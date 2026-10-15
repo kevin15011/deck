@@ -2,7 +2,7 @@
  * JSON Schema (draft 2020-12) for deck-session-event-v1 and deck-session-command-v1 (D-20).
  * Derived from the same constant tables the validators use; pure, no I/O.
  */
-import { SESSION_EVENT_KINDS, TURN_COMPLETED_STATUSES } from "./events";
+import { HOOK_STATUSES, SESSION_EVENT_KINDS, TURN_COMPLETED_STATUSES } from "./events";
 
 type Json = Record<string, unknown>;
 const nonEmptyString = { type: "string", minLength: 1 };
@@ -12,6 +12,26 @@ function dataRule(kind: string, data: Json): Json {
   return { if: { properties: { kind: { const: kind } }, required: ["kind"] }, then: { properties: { data } } };
 }
 const requireId = (field: string): Json => ({ type: "object", required: [field], properties: { [field]: nonEmptyString } });
+const hookData: Json = {
+  type: "object",
+  required: ["hookId", "hookEvent", "status", "provenance"],
+  properties: {
+    hookId: { ...nonEmptyString, maxLength: 256 },
+    hookEvent: { ...nonEmptyString, maxLength: 128 },
+    hookName: { type: "string", maxLength: 500 },
+    status: { enum: [...HOOK_STATUSES] },
+    provenance: { enum: ["claude-stream-json", "codex-app-server"] },
+    durationMs: { type: "number", minimum: 0 },
+    executionMode: { enum: ["sync", "async"] },
+    handlerType: { enum: ["command", "mcpTool", "prompt", "agent"] },
+    provider: { const: "supermemory" },
+    integration: { const: "runner-plugin" },
+  },
+  allOf: [
+    { if: { required: ["provider"] }, then: { required: ["integration"] } },
+    { if: { required: ["integration"] }, then: { required: ["provider"] } },
+  ],
+};
 
 export function buildSessionEventSchema(): Json {
   return {
@@ -37,6 +57,8 @@ export function buildSessionEventSchema(): Json {
       },
     },
     allOf: [
+      dataRule("hook.started", hookData),
+      dataRule("hook.completed", hookData),
       dataRule("turn.completed", { type: "object", required: ["status"], properties: { status: { enum: [...TURN_COMPLETED_STATUSES] } } }),
       dataRule("approval.requested", requireId("approvalId")),
       dataRule("approval.resolved", requireId("approvalId")),
@@ -48,13 +70,25 @@ export function buildSessionEventSchema(): Json {
 }
 
 const COMMAND_VARIANTS: ReadonlyArray<[string, Json, string[]]> = [
-  ["session.create", { projectRoot: nonEmptyString, changeId: nonEmptyString }, ["projectRoot"]],
+  ["project.register", { path: { ...nonEmptyString, maxLength: 4096 }, name: { ...nonEmptyString, maxLength: 160 } }, ["path"]],
+  ["project.rename", { projectId: { ...nonEmptyString, maxLength: 64 }, name: { ...nonEmptyString, maxLength: 160 } }, ["projectId", "name"]],
+  ["project.remove", { projectId: { ...nonEmptyString, maxLength: 64 } }, ["projectId"]],
+  ["session.create", { projectRoot: nonEmptyString, projectId: nonEmptyString, title: { ...nonEmptyString, maxLength: 160 }, changeId: nonEmptyString, members: { type: "object", maxProperties: 32, additionalProperties: { type: "object", required: ["runnerId", "modelId"], properties: { runnerId: nonEmptyString, modelId: nonEmptyString, thinking: nonEmptyString } } } }, []],
+  ["session.prepare", {}, []],
+  ["session.prepare.cancel", { preparationId: nonEmptyString }, ["preparationId"]],
+  ["session.continue", { title: { ...nonEmptyString, maxLength: 160 } }, []],
+  ["session.assignMember", { memberId: nonEmptyString, expectedRevision: { type: "integer", minimum: 0 }, assignment: { type: "object", required: ["runnerId", "modelId"], properties: { runnerId: nonEmptyString, modelId: nonEmptyString, thinking: nonEmptyString } } }, ["memberId", "expectedRevision", "assignment"]],
   ["session.attach", { after: { type: "integer", minimum: 0 } }, ["after"]],
   ["session.bindChange", { changeId: nonEmptyString }, ["changeId"]],
-  ["prompt.send", { text: nonEmptyString, target: { const: "lead" } }, ["text"]],
+  ["prompt.send", { text: { type: "string" }, attachmentIds: { type: "array", maxItems: 8, uniqueItems: true, items: { type: "string", pattern: UUID_PATTERN } }, target: { const: "lead" } }, ["text"]],
+  ["prompt.cancel", { promptId: nonEmptyString }, ["promptId"]],
+  ["prompt.resume", {}, []],
   ["turn.interrupt", { taskId: nonEmptyString }, ["taskId"]],
   ["approval.respond", { approvalId: nonEmptyString, decision: { enum: ["allow", "allow-once", "deny"] } }, ["approvalId", "decision"]],
   ["task.cancel", { taskId: nonEmptyString }, ["taskId"]],
+  ["session.release", {}, []],
+  ["session.rename", {title: {...nonEmptyString,maxLength:160,pattern:"^(?=.*\\S)[^\\u0000-\\u001f]*$"}}, ["title"]],
+  ["session.remove", {}, []],
   ["session.stop", {}, []],
 ];
 
@@ -65,10 +99,10 @@ export function buildSessionCommandSchema(): Json {
     type: "object",
     required: ["v", "commandId", "type"],
     properties: { v: { const: 1 }, commandId: { type: "string", pattern: UUID_PATTERN }, type: { enum: COMMAND_VARIANTS.map(([t]) => t) } },
-    allOf: COMMAND_VARIANTS.map(([type, props, required]) => ({
+    allOf: [...COMMAND_VARIANTS.map(([type, props, required]) => ({
       if: { properties: { type: { const: type } }, required: ["type"] },
-      then: { required, properties: props },
-    })),
+      then: { required, properties: props, ...(type === "prompt.send" ? { anyOf: [{ properties: { text: nonEmptyString } }, { required: ["attachmentIds"], properties: { attachmentIds: { minItems: 1 } } }] } : {}) },
+    })), { if: { properties: { type: { const: "session.create" } }, required: ["type"] }, then: { oneOf: [{ required: ["projectRoot"], not: { required: ["projectId"] } }, { required: ["projectId"], not: { required: ["projectRoot"] } }] } }],
   };
 }
 

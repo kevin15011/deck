@@ -44,6 +44,13 @@ async function start(paths = stateEnv().paths, over: Partial<DaemonOptions> = {}
 const connect = async (paths: { socket: { path: string } }) => { const c = await ControlClient.connect(paths.socket.path); clients.push(c); return c; };
 
 describe("startDaemon (XR-3.1)", () => {
+  test("an available web service can remain disabled until explicit enable", async () => {
+    const { result, paths } = await start(undefined, { web: { autoStart: false, config: { port: 0, trustedProxy: null, allowedOrigins: [], allowFunnel: false } } });
+    if (!result.ok) throw new Error("expected start");
+    const client = await connect(paths);
+    expect(await client.request({ t: "daemon.status" })).toMatchObject({ status: { web: { enabled: false } } });
+    expect(await client.request({ t: "query", name: "web.enable", args: {} })).toMatchObject({ outcome: { ok: true, data: { enabled: true } } });
+  });
   test("accepted restart fences a same-batch command and bridge approval before scheduled cleanup", async () => {
     let calls = 0, finishClose!: () => void;
     const closing = new Promise<void>((resolve) => { finishClose = resolve; });
@@ -82,7 +89,7 @@ describe("startDaemon (XR-3.1)", () => {
     const closing = new Promise<void>((resolve) => { finishClose = resolve; });
     const { result, paths } = await start(undefined, {
       web: { config: { port: 0, trustedProxy: null, allowedOrigins: [], allowFunnel: false } },
-      createService: () => ({ execute: async () => { calls++; return { ok: true }; }, openLog: () => undefined, hasRunningWork: () => false, close: () => closing }),
+      createService: () => ({ execute: async () => { calls++; return { ok: true }; }, uploadAttachment: () => { calls++; return {ok:true}; }, openLog: () => undefined, hasRunningWork: () => false, close: () => closing }),
     });
     if (!result.ok) throw new Error("expected start");
     const c = await connect(paths);
@@ -94,6 +101,8 @@ describe("startDaemon (XR-3.1)", () => {
       expect(await c.request({ t: "daemon.restart" })).toMatchObject({ outcome: { ok: true } });
       const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Origin: base, Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: "s", command: { v: 1, commandId: randomUUID(), type: "prompt.send", text: "after shutdown" } }) });
       expect(await response.json()).toMatchObject({ ok: false, code: "daemon-stopping" });
+      const upload = await fetch(`${base}/api/sessions/s/attachments`, {method:"POST",headers:{Origin:base,Cookie:cookie,"Content-Type":"image/png"},body:new Uint8Array([1])});
+      expect(await upload.json()).toMatchObject({ok:false,code:"daemon-stopping"});
       expect(calls).toBe(0);
     } finally { finishClose(); }
   });

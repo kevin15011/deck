@@ -44,6 +44,7 @@ describe("buildClaudeTurnLaunch (XR-4.3, design 4.1)", () => {
     expect(a).toContain("--strict-mcp-config");
     expect(valueAfter(a, "--mcp-config")).toBe("/state/tasks/lead/mcp-config.json");
     expect(valueAfter(a, "--permission-prompt-tool")).toBe(DECK_APPROVE_PROMPT_TOOL);
+    expect(a).not.toContain("--dangerously-skip-permissions");
     expect(DECK_APPROVE_PROMPT_TOOL).toBe("mcp__deck__deck_approve");
     expect(JSON.parse(valueAfter(a, "--settings")!)).toMatchObject({ disableAllHooks: true });
     expect(valueAfter(a, "--disallowedTools")).toBe("Task,Agent");
@@ -56,7 +57,7 @@ describe("buildClaudeTurnLaunch (XR-4.3, design 4.1)", () => {
     expect(launch.args).not.toContain("--session-id");
   });
 
-  test("never --bare, --safe-mode or permission bypass; the interactive launch plan is not involved", () => {
+  test("relay excludes permission bypass and interactive launch flags", () => {
     const { launch } = build();
     for (const forbidden of ["--bare", "--safe-mode", "--dangerously-skip-permissions", "--allowedTools", "--allow-dangerously-skip-permissions"]) expect(launch.args).not.toContain(forbidden);
   });
@@ -78,6 +79,7 @@ describe("buildClaudeTurnLaunch (XR-4.3, design 4.1)", () => {
   test("runner-default approvals omit the prompt tool; delegation flag off omits --disallowedTools; empty role prompt writes no file", () => {
     const { launch, files } = build({ approvals: "runner-default", disableNativeDelegation: false, rolePrompt: "" });
     expect(launch.args).not.toContain("--permission-prompt-tool");
+    expect(launch.args).toContain("--dangerously-skip-permissions");
     expect(launch.args).not.toContain("--disallowedTools");
     expect(launch.args).not.toContain("--append-system-prompt-file");
     expect(files.has("role-prompt.md")).toBe(false);
@@ -139,4 +141,30 @@ test("HTTP headers preserve environment references without resolving their value
 
 test.each<Record<string, string>>([{ "X-Key": "inline-secret-value" }, { "X-Key": "${TOKEN}" }, { "Bad\r\nHeader": "TOKEN" }])("rejects invalid HTTP header environment references %j", envHttpHeaders => {
   expect(() => build({ mcp: { servers: ["deck"], sessionTools: [] }, mcpServerSpecs: { deck: { transport: "http", url: "https://example.com/mcp", envHttpHeaders } } })).toThrow("HTTP headers require valid");
+});
+
+
+describe("prepared official native Supermemory", () => {
+  const memory = { provider: "supermemory", integration: "runner-plugin", status: "ready", projectScope: "sm_project_v1_acme_deck", plugin: { root: "/owned/official", exclusiveHookEvents: ["SessionStart", "UserPromptSubmit", "Stop"], mcpServers: { plugin_supermemory_supermemory: { command: "node", args: ["/owned/official/hooks/mcp-proxy.js"], env: {} } } } } as const;
+  test("admit only official plugin hooks and explicit native MCP in fresh and resumed execution", () => {
+    for (const resumed of [false, true]) {
+      const { launch, files } = build({ nativeMemory: memory, ...(resumed ? { resume: { nativeSessionId: SID } } : {}) });
+      expect(valueAfter(launch.args, "--plugin-dir")).toBe(memory.plugin.root);
+      expect(valueAfter(launch.args, "--setting-sources")).toBe("");
+      expect(JSON.parse(valueAfter(launch.args, "--settings")!).disableAllHooks).toBe(false);
+      expect(launch.expectedMcpServers).toEqual(["serena", "deck", "plugin_supermemory_supermemory"]);
+      expect(JSON.parse(files.get("mcp-config.json")!).mcpServers.plugin_supermemory_supermemory.args).toEqual(["/owned/official/hooks/mcp-proxy.js"]);
+      expect(launch.args).toContain("--strict-mcp-config");
+      expect(valueAfter(launch.args, "--disallowedTools")).toBe("Task,Agent");
+    }
+  });
+  test("unavailable or malformed prepared scope never starts an unscoped plugin", () => {
+    expect(() => build({ nativeMemory: { ...memory, status: "unavailable", reasonCode: "native-memory-profile-unavailable" } })).toThrow("native-memory-profile-unavailable");
+    expect(() => build({ nativeMemory: { ...memory, projectScope: "sm_project_default" } })).toThrow("canonical");
+  });
+  test("disabled memory keeps hooks disabled and adds no native plugin", () => {
+    const { launch } = build({ nativeMemory: { provider: "supermemory", integration: "runner-plugin", status: "disabled" } });
+    expect(launch.args).not.toContain("--plugin-dir");
+    expect(JSON.parse(valueAfter(launch.args, "--settings")!).disableAllHooks).toBe(true);
+  });
 });

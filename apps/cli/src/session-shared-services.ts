@@ -5,6 +5,7 @@ import type { ChildMcpContext, ChildMcpResolver, SessionMemoryPort } from "@deck
 import type { SessionCodebaseReadiness } from "./session-codebase-readiness";
 import { createSupermemoryRuntimeHost } from "./supermemory-runtime-host";
 import { getWebSearchProviderDescriptor } from "./web-search-provider";
+import { prepareSessionNativeMemory, type NativeMemoryPreparationEffects } from "./session-native-memory";
 
 export type SessionMemoryContext = { sessionId: string; projectRoot: string; leadRunnerId: string };
 
@@ -13,6 +14,7 @@ export function createSessionMemoryPort(
   config: NormalizedDeckConfig,
   createRuntime: typeof createSupermemoryRuntimeHost = createSupermemoryRuntimeHost,
 ): SessionMemoryPort | undefined {
+  if (context.leadRunnerId !== "pi") return undefined;
   if (config.adaptiveMemory.enabled !== true || config.adaptiveMemory.activeProvider !== "supermemory") return undefined;
   let runtime: ReturnType<typeof createRuntime> | undefined;
   const get = () => runtime ??= createRuntime({
@@ -34,14 +36,16 @@ export async function resolveSessionChildMcp(
   config: NormalizedDeckConfig,
   environment: Readonly<Record<string, string | undefined>> = process.env,
   managed?: { readiness: SessionCodebaseReadiness; context: ChildMcpContext },
+  nativeMemoryEffects?: NativeMemoryPreparationEffects,
 ): Promise<ChildMcpResolver> {
+  const memory = managed ? prepareSessionNativeMemory(adapter?.runnerId ?? "", managed.context.projectRoot, config, environment, nativeMemoryEffects) : undefined;
   const servers: Record<string, ChildMcpServerSpec> = { ...await adapter?.readSessionMcpServers?.() };
   const memoryProviderIds = [...new Set(["supermemory", "adaptive-memory", ...(config.adaptiveMemory.supermemory?.mcpServerName ? [config.adaptiveMemory.supermemory.mcpServerName] : [])])];
   // Claude persists an explicit trusted selection. Codex and OpenCode use the global web
   // policy in their native install plans; their absent optional selection seam is intentional.
   const selected = adapter?.readSelectedCapabilityIds?.();
   const enabled = config.webSearch.enabled && (selected === undefined || selected.includes("web-search"));
-  let envOverlay: Record<string, string> | undefined;
+  let envOverlay: Record<string, string> | undefined = memory?.envOverlay;
   let webSearch: ChildMcpResolver["webSearch"] = { enabled: false };
   if (enabled) {
     const provider = getWebSearchProviderDescriptor(config.webSearch.provider);
@@ -50,7 +54,7 @@ export async function resolveSessionChildMcp(
     if (!credential) throw new Error("web-search-credential-missing: configured provider credential is unavailable");
     const [command, ...args] = provider.command;
     servers[provider.semanticServerId] = { command, args, env: {} };
-    envOverlay = { [provider.credentialEnvVar]: credential };
+    envOverlay = { ...envOverlay, [provider.credentialEnvVar]: credential };
     webSearch = { enabled: true, serverId: provider.semanticServerId };
   }
   let release: (() => Promise<void>) | undefined;
@@ -63,6 +67,7 @@ export async function resolveSessionChildMcp(
     release = () => { if (released) return Promise.resolve(); released = true; return managed.readiness.release(prepared); };
   }
   return {
+    ...(memory ? { nativeMemory: memory.nativeMemory } : {}),
     runnerPackages: () => Object.keys(servers), memoryProviderIds, webSearch,
     ...(envOverlay ? { envOverlay } : {}), resolveServer: (id) => servers[id],
     ...(release ? { release } : {}),

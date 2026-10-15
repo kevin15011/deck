@@ -201,3 +201,16 @@ export async function runSessionCommand(deps: SessionCommandDeps, sub: SessionSu
       return runAckClaudeTos({ store: deps.configStore, yes: sub.yes, interactive: deps.interactive, write: deps.write, readLine: deps.readLine });
   }
 }
+
+/** Open the global workspace without creating or attaching a project session. */
+export async function runWebWorkspace(deps: SessionCommandDeps, flags: {json:boolean;noOpen:boolean}): Promise<number> {
+  const outcome = await withDaemon(deps, true, ({client}) => client.query("web.enable"));
+  if (!outcome?.ok) { deps.writeErr(`Unable to start the web workspace: ${outcome && !outcome.ok ? outcome.code : "daemon-unavailable"}\n`); return 1; }
+  const status = outcome.data as {enabled:boolean;url?:string;error?:string};
+  if (!status.enabled || !status.url) { deps.writeErr("Unable to start the web workspace: listener-unavailable\n"); return 1; }
+  deps.write(flags.json ? `${JSON.stringify(status)}\n` : `Browser: ${status.url}\n`);
+  if (!flags.json && !flags.noOpen && deps.openBrowser) {
+    try { await deps.openBrowser(status.url); } catch { deps.writeErr("Unable to open your browser. Open the URL above manually.\n"); }
+  }
+  return 0;
+}

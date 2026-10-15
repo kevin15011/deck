@@ -90,6 +90,7 @@ export async function runTerminalClient(options: TerminalOptions): Promise<{ rea
 
   let lastSeq = options.after ?? 0;
   let caughtUp = false;
+  let currentLeadTaskId = "lead";
   const pending: PendingApproval[] = [];
   const tasks = new Map<string, { state: string; attempt?: number; runner?: string; model?: string }>();
   const awaitingEcho: string[] = [];
@@ -117,6 +118,9 @@ export async function runTerminalClient(options: TerminalOptions): Promise<{ rea
     }
     if (event.kind === "task.created" && typeof d.taskId === "string") {
       tasks.set(d.taskId, { state: "created", attempt: 1, runner: String(d.runnerId ?? ""), model: String(d.modelId ?? "") });
+      if (d.memberId === "lead" || d.memberId === undefined && d.taskId === "lead") currentLeadTaskId = d.taskId;
+    } else if (event.kind === "session.assignment" && d.memberId === "lead" && Number.isInteger(d.generation) && Number(d.generation) >= 0) {
+      currentLeadTaskId = d.generation === 0 ? "lead" : `lead-g${d.generation}`;
     } else if (event.kind === "task.continued" && typeof d.taskId === "string") {
       const t = tasks.get(d.taskId); if (t) t.attempt = Number(d.attempt ?? (t.attempt ?? 1) + 1);
     } else if (event.kind === "task.state" && typeof d.taskId === "string") {
@@ -180,7 +184,7 @@ export async function runTerminalClient(options: TerminalOptions): Promise<{ rea
     if (line.startsWith("/")) {
       switch (line.split(/\s+/)[0]) {
         case "/detach": return "detached";
-        case "/interrupt": report(await send({ type: "turn.interrupt", taskId: "lead" })); return undefined;
+        case "/interrupt": report(await send({ type: "turn.interrupt", taskId: currentLeadTaskId })); return undefined;
         case "/stop": report(await send({ type: "session.stop" })); return undefined;
         case "/tasks":
           if (tasks.size === 0) println("(no tasks yet)");

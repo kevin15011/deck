@@ -7,11 +7,13 @@
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import type { ImageAttachment } from "@deck/core/session/commands";
 import type { SessionEvent } from "@deck/core/session/events";
+import type { CrossTeamAssignments } from "@deck/core/session/assignments";
 import type { EventLog } from "./event-log";
 import { writePrivateFile } from "./paths";
 
-export const LEDGER_SNAPSHOT_VERSION = 1 as const;
+export const LEDGER_SNAPSHOT_VERSION = 4 as const;
 const RESULT_LIMIT = 8192;
 
 export const TASK_STATES = ["created", "queued", "running", "completed", "failed", "cancelled", "interrupted", "ownership-unsettled"] as const;
@@ -37,12 +39,27 @@ export type LedgerTask = { taskId: string; memberId: string; attempts: TaskAttem
 export type LedgerCommandReceipt = { type: string; outcome: { ok: boolean; [key: string]: unknown } };
 export type LedgerPendingApproval = { approvalId: string; taskId?: string; seq: number };
 export type LedgerAnomaly = { code: string; seq: number; detail?: string };
-export type LedgerSession = { projectRoot?: string; changeId?: string; state: SessionLifecycleState };
+export type SessionHandoff = { text: string; sourceSessionId: string; sourceGeneration: number; sourceSeq: number; continuity: "reseeded" };
+export type LedgerSession = { projectRoot?: string; changeId?: string; state: SessionLifecycleState; generation?: number; assignmentRevision?: number; memberOverrides?: CrossTeamAssignments; handoff?: SessionHandoff; stopRequested?: boolean; released?: boolean; releasePending?: boolean; releaseEpoch?: number; removalPending?: boolean; removed?: boolean; releaseFailure?: string; title?: string };
+export type UserPrompt = {
+  promptId: string; state: "queued" | "dispatched" | "completed" | "failed" | "interrupted" | "cancelled" | "ownership-unsettled";
+  text?: string; textHash: string; by: string; generation: number; createdAt: string; seq: number;
+  position: number; taskId?: string; attempt?: number; reason?: string;
+  dispatchedSeq?: number;
+  /** Retained after cancellation/dispatch for history and managed-file ownership. */
+  attachments?: ImageAttachment[];
+};
 export type LedgerState = {
   sessionId: string; seq: number; session: LedgerSession;
   tasks: Record<string, LedgerTask>; approvals: Record<string, LedgerPendingApproval>; anomalies: LedgerAnomaly[];
   /** Accepted commands by commandId, oldest first, bounded by MAX_RECEIPTS. Absent in snapshots written before receipts existed. */
   commands?: Record<string, LedgerCommandReceipt>;
+  lifecycleCommands?: Record<string, LedgerCommandReceipt & {fingerprint: string}>;
+  /** Latest finalized public assistant response from any actual Lead generation. */
+  lastLeadReplySeq?: number;
+  lastEventTs?: string;
+  prompts?: Record<string, UserPrompt>;
+  promptQueue?: { paused: boolean; reason?: string; lastResumeSeq?: number };
 };
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.length > 0 ? v : undefined);
@@ -54,26 +71,40 @@ export class Ledger {
   private constructor(private state: LedgerState) {}
 
   static empty(sessionId: string): Ledger {
-    return new Ledger({ sessionId, seq: 0, session: { state: "created" }, tasks: {}, approvals: {}, anomalies: [], commands: {} });
+    return new Ledger({ sessionId, seq: 0, session: { state: "created" }, tasks: {}, approvals: {}, anomalies: [], commands: {}, lifecycleCommands: {}, lastLeadReplySeq: 0, prompts: {}, promptQueue: { paused: false } });
   }
 
   static fromState(state: LedgerState): Ledger {
     const copy = structuredClone(state);
-    copy.commands ??= {};
+    copy.commands ??= {}; copy.lifecycleCommands ??= {};
+    copy.lastLeadReplySeq ??= 0;
+    copy.prompts ??= {}; copy.promptQueue ??= { paused: false };
     return new Ledger(copy);
   }
 
   get seq(): number { return this.state.seq; }
   get sessionId(): string { return this.state.sessionId; }
   get session(): Readonly<LedgerSession> { return this.state.session; }
+  get lastLeadReplySeq(): number { return this.state.lastLeadReplySeq ?? 0; }
+  get lastEventTs(): string | undefined { return this.state.lastEventTs; }
+  get promptQueue(): Readonly<{ paused: boolean; reason?: string; lastResumeSeq?: number }> { return this.state.promptQueue ?? { paused: false }; }
+  prompts(): UserPrompt[] { return Object.values(this.state.prompts ?? {}).sort((a, b) => a.seq - b.seq); }
+  prompt(promptId: string): UserPrompt | undefined { return this.state.prompts?.[promptId]; }
   get anomalies(): readonly LedgerAnomaly[] { return this.state.anomalies; }
   tasks(): LedgerTask[] { return Object.values(this.state.tasks); }
   task(taskId: string): LedgerTask | undefined { return this.state.tasks[taskId]; }
   latest(taskId: string): TaskAttempt | undefined { return this.state.tasks[taskId]?.attempts.at(-1); }
   pendingApprovals(): LedgerPendingApproval[] { return Object.values(this.state.approvals); }
+  lifecycleReceipt(commandId: string) { return this.state.lifecycleCommands?.[commandId]; }
   receipt(commandId: string): LedgerCommandReceipt | undefined { return this.state.commands?.[commandId]; }
   nativeConfirmed(taskId: string): boolean { return this.state.tasks[taskId]?.nativeConfirmed === true; }
   toState(): LedgerState { return structuredClone(this.state); }
+
+  private onLifecycle(event: SessionEvent, type: string, fingerprint: string): void {
+    const d=event.data; if(!str(d.commandId) || !d.outcome || typeof d.outcome!=="object") return;
+    const commands=this.state.lifecycleCommands??={};
+    commands[String(d.commandId)]??={type,fingerprint,outcome:structuredClone(d.outcome) as LedgerCommandReceipt["outcome"]};
+  }
 
   private anomaly(code: string, seq: number, detail?: string): void {
     if (this.state.anomalies.length < MAX_ANOMALIES) this.state.anomalies.push({ code, seq, ...(detail ? { detail } : {}) });
@@ -83,12 +114,77 @@ export class Ledger {
     if (event.sessionId !== this.state.sessionId) throw new Error(`Ledger session mismatch: ${event.sessionId}`);
     if (event.seq !== this.state.seq + 1) throw new Error(`Ledger sequence violation: expected ${this.state.seq + 1}, got ${event.seq}`);
     this.state.seq = event.seq;
+    this.state.lastEventTs = event.ts;
     const d = event.data;
+    if(event.kind==="diagnostic" && d.code==="session.preparation" && d.commandId && d.outcome) this.onLifecycle(event,"session.prepare","");
     switch (event.kind) {
+      case "prompt.queued": {
+        const promptId = str(d.promptId);
+        if (!promptId || typeof d.text !== "string" || typeof d.textHash !== "string") return this.anomaly("prompt-queued-invalid", event.seq);
+        const prompts = this.state.prompts ??= {};
+        prompts[promptId] ??= { promptId, state: "queued", text: d.text, textHash: d.textHash, by: str(d.by) ?? "unknown", generation: Number(d.generation) || 0, position: Number(d.position) || 1, createdAt: event.ts, seq: event.seq, ...(Array.isArray(d.attachments) ? { attachments: structuredClone(d.attachments) as ImageAttachment[] } : {}) };
+        break;
+      }
+      case "prompt.dispatched": {
+        const prompt = this.state.prompts?.[String(d.promptId)];
+        if (prompt && (prompt.state === "queued" || d.reseeded === true)) { prompt.state = "dispatched"; prompt.taskId = str(d.taskId); prompt.attempt = Number(d.attempt); prompt.dispatchedSeq = event.seq; delete prompt.text; }
+        break;
+      }
+      case "prompt.state": {
+        const prompt = this.state.prompts?.[String(d.promptId)];
+        if (prompt && ["completed", "failed", "interrupted", "cancelled", "ownership-unsettled"].includes(d.state as string)) {
+          prompt.state = d.state as UserPrompt["state"]; if (str(d.reason)) prompt.reason = str(d.reason); delete prompt.text;
+        }
+        break;
+      }
+      case "prompt.queue": {
+        const resumed = this.state.promptQueue?.paused && d.paused === false;
+        this.state.promptQueue = { paused: d.paused === true, ...(str(d.reason) ? { reason: str(d.reason) } : {}), ...(resumed ? { lastResumeSeq: event.seq } : this.state.promptQueue?.lastResumeSeq ? { lastResumeSeq: this.state.promptQueue.lastResumeSeq } : {}) };
+        if (str(d.commandId)) this.onCommandAccepted({ ...event, data: { commandId: d.commandId, type: "prompt.resume", outcome: { ok: true } } });
+        break;
+      }
       case "session.created":
         this.state.session.projectRoot = str(d.projectRoot) ?? this.state.session.projectRoot;
         if (str(d.changeId) && !this.state.session.changeId) this.state.session.changeId = str(d.changeId);
+        if (d.memberOverrides && typeof d.memberOverrides === "object") this.state.session.memberOverrides = structuredClone(d.memberOverrides) as CrossTeamAssignments;
+        if (d.handoff && typeof d.handoff === "object") this.state.session.handoff = structuredClone(d.handoff) as SessionHandoff;
         break;
+      case "session.assignment":
+        this.state.session.generation = d.generation as number;
+        this.state.session.assignmentRevision = d.revision as number;
+        this.state.session.memberOverrides = structuredClone(d.memberOverrides) as CrossTeamAssignments;
+        if (d.handoff && typeof d.handoff === "object") this.state.session.handoff = structuredClone(d.handoff) as SessionHandoff;
+        break;
+      case "session.released": {
+        const epoch=Number(d.epoch); if(!Number.isSafeInteger(epoch) || epoch<0) break;
+        if(epoch < (this.state.session.releaseEpoch??0)) break;
+        this.state.session.releaseEpoch=epoch; this.state.session.released=true;
+        this.state.session.releasePending=d.phase!=="released";
+        if(str(d.reasonCode)) this.state.session.releaseFailure=String(d.reasonCode); else delete this.state.session.releaseFailure;
+        this.state.promptQueue={paused:true,reason:"session-released",...(this.state.promptQueue?.lastResumeSeq ? {lastResumeSeq:this.state.promptQueue.lastResumeSeq} : {})};
+        if(str(d.commandId) && d.outcome) this.onLifecycle(event,"session.release","");
+        break;
+      }
+      case "session.reopened": {
+        if(Number(d.epoch)!==(this.state.session.releaseEpoch??0)) break;
+        this.state.session.state="idle"; this.state.session.stopRequested=false;
+        this.state.session.released=d.prepared!==true; this.state.session.releasePending=false;
+        if(d.prepared===true && !Object.values(this.state.prompts??{}).some(prompt=>prompt.state==="queued")) this.state.promptQueue={paused:false}; delete this.state.session.releaseFailure;
+        break;
+      }
+      case "session.renamed": {
+        if(typeof d.title!=="string") break;
+        this.state.session.title=d.title; this.onLifecycle(event,"session.rename",JSON.stringify(d.title)); break;
+      }
+      case "session.removed": {
+        this.state.session.removalPending=d.phase!=="removed"; this.state.session.removed=d.phase==="removed";
+        if(d.phase==="removing") {
+          this.state.session.released=true;this.state.session.releasePending=true;this.state.session.releaseEpoch=Number(d.epoch)||((this.state.session.releaseEpoch??0)+1);
+          this.state.promptQueue={paused:true,reason:"session-released"};
+          this.onLifecycle(event,"session.remove","");
+        }
+        break;
+      }
       case "session.bound": {
         const changeId = str(d.changeId);
         if (!changeId) return this.anomaly("session-bound-invalid", event.seq);
@@ -99,6 +195,11 @@ export class Ledger {
       case "session.state": {
         const st = str(d.state) as SessionLifecycleState | undefined;
         if (st) this.state.session.state = st;
+        if (d.cancelPrompts === true) {
+          this.state.session.stopRequested = true;
+          for (const prompt of Object.values(this.state.prompts ?? {})) if (prompt.state === "queued") { prompt.state = "cancelled"; prompt.reason = "session-stopped"; delete prompt.text; }
+          if (str(d.commandId) && d.outcome) { this.onLifecycle(event,"session.stop",""); this.onCommandAccepted({ ...event, data: { commandId: d.commandId, type: "session.stop", outcome: d.outcome } }); }
+        }
         break;
       }
       case "session.ended": this.state.session.state = "ended"; break;
@@ -113,6 +214,11 @@ export class Ledger {
       case "task.state": return this.onTaskState(event);
       case "task.continued": return this.onTaskContinued(event);
       case "task.result": return this.onTaskResult(event);
+      case "message.completed": {
+        const task = event.source.taskId ? this.state.tasks[event.source.taskId] : undefined;
+        if (task?.memberId === "lead" && /^lead(?:-g[1-9]\d*)?$/.test(task.taskId) && (event.source.memberId === undefined || event.source.memberId === "lead") && event.data.role === "assistant" && !event.data.internal && typeof event.data.text === "string" && event.data.text.trim()) this.state.lastLeadReplySeq = event.seq;
+        break;
+      }
       case "approval.requested": {
         const id = str(d.approvalId);
         if (id) this.state.approvals[id] = { approvalId: id, ...(str(d.taskId) ? { taskId: str(d.taskId) } : {}), seq: event.seq };
@@ -158,6 +264,8 @@ export class Ledger {
         state: initial, startedSeq: event.seq,
       }],
     };
+    const queuedPrompt = str(d.promptId) ? this.state.prompts?.[d.promptId as string] : undefined;
+    if (queuedPrompt?.state === "queued") { queuedPrompt.taskId = taskId; queuedPrompt.attempt = 1; }
   }
 
   private onTaskState(event: SessionEvent): void {
@@ -177,6 +285,14 @@ export class Ledger {
       attempt.state = wanted;
       if (str(d.reason)) attempt.reason = str(d.reason); else delete attempt.reason;
       if (TERMINAL_TASK_STATES.includes(wanted)) attempt.endedSeq = event.seq;
+    }
+    for (const prompt of Object.values(this.state.prompts ?? {})) {
+      if (prompt.state !== "dispatched" || prompt.taskId !== taskId || prompt.attempt !== attempt.attempt) continue;
+      if (wanted === "failed" && d.reason === "native-session-not-found") continue;
+      if (TERMINAL_TASK_STATES.includes(wanted) || wanted === "ownership-unsettled") {
+        prompt.state = wanted as UserPrompt["state"];
+        if (["failed", "interrupted", "ownership-unsettled"].includes(wanted) && !(wanted === "interrupted" && (this.state.promptQueue?.lastResumeSeq ?? 0) > (prompt.dispatchedSeq ?? 0))) this.state.promptQueue = { paused: true, reason: wanted, lastResumeSeq: this.state.promptQueue?.lastResumeSeq };
+      }
     }
   }
 
@@ -198,6 +314,9 @@ export class Ledger {
       ...(str(d.nativeSessionId) ? { nativeSessionId: str(d.nativeSessionId) } : {}),
       state: "created", continuity, startedSeq: event.seq,
     });
+    const queuedPrompt = str(d.promptId) ? this.state.prompts?.[d.promptId as string] : undefined;
+    if (queuedPrompt?.state === "queued") { queuedPrompt.taskId = taskId; queuedPrompt.attempt = attemptNo; }
+    if (continuity === "reseeded") for (const prompt of Object.values(this.state.prompts ?? {})) if (prompt.state === "dispatched" && prompt.taskId === taskId && prompt.attempt === previous.attempt) prompt.attempt = attemptNo;
   }
 
   private onTaskResult(event: SessionEvent): void {
@@ -212,7 +331,7 @@ export class Ledger {
 
 // ---- snapshots ----------------------------------------------------------------------------
 
-type SnapshotFile = { v: 1; seq: number; eventDigest: string; digest: string; state: LedgerState };
+type SnapshotFile = { v: 4; seq: number; eventDigest: string; digest: string; state: LedgerState };
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 const eventDigest = (event: SessionEvent) => sha256(JSON.stringify(event));
 const stateDigest = (seq: number, eventHash: string, state: LedgerState) => sha256(JSON.stringify({ seq, eventHash, state }));
@@ -227,7 +346,11 @@ function readSnapshot(file: string): SnapshotFile | "missing" | "corrupt" {
     const v = JSON.parse(text) as Partial<SnapshotFile>;
     const ok = v && v.v === LEDGER_SNAPSHOT_VERSION && Number.isInteger(v.seq) && typeof v.eventDigest === "string"
       && typeof v.digest === "string" && v.state && typeof v.state === "object" && v.state.seq === v.seq
-      && typeof v.state.tasks === "object" && typeof v.state.session === "object";
+      && typeof v.state.tasks === "object" && typeof v.state.session === "object"
+      && v.state.lifecycleCommands && typeof v.state.lifecycleCommands === "object"
+      && v.state.prompts && typeof v.state.prompts === "object" && typeof v.state.promptQueue?.paused === "boolean"
+      && Number.isSafeInteger(v.state.lastLeadReplySeq) && v.state.lastLeadReplySeq! >= 0 && v.state.lastLeadReplySeq! <= v.seq!
+      && (v.seq === 0 || typeof v.state.lastEventTs === "string");
     if (!ok) return "corrupt";
     if (stateDigest(v.seq!, v.eventDigest!, v.state!) !== v.digest) return "corrupt";
     return v as SnapshotFile;

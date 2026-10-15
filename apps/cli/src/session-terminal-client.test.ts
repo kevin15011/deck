@@ -82,6 +82,29 @@ describe("runTerminalClient (XR-9.1)", () => {
     expect(t.detached).toEqual(["s-1"]);
   });
 
+  test("accepts queued ACKs while Lead runs and obtains attempts only from events", async () => {
+    const t = setup({ "prompt.send": { ok: true, data: { promptId: "pending", state: "queued", position: 1 } } });
+    await t.tick();
+    t.emit(ev("task.created", { taskId: "lead", memberId: "lead", runnerId: "claude", modelId: "opus" }));
+    t.emit(ev("task.state", { taskId: "lead", state: "running" }));
+    t.caughtUp();
+    t.lines.push("first pending");
+    t.lines.push("second pending");
+    await t.tick();
+    expect(t.sent.map(item => item.command.text)).toEqual(["first pending", "second pending"]);
+    t.lines.push("/tasks");
+    await t.tick();
+    expect(t.text()).toContain("lead  running (attempt 1)");
+    expect(t.text()).not.toContain("Refused:");
+    t.emit(ev("prompt.dispatched", { promptId: "pending", taskId: "lead", attempt: 2 }));
+    t.emit(ev("task.continued", { taskId: "lead", attempt: 2 }));
+    t.lines.push("/tasks");
+    await t.tick();
+    expect(t.text()).toContain("lead  running (attempt 2)");
+    t.lines.end();
+    await t.run;
+  });
+
   test("does not echo the user's own prompt back from the event stream, but shows other clients' prompts", async () => {
     const t = setup();
     await t.tick();
@@ -114,6 +137,28 @@ describe("runTerminalClient (XR-9.1)", () => {
     expect(t.text()).toMatch(/unknown command: \/wat/i);
     t.lines.end();
     await t.run;
+  });
+
+  test("/interrupt targets the current Lead generation after replay and live assignment changes", async () => {
+    const t = setup();
+    await t.tick();
+    t.emit(ev("task.created", { taskId: "lead", memberId: "lead" }));
+    t.emit(ev("session.assignment", { memberId: "lead", generation: 1 }));
+    t.emit(ev("task.created", { taskId: "lead-g1", memberId: "lead" }));
+    t.emit(ev("task.created", { taskId: "worker-1", memberId: "apply-fast" }));
+    t.caughtUp();
+    t.lines.push("/interrupt");
+    await t.tick();
+    t.emit(ev("session.assignment", { memberId: "lead", generation: 2 }));
+    t.emit(ev("session.assignment", { memberId: "quality", generation: 2 }));
+    t.lines.push("/interrupt");
+    await t.tick();
+    t.lines.end();
+    await t.run;
+    expect(t.sent.map(item => item.command)).toEqual([
+      { v: 1, commandId: "cmd-1", type: "turn.interrupt", taskId: "lead-g1" },
+      { v: 1, commandId: "cmd-2", type: "turn.interrupt", taskId: "lead-g2" },
+    ]);
   });
 
   test("/detach leaves without stopping anything", async () => {

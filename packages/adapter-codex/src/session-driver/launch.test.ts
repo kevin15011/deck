@@ -21,3 +21,19 @@ test("rejects inherited HTTP credentials and transport fields without emitting v
     expect(() => verifyCodexConfig({ features, mcp_servers: { "context.7": { url: "https://mcp.context7.com/mcp", ...inherited } } }, input)).toThrow("codex-mcp-spec-isolation-violation");
   }
 });
+const nativeMemory: NonNullable<DriverTaskInput["nativeMemory"]> = { provider: "supermemory", integration: "runner-plugin", status: "ready", projectScope: "sm_project_v1_owner_repo", plugin: { root: "/plugins/supermemory", nodeCommand: "/usr/bin/node", scripts: { recall: "/plugins/supermemory/recall.js", flush: "/plugins/supermemory/flush.js" } } };
+test("admits only official memory hooks and clears every inherited event without enabling native plugins", () => {
+  const launch = buildCodexLaunch({ ...input, nativeMemory }, [], { baseEnv: {} });
+  expect(launch.args).toContain("features.hooks=true");
+  expect(launch.args).toContain("features.plugins=false");
+  const hooks = launch.args.find(arg => arg.startsWith("hooks="))!;
+  expect(() => parseTOML(hooks)).not.toThrow();
+  expect(hooks).toContain('"SessionStart"=[]');
+  expect(hooks).toContain("/plugins/supermemory/recall.js");
+  expect(hooks).toContain("/plugins/supermemory/flush.js");
+  expect(hooks).not.toContain("bypass");
+});
+test("does not silently launch configured but unavailable or incomplete native memory", () => {
+  expect(() => buildCodexLaunch({ ...input, nativeMemory: { ...nativeMemory, status: "unavailable" } }, [], { baseEnv: {} })).toThrow("codex-native-memory-unavailable");
+  expect(() => buildCodexLaunch({ ...input, nativeMemory: { ...nativeMemory, plugin: undefined } }, [], { baseEnv: {} })).toThrow("codex-native-memory-invalid");
+});

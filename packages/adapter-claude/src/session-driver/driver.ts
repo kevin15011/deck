@@ -7,9 +7,10 @@ import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { redactText } from "@deck/core/session/redaction";
 import type {
-  DriverEvent, DriverHostIo, DriverProbe, DriverProbeContext, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver,
+  DriverEvent, DriverHostIo, DriverImageInput, DriverProbe, DriverProbeContext, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver,
   SupervisedChild, SupervisedChildExit, TurnOutcome,
 } from "@deck/core/session/driver";
+import { prepareImages, redactImagePayload } from "./images";
 import { buildClaudeTurnLaunch, ClaudeLaunchError, encodeUserMessage, type ClaudeTurnLaunch } from "./launch";
 import { CLAUDE_PROTOCOL, ClaudeLineSplitter, ClaudeStreamMapper, parseClaudeLine, type ClaudeInit, type ClaudeResult } from "./mapper";
 
@@ -86,9 +87,12 @@ class ClaudeTask {
   /** Whether the next turn must resume: the first turn of a fresh native session assigns the id instead. */
   private firstTurnPending = true;
 
-  async runTurn(prompt: string): Promise<TurnOutcome> {
+  async runTurn(prompt: string, images?: readonly DriverImageInput[]): Promise<TurnOutcome> {
     if (this.closed) throw new Error("Claude task is closed");
     if (this.current) throw new Error("A Claude turn is already running");
+    let userMessage: string;
+    try { userMessage = encodeUserMessage(prompt, prepareImages(images)); }
+    catch { return { status: "failed", error: "image-input-invalid" }; }
     const resume = this.input.resume !== undefined || !this.firstTurnPending;
     this.firstTurnPending = false;
     const emit = (event: DriverEvent) => { try { this.io.emit(event); } catch { /* a sink failure must not break the turn */ } };
@@ -118,12 +122,12 @@ class ClaudeTask {
     }
     state.child = child;
     const splitter = new ClaudeLineSplitter();
-    const mapper = new ClaudeStreamMapper();
-    const onLine = (line: string) => this.onLine(line, mapper, state, launch, emit);
+    const mapper = new ClaudeStreamMapper(this.input.nativeMemory);
+    const onLine = (line: string) => this.onLine(line, mapper, state, launch, emit, Boolean(images?.length));
     child.onStdout((chunk) => { for (const line of splitter.push(chunk)) onLine(line); });
     child.onStderr((chunk) => { state.stderr = (state.stderr + chunk).slice(-STDERR_TAIL); });
     if (state.interruptRequested) this.deliverInterrupt(state);
-    child.writeStdin(encodeUserMessage(prompt));
+    child.writeStdin(userMessage);
     child.endStdin();
 
     let exit: SupervisedChildExit;
@@ -138,13 +142,13 @@ class ClaudeTask {
     return this.outcome(state, exit);
   }
 
-  private onLine(line: string, mapper: ClaudeStreamMapper, state: TurnState, launch: ClaudeTurnLaunch, emit: (e: DriverEvent) => void): void {
+  private onLine(line: string, mapper: ClaudeStreamMapper, state: TurnState, launch: ClaudeTurnLaunch, emit: (e: DriverEvent) => void, imageTurn = false): void {
     if (state.fatal) return;
     const parsed = parseClaudeLine(line);
-    const events = parsed.ok ? undefined : mapper.unparsable(line);
+    const events = parsed.ok ? undefined : mapper.unparsable(imageTurn ? "Image turn native diagnostic omitted" : redactImagePayload(line));
     if (events) { for (const e of events) emit(e); return; }
     if (!parsed.ok) return;
-    const out = mapper.map(parsed.message);
+    const out = mapper.map(redactImagePayload(parsed.message));
     for (const e of out.events) emit(e);
     if (out.result) state.result = out.result;
     if (out.init) { state.init = out.init; this.checkInit(out.init, state, launch, emit); }
@@ -272,10 +276,10 @@ export function createClaudeSessionDriver(options: ClaudeSessionDriverOptions = 
     async startTask(input: DriverTaskInput, io: DriverHostIo): Promise<DriverTaskHandle> {
       const nativeId = input.resume?.nativeSessionId ?? input.nativeSessionId ?? randomUUID();
       const task = new ClaudeTask(input, io, nativeId, resolved);
-      const done = task.runTurn(input.prompt);
+      const done = task.runTurn(input.prompt, input.images);
       return {
         nativeSessionId: Promise.resolve(task.id),
-        send: (prompt) => task.runTurn(prompt),
+        send: (prompt, images) => task.runTurn(prompt, images),
         interrupt: () => task.interrupt(),
         done,
         close: () => task.close(),

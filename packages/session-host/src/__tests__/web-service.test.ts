@@ -7,6 +7,7 @@ import { EventLog } from "../event-log";
 import { resolveStatePaths, ensureStateLayout } from "../paths";
 import { WebService } from "../web-service";
 import type { SessionService } from "../service";
+import { waitFor } from "./test-helpers";
 import { listOpenSpecArtifacts, readOpenSpecArtifact } from "../openspec-artifacts";
 const NativeWebSocket = WebSocket as unknown as {
   new (url: string, options: Bun.WebSocketOptions): WebSocket;
@@ -28,6 +29,52 @@ function fixture(extra = {}) {
   return { host, paths, log, executed, base: host.status().url! };
 }
 async function pair(f: ReturnType<typeof fixture>) { const p = f.host.pair(); const response = await fetch(`${f.base}/pair`, { method: "POST", headers: { Origin: f.base, "Content-Type": "application/json" }, body: JSON.stringify({ code: p.code, name: "Test" }) }); return { response, cookie: response.headers.get("set-cookie")!.split(";")[0]!, p }; }
+
+test("project actions require the authenticated same-origin workspace command boundary", async () => {
+  const f = fixture();
+  const commands = [{ type: "project.rename", projectId: "p", name: "Renamed" }, { type: "project.remove", projectId: "p" }];
+  const send = (command: unknown, headers: Record<string, string>) => fetch(`${f.base}/api/commands`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ command: { v: 1, commandId: randomUUID(), ...(command as object) } }) });
+  for (const command of commands) expect((await send(command, { Origin: f.base })).status).toBe(401);
+  expect(f.executed).toHaveLength(0);
+  const { cookie } = await pair(f);
+  for (const command of commands) expect((await send(command, { Origin: "http://evil.example", Cookie: cookie })).status).toBe(403);
+  expect(f.executed).toHaveLength(0);
+  for (const command of commands) expect((await send(command, { Origin: f.base, Cookie: cookie })).status).toBe(200);
+  expect(f.executed).toHaveLength(2);
+});
+
+test("sidebar status polling authenticates and bounds session IDs before dispatch", async () => {
+  const queries: unknown[] = [];
+  const f = fixture({ service: { execute: async () => ({ ok: true }), openLog: () => undefined, hasRunningWork: () => false, query: async (name: string, args: unknown) => { queries.push({ name, args }); return { ok: true, data: { sessions: [] } }; } } });
+  const route = "/api/sessions/status?projectId=p&sessionId=s&sessionId=t";
+  expect((await fetch(`${f.base}${route}`)).status).toBe(401);
+  const { cookie } = await pair(f); const headers = { Cookie: cookie };
+  expect((await fetch(`${f.base}${route}`, { headers })).status).toBe(200);
+  expect(queries).toEqual([{ name: "sessions.status", args: { projectId: "p", sessionIds: ["s", "t"] } }]);
+  for (const route of ["/api/sessions/status?projectId=p", "/api/sessions/status?projectId=p&sessionId=..%2Fescape", `/api/sessions/status?projectId=p&${Array(101).fill("sessionId=s").join("&")}`, "/api/sessions/status?projectId=p&projectId=q&sessionId=s"]) expect((await fetch(`${f.base}${route}`, { headers })).status).toBe(400);
+  expect(queries).toHaveLength(1);
+});
+
+test("workspace query endpoints require authentication and forward bounded explicit parameters", async () => {
+  const queries: unknown[] = [];
+  const f = fixture({ service: {
+    execute: async () => ({ ok: true }), openLog: () => undefined, hasRunningWork: () => false,
+    query: async (name: string, args: unknown) => { queries.push({ name, args }); return { ok: true, data: {} }; },
+  } });
+  const routes = ["/api/projects", "/api/directories?path=~%2F&prefix=rep&limit=10", "/api/sessions?projectId=p&limit=1&cursor=c", "/api/models?projectId=p", "/api/sessions/s/readiness"];
+  for (const route of routes) expect((await fetch(`${f.base}${route}`)).status).toBe(401);
+  const { cookie } = await pair(f); const headers = { Cookie: cookie };
+  for (const route of routes) expect((await fetch(`${f.base}${route}`, { headers })).status).toBe(200);
+  expect(queries).toEqual([
+    { name: "projects.list", args: {} },
+    { name: "directories.list", args: { path: "~/", prefix: "rep", limit: 10 } },
+    { name: "sessions.list", args: { projectId: "p", cursor: "c", limit: 1 } },
+    { name: "runners.models", args: { projectId: "p" } },
+    { name: "session.readiness", args: { sessionId: "s" } },
+  ]);
+  expect((await fetch(`${f.base}/api/directories?path=a&path=b`, { headers })).status).toBe(400);
+  expect((await fetch(`${f.base}/api/directories`, { headers: { ...headers, Host: "evil.example" } })).status).toBe(403);
+});
 
 test("OpenSpec endpoints require a device and forward only session-scoped selections", async () => {
   const queries: unknown[] = [];
@@ -182,4 +229,37 @@ test('localhost access requires an exact matching loopback Host and origin', asy
  expect(r.status).toBe(200);
  const mismatch=await fetch(`${f.base}/api/local-access`,{method:'POST',headers:{Host:new URL(f.base).host,Origin:local,'Content-Type':'application/json'},body:'{}'});
  expect(mismatch.status).toBe(403);
+});
+
+
+test("image upload/read require device and same-origin auth, preserve binary bytes, and bound JSON separately", async () => {
+ const calls:unknown[]=[]; const bytes=Buffer.alloc(2*1024*1024,17); const attachmentId="11111111-1111-4111-8111-111111111111";
+ const attachment={attachmentId,mimeType:"image/png" as const,name:"paste.png",sizeBytes:bytes.length,width:1,height:1};
+ const f=fixture({service:{execute:async()=>{calls.push("command");return{ok:true};},openLog:()=>undefined,hasRunningWork:()=>false,uploadAttachment:(input:unknown)=>{calls.push(input);return{ok:true,data:{attachment}};},readAttachment:()=>({attachment,bytes})}});
+ const url=`${f.base}/api/sessions/s/attachments?name=paste.png`;
+ expect((await fetch(url,{method:"POST",headers:{Origin:f.base,"Content-Type":"image/png"},body:bytes.subarray(0,70)})).status).toBe(401);
+ const {cookie}=await pair(f); const headers={Origin:f.base,Cookie:cookie,"Content-Type":"image/png"};
+ expect((await fetch(url,{method:"POST",headers:{...headers,Origin:"http://evil.example"},body:bytes.subarray(0,70)})).status).toBe(403);
+ const uploaded=await fetch(url,{method:"POST",headers,body:bytes}); expect(uploaded.status).toBe(200); expect(await uploaded.json()).toEqual({ok:true,data:{attachment}});
+ expect((calls[0] as any).bytes).toEqual(bytes);
+ expect((await fetch(`${f.base}/api/sessions/s/attachments/${attachmentId}`)).status).toBe(401);
+ const read=await fetch(`${f.base}/api/sessions/s/attachments/${attachmentId}`,{headers:{Cookie:cookie}}); expect(Buffer.from(await read.arrayBuffer())).toEqual(bytes);
+ expect(read.headers.get("Content-Type")).toBe("image/png"); expect(read.headers.get("X-Content-Type-Options")).toBe("nosniff"); expect(read.headers.get("Content-Security-Policy")).toContain("blob:");
+ expect((await fetch(url,{method:"POST",headers:{...headers,"Content-Type":"image/svg+xml"},body:"<svg/>"})).status).toBe(400);
+ expect((await fetch(url,{method:"POST",headers:{...headers,Connection:"close"},body:Buffer.alloc(5*1024*1024+1)})).status).toBe(413);
+ const command=await fetch(`${f.base}/api/commands`,{method:"POST",headers:{...headers,"Content-Type":"application/json",Connection:"close"},body:JSON.stringify({padding:"x".repeat(1024*1024+1)})}); expect(command.status).toBe(400);
+ expect(calls).toHaveLength(1);
+});
+
+
+test("image uploads bound in-flight body memory and release reservations after abort", async () => {
+  const f=fixture(); const {cookie}=await pair(f); const headers={Origin:f.base,Cookie:cookie,"Content-Type":"image/png"};
+  const controllers:AbortController[]=[]; const streams:ReadableStreamDefaultController<Uint8Array>[]=[];
+  const requests=Array.from({length:8},()=>{const abort=new AbortController();controllers.push(abort);const body=new ReadableStream<Uint8Array>({start(controller){streams.push(controller);controller.enqueue(new Uint8Array([1]));}});return fetch(`${f.base}/api/sessions/s/attachments`,{method:"POST",headers,body,signal:abort.signal}).catch(()=>undefined);});
+  await waitFor(()=>(f.host as any).uploadsInFlight===8,2000,"upload body reservations");
+  expect((await fetch(`${f.base}/api/sessions/s/attachments`,{method:"POST",headers,body:new Uint8Array([1])})).status).toBe(429);
+  controllers[0]!.abort(); await waitFor(()=>(f.host as any).uploadsInFlight===7,2000,"aborted upload release");
+  const retry=await fetch(`${f.base}/api/sessions/s/attachments`,{method:"POST",headers,body:new Uint8Array([1])}); expect(retry.status).toBe(400);
+  controllers.forEach(controller=>controller.abort()); streams.forEach(controller=>{try{controller.close();}catch{}}); await Promise.all(requests);
+  await waitFor(()=>(f.host as any).uploadsInFlight===0,2000,"all upload reservations released");
 });

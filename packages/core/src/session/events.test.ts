@@ -50,10 +50,18 @@ describe("validateSessionEvent", () => {
     expect(validateSessionEvent({ ...base(), kind: "command.accepted", data: { type: "prompt.send", outcome: { ok: true } } }).ok).toBe(false);
     expect(validateSessionEvent({ ...base(), kind: "command.accepted", data: { commandId: "c", type: "prompt.send" } }).ok).toBe(false);
   });
+  test("hook lifecycle requires bounded identity, native provenance and explicit status", () => {
+    const data = { hookId: "h1", hookEvent: "sessionStart", provenance: "codex-app-server", status: "running" };
+    expect(validateSessionEvent({ ...base(), kind: "hook.started", data }).ok).toBe(true);
+    expect(validateSessionEvent({ ...base(), kind: "hook.completed", data: { ...data, status: "completed", durationMs: 42, provider: "supermemory", integration: "runner-plugin" } }).ok).toBe(true);
+    for (const change of [{ hookId: "" }, { hookId: "x".repeat(257) }, { hookEvent: "x".repeat(129) }, { provenance: "inferred" }, { status: "saved" }, { durationMs: -1 }, { provider: "supermemory" }, { integration: "runner-plugin" }, { hookName: "x".repeat(501) }]) expect(validateSessionEvent({ ...base(), kind: "hook.completed", data: { ...data, ...change } }).ok).toBe(false);
+  });
   test("kind union covers all design kinds", () => {
     expect(SESSION_EVENT_KINDS).toContain("runner.unmapped");
     expect(SESSION_EVENT_KINDS).toContain("command.accepted");
-    expect(SESSION_EVENT_KINDS.length).toBe(28);
+    expect(SESSION_EVENT_KINDS).toContain("hook.started");
+    expect(SESSION_EVENT_KINDS).toContain("hook.completed");
+    expect(SESSION_EVENT_KINDS.length).toBe(40);
   });
 });
 

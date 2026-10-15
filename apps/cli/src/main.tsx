@@ -2,7 +2,7 @@ import { formatLaunchDiagnostic, formatPlainDiagnostic, isQuietDiagnostic, shoul
 import React from "react";
 import { render, renderToString } from "ink";
 
-import { DAEMON_USAGE, parseArgs } from "./cli-args";
+import { DAEMON_USAGE, WEB_USAGE, parseArgs } from "./cli-args";
 import { getBuildInfo } from "./runtime/build-info";
 import { resolveProjectRoot } from "./project-root";
 import { createDefaultAdapterRegistry, deckInternalCommand } from "./runner-adapters";
@@ -96,13 +96,17 @@ if (parsed.command === "internal-session-daemon") {
   const { createCrossSessionService } = await import("./session-service");
   const { WEB_ASSETS } = await import("./runtime/web-assets.generated");
   const crossRunner = configStore.read().crossRunner;
+  const { validateDeckConfig } = await import("@deck/core/config/deck-config");
+  const webConfig = crossRunner?.web ?? validateDeckConfig({crossRunner:{}}).crossRunner!.web;
   process.exit(await runSessionDaemon({
     version: getBuildInfo().version,
     anchorCommand: deckInternalCommand("child-anchor"),
-    ...(crossRunner?.enabled ? { web: { config: crossRunner.web, assets: WEB_ASSETS } } : {}),
+    web: { autoStart: Boolean(crossRunner?.enabled), config: webConfig, assets: WEB_ASSETS },
     createService: (services) => createCrossSessionService(services, { configStore }),
   }));
 }
+
+if (parsed.command === "web-help") { console.log(WEB_USAGE); process.exit(0); }
 
 // Cross-runner terminal client and session management (XR-9.1, XR-9.2).
 if (parsed.command === "daemon-help") {
@@ -114,7 +118,7 @@ if (parsed.command === "daemon") {
   process.exit(await runDaemonCli(parsed.sub));
 }
 
-if (parsed.command === "cross-launch" || parsed.command === "session") {
+if (parsed.command === "cross-launch" || parsed.command === "session" || parsed.command === "web") {
   const { runSessionCli } = await import("./session-cli");
   process.exit(await runSessionCli(parsed, { configStore, projectRoot: () => resolveProjectRoot() }));
 }

@@ -1,7 +1,9 @@
+import { prepareImages, redactImagePayload } from "./images";
 import { execFile } from "node:child_process";
-import type { DriverHostIo, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
+import type { DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
+import { redactText } from "@deck/core/session/redaction";
 import { CODEX_PROTOCOL, codexTurnStatus, mapCodexNotification } from "./mapper";
-import { buildCodexLaunch, nativeCodexMcpId, verifyCodexConfig, type CodexLaunchOptions } from "./launch";
+import { buildCodexLaunch, isAdmittedCodexMemoryHook, nativeCodexMcpId, verifyCodexConfig, type CodexHookMetadata, type CodexLaunchOptions } from "./launch";
 import { CodexRpc, object, type RpcMessage } from "./rpc";
 
 export const CODEX_TESTED_VERSIONS = { min: "0.162.1", maxTested: "0.162.1" } as const;
@@ -22,9 +24,11 @@ function nativeModel(modelId: string): { model: string; modelProvider?: string }
   return slash < 0 ? { model: modelId } : { model: modelId.slice(slash + 1), ...(modelId.slice(0, slash) === "openai-codex" ? {} : { modelProvider: modelId.slice(0, slash) }) };
 }
 type Turn = { id?: string; resolve(outcome: TurnOutcome): void; interrupted: boolean; escalation?: ReturnType<typeof setTimeout> };
+const isHookNotification = (message: RpcMessage) => message.method?.startsWith("hook/") === true;
 
 class CodexTask {
   private readonly nativeInput: DriverTaskInput;
+  private attestedMemory?: DriverTaskInput["nativeMemory"];
   private child?: SupervisedChild;
   private spawning?: Promise<SupervisedChild>;
   private rpc?: CodexRpc;
@@ -72,8 +76,8 @@ class CodexTask {
     this.rpc?.close(); this.rpc = undefined;
     return this.drain;
   }
-  private async connect(inherited?: readonly string[], inheritedPlugins?: readonly string[]): Promise<CodexRpc> {
-    const launch = buildCodexLaunch(this.nativeInput, inherited, this.options, inheritedPlugins);
+  private async connect(inherited?: readonly string[], inheritedPlugins?: readonly string[], inheritedHooks?: readonly CodexHookMetadata[]): Promise<CodexRpc> {
+    const launch = buildCodexLaunch(this.nativeInput, inherited, this.options, inheritedPlugins, inheritedHooks);
     const spawning = this.io.spawn(launch.command, launch.args, { cwd: this.input.cwd, env: launch.env });
     this.spawning = spawning;
     const child = await spawning;
@@ -117,9 +121,16 @@ class CodexTask {
       const inventory = await this.connect();
       const config = object(object(await inventory.call("config/read", { cwd: this.input.cwd, includeLayers: false })).config);
       const inherited = Object.keys(object(config.mcp_servers));
+      const inheritedHooks = this.input.nativeMemory?.status === "ready" ? await this.readHooks(inventory) : [];
       await this.stopChild();
-      const rpc = await this.connect(inherited, Object.keys(object(config.plugins)));
+      const rpc = await this.connect(inherited, Object.keys(object(config.plugins)), inheritedHooks);
       verifyCodexConfig(object(object(await rpc.call("config/read", { cwd: this.input.cwd, includeLayers: false })).config), this.nativeInput);
+      if (this.input.nativeMemory?.status === "ready") {
+        const activeHooks = (await this.readHooks(rpc)).filter(hook => hook.enabled !== false);
+        if (activeHooks.length !== 2 || !["stop", "userPromptSubmit"].every(event => activeHooks.some(hook => hook.eventName === event))
+          || activeHooks.some(hook => !isAdmittedCodexMemoryHook(hook, this.input) || hook.trustStatus !== "trusted")) throw new Error("codex-hook-isolation-violation");
+        this.attestedMemory = { ...this.input.nativeMemory, plugin: { ...this.input.nativeMemory.plugin!, exclusiveHookEvents: ["userPromptSubmit", "stop"] } };
+      }
       const thread = object(object(await rpc.call(this.input.resume ? "thread/resume" : "thread/start", {
         ...nativeModel(this.input.assignment.modelId), cwd: this.input.cwd,
         developerInstructions: this.input.rolePrompt,
@@ -132,10 +143,21 @@ class CodexTask {
       await this.verifyRuntimeMcp(rpc, Date.now() + (this.options.rpcTimeoutMs ?? 30_000));
     } catch (error) { await this.fail(error instanceof Error && /^codex-/.test(error.message) ? error.message : "codex-startup-failed"); throw error; }
   }
+  private async readHooks(rpc: CodexRpc): Promise<CodexHookMetadata[]> {
+    const response = object(await rpc.call("hooks/list", { cwds: [this.input.cwd] }));
+    if (!Array.isArray(response.data) || response.data.length !== 1) throw new Error("codex-hooks-inventory-invalid");
+    const entry = object(response.data[0]);
+    if (!Array.isArray(entry.hooks) || !Array.isArray(entry.errors) || entry.errors.length || entry.cwd !== this.input.cwd) throw new Error("codex-hooks-inventory-invalid");
+    return entry.hooks.map(value => {
+      const hook = object(value);
+      if (typeof hook.key !== "string" || !hook.key || typeof hook.currentHash !== "string" || !hook.currentHash || typeof hook.eventName !== "string") throw new Error("codex-hooks-inventory-invalid");
+      return hook as CodexHookMetadata;
+    });
+  }
   async start(): Promise<TurnOutcome> {
     try {
       await this.initialize();
-      const done = this.send(this.input.prompt);
+      const done = this.send(this.input.prompt, this.input.images);
       this.resolveId(this.threadId!);
       return await done;
     } catch (error) {
@@ -171,20 +193,21 @@ class CodexTask {
     }
   }
   private onMessage(message: RpcMessage): void {
+    message = redactImagePayload(message);
     if (message.id !== undefined && message.method) { void this.approve(message); return; }
     const p = object(message.params);
     if (p.threadId !== undefined && this.threadId !== undefined && p.threadId !== this.threadId) {
-      this.emit({ kind: "runner.unmapped", data: { nativeType: message.method, reason: "foreign-thread" }, raw: message }); return;
+      this.emit({ kind: "runner.unmapped", data: { nativeType: isHookNotification(message) ? redactText(message.method!, 128) : message.method, reason: "foreign-thread" }, ...(isHookNotification(message) ? {} : { raw: message }) }); return;
     }
     if (message.method === "turn/started" && this.turn) this.turn.id = typeof object(p.turn).id === "string" ? object(p.turn).id as string : this.turn.id;
     if (message.method === "turn/completed") {
       const id = object(p.turn).id;
       if (!this.turn || this.turn.id && id !== this.turn.id) { this.emit({ kind: "runner.unmapped", data: { nativeType: message.method, reason: "stale-turn" }, raw: message }); return; }
-      for (const event of mapCodexNotification(message)) this.emit(event);
+      for (const event of mapCodexNotification(message, this.attestedMemory)) this.emit(event);
       this.finish({ status: codexTurnStatus(object(p.turn).status) }, true);
       return;
     }
-    for (const event of mapCodexNotification(message)) this.emit(event);
+    for (const event of mapCodexNotification(message, this.attestedMemory)) this.emit(event);
   }
   private async approve(message: RpcMessage): Promise<void> {
     const rpc = this.rpc, id = message.id!, p = object(message.params);
@@ -202,7 +225,7 @@ class CodexTask {
     const activeTurn = this.turn;
     if (!known || !activeTurn || typeof activeTurn.id !== "string" || activeTurn.id.length === 0
       || p.threadId !== this.threadId || p.turnId !== activeTurn.id) {
-      this.emit({ kind: "runner.unmapped", data: { nativeType: message.method }, raw: message });
+      this.emit({ kind: "runner.unmapped", data: { nativeType: isHookNotification(message) ? redactText(message.method!, 128) : message.method }, ...(isHookNotification(message) ? {} : { raw: message }) });
       rpc?.reject(id, -32601, "Unsupported or stale server request"); return;
     }
     if (this.approvals.has(id)) return;
@@ -223,15 +246,18 @@ class CodexTask {
     try { rpc?.reply(id, mcpApproval ? { action: decision, content: decision === "accept" ? {} : null, _meta: null } : { decision }); }
     catch { void this.fail("codex-approval-reply-failed"); }
   }
-  async send(prompt: string): Promise<TurnOutcome> {
+  async send(prompt: string, images?: readonly DriverImageInput[]): Promise<TurnOutcome> {
     if (this.closed || this.failed) throw new Error("codex-task-closed");
     if (this.turn) throw new Error("codex-turn-already-running");
+    let nativeImages: ReturnType<typeof prepareImages>;
+    try { nativeImages = prepareImages(images); }
+    catch { return { status: "failed", error: "image-input-invalid" }; }
     let resolve!: (outcome: TurnOutcome) => void;
     const done = new Promise<TurnOutcome>((r) => { resolve = r; });
     const state: Turn = { resolve, interrupted: false }; this.turn = state;
     void (async () => {
       try {
-        const result = object(await this.rpc!.call("turn/start", { threadId: this.threadId, input: [{ type: "text", text: prompt }], ...(this.input.assignment.thinking ? { effort: this.input.assignment.thinking } : {}) }));
+        const result = object(await this.rpc!.call("turn/start", { threadId: this.threadId, input: [...(prompt || !nativeImages.length ? [{ type: "text", text: prompt }] : []), ...nativeImages], ...(this.input.assignment.thinking ? { effort: this.input.assignment.thinking } : {}) }));
         if (typeof object(result.turn).id !== "string") throw new Error("codex-turn-id-missing");
         state.id = object(result.turn).id as string;
         if (state.interrupted && this.turn === state) this.deliverInterrupt(state);
@@ -284,7 +310,7 @@ export function createCodexSessionDriver(options: CodexSessionDriverOptions = {}
     async startTask(input, io): Promise<DriverTaskHandle> {
       const task = new CodexTask(input, io, options);
       const done = task.start();
-      return { nativeSessionId: task.nativeSessionId, done, send: (prompt) => task.send(prompt), interrupt: () => task.interrupt(), close: () => task.close() };
+      return { nativeSessionId: task.nativeSessionId, done, send: (prompt, images) => task.send(prompt, images), interrupt: () => task.interrupt(), close: () => task.close() };
     },
   };
 }

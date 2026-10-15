@@ -2,14 +2,17 @@
  * Port between the control server and the session manager (S1b implements it).
  * The server owns transport concerns (framing, idempotency, attach); the service owns sessions.
  */
-import type { SessionCommand } from "@deck/core/session/commands";
+import type { ImageAttachment, SessionCommand } from "@deck/core/session/commands";
 import type { CredentialGrant } from "./credentials";
 import type { EventLog } from "./event-log";
 import type { CommandOutcome, ExecuteOutcome } from "./protocol";
 
 export interface SessionService {
-  /** Execute an already validated command. `sessionId` is absent only for `session.create`. */
+  /** Execute a validated command. Workspace registration and session creation need no sessionId. */
   execute(input: { sessionId?: string; command: SessionCommand; clientId: string }): Promise<ExecuteOutcome>;
+  /** Authenticated browser images; managed files remain private to the host. */
+  uploadAttachment?(input: {sessionId: string; bytes: Uint8Array; mimeType: string; name: string}): CommandOutcome;
+  readAttachment?(sessionId: string, attachmentId: string): {attachment: ImageAttachment; bytes: Uint8Array} | undefined;
   /** The event log of a known session, or undefined. */
   openLog(sessionId: string): EventLog | undefined;
   /** True while any task runs: keeps the daemon alive and blocks version-skew restarts. */

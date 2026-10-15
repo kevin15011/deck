@@ -280,7 +280,7 @@ export class ControlServer {
     if (frame.sessionId !== undefined) {
       try { sessionId = assertSafeSegment(String(frame.sessionId), "session id"); } catch { return respond({ ok: false, code: "invalid-session-id" }, { commandId: command.commandId }); }
     }
-    if (command.type !== "session.create" && !sessionId) return respond({ ok: false, code: "session-required" }, { commandId: command.commandId });
+    if (command.type !== "session.create" && command.type !== "project.register" && command.type !== "project.rename" && command.type !== "project.remove" && !sessionId) return respond({ ok: false, code: "session-required" }, { commandId: command.commandId });
 
     if (command.type === "session.attach") {
       const log = this.options.service.openLog(sessionId!);

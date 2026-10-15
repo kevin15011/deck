@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync, truncateSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { DriverTaskInput } from "@deck/core/session/driver";
 import { createClaudeSessionDriver } from "./driver";
 import { fixtureLines } from "./fixtures";
@@ -26,6 +29,46 @@ function make(timers = new FakeTimers()) {
   const driver = createClaudeSessionDriver({ baseEnv: { PATH: "/bin" }, clock: timers, escalationMs: 10_000, killGraceMs: 2_000 });
   return { h, driver, timers };
 }
+
+const imageDirs: string[] = [];
+afterEach(() => { for (const dir of imageDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+function images() {
+  const dir = mkdtempSync(join(tmpdir(), "deck-claude-images-")); imageDirs.push(dir);
+  return ["image/png", "image/jpeg"].map((mimeType, index) => {
+    const path = join(dir, `image-${index}`); writeFileSync(path, `image-bytes-${index}`);
+    return { path, mimeType: mimeType as "image/png" | "image/jpeg", name: `Image ${index + 1}` };
+  });
+}
+
+describe("Claude native image inputs", () => {
+  test.each([false, true])("passes multiple structured images to fresh/resumed turns (%s) without inheriting attachments", async (resumed) => {
+    const files = images(); const { h, driver } = make();
+    const task = await driver.startTask(input({ prompt: "Inspect", images: files, ...(resumed ? { resume: { nativeSessionId: SID } } : {}) }), h.io);
+    const child = await h.nextChild();
+    expect(JSON.parse(child.stdin[0]!).message.content).toEqual([
+      { type: "text", text: "Inspect" },
+      ...files.map((file, index) => ({ type: "image", source: { type: "base64", media_type: file.mimeType, data: Buffer.from(`image-bytes-${index}`).toString("base64") } })),
+    ]);
+    child.stdout(JSON.stringify({ type: "user", message: { content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "PRIVATE-BASE64-PAYLOAD" } }] } }) + "\n");
+    child.stdout("malformed PRIVATE-BASE64-PAYLOAD\n");
+    expect(JSON.stringify(h.events)).not.toContain("PRIVATE-BASE64-PAYLOAD");
+    child.lines(withSession("turn-success.jsonl")); child.exit(); expect((await task.done).status).toBe("completed");
+    const second = task.send("", [files[1]!]); const follow = await h.nextChild(2);
+    expect(JSON.parse(follow.stdin[0]!).message.content).toEqual([{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: Buffer.from("image-bytes-1").toString("base64") } }]);
+    follow.lines(withSession("turn-success.jsonl")); follow.exit(); await second;
+    const third = task.send("text only"); const last = await h.nextChild(3);
+    expect(JSON.parse(last.stdin[0]!).message.content).toBe("text only"); last.lines(withSession("turn-success.jsonl")); last.exit(); await third; await task.close();
+  });
+  test("rejects missing, oversized, excessive and aggregate oversized image inputs without leaking paths", async () => {
+    const files = images(); const huge = { ...files[0]!, path: `${files[0]!.path}-huge` }; writeFileSync(huge.path, ""); truncateSync(huge.path, 5 * 1024 * 1024 + 1);
+    const aggregate = { ...files[0]!, path: `${files[0]!.path}-aggregate` }; writeFileSync(aggregate.path, ""); truncateSync(aggregate.path, 5 * 1024 * 1024);
+    for (const bad of [[{ ...files[0]!, path: `${files[0]!.path}-missing` }], [huge], Array(9).fill(files[0]), Array(5).fill(aggregate)]) {
+      const { h, driver } = make(); const task = await driver.startTask(input({ images: bad }), h.io);
+      expect(await task.done).toMatchObject({ status: "failed", error: "image-input-invalid" });
+      expect(h.children).toHaveLength(0); expect(JSON.stringify(h.events)).not.toContain(files[0]!.path); await task.close();
+    }
+  });
+});
 
 describe("createClaudeSessionDriver.startTask", () => {
   test("only a confirmed missing resume context receives the reseed reason", async () => {

@@ -22,23 +22,46 @@ const otherLog = EventLog.open({ dir: join(paths.sessionsDir, 'other', 'events')
 const append = (kind: any, data: Record<string, unknown>, taskId = 'lead') => log.append({ kind, source: { taskId, memberId: taskId === 'lead' ? 'lead' : 'researcher', runnerId: taskId === 'lead' ? 'codex' : 'claude' }, data });
 append('task.created', { taskId: 'lead', runnerId: 'codex', modelId: 'gpt-6-luna', attempt: 1, state: 'idle' });
 append('message.completed', { role: 'user', text: 'Separate the conversation from tool activity, and let me follow the OpenSpec documents.' });
-append('tool.started', { toolName: 'Inspect workspace', description: 'Reviewing the chat and session event structure.' });
-append('tool.completed', { toolName: 'Inspect workspace', summary: 'Found tool events mixed into conversation messages.' });
+append('hook.started', { hookId: 'browser-hook', hookName: 'Workspace initialization', hookEvent: 'SessionStart', status: 'running', provenance: 'codex-app-server', attempt: 1, executionMode: 'sync', handlerType: 'command' });
+append('turn.started', {});
+log.append({ kind: 'hook.completed', source: { taskId: 'lead', memberId: 'lead', runnerId: 'codex', nativeSessionId: 'native-browser' }, data: { hookId: 'browser-hook', hookEvent: 'SessionStart', status: 'completed', provenance: 'codex-app-server', attempt: 1, durationMs: 325, exitCode: 0 } });
+append('hook.completed', { hookId: 'browser-memory-hook', hookEvent: 'UserPromptSubmit', status: 'completed', provenance: 'codex-app-server', attempt: 1, provider: 'supermemory', integration: 'runner-plugin', durationMs: 150 });
+append('reasoning.delta', { text: 'Inspecting the workspace ', format: 'delta', messageId: 'thinking-1', partId: 'summary:0', reasoningKind: 'summary' });
+append('reasoning.delta', { text: 'before changing activity.', format: 'delta', messageId: 'thinking-1', partId: 'summary:0', reasoningKind: 'summary' });
+append('tool.started', { toolCallId: 'inspect', toolName: 'Inspect workspace', input: { command: 'bun test apps/web', token: 'private-fixture-token' } });
+append('tool.started', { toolCallId: 'inspect', toolName: 'Inspect workspace' });
+append('tool.completed', { toolCallId: 'inspect', output: 'Focused workspace checks passed.', durationMs: 1400, status: 'completed' });
+append('reasoning.delta', { text: 'Inspecting the workspace before changing activity.', format: 'snapshot', messageId: 'thinking-1', partId: 'summary:0', reasoningKind: 'summary' });
+append('tool.started', { toolCallId: 'skill', toolName: 'Skill', input: { skill: 'frontend-ui-engineering' } });
+append('tool.completed', { toolCallId: 'skill', output: 'Skill instructions loaded.', status: 'completed' });
+append('diagnostic', { code: 'fixture-notice', message: 'HIDDEN ACTIVITY NOTICE' });
 append('task.created', { taskId: 'research', runnerId: 'claude', modelId: 'haiku', state: 'completed', attempt: 1 }, 'research');
 append('message.completed', { role: 'user', text: 'PRIVATE DELEGATION IN CHILD ONLY' }, 'research');
 append('message.completed', { role: 'assistant', text: '## Research result\n\nUse separate views for **conversation**, activity and documents.' }, 'research');
+append('tool.started', { toolUseId: 'child-read', name: 'PRIVATE CHILD TOOL', input: { path: 'child-only.md' } }, 'research');
+append('hook.started', { hookId: 'child-hook', hookName: 'PRIVATE CHILD HOOK', hookEvent: 'PreToolUse', status: 'running', provenance: 'claude-stream-json', attempt: 1 }, 'research');
 append('task.result', { taskId: 'research', result: '### Research complete\n\nThe workspace keeps the Lead answer readable while tools and documents have their own place.' }, 'research');
 append('message.completed', { role: 'assistant', text: '## A clearer workspace\n\nYour conversation now has its own reading space. The workspace alongside it follows the work as it happens.\n\n- **Activity** collects tools and progress.\n- **Subagents** shows delegated work and its results.\n- **OpenSpec** renders the documents as they are created.\n\n```sh\ndeck daemon status\n```\n\n| Conversation | Workspace |\n| --- | --- |\n| You and the Lead | Evidence and progress |\n\nThe documents remain read only, so you can review them without changing the session.' });
+append('turn.completed', { status: 'completed' });
 let promptCount = 0;
-const sessions = [{ sessionId: 'desktop', changeId: 'Workspace redesign', projectRoot: project, state: 'idle' }, { sessionId: 'other', changeId: 'Another session', projectRoot: project, state: 'idle' }];
+let nextPrompt: { gate?: Promise<void>; response?: Promise<void>; fail?: boolean; manual?: boolean; terminal?: boolean } | undefined;
+const projects = [{ projectId: 'browser-project', path: project, name: 'Browser project', available: true, createdAt: new Date().toISOString() }];
+const sessions = [{ sessionId: 'desktop', projectId: 'browser-project', changeId: 'Workspace redesign', projectRoot: project, state: 'idle', generation: 0 }, { sessionId: 'other', projectId: 'browser-project', changeId: 'Another session', projectRoot: project, state: 'idle', generation: 0 }];
 const host = new WebService({ paths, assets: WEB_ASSETS, config: { port: 0, trustedProxy: null, allowedOrigins: [], allowFunnel: false }, service: {
     openLog: id => id === 'desktop' ? log : id === 'other' ? otherLog : undefined,
     hasRunningWork: () => false,
-    query: (name, raw) => { const args = raw as Record<string, unknown>; if (name === 'openspec.list') return args.sessionId === 'other' ? { ok: true, data: { changes: [] } } : listOpenSpecArtifacts({ projectRoot: project }); if (name === 'openspec.read') return readOpenSpecArtifact({ projectRoot: project }, args.changeId, args.path); return { ok: true, data: { sessions } }; },
+    query: (name, raw) => { const args = raw as Record<string, unknown>; if (name === 'projects.list') return { ok: true, data: { projects } }; if (name === 'session.readiness') return { ok: true, data: { status: 'ready', generation: 0 } }; if (name === 'openspec.list') return args.sessionId === 'other' ? { ok: true, data: { changes: [] } } : listOpenSpecArtifacts({ projectRoot: project }); if (name === 'openspec.read') return readOpenSpecArtifact({ projectRoot: project }, args.changeId, args.path); return { ok: true, data: { sessions } }; },
     execute: async ({ command }) => {
         if (command.type === 'prompt.send') {
-            promptCount++; await Bun.sleep(200);
+            promptCount++;
+            const controlled = nextPrompt; nextPrompt = undefined;
+            if (controlled?.gate) await controlled.gate; else await Bun.sleep(200);
+            if (controlled?.fail) return { ok: false, code: 'simulated-send-failure', message: 'Simulated send failure' };
+            append('command.accepted', { commandId: command.commandId, type: command.type, outcome: { ok: true } });
             append('message.completed', { role: 'user', text: command.text });
+            if (controlled?.terminal) { append('turn.started', {}); append('turn.completed', { status: 'completed' }); }
+            if (controlled?.response) await controlled.response;
+            if (controlled?.manual || controlled?.terminal) return { ok: true };
             append('message.completed', { role: 'assistant', text: 'Ready to review your next step.' });
             append('approval.requested', { approvalId: 'approval-1', toolName: 'Read workspace', description: 'Inspect the project files' });
         }
@@ -48,7 +71,11 @@ const host = new WebService({ paths, assets: WEB_ASSETS, config: { port: 0, trus
 } });
 host.enable();
 const browser = await chromium.launch({ executablePath: process.env.DECK_TEST_CHROME ?? join(homedir(), 'Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'), headless: true });
-const noOverflow = async (page: Page) => assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Viewport must not overflow horizontally');
+const noOverflow = async (page: Page) => {
+    const bounds = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, documentWidth: document.documentElement.scrollWidth, documentHeight: document.documentElement.scrollHeight, bodyHeight: document.body.scrollHeight, overflow: Array.from(document.body.querySelectorAll<HTMLElement>('*')).map(element => ({ tag: element.tagName, class: element.className, bottom: Math.round(element.getBoundingClientRect().bottom) })).filter(element => element.bottom > innerHeight + 1).slice(0, 12) }));
+    assert.ok(bounds.documentWidth <= bounds.width, 'Viewport must not overflow horizontally');
+    assert.ok(bounds.documentHeight <= bounds.height + 1 && bounds.bodyHeight <= bounds.height + 1, `Document must fit the viewport: ${JSON.stringify(bounds)}`);
+};
 try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }), page = await context.newPage(), errors: string[] = [], external: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -93,7 +120,29 @@ try {
     const chat = page.getByRole('region', { name: 'Conversation', exact: true });
     await chat.getByRole('heading', { name: 'A clearer workspace' }).waitFor();
     assert.equal(await chat.getByText('PRIVATE DELEGATION IN CHILD ONLY').count(), 0);
-    assert.equal(await chat.getByText('Inspect workspace · finished').count(), 0);
+    assert.equal(await chat.getByText('Inspect workspace', { exact: true }).count(), 0);
+    const activity = page.locator('#panel-activity');
+    await activity.getByRole('heading', { name: 'Lead activity', exact: true }).waitFor();
+    assert.equal(await activity.getByText('Inspect workspace', { exact: true }).count(), 1, 'Duplicate tool notifications become a single row');
+    assert.equal(await activity.getByText('Inspecting the workspace before changing activity.', { exact: true }).count(), 1, 'Final reasoning snapshot does not duplicate streamed summary');
+    await activity.getByText('Skill · frontend-ui-engineering', { exact: true }).waitFor();
+    assert.equal(await activity.getByText('PRIVATE CHILD TOOL', { exact: true }).count(), 0);
+    assert.equal(await activity.getByText('HIDDEN ACTIVITY NOTICE', { exact: true }).count(), 0);
+    const inspectedTool = activity.locator('.activity-row').filter({ has: page.getByText('Inspect workspace', { exact: true }) });
+    await inspectedTool.locator('summary').press('Enter');
+    await inspectedTool.getByText('Focused workspace checks passed.', { exact: true }).waitFor();
+    assert.ok((await inspectedTool.innerText()).includes('1.4 s'));
+    assert.ok((await inspectedTool.innerText()).includes('[redacted]'));
+    assert.equal((await activity.innerText()).includes('private-fixture-token'), false);
+    const nativeHook = activity.locator('.activity-row').filter({ has: page.getByText('Hook · Workspace initialization', { exact: true }) });
+    assert.equal(await nativeHook.count(), 1, 'Startup/native identity boundary preserves one hook lifecycle');
+    assert.ok((await nativeHook.innerText()).includes('Completed')); assert.ok((await nativeHook.innerText()).includes('325 ms'));
+    await nativeHook.locator('summary').press('Enter');
+    await nativeHook.getByText('Exit code: 0', { exact: true }).waitFor();
+    assert.ok((await nativeHook.innerText()).includes('codex-app-server'));
+    assert.equal((await nativeHook.innerText()).includes('Supermemory'), false, 'Generic hooks do not invent provider attribution');
+    await activity.getByText('Supermemory runner plugin', { exact: false }).waitFor();
+    assert.equal(await activity.getByText('PRIVATE CHILD HOOK', { exact: true }).count(), 0);
     await page.screenshot({ path: '/tmp/deck-web-desktop.png', fullPage: true });
     await page.getByRole('button', { name: 'Switch to light theme', exact: true }).click();
     await page.screenshot({ path: '/tmp/deck-web-theme-light.png', fullPage: true });
@@ -201,6 +250,11 @@ try {
     assert.equal(await page.getByRole('button', { name: 'Open sessions' }).evaluate(element => document.activeElement === element), true);
     await page.getByRole('tab', { name: 'Activity', exact: true }).click();
     await page.getByRole('button', { name: 'Allow once' }).waitFor();
+    await activity.getByText('Inspect workspace', { exact: true }).waitFor();
+    const mobileDetails = inspectedTool.locator('details');
+    if (!(await mobileDetails.evaluate(element => (element as HTMLDetailsElement).open))) await mobileDetails.locator('summary').press('Enter');
+    await inspectedTool.getByText('Focused workspace checks passed.', { exact: true }).waitFor();
+    await activity.getByText('Hook · Workspace initialization', { exact: true }).waitFor();
     assert.equal(await page.getByLabel('Message the lead').isVisible(), false);
     await noOverflow(page);
     await page.screenshot({ path: '/tmp/deck-web-mobile-activity.png', fullPage: true });
@@ -218,9 +272,18 @@ try {
     await page.screenshot({ path: '/tmp/deck-web-mobile.png', fullPage: true });
     await page.close();
     const reopened = await context.newPage(); await reopened.goto(host.status().url!);
+    // A new desktop tab restores the collapsed rail; open history before choosing a session.
+    const expandSidebar = reopened.getByRole('button', { name: 'Expand sidebar', exact: true });
+    await expandSidebar.waitFor(); await expandSidebar.click();
     await reopened.getByRole('button', { name: /Workspace redesign/ }).click();
     await reopened.getByRole('button', { name: 'Allow once' }).waitFor(); await reopened.getByRole('button', { name: 'Allow once' }).click();
     await reopened.getByText('No pending approvals').waitFor({ state: 'attached' });
+    const replayActivity = reopened.locator('#panel-activity');
+    assert.equal(await replayActivity.getByText('Inspect workspace', { exact: true }).count(), 1);
+    assert.equal(await replayActivity.getByText('Inspecting the workspace before changing activity.', { exact: true }).count(), 1);
+    assert.equal(await replayActivity.getByText('PRIVATE CHILD TOOL', { exact: true }).count(), 0);
+    assert.equal(await replayActivity.getByText('Hook · Workspace initialization', { exact: true }).count(), 1);
+    assert.equal(await replayActivity.getByText('PRIVATE CHILD HOOK', { exact: true }).count(), 0);
     const replayChat = reopened.getByRole('region', { name: 'Conversation', exact: true });
     assert.equal(await replayChat.getByText('Continue the cross runner feature', { exact: true }).count(), 1);
     // Activity must not move a reader; only new Lead messages offer a jump.
@@ -231,7 +294,7 @@ try {
     const before = await replayChat.evaluate(element => element.scrollTop);
     append('tool.started', { toolName: 'Background tool', description: 'This must not scroll the conversation.' });
     await reopened.getByRole('tab', { name: 'Activity', exact: true }).click();
-    await reopened.getByText('Background tool · started').waitFor();
+    await reopened.getByText('Background tool', { exact: true }).waitFor();
     assert.equal(await replayChat.evaluate(element => element.scrollTop), before);
     append('message.completed', { role: 'assistant', text: 'A new Lead response while you read history.' });
     await reopened.getByRole('button', { name: 'Jump to latest' }).waitFor();
@@ -239,14 +302,156 @@ try {
     await reopened.getByRole('button', { name: 'Jump to latest' }).click();
     append('message.delta', { text: 'Partial output before failure' });
     append('turn.completed', { status: 'failed', error: 'Managed tools did not become ready.' });
+    await replayActivity.getByText(/No completion reported/).waitFor();
     await reopened.getByRole('alert').getByText('Managed tools did not become ready.', { exact: true }).waitFor();
     await replayChat.getByText('Partial output before failure', { exact: true }).waitFor();
+    // Activity follows live work only while the reader stays near its bottom.
+    const timeline = reopened.getByRole('region', { name: 'Lead activity timeline', exact: true });
+    let activityCheckpoint = 0;
+    const atLatestActivity = async () => {
+        const checkpoint = ++activityCheckpoint;
+        try { await reopened.waitForFunction(() => {
+            const element = document.querySelector<HTMLElement>('.activity-content');
+            return !!element && element.scrollHeight - element.scrollTop - element.clientHeight <= 2;
+        }, undefined, { timeout: 4000 }); }
+        catch (error) { throw new Error(`Activity follow checkpoint ${checkpoint}: ${JSON.stringify(await timeline.evaluate(element => ({ top: element.scrollTop, height: element.scrollHeight, viewport: element.clientHeight, open: element.querySelectorAll('details[open]').length })))}; ${error}`); }
+    };
+    await reopened.getByRole('tab', { name: 'Activity', exact: true }).click();
+    await timeline.focus(); await timeline.press('End');
+    append('turn.started', {});
+    for (let index = 0; index < 25; index++) {
+        append('tool.started', { toolCallId: `scroll-${index}`, toolName: `Activity step ${index}`, input: { path: `src/step-${index}.ts` } });
+        append('tool.completed', { toolCallId: `scroll-${index}`, output: 'Inspection complete.' });
+    }
+    await timeline.getByText('Activity step 24', { exact: true }).waitFor();
+    await atLatestActivity();
+    await reopened.setViewportSize({ width: 1440, height: 700 });
+    await atLatestActivity(); await noOverflow(reopened);
+    await reopened.setViewportSize({ width: 1440, height: 1000 });
+    await atLatestActivity();
+    await timeline.focus(); await timeline.press('Home');
+    await reopened.getByRole('button', { name: 'Jump to latest activity', exact: false }).waitFor();
+    await reopened.waitForFunction(() => document.querySelector<HTMLElement>('.activity-content')!.scrollTop === 0);
+    const activityPosition = await timeline.evaluate(element => element.scrollTop);
+    append('tool.completed', { toolCallId: 'reader-late', toolName: 'Activity while reading', output: 'Keep the reader where they are.' });
+    await timeline.getByText('Activity while reading', { exact: true }).waitFor();
+    assert.equal(await timeline.evaluate(element => element.scrollTop), activityPosition);
+    await reopened.getByRole('tab', { name: 'Subagents', exact: true }).click();
+    append('tool.completed', { toolCallId: 'hidden-late', toolName: 'Activity in hidden tab', output: 'Retain the reading position.' });
+    await reopened.getByRole('tab', { name: 'Activity', exact: true }).click();
+    assert.equal(await timeline.evaluate(element => element.scrollTop), activityPosition);
+    await reopened.getByRole('button', { name: /Another session/ }).click();
+    await reopened.getByRole('heading', { name: 'No Lead details yet', exact: true }).waitFor();
+    await reopened.getByRole('button', { name: /Workspace redesign/ }).click();
+    await timeline.getByText('Activity in hidden tab', { exact: true }).waitFor();
+    assert.equal(await timeline.evaluate(element => element.scrollTop), activityPosition, 'Activity reading position survives session replay');
+    await reopened.getByRole('button', { name: 'Jump to latest activity', exact: false }).press('Enter');
+    await atLatestActivity();
+    append('reasoning.delta', { text: 'A growing runner-reported explanation. ', format: 'delta', messageId: 'scroll-reasoning', partId: 'text:0' });
+    await atLatestActivity();
+    const beforeGrowth = await timeline.evaluate(element => element.scrollHeight);
+    append('reasoning.delta', { text: 'Detailed reasoning stays in the Activity view. '.repeat(150), format: 'delta', messageId: 'scroll-reasoning', partId: 'text:0' });
+    await reopened.waitForFunction(height => document.querySelector<HTMLElement>('.activity-content')!.scrollHeight > height, beforeGrowth);
+    await atLatestActivity();
+    append('tool.completed', { toolCallId: 'expanding-details', toolName: 'Expandable activity', input: { path: 'README.md' }, output: 'Detailed tool output\n'.repeat(100) });
+    const expanding = timeline.locator('.activity-row').filter({ has: reopened.getByText('Expandable activity', { exact: true }) });
+    await expanding.waitFor(); await atLatestActivity();
+    await expanding.locator('summary').click();
+    await reopened.getByRole('button', { name: 'Jump to latest activity', exact: false }).waitFor();
+    const expandedPosition = await timeline.evaluate(element => element.scrollTop);
+    append('tool.completed', { toolCallId: 'after-expanded', toolName: 'Work during detail reading', output: 'Do not move expanded details.' });
+    await timeline.getByText('Work during detail reading', { exact: true }).waitFor();
+    assert.equal(await timeline.evaluate(element => element.scrollTop), expandedPosition);
+    await reopened.setViewportSize({ width: 390, height: 844 });
+    await reopened.getByRole('tab', { name: 'Activity', exact: true }).click();
+    await reopened.getByRole('button', { name: 'Jump to latest activity', exact: false }).click();
+    await atLatestActivity(); await noOverflow(reopened);
+    await reopened.setViewportSize({ width: 390, height: 640 });
+    await atLatestActivity(); await noOverflow(reopened);
+    const touch = await context.newCDPSession(reopened);
+    await touch.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 200, y: 400 }] });
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 200, y: 500 }] });
+    await reopened.waitForTimeout(100);
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await reopened.getByRole('button', { name: 'Jump to latest activity', exact: false }).waitFor();
+    await reopened.waitForTimeout(100);
+    const touchPosition = await timeline.evaluate(element => element.scrollTop);
+    append('tool.completed', { toolCallId: 'touch-reading', toolName: 'Activity during touch reading', output: 'Keep the mobile reader in place.' });
+    await timeline.getByText('Activity during touch reading', { exact: true }).waitFor();
+    assert.ok(Math.abs(await timeline.evaluate(element => element.scrollTop) - touchPosition) <= 1);
+    await reopened.getByRole('button', { name: 'Jump to latest activity', exact: false }).click();
+    await atLatestActivity();
+    await touch.send('Emulation.setTouchEmulationEnabled', { enabled: false }); await touch.detach();
+    await reopened.screenshot({ path: '/tmp/deck-web-activity-scroll-mobile.png', fullPage: true });
+    await reopened.setViewportSize({ width: 1440, height: 1000 });
+    append('turn.completed', { status: 'completed' });
+    await atLatestActivity(); await noOverflow(reopened);
+    // A delayed POST is visible immediately, and its late result cannot populate another session.
+    let acceptPrompt!: () => void;
+    nextPrompt = { gate: new Promise<void>(resolve => { acceptPrompt = resolve; }), manual: true };
+    await reopened.getByLabel('Message the lead').fill('Show progress during a delayed turn');
+    await reopened.getByLabel('Message the lead').press('Enter');
+    await reopened.locator('.lead-progress:visible').getByText('Sending…', { exact: true }).waitFor();
+    await reopened.getByRole('button', { name: /Another session/ }).click();
+    acceptPrompt();
+    await reopened.waitForFunction(() => document.querySelector('.lead-progress')?.getAttribute('data-phase') === 'idle');
+    assert.equal(await reopened.getByText('Sending…', { exact: true }).count(), 0);
+    await reopened.getByRole('button', { name: /Workspace redesign/ }).click();
+    await reopened.locator('.lead-progress:visible').getByText('Waiting for Lead…', { exact: true }).waitFor();
+    append('diagnostic', { code: 'turn.preparation', phase: 'checking-runner', attempt: 2, elapsedMs: 0 });
+    await reopened.locator('.lead-progress:visible').getByText('Checking runner…', { exact: true }).waitFor();
+    append('diagnostic', { code: 'turn.preparation', phase: 'preparing-tools', attempt: 2, elapsedMs: 100 });
+    await reopened.locator('.lead-progress:visible').getByText('Preparing tools…', { exact: true }).waitFor();
+    append('diagnostic', { code: 'turn.preparation', phase: 'starting-runner', attempt: 2, elapsedMs: 200 });
+    await reopened.locator('.lead-progress:visible').getByText('Starting Lead…', { exact: true }).waitFor();
+    append('turn.started', {});
+    append('diagnostic', { code: 'turn.preparation', phase: 'turn-started', attempt: 2, elapsedMs: 300 });
+    await reopened.locator('.lead-progress:visible').getByText('Waiting for Lead…', { exact: true }).waitFor();
+    append('reasoning.delta', { text: 'Reported planning', format: 'delta', messageId: 'status-reasoning', partId: 'text:0' });
+    await reopened.locator('.lead-progress:visible').getByText('Reasoning…', { exact: true }).waitFor();
+    append('tool.started', { toolUseId: 'child-status', name: 'Child write' }, 'research');
+    await reopened.locator('.lead-progress:visible').getByText('Reasoning…', { exact: true }).waitFor();
+    append('tool.started', { toolCallId: 'live-tool', toolName: 'Read', input: { path: 'README.md' } });
+    await reopened.locator('.lead-progress:visible').getByText('Using Read…', { exact: true }).waitFor();
+    await reopened.reload();
+    await reopened.getByRole('button', { name: /Workspace redesign/ }).click();
+    await reopened.locator('.lead-progress:visible').getByText('Using Read…', { exact: true }).waitFor();
+    await reopened.setViewportSize({ width: 390, height: 844 });
+    await reopened.getByRole('tab', { name: 'Activity', exact: true }).click();
+    await reopened.locator('.mobile-progress').getByText('Using Read…', { exact: true }).waitFor();
+    await noOverflow(reopened);
+    await reopened.screenshot({ path: '/tmp/deck-web-live-progress.png', fullPage: true });
+    append('tool.completed', { toolCallId: 'live-tool', output: 'Read complete' });
+    await reopened.locator('.mobile-progress').getByText('Waiting for Lead…', { exact: true }).waitFor();
+    append('message.delta', { text: 'Progress is now visible.' });
+    await reopened.locator('.mobile-progress').getByText('Responding…', { exact: true }).waitFor();
+    append('turn.completed', { status: 'completed' });
+    await reopened.waitForFunction(() => document.querySelector('.mobile-progress')?.getAttribute('data-phase') === 'idle');
+    await reopened.setViewportSize({ width: 1440, height: 1000 });
+    // Transport failure preserves the draft and clears optimistic progress.
+    nextPrompt = { fail: true };
+    await reopened.getByLabel('Message the lead').fill('Keep this failed draft');
+    await reopened.getByLabel('Message the lead').press('Enter');
+    await reopened.getByRole('alert').getByText('Simulated send failure', { exact: true }).waitFor();
+    assert.equal(await reopened.getByLabel('Message the lead').inputValue(), 'Keep this failed draft');
+    await reopened.waitForFunction(() => document.querySelector('.lead-progress')?.getAttribute('data-phase') === 'idle');
+    // A terminal event may arrive while the POST is still pending; it remains authoritative afterwards.
+    let finishResponse!: () => void;
+    nextPrompt = { terminal: true, response: new Promise<void>(resolve => { finishResponse = resolve; }) };
+    await reopened.getByLabel('Message the lead').fill('Complete before the HTTP response');
+    await reopened.getByLabel('Message the lead').press('Enter');
+    await reopened.getByRole('button', { name: 'Send prompt', exact: true }).waitFor({ state: 'attached' });
+    await reopened.waitForFunction(() => document.querySelector('.lead-progress')?.getAttribute('data-phase') === 'idle');
+    finishResponse();
+    await reopened.waitForFunction(() => document.querySelector<HTMLTextAreaElement>('#prompt')?.value === '');
+    assert.equal(await reopened.locator('.lead-progress').getAttribute('data-phase'), 'idle');
     const tokenContext = await browser.newContext(), tokenPage = await tokenContext.newPage();
     await tokenPage.goto(host.pair().url); await tokenPage.getByRole('button', { name: /Workspace redesign/ }).waitFor(); assert.equal(new URL(tokenPage.url()).hash, ''); await tokenContext.close();
     host.revoke(host.devices()[0]!.id); await reopened.reload();
     await reopened.getByRole('heading', { name: 'Could not open your workspace' }).waitFor();
     assert.equal(await reopened.getByLabel('Pairing code').count(), 0); assert.equal(host.devices().length, 2);
     assert.deepEqual(errors, []); assert.deepEqual(external, []);
-    console.log(JSON.stringify({ ok: true, checks: ['single-line-composer', 'four-line-growth-and-scroll-cap', 'composer-shrink-and-responsive-reflow', 'theme-default-and-invalid-fallback', 'exact-original-light-palette', 'keyboard-theme-switch', 'theme-reload-and-new-tab-persistence', 'blocked-theme-storage', 'local-access', 'lead-only-markdown-chat', 'separate-activity-and-child-transcripts', 'keyboard-tabs', 'artifact-render-refresh-and-relative-links', 'automatic-visible-document-and-catalog-update', 'code-copy', 'deleted-document-and-change-selection-preserved', 'no-html-or-image-fetch', 'stale-artifact-session-response-ignored', 'per-session-drafts', 'rapid-enter-single-command', 'collapsible-sidebar', 'mobile-drawer-escape-focus', 'mobile-tabs-and-visible-approvals', 'no-horizontal-overflow', 'approval-replay-and-response', 'conversation-scroll-preserved', 'jump-latest', 'failed-turn-partial-output', 'revocation', 'optional-pairing'], screenshots: ['/tmp/deck-web-desktop.png', '/tmp/deck-web-openspec.png', '/tmp/deck-web-mobile.png', '/tmp/deck-web-mobile-activity.png', '/tmp/deck-web-mobile-openspec.png'] }));
+    console.log(JSON.stringify({ ok: true, checks: ['viewport-document-bounds', 'activity-live-autofollow', 'activity-reader-pause-and-keyboard-jump', 'activity-tab-session-replay-position', 'activity-dynamic-details-and-reasoning', 'activity-mobile-and-vertical-resize', 'native-hook-init-correlation', 'native-hook-provider-and-safe-details', 'native-hook-mobile-and-replay', 'immediate-delayed-send-status', 'receipt-scoped-first-event-progress', 'explicit-preparation-status', 'mobile-live-progress-and-replay', 'failed-send-draft-and-status', 'terminal-before-http-response', 'lead-tool-detail-and-reasoning-projection', 'explicit-skill-evidence', 'child-and-lifecycle-activity-hidden', 'keyboard-tool-disclosure', 'activity-mobile-and-replay', 'activity-redaction-and-truthful-status', 'single-line-composer', 'four-line-growth-and-scroll-cap', 'composer-shrink-and-responsive-reflow', 'theme-default-and-invalid-fallback', 'exact-original-light-palette', 'keyboard-theme-switch', 'theme-reload-and-new-tab-persistence', 'blocked-theme-storage', 'local-access', 'lead-only-markdown-chat', 'separate-activity-and-child-transcripts', 'keyboard-tabs', 'artifact-render-refresh-and-relative-links', 'automatic-visible-document-and-catalog-update', 'code-copy', 'deleted-document-and-change-selection-preserved', 'no-html-or-image-fetch', 'stale-artifact-session-response-ignored', 'per-session-drafts', 'rapid-enter-single-command', 'collapsible-sidebar', 'mobile-drawer-escape-focus', 'mobile-tabs-and-visible-approvals', 'no-horizontal-overflow', 'approval-replay-and-response', 'conversation-scroll-preserved', 'jump-latest', 'failed-turn-partial-output', 'revocation', 'optional-pairing'], screenshots: ['/tmp/deck-web-desktop.png', '/tmp/deck-web-openspec.png', '/tmp/deck-web-mobile.png', '/tmp/deck-web-mobile-activity.png', '/tmp/deck-web-mobile-openspec.png'] }));
     await context.close();
 } finally { await browser.close(); await host.close(); log.close(); otherLog.close(); rmSync(root, { recursive: true, force: true }); }

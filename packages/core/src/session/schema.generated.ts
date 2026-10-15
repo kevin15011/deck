@@ -35,6 +35,12 @@ export const SESSION_EVENT_SCHEMA = {
         "session.state",
         "session.ended",
         "session.recovered",
+        "session.assignment",
+        "session.successor",
+        "session.released",
+        "session.reopened",
+        "session.renamed",
+        "session.removed",
         "task.created",
         "task.state",
         "task.continued",
@@ -46,6 +52,8 @@ export const SESSION_EVENT_SCHEMA = {
         "reasoning.delta",
         "tool.started",
         "tool.completed",
+        "hook.started",
+        "hook.completed",
         "approval.requested",
         "approval.resolved",
         "memory.recalled",
@@ -57,7 +65,11 @@ export const SESSION_EVENT_SCHEMA = {
         "runner.unmapped",
         "client.attached",
         "client.detached",
-        "command.accepted"
+        "command.accepted",
+        "prompt.queued",
+        "prompt.dispatched",
+        "prompt.state",
+        "prompt.queue"
       ]
     },
     "source": {
@@ -105,6 +117,220 @@ export const SESSION_EVENT_SCHEMA = {
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "hook.started"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "hookId",
+              "hookEvent",
+              "status",
+              "provenance"
+            ],
+            "properties": {
+              "hookId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "hookEvent": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "hookName": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "completed",
+                  "failed",
+                  "blocked",
+                  "stopped",
+                  "unknown"
+                ]
+              },
+              "provenance": {
+                "enum": [
+                  "claude-stream-json",
+                  "codex-app-server"
+                ]
+              },
+              "durationMs": {
+                "type": "number",
+                "minimum": 0
+              },
+              "executionMode": {
+                "enum": [
+                  "sync",
+                  "async"
+                ]
+              },
+              "handlerType": {
+                "enum": [
+                  "command",
+                  "mcpTool",
+                  "prompt",
+                  "agent"
+                ]
+              },
+              "provider": {
+                "const": "supermemory"
+              },
+              "integration": {
+                "const": "runner-plugin"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "required": [
+                    "provider"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "integration"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "integration"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "provider"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "hook.completed"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "hookId",
+              "hookEvent",
+              "status",
+              "provenance"
+            ],
+            "properties": {
+              "hookId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "hookEvent": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "hookName": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "completed",
+                  "failed",
+                  "blocked",
+                  "stopped",
+                  "unknown"
+                ]
+              },
+              "provenance": {
+                "enum": [
+                  "claude-stream-json",
+                  "codex-app-server"
+                ]
+              },
+              "durationMs": {
+                "type": "number",
+                "minimum": 0
+              },
+              "executionMode": {
+                "enum": [
+                  "sync",
+                  "async"
+                ]
+              },
+              "handlerType": {
+                "enum": [
+                  "command",
+                  "mcpTool",
+                  "prompt",
+                  "agent"
+                ]
+              },
+              "provider": {
+                "const": "supermemory"
+              },
+              "integration": {
+                "const": "runner-plugin"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "required": [
+                    "provider"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "integration"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "integration"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "provider"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
     {
       "if": {
         "properties": {
@@ -315,18 +541,113 @@ export const SESSION_COMMAND_SCHEMA = {
     },
     "type": {
       "enum": [
+        "project.register",
+        "project.rename",
+        "project.remove",
         "session.create",
+        "session.prepare",
+        "session.prepare.cancel",
+        "session.continue",
+        "session.assignMember",
         "session.attach",
         "session.bindChange",
         "prompt.send",
+        "prompt.cancel",
+        "prompt.resume",
         "turn.interrupt",
         "approval.respond",
         "task.cancel",
+        "session.release",
+        "session.rename",
+        "session.remove",
         "session.stop"
       ]
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "project.register"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "project.rename"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "projectId",
+          "name"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "project.remove"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "projectId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      }
+    },
     {
       "if": {
         "properties": {
@@ -339,17 +660,160 @@ export const SESSION_COMMAND_SCHEMA = {
         ]
       },
       "then": {
-        "required": [
-          "projectRoot"
-        ],
+        "required": [],
         "properties": {
           "projectRoot": {
             "type": "string",
             "minLength": 1
           },
+          "projectId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
           "changeId": {
             "type": "string",
             "minLength": 1
+          },
+          "members": {
+            "type": "object",
+            "maxProperties": 32,
+            "additionalProperties": {
+              "type": "object",
+              "required": [
+                "runnerId",
+                "modelId"
+              ],
+              "properties": {
+                "runnerId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "modelId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "thinking": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session.prepare"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [],
+        "properties": {}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session.prepare.cancel"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "preparationId"
+        ],
+        "properties": {
+          "preparationId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session.continue"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session.assignMember"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "memberId",
+          "expectedRevision",
+          "assignment"
+        ],
+        "properties": {
+          "memberId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "assignment": {
+            "type": "object",
+            "required": [
+              "runnerId",
+              "modelId"
+            ],
+            "properties": {
+              "runnerId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "modelId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "thinking": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
         }
       }
@@ -417,13 +881,80 @@ export const SESSION_COMMAND_SCHEMA = {
         ],
         "properties": {
           "text": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
+          },
+          "attachmentIds": {
+            "type": "array",
+            "maxItems": 8,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
           },
           "target": {
             "const": "lead"
           }
+        },
+        "anyOf": [
+          {
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "required": [
+              "attachmentIds"
+            ],
+            "properties": {
+              "attachmentIds": {
+                "minItems": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "prompt.cancel"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "promptId"
+        ],
+        "properties": {
+          "promptId": {
+            "type": "string",
+            "minLength": 1
+          }
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "prompt.resume"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [],
+        "properties": {}
       }
     },
     {
@@ -507,6 +1038,63 @@ export const SESSION_COMMAND_SCHEMA = {
       "if": {
         "properties": {
           "type": {
+            "const": "session.release"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [],
+        "properties": {}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session.rename"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "^(?=.*\\S)[^\\u0000-\\u001f]*$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session.remove"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [],
+        "properties": {}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
             "const": "session.stop"
           }
         },
@@ -518,7 +1106,43 @@ export const SESSION_COMMAND_SCHEMA = {
         "required": [],
         "properties": {}
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session.create"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "oneOf": [
+          {
+            "required": [
+              "projectRoot"
+            ],
+            "not": {
+              "required": [
+                "projectId"
+              ]
+            }
+          },
+          {
+            "required": [
+              "projectId"
+            ],
+            "not": {
+              "required": [
+                "projectRoot"
+              ]
+            }
+          }
+        ]
+      }
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "60d26636e3e7459050f3c6a61b8bdedda4af7aae2f710e2883e5f05b2d202177";
+export const SESSION_SCHEMA_DIGEST = "609cc460b85e6a1284409eb98b39080ca302cb6658b1641ad9a526eeba75c1a9";

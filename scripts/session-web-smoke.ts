@@ -2,6 +2,7 @@
 import {chmodSync,copyFileSync,existsSync,mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir,homedir} from 'node:os';
 import {join,resolve} from 'node:path';
+import {createHash} from 'node:crypto';
 const deck=process.argv[process.argv.indexOf('--deck')+1];if(!deck||!deck.startsWith('/'))throw new Error('--deck requires absolute compiled binary');
 const base=realpathSync(mkdtempSync(join(realpathSync(tmpdir()),'deck-web-bin-'))),home=join(base,'home'),bin=join(base,'bin'),project=join(base,'project');for(const p of[home,bin,project])mkdirSync(p,{recursive:true});
 const artifactDir=join(project,'openspec/changes/web-check');mkdirSync(artifactDir,{recursive:true});writeFileSync(join(artifactDir,'proposal.md'),'# Compiled artifact\n\n- [x] Read-only workspace\n');
@@ -9,10 +10,11 @@ const archiveDir=join(project,'openspec/changes/archive/old-check');mkdirSync(ar
 writeFileSync(join(project,'private.txt'),'Not a browser artifact');
 copyFileSync(process.env.DECK_TEST_CLAUDE_FIXTURE??resolve(import.meta.dir,'fixtures/fake-claude.mjs'),join(base,'fake-claude.mjs'));
 writeFileSync(join(bin,'claude'),`#!/bin/sh\nexec "${process.execPath}" "${join(base,'fake-claude.mjs')}" "$@"\n`);chmodSync(join(bin,'claude'),0o755);
-const env={HOME:home,XDG_CONFIG_HOME:join(home,'.config'),XDG_STATE_HOME:join(home,'.local/state'),XDG_DATA_HOME:join(home,'.local/share'),TMPDIR:base,PATH:`${bin}:/usr/bin:/bin`,FAKE_CLAUDE_APPROVAL:'1',DECK_SESSION_DAEMON_IDLE_MS:'600000'};
+const env={HOME:home,XDG_CONFIG_HOME:join(home,'.config'),XDG_STATE_HOME:join(home,'.local/state'),XDG_DATA_HOME:join(home,'.local/share'),TMPDIR:base,PATH:`${bin}:/usr/bin:/bin`,FAKE_CLAUDE_APPROVAL:'1',FAKE_CLAUDE_LOG:join(base,'native-calls.jsonl'),FAKE_CLAUDE_IMAGE_LOG:join(base,'native-images.jsonl'),DECK_SESSION_DAEMON_IDLE_MS:'600000'};
+const nativeTurns=()=>existsSync(env.FAKE_CLAUDE_LOG)?readFileSync(env.FAKE_CLAUDE_LOG,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line)).filter(call=>call.argv.includes('-p')).length:0;
 const owned=new Set<Bun.Subprocess>();
-const spawn=(args:string[],stdin:'ignore'|'pipe'='ignore')=>{const p=Bun.spawn([deck,...args],{cwd:project,env,stdin,stdout:'pipe',stderr:'pipe'});owned.add(p);void p.exited.then(()=>owned.delete(p));return p};
-const run=async(args:string[])=>{const p=spawn(args);const [out,err,code]=await Promise.all([new Response(p.stdout).text(),new Response(p.stderr).text(),p.exited]);if(code!==0)throw new Error(`${args.join(' ')}: ${err||out}`);return out};
+const spawn=(args:string[],stdin:'ignore'|'pipe'='ignore',cwd=project)=>{const p=Bun.spawn([deck,...args],{cwd,env,stdin,stdout:'pipe',stderr:'pipe'});owned.add(p);void p.exited.then(()=>owned.delete(p));return p};
+const run=async(args:string[],cwd=project)=>{const p=spawn(args,'ignore',cwd);const [out,err,code]=await Promise.all([new Response(p.stdout).text(),new Response(p.stderr).text(),p.exited]);if(code!==0)throw new Error(`${args.join(' ')}: ${err||out}`);return out};
 const until=async(fn:()=>boolean)=>{const deadline=Date.now()+30000;while(!fn()){if(Date.now()>deadline)throw new Error('Timed out waiting for daemon/session');await Bun.sleep(50)}};
 
 try{
@@ -42,14 +44,117 @@ try{
  check('artifact reflects disk update',(await(await fetch(artifactURL,{headers})).json()).data.markdown==='# Updated compiled artifact\n');
  artifactURL.searchParams.set('path','../../../private.txt');
  check('artifact traversal rejected',!(await fetch(artifactURL,{headers})).ok);
- const command=async(body:Record<string,unknown>)=>{const r=await fetch(new URL('api/commands',url),{method:'POST',headers,body:JSON.stringify({sessionId:id,command:{v:1,commandId:crypto.randomUUID(),...body}})});const value=await r.json();check(String(body.type),r.ok&&value.ok)};
- await command({type:'prompt.send',text:'Compiled HTTP approval check'});
+ const command=async(body:Record<string,unknown>,commandId=crypto.randomUUID())=>{const r=await fetch(new URL('api/commands',url),{method:'POST',headers,body:JSON.stringify({sessionId:id,command:{v:1,commandId,...body}})});const value=await r.json();check(String(body.type),r.ok&&value.ok);return value.data};
+ const imageBytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==','base64');
+ const imageUploadURL=new URL(`api/sessions/${id}/attachments?name=Screenshot.png`,url),imageHeaders={...headers,'Content-Type':'image/png'};
+ check('image uploads require authentication',(await fetch(imageUploadURL,{method:'POST',headers:{Origin:new URL(url).origin,'Content-Type':'image/png'},body:imageBytes})).status===401);
+ const images:any[]=[];
+ for(let i=0;i<2;i++){const response=await fetch(imageUploadURL,{method:'POST',headers:imageHeaders,body:imageBytes}),value=await response.json();check('compiled image upload',response.ok&&value.ok&&value.data.attachment.mimeType==='image/png'&&value.data.attachment.sizeBytes===imageBytes.length);images.push(value.data.attachment);}
+ check('image metadata contains opaque identity without local paths',images.every(image=>typeof image.attachmentId==='string'&&!('path'in image)&&image.width===1&&image.height===1));
+ const imageURL=new URL(`api/sessions/${id}/attachments/${images[0].attachmentId}`,url);
+ check('image reads require authentication',(await fetch(imageURL)).status===401);
+ const imageRead=await fetch(imageURL,{headers});check('authenticated preview preserves image bytes',imageRead.ok&&imageRead.headers.get('content-type')?.startsWith('image/png')===true&&Buffer.from(await imageRead.arrayBuffer()).equals(imageBytes));
+ await command({type:'prompt.send',text:'Compiled HTTP approval check',attachmentIds:images.map(image=>image.attachmentId)});
  let events:any[]=[],after=0;const replay=async()=>{let more=true;while(more){const d=await(await fetch(new URL(`api/sessions/${id}/events?after=${after}`,url),{headers})).json();events.push(...d.events);after=d.seq;more=d.hasMore;}};
  const deadline=Date.now()+30000;while(!events.some(e=>e.kind==='approval.requested')){if(Date.now()>deadline)throw new Error('approval timeout');await replay();await Bun.sleep(25)}
+ const nativeImages=JSON.parse(readFileSync(env.FAKE_CLAUDE_IMAGE_LOG,'utf8').trim().split('\n')[0]!).images;
+ check('compiled Claude receives both native image blocks',nativeImages.length===2&&nativeImages.every((image:any)=>image.mimeType==='image/png'&&image.digest===createHash('sha256').update(imageBytes).digest('hex')));
+ check('delivered image metadata excludes payload and filesystem path',events.some(e=>e.kind==='message.completed'&&e.data.role==='user'&&e.data.attachments?.length===2)&&!JSON.stringify(events).includes(imageBytes.toString('base64'))&&!JSON.stringify(events.filter(e=>e.kind==='prompt.queued'||e.kind==='message.completed')).includes('/attachments/'));
+ const queueURL=new URL(`api/sessions/${id}/prompts`,url);
+ check('queued messages require authenticated device',(await fetch(queueURL)).status===401);
+ const promptSnapshot=async()=>{const response=await fetch(queueURL,{headers}),value=await response.json();if(!response.ok||!value.ok)throw new Error(`Prompt queue query failed: ${value.code??response.status}`);return value.data;};
+ const queuedText='Compiled queued message must never reach native Claude',queuedId=crypto.randomUUID(),nativeBeforeQueue=nativeTurns();
+ const queued=await command({type:'prompt.send',text:queuedText,attachmentIds:[images[0].attachmentId]},queuedId);
+ check('busy Lead durably accepts queued command identity',queued.promptId===queuedId&&queued.state==='queued'&&queued.taskId===undefined&&queued.attempt===undefined);
+ const pendingInbox=await promptSnapshot();await replay();
+ check('compiled inbox distinguishes pending from active',pendingInbox.queued.some((prompt:any)=>prompt.promptId===queuedId&&prompt.text===queuedText)&&!!pendingInbox.active&&!pendingInbox.paused&&nativeTurns()===nativeBeforeQueue);
+ check('queued image metadata preserves accepted attachment',pendingInbox.queued.find((prompt:any)=>prompt.promptId===queuedId)?.attachments?.[0]?.attachmentId===images[0].attachmentId);
+ check('queued input absent from delivered user chat',!events.some(e=>e.kind==='message.completed'&&e.data.role==='user'&&e.data.text===queuedText)&&!events.some(e=>e.kind==='prompt.dispatched'&&e.data.promptId===queuedId));
+ await command({type:'prompt.cancel',promptId:queuedId});await replay();
+ check('compiled cancellation removes only pending message',!(await promptSnapshot()).queued.some((prompt:any)=>prompt.promptId===queuedId)&&events.some(e=>e.kind==='prompt.state'&&e.data.promptId===queuedId&&e.data.state==='cancelled'));
+ check('cancelling queued image keeps accepted history preview',(await fetch(imageURL,{headers})).ok);
  const approval=events.find(e=>e.kind==='approval.requested');await command({type:'approval.respond',approvalId:approval.data.approvalId,decision:'allow-once'});
  while(!events.some(e=>e.kind==='turn.completed')){if(Date.now()>deadline)throw new Error('completion timeout');await replay();await Bun.sleep(25)}
  check('real bridge approval and completed native turn',events.some(e=>e.kind==='approval.resolved')&&events.some(e=>e.kind==='message.completed'&&e.data.text==='echo: Compiled HTTP approval check'));
+ check('cancelled queued input never invokes native runner',nativeTurns()===nativeBeforeQueue&&!events.some(e=>e.kind==='prompt.dispatched'&&e.data.promptId===queuedId)&&!events.some(e=>e.kind==='message.completed'&&e.data.role==='user'&&e.data.text===queuedText));
  check('cursor replay empty after catchup',(await(await fetch(new URL(`api/sessions/${id}/events?after=${after}`,url),{headers})).json()).events.length===0);
+
+ // Exercise the global workspace through the compiled CLI and authenticated HTTP boundary.
+ const workspace=JSON.parse(await run(['web','--json'],bin));check('cwd-independent web entry',workspace.enabled&&new URL(workspace.url).origin===new URL(url).origin);
+ const query=async(path:string)=>{const response=await fetch(new URL(path,url),{headers});const value=await response.json();if(!response.ok||!value.ok)throw new Error(`Workspace query failed: ${path} ${value.code??response.status}`);return value.data};
+ const workspaceCommand=async(body:Record<string,unknown>,sessionId?:string,commandId=crypto.randomUUID())=>{const response=await fetch(new URL('api/commands',url),{method:'POST',headers,body:JSON.stringify({sessionId,command:{v:1,commandId,...body}})});const value=await response.json();if(!response.ok||!value.ok)throw new Error(`Workspace command failed: ${body.type} ${value.code??response.status}`);return value.data};
+ const settledReadiness=async(sessionId:string)=>{const deadline=Date.now()+30000;let value=await query(`api/sessions/${sessionId}/readiness`);while(value.status==='preparing'||value.status==='releasing'){if(Date.now()>deadline)throw new Error('Session readiness did not settle');await Bun.sleep(25);value=await query(`api/sessions/${sessionId}/readiness`);}return value;};
+ const releaseId=crypto.randomUUID();
+ await workspaceCommand({type:'session.release'},id,releaseId);
+ check('close releases the existing session',(await settledReadiness(id)).status==='unprepared');
+ await replay();
+ check('release retains delivered conversation and image previews',events.some(e=>e.kind==='message.completed'&&e.data.role==='user'&&e.data.attachments?.length===2)&&(await fetch(imageURL,{headers})).ok&&!events.some(e=>e.kind==='session.ended'));
+ await workspaceCommand({type:'session.prepare'},id);
+ check('prepare reconnects the same released session',(await settledReadiness(id)).status==='ready'&&!(await promptSnapshot()).paused);
+ await workspaceCommand({type:'session.release'},id,releaseId);
+ check('stale release retry cannot disconnect newer preparation',(await query(`api/sessions/${id}/readiness`)).status==='ready');
+ const reconnectText='Compiled same-session reconnect',previousApprovals=new Set(events.filter(e=>e.kind==='approval.requested').map(e=>e.data.approvalId));
+ await workspaceCommand({type:'prompt.send',text:reconnectText},id);
+ const reconnectDeadline=Date.now()+30000;let reconnectApproval:any;
+ while(!reconnectApproval){if(Date.now()>reconnectDeadline)throw new Error('Reconnected turn approval timeout');await replay();reconnectApproval=events.find(e=>e.kind==='approval.requested'&&!previousApprovals.has(e.data.approvalId));await Bun.sleep(25);}
+ await workspaceCommand({type:'approval.respond',approvalId:reconnectApproval.data.approvalId,decision:'allow-once'},id);
+ while(!events.some(e=>e.kind==='message.completed'&&e.data.text===`echo: ${reconnectText}`)){if(Date.now()>reconnectDeadline)throw new Error('Reconnected response timeout');await replay();await Bun.sleep(25);}
+ const reconnectCalls=readFileSync(env.FAKE_CLAUDE_LOG,'utf8').trim().split('\n').map(line=>JSON.parse(line)).filter(call=>call.argv.includes('-p'));
+ const firstCall=reconnectCalls[0].argv,lastCall=reconnectCalls.at(-1).argv;
+ check('reconnected native turn resumes original runner identity',lastCall.includes('--resume')&&lastCall[lastCall.indexOf('--resume')+1]===firstCall[firstCall.indexOf('--session-id')+1]);
+ check('reconnected response remains in original conversation',events.some(e=>e.kind==='message.completed'&&e.data.text==='echo: Compiled HTTP approval check')&&events.some(e=>e.kind==='message.completed'&&e.data.text===`echo: ${reconnectText}`));
+ check('workspace directories require device',(await fetch(new URL('api/directories',url))).status===401);
+ const workspaceRoot=join(home,'workspace');mkdirSync(workspaceRoot);
+ const directories=await query('api/directories');check('directory suggestions confined to home',directories.root===home&&directories.directories.some((entry:any)=>entry.path===workspaceRoot));
+ check('directory escape rejected',!(await fetch(new URL(`api/directories?path=${encodeURIComponent(base)}`,url),{headers})).ok);
+ const registered=await workspaceCommand({type:'project.register',path:workspaceRoot,name:'Compiled workspace'});
+ const alias=await workspaceCommand({type:'project.register',path:join(workspaceRoot,'.')});check('canonical project deduplication',registered.project.projectId===alias.project.projectId);
+ const projectId=registered.project.projectId;
+ const created=await workspaceCommand({type:'session.create',projectId,title:'Compiled workspace session'}),createdId=created.sessionId;
+ const second=await workspaceCommand({type:'session.create',projectId,title:'Independent session'});check('explicit sessions have distinct histories',createdId!==second.sessionId&&createdId!==id);
+ check('attachment IDs cannot cross session boundaries',!(await fetch(new URL(`api/sessions/${second.sessionId}/attachments/${images[0].attachmentId}`,url),{headers})).ok);
+ const page=await query(`api/sessions?projectId=${projectId}&limit=1`),next=await query(`api/sessions?projectId=${projectId}&limit=1&cursor=${encodeURIComponent(page.nextCursor)}`);
+ check('project session pagination',page.sessions.length===1&&!!page.nextCursor&&next.sessions.length===1&&page.sessions[0].sessionId!==next.sessions[0].sessionId);
+ const turnsBefore=nativeTurns();await workspaceCommand({type:'session.prepare'},createdId);
+ let preparation=await query(`api/sessions/${createdId}/readiness`);const prepareDeadline=Date.now()+30000;
+ while(preparation.status==='preparing'){if(Date.now()>prepareDeadline)throw new Error('Workspace preparation timeout');await Bun.sleep(25);preparation=await query(`api/sessions/${createdId}/readiness`);}
+ check('explicit preparation without a native prompt',preparation.status==='ready'&&nativeTurns()===turnsBefore);
+ const modelCatalog=await query(`api/models?projectId=${projectId}`),alternate=modelCatalog.runners.find((runner:any)=>runner.runnerId==='claude'&&runner.available)?.models.find((model:any)=>model.modelId!=='haiku');
+ check('compiled native model catalog',!!alternate);
+ const assigned=await workspaceCommand({type:'session.assignMember',memberId:'lead',assignment:{runnerId:'claude',modelId:alternate.modelId},expectedRevision:0},createdId);
+ check('session-scoped assignment creates fresh generation',assigned.generation===1&&assigned.revision===1&&assigned.continuity==='reseeded'&&(await query(`api/sessions/${createdId}/readiness`)).status==='unprepared'&&(await query(`api/sessions?projectId=${projectId}`)).sessions.find((session:any)=>session.sessionId===createdId)?.currentLeadTaskId==='lead-g1');
+ const terminalStopId=crypto.randomUUID();await workspaceCommand({type:'session.stop'},createdId,terminalStopId);
+ const continueId=crypto.randomUUID(),successor=await workspaceCommand({type:'session.continue'},createdId,continueId),retried=await workspaceCommand({type:'session.continue'},createdId,continueId);
+ check('ended session continuation is linked and idempotent',successor.sessionId!==createdId&&retried.sessionId===successor.sessionId&&(await query(`api/sessions?projectId=${projectId}`)).sessions.some((session:any)=>session.sessionId===successor.sessionId&&session.predecessorSessionId===createdId));
+ await workspaceCommand({type:'session.prepare'},second.sessionId);
+ let secondPreparation=await query(`api/sessions/${second.sessionId}/readiness`);const secondPrepareDeadline=Date.now()+30000;
+ while(secondPreparation.status==='preparing'){if(Date.now()>secondPrepareDeadline)throw new Error('Second preparation timeout');await Bun.sleep(25);secondPreparation=await query(`api/sessions/${second.sessionId}/readiness`);}
+ check('live session ready before restart',secondPreparation.status==='ready');
+ const renameId=crypto.randomUUID();await workspaceCommand({type:'session.rename',title:'Renamed compiled session'},second.sessionId,renameId);
+ check('session title changes without changing identity',(await query(`api/sessions?projectId=${projectId}`)).sessions.some((session:any)=>session.sessionId===second.sessionId&&session.title==='Renamed compiled session'));
+ await workspaceCommand({type:'session.release'},id);
+ check('second close settles before daemon restart',(await settledReadiness(id)).status==='unprepared');
+ await run(['daemon','restart','--json']);
+ check('registry and history survive daemon restart',(await query('api/projects')).projects.some((entry:any)=>entry.projectId===projectId)&&(await query(`api/sessions?projectId=${projectId}`)).sessions.length===3);
+ check('continuation retry survives restart',(await workspaceCommand({type:'session.continue'},createdId,continueId)).sessionId===successor.sessionId);
+ check('restart invalidates preparation',(await query(`api/sessions/${second.sessionId}/readiness`)).status==='unprepared');
+ check('renamed title survives restart',(await query(`api/sessions?projectId=${projectId}`)).sessions.some((session:any)=>session.sessionId===second.sessionId&&session.title==='Renamed compiled session'));
+ check('released session remains unprepared after restart',(await query(`api/sessions/${id}/readiness`)).status==='unprepared');
+ await workspaceCommand({type:'session.prepare'},createdId);
+ check('legacy ended session reopens in place',(await settledReadiness(createdId)).status==='ready'&&(await query(`api/sessions?projectId=${projectId}`)).sessions.length===3);
+ await workspaceCommand({type:'session.stop'},createdId,terminalStopId);
+ check('stale terminal stop cannot close reopened session',(await query(`api/sessions/${createdId}/readiness`)).status==='ready');
+ const removeId=crypto.randomUUID();await workspaceCommand({type:'session.remove'},second.sessionId,removeId);
+ const removalDeadline=Date.now()+30000;while((await query(`api/sessions?projectId=${projectId}`)).sessions.some((session:any)=>session.sessionId===second.sessionId)){if(Date.now()>removalDeadline)throw new Error('Removed session remained in catalog');await Bun.sleep(25);}
+ check('session removal preserves other sessions',(await query(`api/sessions?projectId=${projectId}`)).sessions.length===2&&(await query(`api/sessions/${createdId}/readiness`)).status==='ready');
+ check('removed session retains authenticated history',(await fetch(new URL(`api/sessions/${second.sessionId}/events`,url),{headers})).ok);
+ const removedMutation=await fetch(new URL('api/commands',url),{method:'POST',headers,body:JSON.stringify({sessionId:second.sessionId,command:{v:1,commandId:crypto.randomUUID(),type:'session.prepare'}})});
+ check('removed session rejects preparation',!(await removedMutation.json()).ok);
+ await run(['daemon','restart','--json']);
+ await workspaceCommand({type:'session.remove'},second.sessionId,removeId);
+ check('removed session stays hidden across restart and retry',!(await query(`api/sessions?projectId=${projectId}`)).sessions.some((session:any)=>session.sessionId===second.sessionId));
+ const replayedImage=await fetch(imageURL,{headers});check('accepted image survives daemon restart',replayedImage.ok&&Buffer.from(await replayedImage.arrayBuffer()).equals(imageBytes));
+ await run(['daemon','stop','--json']);
  console.log(JSON.stringify({ok:true,checks}));
- daemon.kill('SIGTERM');await daemon.exited;await daemonOutput;
-}finally{for(const p of owned)if(p.exitCode===null)p.kill('SIGTERM');await Promise.all([...owned].map(p=>p.exited));rmSync(base,{recursive:true,force:true})}
+ await daemon.exited;await daemonOutput;
+}finally{await run(['daemon','stop','--json']).catch(()=>{});for(const p of owned)if(p.exitCode===null)p.kill('SIGTERM');await Promise.all([...owned].map(p=>p.exited));rmSync(base,{recursive:true,force:true})}

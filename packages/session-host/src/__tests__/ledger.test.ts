@@ -25,6 +25,39 @@ function replay(drafts: EventDraft[]): Ledger {
 }
 
 describe("Ledger command receipts and native confirmation (S1b)", () => {
+  test("reply cursor tracks only public finalized actual Lead replies across generations", () => {
+    const ledger = replay([
+      created("lead", { memberId: "lead" }), created("child"), created("lead-g1", { memberId: "lead" }),
+      { kind: "message.completed", source: { taskId: "lead", memberId: "lead" }, data: { role: "assistant", text: "first reply" } },
+      { kind: "message.completed", source: { taskId: "child", memberId: "lead" }, data: { role: "assistant", text: "child reply" } },
+      { kind: "message.completed", source: { taskId: "unknown", memberId: "lead" }, data: { role: "assistant", text: "helper reply" } },
+      { kind: "message.delta", source: { taskId: "lead" }, data: { text: "streaming" } },
+      { kind: "message.completed", source: { taskId: "lead" }, data: { role: "system", text: "system" } },
+      { kind: "message.completed", source: { taskId: "lead" }, data: { role: "assistant", text: "internal", internal: true } },
+      { kind: "message.completed", source: { taskId: "lead" }, data: { role: "assistant", text: "   " } },
+      created("helper", { memberId: "lead" }),
+      { kind: "message.completed", source: { taskId: "helper", memberId: "lead" }, data: { role: "assistant", text: "helper completion" } },
+    ]);
+    expect(ledger.lastLeadReplySeq).toBe(4);
+    ledger.apply({ v: 1, sessionId: "s-1", seq: 13, ts: "2026-10-15T00:00:00Z", kind: "message.completed", source: { taskId: "lead-g1", memberId: "lead" }, data: { role: "assistant", text: "current generation" } });
+    expect(ledger.lastLeadReplySeq).toBe(13);
+    expect(ledger.lastEventTs).toBe("2026-10-15T00:00:00Z");
+  });
+
+  test("old snapshot versions rebuild the reply cursor from the authoritative log", () => {
+    const dir = tempDir(), log = openLog(dir), file = join(dir, "snapshot.json");
+    log.appendMany([created("lead", { memberId: "lead" }), { kind: "message.completed", source: { taskId: "lead" }, data: { role: "assistant", text: "persisted reply" } }]);
+    const initial = loadLedger(log, file).ledger;
+    saveLedgerSnapshot(initial, log, file);
+    const old = JSON.parse(readFileSync(file, "utf8")); old.v = 1; delete old.state.lastLeadReplySeq; delete old.state.lastEventTs;
+    writeFileSync(file, JSON.stringify(old));
+    const rebuilt = loadLedger(log, file);
+    expect(rebuilt.source).toBe("rebuilt"); expect(rebuilt.ledger.lastLeadReplySeq).toBe(2);
+    saveLedgerSnapshot(rebuilt.ledger, log, file);
+    const restored = loadLedger(log, file);
+    expect(restored.source).toBe("snapshot"); expect(restored.replayed).toBe(0); expect(restored.ledger.lastLeadReplySeq).toBe(2);
+    log.close();
+  });
   const accepted = (commandId: string, type = "prompt.send", outcome: Record<string, unknown> = { ok: true, data: { taskId: "lead" } }): EventDraft =>
     ({ kind: "command.accepted", data: { commandId, type, outcome } });
 
@@ -218,7 +251,7 @@ describe("snapshot checkpointing (D-15)", () => {
     ["garbage", (s: string) => "not json{{", "corrupt"],
     ["wrong shape", (s: string) => JSON.stringify({ v: 1 }), "corrupt"],
     ["tampered digest", (s: string) => s.replace(/"completed"/, '"failed"'), "corrupt"],
-    ["unknown version", (s: string) => s.replace('"v":1', '"v":99'), "corrupt"],
+    ["unknown version", (s: string) => s.replace('"v":4', '"v":99'), "corrupt"],
   ])("snapshot %s triggers a rebuild from the log", (_name, mutate, reason) => {
     const { log, snap } = setup();
     saveLedgerSnapshot(loadLedger(log, snap).ledger, log, snap);

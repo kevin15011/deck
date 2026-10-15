@@ -8,14 +8,16 @@ export const SESSION_EVENT_VERSION = 1 as const;
 export const RAW_PAYLOAD_LIMIT_BYTES = 64 * 1024;
 
 export const SESSION_EVENT_KINDS = [
-  "session.created", "session.bound", "session.state", "session.ended", "session.recovered",
+  "session.created", "session.bound", "session.state", "session.ended", "session.recovered", "session.assignment", "session.successor", "session.released", "session.reopened", "session.renamed", "session.removed",
   "task.created", "task.state", "task.continued", "task.result",
   "turn.started", "turn.completed",
   "message.delta", "message.completed", "reasoning.delta", "tool.started", "tool.completed",
+  "hook.started", "hook.completed",
   "approval.requested", "approval.resolved", "memory.recalled", "memory.proposed", "memory.written",
   "usage", "rate-limit", "diagnostic", "runner.unmapped", "client.attached", "client.detached",
   /** Durable idempotency receipt: a command was accepted and its outcome is recorded (XR-1.5, survives daemon restart). */
   "command.accepted",
+  "prompt.queued", "prompt.dispatched", "prompt.state", "prompt.queue",
 ] as const;
 export type SessionEventKind = (typeof SESSION_EVENT_KINDS)[number];
 
@@ -36,9 +38,23 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object
 const isStr = (v: unknown): v is string => typeof v === "string" && v.length > 0;
 const KINDS = new Set<string>(SESSION_EVENT_KINDS);
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+export const HOOK_STATUSES = ["running", "completed", "failed", "blocked", "stopped", "unknown"] as const;
+const hookData = (d: Record<string, unknown>): string | null => {
+  for (const [key, limit] of [["hookId", 256], ["hookEvent", 128]] as const) if (!isStr(d[key]) || (d[key] as string).length > limit) return `data.${key} invalid`;
+  if (d.hookName !== undefined && (typeof d.hookName !== "string" || d.hookName.length > 500)) return "data.hookName invalid";
+  if (!(HOOK_STATUSES as readonly unknown[]).includes(d.status)) return "data.status invalid";
+  if (!["claude-stream-json", "codex-app-server"].includes(d.provenance as string)) return "data.provenance invalid";
+  if (d.durationMs !== undefined && (typeof d.durationMs !== "number" || !Number.isFinite(d.durationMs) || d.durationMs < 0)) return "data.durationMs invalid";
+  if (d.executionMode !== undefined && !["sync", "async"].includes(d.executionMode as string)) return "data.executionMode invalid";
+  if (d.handlerType !== undefined && !["command", "mcpTool", "prompt", "agent"].includes(d.handlerType as string)) return "data.handlerType invalid";
+  if ((d.provider !== undefined || d.integration !== undefined) && (d.provider !== "supermemory" || d.integration !== "runner-plugin")) return "data.provider/integration invalid";
+  return null;
+};
 
 /** Kind-specific data checks; kinds not listed accept any object. */
 const DATA_RULES: Partial<Record<SessionEventKind, (d: Record<string, unknown>) => string | null>> = {
+  "hook.started": hookData,
+  "hook.completed": hookData,
   "turn.completed": (d) => (TURN_COMPLETED_STATUSES as readonly string[]).includes(d.status as string) ? null : "data.status invalid",
   "approval.requested": (d) => isStr(d.approvalId) ? null : "data.approvalId required",
   "approval.resolved": (d) => isStr(d.approvalId) ? null : "data.approvalId required",

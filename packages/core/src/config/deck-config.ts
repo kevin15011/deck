@@ -222,6 +222,7 @@ export type CrossRunnerConfig = {
   members: CrossTeamAssignments;
   approvals: Record<string, CrossRunnerApprovalMode>;
   maxConcurrentTasks: number;
+  executionBudget?: { lead: number; delegated: number };
   web: { port: number; trustedProxy: string | null; allowedOrigins: string[]; allowFunnel: boolean };
   claudeTosAcknowledgedAt: string | null;
 };
@@ -953,10 +954,10 @@ export function diagnoseDeckConfigDeprecations(config: unknown): readonly DeckCo
   return diagnostics;
 }
 
-const CROSS_RUNNER_FIELDS = new Set(["enabled", "defaultRunner", "members", "approvals", "maxConcurrentTasks", "web", "claudeTosAcknowledgedAt"]);
+const CROSS_RUNNER_FIELDS = new Set(["enabled", "defaultRunner", "members", "approvals", "maxConcurrentTasks", "executionBudget", "web", "claudeTosAcknowledgedAt"]);
 const CROSS_MEMBER_FIELDS = new Set(["runnerId", "modelId", "thinking"]);
 const CROSS_WEB_FIELDS = new Set(["port", "trustedProxy", "allowedOrigins", "allowFunnel"]);
-const CROSS_APPROVAL_DEFAULTS: Record<string, CrossRunnerApprovalMode> = { claude: "relay", opencode: "relay", codex: "runner-default" };
+const CROSS_APPROVAL_DEFAULTS: Record<string, CrossRunnerApprovalMode> = { claude: "runner-default", opencode: "runner-default", codex: "runner-default" };
 
 function crossInvalid(message: string, fieldPath: string, configPath?: string): DeckConfigError {
   return new DeckConfigError("CROSS_RUNNER_CONFIG_INVALID", message, { configPath, fieldPath });
@@ -1007,6 +1008,17 @@ function normalizeCrossRunnerConfig(value: unknown, configPath?: string): CrossR
   const max = value.maxConcurrentTasks ?? 4;
   if (typeof max !== "number" || !Number.isInteger(max) || max < 1 || max > 64) throw crossInvalid("crossRunner.maxConcurrentTasks must be an integer between 1 and 64.", "crossRunner.maxConcurrentTasks", configPath);
 
+  const executionBudget = { lead: 2, delegated: 4 };
+  if (value.executionBudget !== undefined) {
+    assertPlainObject(value.executionBudget, "crossRunner.executionBudget", configPath);
+    assertKnownFields(value.executionBudget, new Set(["lead", "delegated"]), "crossRunner.executionBudget", configPath);
+    for (const key of ["lead", "delegated"] as const) {
+      const n = value.executionBudget[key] === undefined ? executionBudget[key] : value.executionBudget[key];
+      if (!Number.isInteger(n) || (n as number) < 1 || (n as number) > 64) throw crossInvalid(`crossRunner.executionBudget.${key} must be an integer between 1 and 64.`, `crossRunner.executionBudget.${key}`, configPath);
+      executionBudget[key] = n as number;
+    }
+  }
+
   const web = { port: 7421, trustedProxy: null as string | null, allowedOrigins: [] as string[], allowFunnel: false };
   if (value.web !== undefined) {
     assertPlainObject(value.web, "crossRunner.web", configPath);
@@ -1043,6 +1055,7 @@ function normalizeCrossRunnerConfig(value: unknown, configPath?: string): CrossR
     members,
     approvals,
     maxConcurrentTasks: max,
+    executionBudget,
     web,
     claudeTosAcknowledgedAt: ack,
   };

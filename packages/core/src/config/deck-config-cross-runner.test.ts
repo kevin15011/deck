@@ -38,11 +38,26 @@ describe("crossRunner config (XR-2.1, XR-2.2, D-5)", () => {
     expect(c.crossRunner).toEqual({
       enabled: true,
       members: { lead: { runnerId: "claude", modelId: "opus", thinking: "high" } },
-      approvals: { claude: "relay", opencode: "relay", codex: "runner-default" },
+      approvals: { claude: "runner-default", opencode: "runner-default", codex: "runner-default" },
       maxConcurrentTasks: 4,
+      executionBudget: { lead: 2, delegated: 4 },
       web: { port: 7421, trustedProxy: null, allowedOrigins: [], allowFunnel: false },
       claudeTosAcknowledgedAt: null,
     });
+  });
+
+  test("preserves explicit relay opt-in for each runner", () => {
+    const approvals = { claude: "relay", codex: "relay", opencode: "relay" } as const;
+    const c = validateDeckConfig({ version: 1, crossRunner: { approvals } });
+    expect(c.crossRunner?.approvals).toEqual(approvals);
+    expect(validateDeckConfig(c).crossRunner?.approvals).toEqual(approvals);
+  });
+  test("normalizes independent native turn budgets with positive bounded capacity", () => {
+    expect(validateDeckConfig({ version: 1, crossRunner: { executionBudget: { lead: 3 } } }).crossRunner?.executionBudget).toEqual({ lead: 3, delegated: 4 });
+    for (const invalid of [0, -1, 1.5, 65, "2", null]) {
+      expect(code(() => validateDeckConfig({ version: 1, crossRunner: { executionBudget: { delegated: invalid } } }))).toBe("CROSS_RUNNER_CONFIG_INVALID");
+    }
+    expect(code(() => validateDeckConfig({ version: 1, crossRunner: { executionBudget: { unknown: 2 } } }))).toBe("DECK_CONFIG_UNKNOWN_FIELD");
   });
 
   test("empty section normalizes to disabled with defaults", () => {
@@ -99,6 +114,6 @@ describe("crossRunner config (XR-2.1, XR-2.2, D-5)", () => {
     expect(c.crossRunner?.claudeTosAcknowledgedAt).toBe("2026-10-12T00:00:00.000Z");
     expect(c.crossRunner?.web.trustedProxy).toBe("127.0.0.1");
     expect(c.crossRunner?.approvals.codex).toBe("relay");
-    expect(c.crossRunner?.approvals.claude).toBe("relay");
+    expect(c.crossRunner?.approvals.claude).toBe("runner-default");
   });
 });

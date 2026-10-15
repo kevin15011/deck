@@ -17,9 +17,9 @@ describe("cross-session shared services", () => {
     config.adaptiveMemory = { enabled: true, activeProvider: "supermemory" };
     const calls: unknown[] = [];
     let creations = 0;
-    const port = createSessionMemoryPort({ sessionId: "s1", projectRoot: "/project", leadRunnerId: "claude" }, config, async (input) => {
+    const port = createSessionMemoryPort({ sessionId: "s1", projectRoot: "/project", leadRunnerId: "pi" }, config, async (input) => {
       creations++;
-      expect(input).toMatchObject({ sessionId: "s1", projectRoot: "/project", runnerId: "claude", role: "lead", deferInitialRecallToLoopback: true });
+      expect(input).toMatchObject({ sessionId: "s1", projectRoot: "/project", runnerId: "pi", role: "lead", deferInitialRecallToLoopback: true });
       return { enabled: true, explicitRecall: async (q: string) => { calls.push(["recall", q]); return { ok: true, advisoryText: "advisory", diagnostics: [] }; },
         explicitRemember: async (c: string) => { calls.push(["remember", c]); return { ok: true, diagnostics: [], metrics: [] }; },
         recordLifecycle: (...args: unknown[]) => calls.push(args),
@@ -45,7 +45,7 @@ describe("cross-session shared services", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-sm-session-")); roots.push(projectRoot);
     execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
     execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/session-fixture.git"], { cwd: projectRoot, stdio: "ignore" });
-    const port = createSessionMemoryPort({ sessionId: "deck-session", projectRoot, leadRunnerId: "codex" }, config, (input) => createSupermemoryRuntimeHost({
+    const port = createSessionMemoryPort({ sessionId: "deck-session", projectRoot, leadRunnerId: "pi" }, config, (input) => createSupermemoryRuntimeHost({
       projectRoot: input.projectRoot, sessionId: input.sessionId, runnerId: input.runnerId,
       deckConfig: input.deckConfig, role: input.role, deferInitialRecallToLoopback: input.deferInitialRecallToLoopback,
       stateHome: projectRoot, apiKey: "fixture-only-not-networked",
@@ -90,4 +90,10 @@ describe("cross-session shared services", () => {
     expect(resolver.webSearch).toEqual({ enabled: false });
     expect(resolver.envOverlay).toBeUndefined();
   });
+});
+
+
+test.each(["claude", "codex", "opencode"])("native %s never constructs daemon memory even when configured", runnerId => {
+  const config = getDefaultDeckConfig(); config.adaptiveMemory = { enabled: true, activeProvider: "supermemory" };
+  expect(createSessionMemoryPort({ sessionId: "s", projectRoot: "/p", leadRunnerId: runnerId }, config, async () => { throw new Error("daemon memory forbidden"); })).toBeUndefined();
 });

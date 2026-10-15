@@ -593,3 +593,10 @@ test("session pair and devices expose the documented local aliases", () => {
   expect(parseArgs(["session", "devices", "--json"])).toEqual({ command: "session", sub: { action: "web", operation: "devices", json: true } });
   expect(parseArgs(["session", "pair", "--expose"]).command).toBe("error");
 });
+
+ test("parses standalone web flags without a project", () => {
+  expect(parseArgs(["web"])).toEqual({command:"web", flags:{json:false,noOpen:false}});
+  expect(parseArgs(["web","--json","--no-open"])).toEqual({command:"web",flags:{json:true,noOpen:true}});
+  expect(parseArgs(["web","--help"])).toEqual({command:"web-help"});
+  for(const args of [["web","x"],["web","--json","--json"]]) expect(parseArgs(args).command).toBe("error");
+ });

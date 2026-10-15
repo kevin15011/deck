@@ -6,7 +6,7 @@ import type { RunnerAdapter } from "@deck/core";
 import type { DriverHostIo, DriverTaskInput, RunnerSessionDriver } from "@deck/core/session/driver";
 import { ControlClient, resolveStatePaths, startDaemon, type RunningDaemon, type StatePaths } from "@deck/session-host";
 import { createDeckConfigStore } from "./deck-config-store";
-import { formatSessionList, runCrossLaunch, runSessionCommand, type SessionCommandDeps } from "./session-commands";
+import { formatSessionList, runWebWorkspace, runCrossLaunch, runSessionCommand, type SessionCommandDeps } from "./session-commands";
 import { createCrossSessionService } from "./session-service";
 
 const ANCHOR_ENTRY = resolve(import.meta.dir, "../../../packages/session-host/src/__tests__/fixtures/anchor-entry.ts");
@@ -91,7 +91,7 @@ describe("deck cross developer (XR-9.1)", () => {
     t.feed("/detach");
     expect(await run).toBe(0);
     expect(t.driver.starts).toHaveLength(1);
-    expect(t.driver.starts[0]).toMatchObject({ cwd: t.project, assignment: { runnerId: "claude", modelId: "opus" }, approvals: "relay" });
+    expect(t.driver.starts[0]).toMatchObject({ cwd: t.project, assignment: { runnerId: "claude", modelId: "opus" }, approvals: "runner-default" });
 
     // a second launch for the same project re-attaches to the SAME session and continues it
     const again = runCrossLaunch(t.deps(), {});
@@ -210,8 +210,8 @@ describe("deck session subcommands (XR-9.2, XR-11.2)", () => {
 describe("formatSessionList", () => {
   test("aligns columns and flags running sessions", () => {
     const text = formatSessionList([
-      { sessionId: "s-1", projectRoot: "/p", state: "running", createdAt: "", updatedAt: "", lastSeq: 1, running: true, tasks: 1, activeTasks: 1, lead: { runnerId: "claude", modelId: "opus" } },
-      { sessionId: "s-22", projectRoot: "/q", changeId: "c", state: "ended", createdAt: "", updatedAt: "", lastSeq: 1, running: false, tasks: 0, activeTasks: 0 },
+      { projectId:"p",title:"Session",generation:0,assignmentRevision:0,members:{},currentLeadTaskId:"lead",leadActivity:{state:'running',pendingApprovals:0,lastReplySeq:0},sharedWorkspace:true,sharedActiveSessions:1,sessionId: "s-1", projectRoot: "/p", state: "running", createdAt: "", updatedAt: "", lastSeq: 1, running: true, tasks: 1, activeTasks: 1, lead: { runnerId: "claude", modelId: "opus" } },
+      { projectId:"q",title:"Closed",generation:0,assignmentRevision:0,members:{},currentLeadTaskId:"lead",leadActivity:{state:'idle',pendingApprovals:0,lastReplySeq:0},sharedWorkspace:true,sharedActiveSessions:0,sessionId: "s-22", projectRoot: "/q", changeId: "c", state: "ended", createdAt: "", updatedAt: "", lastSeq: 1, running: false, tasks: 0, activeTasks: 0 },
     ]);
     expect(text.split("\n")[0]).toMatch(/^ID\s+STATE\s+CHANGE\s+LEAD\s+PROJECT$/);
     expect(text).toContain("running*");
@@ -235,4 +235,23 @@ describe("deck session web controls", () => {
   const run=runCrossLaunch(t.deps({interactive:true,readLine:async()=>{answered=true;return "no";},openBrowser:async url=>{opened.push(url);}}),{});
   await until(()=>t.text().includes("Attached to"),"attach");expect(answered).toBe(true);expect(t.text()).toContain("Browser: http://127.0.0.1:");expect(t.text()).not.toContain("#pair=");expect(t.text()).not.toContain("Pairing code:");expect(opened).toEqual([]);t.feed("/detach");expect(await run).toBe(0);
  });
+});
+
+describe("deck web workspace", () => {
+  test("opens from any directory without registering a project or creating a session", async () => {
+    const t = await boot({configured:false,web:true}); const opened:string[]=[];
+    const deps = t.deps({projectRoot:()=>{throw new Error("must not resolve cwd");},openBrowser:async url=>{opened.push(url);}});
+    expect(await runWebWorkspace(deps,{json:false,noOpen:false})).toBe(0);
+    expect(opened).toHaveLength(1); expect(t.text()).toContain("Browser: http://127.0.0.1:");
+    await runSessionCommand(t.deps(),{action:"list",json:true}); expect(t.text()).toContain('"sessions": []');
+    expect(t.store.read().crossRunner?.enabled ?? false).toBe(false);
+  });
+  test("json and no-open skip browser effects; opener failure retains usable URL", async () => {
+    const t = await boot({web:true}); let opens=0;
+    const deps=t.deps({openBrowser:async()=>{opens++;throw new Error("private failure");}});
+    expect(await runWebWorkspace(deps,{json:true,noOpen:false})).toBe(0);
+    expect(await runWebWorkspace(deps,{json:false,noOpen:true})).toBe(0); expect(opens).toBe(0);
+    expect(await runWebWorkspace(deps,{json:false,noOpen:false})).toBe(0); expect(opens).toBe(1);
+    expect(t.err.join("")).toContain("Open the URL above manually"); expect(t.err.join("")).not.toContain("private failure");
+  });
 });

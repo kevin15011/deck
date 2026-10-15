@@ -54,7 +54,7 @@ export {
 export { runSessionDaemon, type RunSessionDaemonOptions } from "./daemon-main";
 export { createDriverSpawn, toSupervisedChild } from "./driver-spawn";
 export {
-  LEAD_TASK_ID, SessionManager, type ChildMcpResolver, type ChildMcpContext, type DriverLookup, type SessionManagerOptions, type SessionSummary,
+  LEAD_TASK_ID, SessionManager, type ChildMcpResolver, type ChildMcpContext, type DriverLookup, type SessionManagerOptions, type SessionSummary, type SessionModelCatalog, type SessionPreparation,
 } from "./session-manager";
 
 export { WebService, type WebConfig, type WebAssets, type WebAsset, type WebServiceOptions } from "./web-service";

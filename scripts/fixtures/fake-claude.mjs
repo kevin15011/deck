@@ -1,9 +1,11 @@
 // Stand-in for the `claude` CLI used by the session smoke harness and tests. It speaks just enough
 // stream-json (shapes recorded from Claude Code 2.1.296) to drive a Deck session end to end:
 //   claude --version                      -> "2.1.296 (Claude Code)"
+//   SDK initialize control request       -> provider-free fixture model catalog
 //   claude -p ... [--session-id|--resume] -> init / assistant / result for the first stdin line
 // Every invocation appends its argv to $FAKE_CLAUDE_LOG (one JSON line) for assertions.
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
@@ -25,8 +27,29 @@ process.stdin.on("data", async (chunk) => {
   const at = buffer.indexOf("\n");
   if (at < 0 || answered) return;
   answered = true;
+  let request;
+  try { request = JSON.parse(buffer.slice(0, at)); } catch { /* malformed user input below */ }
+  if (request?.type === "control_request" && request.request?.subtype === "initialize") {
+    process.stdout.write(JSON.stringify({ type: "control_response", response: {
+      subtype: "success", request_id: request.request_id, response: { models: [
+        { value: "haiku", displayName: "Fixture Haiku", description: "Offline fixture model" },
+        { value: "sonnet", displayName: "Fixture Sonnet", description: "Offline fixture model", supportsEffort: true, supportedEffortLevels: ["high"] },
+      ] },
+    } }) + "\n");
+    return;
+  }
   let text = "";
-  try { text = JSON.parse(buffer.slice(0, at)).message.content; } catch { /* keep empty */ }
+  try {
+    const content = request.message.content;
+    text = typeof content === "string" ? content : content.filter(part => part.type === "text").map(part => part.text).join("\n");
+    if (process.env.FAKE_CLAUDE_IMAGE_LOG) {
+      const images = Array.isArray(content) ? content.filter(part => part.type === "image").map(part => {
+        const bytes = Buffer.from(part.source.data, "base64");
+        return { mimeType: part.source.media_type, sizeBytes: bytes.length, digest: createHash("sha256").update(bytes).digest("hex") };
+      }) : [];
+      appendFileSync(process.env.FAKE_CLAUDE_IMAGE_LOG, JSON.stringify({ images }) + "\n");
+    }
+  } catch { /* keep empty */ }
   const base = { session_id: sessionId };
   const out = (m) => process.stdout.write(`${JSON.stringify({ ...m, ...base })}\n`);
   out({ type: "system", subtype: "init", cwd: process.cwd(), tools: [], mcp_servers: servers.map((name) => ({ name, status: "connected", source: "dynamic" })), model: "fake-haiku", permissionMode: "default", apiKeySource: "none", claude_code_version: "2.1.296" });

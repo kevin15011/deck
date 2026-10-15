@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerAdapter } from "@deck/core";
-import type { DriverTaskInput, RunnerSessionDriver } from "@deck/core/session/driver";
+import type { DriverHostIo, DriverTaskInput, RunnerSessionDriver } from "@deck/core/session/driver";
 import { ApprovalBroker, CredentialRegistry, ensureStateLayout, resolveStatePaths, Supervisor, type DaemonServices } from "@deck/session-host";
 import { createDeckConfigStore } from "./deck-config-store";
 import { createDefaultAdapterRegistry } from "./runner-adapters";
 import { createCrossSessionDrivers, createCrossSessionService } from "./session-service";
 import { acknowledgeClaudeTos } from "./session-tos";
 import type { SupermemoryRuntimeHost } from "./supermemory-runtime-host";
+import { execFileSync } from "node:child_process";
 
 const roots: string[] = [];
 afterEach(() => { for (const d of roots.splice(0)) rmSync(d, { recursive: true, force: true }); });
@@ -108,9 +109,64 @@ describe("createCrossSessionService (production composition)", () => {
     expect(drivers).toContainEqual(expect.objectContaining({ runnerId: "claude", probe: expect.objectContaining({ status: "ready" }) }));
   });
 
-  test("production service gives child tools one lazy host memory writer and removes native memory MCPs", async () => {
+  test.each(["claude", "codex", "opencode"])("project AGENTS instructions are explicitly supplied only to Claude, including resumed turns (%s)", async (runnerId) => {
+    const e = env();
+    e.store.write({ crossRunner: { enabled: true, members: { lead: { runnerId, modelId: "fixture" } } } });
+    writeFileSync(join(e.home, "AGENTS.md"), "Ancestor instructions must not be supplied");
+    const file = join(e.project, "AGENTS.md");
+    const first = "# Project rules\n\nUse project-fixture-style.\n";
+    writeFileSync(file, first);
+    const inputs: DriverTaskInput[] = [];
+    const selected = { runnerId, getSessionDriver: () => ({ ...driver(runnerId), startTask: async (input: DriverTaskInput, io: DriverHostIo) => {
+      inputs.push(input);
+      io.emit({ kind: "turn.started", data: {} });
+      return { nativeSessionId: Promise.resolve("fixture-native-session"), done: Promise.resolve({ status: "completed" as const }), send: async () => ({ status: "completed" as const }), interrupt: async () => {}, close: async () => {} };
+    } }), readSessionMcpServers: async () => ({}) } as unknown as RunnerAdapter;
+    const service = createCrossSessionService(e.services, { configStore: e.store, adapters: () => [selected] });
+    try {
+      const sessionId = (await create(service, e.project) as { data: { sessionId: string } }).data.sessionId;
+      for (let turn = 0; turn < 2; turn++) {
+        if (turn) writeFileSync(file, "# Project rules\n\nUse updated-fixture-style.\n");
+        await service.execute({ sessionId, clientId: "c", command: { v: 1, commandId: crypto.randomUUID(), type: "prompt.send", text: "go" } });
+        for (let i = 0; i < 100 && service.hasRunningWork(); i++) await new Promise((r) => setTimeout(r, 1));
+      }
+      expect(inputs).toHaveLength(2);
+      expect(inputs[1]?.resume).toEqual({ nativeSessionId: "fixture-native-session" });
+      if (runnerId === "claude") {
+        expect(inputs[0]?.rolePrompt).toContain(first);
+        expect(inputs[0]?.rolePrompt.split("Use project-fixture-style.")).toHaveLength(2);
+        expect(inputs[1]?.rolePrompt).toContain("Use updated-fixture-style.");
+        expect(inputs[1]?.rolePrompt).not.toContain("Use project-fixture-style.");
+      } else for (const input of inputs) expect(input.rolePrompt).not.toContain("fixture-style");
+      for (const input of inputs) expect(input.rolePrompt).not.toContain("Ancestor instructions");
+      expect(JSON.stringify([...service.openLog(sessionId)!.readAfter(0)])).not.toContain("fixture-style");
+    } finally { await service.close(); }
+  });
+
+  test("unsafe project AGENTS fails visibly before starting Claude", async () => {
+    const e = env();
+    e.store.write(crossConfig);
+    writeFileSync(join(e.home, "outside.md"), "Outside private content must not be read");
+    symlinkSync(join(e.home, "outside.md"), join(e.project, "AGENTS.md"));
+    let starts = 0;
+    const selected = { runnerId: "claude", getSessionDriver: () => ({ ...driver("claude"), startTask: async () => { starts++; throw new Error("must not start"); } }), readSessionMcpServers: async () => ({}) } as unknown as RunnerAdapter;
+    const service = createCrossSessionService(e.services, { configStore: e.store, adapters: () => [selected] });
+    try {
+      const sessionId = (await create(service, e.project) as { data: { sessionId: string } }).data.sessionId;
+      await service.execute({ sessionId, clientId: "c", command: { v: 1, commandId: crypto.randomUUID(), type: "prompt.send", text: "go" } });
+      for (let i = 0; i < 100 && service.hasRunningWork(); i++) await new Promise((r) => setTimeout(r, 1));
+      expect(starts).toBe(0);
+      const events = [...service.openLog(sessionId)!.readAfter(0)];
+      expect(events.find((event) => event.kind === "turn.completed")?.data).toMatchObject({ status: "failed", error: expect.stringContaining("project-instructions-unavailable") });
+      expect(JSON.stringify(events)).not.toContain("Outside private content");
+    } finally { await service.close(); }
+  });
+
+  test("production service prepares native memory and excludes daemon tools and writes", async () => {
     const e = env();
     e.store.write({ ...crossConfig, adaptiveMemory: { enabled: true, activeProvider: "supermemory" } });
+    execFileSync("git", ["init"], { cwd: e.project, stdio: "ignore" });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/session-fixture.git"], { cwd: e.project, stdio: "ignore" });
     let input: DriverTaskInput | undefined;
     let finish!: (outcome: { status: "completed" }) => void;
     let creations = 0, writes = 0;
@@ -119,7 +175,7 @@ describe("createCrossSessionService (production composition)", () => {
       const done = new Promise<{ status: "completed" }>((resolve) => { finish = resolve; });
       return { nativeSessionId: Promise.resolve("native-fixture"), done, send: async () => ({ status: "completed" }), interrupt: async () => finish({ status: "completed" }), close: async () => finish({ status: "completed" }) };
     } }), readSessionMcpServers: async () => ({ supermemory: { command: "forbidden", args: [], env: {} } }) } as unknown as RunnerAdapter;
-    const service = createCrossSessionService(e.services, { configStore: e.store, adapters: () => [selected], memoryRuntime: async (context) => {
+    const service = createCrossSessionService(e.services, { configStore: e.store, adapters: () => [selected], nativeMemoryEffects: { credential: () => ({ token: "fixture-private-token", canonicalRepoTag: "sm_project_v1_acme_session_fixture" }), plugin: () => ({ plugin: { root: "/verified/plugin" }, env: { SUPERMEMORY_CC_API_KEY: "fixture-private-token", SUPERMEMORY_REPO_TAG: "sm_project_v1_acme_session_fixture" } }) }, memoryRuntime: async (context) => {
       creations++; expect(context.projectRoot).toBe(e.project);
       return { enabled: true, explicitRecall: async () => ({ ok: true, advisoryText: "Project advisory", diagnostics: [] }), explicitRemember: async () => { writes++; return { ok: true, diagnostics: [], metrics: [] }; }, recordLifecycle() {} } as unknown as SupermemoryRuntimeHost;
     } });
@@ -130,10 +186,15 @@ describe("createCrossSessionService (production composition)", () => {
       expect(input?.mcp.servers).toEqual(["deck"]);
       expect(creations).toBe(0);
       const grant = { sessionId, taskId: input!.taskId, memberId: "lead", allowedTools: input!.mcp.sessionTools };
-      expect(await service.callTaskTool!(grant, "deck_memory_recall", { query: "project" }, {})).toMatchObject({ ok: true, data: { advisoryText: "Project advisory" } });
-      expect(await service.callTaskTool!(grant, "deck_memory_propose", { content: "Project decision" }, {})).toMatchObject({ ok: true });
-      expect(await service.callTaskTool!(grant, "deck_memory_propose", { content: "Project decision" }, {})).toMatchObject({ ok: true, data: { duplicate: true } });
-      expect(creations).toBe(1); expect(writes).toBe(1);
+      expect(await service.callTaskTool!(grant, "deck_memory_recall", { query: "project" }, {})).toMatchObject({ ok: false, code: "tool-not-allowed" });
+      expect(await service.callTaskTool!(grant, "deck_memory_propose", { content: "Project decision" }, {})).toMatchObject({ ok: false, code: "tool-not-allowed" });
+      expect(input?.nativeMemory).toMatchObject({ status: "ready", provider: "supermemory", projectScope: "sm_project_v1_acme_session_fixture" });
+      expect(input?.rolePrompt).toContain("official runner plugin");
+      expect(input?.rolePrompt).toContain("Deck memory tools are intentionally omitted");
+      expect(input?.rolePrompt).toContain("their absence is not evidence that the Deck session MCP server disconnected");
+      expect(input?.mcp.sessionTools).not.toContain("deck_memory_recall");
+      expect(JSON.stringify(input)).not.toContain("fixture-private-token");
+      expect(creations).toBe(0); expect(writes).toBe(0);
     } finally { await service.close(); }
   });
 

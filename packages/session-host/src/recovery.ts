@@ -90,7 +90,8 @@ export function recoverSession(options: RecoverSessionOptions): RecoveryReport {
     try {
       lease = readLease(file);
       // A task that never reached `running` and has no lease never owned a process.
-      verdict = !lease && (attempt.state === "created" || attempt.state === "queued") ? { settled: true } : verifyLeaseSettled(lease, probe);
+      const neverDispatched = ledger.prompts().some(prompt => prompt.state === "queued" && prompt.taskId === task.taskId && prompt.attempt === attempt.attempt);
+      verdict = !lease && (attempt.state === "created" || attempt.state === "queued" || neverDispatched) ? { settled: true } : verifyLeaseSettled(lease, probe);
     } catch (error) {
       verdict = error instanceof LeaseInvalidError ? no("lease-invalid") : no("probe-unknown");
     }
@@ -117,6 +118,7 @@ export function recoverSession(options: RecoverSessionOptions): RecoveryReport {
   if (drafts.length > 0 || LIVE_SESSION_STATES.includes(ledger.session.state)) {
     drafts.push({ kind: "session.recovered", data: { interrupted: report.interrupted, unsettled: report.unsettled } });
   }
+  if (ledger.session.stopRequested && report.unsettled.length === 0) drafts.push({ kind: "session.ended", data: { reason: "stopped" } });
   if (drafts.length === 0) return report;
 
   for (const event of log.appendMany(drafts)) ledger.apply(event);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CrossRunnerConfig } from "@deck/core/config/deck-config";
 import type { SessionCommandBody } from "@deck/core/session/commands";
@@ -7,6 +7,8 @@ import type { SessionEvent } from "@deck/core/session/events";
 import type { DriverHostIo, DriverTaskInput, TurnOutcome } from "@deck/core/session/driver";
 import { ApprovalBroker } from "../approval-broker";
 import { CredentialRegistry } from "../credentials";
+import { MemoryBroker } from "../memory-broker";
+import { BridgeService } from "../bridge-service";
 import { ensureStateLayout, resolveStatePaths, sessionPaths } from "../paths";
 import { createNodeProbe } from "../process-probe";
 import { recoverAllSessions } from "../recovery";
@@ -44,7 +46,7 @@ function setup(over: { config?: CrossRunnerConfig | undefined; driver?: FakeDriv
   let manager: SessionManager;
   const broker = new ApprovalBroker({ sink: { emit: (sessionId, draft) => { manager.openLog(sessionId)?.append(draft); } } });
   manager = new SessionManager({
-    paths, broker, credentials, supervisor,
+    paths, broker, credentials, supervisor, homeDir: dir,
     drivers: { get: (runnerId) => (runnerId === driver?.runnerId ? driver : undefined), list: () => (driver ? [driver] : []) },
     config: () => state.config,
     sessionMcpCommand: ["/bin/deck", "internal", "session-mcp"],
@@ -68,6 +70,618 @@ function setup(over: { config?: CrossRunnerConfig | undefined; driver?: FakeDriv
 }
 
 const lastTurn = (driver: FakeDriver): FakeTurn => driver.turns.at(-1)!;
+
+describe("persistent workspace sessions", () => {
+  const grantFor = (t: ReturnType<typeof setup>, sessionId: string, taskId = "lead") => t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths, sessionId).taskCredentialFile(taskId), "utf8")).token)!;
+
+  test("crashed preflight reservation with no dispatch fence or lease safely restores pending text", async () => {
+    const t = setup(); const id = await t.create(); let release!: () => void;
+    t.driver.probe = () => new Promise(resolve => { release = () => resolve({ ...t.driver.probeResult, status: "blocked" }); });
+    await t.run({ type: "prompt.send", text: "never reached native" }, id); await waitFor(() => !!release, 200, "held runner check");
+    expect(t.events(id).some(e => e.kind === "prompt.dispatched")).toBe(false);
+    const dir = tempDir(), paths = resolveStatePaths({ env: { HOME: dir, XDG_STATE_HOME: join(dir, "state") }, tmpdir: dir }); ensureStateLayout(paths); cpSync(t.paths.sessionsDir, paths.sessionsDir, { recursive: true });
+    const report = recoverAllSessions({ paths, probe: createNodeProbe() });
+    expect(report.sessions[0]?.unsettled).toEqual([]);
+    const driver = new FakeDriver(); driver.autoComplete = true; const reopened = setup({ dir, driver });
+    await waitFor(() => driver.turns.length === 1, 300, "restored pending native call"); await reopened.idle();
+    expect(driver.turns[0]?.input.prompt).toBe("never reached native");
+    release(); await t.idle();
+  });
+
+  test("an explicit resume during interrupted native close drains once then continues FIFO", async () => {
+    const driver = new PersistentFakeDriver(); const t = setup({ driver }); const id = await t.create();
+    await t.run({ type: "prompt.send", text: "first" }, id); await waitFor(() => driver.turns.length === 1, 200, "first");
+    await t.run({ type: "prompt.send", text: "second" }, id); await t.run({ type: "turn.interrupt", taskId: "lead" }, id);
+    await waitFor(() => driver.closeCalls === 1, 200, "held native close");
+    expect((await t.run({ type: "prompt.resume" }, id)).ok).toBe(true); expect(driver.turns).toHaveLength(1);
+    driver.releaseClose(); await waitFor(() => driver.turns.length === 2, 200, "next after drain");
+    expect(lastTurn(driver).input.prompt).toBe("second"); lastTurn(driver).finish(); await t.idle();
+    expect((await t.manager.query("prompts.list", { sessionId: id }) as any).data.paused).toBe(false);
+  });
+
+  test("failed internal wake pauses accepted users and retains notices until their native delivery", async () => {
+    let release!: (value: any) => void, leadPreparations = 0;
+    const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }), options: { childMcp: async (_runner, context) => {
+      if (context.taskId === "lead" && ++leadPreparations === 2) return new Promise(resolve => { release = resolve; });
+      return { runnerPackages: () => [], resolveServer: () => undefined };
+    } } });
+    const id = await t.create(); await t.run({ type: "prompt.send", text: "initial" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "lead");
+    const original = lastTurn(t.driver); original.init();
+    const childId = (await t.manager.callTaskTool(grantFor(t, id), "deck_delegate", { agent: "investigate", task: "inspect" }) as any).data.taskId;
+    await waitFor(() => t.driver.turns.length === 2, 200, "child"); const child = lastTurn(t.driver); child.finish(); await waitFor(() => child.closed, 200, "child close");
+    original.finish(); await waitFor(() => !!release, 300, "reserved wake preflight");
+    await t.run({ type: "prompt.send", text: "exact user instruction" }, id);
+    release({ runnerPackages: () => [], resolveServer: () => undefined, nativeMemory: { provider: "supermemory", integration: "runner-plugin", status: "unavailable" } });
+    await t.idle();
+    expect((await t.manager.query("prompts.list", { sessionId: id }) as any).data).toMatchObject({ paused: true, queued: [{ text: "exact user instruction" }] });
+    expect(t.events(id).filter(e => e.data.code === "lead.notices-delivered")).toHaveLength(0);
+    await t.run({ type: "prompt.resume" }, id); await waitFor(() => t.driver.turns.length === 3, 200, "user resumes");
+    const user = lastTurn(t.driver); expect(user.input.prompt).toBe("exact user instruction"); expect(user.input.rolePrompt).toContain(childId);
+    expect(t.events(id).filter(e => e.data.code === "lead.notices-delivered")).toHaveLength(1);
+    user.finish(); await t.idle();
+  });
+
+  test("large completion batches consume only complete notices actually delivered once", async () => {
+    const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }) });
+    t.driver.onStart = turn => { if (turn.input.memberId !== "lead") { turn.init(); turn.finish(); } };
+    const id = await t.create(); await t.run({ type: "prompt.send", text: "initial" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "lead"); const lead = lastTurn(t.driver); lead.init();
+    for (let i = 0; i < 200; i++) await t.manager.callTaskTool(grantFor(t, id), "deck_delegate", { agent: "investigate", task: `job ${i}` });
+    await waitFor(() => t.events(id).filter(e => e.kind === "task.state" && e.source.taskId !== "lead" && e.data.state === "completed").length === 200, 1000, "all children complete");
+    lead.finish(); await waitFor(() => t.driver.turns.filter(turn => turn.input.memberId === "lead").length === 2, 400, "first notice batch");
+    const first = lastTurn(t.driver); expect(first.input.prompt.length).toBeLessThanOrEqual(8192); expect(first.input.rolePrompt).not.toContain("Delegated task completion notice:");
+    const firstIds = (t.events(id).filter(e => e.data.code === "lead.notices-delivered").at(-1)!.data.notices as any[]).map(n => n.taskId);
+    expect(firstIds.length).toBeLessThan(200); first.finish();
+    await waitFor(() => t.driver.turns.filter(turn => turn.input.memberId === "lead").length === 3, 400, "overflow notice batch");
+    const secondIds = (t.events(id).filter(e => e.data.code === "lead.notices-delivered").at(-1)!.data.notices as any[]).map(n => n.taskId);
+    expect(firstIds.filter(id => secondIds.includes(id))).toEqual([]); expect(firstIds.length + secondIds.length).toBe(200);
+    lastTurn(t.driver).finish(); await t.idle();
+  });
+
+  test.each(["enqueue", "pause", "dispatch", "completion"])("%s fsync failure never falsely acknowledges or starts the next item and drains owned work", async stage => {
+    let unblock!: (value: any) => void;
+    const t = setup({ options: stage === "dispatch" ? { childMcp: async () => new Promise(resolve => { unblock = resolve; }) } : {} });
+    const id = await t.create();
+    const first = await t.run({ type: "prompt.send", text: "first" }, id);
+    if (stage === "dispatch") await waitFor(() => !!unblock, 200, "held preflight"); else await waitFor(() => t.driver.turns.length === 1, 200, "owned lead");
+    if (stage !== "enqueue") await t.run({ type: "prompt.send", text: "next must not run" }, id);
+    const log = t.manager.openLog(id)!, flush = log.flush.bind(log);
+    log.flush = () => { throw new Error("synthetic-fsync-failure"); };
+    const retryId = "77777777-7777-4777-8777-777777777777";
+    if (stage === "enqueue") await expect(t.runWithId(retryId, { type: "prompt.send", text: "next must not run" }, id)).rejects.toThrow("synthetic-fsync-failure");
+    else if (stage === "pause") await expect(t.run({ type: "turn.interrupt", taskId: "lead" }, id)).rejects.toThrow("synthetic-fsync-failure");
+    else if (stage === "dispatch") unblock({ runnerPackages: () => [], resolveServer: () => undefined });
+    else lastTurn(t.driver).finish();
+    await waitFor(() => !t.manager.hasRunningWork(), 500, "fault cleanup drained");
+    log.flush = flush;
+    expect(t.driver.turns).toHaveLength(stage === "dispatch" ? 0 : 1);
+    expect((await t.runWithId(stage === "enqueue" ? retryId : (first as any).data.promptId, { type: "prompt.send", text: stage === "enqueue" ? "next must not run" : "first" }, id) as any).code).toBe("log-write-failed");
+  });
+
+  test("complete queued intent without its receipt restores exactly once after restart", async () => {
+    const t = setup(); const id = await t.create();
+    const commandId = "88888888-8888-4888-8888-888888888888", text = "prefix accepted instruction";
+    t.manager.openLog(id)!.append({ kind: "prompt.queued", data: { promptId: commandId, text, textHash: (await import("node:crypto")).createHash("sha256").update(text).digest("hex"), by: "test", generation: 0, position: 1 } });
+    t.manager.openLog(id)!.flush(); await t.manager.close();
+    const driver = new FakeDriver(); driver.autoComplete = true;
+    const reopened = setup({ dir: t.dir, driver });
+    await waitFor(() => driver.turns.length === 1, 300, "recovered queue admission"); await reopened.idle();
+    expect(driver.turns[0]!.input.prompt).toBe(text);
+    expect(await reopened.runWithId(commandId, { type: "prompt.send", text }, id)).toMatchObject({ ok: true, duplicate: true });
+    expect(driver.turns).toHaveLength(1);
+  });
+
+  test("stop intent prefix cancels the entire inbox and never restarts its remaining entries", async () => {
+    const t = setup(); const id = await t.create();
+    t.manager.openLog(id)!.append({ kind: "prompt.queue", data: { paused: true, reason: "test" } });
+    await t.run({ type: "prompt.send", text: "one" }, id); await t.run({ type: "prompt.send", text: "two" }, id);
+    const commandId = "99999999-9999-4999-8999-999999999999";
+    t.manager.openLog(id)!.append({ kind: "session.state", data: { state: "stopping", cancelPrompts: true, commandId, outcome: { ok: true, data: { state: "ended" } } } }); t.manager.openLog(id)!.flush(); await t.manager.close();
+    recoverAllSessions({ paths: t.paths, probe: createNodeProbe() });
+    const reopened = setup({ dir: t.dir });
+    expect((await reopened.manager.query("prompts.list", { sessionId: id }) as any).data.queued).toEqual([]);
+    expect(await reopened.runWithId(commandId, { type: "session.stop" }, id)).toMatchObject({ ok: true, duplicate: true });
+    expect(reopened.driver.turns).toHaveLength(0);
+  });
+
+  test("resume intent prefix owns one barrier and replay cannot clear a newer failure pause", async () => {
+    const t = setup(); const id = await t.create();
+    const commandId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    t.manager.openLog(id)!.appendMany([{ kind: "prompt.queue", data: { paused: true, reason: "interrupted" } }, { kind: "prompt.queue", data: { paused: false, commandId } }, { kind: "prompt.queue", data: { paused: true, reason: "later-failure" } }]); t.manager.openLog(id)!.flush(); await t.manager.close();
+    const reopened = setup({ dir: t.dir });
+    expect(await reopened.runWithId(commandId, { type: "prompt.resume" }, id)).toMatchObject({ ok: true, duplicate: true });
+    expect((await reopened.manager.query("prompts.list", { sessionId: id }) as any).data).toMatchObject({ paused: true, pauseReason: "later-failure" });
+  });
+
+  test("cancel during held preflight never delivers that item and starts the next FIFO item", async () => {
+    let release!: (value: any) => void, calls = 0;
+    const t = setup({ options: { childMcp: async () => ++calls === 1 ? new Promise(resolve => { release = resolve; }) : { runnerPackages: () => [], resolveServer: () => undefined } } });
+    const id = await t.create(); const first = await t.run({ type: "prompt.send", text: "cancel before native" }, id);
+    await waitFor(() => !!release, 200, "held tools");
+    const second = await t.run({ type: "prompt.send", text: "next item" }, id);
+    expect((await t.run({ type: "prompt.cancel", promptId: (first as any).data.promptId }, id)).ok).toBe(true);
+    release({ runnerPackages: () => [], resolveServer: () => undefined });
+    await waitFor(() => t.driver.turns.length === 1, 200, "next admitted");
+    expect(lastTurn(t.driver).input.prompt).toBe("next item");
+    expect(t.events(id).find(e => e.kind === "prompt.state" && e.data.promptId === (first as any).data.promptId)?.data.state).toBe("cancelled");
+    expect(t.events(id).filter(e => e.kind === "message.completed" && e.data.role === "user").map(e => e.data.text)).toEqual(["next item"]);
+    expect((await t.manager.query("prompts.list", { sessionId: id }) as any).data.paused).toBe(false);
+    expect((await t.run({ type: "prompt.cancel", promptId: (second as any).data.promptId }, id) as any).code).toBe("prompt-already-started");
+    lastTurn(t.driver).finish(); await t.idle();
+  });
+
+  test("prompt IDs retain typed content deduplication after command receipt eviction", async () => {
+    const t = setup(); const id = await t.create();
+    const commandId = "66666666-6666-4666-8666-666666666666";
+    const first = await t.runWithId(commandId, { type: "prompt.send", text: "original" }, id);
+    expect((await t.runWithId(commandId, { type: "prompt.send", text: "changed" }, id) as any).code).toBe("command-id-reused");
+    t.manager.openLog(id)!.appendMany(Array.from({ length: 1002 }, (_, i) => ({ kind: "command.accepted" as const, data: { commandId: `eviction-${i}`, type: "session.bindChange", outcome: { ok: true } } })));
+    expect(await t.runWithId(commandId, { type: "prompt.send", text: "original" }, id)).toMatchObject({ ...first, duplicate: true });
+    expect((await t.runWithId(commandId, { type: "prompt.send", text: "changed" }, id) as any).code).toBe("command-id-reused");
+    expect((await t.runWithId(commandId, { type: "prompt.resume" }, id) as any).code).toBe("command-id-reused");
+    await waitFor(() => t.driver.turns.length === 1, 200, "one native turn"); lastTurn(t.driver).finish(); await t.idle();
+  });
+
+  test("restart with uncertain dispatched owner preserves all never-dispatched messages", async () => {
+    const t = setup(); const id = await t.create();
+    await t.run({ type: "prompt.send", text: "native active" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "lead");
+    const second = await t.run({ type: "prompt.send", text: "second preserved" }, id), third = await t.run({ type: "prompt.send", text: "third preserved" }, id);
+    const dir = tempDir(), paths = resolveStatePaths({ env: { HOME: dir, XDG_STATE_HOME: join(dir, "state") }, tmpdir: dir });
+    ensureStateLayout(paths); cpSync(t.paths.sessionsDir, paths.sessionsDir, { recursive: true });
+    recoverAllSessions({ paths, probe: createNodeProbe() });
+    const reopened = setup({ dir });
+    const snapshot = (await reopened.manager.query("prompts.list", { sessionId: id }) as any).data;
+    expect(snapshot.queued.map((p: any) => [p.promptId, p.text])).toEqual([[(second as any).data.promptId, "second preserved"], [(third as any).data.promptId, "third preserved"]]);
+    expect(snapshot.paused).toBe(true);
+    expect((await reopened.run({ type: "prompt.resume" }, id) as any).code).toBe("ownership-unsettled");
+    expect(reopened.driver.turns).toHaveLength(0);
+    await t.run({ type: "session.stop" }, id); await t.idle();
+  });
+
+  test("queue count and UTF-8 aggregate limits reject without clearing accepted messages", async () => {
+    const t = setup(); const id = await t.create();
+    await t.run({ type: "prompt.send", text: "active" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "lead");
+    for (let i = 0; i < 32; i++) expect((await t.run({ type: "prompt.send", text: `queued ${i}` }, id)).ok).toBe(true);
+    expect((await t.run({ type: "prompt.send", text: "overflow" }, id) as any).code).toBe("prompt-queue-full");
+    await t.run({ type: "session.stop" }, id); await t.idle();
+    const next = await t.create(); await t.run({ type: "prompt.send", text: "active" }, next); await waitFor(() => t.driver.turns.length === 2, 200, "next lead");
+    const multibyte = "界".repeat(200_000);
+    expect((await t.run({ type: "prompt.send", text: multibyte }, next)).ok).toBe(true);
+    expect((await t.run({ type: "prompt.send", text: multibyte }, next) as any).code).toBe("prompt-queue-full");
+    expect((await t.manager.query("prompts.list", { sessionId: next }) as any).data.queued).toHaveLength(1);
+    await t.run({ type: "session.stop" }, next); await t.idle();
+  });
+
+  test("durable user prompts queue FIFO behind one Lead and cancel before dispatch", async () => {
+    const t = setup(); const id = await t.create();
+    const first = await t.run({ type: "prompt.send", text: "first" }, id);
+    expect(first).toMatchObject({ ok: true, data: { promptId: expect.any(String), state: "queued", position: 1 } });
+    await waitFor(() => t.driver.turns.length === 1, 200, "first lead"); const firstTurn = lastTurn(t.driver); firstTurn.init();
+    const second = await t.run({ type: "prompt.send", text: "second" }, id);
+    const third = await t.run({ type: "prompt.send", text: "third" }, id);
+    expect(second.ok).toBe(true); expect(third.ok).toBe(true); expect(t.driver.turns).toHaveLength(1);
+    const queue = (await t.manager.query("prompts.list", { sessionId: id }) as any).data;
+    expect(queue.queued.map((p: any) => p.text)).toEqual(["second", "third"]);
+    expect(t.events(id).filter(e => e.kind === "message.completed" && e.data.role === "user").map(e => e.data.text)).toEqual(["first"]);
+    expect((await t.run({ type: "prompt.cancel", promptId: (second as any).data.promptId }, id)).ok).toBe(true);
+    firstTurn.finish(); await waitFor(() => t.driver.turns.length === 2, 200, "third lead");
+    expect(lastTurn(t.driver).input.prompt).toBe("third");
+    expect(lastTurn(t.driver).input.resume?.nativeSessionId).toBe(firstTurn.nativeSessionId);
+    expect((await t.run({ type: "prompt.cancel", promptId: (third as any).data.promptId }, id) as any).code).toBe("prompt-already-started");
+    lastTurn(t.driver).finish(); await t.idle();
+    expect((await t.manager.query("prompts.list", { sessionId: id }) as any).data.queued).toEqual([]);
+  });
+
+  test("interrupt pauses accepted pending prompts and resume waits until the current handle drains", async () => {
+    const t = setup(); const id = await t.create();
+    await t.run({ type: "prompt.send", text: "first" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "first lead");
+    const first = lastTurn(t.driver); first.init();
+    await t.run({ type: "prompt.send", text: "second" }, id);
+    await t.run({ type: "turn.interrupt", taskId: "lead" }, id); await t.idle();
+    expect((await t.manager.query("prompts.list", { sessionId: id }) as any).data.paused).toBe(true);
+    expect(t.driver.turns).toHaveLength(1);
+    await t.run({ type: "prompt.send", text: "third" }, id);
+    expect(t.driver.turns).toHaveLength(1);
+    await t.run({ type: "prompt.resume" }, id); await waitFor(() => t.driver.turns.length === 2, 200, "resume second");
+    expect(lastTurn(t.driver).input.prompt).toBe("second"); lastTurn(t.driver).finish();
+    await waitFor(() => t.driver.turns.length === 3, 200, "resume third"); lastTurn(t.driver).finish(); await t.idle();
+  });
+
+  test("project removal preserves active work, session history and restart visibility until explicit Add", async () => {
+    const t = setup(); const id = await t.create();
+    const projectId = (await t.manager.query("sessions.list", {}) as any).data.sessions[0].projectId;
+    await t.run({ type: "prompt.send", text: "Continue working" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "lead");
+    const lead = lastTurn(t.driver); lead.init();
+    expect((await t.run({ type: "project.rename", projectId, name: "  My project  " }) as any).data.project.name).toBe("My project");
+    const removeId = "55555555-5555-4555-8555-555555555555";
+    expect(await t.runWithId(removeId, { type: "project.remove", projectId })).toMatchObject({ ok: true, data: { projectId, removed: true } });
+    expect((await t.manager.query("projects.list", {}) as any).data.projects).toEqual([]);
+    expect(lead.finished).toBe(false); expect(lead.interrupts).toHaveLength(0); expect(existsSync(t.project)).toBe(true);
+    expect((await t.manager.query("sessions.status", { projectId, sessionIds: [id] }) as any).data.sessions[0].leadActivity.state).toBe("running");
+    lead.say("Work completed after removal"); lead.finish(); await t.idle();
+    const before = t.events(id);
+    await t.manager.close(); const reopened = setup({ dir: t.dir });
+    expect((await reopened.manager.query("projects.list", {}) as any).data.projects).toEqual([]);
+    expect(reopened.events(id)).toEqual(before);
+    expect((await reopened.run({ type: "session.create", projectRoot: reopened.project }, undefined, "web:test")).ok).toBe(true);
+    expect((await reopened.manager.query("projects.list", {}) as any).data.projects).toEqual([]);
+    const restored = await reopened.run({ type: "project.register", path: reopened.project });
+    expect((restored as any).data.project).toMatchObject({ projectId, name: "My project" });
+    expect((await reopened.manager.query("sessions.list", { projectId }) as any).data.sessions.some((s: any) => s.sessionId === id)).toBe(true);
+    expect(await reopened.runWithId(removeId, { type: "project.remove", projectId })).toMatchObject({ ok: true, duplicate: true });
+    expect((await reopened.manager.query("projects.list", {}) as any).data.projects).toHaveLength(1);
+  });
+
+  test("bounded status polling is project scoped and reports only current Lead activity", async () => {
+    const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }) });
+    const id = await t.create();
+    const projectId = (await t.manager.query("sessions.list", {}) as any).data.sessions[0].projectId;
+    const otherRoot = tempSubdir(t.dir, "other");
+    const other = await t.run({ type: "session.create", projectRoot: otherRoot });
+    const read = async () => (await t.manager.query("sessions.status", { projectId, sessionIds: [id, (other as any).data.sessionId, "missing"] }) as any).data.sessions;
+    expect(await read()).toMatchObject([{ sessionId: id, leadActivity: { state: "idle", lastReplySeq: 0, pendingApprovals: 0 } }]);
+    await t.run({ type: "prompt.send", text: "Start" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "lead");
+    const lead = lastTurn(t.driver); lead.init();
+    const delegated = await t.manager.callTaskTool(grantFor(t, id), "deck_delegate", { agent: "investigate", task: "Child" });
+    await waitFor(() => t.driver.turns.length === 2, 200, "child"); const child = lastTurn(t.driver); child.init(); child.say("child response");
+    const childApproval = t.broker.request({ sessionId: id, taskId: (delegated as any).data.taskId, memberId: "investigate", tool: "Bash" });
+    expect((await read())[0].leadActivity).toMatchObject({ taskId: "lead", state: "running", pendingApprovals: 0, lastReplySeq: 0 });
+    const leadApproval = t.broker.request({ sessionId: id, taskId: "lead", memberId: "lead", tool: "Bash" });
+    expect((await read())[0].leadActivity.pendingApprovals).toBe(1);
+    t.broker.respond({ approvalId: leadApproval.approvalId, decision: "deny", by: "test" });
+    t.broker.respond({ approvalId: childApproval.approvalId, decision: "deny", by: "test" });
+    lead.say("Actual reply"); const replySeq = t.events(id).at(-1)!.seq;
+    lead.emit("message.delta", { text: "later delta" }); lead.emit("reasoning.delta", { text: "reasoning" }); lead.emit("tool.completed", { tool: "Bash", output: "result" });
+    lead.emit("message.completed", { role: "system", text: "helper" }); lead.emit("message.completed", { role: "assistant", text: "internal", internal: true }); lead.emit("message.completed", { role: "assistant", text: "   " });
+    expect((await read())[0].leadActivity.lastReplySeq).toBe(replySeq);
+    child.finish(); await waitFor(() => child.closed, 200, "child drain"); await t.manager.callTaskTool(grantFor(t, id), "deck_task_result", { taskId: (delegated as any).data.taskId });
+    lead.finish(); await t.idle();
+    await t.run({ type: "session.assignMember", memberId: "lead", expectedRevision: 0, assignment: { runnerId: "claude", modelId: "new" } }, id);
+    expect((await read())[0].leadActivity).toMatchObject({ state: "idle", lastReplySeq: replySeq });
+    expect((await read())[0].leadActivity.taskId).toBeUndefined();
+    const staleApproval = t.broker.request({ sessionId: id, taskId: "lead", memberId: "lead", tool: "Bash" });
+    expect((await read())[0].leadActivity.pendingApprovals).toBe(0);
+    t.broker.respond({ approvalId: staleApproval.approvalId, decision: "deny", by: "test" });
+    await t.manager.close(); const reopened = setup({ dir: t.dir });
+    expect((await reopened.manager.query("sessions.status", { projectId, sessionIds: [id] }) as any).data.sessions[0].leadActivity.lastReplySeq).toBe(replySeq);
+    const log = reopened.manager.openLog(id)!;
+    const readAfter = log.readAfter.bind(log);
+    log.readAfter = function* () { throw new Error("status polling must not read event segments"); };
+    expect((await reopened.manager.query("sessions.status", { projectId, sessionIds: [id, id] }) as any).data.sessions).toHaveLength(1);
+    log.readAfter = readAfter;
+    expect((await reopened.manager.query("sessions.status", { projectId, sessionIds: Array(101).fill(id) }) as any).code).toBe("sessions-status-invalid");
+    expect((await reopened.manager.query("sessions.status", { projectId, sessionIds: ["../invalid"] }) as any).code).toBe("sessions-status-invalid");
+  });
+
+  test("continuation rejects a replaced canonical project instead of silently following its symlink", async () => {
+    const t = setup(); const id = await t.create(); await t.run({ type: "session.stop" }, id);
+    const other = tempSubdir(t.dir, "other"); renameSync(t.project, join(t.dir, "old")); symlinkSync(other, t.project);
+    expect((await t.run({ type: "session.continue" }, id) as any).code).toBe("project-unavailable");
+    expect((await t.manager.query("sessions.list", {}) as any).data.sessions).toHaveLength(1);
+  });
+
+  test("successor retains an inherited member removed from current global defaults", async () => {
+    const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }) });
+    const source = await t.create(); await t.run({ type: "session.stop" }, source);
+    delete t.state.config!.members.investigate;
+    const successor = await t.run({ type: "session.continue" }, source);
+    expect(successor.ok).toBe(true);
+    const summaries = (await t.manager.query("sessions.list", {}) as any).data.sessions;
+    expect(summaries.find((s: any) => s.sessionId === (successor as any).data.sessionId).members.investigate).toEqual({ runnerId: "claude", modelId: "fast" });
+    expect((await t.run({ type: "session.create", projectRoot: t.project, members: { arbitrary: { runnerId: "claude", modelId: "fast" } } }) as any).code).toBe("member-not-assigned");
+  });
+
+  test("delegated admission rotates sessions instead of draining one backlog", async () => {
+    const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } }, executionBudget: { lead: 2, delegated: 1 } }) });
+    const one = await t.create(), two = await t.create();
+    await t.run({ type: "prompt.send", text: "lead-one" }, one); await t.run({ type: "prompt.send", text: "lead-two" }, two);
+    await waitFor(() => t.driver.turns.length === 2, 200, "two leads");
+    await t.manager.callTaskTool(grantFor(t, one), "deck_delegate", { agent: "investigate", task: "one-first" });
+    await t.manager.callTaskTool(grantFor(t, one), "deck_delegate", { agent: "investigate", task: "one-second" });
+    await t.manager.callTaskTool(grantFor(t, two), "deck_delegate", { agent: "investigate", task: "two-first" });
+    await waitFor(() => t.driver.turns.length === 3, 200, "first child");
+    expect(lastTurn(t.driver).input.prompt).toBe("one-first"); lastTurn(t.driver).finish();
+    await waitFor(() => t.driver.turns.length === 4, 200, "fair next child");
+    expect(lastTurn(t.driver).input.prompt).toBe("two-first"); lastTurn(t.driver).finish();
+    await waitFor(() => t.driver.turns.length === 5, 200, "return to backlog");
+    expect(lastTurn(t.driver).input.prompt).toBe("one-second");
+    await t.run({ type: "session.stop" }, one); await t.run({ type: "session.stop" }, two); await t.idle();
+  });
+
+  test("repairs a successor creation crash from durable transfer intent", async () => {
+    const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }) }); t.driver.autoComplete = true;
+    const source = await t.create(); await t.run({ type: "prompt.send", text: "Preserve context" }, source); await t.idle();
+    await t.run({ type: "session.stop" }, source);
+    const sourceSeq = t.events(source).at(-1)!.seq;
+    const commandId = "33333333-3333-4333-8333-333333333333";
+    const result = await t.runWithId(commandId, { type: "session.continue" }, source);
+    const target = (result as any).data.sessionId as string;
+    await t.manager.close();
+    // Model the metadata-committed/log-not-written crash boundary.
+    const paths = sessionPaths(t.paths, target);
+    rmSync(paths.eventsDir, { recursive: true }); rmSync(paths.ledgerSnapshotFile, { force: true });
+    const sourcePaths = sessionPaths(t.paths, source);
+    rmSync(sourcePaths.ledgerSnapshotFile, { force: true });
+    for (const name of readdirSync(sourcePaths.eventsDir).filter(name => name.endsWith(".jsonl"))) {
+      const file = join(sourcePaths.eventsDir, name);
+      const kept = readFileSync(file, "utf8").trim().split("\n").filter(line => JSON.parse(line).seq <= sourceSeq);
+      if (kept.length) writeFileSync(file, `${kept.join("\n")}\n`); else rmSync(file);
+    }
+    const reopened = setup({ dir: t.dir, config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "latest" } } }) });
+    expect(reopened.events(target).find(e => e.kind === "session.created")?.data.handoff).toMatchObject({ text: expect.stringContaining("Preserve context"), sourceSessionId: source, continuity: "reseeded" });
+    expect((await reopened.runWithId(commandId, { type: "session.continue" }, source) as any).data.sessionId).toBe(target);
+    expect((await reopened.manager.query("sessions.list", {}) as any).data.sessions.find((s: any) => s.sessionId === target).members.investigate.modelId).toBe("fast");
+    reopened.driver.autoComplete = true;
+    await reopened.run({ type: "prompt.send", text: "Continue" }, target); await reopened.idle();
+    expect(lastTurn(reopened.driver).input.rolePrompt).toContain("Preserve context");
+    expect(lastTurn(reopened.driver).input.resume).toBeUndefined();
+  });
+
+  test("preparation timeout is terminal without starting a model and permits retry", async () => {
+    const clock = new FakeClock(); const t = setup({ options: { clock } }); const id = await t.create();
+    let probing = false;
+    t.driver.probe = () => { probing = true; return new Promise(() => {}); };
+    await t.run({ type: "session.prepare" }, id); await waitFor(() => probing, 200, "probe");
+    clock.advance(30_000); await t.idle();
+    expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data).toMatchObject({ status: "failed", reasonCode: "preparation-timeout" });
+    expect(t.driver.turns).toHaveLength(0);
+    t.driver.probe = async () => t.driver.probeResult;
+    await t.run({ type: "session.prepare" }, id); await t.idle();
+    expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data.status).toBe("ready");
+  });
+
+  test("prototype property names are not configured team members", async () => {
+    const t = setup(); const id = await t.create();
+    expect((await t.run({ type: "session.assignMember", memberId: "constructor", expectedRevision: 0, assignment: { runnerId: "claude", modelId: "opus" } }, id) as any).code).toBe("member-not-assigned");
+    expect(t.events(id).some(e => e.kind === "session.assignment")).toBe(false);
+  });
+
+  test("preparation remains busy until release drains and pruning cannot remove it", async () => {
+    let drain!: () => void;
+    const released = new Promise<void>(resolve => { drain = resolve; });
+    const t = setup({ options: { childMcp: async () => ({ runnerPackages: () => [], resolveServer: () => undefined, release: () => released }) } });
+    const id = await t.create(); await t.run({ type: "session.prepare" }, id);
+    await waitFor(() => t.events(id).some(e => e.data.phase === "preparing-tools"), 200, "preparation phase");
+    expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data.status).toBe("preparing");
+    expect((await t.manager.query("sessions.list", {}) as any).data.sessions[0].leadActivity).toMatchObject({ state: "preparing", lastReplySeq: 0 });
+    expect((await t.run({ type: "prompt.send", text: "too early" }, id) as any).code).toBe("session-preparing");
+    expect((await t.manager.query("sessions.prune", { keep: 0 }) as any).data.removed).toEqual([]);
+    drain(); await t.idle();
+    expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data.status).toBe("ready");
+  });
+
+  test("direct prompts reject replaced project roots even after successful preflight", async () => {
+    const t = setup(); const id = await t.create();
+    await t.run({ type: "session.prepare" }, id); await t.idle();
+    const other = tempSubdir(t.dir, "other");
+    renameSync(t.project, join(t.dir, "old")); symlinkSync(other, t.project);
+    await t.run({ type: "prompt.send", text: "must not execute" }, id); await t.idle();
+    expect(t.driver.turns).toHaveLength(0);
+    expect(t.events(id).find(e => e.kind === "turn.completed")?.data.status).toBe("failed");
+    expect((await t.manager.query("projects.list", {}) as any).data.projects[0].available).toBe(false);
+  });
+
+  test("concurrent duplicate assignment commands commit one revision", async () => {
+    let probe!: () => void;
+    const t = setup(); const id = await t.create();
+    t.driver.probe = () => new Promise(resolve => { probe = () => resolve(t.driver.probeResult); });
+    const commandId = "22222222-2222-4222-8222-222222222222";
+    const command = { type: "session.assignMember" as const, memberId: "lead", expectedRevision: 0, assignment: { runnerId: "claude", modelId: "other" } };
+    const first = t.runWithId(commandId, command, id), second = t.runWithId(commandId, command, id);
+    await waitFor(() => !!probe, 200, "probe waits"); probe();
+    expect(await first).toMatchObject({ ok: true, data: { revision: 1, generation: 1 } });
+    expect(await second).toMatchObject({ ok: true, duplicate: true, data: { revision: 1, generation: 1 } });
+    expect(t.events(id).filter(e => e.kind === "session.assignment")).toHaveLength(1);
+  });
+
+  test("preflight failures never persist thrown credential material and validate project instructions", async () => {
+    const t = setup({ options: { rolePrompt: () => { throw new Error("PRIVATE-CREDENTIAL-MARKER"); } } });
+    const id = await t.create();
+    await t.run({ type: "session.prepare" }, id); await t.idle();
+    expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data).toMatchObject({ status: "failed", reasonCode: "project-instructions-unavailable" });
+    expect(JSON.stringify(t.events(id))).not.toContain("PRIVATE-CREDENTIAL-MARKER");
+    expect(t.driver.turns).toHaveLength(0);
+  });
+
+  test("stale preparation cancellation cannot revoke a newly assigned generation", async () => {
+    let releases = 0;
+    const t = setup({ options: { childMcp: async () => ({ runnerPackages: () => [], resolveServer: () => undefined, release: async () => { releases++; } }) } });
+    const id = await t.create();
+    const first = await t.run({ type: "session.prepare" }, id); await t.idle();
+    expect(releases).toBe(1);
+    await t.run({ type: "session.assignMember", memberId: "lead", expectedRevision: 0, assignment: { runnerId: "claude", modelId: "other" } }, id);
+    await t.run({ type: "session.prepare" }, id); await t.idle();
+    expect((await t.run({ type: "session.prepare.cancel", preparationId: (first as any).data.preparation.preparationId }, id) as any).code).toBe("preparation-stale");
+    expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data).toMatchObject({ status: "ready", generation: 1 });
+    expect(releases).toBe(2);
+  });
+
+  test("current Lead can continue an old delegated owner and is the only completion wake target", async () => {
+    const codex = new FakeDriver("codex");
+    const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }) });
+    (t.manager as any).options.drivers.get = (id: string) => id === "claude" ? t.driver : id === "codex" ? codex : undefined;
+    const id = await t.create(); await t.run({ type: "prompt.send", text: "Start" }, id);
+    await waitFor(() => t.driver.turns.length === 1, 200, "first lead"); const original = lastTurn(t.driver); original.init();
+    const firstGrant = grantFor(t, id);
+    const delegated = await t.manager.callTaskTool(firstGrant, "deck_delegate", { agent: "investigate", task: "Inspect" });
+    await waitFor(() => t.driver.turns.length === 2, 200, "child"); const child = lastTurn(t.driver); child.init(); child.finish();
+    await waitFor(() => child.closed, 200, "child drain");
+    await t.manager.callTaskTool(firstGrant, "deck_task_result", { taskId: (delegated as any).data.taskId });
+    original.finish(); await t.idle();
+    await t.run({ type: "session.assignMember", memberId: "lead", expectedRevision: 0, assignment: { runnerId: "codex", modelId: "gpt" } }, id);
+    await t.run({ type: "prompt.send", text: "Follow up" }, id); await waitFor(() => codex.turns.length === 1, 200, "new lead");
+    const current = lastTurn(codex); current.init(); const currentGrant = grantFor(t, id, "lead-g1");
+    const bridge = new BridgeService({ credentials: t.credentials, broker: t.broker, status: g => t.manager.taskStatus(g), callTaskTool: (g, name, args, context) => t.manager.callTaskTool(g, name, args, context) });
+    const token = JSON.parse(readFileSync(sessionPaths(t.paths, id).taskCredentialFile("lead-g1"), "utf8")).token;
+    expect((await bridge.call({ token, tool: "deck_delegate", arguments: { agent: "investigate", task: "Continue inspection", continueTaskId: (delegated as any).data.taskId } })).ok).toBe(true);
+    await waitFor(() => t.driver.turns.length === 3, 200, "original child continued");
+    const continued = lastTurn(t.driver);
+    expect(continued.input.assignment).toEqual({ runnerId: "claude", modelId: "fast" });
+    expect(continued.input.resume?.nativeSessionId).toBe(child.nativeSessionId);
+    expect((await t.manager.callTaskTool(firstGrant, "deck_delegate", { agent: "investigate", task: "stale" }) as any).code).toBe("credential-revoked");
+    current.finish(); await waitFor(() => current.closed, 200, "current drain"); continued.finish();
+    await waitFor(() => codex.turns.length === 2, 300, "current lead wake");
+    expect(lastTurn(codex).input.taskId).toBe("lead-g1");
+    expect(lastTurn(codex).input.resume?.nativeSessionId).toBe(current.nativeSessionId);
+    expect(t.driver.turns.filter(turn => turn.input.memberId === "lead")).toHaveLength(1);
+    await t.manager.callTaskTool(grantFor(t, id, "lead-g1"), "deck_task_result", { taskId: (delegated as any).data.taskId });
+    lastTurn(codex).finish(); await t.idle();
+    expect(codex.turns).toHaveLength(2);
+    void currentGrant;
+  });
+
+  test("stopping a globally queued Lead never starts it and other sessions continue", async () => {
+    const t = setup({ config: baseConfig({ executionBudget: { lead: 1, delegated: 1 } }) });
+    const one = await t.create(), two = await t.create(), three = await t.create();
+    for (const [id, text] of [[one, "one"], [two, "two"], [three, "three"]]) await t.run({ type: "prompt.send", text: text! }, id);
+    await waitFor(() => t.driver.turns.length === 1, 200, "admitted lead");
+    expect((await t.run({ type: "session.stop" }, two) as any).data.state).toBe("ended");
+    lastTurn(t.driver).finish(); await waitFor(() => t.driver.turns.length === 2, 200, "next lead");
+    expect(lastTurn(t.driver).input.prompt).toBe("three");
+    expect(t.events(two).find(e => e.kind === "task.state" && e.data.state === "cancelled")).toBeDefined();
+    expect(t.driver.turns.some(turn => turn.input.prompt === "two")).toBe(false);
+    lastTurn(t.driver).finish(); await t.idle();
+  });
+
+  test("registers projects and creates independent filtered paginated sessions", async () => {
+    const t = setup();
+    const registered = await t.run({ type: "project.register", path: t.project, name: "Deck" });
+    expect(registered.ok).toBe(true);
+    const projectId = (registered as any).data.project.projectId;
+    const one = await t.run({ type: "session.create", projectId, title: "One" });
+    const two = await t.run({ type: "session.create", projectId, title: "Two" });
+    expect((one as any).data.sessionId).not.toBe((two as any).data.sessionId);
+    const page = await t.manager.query("sessions.list", { projectId, limit: 1 });
+    expect((page as any).data.sessions).toHaveLength(1);
+    const next = await t.manager.query("sessions.list", { projectId, limit: 1, cursor: (page as any).data.nextCursor });
+    expect((next as any).data.sessions).toHaveLength(1);
+    expect((next as any).data.sessions[0].sessionId).not.toBe((page as any).data.sessions[0].sessionId);
+    expect((await t.manager.query("projects.list", {}) as any).data.projects).toHaveLength(1);
+  });
+
+  test("prepares without a model turn and cancellation drains late resources once", async () => {
+    let resolve!: (value: any) => void, releases = 0;
+    const t = setup({ options: { childMcp: () => new Promise(r => { resolve = r; }) } });
+    const id = await t.create();
+    const result = await t.run({ type: "session.prepare" }, id);
+    expect((result as any).data.preparation.status).toBe("preparing");
+    await waitFor(() => !!resolve, 200, "resolver invoked");
+    expect(t.driver.turns).toHaveLength(0);
+    const cancelled = t.run({ type: "session.prepare.cancel", preparationId: (result as any).data.preparation.preparationId }, id);
+    resolve({ runnerPackages: () => [], resolveServer: () => undefined, release: async () => { releases++; } });
+    await cancelled;
+    await waitFor(() => releases === 1, 200, "resource release");
+    expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data.status).toBe("cancelled");
+    expect(t.driver.turns).toHaveLength(0);
+  });
+
+  test("Lead generations preserve old owners and use a fresh native context with public handoff", async () => {
+    const codex = new FakeDriver("codex");
+    const t = setup();
+    (t.manager as any).options.drivers.get = (id: string) => id === "claude" ? t.driver : id === "codex" ? codex : undefined;
+    const id = await t.create();
+    await t.run({ type: "prompt.send", text: "Remember the feature" }, id);
+    await waitFor(() => t.driver.turns.length === 1, 200, "turn");
+    lastTurn(t.driver).init(); lastTurn(t.driver).say("Feature context"); lastTurn(t.driver).finish(); await t.idle();
+    const switched = await t.run({ type: "session.assignMember", memberId: "lead", expectedRevision: 0, assignment: { runnerId: "codex", modelId: "gpt" } }, id);
+    expect((switched as any).data.generation).toBe(1);
+    expect((await t.run({ type: "session.assignMember", memberId: "lead", expectedRevision: 0, assignment: { runnerId: "codex", modelId: "other" } }, id)).ok).toBe(false);
+    await t.run({ type: "prompt.send", text: "Continue" }, id);
+    await waitFor(() => codex.turns.length === 1, 200, "new runner");
+    expect(lastTurn(codex).input.taskId).toBe("lead-g1");
+    expect(lastTurn(codex).input.resume).toBeUndefined();
+    expect(lastTurn(codex).input.rolePrompt).toContain("Feature context");
+    expect(t.events(id).find(e => e.kind === "task.created" && e.data.taskId === "lead")?.data.modelId).toBe("opus");
+    lastTurn(codex).finish(); await t.idle();
+  });
+
+  test("ended sessions continue into idempotent linked successors with fresh native identity", async () => {
+    const t = setup(); const source = await t.create();
+    await t.run({ type: "session.stop" }, source);
+    const commandId = "11111111-1111-4111-8111-111111111111";
+    const result = await t.runWithId(commandId, { type: "session.continue", title: "Follow up" }, source);
+    expect(result.ok).toBe(true);
+    const again = await t.runWithId(commandId, { type: "session.continue", title: "Follow up" }, source);
+    expect((again as any).data.sessionId).toBe((result as any).data.sessionId);
+    const sessions = (await t.manager.query("sessions.list", {}) as any).data.sessions;
+    expect(sessions.find((s: any) => s.sessionId === (result as any).data.sessionId).predecessorSessionId).toBe(source);
+    expect(sessions.find((s: any) => s.sessionId === source).state).toBe("ended");
+  });
+
+  test("daemon Lead admission is bounded while delegates retain independent capacity", async () => {
+    const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } }, executionBudget: { lead: 1, delegated: 1 } }) });
+    const one = await t.create(), two = await t.create();
+    await t.run({ type: "prompt.send", text: "one" }, one);
+    await t.run({ type: "prompt.send", text: "two" }, two);
+    await waitFor(() => t.driver.turns.length === 1, 200, "one admitted lead");
+    const parent = lastTurn(t.driver); parent.init();
+    const grant = t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths, one).taskCredentialFile("lead"), "utf8")).token);
+    expect(grant).toBeDefined();
+    const result = await t.manager.callTaskTool(grant!, "deck_delegate", { agent: "investigate", task: "inspect" });
+    expect(result.ok).toBe(true);
+    await waitFor(() => t.driver.turns.length === 2, 200, "delegate independent capacity");
+    expect(lastTurn(t.driver).input.memberId).toBe("investigate");
+    lastTurn(t.driver).finish(); parent.finish();
+    await waitFor(() => t.driver.turns.some(x => x.input.prompt === "two"), 300, "next admitted lead");
+    for (const turn of t.driver.turns) turn.finish();
+    await t.run({ type: "session.stop" }, one); await t.run({ type: "session.stop" }, two);
+  });
+});
+
+describe("turn preparation diagnostics", () => {
+  const preparation = (events: SessionEvent[]) => events.filter(e => e.kind === "diagnostic" && e.data.code === "turn.preparation");
+
+  test("durably records actual preparation boundaries and driver turn start once with injected timing", async () => {
+    const clock = new FakeClock();
+    const driver = new FakeDriver();
+    const t = setup({ driver, options: { clock, childMcp: async () => {
+      clock.advance(60);
+      return { runnerPackages: () => [], resolveServer: () => undefined };
+    } } });
+    const sessionId = await t.create();
+    driver.probe = async () => { clock.advance(40); return driver.probeResult; };
+    driver.onStart = turn => { clock.advance(100); turn.init(); turn.init(); };
+    await t.run({ type: "prompt.send", text: "hello" }, sessionId);
+    await waitFor(() => driver.turns.length === 1, 250, "native start");
+    expect(preparation(t.events(sessionId)).map(e => e.data)).toEqual([
+      { code: "turn.preparation", phase: "checking-runner", attempt: 1, elapsedMs: 0 },
+      { code: "turn.preparation", phase: "preparing-tools", attempt: 1, elapsedMs: 40, previousPhase: "checking-runner", previousPhaseDurationMs: 40 },
+      { code: "turn.preparation", phase: "starting-runner", attempt: 1, elapsedMs: 100, previousPhase: "preparing-tools", previousPhaseDurationMs: 60 },
+      { code: "turn.preparation", phase: "turn-started", attempt: 1, elapsedMs: 200, previousPhase: "starting-runner", previousPhaseDurationMs: 100 },
+    ]);
+    for (const e of preparation(t.events(sessionId))) expect(e.source).toMatchObject({ taskId: "lead", memberId: "lead", runnerId: "claude" });
+    const firstNative = t.events(sessionId).find(e => e.kind === "turn.started")!;
+    const ready = preparation(t.events(sessionId)).at(-1)!;
+    expect(ready.seq).toBeGreaterThan(firstNative.seq);
+    lastTurn(driver).finish(); await t.idle();
+    await t.manager.close();
+    const reopened = setup({ dir: t.dir });
+    expect(preparation(reopened.events(sessionId)).map(e => e.data.phase)).toEqual(["checking-runner", "preparing-tools", "starting-runner", "turn-started"]);
+  });
+
+  test.each(["probe", "tools", "startup"])("%s failure never reports driver turn start", async stage => {
+    const driver = new FakeDriver();
+    const t = setup({ driver, options: { childMcp: async () => {
+      if (stage === "tools") throw new Error("synthetic preparation failure");
+      return { runnerPackages: () => [], resolveServer: () => undefined };
+    } } });
+    const sessionId = await t.create();
+    if (stage === "probe") driver.probeResult = { ...driver.probeResult, status: "blocked", reasonCode: "synthetic-blocked" };
+    if (stage === "startup") driver.startError = new Error("synthetic startup failure");
+    await t.run({ type: "prompt.send", text: "hello" }, sessionId); await t.idle();
+    const phases = preparation(t.events(sessionId)).map(e => e.data.phase);
+    expect(phases).toEqual(stage === "probe" ? ["checking-runner"] : stage === "tools" ? ["checking-runner", "preparing-tools"] : ["checking-runner", "preparing-tools", "starting-runner"]);
+    expect(t.events(sessionId).find(e => e.kind === "turn.completed")?.data.status).toBe("failed");
+  });
+
+  test("cancellation before native init never emits a late turn-started diagnostic", async () => {
+    const t = setup(), sessionId = await t.create();
+    await t.run({ type: "prompt.send", text: "hello" }, sessionId);
+    await waitFor(() => t.driver.turns.length === 1, 250, "native start");
+    await t.run({ type: "task.cancel", taskId: "lead" }, sessionId);
+    lastTurn(t.driver).init(); await t.idle(); lastTurn(t.driver).init();
+    expect(preparation(t.events(sessionId)).map(e => e.data.phase)).toEqual(["checking-runner", "preparing-tools", "starting-runner"]);
+  });
+});
 
 describe("read-only session OpenSpec queries", () => {
   test("uses the stored project and immutable ledger binding without modifying session events", async () => {
@@ -123,6 +737,38 @@ class PersistentFakeDriver extends FakeDriver {
 }
 
 describe("native handle ownership (D-7, D-14)", () => {
+  test("global Lead admission waits for the previous native handle drain", async () => {
+    const driver = new PersistentFakeDriver();
+    const t = setup({ driver, config: baseConfig({ executionBudget: { lead: 1, delegated: 1 } }) });
+    const one = await t.create(), two = await t.create();
+    await t.run({ type: "prompt.send", text: "one" }, one); await t.run({ type: "prompt.send", text: "two" }, two);
+    await waitFor(() => driver.turns.length === 1, 200, "one admitted");
+    lastTurn(driver).finish(); await waitFor(() => driver.closeCalls === 1, 200, "native draining");
+    expect(driver.turns).toHaveLength(1);
+    driver.releaseClose(); await waitFor(() => driver.turns.length === 2, 200, "slot transferred");
+    expect(lastTurn(driver).input.prompt).toBe("two");
+    lastTurn(driver).finish(); await t.idle();
+  });
+
+  test("uncertain child ownership retains the per-session delegate reservation", async () => {
+    const driver = new FakeDriver(); const start = driver.startTask.bind(driver);
+    driver.startTask = async (input, io) => {
+      const handle = await start(input, io);
+      return input.memberId === "lead" ? handle : { ...handle, close: async () => { throw new Error("drain-unproven"); } };
+    };
+    const t = setup({ driver, config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } }, maxConcurrentTasks: 1, executionBudget: { lead: 2, delegated: 4 } }) });
+    const id = await t.create(); await t.run({ type: "prompt.send", text: "start" }, id);
+    await waitFor(() => driver.turns.length === 1, 200, "lead"); const lead = lastTurn(driver);
+    const grant = t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths, id).taskCredentialFile("lead"), "utf8")).token)!;
+    const first = await t.manager.callTaskTool(grant, "deck_delegate", { agent: "investigate", task: "first" });
+    await t.manager.callTaskTool(grant, "deck_delegate", { agent: "investigate", task: "second" });
+    await waitFor(() => driver.turns.length === 2, 200, "first child"); lastTurn(driver).finish();
+    await waitFor(() => t.events(id).some(e => e.kind === "task.state" && e.data.taskId === (first as any).data.taskId && e.data.state === "ownership-unsettled"), 200, "uncertain child");
+    expect(driver.turns).toHaveLength(2);
+    await t.run({ type: "session.stop" }, id); lead.finish();
+    await waitFor(() => !t.manager.hasRunningWork(), 200, "stop queues");
+  });
+
   test("managed MCP leases stay held until native close has drained, including cancellation", async () => {
     const driver = new PersistentFakeDriver();
     let releases = 0;
@@ -154,12 +800,13 @@ describe("native handle ownership (D-7, D-14)", () => {
     expect(releases).toBe(0);
     expect(t.events(sessionId).find((e) => e.kind === "turn.completed")?.data).toMatchObject({ status: "failed", error: "Unable to close the turn: drain unproven" });
     expect(t.events(sessionId).filter((e) => e.kind === "task.state").at(-1)?.data).toMatchObject({ state: "ownership-unsettled", reason: "native-close-failed" });
-    expect(await t.run({ type: "prompt.send", text: "unsafe continuation" }, sessionId)).toMatchObject({ ok: false, code: "ownership-unsettled" });
+    expect(await t.run({ type: "prompt.send", text: "unsafe continuation" }, sessionId)).toMatchObject({ ok: true, data: { state: "queued" } });
     expect(await t.manager.query("sessions.prune", { keep: 0, maxAgeDays: 0 })).toMatchObject({ ok: true, data: { removed: [] } });
     await t.manager.close(); expect(releases).toBe(0);
     recoverAllSessions({ paths: t.paths, probe: createNodeProbe() });
     const reopened = setup({ dir: t.dir });
-    expect(await reopened.run({ type: "prompt.send", text: "still unsafe after restart" }, sessionId)).toMatchObject({ ok: false, code: "ownership-unsettled" });
+    expect(await reopened.run({ type: "prompt.send", text: "still unsafe after restart" }, sessionId)).toMatchObject({ ok: true, data: { state: "queued" } });
+    expect((await reopened.manager.query("prompts.list", { sessionId }) as any).data.paused).toBe(true);
   });
 
   test("a delegated task whose native close rejects cannot be continued", async () => {
@@ -214,7 +861,7 @@ describe("native handle ownership (D-7, D-14)", () => {
         expect(driver.active).toBe(true);
         expect(t.manager.hasRunningWork()).toBe(true);
         expect(t.kinds(sessionId)).not.toContain("turn.completed");
-        expect(await t.run({ type: "prompt.send", text: "too soon" }, sessionId)).toMatchObject({ ok: false, code: "turn-in-progress" });
+        expect(driver.turns).toHaveLength(1);
       } finally { driver.releaseClose(); }
       await t.idle();
       expect(driver.active).toBe(false);
@@ -436,27 +1083,27 @@ describe("single-member Lead lifecycle (task 1.16)", () => {
     const seenAtStart: SessionEvent[] = [];
     t.driver.onStart = () => { seenAtStart.push(...t.events(sessionId)); };
     const r = await t.run({ type: "prompt.send", text: "hello" }, sessionId);
-    expect(r).toMatchObject({ ok: true, data: { taskId: "lead", attempt: 1 } });
+    expect(r).toMatchObject({ ok: true, data: { promptId: expect.any(String), state: "queued" } });
     await t.idle();
 
-    expect(t.kinds(sessionId)).toEqual([
-      "session.created",
-      "command.accepted", "session.state", "message.completed", "task.created", "task.state",
-      "turn.started", "message.completed", "usage",
-      "turn.completed", "task.result", "task.state", "session.state",
-    ]);
     const ev = t.events(sessionId);
-    expect(ev[3]).toMatchObject({ kind: "message.completed", data: { role: "user", text: "hello" } });
-    expect(ev[4]).toMatchObject({ kind: "task.created", source: { taskId: "lead", memberId: "lead", runnerId: "claude" }, data: { runnerId: "claude", modelId: "opus", thinking: "high" } });
-    expect(ev[7]).toMatchObject({ kind: "message.completed", source: { taskId: "lead", memberId: "lead", runnerId: "claude" }, data: { role: "assistant", text: "reply to: hello" } });
-    expect(ev[9]).toMatchObject({ kind: "turn.completed", data: { status: "completed" } });
-    expect(ev[10]).toMatchObject({ kind: "task.result", data: { taskId: "lead", summary: "reply to: hello" } });
-    expect(ev[11]).toMatchObject({ kind: "task.state", data: { taskId: "lead", state: "completed" } });
-    expect(ev[12]).toMatchObject({ kind: "session.state", data: { state: "idle" } });
+    const queued = ev.find(e => e.kind === "prompt.queued")!;
+    const dispatched = ev.find(e => e.kind === "prompt.dispatched")!;
+    const user = ev.find(e => e.kind === "message.completed" && e.data.role === "user")!;
+    const created = ev.find(e => e.kind === "task.created")!;
+    expect(user.data).toMatchObject({ text: "hello", promptId: queued.data.promptId });
+    expect(dispatched.seq).toBeGreaterThan(created.seq);
+    expect(user.seq).toBeGreaterThan(dispatched.seq);
+    expect(ev.find(e => e.kind === "turn.started")!.seq).toBeGreaterThan(user.seq);
+    expect(created).toMatchObject({ source: { taskId: "lead", memberId: "lead", runnerId: "claude" }, data: { runnerId: "claude", modelId: "opus", thinking: "high" } });
+    expect(ev.find(e => e.kind === "message.completed" && e.data.role === "assistant")?.data.text).toBe("reply to: hello");
+    expect(ev.find(e => e.kind === "turn.completed")?.data.status).toBe("completed");
+    expect(ev.find(e => e.kind === "task.result")?.data.summary).toBe("reply to: hello");
+    expect(ev.at(-1)).toMatchObject({ kind: "prompt.state", data: { state: "completed" } });
     expect(ev.map((e, i) => e.seq === i + 1).every(Boolean)).toBe(true);
 
     // XR-4.5: the native session id was persisted before the driver started
-    const nativeId = (ev[4]!.data as { nativeSessionId?: string }).nativeSessionId;
+    const nativeId = (created.data as { nativeSessionId?: string }).nativeSessionId;
     expect(nativeId).toMatch(/^[0-9a-f-]{36}$/);
     expect(seenAtStart.some((e) => e.kind === "task.created" && e.data.nativeSessionId === nativeId)).toBe(true);
     expect(lastTurn(t.driver).input.nativeSessionId).toBe(nativeId);
@@ -505,7 +1152,7 @@ describe("single-member Lead lifecycle (task 1.16)", () => {
     await t.idle();
     const nativeId = lastTurn(t.driver).input.nativeSessionId!;
     const r2 = await t.run({ type: "prompt.send", text: "two" }, sessionId);
-    expect(r2).toMatchObject({ ok: true, data: { taskId: "lead", attempt: 2 } });
+    expect(r2).toMatchObject({ ok: true, data: { promptId: expect.any(String), state: "queued" } });
     await t.idle();
     expect(t.kinds(sessionId).filter((k) => k === "task.continued")).toHaveLength(1);
     expect(lastTurn(t.driver).input.resume).toEqual({ nativeSessionId: nativeId });
@@ -520,22 +1167,23 @@ describe("single-member Lead lifecycle (task 1.16)", () => {
     const id = lastTurn(t.driver).input.nativeSessionId!;
     lastTurn(t.driver).finish({ status: "failed", error: "spawn failed" }); // no turn.started was emitted
     await t.idle();
+    await t.run({ type: "prompt.resume" }, sessionId);
     await t.run({ type: "prompt.send", text: "two" }, sessionId);
+    await waitFor(() => t.driver.turns.length === 2, 250, "second native admission");
     expect(lastTurn(t.driver).input.resume).toBeUndefined();
     expect(lastTurn(t.driver).input.nativeSessionId).toBe(id);
     lastTurn(t.driver).finish();
     await t.idle();
   });
 
-  test("a second prompt while a turn runs is refused and records nothing", async () => {
-    const t = setup();
-    const sessionId = await t.create();
+  test("a second prompt while a turn runs is durably queued without concurrent native work", async () => {
+    const t = setup(); const sessionId = await t.create();
     await t.run({ type: "prompt.send", text: "one" }, sessionId);
-    const before = t.kinds(sessionId).length;
-    expect(await t.run({ type: "prompt.send", text: "two" }, sessionId)).toMatchObject({ ok: false, code: "turn-in-progress" });
-    expect(t.kinds(sessionId)).toHaveLength(before);
-    lastTurn(t.driver).finish();
-    await t.idle();
+    await waitFor(() => t.driver.turns.length === 1, 250, "first native turn");
+    expect(await t.run({ type: "prompt.send", text: "two" }, sessionId)).toMatchObject({ ok: true, data: { state: "queued" } });
+    expect(t.driver.turns).toHaveLength(1);
+    lastTurn(t.driver).finish(); await waitFor(() => t.driver.turns.length === 2, 250, "second native turn");
+    expect(lastTurn(t.driver).input.prompt).toBe("two"); lastTurn(t.driver).finish(); await t.idle();
   });
 
   test("a failed turn is recorded as failed with a bounded, redacted reason, and the session returns to idle", async () => {
@@ -549,9 +1197,10 @@ describe("single-member Lead lifecycle (task 1.16)", () => {
     expect(completed.data).toMatchObject({ status: "failed" });
     expect(JSON.stringify(completed.data)).not.toContain("abcdefghijklmnopqrstuv");
     expect(ev.find((e) => e.kind === "task.state" && e.data.state === "failed")).toBeDefined();
-    expect(ev.at(-1)).toMatchObject({ kind: "session.state", data: { state: "idle" } });
-    // the task can be continued after a failure
-    expect(await t.run({ type: "prompt.send", text: "again" }, sessionId)).toMatchObject({ ok: true, data: { attempt: 2 } });
+    expect([...ev].reverse().find(e => e.kind === "session.state")).toMatchObject({ data: { state: "idle" } });
+    // An explicit resume clears the failure barrier before a new instruction.
+    await t.run({ type: "prompt.resume" }, sessionId);
+    expect(await t.run({ type: "prompt.send", text: "again" }, sessionId)).toMatchObject({ ok: true, data: { promptId: expect.any(String), state: "queued" } });
     lastTurn(t.driver).finish();
     await t.idle();
   });
@@ -730,7 +1379,7 @@ describe("durable idempotency across a daemon restart (XR-1.5, Lead decision 3)"
     const created = await a.runWithId(C_CREATE, { type: "session.create", projectRoot: a.project });
     const sessionId = (created as { data: { sessionId: string } }).data.sessionId;
     const first = await a.runWithId(C_PROMPT, { type: "prompt.send", text: "hello" }, sessionId);
-    expect(first).toMatchObject({ ok: true, data: { taskId: "lead", attempt: 1 } });
+    expect(first).toMatchObject({ ok: true, data: { promptId: expect.any(String), state: "queued" } });
     await a.idle();
     expect(a.driver.turns).toHaveLength(1);
     await a.manager.close();
@@ -739,12 +1388,12 @@ describe("durable idempotency across a daemon restart (XR-1.5, Lead decision 3)"
     const b = setup({ dir });
     b.driver.autoComplete = true;
     const again = await b.runWithId(C_PROMPT, { type: "prompt.send", text: "hello" }, sessionId);
-    expect(again).toMatchObject({ ok: true, duplicate: true, data: { taskId: "lead", attempt: 1 } });
+    expect(again).toMatchObject({ ok: true, duplicate: true, data: { promptId: expect.any(String), state: "queued" } });
     expect(b.driver.turns).toHaveLength(0);
     expect(b.kinds(sessionId).filter((k) => k === "task.created" || k === "task.continued")).toHaveLength(1);
 
     // a NEW commandId is a genuinely new command
-    expect(await b.run({ type: "prompt.send", text: "next" }, sessionId)).toMatchObject({ ok: true, data: { attempt: 2 } });
+    expect(await b.run({ type: "prompt.send", text: "next" }, sessionId)).toMatchObject({ ok: true, data: { promptId: expect.any(String), state: "queued" } });
     await b.idle();
     expect(b.driver.turns).toHaveLength(1);
   });
@@ -777,7 +1426,7 @@ describe("durable idempotency across a daemon restart (XR-1.5, Lead decision 3)"
     const t = setup();
     const sessionId = await t.create();
     await t.run({ type: "prompt.send", text: "one" }, sessionId);
-    expect(await t.runWithId(C_PROMPT, { type: "prompt.send", text: "two" }, sessionId)).toMatchObject({ ok: false, code: "turn-in-progress" });
+    expect(await t.runWithId(C_PROMPT, { type: "prompt.send", text: "x".repeat(262145) }, sessionId)).toMatchObject({ ok: false, code: "prompt-too-large" });
     lastTurn(t.driver).finish();
     await t.idle();
     expect(await t.runWithId(C_PROMPT, { type: "prompt.send", text: "two" }, sessionId)).toMatchObject({ ok: true });
@@ -796,7 +1445,8 @@ describe("restart and recovery interplay (XR-3.7)", () => {
     const report = recoverAllSessions({ paths: a.paths, probe: createNodeProbe() });
     expect(report.sessions[0]!.unsettled).toEqual([{ taskId: "lead", reason: "lease-missing" }]);
     const b = setup({ dir });
-    expect(await b.run({ type: "prompt.send", text: "again" }, sessionId)).toMatchObject({ ok: false, code: "ownership-unsettled" });
+    expect(await b.run({ type: "prompt.send", text: "again" }, sessionId)).toMatchObject({ ok: true, data: { state: "queued" } });
+    expect((await b.manager.query("prompts.list", { sessionId }) as any).data.paused).toBe(true);
     lastTurn(a.driver).finish();
   });
 
@@ -809,8 +1459,9 @@ describe("restart and recovery interplay (XR-3.7)", () => {
     a.manager.openLog(sessionId)!.append({ kind: "task.state", source: { taskId: "lead" }, data: { taskId: "lead", state: "interrupted", reason: "daemon-restart" } });
     lastTurn(a.driver).finish();
     await a.idle();
+    await a.run({ type: "prompt.resume" }, sessionId);
     const r = await a.run({ type: "prompt.send", text: "again" }, sessionId);
-    expect(r).toMatchObject({ ok: true, data: { attempt: 2 } });
+    expect(r).toMatchObject({ ok: true, data: { promptId: expect.any(String), state: "queued" } });
     lastTurn(a.driver).finish();
     await a.idle();
   });
@@ -932,4 +1583,221 @@ describe("sessions.prune retention (design 6.2)", () => {
     lastTurn(t.driver).finish();
     await t.idle();
   });
+});
+
+
+describe("native memory ownership", () => {
+  test("passes prepared native memory and publishes status without exposing plugin internals", async () => {
+    const nativeMemory = { provider: "supermemory", integration: "runner-plugin", status: "ready", projectScope: "sm_project_v1_acme_deck", plugin: { root: "/private/plugin" } } as const;
+    const t = setup({ options: { childMcp: { nativeMemory, runnerPackages: () => [], resolveServer: () => undefined } } });
+    const sid = await t.create();
+    await t.run({ type: "prompt.send", text: "go" }, sid);
+    await waitFor(() => t.driver.turns.length === 1, 250, "native start");
+    const input = lastTurn(t.driver).input;
+    expect(input.nativeMemory).toEqual(nativeMemory);
+    expect(input.rolePrompt).toContain("Supermemory");
+    expect(input.rolePrompt).toContain("runner-plugin");
+    expect(input.mcp.sessionTools).not.toContain("deck_memory_recall");
+    const grant = { sessionId: sid, taskId: "lead", memberId: "lead", runnerId: "claude", allowedTools: ["deck_memory_recall", "deck_memory_propose"] };
+    expect(await t.manager.callTaskTool(grant, "deck_memory_recall", { query: "x" })).toMatchObject({ ok: false, code: "tool-not-allowed" });
+    expect(await t.manager.callTaskTool(grant, "deck_memory_propose", { content: "x" })).toMatchObject({ ok: false, code: "tool-not-allowed" });
+    const status = t.events(sid).find(e => e.data.code === "memory.integration");
+    expect(status?.data).toMatchObject({ provider: "supermemory", integration: "runner-plugin", status: "ready", projectScope: nativeMemory.projectScope });
+    expect(JSON.stringify(status)).not.toContain("/private/plugin");
+    lastTurn(t.driver).finish(); await t.idle();
+  });
+
+  test("unavailable configured native memory blocks before native execution and reports why", async () => {
+    const t = setup({ options: { childMcp: { nativeMemory: { provider: "supermemory", integration: "runner-plugin", status: "unavailable", reasonCode: "native-memory-scope-unavailable" }, runnerPackages: () => [], resolveServer: () => undefined } } });
+    const sid = await t.create();
+    await t.run({ type: "prompt.send", text: "go" }, sid); await t.idle();
+    expect(t.driver.turns).toHaveLength(0);
+    expect(t.events(sid).find(e => e.data.code === "memory.integration")?.data.status).toBe("unavailable");
+    expect(t.events(sid).find(e => e.kind === "turn.completed")?.data.error).toContain("native-memory-scope-unavailable");
+  });
+});
+
+
+describe("managed user image attachments", () => {
+  const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==","base64");
+  const upload=(t:ReturnType<typeof setup>,sessionId:string,name="clipboard.png")=>{
+    const outcome=t.manager.uploadAttachment({sessionId,bytes:png,mimeType:"image/png",name});
+    if(!outcome.ok) throw Error(outcome.code); return (outcome.data as any).attachment;
+  };
+  test("queued image-only input reaches native admission once and never bleeds into the next resumed turn", async () => {
+    const t=setup(); const id=await t.create(); await t.run({type:"prompt.send",text:"active"},id);
+    await waitFor(()=>t.driver.turns.length===1); lastTurn(t.driver).init();
+    const a=upload(t,id), b=upload(t,id,"second.png"); const promptId="11111111-1111-4111-8111-111111111111";
+    expect((await t.runWithId(promptId,{type:"prompt.send",text:"",attachmentIds:[a.attachmentId,b.attachmentId]},id)).ok).toBe(true);
+    const snapshot=await t.manager.query("prompts.list",{sessionId:id});
+    expect((snapshot as any).data.queued[0].attachments).toEqual([a,b]);
+    expect(t.events(id).filter(e=>e.kind==="message.completed" && e.data.promptId===promptId)).toHaveLength(0);
+    lastTurn(t.driver).finish(); await waitFor(()=>t.driver.turns.length===2);
+    const imageTurn=lastTurn(t.driver); expect(imageTurn.input.prompt).toBe(""); expect(imageTurn.input.images).toHaveLength(2);
+    expect(imageTurn.input.images!.map(image=>readFileSync(image.path))).toEqual([png,png]);
+    expect(imageTurn.input.rolePrompt).toContain("Inspect every supplied native image");
+    for (const [index, image] of imageTurn.input.images!.entries()) expect(imageTurn.input.rolePrompt).toContain(`Image ${index+1} (${image.name}): ${image.path}`);
+    expect(imageTurn.input.resume).toBeDefined();
+    expect(t.events(id).find(e=>e.kind==="message.completed" && e.data.promptId===promptId)?.data.attachments).toEqual([a,b]);
+    imageTurn.emit("message.completed",{text:`private ${imageTurn.input.images![0]!.path}`},{path:imageTurn.input.images![0]!.path});
+    imageTurn.emit("tool.completed",{summary:imageTurn.input.images!.map(image=>image.path).join(" ")});
+    for (const image of imageTurn.input.images!) expect(JSON.stringify(t.events(id))).not.toContain(image.path);
+    expect(JSON.stringify(t.events(id))).not.toContain(imageTurn.input.images![0]!.path);
+    imageTurn.init(); imageTurn.finish(); await t.idle();
+    await t.run({type:"prompt.send",text:"next"},id); await waitFor(()=>t.driver.turns.length===3);
+    expect(lastTurn(t.driver).input.images).toBeUndefined(); lastTurn(t.driver).finish(); await t.idle();
+    expect((await t.runWithId(promptId,{type:"prompt.send",text:"",attachmentIds:[a.attachmentId,b.attachmentId]},id)).duplicate).toBe(true);
+    expect(await t.runWithId(promptId,{type:"prompt.send",text:"",attachmentIds:[b.attachmentId,a.attachmentId]},id)).toMatchObject({ok:false,code:"command-id-reused"});
+  });
+  test("attachment ownership is session-scoped and cancelled accepted images survive restart", async () => {
+    const t=setup(); const id=await t.create(), other=await t.create(); const image=upload(t,id);
+    expect(await t.run({type:"prompt.send",text:"image",attachmentIds:[image.attachmentId]},other)).toMatchObject({ok:false,code:"attachment-unknown"});
+    let release!:()=>void; t.driver.probe=()=>new Promise(resolve=>{release=()=>resolve(t.driver.probeResult);}); const sent=await t.run({type:"prompt.send",text:"",attachmentIds:[image.attachmentId]},id);
+    expect(sent.ok).toBe(true); const promptId=(sent as any).data.promptId;
+    await waitFor(()=>!!release); expect((await t.run({type:"prompt.cancel",promptId},id)).ok).toBe(true); release(); await t.idle();
+    expect(t.manager.readAttachment(id,image.attachmentId)?.bytes).toEqual(png);
+    // Recovery reads immutable metadata independently from browser/OS paths.
+    await t.manager.close(); const recovered=setup({dir:t.dir}); expect(recovered.manager.readAttachment(id,image.attachmentId)?.bytes).toEqual(png);
+    const queued=t.events(id).find(e=>e.kind==="prompt.queued")!;
+    expect(queued.data.attachments).toEqual([image]); expect(JSON.stringify(queued)).not.toContain(t.paths.root);
+  });
+  test("paused image inbox survives daemon restart and dedupes before resuming native input", async () => {
+    const t=setup(); const id=await t.create(); await t.run({type:"prompt.send",text:"active"},id);await waitFor(()=>t.driver.turns.length===1);lastTurn(t.driver).init();
+    const image=upload(t,id);const promptId="22222222-2222-4222-8222-222222222222";
+    await t.runWithId(promptId,{type:"prompt.send",text:"",attachmentIds:[image.attachmentId]},id);
+    await t.run({type:"turn.interrupt",taskId:"lead"},id);await t.idle();await t.manager.close();
+    const next=setup({dir:t.dir});const snapshot=await next.manager.query("prompts.list",{sessionId:id});
+    expect((snapshot as any).data).toMatchObject({paused:true,queued:[{promptId,text:"",attachments:[image]}]});
+    expect((await next.runWithId(promptId,{type:"prompt.send",text:"",attachmentIds:[image.attachmentId]},id)).duplicate).toBe(true);
+    expect(await next.runWithId(promptId,{type:"prompt.send",text:"changed",attachmentIds:[image.attachmentId]},id)).toMatchObject({ok:false,code:"command-id-reused"});
+    expect(next.driver.turns).toHaveLength(0);await next.run({type:"prompt.resume"},id);await waitFor(()=>next.driver.turns.length===1);
+    expect(readFileSync(lastTurn(next.driver).input.images![0]!.path)).toEqual(png);lastTurn(next.driver).finish();await next.idle();
+  });
+  test("message image bytes allow the exact20MiB boundary and reject larger aggregates", async () => {
+    const t=setup();t.driver.autoComplete=true;const id=await t.create();
+    const chunk=Buffer.alloc(5*1024*1024-png.length);chunk.writeUInt32BE(chunk.length-12);chunk.write("paDd",4);
+    let crc=0xffffffff;for(const byte of chunk.subarray(4,-4)){crc^=byte;for(let bit=0;bit<8;bit++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}chunk.writeUInt32BE((crc^0xffffffff)>>>0,chunk.length-4);
+    const large=Buffer.concat([png.subarray(0,-12),chunk,png.subarray(-12)]);const ids:string[]=[];
+    for(let i=0;i<5;i++){const result=t.manager.uploadAttachment({sessionId:id,bytes:large,mimeType:"image/png",name:`image${i}.png`});expect(result.ok).toBe(true);ids.push((result as any).data.attachment.attachmentId);}
+    expect(await t.run({type:"prompt.send",text:"",attachmentIds:ids},id)).toMatchObject({ok:false,code:"attachment-too-large"});
+    expect((await t.run({type:"prompt.send",text:"",attachmentIds:ids.slice(0,4)},id)).ok).toBe(true);await t.idle();expect(lastTurn(t.driver).input.images).toHaveLength(4);
+  });
+  test("Lead generation handoff keeps bounded image labels and private references without public paths", async () => {
+    const t=setup(); const id=await t.create(); const image=upload(t,id);
+    await t.run({type:"prompt.send",text:"",attachmentIds:[image.attachmentId]},id); await waitFor(()=>t.driver.turns.length===1);
+    const original=lastTurn(t.driver); const path=original.input.images![0]!.path; original.init(); original.say("A red pixel");original.finish();await t.idle();
+    expect((await t.run({type:"session.assignMember",memberId:"lead",expectedRevision:0,assignment:{runnerId:"claude",modelId:"sonnet"}},id)).ok).toBe(true);
+    expect(JSON.stringify(t.events(id))).toContain(image.attachmentId); expect(JSON.stringify(t.events(id))).not.toContain(path);
+    await t.run({type:"prompt.send",text:"Describe the earlier image"},id); await waitFor(()=>t.driver.turns.length===2);
+    const current=lastTurn(t.driver); expect(current.input.images).toBeUndefined(); expect(current.input.rolePrompt).toContain("Image 1: clipboard.png"); expect(current.input.rolePrompt).toContain(path);
+    current.emit("message.completed",{text:`Previous image ${path}`}); expect(JSON.stringify(t.events(id))).not.toContain(path);
+    current.finish(); await t.idle();
+  });
+  test("missing managed image before native admission fails visibly without delivering user chat", async () => {
+    const t=setup(); const id=await t.create(); const image=upload(t,id); let release!:()=>void;
+    t.driver.probe=()=>new Promise(resolve=>{release=()=>resolve(t.driver.probeResult);});
+    const sent=await t.run({type:"prompt.send",text:"inspect",attachmentIds:[image.attachmentId]},id); await waitFor(()=>!!release);
+    rmSync(join(sessionPaths(t.paths,id).attachmentsDir,`${image.attachmentId}.image`)); release(); await t.idle();
+    expect(t.driver.turns).toHaveLength(0);
+    expect(t.events(id).filter(e=>e.kind==="message.completed" && e.data.role==="user")).toHaveLength(0);
+    const result=await t.manager.query("prompts.list",{sessionId:id}); expect((result as any).data.paused).toBe(true);
+    expect(t.events(id).find(e=>e.kind==="prompt.state" && e.data.promptId===(sent as any).data.promptId)?.data.state).toBe("failed");
+  });
+});
+
+
+describe("reversible session release and session catalog actions", () => {
+ const ready=async(t:ReturnType<typeof setup>,id:string)=>{expect((await t.run({type:"session.prepare"},id)).ok).toBe(true);await waitFor(async()=>((await t.manager.query("session.readiness",{sessionId:id})) as any).data.status==="ready");};
+ test("release waits owned native drain, preserves paused FIFO and native identity, and leaves another session running",async()=>{
+  const t=setup();const id=await t.create(),other=await t.create();await ready(t,id);
+  const start=t.driver.startTask.bind(t.driver);let close!:()=>void;const held=new Promise<void>(resolve=>{close=resolve;});let n=0;
+  t.driver.startTask=async(input,io)=>{const handle=await start(input,io);if(++n!==1)return handle;return{...handle,close:async()=>{await held;await handle.close();}};};
+  await t.run({type:"prompt.send",text:"active"},id);await waitFor(()=>t.driver.turns.length===1);lastTurn(t.driver).init();const native=lastTurn(t.driver).nativeSessionId;
+  const queued=await t.run({type:"prompt.send",text:"later"},id);const releaseId="33333333-3333-4333-8333-333333333333";
+  expect(await t.runWithId(releaseId,{type:"session.release"},id)).toMatchObject({ok:true,data:{preparation:{status:"releasing"}}});
+  expect((await t.manager.query("session.readiness",{sessionId:id}) as any).data.status).toBe("releasing");
+  expect(await t.run({type:"prompt.send",text:"not admitted"},id)).toMatchObject({ok:false,code:"session-released"});
+  expect(await t.run({type:"session.prepare"},id)).toMatchObject({ok:false,code:"session-releasing"});
+  await t.run({type:"prompt.send",text:"other session"},other);await waitFor(()=>t.driver.turns.length===2);expect(lastTurn(t.driver).finished).toBe(false);
+  close();await waitFor(async()=>((await t.manager.query("session.readiness",{sessionId:id})) as any).data.status==="unprepared");
+  const inbox=await t.manager.query("prompts.list",{sessionId:id});expect((inbox as any).data).toMatchObject({paused:true,queued:[{promptId:(queued as any).data.promptId,text:"later"}]});
+  await ready(t,id);expect(t.driver.turns).toHaveLength(2);expect((await t.manager.query("prompts.list",{sessionId:id}) as any).data.paused).toBe(true);
+  expect((await t.runWithId(releaseId,{type:"session.release"},id)).duplicate).toBe(true);expect((await t.manager.query("session.readiness",{sessionId:id}) as any).data.status).toBe("ready");
+  await t.run({type:"prompt.resume"},id);await waitFor(()=>t.driver.turns.length===3);expect(lastTurn(t.driver).input.resume?.nativeSessionId).toBe(native);
+  t.driver.turns.forEach(turn=>turn.finish());await t.idle();
+ });
+ test("release aborts stale preparation and waits helper cleanup before allowing Prepare",async()=>{
+  let releaseResolver!:()=>void,releaseHelper!:()=>void,helperClosed=false;
+  const t=setup({options:{childMcp:async()=>{await new Promise<void>(resolve=>{releaseResolver=resolve;});return{runnerPackages:()=>[],resolveServer:()=>undefined,release:async()=>{await new Promise<void>(resolve=>{releaseHelper=resolve;});helperClosed=true;}};}}});const id=await t.create();
+  await t.run({type:"session.prepare"},id);await waitFor(()=>!!releaseResolver);
+  await t.run({type:"session.release"},id);releaseResolver();await waitFor(()=>!!releaseHelper);
+  expect((await t.manager.query("session.readiness",{sessionId:id}) as any).data.status).toBe("releasing");expect(helperClosed).toBe(false);releaseHelper();
+  await waitFor(async()=>((await t.manager.query("session.readiness",{sessionId:id})) as any).data.status==="unprepared");expect(helperClosed).toBe(true);
+  expect(t.events(id).filter(event=>event.kind==="diagnostic" && event.data.code==="session.preparation" && event.data.status==="ready")).toHaveLength(0);
+ });
+ test("release and remove single-record intents replay safely without receipt tails",async()=>{
+  const t=setup();const id=await t.create();t.state.config!.enabled=false;
+  await t.run({type:"prompt.send",text:"pending"},id);expect(t.driver.turns).toHaveLength(0);
+  const releaseId="66666666-6666-4666-8666-666666666666";
+  t.manager.openLog(id)!.append({kind:"session.released",data:{phase:"releasing",epoch:1,commandId:releaseId,outcome:{ok:true,data:{preparation:{status:"releasing",generation:0}}}}});t.manager.openLog(id)!.flush();await t.manager.close();
+  const next=setup({dir:t.dir});await waitFor(async()=>((await next.manager.query("session.readiness",{sessionId:id})) as any).data.status==="unprepared");await ready(next,id);
+  expect((await next.runWithId(releaseId,{type:"session.release"},id)).duplicate).toBe(true);
+  expect((await next.manager.query("session.readiness",{sessionId:id}) as any).data.status).toBe("ready");expect(next.driver.turns).toHaveLength(0);
+  expect((await next.manager.query("prompts.list",{sessionId:id}) as any).data).toMatchObject({paused:true,queued:[{text:"pending"}]});
+  const removeId="77777777-7777-4777-8777-777777777777";
+  next.manager.openLog(id)!.append({kind:"session.removed",data:{phase:"removing",epoch:2,commandId:removeId,outcome:{ok:true,data:{state:"removing",preparation:{status:"releasing",generation:0}}}}});next.manager.openLog(id)!.flush();await next.manager.close();
+  const restored=setup({dir:t.dir});await waitFor(async()=>!(await restored.manager.query("sessions.list",{}) as any).data.sessions.length);
+  expect((await restored.runWithId(removeId,{type:"session.remove"},id)).duplicate).toBe(true);expect(restored.manager.openLog(id)).toBeDefined();expect(restored.driver.turns).toHaveLength(0);
+ });
+ test("recovery completes removal when crash retains terminal release but omits terminal tombstone",async()=>{
+  const t=setup();const id=await t.create();const log=t.manager.openLog(id)!;
+  log.append({kind:"session.removed",data:{phase:"removing",epoch:1,commandId:"88888888-8888-4888-8888-888888888888",outcome:{ok:true,data:{state:"removing"}}}});
+  log.append({kind:"session.released",data:{phase:"released",epoch:1}});log.flush();
+  expect((await t.manager.query("sessions.list",{}) as any).data.sessions[0]).toMatchObject({removing:true,releasing:false});await t.manager.close();
+  const next=setup({dir:t.dir});await waitFor(async()=>!(await next.manager.query("sessions.list",{}) as any).data.sessions.length);
+  expect(next.events(id).filter(event=>event.kind==="session.removed" && event.data.phase==="removed")).toHaveLength(1);expect(next.manager.openLog(id)).toBeDefined();
+ });
+ test("held assignment validation cannot mutate a removed session",async()=>{
+  const t=setup();const id=await t.create();let probe!:()=>void;t.driver.probe=()=>new Promise(resolve=>{probe=()=>resolve(t.driver.probeResult);});
+  const assignment=t.run({type:"session.assignMember",memberId:"lead",assignment:{runnerId:"claude",modelId:"sonnet"},expectedRevision:0},id);await waitFor(()=>!!probe);
+  await t.run({type:"session.remove"},id);await t.idle();probe();expect(await assignment).toMatchObject({ok:false,code:"session-removed"});
+  expect(t.events(id).filter(event=>event.kind==="session.assignment")).toHaveLength(0);
+ });
+ test("pruning protects held resource drains and fresh Remove retries failed owned cleanup",async()=>{
+  const t=setup();const id=await t.create();let close!:()=>void;let attempts=0;
+  const live=(t.manager as any).sessions.get(id);live.memory=new MemoryBroker(Promise.resolve({recall:async()=>({ok:true}),propose:async()=>({ok:true}),close:async()=>{attempts++;if(attempts===1)throw Error("temporary close failure");await new Promise<void>(resolve=>{close=resolve;});}}));
+  await t.run({type:"session.remove"},id);await waitFor(async()=>((await t.manager.query("session.readiness",{sessionId:id})) as any).data.status==="failed");
+  expect(t.manager.hasRunningWork()).toBe(true);
+  expect((await t.manager.query("session.readiness",{sessionId:id}) as any).data).toMatchObject({status:"failed",reasonCode:"session-release-failed"});
+  expect((await t.manager.query("sessions.prune",{keep:0,maxAgeDays:0}) as any).data.removed).toEqual([]);
+  expect((await t.run({type:"session.remove"},id)).ok).toBe(true);await waitFor(()=>!!close);
+  expect((await t.manager.query("sessions.prune",{keep:0,maxAgeDays:0}) as any).data.removed).toEqual([]);
+  expect((await t.manager.query("sessions.list",{}) as any).data.sessions[0]).toMatchObject({sessionId:id,removing:true,running:true});
+  close();await t.idle();expect(attempts).toBe(2);expect((await t.manager.query("sessions.list",{}) as any).data.sessions).toEqual([]);
+ });
+ test("Prepare reopens legacy ended in place and old Stop cannot stop the new incarnation after receipt eviction",async()=>{
+  const t=setup();const id=await t.create();await t.run({type:"prompt.send",text:"history"},id);await waitFor(()=>t.driver.turns.length===1);lastTurn(t.driver).init();const native=lastTurn(t.driver).nativeSessionId;lastTurn(t.driver).finish();await t.idle();
+  const stopId="44444444-4444-4444-8444-444444444444";await t.runWithId(stopId,{type:"session.stop"},id);await ready(t,id);
+  expect(t.events(id).some(event=>event.kind==="session.reopened")).toBe(true);
+  for(let i=0;i<1001;i++) await t.run({type:"session.bindChange",changeId:"same-change"},id);
+  expect((await t.runWithId(stopId,{type:"session.stop"},id)).duplicate).toBe(true);
+  expect((await t.manager.query("session.readiness",{sessionId:id}) as any).data.status).toBe("ready");
+  await t.run({type:"prompt.send",text:"same session"},id);await waitFor(()=>t.driver.turns.length===2);expect(lastTurn(t.driver).input.resume?.nativeSessionId).toBe(native);lastTurn(t.driver).finish();await t.idle();
+  const list=await t.manager.query("sessions.list",{});expect((list as any).data.sessions.map((session:any)=>session.sessionId)).toEqual([id]);
+ });
+ test("rename replay cannot revert a later title and removal hides only after drain while preserving readable history",async()=>{
+  const t=setup();const id=await t.create();const renameId="55555555-5555-4555-8555-555555555555";
+  expect(await t.runWithId(renameId,{type:"session.rename",title:" First "},id)).toMatchObject({ok:true,data:{title:"First"}});
+  await t.run({type:"session.rename",title:"Second"},id);expect((await t.runWithId(renameId,{type:"session.rename",title:" First "},id)).duplicate).toBe(true);
+  expect((await t.manager.query("sessions.list",{}) as any).data.sessions[0].title).toBe("Second");
+  await t.run({type:"prompt.send",text:"preserved"},id);await waitFor(()=>t.driver.turns.length===1);
+  let close!:()=>void;const turn=lastTurn(t.driver);const liveTurn=(t.manager as any).sessions.get(id).turns.get("lead");const handle=liveTurn.handle;liveTurn.handle={...handle,close:()=>new Promise<void>(resolve=>{close=resolve;})};
+  expect(await t.run({type:"session.remove"},id)).toMatchObject({ok:true,data:{state:"removing"}});await waitFor(()=>!!close);
+  expect((await t.manager.query("sessions.list",{}) as any).data.sessions[0]).toMatchObject({sessionId:id,removing:true});
+  expect(await t.run({type:"session.prepare"},id)).toMatchObject({ok:false,code:"session-removed"});close();
+  await waitFor(async()=>!(await t.manager.query("sessions.list",{}) as any).data.sessions.length);
+  expect(t.manager.openLog(id)).toBeDefined();expect(t.events(id).some(event=>event.kind==="session.removed" && event.data.phase==="removed")).toBe(true);
+  expect(existsSync(sessionPaths(t.paths,id).sessionFile)).toBe(true);await t.manager.close();const next=setup({dir:t.dir});
+  expect((await next.manager.query("sessions.list",{}) as any).data.sessions).toEqual([]);expect(await next.run({type:"prompt.send",text:"no"},id)).toMatchObject({ok:false,code:"session-removed"});
+ });
 });

@@ -49,7 +49,7 @@ export type DaemonOptions = {
   uid?: number;
   pid?: number;
   nonce?: string;
-  web?: { config: WebConfig; assets?: WebAssets };
+  web?: { config: WebConfig; assets?: WebAssets; autoStart?: boolean };
 };
 
 export type RunningDaemon = {
@@ -115,10 +115,17 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     const guardedService: SessionService = {
       execute: (input) => admit(() => svc.execute(input)), openLog: (id) => svc.openLog(id), hasRunningWork: () => svc.hasRunningWork(),
       query: (name, args) => admit(() => svc.query?.(name, args) ?? { ok: false, code: "query-unknown" }),
+      uploadAttachment: (input) => {
+        if (draining) return { ok: false, code: "daemon-stopping" };
+        admitted++;
+        try { return svc.uploadAttachment?.(input) ?? { ok: false, code: "attachment-unavailable" }; }
+        finally { admitted--; }
+      },
+      readAttachment: (sessionId, attachmentId) => svc.readAttachment?.(sessionId, attachmentId),
     };
     if (options.web) {
       web = new WebService({ paths, service: guardedService, ...options.web });
-      try { web.start(); } catch { logger.warn("web.listen-failed"); }
+      if (options.web.autoStart !== false) try { web.start(); } catch { logger.warn("web.listen-failed"); }
     }
     const transportService: SessionService = {
       execute: (input) => guardedService.execute(input), openLog: (id) => svc.openLog(id), hasRunningWork: () => svc.hasRunningWork(),

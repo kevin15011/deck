@@ -8,6 +8,7 @@
  * interactive launch lane in `claude-launch-plan.ts` is not touched.
  */
 import type { DriverTaskInput } from "@deck/core/session/driver";
+import { isAbsolute } from "node:path";
 
 export const DECK_APPROVE_PROMPT_TOOL = "mcp__deck__deck_approve";
 const DECK_SERVER_ID = "deck";
@@ -44,11 +45,19 @@ const safeScalar = (value: string): boolean =>
   value.length > 0 && value.trim() === value && !value.startsWith("-") && !/[\0\r\n]/.test(value) && Buffer.byteLength(value, "utf8") <= MAX_SCALAR_BYTES;
 
 /** One stream-json user message (newline terminated). */
-export function encodeUserMessage(text: string): string {
-  return `${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`;
+export function encodeUserMessage(text: string, images: readonly { mimeType: string; data: string }[] = []): string {
+  const content = images.length ? [
+    ...(text ? [{ type: "text", text }] : []),
+    ...images.map(image => ({ type: "image", source: { type: "base64", media_type: image.mimeType, data: image.data } })),
+  ] : text;
+  return `${JSON.stringify({ type: "user", message: { role: "user", content } })}\n`;
 }
 
 export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunchFiles, options: ClaudeLaunchOptions = {}): ClaudeTurnLaunch {
+  const memory = input.nativeMemory;
+  if (memory?.status === "unavailable") throw new ClaudeLaunchError(memory.reasonCode ?? "native-memory-unavailable", memory.reasonCode ?? "Native Supermemory is unavailable");
+  const nativePlugin = memory?.status === "ready" ? memory.plugin : undefined;
+  if (memory?.status === "ready" && (!/^sm_project_v1_[a-z0-9_]{3,180}$/.test(memory.projectScope ?? "") || !nativePlugin || !isAbsolute(nativePlugin.root) || /[\0\r\n]/.test(nativePlugin.root))) throw new ClaudeLaunchError("claude-memory-descriptor-invalid", "Native Supermemory needs a verified canonical project scope and plugin");
   const { modelId, thinking } = input.assignment;
   if (!safeScalar(modelId)) throw new ClaudeLaunchError("claude-invalid-model", "Claude model id must be a bounded, non-option scalar");
   const sessionId = input.resume?.nativeSessionId ?? input.nativeSessionId;
@@ -56,8 +65,11 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
 
   const diagnostics: ClaudeTurnLaunch["diagnostics"] = [];
   const specs: Record<string, { command: string; args: readonly string[]; env: Readonly<Record<string, string>> } | { type: "http"; url: string; headers?: Record<string, string> }> = {};
-  for (const id of input.mcp.servers) {
-    const spec = input.mcpServerSpecs[id];
+  const memoryServers = nativePlugin?.mcpServers ?? {};
+  for (const id of Object.keys(memoryServers)) if (input.mcp.servers.includes(id)) throw new ClaudeLaunchError("claude-memory-mcp-conflict", "Native memory MCP server conflicts with the ordinary child set");
+  const expectedMcpServers = [...input.mcp.servers, ...Object.keys(memoryServers)];
+  for (const id of expectedMcpServers) {
+    const spec = input.mcpServerSpecs[id] ?? memoryServers[id];
     if (!spec) throw new ClaudeLaunchError("claude-mcp-spec-missing", `No launch spec for MCP server "${id}"`);
     if (spec.transport === "http") {
       const headers = Object.fromEntries(Object.entries(spec.envHttpHeaders ?? {}).map(([name, variable]) => {
@@ -81,8 +93,11 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   args.push(...(input.resume ? ["--resume", sessionId] : ["--session-id", sessionId]));
   args.push("--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages");
   args.push("--strict-mcp-config", "--mcp-config", mcpConfigFile);
-  args.push("--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, disableAllHooks: true }));
+  args.push("--setting-sources", "");
+  args.push("--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, disableAllHooks: !nativePlugin }));
+  if (nativePlugin) args.push("--plugin-dir", nativePlugin.root);
   if (input.approvals === "relay") args.push("--permission-prompt-tool", DECK_APPROVE_PROMPT_TOOL);
+  else args.push("--dangerously-skip-permissions");
   if (input.disableNativeDelegation) args.push("--disallowedTools", NATIVE_DELEGATION_TOOLS);
   if (input.rolePrompt.length > 0) args.push("--append-system-prompt-file", files.writePrivateFile("role-prompt.md", input.rolePrompt));
 
@@ -92,5 +107,5 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   for (const [key, value] of Object.entries(options.baseEnv ?? process.env)) if (typeof value === "string") env[key] = value;
   env.MCP_TOOL_TIMEOUT = String(MCP_TOOL_TIMEOUT_MS);
 
-  return { command: options.executable ?? "claude", args, env, expectedMcpServers: [...input.mcp.servers], diagnostics };
+  return { command: options.executable ?? "claude", args, env, expectedMcpServers, diagnostics };
 }

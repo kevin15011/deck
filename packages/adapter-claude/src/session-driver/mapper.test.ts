@@ -64,6 +64,12 @@ describe("Claude 2.1.296 stream-json mapper (recorded fixtures)", () => {
     expect(diagnostics[0]!.data).toMatchObject({ code: "claude-hook-executed" });
     expect(outs.some((o) => o.hookSeen)).toBe(true);
     expect(outs.flatMap((o) => o.events).some((e) => e.kind === "runner.unmapped")).toBe(false);
+    const hooks = outs.flatMap(o => o.events).filter(e => e.kind.startsWith("hook."));
+    expect(hooks.filter(e => e.kind === "hook.started")).toHaveLength(4);
+    expect(hooks.filter(e => e.kind === "hook.completed")).toHaveLength(4);
+    expect(hooks[0]!.data).toMatchObject({ hookId: expect.any(String), hookEvent: "SessionStart", hookName: "SessionStart", status: "running", provenance: "claude-stream-json" });
+    expect(hooks.find(e => e.kind === "hook.completed")!.data).toMatchObject({ status: "completed", exitCode: 0 });
+    expect(hooks.every(e => e.data.provider === undefined && e.raw === undefined)).toBe(true);
   });
 
   test("--safe-mode drops explicit MCP: init reports an empty server list", () => {
@@ -73,6 +79,42 @@ describe("Claude 2.1.296 stream-json mapper (recorded fixtures)", () => {
 });
 
 describe("Claude mapper (synthetic tool and error shapes)", () => {
+  test("future hook subtypes remain metadata-only and preserve ordinary unknown raw policy", () => {
+    const mapper = new ClaudeStreamMapper();
+    const out = mapper.map({ type: "system", subtype: "hook_future token=synthetic-method-secret " + "x".repeat(1000), output: "private recalled context", stdout: "private hook output", hook_name: "node /private/script.js" });
+    expect(out.events).toMatchObject([{ kind: "runner.unmapped", data: { type: expect.any(String) } }]);
+    expect(out.events[0]!.raw).toBeUndefined();
+    expect(String(out.events[0]!.data.type).length).toBeLessThanOrEqual(128);
+    expect(JSON.stringify(out)).not.toContain("private");
+    expect(JSON.stringify(out)).not.toContain("synthetic-method-secret");
+    const raw = { type: "system", subtype: "future", payload: "regular data" };
+    expect(mapper.map(raw).events[0]!.raw).toBe(raw);
+  });
+  test("hook attribution requires an exclusive trusted event set and never exposes hook context", () => {
+    const nativeMemory = { provider: "supermemory", integration: "runner-plugin", status: "ready", plugin: { root: "/trusted/plugin", exclusiveHookEvents: ["SessionStart"] } } as const;
+    const mapper = new ClaudeStreamMapper(nativeMemory);
+    const events = mapper.map({ type: "system", subtype: "hook_response", hook_id: "h1", hook_event: "SessionStart", hook_name: "node /private/plugin/hook.js token=synthetic-secret", exit_code: 0, outcome: "success", output: "private recalled context", stdout: "private context", stderr: "token=synthetic-secret" }).events;
+    const hook = events.find(e => e.kind === "hook.completed")!;
+    expect(hook.data).toMatchObject({ provider: "supermemory", integration: "runner-plugin", status: "completed" });
+    expect(JSON.stringify(hook)).not.toContain("private");
+    expect(JSON.stringify(hook)).not.toContain("synthetic-secret");
+    expect(JSON.stringify(events)).not.toContain("/private/");
+    expect(JSON.stringify(events)).not.toContain("synthetic-secret");
+    expect(mapper.map({ type: "system", subtype: "hook_started", hook_id: "h2", hook_event: "Stop", hook_name: "other" }).events.find(e => e.kind === "hook.started")!.data.provider).toBeUndefined();
+    expect(new ClaudeStreamMapper().map({ type: "system", subtype: "hook_response", hook_id: "h3", hook_event: "Stop", exit_code: 1, outcome: "error" }).events.find(e => e.kind === "hook.completed")!.data.status).toBe("failed");
+  });
+  test("thinking snapshots retain message and block identity and sanitize exposed text", () => {
+    const mapper = new ClaudeStreamMapper();
+    const events = mapper.map({ type: "assistant", message: { id: "m1", content: [
+      { type: "thinking", thinking: "Inspect source token=synthetic-secret\u001b[31m" },
+      { type: "thinking", thinking: "Check tests" },
+    ] } }).events;
+    expect(events[0]!.data).toMatchObject({ messageId: "m1", blockIndex: 0, partId: "0", format: "snapshot", reasoningKind: "text" });
+    expect(events[1]!.data).toMatchObject({ messageId: "m1", blockIndex: 1, partId: "1", text: "Check tests" });
+    expect(events[0]!.data.text).not.toContain("synthetic-secret");
+    expect(events[0]!.data.text).not.toContain("\u001b");
+    expect(String(mapper.map({ type: "assistant", message: { content: [{ type: "thinking", thinking: "x".repeat(50000) }] } }).events[0]!.data.text).length).toBeLessThanOrEqual(8192);
+  });
   test("tool_use / tool_result map to tool.started / tool.completed and permission denials are reported", () => {
     const { events, result, kinds } = run("tool-flow.synthetic.jsonl");
     expect(kinds).toEqual(["turn.started", "message.completed", "tool.started", "tool.completed", "tool.completed", "message.completed", "usage", "diagnostic"]);

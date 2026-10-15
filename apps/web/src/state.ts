@@ -1,4 +1,5 @@
 import type { SessionEvent } from '../../../packages/core/src/session/events';
+import { isLeadEvent } from './event-source';
 export type ViewState = {
     seq: number;
     events: SessionEvent[];
@@ -22,6 +23,8 @@ export function reduceEvent(state: ViewState, event: SessionEvent): ViewState {
         next.state = String(event.data.state);
     if (event.kind === 'session.ended')
         next.state = 'ended';
+    if (event.kind === 'session.reopened')
+        next.state = String(event.data.state ?? 'idle');
     return next;
 }
 export function pairingToken(location: {
@@ -40,7 +43,7 @@ export function pairingToken(location: {
 export function conversationEvents(events: SessionEvent[], taskId = 'lead'): SessionEvent[] {
     const messages: SessionEvent[] = [], pending = new Map<string, number>();
     for (const e of events) {
-        if (e.data.internal === true || (e.source.taskId ?? 'lead') !== taskId || e.data.role === 'system')
+        if (e.data.internal === true || !(taskId === 'lead' ? isLeadEvent(e) : (e.source.taskId ?? 'lead') === taskId) || e.data.role === 'system')
             continue;
         const task = e.source.taskId ?? 'lead';
         if (e.kind === 'turn.completed' || e.kind === 'turn.started' || e.kind === 'task.continued')
@@ -69,7 +72,4 @@ export function conversationEvents(events: SessionEvent[], taskId = 'lead'): Ses
     return messages;
 }
 
-/** Operational events stay outside conversational prose, including delegated task notices. */
-export function activityEvents(events: SessionEvent[]): SessionEvent[] {
-    return events.filter(event => event.data.internal !== true && !event.kind.startsWith('message.') && !['usage', 'reasoning.delta', 'command.accepted'].includes(event.kind));
-}
+export { activityEvents } from './activity';

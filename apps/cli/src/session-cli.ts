@@ -6,7 +6,7 @@ import type { DeckConfigStore } from "./deck-config-store";
 import { LineQueue } from "./line-queue";
 import { deckInternalCommand } from "./runner-adapters";
 import { getBuildInfo } from "./runtime/build-info";
-import { runCrossLaunch, runSessionCommand, type SessionCommandDeps, type SessionConnection } from "./session-commands";
+import { runCrossLaunch, runSessionCommand, runWebWorkspace, type SessionCommandDeps, type SessionConnection } from "./session-commands";
 
 export async function connectToSessionDaemon(options: { ensure: boolean; env?: NodeJS.ProcessEnv; version?: string }): Promise<SessionConnection | undefined> {
   const env = options.env ?? process.env;
@@ -22,7 +22,7 @@ export async function connectToSessionDaemon(options: { ensure: boolean; env?: N
   return { client, paths };
 }
 
-export async function runSessionCli(parsed: Extract<ParsedArgs, { command: "cross-launch" | "session" }>, deps: { configStore: DeckConfigStore; projectRoot: () => string | null }): Promise<number> {
+export async function runSessionCli(parsed: Extract<ParsedArgs, { command: "cross-launch" | "session" | "web" }>, deps: { configStore: DeckConfigStore; projectRoot: () => string | null }): Promise<number> {
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
   const lines = new LineQueue(process.stdin, (prompt) => { process.stdout.write(prompt); });
   const commandDeps: SessionCommandDeps = {
@@ -42,7 +42,7 @@ export async function runSessionCli(parsed: Extract<ParsedArgs, { command: "cros
     env: process.env,
   };
   try {
-    return parsed.command === "cross-launch" ? await runCrossLaunch(commandDeps, parsed.flags) : await runSessionCommand(commandDeps, parsed.sub);
+    return parsed.command === "web" ? await runWebWorkspace(commandDeps, parsed.flags) : parsed.command === "cross-launch" ? await runCrossLaunch(commandDeps, parsed.flags) : await runSessionCommand(commandDeps, parsed.sub);
   } finally {
     lines.dispose();
   }

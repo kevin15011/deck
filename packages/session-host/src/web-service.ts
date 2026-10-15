@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
-import { validateSessionCommand } from "@deck/core/session/commands";
+import { IMAGE_ATTACHMENT_LIMITS, validateSessionCommand } from "@deck/core/session/commands";
 import type { SessionEvent } from "@deck/core/session/events";
 import { assertPrivateFile, writePrivateFile, type StatePaths } from "./paths";
 import type { SessionService } from "./service";
@@ -45,7 +45,7 @@ export type WebServiceOptions = {
 const COOKIE = "deck_device";
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
 const equal = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-const HEADERS = { "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store", "Permissions-Policy": "camera=(), microphone=(), geolocation=()" };
+const HEADERS = { "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store", "Permissions-Policy": "camera=(), microphone=(), geolocation=()" };
 const safeId = (v: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(v) && !v.includes("..");
 export class WebService {
   private server?: Server<SocketData>;
@@ -59,6 +59,7 @@ export class WebService {
   };
   private readonly now: () => number;
   private error?: string;
+  private uploadsInFlight = 0;
   constructor(private readonly options: WebServiceOptions) {
     this.now = options.now ?? Date.now;
     if (options.config.hostname !== undefined && options.config.hostname !== "127.0.0.1")
@@ -86,7 +87,7 @@ export class WebService {
   enable(persist = true) {
     if (!this.server) {
       try {
-        this.server = Bun.serve<SocketData>({ hostname: "127.0.0.1", port: this.options.config.port, maxRequestBodySize: 1024 * 1024, fetch: (r, s) => this.fetch(r, s), websocket: { maxPayloadLength: 1024, backpressureLimit: this.options.maxQueuedBytes ?? 1024 * 1024, closeOnBackpressureLimit: false, open: ws => this.open(ws), message: ws => ws.close(1008, "Read-only stream"), close: ws => { ws.data.unsubscribe?.(); this.sockets.delete(ws); } } });
+        this.server = Bun.serve<SocketData>({ hostname: "127.0.0.1", port: this.options.config.port, maxRequestBodySize: IMAGE_ATTACHMENT_LIMITS.maxFileBytes + 1024 * 1024, fetch: (r, s) => this.fetch(r, s), websocket: { maxPayloadLength: 1024, backpressureLimit: this.options.maxQueuedBytes ?? 1024 * 1024, closeOnBackpressureLimit: false, open: ws => this.open(ws), message: ws => ws.close(1008, "Read-only stream"), close: ws => { ws.data.unsubscribe?.(); this.sockets.delete(ws); } } });
         this.error = undefined;
       }
       catch {
@@ -156,8 +157,24 @@ export class WebService {
     if (!origin || !origins.includes(origin) || new URL(origin).host !== host)
       return false;
   } return true; }
-  private async json(r: Request) { if (!/^application\/json(?:\s*;|$)/i.test(r.headers.get('content-type') ?? ''))
-    throw new Error('json'); return await r.json() as Record<string, unknown>; }
+  private async boundedBody(r: Request, max: number): Promise<Uint8Array> {
+    const length = r.headers.get("content-length");
+    if (length !== null && (!/^\d+$/.test(length) || Number(length) > max)) throw new Error("body-too-large");
+    const reader = r.body?.getReader(); if (!reader) return new Uint8Array();
+    const body = new Uint8Array(length === null ? max : Number(length)); let size=0, aborted=false;
+    const abort=()=>{aborted=true;void reader.cancel().catch(()=>{});};
+    r.signal.addEventListener("abort",abort,{once:true});
+    const timeout=setTimeout(abort,30_000);
+    if(r.signal.aborted) abort();
+    try { for (;;) { const result=await reader.read(); if(aborted) throw new Error("upload-aborted"); if(result.done) break; size+=result.value.length; if(size>max) { void reader.cancel().catch(()=>{}); throw new Error("body-too-large"); } body.set(result.value,size-result.value.length); } }
+    finally { clearTimeout(timeout);r.signal.removeEventListener("abort",abort);reader.releaseLock(); }
+    return body.subarray(0,size);
+  }
+  private async json(r: Request) {
+    if (!/^application\/json(?:\s*;|$)/i.test(r.headers.get('content-type') ?? '')) throw new Error('json');
+    const text=await r.text(); if(Buffer.byteLength(text)>1024*1024) throw new Error("body-too-large");
+    return JSON.parse(text) as Record<string,unknown>;
+  }
   private async fetch(r: Request, s: Server<SocketData>): Promise<Response | undefined> {
     if (!this.boundary(r, s))
       return this.response({ ok: false, code: 'request-forbidden' }, 403);
@@ -192,8 +209,57 @@ export class WebService {
         const device = this.device(r);
         if (!device)
           return this.response({ ok: false, code: 'device-required' }, 401);
-        if (path === '/api/sessions' && r.method === 'GET')
-          return this.response(await this.options.service.query?.('sessions.list', {}) ?? { ok: true, data: { sessions: [] } });
+        const attachments = /^\/api\/sessions\/([^/]+)\/attachments(?:\/([^/]+))?$/.exec(path);
+        if (attachments && (r.method === 'POST' || r.method === 'GET')) {
+          const sessionId=attachments[1]!, attachmentId=attachments[2];
+          if(!safeId(sessionId) || attachmentId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attachmentId)) return this.response({ok:false,code:'attachment-invalid'},400);
+          if(r.method === 'POST' && !attachmentId) {
+            const mimeType=r.headers.get('content-type') ?? '';
+            if(!['image/png','image/jpeg','image/webp'].includes(mimeType) || url.searchParams.getAll('name').length>1) return this.response({ok:false,code:'attachment-invalid'},400);
+            if(this.uploadsInFlight>=8) return this.response({ok:false,code:'attachment-upload-busy'},429);
+            this.uploadsInFlight++;
+            try {
+            let bytes:Uint8Array; try { bytes=await this.boundedBody(r,IMAGE_ATTACHMENT_LIMITS.maxFileBytes); } catch(error) { return (error as Error).message==='upload-aborted' ? this.response({ok:false,code:'attachment-upload-aborted'},408) : this.response({ok:false,code:'attachment-too-large'},413); }
+            const outcome=this.options.service.uploadAttachment?.({sessionId,bytes,mimeType,name:url.searchParams.get('name')??''}) ?? {ok:false as const,code:'attachment-unavailable'};
+            return this.response(outcome,outcome.ok?200:outcome.code==='attachment-too-large'||outcome.code==='attachment-staging-full'?413:outcome.code==='unknown-session'?404:400);
+            } finally { this.uploadsInFlight--; }
+          }
+          if(r.method === 'GET' && attachmentId) {
+            const image=this.options.service.readAttachment?.(sessionId,attachmentId);
+            return image ? new Response(image.bytes as BodyInit,{headers:{...HEADERS,'Content-Type':image.attachment.mimeType,'Content-Disposition':'inline','Content-Length':String(image.bytes.length)}}) : this.response({ok:false,code:'attachment-unknown'},404);
+          }
+          return this.response({ok:false,code:'attachment-invalid'},400);
+        }
+        if (path === '/api/sessions/status' && r.method === 'GET') {
+          const sessionIds = url.searchParams.getAll('sessionId');
+          if (url.searchParams.getAll('projectId').length !== 1 || sessionIds.length < 1 || sessionIds.length > 100 || sessionIds.some(id => !safeId(id))) return this.response({ ok: false, code: 'sessions-status-invalid' }, 400);
+          const outcome = await this.options.service.query?.('sessions.status', { projectId: url.searchParams.get('projectId'), sessionIds }) ?? { ok: false as const, code: 'query-unavailable' };
+          return this.response(outcome, outcome.ok ? 200 : 400);
+        }
+        if (r.method === 'GET' && ['/api/sessions', '/api/projects', '/api/directories', '/api/models'].includes(path)) {
+          const names: Record<string, string> = { '/api/sessions': 'sessions.list', '/api/projects': 'projects.list', '/api/directories': 'directories.list', '/api/models': 'runners.models' };
+          const keys = path === '/api/sessions' ? ['projectId', 'cursor', 'limit'] : path === '/api/directories' ? ['path', 'prefix', 'limit'] : path === '/api/models' ? ['projectId'] : [];
+          const args: Record<string, unknown> = {};
+          for (const key of keys) {
+            const values = url.searchParams.getAll(key);
+            if (values.length > 1) return this.response({ ok: false, code: 'query-invalid' }, 400);
+            if (values.length) args[key] = key === 'limit' ? /^\d+$/.test(values[0]!) ? Number(values[0]) : NaN : values[0];
+          }
+          const outcome = await this.options.service.query?.(names[path]!, args) ?? { ok: false as const, code: 'query-unavailable' };
+          return this.response(outcome, outcome.ok ? 200 : 400);
+        }
+        const prompts = /^\/api\/sessions\/([^/]+)\/prompts$/.exec(path);
+        if (prompts && r.method === 'GET') {
+          if (!safeId(prompts[1]!)) return this.response({ ok: false, code: 'session-invalid' }, 400);
+          const outcome = await this.options.service.query?.('prompts.list', { sessionId: prompts[1] }) ?? { ok: false as const, code: 'query-unavailable' };
+          return this.response(outcome, outcome.ok ? 200 : 404);
+        }
+        const readiness = /^\/api\/sessions\/([^/]+)\/readiness$/.exec(path);
+        if (readiness && r.method === 'GET') {
+          if (!safeId(readiness[1]!)) return this.response({ ok: false, code: 'session-invalid' }, 400);
+          const outcome = await this.options.service.query?.('session.readiness', { sessionId: readiness[1] }) ?? { ok: false as const, code: 'query-unavailable' };
+          return this.response(outcome, outcome.ok ? 200 : 404);
+        }
         const artifacts = /^\/api\/sessions\/([^/]+)\/openspec(\/artifact)?$/.exec(path);
         if (artifacts && r.method === 'GET') {
           const sessionId = artifacts[1]!;

@@ -35,6 +35,13 @@ async function boot(extra: Partial<ControlServerOptions> = {}, logOptions: Const
 }
 
 describe("socket endpoint (XR-8.1)", () => {
+  test("workspace registration is accepted without an existing session", async () => {
+    const calls: unknown[] = [];
+    const t = await boot({ service: { execute: async input => { calls.push(input); return { ok: true, data: { project: { projectId: "p" } } }; }, openLog: () => undefined, hasRunningWork: () => false } });
+    const client = await t.connect();
+    for (const body of [{ type: "project.register" as const, path: "/home/user/repo" }, { type: "project.rename" as const, projectId: "p", name: "New name" }, { type: "project.remove" as const, projectId: "p" }]) expect(await client.command({ v: 1, commandId: uuid(), ...body })).toMatchObject({ outcome: { ok: true, data: { project: { projectId: "p" } } } });
+    expect(calls).toHaveLength(3);
+  });
   test("listens on a 0600 socket even under a permissive umask", async () => {
     const previous = process.umask(0);
     try {

@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync, truncateSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { DriverTaskInput } from "@deck/core/session/driver";
 import { createCodexSessionDriver } from "./driver";
 import { ISOLATION_FEATURES } from "./launch";
@@ -23,6 +26,42 @@ function responder(child: FakeChild, index: number, m: Record<string, unknown>) 
   if (m.method === "turn/start") child.stdout({ id: m.id, result: { turn: { id: "turn" } } });
   if (m.method === "turn/interrupt") { child.stdout({ id: m.id, result: {} }); child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "interrupted" } } }); }
 }
+const imageDirs: string[] = [];
+afterEach(() => { for (const dir of imageDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+function images() {
+  const dir = mkdtempSync(join(tmpdir(), "deck-codex-images-")); imageDirs.push(dir);
+  return ["image/png", "image/jpeg"].map((mimeType, index) => {
+    const path = join(dir, `image-${index}`); writeFileSync(path, `image-bytes-${index}`);
+    return { path, mimeType: mimeType as "image/png" | "image/jpeg", name: `Image ${index + 1}` };
+  });
+}
+describe("Codex native image inputs", () => {
+  test.each([false, true])("passes multiple localImage inputs to fresh/resumed turns (%s) without inheriting attachments", async (resumed) => {
+    const files = images(); const h = harness(responder);
+    const task = await createCodexSessionDriver().startTask({ ...input, images: files, ...(resumed ? { resume: { nativeSessionId: "native-thread" } } : {}) }, h.io);
+    await task.nativeSessionId; const child = h.children[1]!;
+    for (let i = 0; i < 100 && !child.writes.some(m => m.method === "turn/start"); i++) await new Promise(r => setTimeout(r, 1));
+    expect((child.writes.find(m => m.method === "turn/start")!.params as any).input).toEqual([{ type: "text", text: "hello" }, ...files.map(file => ({ type: "localImage", path: file.path }))]);
+    child.stdout({ method: "item/started", params: { threadId: "native-thread", item: { type: "userMessage", content: [{ type: "localImage", path: files[0]!.path }] } } });
+    expect(JSON.stringify(h.events)).not.toContain(files[0]!.path);
+    const complete = () => child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "completed" } } });
+    complete(); await task.done;
+    const second = task.send("", [files[1]!]);
+    for (let i = 0; i < 100 && child.writes.filter(m => m.method === "turn/start").length < 2; i++) await new Promise(r => setTimeout(r, 1));
+    expect((child.writes.filter(m => m.method === "turn/start")[1]!.params as any).input).toEqual([{ type: "localImage", path: files[1]!.path }]); complete(); await second;
+    const third = task.send("text only"); await Promise.resolve();
+    expect((child.writes.filter(m => m.method === "turn/start")[2]!.params as any).input).toEqual([{ type: "text", text: "text only" }]); complete(); await third; await task.close();
+  });
+  test("rejects missing, oversized, excessive and aggregate oversized image inputs without exposing paths", async () => {
+    const files = images(); const huge = { ...files[0]!, path: `${files[0]!.path}-huge` }; writeFileSync(huge.path, ""); truncateSync(huge.path, 5 * 1024 * 1024 + 1);
+    const aggregate = { ...files[0]!, path: `${files[0]!.path}-aggregate` }; writeFileSync(aggregate.path, ""); truncateSync(aggregate.path, 5 * 1024 * 1024);
+    for (const bad of [[{ ...files[0]!, path: `${files[0]!.path}-missing` }], [huge], Array(9).fill(files[0]), Array(5).fill(aggregate)]) {
+      const h = harness(responder); const task = await createCodexSessionDriver().startTask({ ...input, images: bad }, h.io);
+      expect(await task.done).toMatchObject({ status: "failed", error: "image-input-invalid" });
+      expect(h.children.flatMap(child => child.writes).some(m => m.method === "turn/start")).toBe(false); expect(JSON.stringify(h.events)).not.toContain(files[0]!.path); await task.close();
+    }
+  });
+});
 describe("Codex session driver", () => {
   test.each(["allow", "deny"] as const)("relays observed native MCP approval form (%s), including request id zero", async (decision) => {
     const h = harness(responder);
@@ -222,4 +261,59 @@ describe("Codex session driver", () => {
     } finally { releaseDrain(); await Promise.all([done, firstClose, secondClose]); }
     expect(doneSettled && firstCloseSettled && secondCloseSettled).toBe(true);
   });
+});
+
+const memoryInput = (): DriverTaskInput => ({ ...input, nativeMemory: { provider: "supermemory", integration: "runner-plugin", status: "ready", projectScope: "sm_project_v1_owner_repo", plugin: { root: "/owned/supermemory", nodeCommand: "/usr/bin/node", scripts: { recall: "/owned/supermemory/recall.js", flush: "/owned/supermemory/flush.js" } } } });
+const memoryHooks = (isolated: boolean) => [
+  { key: "foreign-json", currentHash: "foreign-hash", eventName: "sessionStart", handlerType: "command", command: "echo foreign", source: "user", enabled: !isolated, trustStatus: "trusted" },
+  { key: "recall", currentHash: "recall-hash", eventName: "userPromptSubmit", handlerType: "command", command: "'/usr/bin/node' '/owned/supermemory/recall.js'", source: "sessionFlags", enabled: true, trustStatus: isolated ? "trusted" : "untrusted" },
+  { key: "flush", currentHash: "flush-hash", eventName: "stop", handlerType: "command", command: "'/usr/bin/node' '/owned/supermemory/flush.js'", source: "sessionFlags", enabled: true, trustStatus: isolated ? "trusted" : "untrusted" },
+];
+function memoryResponder(transform?: (hooks: ReturnType<typeof memoryHooks>) => ReturnType<typeof memoryHooks>) {
+  return (child: FakeChild, index: number, m: Record<string, unknown>) => {
+    if (m.method === "config/read") child.stdout({ id: m.id, result: { config: { ...config(index === 2), features: { ...config(index === 2).features, hooks: true } } } });
+    else if (m.method === "hooks/list") child.stdout({ id: m.id, result: { data: [{ cwd: "/work", hooks: index === 2 && transform ? transform(memoryHooks(true)) : memoryHooks(index === 2), errors: [], warnings: [] }] } });
+    else responder(child, index, m);
+  };
+}
+test("isolates inherited hooks.json without changing native auth home and trusts only admitted official hook hashes", async () => {
+  const h = harness(memoryResponder());
+  const requested = { ...memoryInput(), resume: { nativeSessionId: "saved" } };
+  const task = await createCodexSessionDriver({ baseEnv: { CODEX_HOME: "/native/auth-and-resume" } }).startTask(requested, h.io);
+  expect(await task.nativeSessionId).toBe("saved");
+  expect(h.children[0]!.writes.some(m => m.method === "thread/start" || m.method === "thread/resume")).toBe(false);
+  expect(h.spawns[1]!.options?.env?.CODEX_HOME).toBe("/native/auth-and-resume");
+  const hooks = h.spawns[1]!.args.find(arg => arg.startsWith("hooks="))!;
+  expect(hooks).toContain('"foreign-json"={"enabled"=false}');
+  expect(hooks).toContain('"recall"={"enabled"=true,"trusted_hash"="recall-hash"}');
+  expect(hooks).toContain('"flush"={"enabled"=true,"trusted_hash"="flush-hash"}');
+  expect(h.spawns[1]!.args.join(" ")).not.toContain("bypass-hook-trust");
+  expect(h.children[1]!.writes.find(m => m.method === "thread/resume")?.params).toMatchObject({ threadId: "saved" });
+  h.children[1]!.stdout({ method: "hook/started", params: { threadId: "saved", turnId: "turn", run: { id: "actual-recall-run", eventName: "userPromptSubmit", source: "sessionFlags", status: "running", handlerType: "command" } } });
+  expect(h.events.find(e => e.kind === "hook.started")?.data).toMatchObject({ provider: "supermemory", integration: "runner-plugin" });
+  expect(requested.nativeMemory!.plugin!.exclusiveHookEvents).toBeUndefined();
+  await task.close(); await task.done;
+});
+test.each([
+  ["foreign hook remains enabled", (hooks: ReturnType<typeof memoryHooks>) => hooks.map(h => h.key === "foreign-json" ? { ...h, enabled: true } : h)],
+  ["official hook was modified", (hooks: ReturnType<typeof memoryHooks>) => hooks.map(h => h.key === "recall" ? { ...h, trustStatus: "modified" } : h)],
+  ["official flush is missing", (hooks: ReturnType<typeof memoryHooks>) => hooks.filter(h => h.key !== "flush")],
+])("blocks native prompt effects when hook isolation fails: %s", async (_name, transform) => {
+  const h = harness(memoryResponder(transform));
+  const task = await createCodexSessionDriver({ rpcTimeoutMs: 100 }).startTask(memoryInput(), h.io);
+  expect(await task.done).toMatchObject({ status: "failed" });
+  expect(h.children[1]!.writes.some(m => m.method === "thread/start" || m.method === "thread/resume" || m.method === "turn/start")).toBe(false);
+  expect(h.children[1]!.terminations).toBe(1);
+  await task.close();
+});
+test("foreign-thread hook notifications retain only metadata, never raw hook output", async () => {
+  const h = harness(responder);
+  const task = await createCodexSessionDriver().startTask(input, h.io);
+  await task.nativeSessionId;
+  for (const method of ["hook/started", "hook/completed", "hook/future"]) h.children[1]!.stdout({ method, params: { threadId: "foreign-thread", run: { id: "foreign-run", eventName: "stop", entries: [{ kind: "context", text: "PRIVATE_HOOK_STDOUT_SENTINEL" }], stdout: "PRIVATE_HOOK_STDOUT_SENTINEL" } } });
+  h.children[1]!.stdout({ id: 0, method: "hook/completed", params: { threadId: "native-thread", run: { id: "malformed-request", stdout: "PRIVATE_HOOK_STDOUT_SENTINEL" } } });
+  h.children[1]!.stdout({ id: 1, method: "hook/future", params: { threadId: "native-thread", run: { stdout: "PRIVATE_HOOK_STDOUT_SENTINEL" } } });
+  expect(h.events.filter(e => e.kind === "runner.unmapped" && e.data.reason === "foreign-thread")).toHaveLength(3);
+  expect(JSON.stringify(h.events)).not.toContain("PRIVATE_HOOK_STDOUT_SENTINEL");
+  await task.close(); await task.done;
 });

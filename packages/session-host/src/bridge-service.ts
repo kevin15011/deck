@@ -26,7 +26,8 @@ export class BridgeService implements BridgePort {
       case DECK_STATUS_TOOL: return { ok: true, data: this.options.status(grant) };
       case DECK_APPROVE_TOOL: return this.approve(grant, input.arguments, context.signal);
       default:
-        if (["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel"].includes(input.tool) && (grant.taskId !== "lead" || grant.memberId !== "lead")) return { ok: false, code: "tool-not-allowed" };
+        // Task identity changes with Lead generations; the manager validates the active owner.
+        if (["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel"].includes(input.tool) && grant.memberId !== "lead") return { ok: false, code: "tool-not-allowed" };
         return this.options.callTaskTool?.(grant, input.tool, input.arguments, context) ?? { ok: false, code: "tool-unknown", message: input.tool };
     }
   }

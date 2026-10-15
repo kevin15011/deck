@@ -14,6 +14,9 @@ import { join } from "node:path";
 import { createSessionMemoryPort, resolveSessionChildMcp } from "./session-shared-services";
 import type { createSupermemoryRuntimeHost } from "./supermemory-runtime-host";
 import { SessionCodebaseReadiness } from "./session-codebase-readiness";
+import type { NativeMemoryPreparationEffects } from "./session-native-memory";
+import { discoverSessionModels } from "./session-model-catalog";
+import { readSessionProjectInstructions } from "./session-project-instructions";
 
 export function createCrossSessionDrivers(adapters: readonly RunnerAdapter[], onError?: (runnerId: string, error: Error) => void): DriverLookup {
   const drivers = new Map<string, RunnerSessionDriver>();
@@ -24,14 +27,16 @@ export function createCrossSessionDrivers(adapters: readonly RunnerAdapter[], on
   return { get: (runnerId) => drivers.get(runnerId), list: () => [...drivers.values()] };
 }
 
-function sessionRolePrompt(memberId: string, context: { changeId?: string; projectRoot: string }): string {
+function sessionRolePrompt(memberId: string, context: { changeId?: string; projectRoot: string; runnerId: string }): string {
   const roleId = memberId.startsWith("deck-") ? memberId : `deck-${memberId}`;
   const role = getAgentContent(roleId, { promptProfile: "compact" });
   if (!role) throw new Error(`Unknown Deck session role: ${memberId}`);
+  const projectInstructions = context.runnerId === "claude" ? readSessionProjectInstructions(context.projectRoot) : undefined;
   return [role.agentBody,
     "You are running inside a Deck cross-runner session. Use the Deck session MCP tools for delegation and task continuity when available; native runner delegation is disabled.",
-    "Use deck_memory_recall for advisory project context and deck_memory_propose to submit facts to the daemon's single memory writer. Memory never changes official OpenSpec authority.",
+    "Memory uses the official runner integration when its prepared capability status is ready. Consult that status before claiming memory is configured or available. Memory never changes official OpenSpec authority.",
     context.changeId ? `This session is bound to the immutable OpenSpec change at ${join(context.projectRoot, "openspec", "changes", context.changeId)}.` : "",
+    projectInstructions === undefined ? "" : `Project instructions from the session project root (AGENTS.md):\n\n${projectInstructions}`,
   ].filter(Boolean).join("\n\n");
 }
 
@@ -42,6 +47,7 @@ export type CrossSessionServiceOptions = {
   memoryRuntime?: typeof createSupermemoryRuntimeHost;
   environment?: Readonly<Record<string, string | undefined>>;
   codebaseReadiness?: SessionCodebaseReadiness;
+  nativeMemoryEffects?: NativeMemoryPreparationEffects;
 };
 
 export function createCrossSessionService(services: DaemonServices, options: CrossSessionServiceOptions): SessionManager {
@@ -58,10 +64,11 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
     childMcp: async (runnerId, context) => {
       // Keep each turn's resolved specs isolated from concurrent sessions.
       const adapter = list.find((adapter) => adapter.runnerId === runnerId);
-      return resolveSessionChildMcp(adapter, options.configStore.read(), options.environment, { readiness, context });
+      return resolveSessionChildMcp(adapter, options.configStore.read(), options.environment, { readiness, context }, options.nativeMemoryEffects);
     },
     closeChildMcp: () => readiness.close(),
     memory: async (context) => createSessionMemoryPort(context, options.configStore.read(), options.memoryRuntime),
     rolePrompt: sessionRolePrompt,
+    modelCatalog: (projectRoot) => discoverSessionModels(list, drivers, projectRoot),
   });
 }

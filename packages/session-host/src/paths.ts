@@ -82,6 +82,7 @@ export type SessionPaths = {
   eventsDir: string;
   ledgerSnapshotFile: string;
   tasksDir: string;
+  attachmentsDir: string;
   taskDir(taskId: string): string;
   taskCredentialFile(taskId: string): string;
   taskLeaseFile(taskId: string): string;
@@ -97,6 +98,7 @@ export function sessionPaths(paths: StatePaths, sessionId: string): SessionPaths
     eventsDir: join(dir, "events"),
     ledgerSnapshotFile: join(dir, "ledger.snapshot.json"),
     tasksDir,
+    attachmentsDir: join(dir, "attachments"),
     taskDir,
     taskCredentialFile: (taskId) => join(taskDir(taskId), "credential"),
     taskLeaseFile: (taskId) => join(taskDir(taskId), "lease.json"),

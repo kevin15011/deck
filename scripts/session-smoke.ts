@@ -134,8 +134,8 @@ export async function runSessionSmoke(options: { deck: string[]; keep?: boolean;
     const calls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv: string[]; configDir?: string; disableProjectConfig?: string; disableClaudeCode?: string; config?: { permission?: { task?: string }; mcp?: Record<string, unknown> }; passwordConfigured?: boolean });
     const turn = [...calls].reverse().find((c) => c.argv.includes(runner === "claude" ? "-p" : runner === "codex" ? "app-server" : "serve"));
     if (runner === "claude") {
-    check("claude was started with the isolated argv (no --bare, strict MCP, hooks disabled)", !!turn && !turn.argv.includes("--bare") && turn.argv.includes("--strict-mcp-config") && turn.argv.includes("--session-id")
-      && turn.argv.includes("--permission-prompt-tool") && JSON.parse(turn.argv[turn.argv.indexOf("--settings") + 1]!).disableAllHooks === true, turn?.argv);
+    check("claude was started with isolated MCP/hooks and native no-confirmation execution", !!turn && !turn.argv.includes("--bare") && turn.argv.includes("--strict-mcp-config") && turn.argv.includes("--session-id")
+      && turn.argv.includes("--dangerously-skip-permissions") && !turn.argv.includes("--permission-prompt-tool") && JSON.parse(turn.argv[turn.argv.indexOf("--settings") + 1]!).disableAllHooks === true, turn?.argv);
     } else if (runner === "opencode") {
       check("opencode serves loopback with a private isolated config", !!turn && turn.argv.includes("--pure") && turn.argv.includes("127.0.0.1")
         && turn.disableProjectConfig === "true" && turn.disableClaudeCode === "true" && turn.passwordConfigured === true

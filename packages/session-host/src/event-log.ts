@@ -198,7 +198,8 @@ export class EventLog {
     return this.appendMany([draft])[0]!;
   }
 
-  /** Atomically append a batch (one write, consecutive seq, one rotation decision). */
+  /** Append a rollback-on-write-error batch. Crash recovery may retain a complete-line prefix;
+   * callers needing durable acceptance must flush and use self-sufficient intent records. */
   appendMany(drafts: readonly EventDraft[]): SessionEvent[] {
     if (this.closed) throw new Error("Event log is closed");
     if (this.broken) throw new Error(`Event log is unusable after a failed write: ${this.broken.message}`);

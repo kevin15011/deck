@@ -15,6 +15,7 @@
 import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, type RunnerStdinPayload } from "@deck/core";
 
 export type DaemonSubcommand = { action: "start" | "status" | "stop" | "restart"; json: boolean };
+export const WEB_USAGE = "Usage: deck web [--no-open] [--json]\nStart the local workspace from any directory. Opens the browser unless --no-open or --json is supplied. Creates no project or session.";
 export const DAEMON_USAGE = "Usage: deck daemon <start|status|stop|restart> [--json]\nThe daemon runs in the background. Ctrl+C and /detach close the client, not the daemon.\nStop and restart refuse running work or pending approvals. Restart uses the invoking Deck executable and preserves session history and runner assignments.";
 
 /** `deck session <action>` grammar (XR-9.2, XR-12.1). */
@@ -53,6 +54,8 @@ export type ParsedArgs =
   | { command: "session"; sub: SessionSubcommand }
   | { command: "daemon"; sub: DaemonSubcommand }
   | { command: "daemon-help" }
+  | { command: "web"; flags: { json: boolean; noOpen: boolean } }
+  | { command: "web-help" }
   | {
       command: "upgrade";
       flags: {
@@ -331,6 +334,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return { command: "error", message: "Usage: deck internal serena-mcp" };
   }
 
+  if (first === "web") {
+    if (rest.length === 1 && ["--help", "-h"].includes(rest[0]!)) return { command: "web-help" };
+    if (new Set(rest).size !== rest.length || rest.some(flag => !["--json", "--no-open"].includes(flag))) return {command:"error",message:WEB_USAGE};
+    return {command:"web",flags:{json:rest.includes("--json"),noOpen:rest.includes("--no-open")}};
+  }
   if (first === "cross") return parseCrossArgs(rest);
   if (first === "session") return parseSessionArgs(rest);
   if (first === "daemon") {

@@ -8,7 +8,7 @@
  */
 import { boundRaw } from "@deck/core/session/events";
 import { redactText } from "@deck/core/session/redaction";
-import type { DriverEvent } from "@deck/core/session/driver";
+import type { DriverEvent, NativeMemoryDescriptor } from "@deck/core/session/driver";
 
 export const CLAUDE_PROTOCOL = "claude-stream-json";
 const TOOL_INPUT_LIMIT = 8192;
@@ -83,6 +83,7 @@ function toolText(content: unknown): string {
 export class ClaudeStreamMapper {
   private hookReported = false;
   private streamingMessageId?: string;
+  constructor(private readonly nativeMemory?: NativeMemoryDescriptor) {}
 
   map(message: unknown): MapOutput {
     if (!isObj(message)) return { events: [] };
@@ -111,12 +112,27 @@ export class ClaudeStreamMapper {
     if (subtype === "init") return this.init(m);
     if (HOOK_SYSTEM.has(subtype)) {
       const events: DriverEvent[] = [];
+      const hookId = redactText(str(m.hook_id) ?? "", 256);
+      const nativeEvent = str(m.hook_event) ?? "";
+      const hookEvent = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/.test(nativeEvent) ? nativeEvent : "unknown";
       if (!this.hookReported) {
         this.hookReported = true;
-        events.push({ kind: "diagnostic", data: { code: "claude-hook-executed", hookEvent: str(m.hook_event), hookName: str(m.hook_name) } });
+        events.push({ kind: "diagnostic", data: { code: "claude-hook-executed", hookEvent, hookName: hookEvent } });
+      }
+      if (hookId) {
+        const completed = subtype === "hook_response";
+        const exitCode = num(m.exit_code);
+        const status = !completed ? "running" : exitCode !== undefined ? (exitCode === 0 ? "completed" : "failed") : m.outcome === "success" ? "completed" : ["error", "failed"].includes(String(m.outcome)) ? "failed" : "unknown";
+        const attributed = this.nativeMemory?.status === "ready" && this.nativeMemory.plugin?.exclusiveHookEvents?.includes(nativeEvent);
+        events.push({ kind: completed ? "hook.completed" : "hook.started", data: {
+          hookId, hookEvent, hookName: hookEvent, status, provenance: CLAUDE_PROTOCOL,
+          ...(exitCode !== undefined ? { exitCode } : {}),
+          ...(attributed ? { provider: "supermemory", integration: "runner-plugin" } : {}),
+        } });
       }
       return { events, hookSeen: true };
     }
+    if (subtype.startsWith("hook_")) return { events: [{ kind: "runner.unmapped", data: { type: redactText(`system/${subtype}`, 128) } }], hookSeen: true };
     if (IGNORED_SYSTEM.has(subtype)) return { events: [] };
     return { events: [this.unmapped(`system/${subtype || "unknown"}`, m)] };
   }
@@ -167,15 +183,15 @@ export class ClaudeStreamMapper {
     const message = isObj(m.message) ? m.message : {};
     const messageId = str(message.id);
     const events: DriverEvent[] = [];
-    for (const block of Array.isArray(message.content) ? message.content : []) {
+    for (const [blockIndex, block] of (Array.isArray(message.content) ? message.content : []).entries()) {
       if (!isObj(block)) continue;
       if (block.type === "text") {
         if (typeof block.text === "string" && block.text.length > 0) events.push({ kind: "message.completed", data: { ...(messageId ? { messageId } : {}), text: block.text } });
       } else if (block.type === "thinking") {
-        if (typeof block.thinking === "string" && block.thinking.length > 0) events.push({ kind: "reasoning.delta", data: { text: block.thinking } });
+        if (typeof block.thinking === "string" && block.thinking.length > 0) events.push({ kind: "reasoning.delta", data: { ...(messageId ? { messageId } : {}), blockIndex, partId: String(blockIndex), reasoningKind: "text", format: "snapshot", text: redactText(block.thinking, TOOL_OUTPUT_LIMIT) } });
       } else if (block.type === "tool_use") {
         const input = boundRaw({ runnerId: "claude", protocol: CLAUDE_PROTOCOL, payload: block.input ?? {} }, TOOL_INPUT_LIMIT).payload;
-        events.push({ kind: "tool.started", data: { toolUseId: str(block.id), name: str(block.name), input } });
+        events.push({ kind: "tool.started", data: { toolUseId: str(block.id), name: typeof block.name === "string" ? redactText(block.name, 500) : undefined, input, status: "running" } });
       } else {
         events.push(this.unmapped(`assistant/${str(block.type) ?? "unknown"}`, block));
       }
@@ -192,7 +208,7 @@ export class ClaudeStreamMapper {
     for (const block of message.content) {
       if (!isObj(block)) continue;
       if (block.type === "tool_result") {
-        events.push({ kind: "tool.completed", data: { toolUseId: str(block.tool_use_id), isError: block.is_error === true, output: redactText(toolText(block.content), TOOL_OUTPUT_LIMIT) } });
+        events.push({ kind: "tool.completed", data: { toolUseId: str(block.tool_use_id), isError: block.is_error === true, status: block.is_error === true ? "failed" : "completed", output: redactText(toolText(block.content), TOOL_OUTPUT_LIMIT) } });
       } else if (block.type !== "text") {
         events.push(this.unmapped(`user/${str(block.type) ?? "unknown"}`, block));
       }

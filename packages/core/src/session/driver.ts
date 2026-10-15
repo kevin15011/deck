@@ -17,14 +17,43 @@ export type ChildMcpServerSpec =
   | { transport?: "stdio"; command: string; args: readonly string[]; env: Readonly<Record<string, string>> }
   | { transport: "http"; url: string; /** Header name to environment variable NAME; never a resolved credential. */ envHttpHeaders?: Readonly<Record<string, string>> };
 
+/** Prepared by the CLI composition after native artifact, profile and canonical scope checks.
+ * Contains no credential values. Credentials travel only through the private spawn environment.
+ */
+export type NativeMemoryDescriptor = {
+  provider: "supermemory";
+  integration: "runner-plugin";
+  status: "ready" | "disabled" | "unavailable";
+  reasonCode?: string;
+  projectScope?: string;
+  /** Native hook activation is support evidence, not proof of provider success. */
+  automaticRecall?: "native-hook";
+  /** Managed native lifecycle may not report or await background persistence. */
+  automaticCapture?: "unverified";
+  plugin?: {
+    root: string;
+    hookConfigPath?: string;
+    exclusiveHookEvents?: readonly string[];
+    hooks?: Readonly<Record<string, unknown>>;
+    scripts?: { recall: string; flush: string };
+    nodeCommand?: string;
+    loaderPath?: string;
+    mcpServers?: Readonly<Record<string, ChildMcpServerSpec>>;
+  };
+};
+
+/** Host-validated managed files, supplied as native structured image input. */
+export type DriverImageInput = { path: string; mimeType: "image/png" | "image/jpeg" | "image/webp"; name: string };
+
 export type DriverTaskInput = {
   taskId: string; memberId: string; cwd: string; assignment: RunnerQualifiedAssignment;
-  rolePrompt: string; prompt: string; resume?: { nativeSessionId: string };
+  rolePrompt: string; prompt: string; images?: readonly DriverImageInput[]; resume?: { nativeSessionId: string };
   /** Caller-assigned native session id for a fresh native session; set only for drivers that expose `newNativeSessionId`. */
   nativeSessionId?: string;
   mcp: ChildMcpSet;
   /** Launch spec for every id in `mcp.servers` (the Deck session server included). */
   mcpServerSpecs: Readonly<Record<string, ChildMcpServerSpec>>;
+  nativeMemory?: NativeMemoryDescriptor;
   approvals: "relay" | "runner-default"; credentialFile: string;
   disableNativeDelegation: boolean;
 };
@@ -69,7 +98,7 @@ export type TurnOutcome = { status: "completed" | "interrupted" | "interrupted-f
 export type DriverTaskHandle = {
   nativeSessionId: Promise<string>;
   /** Run a follow-up turn on the same native session; resolves with that turn's outcome. */
-  send(prompt: string): Promise<TurnOutcome>;
+  send(prompt: string, images?: readonly DriverImageInput[]): Promise<TurnOutcome>;
   interrupt(): Promise<void>;
   /** Outcome of the turn started by `startTask`. */
   done: Promise<TurnOutcome>;

@@ -14,6 +14,10 @@ test('task continuation updates actual assignment and attempt', () => {
     const s = reduceEvent(reduceEvent(emptyState(), event(1, 'task.created', { taskId: 't', runnerId: 'codex', modelId: 'm', attempt: 1 })), event(2, 'task.continued', { taskId: 't', attempt: 2 }));
     expect(s.tasks.t).toMatchObject({ runnerId: 'codex', modelId: 'm', attempt: 2 });
 });
+test('legacy ended replay reopens the same view without dropping conversation history', () => {
+    const state = [event(1,'message.completed',{text:'Retained answer'}),event(2,'session.ended',{}),event(3,'session.reopened',{state:'idle'})].reduce(reduceEvent,emptyState());
+    expect(state.state).toBe('idle'); expect(conversationEvents(state.events).map(item=>item.data.text)).toEqual(['Retained answer']);
+});
 
 test('interrupted partial text remains separate when the same task continues', () => {
     const rows = conversationEvents([
@@ -54,4 +58,12 @@ test('Lead conversation excludes tools, child messages, delegation prompts and i
     const rows = conversationEvents([lead, child, answer, event(4, 'tool.started', { name: 'Read' }), event(5, 'message.completed', { role: 'system', text: 'System instruction' }), event(6, 'message.completed', { role: 'assistant', text: 'Lead answer' }), event(7, 'message.completed', { internal: true, text: 'Wake instruction' })]);
     expect(rows.map(row => row.data.text)).toEqual(['My request', 'Lead answer']);
     expect(conversationEvents([lead, child, answer], 'child').map(row => row.data.text)).toEqual(['Delegated work', 'Child result']);
+});
+test('Lead generations share the conversation while retaining their recorded runner and model provenance', () => {
+    const old = { ...event(1, 'message.completed', { role: 'assistant', text: 'Original Lead', modelId: 'old-model' }), source: { taskId: 'lead', memberId: 'lead', runnerId: 'claude' } };
+    const next = { ...event(2, 'message.delta', { text: 'New ', modelId: 'new-model' }), source: { taskId: 'lead-g1', memberId: 'lead', runnerId: 'codex' } };
+    const rows = conversationEvents([old, next, { ...next, seq: 3, data: { ...next.data, text: 'Lead' } }]);
+    expect(rows.map(row => row.data.text)).toEqual(['Original Lead', 'New Lead']);
+    expect(rows[0]!.source.runnerId).toBe('claude'); expect(rows[1]!.source.runnerId).toBe('codex');
+    expect(rows[0]!.data.modelId).toBe('old-model'); expect(rows[1]!.data.modelId).toBe('new-model');
 });

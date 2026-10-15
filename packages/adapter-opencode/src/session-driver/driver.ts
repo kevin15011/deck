@@ -1,8 +1,9 @@
+import { prepareImages, redactImagePayload } from "./images";
 import { execFile } from "node:child_process";
-import type { DriverHostIo, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
+import type { DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
 import { redactText } from "@deck/core/session/redaction";
 import { buildOpenCodeLaunch, type OpenCodeLaunchOptions } from "./launch";
-import { mapOpenCodeEvent, OpenCodeSseParser, OPENCODE_PROTOCOL, record } from "./mapper";
+import { OpenCodeEventMapper, OpenCodeSseParser, OPENCODE_PROTOCOL, record } from "./mapper";
 
 export const OPENCODE_TESTED_VERSIONS = { min: "1.18.31", maxTested: "1.18.31" } as const;
 export type OpenCodeSessionDriverOptions = OpenCodeLaunchOptions & {
@@ -28,6 +29,7 @@ class OpenCodeTask {
   private readonly seenPermissions = new Set<string>();
   private stream?: Promise<void>;
   private authorization = "";
+  private readonly mapper = new OpenCodeEventMapper();
   constructor(private readonly input: DriverTaskInput, private readonly io: DriverHostIo, private readonly options: OpenCodeSessionDriverOptions) {}
 
   private emit(event: Parameters<DriverHostIo["emit"]>[0]) { try { this.io.emit(event); } catch { /* A consumer cannot own the server lifetime. */ } }
@@ -64,6 +66,13 @@ class OpenCodeTask {
       const actual = await this.request("/mcp", undefined, startupSignal);
       if (!record(actual) || Object.keys(actual).some(id => !launch.expectedMcpServers.includes(id)) || launch.expectedMcpServers.some(id => !record(actual[id]) || actual[id].status !== "connected")) {
         throw new Error("opencode-isolation-violation: native MCP set differs from the explicit child set");
+      }
+      if (launch.expectedPlugins.length) {
+        const config = await this.request("/config", undefined, startupSignal);
+        if (!record(config) || !Array.isArray(config.plugin) || JSON.stringify(config.plugin) !== JSON.stringify(launch.expectedPlugins)) throw new Error("opencode-plugin-isolation-violation");
+        const tools = await this.request("/experimental/tool/ids", undefined, startupSignal);
+        if (!Array.isArray(tools) || !tools.includes("supermemory")) throw new Error("opencode-native-memory-tool-unavailable");
+        this.emit({ kind: "diagnostic", data: { code: "native-memory-capture-unverified", provider: "supermemory", runnerId: "opencode", message: "Native Supermemory recall and explicit tools are enabled. Automatic capture completion is not acknowledged by this managed server lifecycle." } });
       }
       if (!this.input.disableNativeDelegation) this.emit({ kind: "diagnostic", data: { code: "native-delegation-not-disabled" } });
       const resumePath = this.input.resume ? `/session/${encodeURIComponent(this.input.resume.nativeSessionId)}` : undefined;
@@ -107,10 +116,11 @@ class OpenCodeTask {
   }
 
   private event(raw: unknown) {
+    raw = redactImagePayload(raw);
     const p = record(raw) && record(raw.properties) ? raw.properties : {};
     const sid = p.sessionID ?? (record(p.part) ? p.part.sessionID : undefined) ?? (record(p.info) ? p.info.sessionID : undefined);
     if (sid && sid !== this.nativeId) return;
-    for (const event of mapOpenCodeEvent(raw)) this.emit(event);
+    for (const event of this.mapper.map(raw)) this.emit(event);
     if (!record(raw)) return;
     if (raw.type === "permission.asked") this.permission(p);
     if (raw.type === "session.error") {
@@ -135,9 +145,12 @@ class OpenCodeTask {
     })().catch(error => { this.emit({ kind: "diagnostic", data: { code: "opencode-permission-reply-failed", message: redactText((error as Error).message, 300) } }); if (turn && this.current === turn) this.finish({ status: "failed", error: "OpenCode permission reply failed" }); });
   }
 
-  send(prompt: string): Promise<TurnOutcome> {
+  send(prompt: string, images?: readonly DriverImageInput[]): Promise<TurnOutcome> {
     if (this.closed || this.serverDead) return Promise.resolve({ status: "failed", error: "OpenCode task is closed" });
     if (this.current) return Promise.reject(new Error("An OpenCode turn is already running"));
+    let nativeImages: ReturnType<typeof prepareImages>;
+    try { nativeImages = prepareImages(images); }
+    catch { return Promise.resolve({ status: "failed", error: "image-input-invalid" }); }
     const split = this.input.assignment.modelId.replace(/^opencode\/(.+\/.+)$/, "$1").indexOf("/");
     const modelId = this.input.assignment.modelId.replace(/^opencode\/(.+\/.+)$/, "$1");
     if (split <= 0) return Promise.resolve({ status: "failed", error: "OpenCode model must be provider/model" });
@@ -146,7 +159,7 @@ class OpenCodeTask {
     this.emit({ kind: "turn.started", data: { nativeSessionId: this.nativeId, model: this.input.assignment.modelId } });
     void this.request(`/session/${encodeURIComponent(this.nativeId)}/message`, {
       system: this.input.rolePrompt, model: { providerID: modelId.slice(0, split), modelID: modelId.slice(split + 1) },
-      ...(this.input.assignment.thinking && this.input.assignment.thinking !== "off" ? { variant: this.input.assignment.thinking } : {}), parts: [{ type: "text", text: prompt }],
+      ...(this.input.assignment.thinking && this.input.assignment.thinking !== "off" ? { variant: this.input.assignment.thinking } : {}), parts: [...(prompt || !nativeImages.length ? [{ type: "text", text: prompt }] : []), ...nativeImages.map(image => ({ type: "file", mime: image.mimeType, filename: image.name, url: `data:${image.mimeType};base64,${image.data}` }))],
     }, AbortSignal.any([turn.controller.signal, this.lifetime.signal])).then(result => {
       if (this.current !== turn) return;
       if (turn.interrupted && record(result) && record(result.info) && record(result.info.error) && result.info.error.name === "MessageAbortedError") return this.finish({ status: "interrupted" });
@@ -191,7 +204,7 @@ export function createOpenCodeSessionDriver(options: OpenCodeSessionDriverOption
     },
     async startTask(input, io): Promise<DriverTaskHandle> {
       const task = new OpenCodeTask(input, io, options); await task.initialize();
-      return { nativeSessionId: Promise.resolve(task.id), done: task.send(input.prompt), send: prompt => task.send(prompt), interrupt: () => task.interrupt(), close: () => task.close() };
+      return { nativeSessionId: Promise.resolve(task.id), done: task.send(input.prompt, input.images), send: (prompt, images) => task.send(prompt, images), interrupt: () => task.interrupt(), close: () => task.close() };
     },
   };
 }

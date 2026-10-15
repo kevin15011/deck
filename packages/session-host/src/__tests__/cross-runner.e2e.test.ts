@@ -240,7 +240,7 @@ test("cross-runner scheduler queues, scopes tools, waits, cancels and wakes Lead
   const ids: string[] = [];
   for (let i = 0; i < 6; i++) ids.push((await t.call("deck_delegate", { agent: i % 2 ? "implementer" : "architect", task: `job${i}` }) as any).data.taskId);
   await waitFor(() => t.drivers[1]!.turns.length + t.drivers[2]!.turns.length === 4);
-  expect(t.events().filter((e) => e.kind === "task.state" && e.data.state === "queued")).toHaveLength(6);
+  expect(t.events().filter((e) => e.kind === "task.state" && e.source.memberId !== "lead" && e.data.state === "queued")).toHaveLength(6);
   expect(await t.manager.callTaskTool({ ...t.grant, taskId: ids[0]!, memberId: "architect" }, "deck_delegate", { agent: "architect", task: "nested" }, {})).toMatchObject({ ok: false, code: "tool-not-allowed" });
   expect(t.drivers[1]!.turns[0]!.input.rolePrompt).toContain("openspec/changes/change");
   expect(t.drivers[1]!.turns[0]!.input.mcp.sessionTools).not.toContain("deck_delegate");
@@ -353,6 +353,8 @@ test("memory proposals have one deduplicated writer across member credentials", 
   await t.manager.close();
   const restarted = new SessionManager(t.options); managers.push(restarted);
   await restarted.execute({ sessionId: t.sessionId, clientId: "test", command: { v: 1, type: "prompt.send", text: "resume", commandId: randomUUID() } });
+  await restarted.execute({ sessionId: t.sessionId, clientId: "test", command: { v: 1, type: "prompt.resume", commandId: randomUUID() } });
+  await waitFor(() => t.drivers[0]!.turns.length === 2);
   expect(await restarted.callTaskTool(t.grant, "deck_memory_propose", { content: "same" }, {})).toMatchObject({ ok: true, data: { duplicate: true } });
   expect(t.writes).toEqual(["same"]);
 });
@@ -377,6 +379,8 @@ test("crash recovery settles absent delegated groups, refuses uncertain ownershi
   expect(signals.every((signal) => signal === 0)).toBe(true);
   t.config.members.architect = { runnerId: "opencode", modelId: "changed" };
   await restarted.execute({ sessionId: t.sessionId, clientId: "test", command: { v: 1, type: "prompt.send", commandId: randomUUID(), text: "recover work" } });
+  await restarted.execute({ sessionId: t.sessionId, clientId: "test", command: { v: 1, type: "prompt.resume", commandId: randomUUID() } });
+  await waitFor(() => t.drivers[0]!.turns.length === 2);
   expect(await restarted.callTaskTool(t.grant, "deck_delegate", { agent: "architect", task: "resume", continueTaskId: "uncertain" }, {})).toMatchObject({ ok: false, code: "ownership-unsettled" });
   expect(await restarted.callTaskTool(t.grant, "deck_delegate", { agent: "architect", task: "resume", continueTaskId: "settled" }, {})).toMatchObject({ ok: true });
   await waitFor(() => t.drivers[1]!.turns.length === 1);
