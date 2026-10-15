@@ -5,6 +5,7 @@ import {
   createOwnerOnlyFileSecretStore,
   readLogicalGitOriginRemote,
   resolveCanonicalSupermemoryProjectScope,
+  resolveSupermemorySessionScope,
   type DeckSecretStore,
 } from "@deck/core";
 import { discoverLiteralSshHostAliasesFromHome, resolveOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
@@ -46,10 +47,10 @@ function readOverride(path: string): Record<string, unknown> | undefined {
   } finally { closeSync(fd); }
 }
 
-function assertNoHigherPriorityOverrides(projectRoot: string, home: string, effects: Effects): void {
+function assertNoHigherPriorityOverrides(projectRoot: string, home: string, effects: Effects, allowNoGit = false): void {
   const git = spawnSync("git", ["-C", projectRoot, "rev-parse", "--show-toplevel"], { encoding: "utf8", timeout: 3_000, maxBuffer: 4096, env: { PATH: process.env.PATH ?? "", HOME: home, LANG: "C" } });
-  if (git.status !== 0 || !git.stdout.trim()) throw new Error("Verified Git project root is unavailable.");
-  const top = realpathSync(git.stdout.trim());
+  if ((git.status !== 0 || !git.stdout.trim()) && !allowNoGit) throw new Error("Verified Git project root is unavailable.");
+  const top = realpathSync(git.status === 0 && git.stdout.trim() ? git.stdout.trim() : projectRoot);
   const paths = [join(top, ".claude"), join(top, ".claude", ".supermemory-claude"), join(home, ".supermemory-claude"), join(home, ".claude")];
   const relocated = effects.claudeConfigDir ?? process.env.CLAUDE_CONFIG_DIR;
   if (relocated !== undefined && (!isAbsolute(relocated) || /[\0\r\n]/.test(relocated))) throw new Error("Claude relocated settings directory is untrusted.");
@@ -100,4 +101,19 @@ export function resolveClaudeSupermemoryLaunchCredential(projectRoot: string, ef
   if (!scope.ok) throw new Error("Verified canonical Supermemory repository identity is unavailable.");
   assertNoHigherPriorityOverrides(projectRoot, canonicalHome, effects);
   return { token: resolved.token, profile: resolved.profile, canonicalRepoTag: scope.scope };
+}
+
+/** Managed sessions with proven absent Git identity use only the explicit shared default. */
+export function resolveClaudeSupermemorySessionCredential(projectRoot: string, effects: Effects = {}): { token: string; profile: string; canonicalRepoTag?: string } {
+  const scope = resolveSupermemorySessionScope({ projectRoot, remotes: [] });
+  if (scope.kind === "canonical") return resolveClaudeSupermemoryLaunchCredential(projectRoot, effects);
+  if (scope.kind !== "global") throw new Error("Verified Supermemory session scope is unavailable.");
+  const home = effects.home ?? process.env.HOME;
+  if (!home) throw new Error("Supermemory HOME is unavailable.");
+  const canonicalHome = realpathSync(home);
+  const store = effects.store ?? createOwnerOnlyFileSecretStore({ configHome: effects.configHome ?? process.env.XDG_CONFIG_HOME ?? join(canonicalHome, ".config") });
+  const resolved = resolveOpenCodeSupermemoryCredential({ store });
+  if (!resolved.ok) throw new Error(resolved.reason === "invalid-store" ? "Protected shared profile store is invalid." : "No explicit shared default credential is configured.");
+  assertNoHigherPriorityOverrides(projectRoot, canonicalHome, effects, true);
+  return { token: resolved.token, profile: resolved.profile };
 }

@@ -139,6 +139,43 @@ describe("canonical Supermemory project scope", () => {
     expect(JSON.stringify(result)).not.toContain("github-work");
   });
 
+  test("accepts only the literal canonical GitHub host-key namespace with an independently canonical destination", () => {
+    for (const config of [
+      "Host github-work\n  HostName github.com\n  HostKeyAlias github.com\n",
+      "Host github-work\n  HostName ssh.github.com\n  Port 443\n  HostKeyAlias github.com\n",
+      "HOST=github-work\n  HOSTNAME = SSH.GITHUB.COM\n  hOsTkEyAlIaS=GiThUb.CoM # canonical namespace\n",
+      "HostKeyAlias = GITHUB.COM\nHost github-work\n  HostName ssh.github.com\n",
+    ]) {
+      const home = sshHome(config);
+      const deps = sshDeps(home);
+      expect(resolveCanonicalSupermemoryProjectScope({
+        projectRoot: gitProject("git@github-work:comodin-software/espritec-theme.git"),
+        remotes: [],
+        sshConfig: deps,
+      })).toMatchObject({ ok: true, scope: "sm_project_v1_comodin_software_espritec_theme" });
+      expect(parseGitRemoteOwnerRepository("ssh://git@github-work/comodin-software/espritec-theme.git", deps))
+        .toEqual({ owner: "comodin-software", repository: "espritec-theme" });
+    }
+  });
+
+  test("rejects nonliteral host-key namespaces and never uses HostKeyAlias as destination evidence", () => {
+    for (const value of ["other", "ssh.github.com", "github.com.evil", "evil.github.com", "%h", "$GITHUB_HOST", "github.com extra", '"github.com"', "'github.com'", "github.com."]) {
+      for (const config of [
+        `Host github-work\n HostName github.com\n HostKeyAlias ${value}\n`,
+        `HostKeyAlias ${value}\nHost github-work\n HostName ssh.github.com\n`,
+      ]) {
+        expect(parseGitRemoteOwnerRepository("git@github-work:acme/repo.git", sshDeps(sshHome(config)))).toBeUndefined();
+      }
+    }
+    for (const config of [
+      "Host github-work\n HostKeyAlias github.com\n",
+      "Host github-work\n HostName evil.example\n HostKeyAlias github.com\n",
+      "Host github-work\n HostName github.com.evil\n HostKeyAlias github.com\n",
+    ]) {
+      expect(parseGitRemoteOwnerRepository("git@github-work:acme/repo.git", sshDeps(sshHome(config)))).toBeUndefined();
+    }
+  });
+
   test("SSH aliases authorize only SCP-style and ssh URL remotes, not HTTPS or arbitrary URL schemes", () => {
     const home = sshHome("Host github-work\n  HostName github.com\n");
     expect(resolveCanonicalSupermemoryProjectScope({ projectRoot: gitProject("ssh://git@github-work/comodin-software/esprit-mobileapp.git"), remotes: [], sshConfig: sshDeps(home) }))
@@ -179,7 +216,7 @@ describe("canonical Supermemory project scope", () => {
       ["unknown directive equals", "Host github-work\n  HostName github.com\n  UnknownDirective=value\n"],
       ["unsupported AddKeysToAgent command", "Host github-work\n  HostName github.com\n  AddKeysToAgent $(whoami)\n"],
       ["proxy jump", "Host github-work\n  HostName github.com\n  ProxyJump bastion\n"],
-      ["host key alias", "Host github-work\n  HostName github.com\n  HostKeyAlias github.com\n"],
+
       ["canonicalize hostname", "Host github-work\n  HostName github.com\n  CanonicalizeHostname yes\n"],
       ["global include", "Include ~/.ssh/common.conf\nHost github-work\n  HostName github.com\n"],
       ["later include", "Host github-work\n  HostName github.com\nInclude ~/.ssh/common.conf\n"],

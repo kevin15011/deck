@@ -37,3 +37,12 @@ test("does not silently launch configured but unavailable or incomplete native m
   expect(() => buildCodexLaunch({ ...input, nativeMemory: { ...nativeMemory, status: "unavailable" } }, [], { baseEnv: {} })).toThrow("codex-native-memory-unavailable");
   expect(() => buildCodexLaunch({ ...input, nativeMemory: { ...nativeMemory, plugin: undefined } }, [], { baseEnv: {} })).toThrow("codex-native-memory-invalid");
 });
+
+test("global memory explicitly admits native hooks while dropping inherited provider selectors and credentials", () => {
+  const global = { ...nativeMemory, scopeMode: "global" as const, projectScope: undefined };
+  const launch = buildCodexLaunch({ ...input, nativeMemory: global }, [], { baseEnv: { HOME: "/user", SUPERMEMORY_API_KEY: "real-key", SUPERMEMORY_REPO_TAG: "foreign", SUPERMEMORY_API_URL: "https://foreign", DECK_MEMORY_CONTAINER: "foreign" } });
+  expect(launch.args).toContain("features.hooks=true");
+  expect(launch.env).toEqual({ HOME: "/user" });
+  expect(() => buildCodexLaunch({ ...input, nativeMemory: { ...global, scopeMode: undefined } }, [])).toThrow("codex-native-memory-invalid");
+  expect(() => buildCodexLaunch({ ...input, nativeMemory: { ...global, projectScope: nativeMemory.projectScope } }, [])).toThrow("codex-native-memory-invalid");
+});

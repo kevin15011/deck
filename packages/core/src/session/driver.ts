@@ -25,6 +25,8 @@ export type NativeMemoryDescriptor = {
   integration: "runner-plugin";
   status: "ready" | "disabled" | "unavailable";
   reasonCode?: string;
+  /** Explicit global mode omits all provider container tags. Absence still requires a canonical project scope. */
+  scopeMode?: "global";
   projectScope?: string;
   /** Native hook activation is support evidence, not proof of provider success. */
   automaticRecall?: "native-hook";

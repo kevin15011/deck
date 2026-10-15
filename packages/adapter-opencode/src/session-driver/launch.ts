@@ -9,7 +9,7 @@ export type OpenCodeLaunchOptions = { executable?: string; baseEnv?: Readonly<Re
 export function buildOpenCodeLaunch(input: DriverTaskInput, io: Pick<DriverHostIo, "writePrivateFile">, options: OpenCodeLaunchOptions = {}) {
   if (input.nativeMemory?.status === "unavailable") throw new Error("opencode-native-memory-unavailable");
   const loaderPath = input.nativeMemory?.status === "ready" ? input.nativeMemory.plugin?.loaderPath : undefined;
-  if (input.nativeMemory?.status === "ready" && (!loaderPath || !isAbsolute(loaderPath) || !/^sm_project_v1_[a-z0-9_]+$/.test(input.nativeMemory.projectScope ?? ""))) throw new Error("opencode-native-memory-invalid");
+  if (input.nativeMemory?.status === "ready" && (!loaderPath || !isAbsolute(loaderPath) || !(input.nativeMemory.scopeMode === "global" ? input.nativeMemory.projectScope === undefined : /^sm_project_v1_[a-z0-9_]+$/.test(input.nativeMemory.projectScope ?? "")))) throw new Error("opencode-native-memory-invalid");
   const plugins = loaderPath ? [pathToFileURL(loaderPath).href] : [];
   const mcp: Record<string, unknown> = {};
   for (const id of input.mcp.servers) {
@@ -37,5 +37,6 @@ export function buildOpenCodeLaunch(input: DriverTaskInput, io: Pick<DriverHostI
     OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
     OPENCODE_SERVER_PASSWORD: randomBytes(32).toString("hex"), OPENCODE_SERVER_USERNAME: "opencode",
   });
+  if (input.nativeMemory?.scopeMode === "global") for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
   return { command: options.executable ?? "opencode", args: ["serve", ...(plugins.length ? [] : ["--pure"]), "--hostname", "127.0.0.1", "--port", "0"], env, expectedMcpServers: [...input.mcp.servers], expectedPlugins: plugins };
 }

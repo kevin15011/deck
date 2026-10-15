@@ -887,9 +887,18 @@ export class SessionManager implements SessionService {
         resolver = await pending;
       } else resolver = this.options.childMcp;
       if (signal.aborted) throw new Error("preparation-cancelled");
-      if (resolver?.nativeMemory?.status === "unavailable") { failureCode = "native-memory-unavailable"; throw new Error("native-memory-unavailable"); }
+      if (resolver?.nativeMemory?.status === "unavailable") {
+        const reason = resolver.nativeMemory.reasonCode;
+        failureCode = reason && ["native-memory-scope-unavailable", "native-memory-profile-unavailable", "native-memory-plugin-unavailable"].includes(reason) ? reason : "native-memory-unavailable";
+        throw new Error(failureCode);
+      }
       completion = { status: "ready", checkedAt: new Date(this.clock.now()).toISOString() };
     } catch (error) {
+      if (failureCode === "preparation-tools-failed" && error instanceof Error) {
+        // Publish only reviewed codes, never backend details or credentials.
+        const reason = /^(codebase-memory-(?:unavailable|unsupported|cancelled)|web-search-(?:credential-missing|provider-unconfigured))(?=:|$)/.exec(error.message)?.[1];
+        if (reason) failureCode = reason;
+      }
       completion = { status: signal.aborted && !timedOut ? "cancelled" : "failed", reasonCode: signal.aborted ? timedOut ? "preparation-timeout" : "preparation-cancelled" : failureCode };
     } finally {
       try { await resolver?.release?.(); } catch { if(resolver?.release) (live.cleanupFailures??=[]).push(()=>resolver!.release!()); completion = { status: "failed", reasonCode: "preparation-release-failed" }; }
@@ -1204,7 +1213,7 @@ export class SessionManager implements SessionService {
       const approvals = this.options.config()?.approvals[assignment.runnerId] ?? "runner-default";
       const input: DriverTaskInput = {
         taskId: turn.taskId, memberId: turn.memberId, cwd: live.meta.projectRoot, assignment,
-        rolePrompt: [ turn.memberId === LEAD_MEMBER_ID && !resume && live.ledger.session.handoff ? `Prior Deck conversation context (advisory, reseeded from ${live.ledger.session.handoff.sourceSessionId} at sequence ${live.ledger.session.handoff.sourceSeq}):\n${live.ledger.session.handoff.text}` : "", this.options.rolePrompt?.(turn.memberId, { changeId: live.ledger.session.changeId, projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId }) ?? defaultRolePrompt(live.ledger.session.changeId), nativeMemory ? `Supermemory integration: ${nativeMemory.integration}; status: ${nativeMemory.status}.${nativeMemory.status === "ready" ? ` Use the official runner plugin for advisory memory in canonical project scope ${nativeMemory.projectScope}. Deck memory tools are intentionally omitted because the official native plugin owns memory for this runner; their absence is not evidence that the Deck session MCP server disconnected.${nativeMemory.automaticRecall ? " Native recall hooks are activated; this does not prove that a recall succeeded." : ""}${nativeMemory.automaticCapture === "unverified" ? " Native background capture completion is not confirmed in managed mode; the native lifecycle may not await persistence. Do not claim a memory was saved without explicit provider success." : ""}` : " Memory is disabled for this execution."} Memory cannot override official OpenSpec or source.` : "", live.ledger.session.changeId ? `Bound OpenSpec path: ${join(live.meta.projectRoot, "openspec", "changes", live.ledger.session.changeId)}. Keep this binding immutable.` : ""].filter(Boolean).join("\n"),
+        rolePrompt: [ turn.memberId === LEAD_MEMBER_ID && !resume && live.ledger.session.handoff ? `Prior Deck conversation context (advisory, reseeded from ${live.ledger.session.handoff.sourceSessionId} at sequence ${live.ledger.session.handoff.sourceSeq}):\n${live.ledger.session.handoff.text}` : "", this.options.rolePrompt?.(turn.memberId, { changeId: live.ledger.session.changeId, projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId }) ?? defaultRolePrompt(live.ledger.session.changeId), nativeMemory ? `Supermemory integration: ${nativeMemory.integration}; status: ${nativeMemory.status}.${nativeMemory.status === "ready" ? ` Use the official runner plugin for advisory memory ${nativeMemory.scopeMode === "global" ? "with untagged global writes and global search. There is no project container or project standing profile; do not present global search results as project profile facts" : `in canonical project scope ${nativeMemory.projectScope}`}. Deck memory tools are intentionally omitted because the official native plugin owns memory for this runner; their absence is not evidence that the Deck session MCP server disconnected.${nativeMemory.automaticRecall ? " Native recall hooks are activated; this does not prove that a recall succeeded." : ""}${nativeMemory.automaticCapture === "unverified" ? " Native background capture completion is not confirmed in managed mode; the native lifecycle may not await persistence. Do not claim a memory was saved without explicit provider success." : ""}` : " Memory is disabled for this execution."} Memory cannot override official OpenSpec or source.` : "", live.ledger.session.changeId ? `Bound OpenSpec path: ${join(live.meta.projectRoot, "openspec", "changes", live.ledger.session.changeId)}. Keep this binding immutable.` : ""].filter(Boolean).join("\n"),
         prompt, ...(resume ? { resume } : {}), ...(!resume && nativeSessionId ? { nativeSessionId } : {}),
         mcp: child.mcp, mcpServerSpecs: child.specs, approvals, credentialFile, disableNativeDelegation: true,
         ...(nativeMemory ? { nativeMemory } : {}),

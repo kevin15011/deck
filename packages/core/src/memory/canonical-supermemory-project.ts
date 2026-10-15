@@ -624,6 +624,9 @@ function sshConfigMapsAliasToCanonicalGithub(alias: string, config: string): boo
 function validateAllowedSshAliasDirective(keyword: string, value: string): boolean {
   if (!value || Buffer.byteLength(value, "utf8") > SSH_CONFIG_MAX_LINE_BYTES || /[\x00-\x1f\x7f]/.test(value)) return false;
   switch (keyword) {
+    case "hostkeyalias":
+      // Host-key namespace only; HostName must still independently prove the destination.
+      return /^github\.com$/i.test(value);
     case "user":
     case "identityfile":
       return true;

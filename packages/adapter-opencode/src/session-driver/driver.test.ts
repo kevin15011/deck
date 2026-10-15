@@ -320,3 +320,14 @@ test.each([
     expect(s.terminated).toBe(1);
   } finally { await s.stop(); }
 });
+
+test("global memory explicitly admits native loader while dropping inherited provider selectors and credentials", () => {
+  const h = privateIo();
+  const nativeMemory = { provider: "supermemory", integration: "runner-plugin", status: "ready", scopeMode: "global", plugin: { root: "/owned/official", loaderPath: "/owned/official/loader.js" } } as const;
+  const launch = buildOpenCodeLaunch({ ...input(), nativeMemory }, h.io, { baseEnv: { HOME: "/user", SUPERMEMORY_API_KEY: "real-key", SUPERMEMORY_REPO_TAG: "foreign", SUPERMEMORY_API_URL: "https://foreign", DECK_MEMORY_CONTAINER: "foreign" } });
+  expect(launch.expectedPlugins).toEqual(["file:///owned/official/loader.js"]);
+  expect(launch.env.HOME).toBe("/user");
+  expect(Object.keys(launch.env).some(key => /^(SUPERMEMORY_|DECK_MEMORY_)/.test(key))).toBe(false);
+  expect(() => buildOpenCodeLaunch({ ...input(), nativeMemory: { ...nativeMemory, scopeMode: undefined } }, h.io)).toThrow("opencode-native-memory-invalid");
+  expect(() => buildOpenCodeLaunch({ ...input(), nativeMemory: { ...nativeMemory, projectScope: "sm_project_v1_owner_repo" } }, h.io)).toThrow("opencode-native-memory-invalid");
+});

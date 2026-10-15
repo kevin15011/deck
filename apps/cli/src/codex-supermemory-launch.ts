@@ -15,6 +15,7 @@ import {
   createOwnerOnlyFileSecretStore,
   readLogicalGitOriginRemote,
   resolveCanonicalSupermemoryProjectScope,
+  resolveSupermemorySessionScope,
   resolveVerifiedGitSharedProjectBase,
   type DeckSecretStore,
   type RunnerLaunchPlan,
@@ -165,4 +166,18 @@ export function authorizeCodexSupermemoryLaunch(
     envOverlay: { ...(plan.envOverlay ?? {}), ...overlay },
     sensitiveEnvAuthorization: { binding: VERIFIED_CODEX_SUPERMEMORY_BINDING, keys: [...new Set([...(plan.sensitiveEnvAuthorization?.keys ?? []), CODEX_SUPERMEMORY_ENV_KEY])] },
   };
+}
+
+/** Managed sessions with proven absent Git identity use only the explicit shared default. */
+export function resolveCodexSupermemorySessionCredential(projectRoot: string, effects: CodexSupermemoryLaunchEffects = {}): { token: string; profile: string; canonicalRepoTag?: string } {
+  const scope = resolveSupermemorySessionScope({ projectRoot, remotes: [] });
+  if (scope.kind === "canonical") return resolveCodexSupermemoryLaunchCredential(projectRoot, effects);
+  if (scope.kind !== "global") throw new Error("Verified Supermemory session scope is unavailable.");
+  const home = effects.home ?? process.env.HOME;
+  if (!home) throw new Error("Supermemory HOME is unavailable.");
+  const canonicalHome = realpathSync(home);
+  const store = effects.store ?? createOwnerOnlyFileSecretStore({ configHome: effects.configHome ?? process.env.XDG_CONFIG_HOME ?? join(canonicalHome, ".config") });
+  const resolved = resolveOpenCodeSupermemoryCredential({ store });
+  if (!resolved.ok) throw new Error(resolved.reason === "invalid-store" ? "Protected shared profile store is invalid." : "No explicit shared default credential is configured.");
+  return { token: resolved.token, profile: resolved.profile };
 }

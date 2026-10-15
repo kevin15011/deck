@@ -5,6 +5,7 @@ import type { ChildMcpContext, ChildMcpResolver, SessionMemoryPort } from "@deck
 import type { SessionCodebaseReadiness } from "./session-codebase-readiness";
 import { createSupermemoryRuntimeHost } from "./supermemory-runtime-host";
 import { getWebSearchProviderDescriptor } from "./web-search-provider";
+import { startGlobalMemoryTransport } from "./session-global-memory-transport";
 import { prepareSessionNativeMemory, type NativeMemoryPreparationEffects } from "./session-native-memory";
 
 export type SessionMemoryContext = { sessionId: string; projectRoot: string; leadRunnerId: string };
@@ -37,6 +38,7 @@ export async function resolveSessionChildMcp(
   environment: Readonly<Record<string, string | undefined>> = process.env,
   managed?: { readiness: SessionCodebaseReadiness; context: ChildMcpContext },
   nativeMemoryEffects?: NativeMemoryPreparationEffects,
+  startGlobalTransport: typeof startGlobalMemoryTransport = startGlobalMemoryTransport,
 ): Promise<ChildMcpResolver> {
   const memory = managed ? prepareSessionNativeMemory(adapter?.runnerId ?? "", managed.context.projectRoot, config, environment, nativeMemoryEffects) : undefined;
   const servers: Record<string, ChildMcpServerSpec> = { ...await adapter?.readSessionMcpServers?.() };
@@ -58,14 +60,37 @@ export async function resolveSessionChildMcp(
     webSearch = { enabled: true, serverId: provider.semanticServerId };
   }
   let release: (() => Promise<void>) | undefined;
-  const codebase = servers["codebase-memory"];
-  if (managed && codebase) {
-    if (codebase.transport === "http") throw new Error("codebase-memory-unsupported: the selected managed backend requires the reviewed native release");
-    const prepared = await managed.readiness.ensure(codebase, managed.context, envOverlay);
-    servers["codebase-memory"] = prepared;
-    let released = false;
-    release = () => { if (released) return Promise.resolve(); released = true; return managed.readiness.release(prepared); };
+  let releases: Array<() => Promise<void>> = [];
+  let releasing: Promise<void> | undefined;
+  const releaseResources = () => releasing ??= (async () => {
+    const pending = releases;
+    const results = await Promise.allSettled(pending.map(close => Promise.resolve().then(close)));
+    releases = pending.filter((_, index) => results[index]?.status === "rejected");
+    if (releases.length) throw new Error("session-resource-release-failed");
+  })().finally(() => { releasing = undefined; });
+  try {
+    if (memory?.globalTransportToken) {
+      const transport = await startGlobalTransport({ token: memory.globalTransportToken, signal: managed?.context.signal });
+      releases.push(() => transport.close());
+      const credentialKey = adapter?.runnerId === "claude" ? "SUPERMEMORY_CC_API_KEY" : "SUPERMEMORY_API_KEY";
+      envOverlay = { ...envOverlay, [credentialKey]: transport.token, SUPERMEMORY_API_URL: transport.apiUrl,
+        ...(adapter?.runnerId === "claude" ? { SUPERMEMORY_MCP_URL: transport.mcpUrl } : {}) };
+    }
+    const codebase = servers["codebase-memory"];
+    if (managed && codebase) {
+      if (codebase.transport === "http") throw new Error("codebase-memory-unsupported: the selected managed backend requires the reviewed native release");
+      const prepared = await managed.readiness.ensure(codebase, managed.context, envOverlay);
+      servers["codebase-memory"] = prepared;
+      releases.push(() => managed.readiness.release(prepared));
+    }
+    if (releases.length) {
+      release = releaseResources;
+    }
+  } catch (error) {
+    await Promise.allSettled(releases.map(close => Promise.resolve().then(close)));
+    throw error;
   }
+
   return {
     ...(memory ? { nativeMemory: memory.nativeMemory } : {}),
     runnerPackages: () => Object.keys(servers), memoryProviderIds, webSearch,

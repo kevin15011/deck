@@ -3,7 +3,10 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getDefaultDeckConfig, resolveCanonicalSupermemoryProjectScope } from "@deck/core";
+import { getDefaultDeckConfig, resolveCanonicalSupermemoryProjectScope, createOwnerOnlyFileSecretStore } from "@deck/core";
+import { storeOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
+import { resolveClaudeSupermemorySessionCredential, resolveClaudeSupermemoryLaunchCredential } from "./claude-supermemory-launch";
+import { resolveCodexSupermemorySessionCredential, resolveCodexSupermemoryLaunchCredential } from "./codex-supermemory-launch";
 import { prepareSessionNativeMemory, readPreparedClaudeMemoryPlugin } from "./session-native-memory";
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -20,7 +23,7 @@ test.each(["claude", "codex", "opencode"])("%s binds verified native preparation
   const f = fixture(); let seen = "";
   const prepared = prepareSessionNativeMemory(runnerId, f.root, f.config, {}, {
     credential: (runner, root) => { expect(runner).toBe(runnerId); expect(root).toBe(f.root); return { token: "private-token", canonicalRepoTag: f.scope }; },
-    plugin: (runner, root, credential) => { seen = runner; expect(root).toBe(f.root); expect(credential.canonicalRepoTag).toBe(f.scope); return { plugin: { root: "/verified/plugin" }, env: { SUPERMEMORY_API_KEY: credential.token, SUPERMEMORY_REPO_TAG: credential.canonicalRepoTag } }; },
+    plugin: (runner, root, credential) => { seen = runner; expect(root).toBe(f.root); expect(credential.canonicalRepoTag).toBe(f.scope); return { plugin: { root: "/verified/plugin" }, env: { SUPERMEMORY_API_KEY: credential.token, SUPERMEMORY_REPO_TAG: f.scope } }; },
   });
   expect(seen).toBe(runnerId);
   expect(prepared?.nativeMemory).toMatchObject({ status: "ready", provider: "supermemory", integration: "runner-plugin", projectScope: f.scope });
@@ -56,4 +59,56 @@ test("verified Claude plugin uses the official top-level MCP shape and expands o
   const plugin = readPreparedClaudeMemoryPlugin(f.root);
   expect(plugin.mcpServers).toEqual({ plugin_supermemory_supermemory: { command: "node", args: [join(f.root, "hooks", "mcp-proxy.js")], env: {} } });
   expect(plugin.exclusiveHookEvents).toEqual(["SessionStart", "UserPromptSubmit", "Stop"]);
+});
+
+for (const withGit of [false, true]) test.each(["claude", "codex", "opencode"])(`%s prepares explicit global memory when identity is absent (git=${withGit})`, runnerId => {
+  const root = mkdtempSync(join(tmpdir(), "deck-global-memory-")); roots.push(root);
+  if (withGit) execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+  const config = getDefaultDeckConfig(); config.adaptiveMemory = { enabled: true, activeProvider: "supermemory" };
+  const prepared = prepareSessionNativeMemory(runnerId, root, config, {}, {
+    credential: () => ({ token: "host-secret" }),
+    plugin: () => ({ plugin: { root: "/verified/plugin" }, env: { SUPERMEMORY_API_KEY: "host-secret", SUPERMEMORY_REPO_TAG: "path-hash" } }),
+  });
+  expect(prepared?.nativeMemory).toMatchObject({ status: "ready", scopeMode: "global" });
+  expect(prepared?.nativeMemory.projectScope).toBeUndefined();
+  expect(JSON.stringify(prepared?.nativeMemory)).not.toContain("host-secret");
+  expect(JSON.stringify(prepared?.envOverlay)).not.toContain("host-secret");
+  expect(prepared?.envOverlay?.SUPERMEMORY_REPO_TAG).toBeUndefined();
+});
+
+for (const withGit of [false, true]) test.each(["claude", "codex"])(`%s managed global credentials require the protected explicit default (git=${withGit})`, runner => {
+  const home = mkdtempSync(join(tmpdir(), "deck-global-profile-")); roots.push(home);
+  const project = join(home, "project"); mkdirSync(project);
+  if (withGit) execFileSync("git", ["init"], { cwd: project, stdio: "ignore" });
+  const store = createOwnerOnlyFileSecretStore({ configHome: join(home, "config") });
+  const resolve = runner === "claude" ? resolveClaudeSupermemorySessionCredential : resolveCodexSupermemorySessionCredential;
+  const staticResolve = runner === "claude" ? resolveClaudeSupermemoryLaunchCredential : resolveCodexSupermemoryLaunchCredential;
+  const effects = { home, store, claudeConfigDir: join(home, ".claude"), managedSettingsPaths: [], origin: () => "git@private-alias:owner/repo.git", discoverAliases: () => ({ status: "trusted" as const, aliases: ["private-alias"], ambiguousAliases: [] }) };
+  storeOpenCodeSupermemoryCredential({ store, token: "alias-key", alias: "private-alias", eligibleAliases: ["private-alias"] });
+  expect(() => resolve(project, effects)).toThrow("explicit shared default");
+  storeOpenCodeSupermemoryCredential({ store, token: "default-key", makeDefault: true, eligibleAliases: [] });
+  expect(resolve(project, effects)).toEqual({ profile: "default", token: "default-key" });
+  expect(() => staticResolve(project, effects)).toThrow("canonical Supermemory repository identity");
+  expect(() => resolve(project, { ...effects, store: { read: () => "{}" } })).toThrow("Protected shared profile store is invalid");
+});
+
+test("global Claude credentials preserve higher-priority override refusal", () => {
+  const home = mkdtempSync(join(tmpdir(), "deck-global-claude-override-")); roots.push(home);
+  const project = join(home, "project"); mkdirSync(project);
+  mkdirSync(join(project, ".claude"));
+  writeFileSync(join(project, ".claude", "settings.json"), JSON.stringify({ env: { SUPERMEMORY_API_URL: "https://foreign.example" } }));
+  const store = createOwnerOnlyFileSecretStore({ configHome: join(home, "config") });
+  storeOpenCodeSupermemoryCredential({ store, token: "default-key", makeDefault: true, eligibleAliases: [] });
+  expect(() => resolveClaudeSupermemorySessionCredential(project, { home, store, claudeConfigDir: join(home, ".claude"), managedSettingsPaths: [] })).toThrow("environment override conflicts");
+});
+
+test.each(["claude", "codex", "opencode"])("%s global native memory rejects explicit project container overrides before plugin effects", runner => {
+  const root = mkdtempSync(join(tmpdir(), "deck-global-override-")); roots.push(root);
+  mkdirSync(join(root, ".claude", ".supermemory-claude"), { recursive: true });
+  writeFileSync(join(root, ".claude", ".supermemory-claude", "config.json"), JSON.stringify({ repoContainerTag: "foreign" }));
+  const config = getDefaultDeckConfig(); config.adaptiveMemory = { enabled: true, activeProvider: "supermemory" };
+  let pluginCalls = 0;
+  const prepared = prepareSessionNativeMemory(runner, root, config, {}, { credential: () => ({ token: "default-key" }), plugin: () => { pluginCalls++; return { plugin: { root: "/verified/plugin" }, env: {} }; } });
+  expect(prepared?.nativeMemory).toMatchObject({ status: "unavailable", reasonCode: "native-memory-plugin-unavailable" });
+  expect(pluginCalls).toBe(0);
 });

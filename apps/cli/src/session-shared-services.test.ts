@@ -97,3 +97,53 @@ test.each(["claude", "codex", "opencode"])("native %s never constructs daemon me
   const config = getDefaultDeckConfig(); config.adaptiveMemory = { enabled: true, activeProvider: "supermemory" };
   expect(createSessionMemoryPort({ sessionId: "s", projectRoot: "/p", leadRunnerId: runnerId }, config, async () => { throw new Error("daemon memory forbidden"); })).toBeUndefined();
 });
+
+for (const withGit of [false, true]) test.each(["claude", "codex", "opencode"])(`%s composes untagged native transport without publishing the provider key (git=${withGit})`, async runnerId => {
+  const root = mkdtempSync(join(tmpdir(), "deck-global-session-")); roots.push(root);
+  if (withGit) execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+  const config = getDefaultDeckConfig(); config.adaptiveMemory = { enabled: true, activeProvider: "supermemory" };
+  let closes = 0;
+  const controller = new AbortController();
+  const resolver = await resolveSessionChildMcp({ runnerId } as RunnerAdapter, config, {}, {
+    context: { projectRoot: root, sessionId: "s", taskId: "t", signal: controller.signal }, readiness: {} as never,
+  }, { credential: () => ({ token: "real-provider-key" }), plugin: () => ({ plugin: { root: "/verified/plugin" }, env: {} }) }, async input => {
+    expect(input.token).toBe("real-provider-key"); expect(input.signal).toBe(controller.signal);
+    return { apiUrl: "http://127.0.0.1:1234/private", mcpUrl: "http://127.0.0.1:1234/private/mcp", token: "ephemeral-bearer", close: async () => { closes++; } };
+  });
+  expect(resolver.nativeMemory).toMatchObject({ status: "ready", scopeMode: "global" });
+  expect(resolver.nativeMemory?.projectScope).toBeUndefined();
+  expect(JSON.stringify(resolver)).not.toContain("real-provider-key");
+  expect(resolver.envOverlay?.SUPERMEMORY_REPO_TAG).toBeUndefined();
+  expect(resolver.envOverlay?.[runnerId === "claude" ? "SUPERMEMORY_CC_API_KEY" : "SUPERMEMORY_API_KEY"]).toBe("ephemeral-bearer");
+  expect(resolver.envOverlay?.SUPERMEMORY_API_URL).toBe("http://127.0.0.1:1234/private");
+  if (runnerId === "claude") expect(resolver.envOverlay?.SUPERMEMORY_MCP_URL).toBe("http://127.0.0.1:1234/private/mcp");
+  await resolver.release?.(); await resolver.release?.(); expect(closes).toBe(1);
+});
+
+test.each(["failure", "cancellation", "release"])("global transport and codebase lifetime handle %s", async mode => {
+  const root = mkdtempSync(join(tmpdir(), "deck-global-cleanup-")); roots.push(root);
+  const config = getDefaultDeckConfig(); config.adaptiveMemory = { enabled: true, activeProvider: "supermemory" };
+  const controller = new AbortController(); let transportCloses = 0; let codebaseCloses = 0;
+  const spec = { command: "codebase", args: [], env: {} };
+  const resolve = () => resolveSessionChildMcp({ runnerId: "codex", readSessionMcpServers: async () => ({ "codebase-memory": spec }) } as unknown as RunnerAdapter, config, {}, {
+    context: { projectRoot: root, sessionId: "s", taskId: "t", signal: controller.signal },
+    readiness: { ensure: async () => { if (mode === "failure") throw new Error("codebase failed"); if (mode === "cancellation") controller.abort(); return spec; }, release: async () => { codebaseCloses++; } } as never,
+  }, { credential: () => ({ token: "real-provider-key" }), plugin: () => ({ plugin: { root: "/verified/plugin" }, env: {} }) }, async () => ({ apiUrl: "http://127.0.0.1:1234/private", mcpUrl: "http://127.0.0.1:1234/private/mcp", token: "ephemeral", close: async () => { transportCloses++; } }));
+  if (mode !== "failure") { const resolver = await resolve(); expect(controller.signal.aborted).toBe(mode === "cancellation"); await resolver.release?.(); await resolver.release?.(); }
+  else await expect(resolve()).rejects.toThrow("codebase failed");
+  expect(transportCloses).toBe(1); expect(codebaseCloses).toBe(mode === "failure" ? 0 : 1);
+});
+
+test.each([false, true])("resource cleanup reports failure and retries only the failed closer (global=%s)", async global => {
+  const root = mkdtempSync(join(tmpdir(), "deck-resource-retry-")); roots.push(root);
+  const config = getDefaultDeckConfig(); if (global) config.adaptiveMemory = { enabled: true, activeProvider: "supermemory" };
+  let transportCloses = 0; let codebaseCloses = 0;
+  const spec = { command: "codebase", args: [], env: {} };
+  const resolver = await resolveSessionChildMcp({ runnerId: "codex", readSessionMcpServers: async () => ({ "codebase-memory": spec }) } as unknown as RunnerAdapter, config, {}, {
+    context: { projectRoot: root, sessionId: "s", taskId: "t", signal: new AbortController().signal },
+    readiness: { ensure: async () => spec, release: async () => { if (++codebaseCloses === 1) throw new Error("retry cleanup"); } } as never,
+  }, { credential: () => ({ token: "real-provider-key" }), plugin: () => ({ plugin: { root: "/verified/plugin" }, env: {} }) }, async () => ({ apiUrl: "http://127.0.0.1:1234/private", mcpUrl: "http://127.0.0.1:1234/private/mcp", token: "ephemeral", close: async () => { transportCloses++; } }));
+  await expect(resolver.release?.()).rejects.toThrow("session-resource-release-failed");
+  await resolver.release?.(); await resolver.release?.();
+  expect(codebaseCloses).toBe(2); expect(transportCloses).toBe(global ? 1 : 0);
+});

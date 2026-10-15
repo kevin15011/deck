@@ -423,6 +423,43 @@ describe("persistent workspace sessions", () => {
     expect(lastTurn(reopened.driver).input.resume).toBeUndefined();
   });
 
+  test.each([
+    "codebase-memory-unavailable", "codebase-memory-unsupported", "codebase-memory-cancelled",
+    "web-search-credential-missing", "web-search-provider-unconfigured",
+  ])("preparation retains bounded tool failure %s", async (reasonCode) => {
+    const secret = "private-token-never-publish";
+    const t = setup({ options: { childMcp: async () => { throw new Error(`${reasonCode}: ${secret}`); } } });
+    const id = await t.create();
+    await t.run({ type: "session.prepare" }, id); await t.idle();
+    expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data).toMatchObject({ status: "failed", phase: "preparing-tools", reasonCode });
+    expect(JSON.stringify(t.events(id))).not.toContain(secret);
+    expect(t.driver.turns).toHaveLength(0);
+  });
+
+  test.each([
+    "native-memory-scope-unavailable", "native-memory-profile-unavailable", "native-memory-plugin-unavailable",
+    "unknown: private-token-never-publish",
+  ])("preparation bounds native memory failure %s", async (reasonCode) => {
+    let releases = 0;
+    const t = setup({ options: { childMcp: {
+      nativeMemory: { provider: "supermemory", integration: "runner-plugin", status: "unavailable", reasonCode },
+      runnerPackages: () => [], resolveServer: () => undefined, release: async () => { releases++; },
+    } } });
+    const id = await t.create();
+    await t.run({ type: "session.prepare" }, id); await t.idle();
+    expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data).toMatchObject({ status: "failed", reasonCode: reasonCode.startsWith("unknown:") ? "native-memory-unavailable" : reasonCode });
+    expect(JSON.stringify(t.events(id))).not.toContain("private-token-never-publish");
+    expect(releases).toBe(1);
+  });
+
+  test.each(["unknown: private-token-never-publish", "codebase-memory-unavailable-private-token-never-publish"])("preparation redacts unknown tool failures %s", async (message) => {
+    const t = setup({ options: { childMcp: async () => { throw new Error(message); } } });
+    const id = await t.create();
+    await t.run({ type: "session.prepare" }, id); await t.idle();
+    expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data).toMatchObject({ status: "failed", reasonCode: "preparation-tools-failed" });
+    expect(JSON.stringify(t.events(id))).not.toContain("private-token-never-publish");
+  });
+
   test("preparation timeout is terminal without starting a model and permits retry", async () => {
     const clock = new FakeClock(); const t = setup({ options: { clock } }); const id = await t.create();
     let probing = false;
@@ -1807,4 +1844,18 @@ describe("reversible session release and session catalog actions", () => {
   expect(existsSync(sessionPaths(t.paths,id).sessionFile)).toBe(true);await t.manager.close();const next=setup({dir:t.dir});
   expect((await next.manager.query("sessions.list",{}) as any).data.sessions).toEqual([]);expect(await next.run({type:"prompt.send",text:"no"},id)).toMatchObject({ok:false,code:"session-removed"});
  });
+});
+
+test("global native memory role instructions omit canonical identity and project standing profiles", async () => {
+  const nativeMemory = { provider: "supermemory", integration: "runner-plugin", status: "ready", scopeMode: "global", plugin: { root: "/private/plugin" } } as const;
+  const t = setup({ options: { childMcp: { nativeMemory, runnerPackages: () => [], resolveServer: () => undefined } } });
+  const sid = await t.create();
+  await t.run({ type: "prompt.send", text: "go" }, sid);
+  await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "global native start");
+  const prompt = lastTurn(t.driver).input.rolePrompt;
+  expect(prompt).toContain("untagged global writes and global search");
+  expect(prompt).toContain("no project container or project standing profile");
+  expect(prompt).not.toContain("canonical project scope");
+  expect(prompt).not.toContain("undefined");
+  lastTurn(t.driver).finish(); await t.idle();
 });

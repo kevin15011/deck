@@ -57,7 +57,7 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   const memory = input.nativeMemory;
   if (memory?.status === "unavailable") throw new ClaudeLaunchError(memory.reasonCode ?? "native-memory-unavailable", memory.reasonCode ?? "Native Supermemory is unavailable");
   const nativePlugin = memory?.status === "ready" ? memory.plugin : undefined;
-  if (memory?.status === "ready" && (!/^sm_project_v1_[a-z0-9_]{3,180}$/.test(memory.projectScope ?? "") || !nativePlugin || !isAbsolute(nativePlugin.root) || /[\0\r\n]/.test(nativePlugin.root))) throw new ClaudeLaunchError("claude-memory-descriptor-invalid", "Native Supermemory needs a verified canonical project scope and plugin");
+  if (memory?.status === "ready" && (!(memory.scopeMode === "global" ? memory.projectScope === undefined : /^sm_project_v1_[a-z0-9_]{3,180}$/.test(memory.projectScope ?? "")) || !nativePlugin || !isAbsolute(nativePlugin.root) || /[\0\r\n]/.test(nativePlugin.root))) throw new ClaudeLaunchError("claude-memory-descriptor-invalid", "Native Supermemory needs a verified canonical project scope and plugin");
   const { modelId, thinking } = input.assignment;
   if (!safeScalar(modelId)) throw new ClaudeLaunchError("claude-invalid-model", "Claude model id must be a bounded, non-option scalar");
   const sessionId = input.resume?.nativeSessionId ?? input.nativeSessionId;
@@ -107,5 +107,6 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   for (const [key, value] of Object.entries(options.baseEnv ?? process.env)) if (typeof value === "string") env[key] = value;
   env.MCP_TOOL_TIMEOUT = String(MCP_TOOL_TIMEOUT_MS);
 
+  if (input.nativeMemory?.scopeMode === "global") for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
   return { command: options.executable ?? "claude", args, env, expectedMcpServers, diagnostics };
 }

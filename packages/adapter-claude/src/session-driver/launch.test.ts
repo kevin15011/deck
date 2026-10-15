@@ -168,3 +168,13 @@ describe("prepared official native Supermemory", () => {
     expect(JSON.parse(valueAfter(launch.args, "--settings")!).disableAllHooks).toBe(true);
   });
 });
+
+test("global memory requires explicit admission and drops inherited provider selectors and credentials", () => {
+  const plugin = { root: "/owned/official" };
+  const memory = { provider: "supermemory", integration: "runner-plugin", status: "ready", scopeMode: "global", plugin } as const;
+  const launch = buildClaudeTurnLaunch(input({ nativeMemory: memory }), { writePrivateFile: name => `/private/${name}` }, { baseEnv: { HOME: "/home/u", SUPERMEMORY_CC_API_KEY: "real-key", SUPERMEMORY_REPO_TAG: "foreign", SUPERMEMORY_API_URL: "https://foreign", DECK_MEMORY_CONTAINER: "foreign" } });
+  expect(launch.env).toMatchObject({ HOME: "/home/u" });
+  expect(Object.keys(launch.env).some(key => /^(SUPERMEMORY_|DECK_MEMORY_)/.test(key))).toBe(false);
+  expect(() => build({ nativeMemory: { ...memory, scopeMode: undefined } })).toThrow("canonical");
+  expect(() => build({ nativeMemory: { ...memory, projectScope: "sm_project_v1_owner_repo" } })).toThrow("canonical");
+});

@@ -13,7 +13,7 @@ export function codexMemoryHooks(input: DriverTaskInput): Record<string, unknown
   const hooks: Record<string, unknown> = Object.fromEntries(HOOK_EVENTS.map(event => [event, []]));
   if (input.nativeMemory?.status !== "ready") return hooks;
   const plugin = input.nativeMemory.plugin;
-  if (!/^sm_project_v1_[a-z0-9_]+$/.test(input.nativeMemory.projectScope ?? "") || !plugin?.nodeCommand || !isAbsolute(plugin.nodeCommand)
+  if (!(input.nativeMemory.scopeMode === "global" ? input.nativeMemory.projectScope === undefined : /^sm_project_v1_[a-z0-9_]+$/.test(input.nativeMemory.projectScope ?? "")) || !plugin?.nodeCommand || !isAbsolute(plugin.nodeCommand)
     || !plugin.scripts || !isAbsolute(plugin.scripts.recall) || !isAbsolute(plugin.scripts.flush)) throw new Error("codex-native-memory-invalid");
   const quote = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
   const command = (script: string) => `${quote(plugin.nodeCommand!)} ${quote(script)}`;
@@ -58,6 +58,7 @@ export function buildCodexLaunch(input: DriverTaskInput, inheritedIds: readonly 
   }
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(options.baseEnv ?? process.env)) if (typeof value === "string") env[key] = value;
+  if (input.nativeMemory?.scopeMode === "global") for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
   return { command: options.executable ?? "codex", args, env };
 }
 
