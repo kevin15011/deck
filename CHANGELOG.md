@@ -9,6 +9,8 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-15
+
 ### Added
 
 - Cross-runner developer sessions with Claude, Codex and OpenCode, durable conversations, delegated tasks, session-specific model assignments and bounded execution budgets.
@@ -21,11 +23,14 @@ All notable release changes to Deck are recorded here. Current release procedure
 - Closing a web session releases its owned resources and returns the same conversation to preparation; its history, images and compatible native context remain available. Pending messages stay paused until explicitly resumed.
 - Project and session removal hide entries without deleting project files or saved history. Remove actions use red text in both themes.
 - Cross sessions use verified native memory integrations and canonical project identity, with runner-reported tool, reasoning and hook activity shown separately from chat responses.
+- Supermemory account credentials can be validated without querying a project's memories or profile.
 
 ### Fixed
 
 - Session recovery and command retries preserve ownership, prevent duplicate execution, and keep stale preparation or catalog responses from restoring obsolete state.
 - Compact sidebar controls, nested directory completion, latest-message navigation and automatic activity scrolling work across desktop and mobile layouts.
+- Pi supervised child cleanup and recovery work on macOS, and global/project skill collisions are handled through reviewed, reversible installation changes.
+- Claude model configuration rejects blocked installation plans, preserves staged edits and reports the actual apply or rollback failure.
 
 ### Compatibility and limits
 

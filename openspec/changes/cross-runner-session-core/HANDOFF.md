@@ -1,5 +1,9 @@
 # Handoff: cross-runner-session-core (read this first)
 
+## Active: v0.11.0 release authorized (2026-10-15)
+
+The user explicitly requested the new release/deployment after the verified commits. Root version and dated changelog are now0.11.0; `release-v0.11.0.md` owns the current publication plan and evidence. Source must reach main before the new stable tag; do not move old tags. The preceding 6693-test/full release gates remain fresh for runtime code, with focused checks for the metadata delta and canonical remote verification before publication. Earlier version-selection/publish deferrals below are historical and superseded by this authorization.
+
 ## Red removal actions and release preparation — verified and committed (2026-10-15)
 
 Remove session/project now use readable red text in both themes, including hover. Eight actual desktop/mobile menu checks passed; minimum contrast6.03:1. Runtime/UI/tests are committed together at `6aabf0b`; documentation, changelog and OpenSpec evidence accompany a separate commit. All accumulated authorized work is included. Product version remains0.10.0 and upcoming changes are under Unreleased.
