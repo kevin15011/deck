@@ -7,7 +7,7 @@ import type { DriverHostIo, DriverTaskInput, RunnerSessionDriver } from "@deck/c
 import { ApprovalBroker, CredentialRegistry, ensureStateLayout, resolveStatePaths, Supervisor, type DaemonServices } from "@deck/session-host";
 import { createDeckConfigStore } from "./deck-config-store";
 import { createDefaultAdapterRegistry } from "./runner-adapters";
-import { createCrossSessionDrivers, createCrossSessionService } from "./session-service";
+import { createCrossSessionDrivers, createCrossSessionService, type SessionRolePromptContext } from "./session-service";
 import { acknowledgeClaudeTos } from "./session-tos";
 import type { SupermemoryRuntimeHost } from "./supermemory-runtime-host";
 import { execFileSync } from "node:child_process";
@@ -100,6 +100,89 @@ describe("createCrossSessionService (production composition)", () => {
     const specialist = service.options.rolePrompt("deck-quality", { changeId: "my-change", projectRoot: e.project });
     expect(specialist).toContain("# Quality (deck-quality)");
     expect(specialist).not.toBe(prompt);
+  });
+
+  const promptFor = (e: ReturnType<typeof env>) =>
+    (make(e) as unknown as { options: { rolePrompt: (member: string, context: SessionRolePromptContext) => string } }).options.rolePrompt;
+
+  test.each(["claude", "codex", "opencode"])("Lead session suffix teaches Deck delegation and owner reuse (%s)", runnerId => {
+    const e = env(), prompt = promptFor(e);
+    for (const member of ["lead", "deck-lead"]) {
+      const text = prompt(member, { projectRoot: e.project, runnerId });
+      expect(text).toContain("Session delegation");
+      expect(text).toContain("deck_delegate {agent, task, continueTaskId?}");
+      expect(text).toContain("deck_task_wait {taskIds, timeoutSec<=50}");
+      expect(text).toContain("deck_task_result {taskId}");
+      expect(text).toContain("deck_task_cancel {taskId}");
+      expect(text).toContain("returns immediately with a taskId");
+      expect(text).toContain("native Task/Agent subagents are disabled");
+      expect(text).toContain("same member and continueTaskId=<that task's id>");
+      expect(text).toContain("original runner/model/native context is reused");
+      expect(text).toContain("never start a new task for the same work");
+      expect(text).toContain("only for a different area or when the owner cannot continue");
+      expect(text).toContain("taskId next to the member in your working notes");
+      expect(text).toContain("re-read the task roster before delegating");
+      expect(text).toContain("direct work is only for seconds-scale or clearly trivial changes");
+      expect(text).toContain("Run independent tasks in parallel");
+    }
+    for (const member of ["investigate", "architect", "apply-fast", "apply-deep", "quality", "setup"]) {
+      const text = prompt(member, { projectRoot: e.project, runnerId, tasks: [{ taskId: "private-roster-id", memberId: "quality", state: "running", attempt: 1 }] });
+      expect(text).not.toContain("Session delegation");
+      expect(text).not.toContain("deck_delegate {agent");
+      expect(text).not.toContain("deck_delegate member ids:");
+      expect(text).not.toContain("Tasks in this session");
+      expect(text).not.toContain("private-roster-id");
+    }
+  });
+
+  test("task roster prioritizes running work then recency and limits output to 20 tasks", () => {
+    const e = env(), prompt = promptFor(e);
+    const tasks = Array.from({ length: 25 }, (_, i) => ({
+      taskId: `task-${i}`, memberId: "investigate", state: i === 1 || i === 3 ? "running" : "completed", attempt: i + 1, summary: `summary-${i}`,
+    }));
+    const text = prompt("lead", { projectRoot: e.project, runnerId: "codex", tasks });
+    const roster = text.split("Tasks in this session\n")[1]!;
+    expect(roster).toBeDefined();
+    const lines = roster.split("\n").filter(line => line.startsWith("- "));
+    expect(lines).toHaveLength(20);
+    expect(lines.slice(0, 4)).toEqual([
+      "- investigate task-3 [running, attempt 4]: summary-3",
+      "- investigate task-1 [running, attempt 2]: summary-1",
+      "- investigate task-24 [completed, attempt 25]: summary-24",
+      "- investigate task-23 [completed, attempt 24]: summary-23",
+    ]);
+    expect(lines.at(-1)).toBe("- investigate task-7 [completed, attempt 8]: summary-7");
+    expect(roster).not.toContain("task-6 ");
+    expect(roster).toContain("Continue a task with deck_delegate continueTaskId=<id>");
+    expect(tasks[0]!.taskId).toBe("task-0");
+  });
+
+  test("task roster sanitizes secrets and controls before truncating summaries", () => {
+    const e = env(), prompt = promptFor(e);
+    const text = prompt("lead", { projectRoot: e.project, runnerId: "codex", tasks: [
+      { taskId: "long", memberId: "quality", state: "completed", attempt: 2, summary: "x".repeat(200) },
+      { taskId: "safe", memberId: "investigate", state: "running", attempt: 1, summary: "token=private-token password=private-password Bearer private-bearer\n\t\x1b[31mred\x1b[0m\u202ehidden\u2028next\u2029line" },
+      { taskId: "empty", memberId: "architect", state: "queued", attempt: 1 },
+    ] });
+    expect(text).toContain("- quality long [completed, attempt 2]: " + "x".repeat(119) + "…");
+    expect(text).not.toContain("x".repeat(120));
+    expect(text).toContain("token=[redacted]");
+    expect(text).toContain("password=[redacted]");
+    expect(text).toContain("[redacted authorization]");
+    for (const secret of ["private-token", "private-password", "private-bearer"]) expect(text).not.toContain(secret);
+    const lines = text.split("\n").filter(line => /^- (investigate|architect|quality) /.test(line));
+    expect(lines).toHaveLength(3);
+    expect(lines.join("")).not.toMatch(/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069\u2028\u2029]/);
+    expect(text).toContain("- architect empty [queued, attempt 1]");
+  });
+
+  test("empty or absent task roster is omitted", () => {
+    const e = env(), prompt = promptFor(e);
+    for (const tasks of [undefined, []]) {
+      const text = prompt("lead", { projectRoot: e.project, runnerId: "codex", tasks });
+      expect(text).not.toContain("Tasks in this session");
+      expect(text).not.toContain("Continue a task with deck_delegate continueTaskId=<id>");
+    }
   });
 
   test("drivers.status reports a ready Claude driver without a subscription acknowledgement", async () => {

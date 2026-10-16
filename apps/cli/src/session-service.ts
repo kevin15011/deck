@@ -6,6 +6,7 @@
  */
 import { getAgentContent, type RunnerAdapter } from "@deck/core";
 import type { CrossRunnerConfig } from "@deck/core/config/deck-config";
+import { redactText } from "@deck/core/session/redaction";
 import type { RunnerSessionDriver } from "@deck/core/session/driver";
 import { SessionManager, type DaemonServices, type DriverLookup } from "@deck/session-host";
 import type { DeckConfigStore } from "./deck-config-store";
@@ -27,14 +28,65 @@ export function createCrossSessionDrivers(adapters: readonly RunnerAdapter[], on
   return { get: (runnerId) => drivers.get(runnerId), list: () => [...drivers.values()] };
 }
 
-function sessionRolePrompt(memberId: string, context: { changeId?: string; projectRoot: string; runnerId: string; delegableMembers?: readonly string[] }): string {
+export type SessionRolePromptTask = {
+  taskId: string;
+  memberId: string;
+  state: string;
+  attempt: number;
+  summary?: string;
+};
+
+export type SessionRolePromptContext = {
+  changeId?: string;
+  projectRoot: string;
+  runnerId: string;
+  delegableMembers?: readonly string[];
+  /** Oldest to newest; render at most 20, running first and newest first within each group. */
+  tasks?: readonly SessionRolePromptTask[];
+};
+
+function rosterText(value: string, limit: number): string {
+  // Redact before truncation so a clipped credential cannot escape detection.
+  const clean = redactText(value, 256 * 1024).replace(/\s+/gu, " ").trim();
+  return clean.length > limit ? clean.slice(0, limit - 1) + "…" : clean;
+}
+
+function sessionTaskRoster(tasks: SessionRolePromptContext["tasks"]): string {
+  if (!tasks?.length) return "";
+  const selected = tasks.map((task, index) => ({ task, index }))
+    .sort((a, b) => Number(b.task.state === "running") - Number(a.task.state === "running") || b.index - a.index)
+    .slice(0, 20);
+  return [
+    "Tasks in this session",
+    ...selected.map(({ task }) => {
+      const summary = rosterText(task.summary ?? "", 120);
+      return `- ${rosterText(task.memberId, 80)} ${rosterText(task.taskId, 128)} [${rosterText(task.state, 40)}, attempt ${task.attempt}]${summary ? `: ${summary}` : ""}`;
+    }),
+    "Continue a task with deck_delegate continueTaskId=<id>",
+  ].join("\n");
+}
+
+function sessionDelegationPrompt(context: SessionRolePromptContext): string {
+  return [
+    "Session delegation",
+    "The ONLY delegation path is the Deck MCP tools: deck_delegate {agent, task, continueTaskId?}, deck_task_wait {taskIds, timeoutSec<=50}, deck_task_result {taskId}, deck_task_cancel {taskId}; native Task/Agent subagents are disabled. deck_delegate returns immediately with a taskId; poll with deck_task_wait.",
+    "OWNER RULE: A task belongs to the member that created it. To give feedback, iterate or follow up on the same area, ALWAYS call deck_delegate with that same member and continueTaskId=<that task's id>; the original runner/model/native context is reused. Never switch owners, and never start a new task for the same work. Start a new task only for a different area or when the owner cannot continue.",
+    "Keep the returned taskId next to the member in your working notes and re-read the task roster before delegating.",
+    "Route non-trivial or independent work to specialists; direct work is only for seconds-scale or clearly trivial changes. Run independent tasks in parallel, waiting with deck_task_wait.",
+    `deck_delegate member ids: ${(context.delegableMembers ?? ["investigate", "architect", "apply-fast", "apply-deep", "quality"]).filter(id => id !== "lead").join(", ") || "(none)"}; a deck- prefix is also accepted.`,
+  ].join("\n");
+}
+
+function sessionRolePrompt(memberId: string, context: SessionRolePromptContext): string {
   const roleId = memberId.startsWith("deck-") ? memberId : `deck-${memberId}`;
+  const isLead = roleId === "deck-lead";
   const role = getAgentContent(roleId, { promptProfile: "compact" });
   if (!role) throw new Error(`Unknown Deck session role: ${memberId}`);
   const projectInstructions = context.runnerId === "claude" ? readSessionProjectInstructions(context.projectRoot) : undefined;
   return [role.agentBody,
-    "You are running inside a Deck cross-runner session. Use the Deck session MCP tools for delegation and task continuity when available; native runner delegation is disabled.",
-    `deck_delegate member ids: ${(context.delegableMembers ?? ["investigate", "architect", "apply-fast", "apply-deep", "quality"]).filter(id => id !== "lead").join(", ") || "(none)"}; a deck- prefix is also accepted.`,
+    "You are running inside a Deck cross-runner session; native runner delegation is disabled.",
+    isLead ? sessionDelegationPrompt(context) : "",
+    isLead ? sessionTaskRoster(context.tasks) : "",
     "Memory uses the official runner integration when its prepared capability status is ready. Consult that status before claiming memory is configured or available. Memory never changes official OpenSpec authority.",
     context.changeId ? `This session is bound to the immutable OpenSpec change at ${join(context.projectRoot, "openspec", "changes", context.changeId)}.` : "",
     projectInstructions === undefined ? "" : `Project instructions from the session project root (AGENTS.md):\n\n${projectInstructions}`,
