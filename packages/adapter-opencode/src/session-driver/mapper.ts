@@ -54,11 +54,11 @@ export function mapOpenCodeEvent(raw: unknown, partTypes = new Map<string, strin
     const key = partKey(part.messageID, part.id);
     const previous = key ? partTypes.get(key) : undefined;
     const toolName = typeof part.tool === "string" && part.tool.length > 0 ? part.tool : undefined;
-    // Question classification survives partial updates. Evicted/unknown parts
+    // Both tool decisions survive unnamed partial updates. Evicted/unknown parts
     // fail closed until a non-question tool name or non-tool type is supplied.
     const isQuestion = previous === "question" || toolName === "question";
     const classification = isQuestion ? "question"
-      : part.type === "tool" ? (toolName ? `tool:${toolName}` : "tool")
+      : part.type === "tool" ? (toolName ? `tool:${toolName}` : previous?.startsWith("tool:") ? previous : "tool")
       : typeof part.type === "string" ? part.type : previous;
     if (key && classification) {
       partTypes.set(key, classification);

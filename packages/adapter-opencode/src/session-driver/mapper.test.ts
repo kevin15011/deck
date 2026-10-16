@@ -103,6 +103,17 @@ describe("question tool answer privacy", () => {
     expect(events[0]).toMatchObject({ kind: "tool.completed", data: { name: "question", status: "completed" } });
     expect(JSON.stringify(mapper.map(delta("q1", answer)))).not.toContain(answer);
   });
+  for (const tool of ["bash", "read", "edit", "mcp__context7__query-docs"]) {
+    test(`${tool} unnamed completion inherits the ordinary tool decision`, () => {
+      const mapper = new OpenCodeEventMapper();
+      mapper.map(updated({ id: "ordinary", type: "tool", tool, callID: "c1", state: { status: "running", input: { path: "file" } } }));
+      const raw = updated({ id: "ordinary", type: "tool", callID: "c1", state: { status: "completed", output: "ORDINARY_RESULT" } });
+      const events = mapper.map(raw);
+      expect(events[0]).toMatchObject({ kind: "tool.completed", data: { output: "ORDINARY_RESULT", status: "completed" } });
+      expect(events[0]!.raw).toBe(raw);
+      expect(mapper.map(delta("ordinary", "ordinary delta"))[0]!.raw).toBeDefined();
+    });
+  }
   test("ordinary tool lifecycles and deltas retain normal payloads", () => {
     const mapper = new OpenCodeEventMapper();
     for (const tool of ["bash", "read"]) {
