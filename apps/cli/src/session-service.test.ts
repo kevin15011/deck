@@ -91,6 +91,8 @@ describe("createCrossSessionService (production composition)", () => {
     const e = env();
     const service = make(e) as unknown as { options: { rolePrompt: (m: string, c: { changeId?: string; projectRoot: string }) => string } };
     const prompt = service.options.rolePrompt("lead", { changeId: "my-change", projectRoot: e.project });
+    expect(prompt).toContain("deck_delegate member ids: investigate, architect, apply-fast, apply-deep, quality; a deck- prefix is also accepted.");
+    expect(service.options.rolePrompt("lead", { projectRoot: e.project, delegableMembers: ["quality", "setup"] } as any)).toContain("deck_delegate member ids: quality, setup; a deck- prefix is also accepted.");
     expect(prompt.length).toBeGreaterThan(500);
     expect(prompt).toContain("my-change");
     expect(prompt).not.toMatch(/delegation tools are not available/i);

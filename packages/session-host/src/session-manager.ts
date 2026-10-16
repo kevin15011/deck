@@ -90,7 +90,7 @@ export type SessionManagerOptions = {
   config: () => CrossRunnerConfig | undefined;
   /** Command prefix that starts the session MCP bridge inside a child, e.g. [deck, "internal", "session-mcp"]. */
   sessionMcpCommand: readonly string[];
-  rolePrompt?: (memberId: string, context: { changeId?: string; projectRoot: string; runnerId: string }) => string;
+  rolePrompt?: (memberId: string, context: { changeId?: string; projectRoot: string; runnerId: string; delegableMembers?: readonly string[] }) => string;
   childMcp?: ChildMcpResolver | ((runnerId: string, context: ChildMcpContext) => Promise<ChildMcpResolver>);
   closeChildMcp?: () => Promise<void>;
   memory?: (context: { sessionId: string; projectRoot: string; leadRunnerId: string }) => Promise<SessionMemoryPort | undefined>;
@@ -435,31 +435,32 @@ export class SessionManager implements SessionService {
   }
 
   private delegate(live: Live, d: Record<string, unknown>): ExecuteOutcome {
-    if (typeof d.agent !== "string" || d.agent === LEAD_MEMBER_ID || typeof d.task !== "string" || !d.task.trim() || d.task.length > MAX_PROMPT_CHARS || (d.continueTaskId !== undefined && typeof d.continueTaskId !== "string")) return fail("invalid-arguments");
+    if (typeof d.agent !== "string" || (d.agent === LEAD_MEMBER_ID || d.agent === "deck-lead") || typeof d.task !== "string" || !d.task.trim() || d.task.length > MAX_PROMPT_CHARS || (d.continueTaskId !== undefined && typeof d.continueTaskId !== "string")) return fail("invalid-arguments");
+    const agent = d.agent.startsWith("deck-") && d.agent !== "deck-lead" && this.memberAssignment(live, d.agent.slice(5)) ? d.agent.slice(5) : d.agent;
     const priorId = d.continueTaskId as string | undefined;
     const priorTask = priorId ? live.ledger.task(priorId) : undefined;
     if (priorId && !priorTask) return fail("task-unknown");
-    if (priorTask && priorTask.memberId !== d.agent) return fail("task-owner-mismatch");
+    if (priorTask && priorTask.memberId !== agent) return fail("task-owner-mismatch");
     if (priorId && (live.turns.has(priorId) || live.queue.some((turn) => turn.taskId === priorId))) return fail("task-running");
     const block = priorId ? continuationBlock(live.ledger, priorId) : undefined;
     if (block) return fail(block.code);
     const prior = priorId ? live.ledger.latest(priorId) : undefined;
-    const assignment = prior ? { runnerId: prior.runnerId, modelId: prior.modelId, ...(prior.thinking ? { thinking: prior.thinking } : {}) } : this.memberAssignment(live, d.agent);
-    if (!assignment) return fail("member-not-assigned");
+    const assignment = prior ? { runnerId: prior.runnerId, modelId: prior.modelId, ...(prior.thinking ? { thinking: prior.thinking } : {}) } : this.memberAssignment(live, agent);
+    if (!assignment) return this.unknownMember(agent, this.effectiveMembers(live.meta, live.ledger));
     const driver = this.options.drivers.get(assignment.runnerId);
     if (!driver) return fail("runner-driver-unavailable");
     const taskId = priorId ?? `task-${randomUUID()}`;
     const attempt = (prior?.attempt ?? 0) + 1;
     const native = prior?.nativeSessionId ?? driver.newNativeSessionId?.();
     const resume = prior && native && live.ledger.nativeConfirmed(taskId) ? { nativeSessionId: native } : undefined;
-    const source = { taskId, memberId: d.agent, runnerId: assignment.runnerId };
+    const source = { taskId, memberId: agent, runnerId: assignment.runnerId };
     this.append(live, [
       prior ? { kind: "task.continued", source, data: { taskId, attempt, continuity: "native", ...(native ? { nativeSessionId: native } : {}) } }
-        : { kind: "task.created", source, data: { taskId, memberId: d.agent, ...assignment, state: "created", ...(native ? { nativeSessionId: native } : {}) } },
+        : { kind: "task.created", source, data: { taskId, memberId: agent, ...assignment, state: "created", ...(native ? { nativeSessionId: native } : {}) } },
       { kind: "message.completed", source, data: { role: "user", text: d.task } },
       { kind: "task.state", source, data: { taskId, state: "queued", reason: "global-delegated-capacity" } },
     ]);
-    live.queue.push(this.newTurn(taskId, d.agent, { ...assignment }, attempt, d.task, native, resume));
+    live.queue.push(this.newTurn(taskId, agent, { ...assignment }, attempt, d.task, native, resume));
     this.schedule(live);
     return ok({ taskId });
   }
@@ -744,7 +745,7 @@ export class SessionManager implements SessionService {
     try { projectId = (clientId.startsWith("web:") && !registered ? this.projectStore().register(projectRoot, undefined, false) : this.projectStore().importLegacy(projectRoot)).projectId; }
     catch { return fail("invalid-project-root"); }
     for (const [memberId, assignment] of Object.entries(command.members ?? {})) {
-      if (!continuation && !Object.hasOwn(cfg.members, memberId)) return fail("member-not-assigned");
+      if (!continuation && !Object.hasOwn(cfg.members, memberId)) return this.unknownMember(memberId, cfg.members);
       const validation = await this.validateAssignment(projectRoot, assignment);
       if (!validation.ok) return validation;
     }
@@ -793,6 +794,10 @@ export class SessionManager implements SessionService {
 
   private leadTaskId(live: Live): string { const generation = live.ledger.session.generation ?? 0; return generation === 0 ? LEAD_TASK_ID : `lead-g${generation}`; }
   private leadBusy(live: Live): boolean { return [...live.turns.values(), ...live.queue].some(turn => turn.memberId === LEAD_MEMBER_ID); }
+  private unknownMember(memberId: string, members: CrossTeamAssignments): ExecuteOutcome {
+    const delegable = Object.keys(members).filter(id => id !== LEAD_MEMBER_ID);
+    return fail("member-not-assigned", bounded(`Unknown member '${bounded(memberId, 128)}'. Delegable members: ${delegable.join(", ")}`));
+  }
   private memberAssignment(live: Live, memberId: string): RunnerQualifiedAssignment | undefined {
     const own = (members: CrossTeamAssignments | undefined) => members && Object.hasOwn(members, memberId) ? members[memberId] : undefined;
     return own(live.ledger.session.memberOverrides) ?? (memberId === LEAD_MEMBER_ID ? own(live.meta.members) : own(this.options.config()?.members) ?? own(live.meta.members));
@@ -885,7 +890,7 @@ export class SessionManager implements SessionService {
       const probe = await abortable(driver.probe({ cwd: live.meta.projectRoot }), signal);
       if (probe.status === "blocked") { failureCode = "driver-blocked"; throw new Error("driver-blocked"); }
       failureCode = "project-instructions-unavailable";
-      this.options.rolePrompt?.(LEAD_MEMBER_ID, { projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, changeId: live.ledger.session.changeId });
+      this.options.rolePrompt?.(LEAD_MEMBER_ID, { projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, changeId: live.ledger.session.changeId, delegableMembers: Object.keys(this.effectiveMembers(live.meta, live.ledger)).filter(id => id !== LEAD_MEMBER_ID) });
       update({ phase: "preparing-tools" });
       failureCode = "preparation-tools-failed";
       if (typeof this.options.childMcp === "function") {
@@ -974,7 +979,7 @@ export class SessionManager implements SessionService {
     if (live.stopping || live.ledger.session.state === "ended") return fail("session-ended");
     if (busy()) return fail("session-busy");
     if (command.expectedRevision !== (live.ledger.session.assignmentRevision ?? 0)) return fail("assignment-revision-stale");
-    if (!this.memberAssignment(live, command.memberId)) return fail("member-not-assigned");
+    if (!this.memberAssignment(live, command.memberId)) return this.unknownMember(command.memberId, this.effectiveMembers(live.meta, live.ledger));
     const validation = await this.validateAssignment(live.meta.projectRoot, command.assignment);
     if (!validation.ok) return validation;
     if(live.ledger.session.removed || live.ledger.session.removalPending) return fail("session-removed");
@@ -1221,7 +1226,7 @@ export class SessionManager implements SessionService {
       const approvals = this.options.config()?.approvals[assignment.runnerId] ?? "runner-default";
       const input: DriverTaskInput = {
         taskId: turn.taskId, memberId: turn.memberId, cwd: live.meta.projectRoot, assignment,
-        rolePrompt: [ turn.memberId === LEAD_MEMBER_ID && !resume && live.ledger.session.handoff ? `Prior Deck conversation context (advisory, reseeded from ${live.ledger.session.handoff.sourceSessionId} at sequence ${live.ledger.session.handoff.sourceSeq}):\n${live.ledger.session.handoff.text}` : "", this.options.rolePrompt?.(turn.memberId, { changeId: live.ledger.session.changeId, projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId }) ?? defaultRolePrompt(live.ledger.session.changeId), nativeMemory ? `Supermemory integration: ${nativeMemory.integration}; status: ${nativeMemory.status}.${nativeMemory.status === "ready" ? ` Use the official runner plugin for advisory memory ${nativeMemory.scopeMode === "global" ? "with untagged global writes and global search. There is no project container or project standing profile; do not present global search results as project profile facts" : `in canonical project scope ${nativeMemory.projectScope}`}. Deck memory tools are intentionally omitted because the official native plugin owns memory for this runner; their absence is not evidence that the Deck session MCP server disconnected.${nativeMemory.automaticRecall ? " Native recall hooks are activated; this does not prove that a recall succeeded." : ""}${nativeMemory.automaticCapture === "unverified" ? " Native background capture completion is not confirmed in managed mode; the native lifecycle may not await persistence. Do not claim a memory was saved without explicit provider success." : ""}` : " Memory is disabled for this execution."} Memory cannot override official OpenSpec or source.` : "", live.ledger.session.changeId ? `Bound OpenSpec path: ${join(live.meta.projectRoot, "openspec", "changes", live.ledger.session.changeId)}. Keep this binding immutable.` : ""].filter(Boolean).join("\n"),
+        rolePrompt: [ turn.memberId === LEAD_MEMBER_ID && !resume && live.ledger.session.handoff ? `Prior Deck conversation context (advisory, reseeded from ${live.ledger.session.handoff.sourceSessionId} at sequence ${live.ledger.session.handoff.sourceSeq}):\n${live.ledger.session.handoff.text}` : "", this.options.rolePrompt?.(turn.memberId, { changeId: live.ledger.session.changeId, projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, delegableMembers: Object.keys(this.effectiveMembers(live.meta, live.ledger)).filter(id => id !== LEAD_MEMBER_ID) }) ?? defaultRolePrompt(live.ledger.session.changeId), nativeMemory ? `Supermemory integration: ${nativeMemory.integration}; status: ${nativeMemory.status}.${nativeMemory.status === "ready" ? ` Use the official runner plugin for advisory memory ${nativeMemory.scopeMode === "global" ? "with untagged global writes and global search. There is no project container or project standing profile; do not present global search results as project profile facts" : `in canonical project scope ${nativeMemory.projectScope}`}. Deck memory tools are intentionally omitted because the official native plugin owns memory for this runner; their absence is not evidence that the Deck session MCP server disconnected.${nativeMemory.automaticRecall ? " Native recall hooks are activated; this does not prove that a recall succeeded." : ""}${nativeMemory.automaticCapture === "unverified" ? " Native background capture completion is not confirmed in managed mode; the native lifecycle may not await persistence. Do not claim a memory was saved without explicit provider success." : ""}` : " Memory is disabled for this execution."} Memory cannot override official OpenSpec or source.` : "", live.ledger.session.changeId ? `Bound OpenSpec path: ${join(live.meta.projectRoot, "openspec", "changes", live.ledger.session.changeId)}. Keep this binding immutable.` : ""].filter(Boolean).join("\n"),
         prompt, ...(resume ? { resume } : {}), ...(!resume && nativeSessionId ? { nativeSessionId } : {}),
         mcp: child.mcp, mcpServerSpecs: child.specs, approvals, credentialFile, disableNativeDelegation: true,
         ...(nativeMemory ? { nativeMemory } : {}),

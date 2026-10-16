@@ -1,3 +1,6 @@
+import { PassThrough } from "node:stream";
+import { runSessionMcpBridge } from "../mcp-bridge";
+import type { ControlClient } from "../control-client";
 import { Ledger, loadLedger } from "../ledger";
 import { EventLog } from "../event-log";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -79,6 +82,47 @@ const lastTurn = (driver: FakeDriver): FakeTurn => driver.turns.at(-1)!;
 
 describe("persistent workspace sessions", () => {
   const grantFor = (t: ReturnType<typeof setup>, sessionId: string, taskId = "lead") => t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths, sessionId).taskCredentialFile(taskId), "utf8")).token)!;
+
+  for (const [first, next] of [["investigate", "deck-investigate"], ["deck-investigate", "investigate"]]) {
+    test(`delegation canonicalizes ${first} and continues with ${next}`, async () => {
+      const promptMembers: Array<readonly string[] | undefined> = [];
+      const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }), options: { rolePrompt: (_member, context) => { promptMembers.push(context.delegableMembers); return "role"; } } });
+      const id = await t.create(); await t.run({ type: "prompt.send", text: "Start" }, id);
+      await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "lead");
+      expect(promptMembers.at(-1)).toEqual(["investigate"]);
+      const grant = grantFor(t, id);
+      for (const agent of ["lead", "deck-lead"]) expect((await t.manager.callTaskTool(grant, "deck_delegate", { agent, task: "invalid" })).ok).toBe(false);
+      const bridge = new BridgeService({ credentials: t.credentials, broker: t.broker, status: g => t.manager.taskStatus(g), callTaskTool: (g, name, args, context) => t.manager.callTaskTool(g, name, args, context) });
+      const token = JSON.parse(readFileSync(sessionPaths(t.paths, id).taskCredentialFile("lead"), "utf8")).token;
+      const unknown = await bridge.call({ token, tool: "deck_delegate", arguments: { agent: "missing", task: "inspect" } });
+      expect(unknown).toMatchObject({ ok: false, code: "member-not-assigned", message: "Unknown member 'missing'. Delegable members: investigate" });
+      const input = new PassThrough();
+      const replies: any[] = [];
+      const done = runSessionMcpBridge({
+        input, write: line => { replies.push(JSON.parse(line)); }, version: "test",
+        env: { DECK_SESSION_CREDENTIAL_FILE: sessionPaths(t.paths, id).taskCredentialFile("lead") },
+        connect: async () => ({
+          closed: new Promise(() => {}), close() {},
+          request: async (frame: any) => ({ t: "bridge.result", outcome: await bridge.call(frame) }),
+        } as unknown as ControlClient),
+      });
+      input.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "deck_delegate", arguments: { agent: "missing", task: "inspect" } } }) + "\n");
+      try {
+        await waitFor(() => replies.length === 1, PROGRESS_TIMEOUT_MS, "MCP error");
+        expect(replies[0].result).toMatchObject({ isError: true, content: [{ type: "text", text: "deck bridge error: member-not-assigned (Unknown member 'missing'. Delegable members: investigate)" }] });
+      } finally { input.end(); await done; }
+
+      const delegated = await t.manager.callTaskTool(grant, "deck_delegate", { agent: first, task: "inspect" });
+      expect(delegated.ok).toBe(true);
+      if (!delegated.ok) return;
+      const taskId = (delegated.data as { taskId: string }).taskId;
+      await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "child");
+      const child = lastTurn(t.driver); child.finish();
+      await waitFor(() => child.closed, PROGRESS_TIMEOUT_MS, "child closed");
+      expect(t.events(id).find(e => e.kind === "task.created" && e.source?.taskId === taskId)?.source?.memberId).toBe("investigate");
+      expect((await t.manager.callTaskTool(grant, "deck_delegate", { agent: next, task: "continue", continueTaskId: taskId })).ok).toBe(true);
+    });
+  }
 
   test("crashed preflight reservation with no dispatch fence or lease safely restores pending text", async () => {
     const t = setup(); const id = await t.create(); let release!: () => void;

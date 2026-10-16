@@ -27,13 +27,14 @@ export function createCrossSessionDrivers(adapters: readonly RunnerAdapter[], on
   return { get: (runnerId) => drivers.get(runnerId), list: () => [...drivers.values()] };
 }
 
-function sessionRolePrompt(memberId: string, context: { changeId?: string; projectRoot: string; runnerId: string }): string {
+function sessionRolePrompt(memberId: string, context: { changeId?: string; projectRoot: string; runnerId: string; delegableMembers?: readonly string[] }): string {
   const roleId = memberId.startsWith("deck-") ? memberId : `deck-${memberId}`;
   const role = getAgentContent(roleId, { promptProfile: "compact" });
   if (!role) throw new Error(`Unknown Deck session role: ${memberId}`);
   const projectInstructions = context.runnerId === "claude" ? readSessionProjectInstructions(context.projectRoot) : undefined;
   return [role.agentBody,
     "You are running inside a Deck cross-runner session. Use the Deck session MCP tools for delegation and task continuity when available; native runner delegation is disabled.",
+    `deck_delegate member ids: ${(context.delegableMembers ?? ["investigate", "architect", "apply-fast", "apply-deep", "quality"]).filter(id => id !== "lead").join(", ") || "(none)"}; a deck- prefix is also accepted.`,
     "Memory uses the official runner integration when its prepared capability status is ready. Consult that status before claiming memory is configured or available. Memory never changes official OpenSpec authority.",
     context.changeId ? `This session is bound to the immutable OpenSpec change at ${join(context.projectRoot, "openspec", "changes", context.changeId)}.` : "",
     projectInstructions === undefined ? "" : `Project instructions from the session project root (AGENTS.md):\n\n${projectInstructions}`,

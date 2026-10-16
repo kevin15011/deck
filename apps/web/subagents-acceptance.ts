@@ -24,7 +24,7 @@ mkdirSync(nestedDirectory, { recursive: true });
 const paths = resolveStatePaths({ env: { XDG_STATE_HOME: join(root, 'state') } }); ensureStateLayout(paths);
 const claude = new FakeDriver('claude'), codex = new FakeDriver('codex'), drivers = [claude, codex];
 for (const driver of drivers) driver.onStart = turn => turn.init();
-const config: CrossRunnerConfig = { enabled: true, members: { lead: { runnerId: 'claude', modelId: 'opus' }, reviewer: { runnerId: 'claude', modelId: 'opus' }, 'deck-investigate': { runnerId: 'claude', modelId: 'opus' } }, approvals: { claude: 'relay', codex: 'runner-default', opencode: 'relay' }, maxConcurrentTasks: 4, claudeTosAcknowledgedAt: null, web: { port: 0, trustedProxy: null, allowedOrigins: [], allowFunnel: false } };
+const config: CrossRunnerConfig = { enabled: true, members: { lead: { runnerId: 'claude', modelId: 'opus' }, reviewer: { runnerId: 'claude', modelId: 'opus' }, investigate: { runnerId: 'claude', modelId: 'opus' } }, approvals: { claude: 'relay', codex: 'runner-default', opencode: 'relay' }, maxConcurrentTasks: 4, claudeTosAcknowledgedAt: null, web: { port: 0, trustedProxy: null, allowedOrigins: [], allowFunnel: false } };
 const catalog = { runners: [
     { runnerId: 'claude', label: 'Claude', available: true, models: [{ modelId: 'opus', label: 'Opus', thinkingLevels: ['low', 'high'] }, { modelId: 'sonnet', label: 'Sonnet', thinkingLevels: ['low', 'high'] }] },
     { runnerId: 'codex', label: 'Codex', available: true, models: [{ modelId: 'codex-model', label: 'Codex model', thinkingLevels: ['low', 'high'] }] },
@@ -61,7 +61,7 @@ try {
     assert.equal(await tab('Activity').getAttribute('aria-selected'), 'true', 'starts on Activity');
     await command({ type: 'prompt.send', text: 'Investigate' }, session);
     await wait(() => claude.turns.length > 0, 'lead turn');
-    const delegated = await manager.callTaskTool({ sessionId: session, taskId: 'lead', memberId: 'lead', runnerId: 'claude' } as never, 'deck_delegate', { agent: 'deck-investigate', task: 'Map the workspace' });
+    const delegated = await manager.callTaskTool({ sessionId: session, taskId: 'lead', memberId: 'lead', runnerId: 'claude' } as never, 'deck_delegate', { agent: 'investigate', task: 'Map the workspace' });
     assert.equal(delegated.ok, true, JSON.stringify(delegated)); const childId = (delegated as any).data.taskId;
     await wait(() => claude.turns.some(turn => turn.input.taskId === childId), 'child turn');
     const child = claude.turns.find(turn => turn.input.taskId === childId)!;
@@ -84,7 +84,7 @@ try {
     await card.waitFor();
     assert.equal(await card.getByRole('heading', { name: 'Investigate' }).count(), 1, 'role label replaces the raw member id');
     assert.equal(await card.locator('img.agent-avatar').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth === 128 && img.src.startsWith('data:image/png')), true, 'avatar is inlined and decodes');
-    manager.openLog(session)!.append({ kind: 'task.result', source: { taskId: childId, memberId: 'deck-investigate', runnerId: 'claude' }, data: { summary: `Findings\n\n${'A long reported result line. '.repeat(60)}` } } as never);
+    manager.openLog(session)!.append({ kind: 'task.result', source: { taskId: childId, memberId: 'investigate', runnerId: 'claude' }, data: { summary: `Findings\n\n${'A long reported result line. '.repeat(60)}` } } as never);
     await card.locator('.task-result--preview').waitFor();
     await card.getByRole('button', { name: 'Open full view' }).waitFor();
     assert.equal(await card.locator('details').count(), 0, 'the list carries no inline conversation');
