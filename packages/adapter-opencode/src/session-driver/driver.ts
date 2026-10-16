@@ -1,6 +1,6 @@
 import { prepareImages, redactImagePayload } from "./images";
 import { execFile } from "node:child_process";
-import type { DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
+import type { DriverDecision, DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
 import { validateQuestions, validateQuestionAnswers, type DriverQuestionAnswer, type Question } from "@deck/core/session/question";
 import { redactText } from "@deck/core/session/redaction";
 import { buildOpenCodeLaunch, type OpenCodeLaunchOptions } from "./launch";
@@ -140,13 +140,29 @@ class OpenCodeTask {
     this.seenPermissions.add(raw.id);
     const turn = this.current;
     void (async () => {
-      let decision = "deny";
+      let decision: DriverDecision = { decision: "deny" };
+      const permission = String(raw.permission ?? "unknown");
+      const exactKey = Array.isArray(raw.patterns) ? redactText(raw.patterns.join(" "), 512) : "";
+      const supportsAlways = Array.isArray(raw.always) && raw.always.length > 0;
       if (turn && !turn.interrupted && this.input.approvals === "relay") {
-        try { decision = (await this.io.approval({ approvalId: raw.id, tool: String(raw.permission ?? "unknown"), summary: Array.isArray(raw.patterns) ? raw.patterns.join(", ") : undefined, input: raw.metadata })).decision; } catch { /* Broker failure denies. */ }
+        try {
+          decision = await this.io.approval({
+            approvalId: raw.id, tool: permission, toolKey: `opencode:${permission}`,
+            ...(exactKey ? { exactKey } : {}),
+            risk: ["read", "glob", "grep", "list"].includes(permission) ? "normal" : "high",
+            ...(supportsAlways ? {
+              nativeScopes: ["always"],
+              alwaysNote: `OpenCode stores this permission for this project on this machine (outside Deck); it applies to future sessions and Deck cannot revoke it
+Patterns: ${raw.always.join("\n")}`,
+            } : {}),
+            summary: Array.isArray(raw.patterns) ? raw.patterns.join(", ") : undefined, input: raw.metadata,
+          });
+        } catch { /* Broker failure denies. */ }
       }
       if (this.closed) return;
-      if (!turn || this.current !== turn || turn.interrupted || turn.controller.signal.aborted) decision = "deny";
-      await this.request(`/permission/${encodeURIComponent(raw.id)}/reply`, { reply: decision === "allow" ? "once" : "reject" });
+      if (!turn || this.current !== turn || turn.interrupted || turn.controller.signal.aborted) decision = { decision: "deny" };
+      const reply = decision.decision === "allow" ? (decision.scope === "always" && supportsAlways ? "always" : "once") : "reject";
+      await this.request(`/permission/${encodeURIComponent(raw.id)}/reply`, { reply });
     })().catch(error => { this.emit({ kind: "diagnostic", data: { code: "opencode-permission-reply-failed", message: redactText((error as Error).message, 300) } }); if (turn && this.current === turn) this.finish({ status: "failed", error: "OpenCode permission reply failed" }); });
   }
 

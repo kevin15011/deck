@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, truncateSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DriverEvent, DriverHostIo, DriverTaskInput, SupervisedChildExit } from "@deck/core/session/driver";
+import type { DriverEvent, DriverHostIo, DriverTaskInput, SupervisedChildExit, DriverDecision } from "@deck/core/session/driver";
 import { createOpenCodeSessionDriver } from "./driver";
 import { buildOpenCodeLaunch } from "./launch";
 import { OpenCodeSseParser, mapOpenCodeEvent } from "./mapper";
@@ -49,7 +49,7 @@ describe("OpenCode SSE", () => {
   });
 });
 
-function fakeServer(options: { extraMcp?: boolean; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number } = {}) {
+function fakeServer(options: { extraMcp?: boolean; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number; pendingPermissions?: unknown[]; permissionReplyStatus?: number } = {}) {
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const requests: Array<{ path: string; body: any; auth: string | null }> = [];
   let messages = 0;
@@ -65,10 +65,10 @@ function fakeServer(options: { extraMcp?: boolean; hang?: boolean; pending?: boo
     if (path === "/experimental/tool/ids") return Response.json(options.memoryTool ? ["bash", "supermemory"] : ["bash"]);
     if (path === "/session") return Response.json({ id: "ses_native" });
     if (path === "/session/ses_native") return Response.json({ id: "ses_native" }, { status: options.resumeStatus ?? 200 });
-    if (path === "/permission") return Response.json(options.pending ? [{ id: "perm1", sessionID: "ses_native", permission: "bash", patterns: ["echo hello"] }] : []);
+    if (path === "/permission") return Response.json(options.pendingPermissions ?? (options.pending ? [{ id: "perm1", sessionID: "ses_native", permission: "bash", patterns: ["echo hello"] }] : []));
     if (path === "/question") return Response.json(options.pendingQuestions ?? []);
     if (path.startsWith("/question/")) return Response.json(true, { status: options.questionReplyStatus ?? 200 });
-    if (path.endsWith("/reply")) return Response.json(true);
+    if (path.endsWith("/reply")) return Response.json(true, { status: options.permissionReplyStatus ?? 200 });
     if (path.endsWith("/abort")) { if (options.abortError) event("session.error", { sessionID: "ses_native", error: { name: "MessageAbortedError" } }); else if (!options.hang) event("session.idle", { sessionID: "ses_native" }); return Response.json(true); }
     if (path.endsWith("/message")) {
       messages++;
@@ -271,18 +271,18 @@ test("SSE response readiness deadline aborts the request and cleans up the serve
 
 test.each(["interrupted", "completed"] as const)("delayed approval after a %s turn is rejected even when another turn starts", async terminal => {
   const s = fakeServer({ hang: true }); const h = privateIo();
-  let release!: (decision: { decision: "allow" }) => void;
+  let release!: (decision: DriverDecision) => void;
   let requested!: () => void;
   const requestSeen = new Promise<void>(resolve => { requested = resolve; });
   try {
     const task = await createOpenCodeSessionDriver({ escalationMs: 1000 }).startTask(input(), { ...h.io, spawn: async () => s.child, approval: () => { requested(); return new Promise(resolve => { release = resolve; }); } });
-    s.event("permission.asked", { id: "late", sessionID: "ses_native", permission: "bash" });
+    s.event("permission.asked", { id: "late", sessionID: "ses_native", permission: "bash", always: ["*"] });
     await requestSeen;
     if (terminal === "interrupted") { await task.interrupt(); s.event("session.idle", { sessionID: "ses_native" }); }
     else s.completeMessages();
     expect((await task.done).status).toBe(terminal);
     const followup = task.send("followup");
-    release({ decision: "allow" });
+    release({ decision: "allow", scope: "always" });
     for (let i = 0; i < 30 && !s.requests.some(r => r.path === "/permission/late/reply"); i++) await new Promise(resolve => setTimeout(resolve, 1));
     expect(s.requests.find(r => r.path === "/permission/late/reply")?.body).toEqual({ reply: "reject" });
     await task.close(); await followup;
@@ -426,6 +426,100 @@ test("question reply failure emits diagnostic and fails active turn", async () =
     s.event("question.asked", questionFixture());
     expect(await task.done).toEqual({ status: "failed", error: "OpenCode question reply failed" });
     expect(h.events.some(e => e.kind === "diagnostic" && e.data.code === "opencode-question-reply-failed")).toBe(true);
+    await task.close();
+  } finally { await s.stop(); }
+});
+
+test.each([
+  ["bash", "high"], ["edit", "high"], ["write", "high"], ["patch", "high"],
+  ["webfetch", "high"], ["external_directory", "high"], ["future_tool", "high"],
+  ["read", "normal"], ["glob", "normal"], ["grep", "normal"], ["list", "normal"],
+] as const)("advertises approval identity and risk for %s", async (permission, risk) => {
+  const s = fakeServer({ hang: true }); const h = privateIo();
+  const calls: Parameters<DriverHostIo["approval"]>[0][] = [];
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, approval: async req => {
+      calls.push(req); return { decision: "deny" };
+    } });
+    s.event("permission.asked", { id: "scope", sessionID: "ses_native", permission, patterns: ["first", "second"], always: ["first *", "second *"], metadata: { context: true } });
+    await waitForRequest(s, "/permission/scope/reply");
+    expect(calls).toEqual([expect.objectContaining({
+      tool: permission, toolKey: `opencode:${permission}`, exactKey: "first second", risk,
+      nativeScopes: ["always"], input: { context: true },
+      alwaysNote: "OpenCode stores this permission for this project on this machine (outside Deck); it applies to future sessions and Deck cannot revoke it\nPatterns: first *\nsecond *",
+    })]);
+    await task.close();
+  } finally { await s.stop(); }
+});
+
+test.each([
+  { decision: "allow", scope: undefined, always: ["*"], reply: "once" },
+  { decision: "allow", scope: "once", always: ["*"], reply: "once" },
+  { decision: "allow", scope: "always", always: ["*"], reply: "always" },
+  { decision: "allow", scope: "always", always: [], reply: "once" },
+  { decision: "allow", scope: "always", always: undefined, reply: "once" },
+  { decision: "allow", scope: "future", always: ["*"], reply: "once" },
+  { decision: "deny", scope: "always", always: ["*"], reply: "reject" },
+] as const)("permission wire reply $decision/$scope with $always is $reply", async ({ decision, scope, always, reply }) => {
+  const s = fakeServer({ hang: true }); const h = privateIo();
+  const calls: Parameters<DriverHostIo["approval"]>[0][] = [];
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, approval: async req => {
+      calls.push(req); return { decision, scope } as DriverDecision;
+    } });
+    const properties = { id: "wire", sessionID: "ses_native", permission: "bash", patterns: [], always };
+    s.event("permission.asked", { ...properties, sessionID: "ses_foreign" });
+    s.event("permission.asked", properties);
+    s.event("permission.asked", properties);
+    await waitForRequest(s, "/permission/wire/reply");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.exactKey).toBeUndefined();
+    expect(calls[0]?.nativeScopes).toEqual(always?.length ? ["always"] : undefined);
+    expect(calls[0]?.alwaysNote).toEqual(always?.length ? expect.stringContaining("Patterns: *") : undefined);
+    expect(s.requests.filter(r => r.path === "/permission/wire/reply").map(r => r.body)).toEqual([{ reply }]);
+    await task.close();
+  } finally { await s.stop(); }
+});
+
+test("permission exact keys are redacted and bounded", async () => {
+  const s = fakeServer({ hang: true }); const h = privateIo();
+  const calls: Parameters<DriverHostIo["approval"]>[0][] = [];
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, approval: async req => { calls.push(req); return { decision: "deny" }; } });
+    s.event("permission.asked", { id: "key", sessionID: "ses_native", permission: "bash", patterns: ["TOKEN=private-secret", "x".repeat(600)] });
+    await waitForRequest(s, "/permission/key/reply");
+    expect(calls[0]?.exactKey?.length).toBeLessThanOrEqual(512);
+    expect(calls[0]?.exactKey).not.toContain("private-secret");
+    await task.close();
+  } finally { await s.stop(); }
+});
+
+test("replayed permissions use stale guard and dedupe while fresh ones advertise always", async () => {
+  const fixture = { id: "replayed", sessionID: "ses_native", permission: "bash", patterns: ["echo hello"], always: ["echo *"] };
+  const s = fakeServer({ hang: true, pendingPermissions: [fixture] }); const h = privateIo();
+  const calls: Parameters<DriverHostIo["approval"]>[0][] = [];
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, approval: async req => { calls.push(req); return { decision: "allow", scope: "always" }; } });
+    await waitForRequest(s, "/permission/replayed/reply");
+    s.event("permission.asked", fixture);
+    s.event("permission.asked", { ...fixture, id: "fresh" });
+    await waitForRequest(s, "/permission/fresh/reply");
+    expect(s.requests.find(r => r.path === "/permission/replayed/reply")?.body).toEqual({ reply: "reject" });
+    expect(s.requests.filter(r => r.path === "/permission/replayed/reply")).toHaveLength(1);
+    expect(s.requests.find(r => r.path === "/permission/fresh/reply")?.body).toEqual({ reply: "always" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.nativeScopes).toEqual(["always"]);
+    await task.close();
+  } finally { await s.stop(); }
+});
+
+test("permission reply failures preserve diagnostic and fail the active turn", async () => {
+  const s = fakeServer({ hang: true, permissionReplyStatus: 500 }); const h = privateIo();
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child });
+    s.event("permission.asked", { id: "fail", sessionID: "ses_native", permission: "bash" });
+    expect(await task.done).toEqual({ status: "failed", error: "OpenCode permission reply failed" });
+    expect(h.events.some(e => e.kind === "diagnostic" && e.data.code === "opencode-permission-reply-failed")).toBe(true);
     await task.close();
   } finally { await s.stop(); }
 });
