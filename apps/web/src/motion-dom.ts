@@ -60,6 +60,16 @@ export function installMotion(root: Document = document): () => void {
                 }
                 continue;
             }
+                else if (record.attributeName === 'class' && target.classList.contains('app-body') && settled && !reducedMotion()) {
+                    const was = (record.oldValue ?? '').split(/\s+/).includes('workspace-collapsed'), now = target.classList.contains('workspace-collapsed');
+                    if (was !== now) {
+                        const columns = (collapsed: boolean) => `minmax(0px, 1fr) minmax(0px, ${collapsed ? 0 : 1}fr)`, grids = target.querySelectorAll('.panes, .view-nav'), hidden = target.querySelectorAll<HTMLElement>('.workspace-pane, .workspace-tabs');
+                        // The panel stays painted while it closes; CSS hides it once the class settles.
+                        if (now) gsap.set(hidden, { visibility: 'visible' });
+                        gsap.fromTo(grids, { gridTemplateColumns: columns(was) }, { gridTemplateColumns: columns(now), duration: duration.base, ease: ease.out, clearProps: 'gridTemplateColumns', onComplete: () => { gsap.set(hidden, { clearProps: 'visibility' }); } });
+                        if (!now) animateIn(target.querySelector('.workspace-pane'), 'fade', { duration: duration.base });
+                    }
+                }
             if (!settled) continue;
             for (const node of record.addedNodes) {
                 if (!(node instanceof HTMLElement)) continue;

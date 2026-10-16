@@ -17,8 +17,8 @@ function Collapse({ open, id, className, label, busy, children }: { open: boolea
     return <div ref={node} id={id} hidden={!open && !visible} {...(!open ? { inert: true, "aria-hidden": true } : {})} className={className} role="group" aria-label={label} aria-busy={busy}>{children}</div>;
 }
 
-export function NavigationIcon({ kind, expanded }: { kind: 'chevron' | 'plus' | 'refresh' | 'folder' | 'menu' | 'close' | 'more'; expanded?: boolean }) {
-    const paths = { chevron: 'm6 4 4 4-4 4', plus: 'M8 3v10M3 8h10', refresh: 'M13 6a5 5 0 1 0 .2 4M13 2v4H9', folder: 'M2 4h5l1.5 2H14v7H2Z', menu: 'M3 4h10M3 8h10M3 12h10', close: 'm4 4 8 8m0-8-8 8' };
+export function NavigationIcon({ kind, expanded }: { kind: 'chevron' | 'panel' | 'plus' | 'refresh' | 'folder' | 'menu' | 'close' | 'more'; expanded?: boolean }) {
+    const paths = { chevron: 'm6 4 4 4-4 4', panel: 'M2.5 3h11v10h-11ZM9.5 3v10', plus: 'M8 3v10M3 8h10', refresh: 'M13 6a5 5 0 1 0 .2 4M13 2v4H9', folder: 'M2 4h5l1.5 2H14v7H2Z', menu: 'M3 4h10M3 8h10M3 12h10', close: 'm4 4 8 8m0-8-8 8' };
     return <svg className="navigation-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">{kind === 'more' ? <><circle cx="3" cy="8" r=".7"/><circle cx="8" cy="8" r=".7"/><circle cx="13" cy="8" r=".7"/></> : <path d={paths[kind]} transform={kind === 'chevron' && expanded ? 'rotate(90 8 8)' : undefined}/>}</svg>;
 }
 

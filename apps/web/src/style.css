@@ -159,7 +159,7 @@ small, .muted, .empty-note { color: var(--muted); }
 .approval details { font-size: .75rem; }
 .approval-actions { display: flex; gap: .5rem; flex-shrink: 0; }
 .approval-actions button { font-size: .8rem; }
-.view-nav { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); min-height: 52px; }
+.view-nav { display: grid; grid-template-columns: minmax(0px, 1fr) minmax(0px, 1fr); border-bottom: 1px solid var(--border); min-height: 52px; }
 .chat-label { display: flex; align-items: center; gap: .75rem; padding: 0 2rem; font-size: .85rem; font-weight: 600; }
 .chat-label small { font-size: .7rem; font-weight: 400; }
 .workspace-tabs { display: flex; align-items: stretch; gap: .25rem; padding: 0 1.25rem; border-left: 1px solid var(--border); background: var(--canvas); }
@@ -167,7 +167,7 @@ small, .muted, .empty-note { color: var(--muted); }
 .workspace-tabs button[aria-selected=true] { color: var(--action); font-weight: 600; }
 .workspace-tabs button[aria-selected=true]::after { content: ''; position: absolute; bottom: -1px; left: .75rem; right: .75rem; height: 2px; background: var(--action); }
 .workspace-tabs .chat-tab { display: none; }
-.panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; flex: 1; }
+.panes { display: grid; grid-template-columns: minmax(0px, 1fr) minmax(0px, 1fr); min-height: 0; flex: 1; }
 .chat-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; }
 .conversation { overflow: auto; overscroll-behavior: contain; flex: 1; padding: 1.75rem 2rem; scrollbar-gutter: stable; }
 .message { margin: 0 0 1.75rem; min-width: 0; font-size: 1rem; line-height: 1.65; }
@@ -415,3 +415,9 @@ details > pre { border: 1px solid var(--border); padding: .75rem; border-radius:
 .dragging{cursor:grabbing;background:var(--canvas);border-radius:6px;box-shadow:0 8px 24px color-mix(in srgb,var(--ink) 22%,transparent);will-change:transform}
 .dragging .drag-handle{cursor:grabbing}
 @media (hover:none){.drag-handle{opacity:.5}}
+
+/* Collapsible workspace panel (desktop) */
+.workspace-toggle{flex:0 0 auto;padding:.5rem}
+.workspace-pane,.workspace-tabs{overflow:hidden}
+.app-body.workspace-collapsed .panes,.app-body.workspace-collapsed .view-nav{grid-template-columns:minmax(0px,1fr) minmax(0px,0fr)}
+.app-body.workspace-collapsed .workspace-pane,.app-body.workspace-collapsed .workspace-tabs{visibility:hidden;border-left-width:0}

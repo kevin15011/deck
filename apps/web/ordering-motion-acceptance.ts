@@ -132,9 +132,25 @@ try {
     assert.equal(await openDialogOpacity(), 1, 'reduced motion skips tweens');
     await closeDialog();
     await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+    // Collapsible workspace panel.
+    const paneWidth = () => page.evaluate(() => Math.round(document.querySelector('.workspace-pane')!.getBoundingClientRect().width));
+    const open = await paneWidth();
+    assert.ok(open > 300, 'workspace panel is open by default');
+    await page.getByRole('button', { name: 'Hide workspace panel' }).click();
+    await page.waitForTimeout(600);
+    assert.equal(await paneWidth(), 0, 'workspace panel collapses');
+    assert.equal(await page.locator('.workspace-pane').isVisible(), false, 'collapsed panel is hidden from the accessibility tree');
+    await page.reload();
+    await page.getByRole('button', { name: 'Show workspace panel' }).waitFor();
+    assert.equal(await paneWidth(), 0, 'collapsed state survives reload');
+    await page.getByRole('button', { name: 'Show workspace panel' }).click();
+    await page.waitForTimeout(600);
+    assert.equal(await paneWidth(), open, 'workspace panel expands back');
+    await page.getByRole('tab', { name: 'Subagents' }).waitFor();
     await page.screenshot({ path: '/tmp/deck-ordering.png' });
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ ok: true, checks: ['pointer-session-drag', 'click-select', 'keyboard-reorder', 'project-drag', 'persistence', 'new-on-top', 'dialog-tween', 'press-feedback', 'reduced-motion'] }));
+    console.log(JSON.stringify({ ok: true, checks: ['pointer-session-drag', 'click-select', 'keyboard-reorder', 'project-drag', 'persistence', 'new-on-top', 'dialog-tween', 'press-feedback', 'reduced-motion', 'workspace-collapse'] }));
 } catch (error) { console.error(error); process.exitCode = 1; } finally { await browser.close(); host.disable?.(); await Bun.sleep(50); rmSync(root, { recursive: true, force: true }); process.exit(process.exitCode ?? 0); }
 }
 await acceptance();
