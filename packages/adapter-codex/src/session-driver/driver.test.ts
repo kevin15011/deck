@@ -325,12 +325,31 @@ const questionRequest = { id: "question", method: "item/tool/requestUserInput", 
 } };
 const emptyQuestionAnswers = { answers: { choice: { answers: [] }, secret: { answers: [] } } };
 describe("Codex user questions", () => {
+  test("delivers reused RPC IDs from separate native processes to a shared broker", async () => {
+    const seen = new Set<string>();
+    const broker: NonNullable<import("@deck/core/session/driver").DriverHostIo["question"]> = async request => {
+      if (seen.has(request.questionId)) throw new Error("question-id-reused");
+      seen.add(request.questionId);
+      return { outcome: "answered", answers: { choice: ["A"], secret: ["value"] } };
+    };
+    // Reusing the task ID too models restarting its native process.
+    for (const approvals of ["relay", "runner-default"] as const) {
+      const h = harness(responder); h.io.question = broker;
+      const task = await createCodexSessionDriver().startTask({ ...input, approvals }, h.io);
+      try {
+        await task.nativeSessionId;
+        const child = h.children[1]!; child.stdout(questionRequest); await Promise.resolve();
+        expect(child.writes.find(m => m.id === "question")?.result).toEqual({ answers: { choice: { answers: ["A"] }, secret: { answers: ["value"] } } });
+      } finally { await task.close(); }
+    }
+    expect(seen.size).toBe(2);
+  });
   test("maps choices and secret free text and only sends answers to RPC", async () => {
     const h = harness(responder); const requests: unknown[] = [];
     h.io.question = async request => { requests.push(request); return { outcome: "answered", answers: { choice: ["A"], secret: ["SECRET_SENTINEL"] } }; };
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io); await task.nativeSessionId;
     const child = h.children[1]!; child.stdout(questionRequest); await Promise.resolve();
-    expect(requests).toEqual([{ questionId: "codex:question", questions: [
+    expect(requests).toEqual([{ questionId: expect.stringMatching(/^codex:task:question:[0-9a-f-]{36}$/), questions: [
       { id: "choice", header: "Pick", prompt: "Choose", options: [{ label: "A", description: "First" }], multiple: false, allowOther: true, secret: false },
       { id: "secret", header: "Key", prompt: "Enter key", options: [], multiple: false, allowOther: false, secret: true },
     ] }]);
@@ -343,6 +362,7 @@ describe("Codex user questions", () => {
     const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
     const child = h.children[1]!; child.stdout(questionRequest); await Promise.resolve();
     expect(child.writes.find(m => m.id === "question")?.result).toEqual(emptyQuestionAnswers);
+    expect(h.events.filter(event => event.kind === "diagnostic" && event.data.code === "codex-question-broker-failed")).toHaveLength(outcome === "throws" ? 1 : 0);
     expect(JSON.stringify(h.events)).not.toContain("SECRET_SENTINEL"); await task.close();
   });
   test.each([{ threadId: "foreign" }, { turnId: "stale" }])("dismisses stale requests without relaying %j", async override => {
@@ -391,6 +411,6 @@ test("Codex questions support zero request IDs and empty option arrays", async (
   h.io.question = async request => { seen = request; return { outcome: "dismissed" }; };
   const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
   const child = h.children[1]!; child.stdout({ ...questionRequest, id: 0, params: { ...questionRequest.params, questions: [{ id: "text", header: "Text", question: "Type", options: [] }] } }); await Promise.resolve();
-  expect(seen).toMatchObject({ questionId: "codex:0", questions: [{ id: "text", options: [], multiple: false, allowOther: false, secret: false }] });
+  expect(seen).toMatchObject({ questionId: expect.stringMatching(/^codex:task:0:[0-9a-f-]{36}$/), questions: [{ id: "text", options: [], multiple: false, allowOther: false, secret: false }] });
   expect(child.writes.find(m => m.id === 0)?.result).toEqual({ answers: { text: { answers: [] } } }); await task.close();
 });

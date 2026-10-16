@@ -1,6 +1,7 @@
 import { validateQuestions, type Question } from "@deck/core/session/question";
 import { prepareImages, redactImagePayload } from "./images";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import type { DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
 import { redactText } from "@deck/core/session/redaction";
 import { CODEX_PROTOCOL, codexTurnStatus, mapCodexNotification } from "./mapper";
@@ -231,13 +232,16 @@ class CodexTask {
     try {
       if (valid && activeTurn && !activeTurn.interrupted && !this.closed && activeTurn.id
         && p.threadId === this.threadId && p.turnId === activeTurn.id) {
-        const result = await this.io.question?.({ questionId: `codex:${String(id)}`, questions });
+        const result = await this.io.question?.({ questionId: `codex:${this.input.taskId}:${String(id)}:${randomUUID()}`, questions });
         if (result?.outcome === "answered" && !this.closed && this.turn === activeTurn
           && !activeTurn.interrupted && activeTurn.id === p.turnId) {
           answers = Object.fromEntries(questions.map(q => [q.id, { answers: result.answers[q.id] ?? [] }]));
         }
       }
-    } catch { /* Broker errors may contain secret answers: never emit their message or payload. */ }
+    } catch {
+      // Broker errors may contain secret answers: emit only a fixed diagnostic code.
+      this.emit({ kind: "diagnostic", data: { code: "codex-question-broker-failed" } });
+    }
     try { rpc?.reply(id, { answers }); }
     catch { void this.fail("codex-question-reply-failed"); }
   }

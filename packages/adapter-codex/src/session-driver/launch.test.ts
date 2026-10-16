@@ -47,8 +47,8 @@ test("global memory explicitly admits native hooks while dropping inherited prov
   expect(() => buildCodexLaunch({ ...input, nativeMemory: { ...global, projectScope: nativeMemory.projectScope } }, [])).toThrow("codex-native-memory-invalid");
 });
 
-test("enables experimental default-mode questions only for relay launches", () => {
+test("enables experimental default-mode questions for all supervised launches", () => {
   for (const approvals of ["relay", "runner-default"] as const) {
-    expect(buildCodexLaunch({ ...input, approvals }, []).args).toContain(`features.default_mode_request_user_input=${approvals === "relay"}`);
+    expect(buildCodexLaunch({ ...input, approvals }, []).args).toContain("features.default_mode_request_user_input=true");
   }
 });
