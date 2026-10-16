@@ -7,7 +7,7 @@ import type { DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, Dri
 import { redactText } from "@deck/core/session/redaction";
 import { CODEX_PROTOCOL, codexTurnStatus, mapCodexNotification } from "./mapper";
 import { buildCodexLaunch, isAdmittedCodexMemoryHook, nativeCodexMcpId, verifyCodexConfig, type CodexHookMetadata, type CodexLaunchOptions } from "./launch";
-import { CodexRpc, object, type RpcMessage } from "./rpc";
+import { CodexRpc, CodexRpcFrameError, object, type RpcMessage } from "./rpc";
 
 export const CODEX_TESTED_VERSIONS = { min: "0.162.1", maxTested: "0.162.1" } as const;
 type ProbeExec = (command: string, args: readonly string[], options: { cwd?: string; timeoutMs: number }) => Promise<{ code: number | null; stdout: string }>;
@@ -36,6 +36,20 @@ function canonicalApprovalJson(value: unknown): string | undefined {
       ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, child]) => [key, sorted(child)]))
       : item;
   return JSON.stringify(sorted(value));
+}
+
+// Exact internal codes only: neither native messages nor arbitrary codex-prefixed errors are safe.
+const STARTUP_ERROR_CODES = new Set([
+  "codex-invalid-assignment", "codex-task-closed", "codex-process-exited", "codex-process-exited-before-ready",
+  "codex-process-ready-timeout", "codex-rpc-closed", "codex-native-session-not-found", "codex-native-session-id-mismatch",
+  "codex-native-memory-unavailable", "codex-native-memory-invalid", "codex-hooks-inventory-invalid", "codex-hook-isolation-violation",
+  "codex-mcp-spec-missing", "codex-http-mcp-url-invalid", "codex-http-mcp-env-header-invalid",
+  "codex-feature-isolation-violation", "codex-mcp-isolation-violation", "codex-mcp-spec-isolation-violation",
+  "codex-mcp-status-invalid", "codex-mcp-server-not-connected", "codex-mcp-status-pagination-cycle", "codex-runtime-mcp-isolation-violation",
+]);
+function startupErrorCode(error: unknown): string {
+  if (error instanceof CodexRpcFrameError) return error.code;
+  return error instanceof Error && STARTUP_ERROR_CODES.has(error.message) ? error.message : "codex-startup-failed";
 }
 
 class CodexTask {
@@ -99,7 +113,7 @@ class CodexTask {
     this.child = child;
     const rpc = new CodexRpc((text) => child.writeStdin(text), (message) => this.onMessage(message), { timeoutMs: this.options.rpcTimeoutMs });
     this.rpc = rpc;
-    child.onStdout((chunk) => { try { rpc.push(chunk); } catch { void this.fail("codex-rpc-invalid-frame"); } });
+    child.onStdout((chunk) => { try { rpc.push(chunk); } catch (error) { void this.fail(error instanceof CodexRpcFrameError ? error.code : "codex-rpc-invalid-frame"); } });
     child.onStderr(() => {}); // Native diagnostics can contain credential-bearing config: never persist stderr.
     void child.exited.then(() => {
       rpc.close(new Error("codex-process-exited"));
@@ -149,12 +163,13 @@ class CodexTask {
         developerInstructions: this.input.rolePrompt,
         approvalPolicy: this.input.approvals === "relay" ? "on-request" : "never",
         approvalsReviewer: "user", sandbox: this.input.approvals === "relay" ? "read-only" : "danger-full-access",
-        ...(this.input.resume ? { threadId: this.input.resume.nativeSessionId } : { ephemeral: false }),
+        // Only thread.id is consumed; full resume history can exceed the RPC frame bound.
+        ...(this.input.resume ? { threadId: this.input.resume.nativeSessionId, excludeTurns: true } : { ephemeral: false }),
       })).thread);
       if (typeof thread.id !== "string" || !thread.id || this.input.resume && thread.id !== this.input.resume.nativeSessionId) throw new Error("codex-native-session-id-mismatch");
       this.threadId = thread.id;
       await this.verifyRuntimeMcp(rpc, Date.now() + (this.options.rpcTimeoutMs ?? 30_000));
-    } catch (error) { await this.fail(error instanceof Error && /^codex-/.test(error.message) ? error.message : "codex-startup-failed"); throw error; }
+    } catch (error) { await this.fail(startupErrorCode(error)); throw error; }
   }
   private async readHooks(rpc: CodexRpc): Promise<CodexHookMetadata[]> {
     const response = object(await rpc.call("hooks/list", { cwds: [this.input.cwd] }));
@@ -174,7 +189,7 @@ class CodexTask {
       this.resolveId(this.threadId!);
       return await done;
     } catch (error) {
-      return this.startupInterrupted ? { status: "interrupted-forced" } : { status: "failed", error: "codex-startup-failed", ...(error instanceof Error && error.message === "codex-native-session-not-found" ? { reasonCode: "native-session-not-found" as const } : {}) };
+      return this.startupInterrupted ? { status: "interrupted-forced" } : { status: "failed", error: startupErrorCode(error), ...(error instanceof Error && error.message === "codex-native-session-not-found" ? { reasonCode: "native-session-not-found" as const } : {}) };
     }
   }
   private async verifyRuntimeMcp(rpc: CodexRpc, deadline: number): Promise<void> {

@@ -29,3 +29,18 @@ describe("Codex app-server JSONL transport", () => {
     rpc.close(); expect(await pending).toContain("closed");
   });
 });
+
+test.each([false, true])("keeps the default 1 MiB frame bound, including split frames (%s)", async split => {
+  const rpc = new CodexRpc(() => {}, () => {});
+  const pending = rpc.call("thread/resume", {}).catch((error: Error) => error.message);
+  const frame = JSON.stringify({ id: 1, result: { text: "x".repeat(1024 * 1024) } }) + "\n";
+  if (split) rpc.push(frame.slice(0, 1024));
+  expect(() => rpc.push(split ? frame.slice(1024) : frame)).toThrow("codex-rpc-frame-too-large");
+  expect(await pending).toBe("codex-rpc-frame-too-large");
+});
+test("invalid JSON rejects pending requests with a safe fixed code", async () => {
+  const rpc = new CodexRpc(() => {}, () => {});
+  const pending = rpc.call("initialize", {}).catch((error: Error) => error.message);
+  expect(() => rpc.push('SECRET_FRAME_SENTINEL invalid JSON\n')).toThrow("codex-rpc-invalid-frame");
+  expect(await pending).toBe("codex-rpc-invalid-frame");
+});

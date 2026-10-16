@@ -2,6 +2,11 @@
 export type RpcMessage = { id?: string | number; method?: string; params?: Record<string, unknown>; result?: unknown; error?: { code?: number; message?: string } };
 export const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
+/** Only these internal framing codes may cross the driver diagnostic boundary. */
+export class CodexRpcFrameError extends Error {
+  constructor(readonly code: "codex-rpc-invalid-frame" | "codex-rpc-frame-too-large") { super(code); }
+}
+
 export class CodexRpc {
   private buffer = "";
   private serial = 0;
@@ -34,7 +39,7 @@ export class CodexRpc {
         if (!line.trim()) continue;
         this.bound(line);
         const parsed: unknown = JSON.parse(line);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("codex-rpc-invalid-frame");
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new CodexRpcFrameError("codex-rpc-invalid-frame");
         const m = parsed as RpcMessage;
         if (m.id !== undefined && !m.method) {
           const p = typeof m.id === "number" ? this.pending.get(m.id) : undefined;
@@ -45,9 +50,9 @@ export class CodexRpc {
         } else this.message(m);
       }
       this.bound(this.buffer);
-    } catch (error) { const e = error instanceof Error ? error : new Error("codex-rpc-invalid-frame"); this.close(e); throw e; }
+    } catch (error) { const e = error instanceof CodexRpcFrameError ? error : new CodexRpcFrameError("codex-rpc-invalid-frame"); this.close(e); throw e; }
   }
-  private bound(text: string): void { if (Buffer.byteLength(text, "utf8") > (this.options.maxFrameBytes ?? 1024 * 1024)) throw new Error("codex-rpc-frame-too-large"); }
+  private bound(text: string): void { if (Buffer.byteLength(text, "utf8") > (this.options.maxFrameBytes ?? 1024 * 1024)) throw new CodexRpcFrameError("codex-rpc-frame-too-large"); }
   close(error = new Error("codex-rpc-closed")): void {
     if (this.closed) return;
     this.closed = error; this.buffer = "";

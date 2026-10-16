@@ -237,10 +237,14 @@ describe("Codex session driver", () => {
     expect(h.children[0]?.terminations).toBe(1);
     expect(h.children[0]?.writes).toHaveLength(0);
   });
-  test.each(["malformed-startup", "startup-interrupt"])("shares the outstanding group drain across done and repeated close: %s", async (mode) => {
+  test.each(["malformed-startup", "oversized-startup", "startup-interrupt"])("shares the outstanding group drain across done and repeated close: %s", async (mode) => {
     let releaseDrain!: () => void;
     const drain = new Promise<void>((resolve) => { releaseDrain = resolve; });
-    const h = harness((child, _index, m) => { if (mode === "malformed-startup" && m.method === "initialize") child.stdoutRaw("invalid JSON\n"); });
+    const h = harness((child, _index, m) => {
+      if (m.method !== "initialize") return;
+      if (mode === "malformed-startup") child.stdoutRaw("invalid JSON\n");
+      if (mode === "oversized-startup") child.stdoutRaw("x".repeat(1024 * 1024 + 1));
+    });
     const spawn = h.io.spawn;
     h.io.spawn = async (...args) => {
       const child = await spawn(...args) as FakeChild;
@@ -594,5 +598,67 @@ describe("Codex approval match identities", () => {
     ]);
     expect(requests[0].identity !== requests[1].identity).toBe(true);
     expect(requests[0].identity === requests[2].identity).toBe(true);
+  });
+});
+
+describe("Codex bounded resume responses", () => {
+  test.each([false, true])("excludes turns only when resuming (%s)", async resumed => {
+    const h = harness(responder);
+    const task = await createCodexSessionDriver().startTask({ ...input, ...(resumed ? { resume: { nativeSessionId: "saved" } } : {}) }, h.io);
+    try {
+      await task.nativeSessionId;
+      const request = h.children[1]!.writes.find(m => m.method === (resumed ? "thread/resume" : "thread/start"))!;
+      expect(Object.hasOwn(request.params as object, "excludeTurns")).toBe(resumed);
+      if (resumed) expect(request.params).toMatchObject({ threadId: "saved", excludeTurns: true });
+    } finally { await task.close(); }
+  });
+  test("resumes large history by requesting only thread metadata", async () => {
+    const h = harness((child, index, m) => {
+      if (m.method === "thread/resume") {
+        const params = m.params as Record<string, unknown>;
+        child.stdout({ id: m.id, result: { thread: { id: "saved", turns: params.excludeTurns === true ? [] : [{ text: "x".repeat(1_050_693) }] } } });
+      } else responder(child, index, m);
+    });
+    const task = await createCodexSessionDriver().startTask({ ...input, resume: { nativeSessionId: "saved" } }, h.io);
+    try {
+      await expect(task.nativeSessionId).resolves.toBe("saved");
+      const child = h.children[1]!;
+      expect(child.writes.some(m => m.method === "turn/start")).toBe(true);
+      child.stdout({ method: "turn/completed", params: { threadId: "saved", turn: { id: "turn", status: "completed" } } });
+      expect(await task.done).toEqual({ status: "completed" });
+    } finally { await task.close(); }
+  });
+  test.each(["startup", "running"])("preserves frame-too-large without exposing frames (%s)", async phase => {
+    const h = harness((child, index, m) => {
+      if (phase === "startup" && m.method === "thread/resume") child.stdout({ id: m.id, result: { thread: { id: "saved", text: "FRAME_SECRET_SENTINEL" + "x".repeat(1024 * 1024) } } });
+      else responder(child, index, m);
+    });
+    const task = await createCodexSessionDriver().startTask({ ...input, resume: { nativeSessionId: "saved" } }, h.io);
+    try {
+      if (phase === "running") {
+        await task.nativeSessionId;
+        h.children[1]!.stdoutRaw(`{"text":"FRAME_SECRET_SENTINEL${"x".repeat(1024 * 1024)}"}\n`);
+      } else await expect(task.nativeSessionId).rejects.toThrow("codex-rpc-frame-too-large");
+      expect(await task.done).toEqual({ status: "failed", error: "codex-rpc-frame-too-large" });
+      expect(h.events.filter(event => event.kind === "diagnostic" && event.data.code !== "codex-mcp-aliases")).toEqual([{ kind: "diagnostic", data: { code: "codex-rpc-frame-too-large" } }]);
+      expect(h.children[1]!.terminations).toBe(1);
+      expect(JSON.stringify(h.events)).not.toContain("FRAME_SECRET_SENTINEL");
+    } finally { await task.close(); }
+  });
+  test.each(["write-error", "native-error", "invalid-json"])("keeps unknown errors generic (%s)", async mode => {
+    const h = harness((child, index, m) => {
+      if (m.method !== "initialize") return responder(child, index, m);
+      if (mode === "write-error") throw new Error("codex-UNKNOWN_SECRET_SENTINEL");
+      if (mode === "native-error") child.stdout({ id: m.id, error: { code: -32603, message: "codex-UNKNOWN_SECRET_SENTINEL" } });
+      else child.stdoutRaw('codex-UNKNOWN_SECRET_SENTINEL invalid JSON\n');
+    });
+    const task = await createCodexSessionDriver().startTask(input, h.io);
+    try {
+      const code = mode === "invalid-json" ? "codex-rpc-invalid-frame" : "codex-startup-failed";
+      expect(await task.done).toEqual({ status: "failed", error: code });
+      await expect(task.nativeSessionId).rejects.toThrow(code);
+      expect(h.events.filter(event => event.kind === "diagnostic" && event.data.code !== "codex-mcp-aliases")).toEqual([{ kind: "diagnostic", data: { code } }]);
+      expect(JSON.stringify(h.events)).not.toContain("UNKNOWN_SECRET_SENTINEL");
+    } finally { await task.close(); }
   });
 });
