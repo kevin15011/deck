@@ -124,6 +124,26 @@ describe("persistent workspace sessions", () => {
     });
   }
 
+  test("exact prefixed member wins after a stripped member is added, including continuation", async () => {
+    const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, "deck-investigate": { runnerId: "claude", modelId: "original" } } }) });
+    const id = await t.create(); await t.run({ type: "prompt.send", text: "Start" }, id);
+    await waitFor(() => t.driver.turns.length === 1);
+    const grant = grantFor(t, id);
+    const first = await t.manager.callTaskTool(grant, "deck_delegate", { agent: "deck-investigate", task: "inspect" });
+    expect(first.ok).toBe(true); if (!first.ok) return;
+    const taskId = (first.data as { taskId: string }).taskId;
+    await waitFor(() => t.driver.turns.length === 2);
+    const child = lastTurn(t.driver); child.finish(); await waitFor(() => child.closed);
+    t.state.config!.members.investigate = { runnerId: "claude", modelId: "other" };
+    expect(await t.manager.callTaskTool(grant, "deck_delegate", { agent: "deck-investigate", task: "continue", continueTaskId: taskId })).toMatchObject({ ok: true });
+    await waitFor(() => t.driver.turns.length === 3);
+    expect(lastTurn(t.driver).input).toMatchObject({ memberId: "deck-investigate", assignment: { modelId: "original" } });
+    expect(await t.manager.callTaskTool(grant, "deck_delegate", { agent: "deck-investigate", task: "new" })).toMatchObject({ ok: true });
+    await waitFor(() => t.driver.turns.length === 4);
+    expect(lastTurn(t.driver).input).toMatchObject({ memberId: "deck-investigate", assignment: { modelId: "original" } });
+    for (const agent of ["lead", "deck-lead"]) expect(await t.manager.callTaskTool(grant, "deck_delegate", { agent, task: "invalid" })).toMatchObject({ ok: false });
+  });
+
   test("crashed preflight reservation with no dispatch fence or lease safely restores pending text", async () => {
     const t = setup(); const id = await t.create(); let release!: () => void;
     t.driver.probe = () => new Promise(resolve => { release = () => resolve({ ...t.driver.probeResult, status: "blocked" }); });

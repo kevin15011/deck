@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { chmodSync, existsSync, lstatSync, readFileSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -21,7 +21,7 @@ afterEach(async () => {
 
 const GRANT = { sessionId: "s-1", taskId: "lead", memberId: "lead", runnerId: "claude", allowedTools: DEFAULT_ALLOWED_TOOLS } as const;
 
-async function harness(options: { grantTools?: readonly string[] } = {}) {
+async function harness(options: { grantTools?: readonly string[]; questions?: boolean } = {}) {
   const dir = tempDir();
   const clock = new FakeClock();
   const service = new StubSessionService(join(dir, "sessions"));
@@ -29,7 +29,9 @@ async function harness(options: { grantTools?: readonly string[] } = {}) {
   const socketPath = join(dir, "d.sock");
   const broker = new ApprovalBroker({ sink: { emit: (sid, draft) => { service.logs.get(sid)?.append(draft); } }, clock });
   const credentials = new CredentialRegistry({ socketPath });
-  const bridge = new BridgeService({ credentials, broker, status: (g) => ({ sessionId: g.sessionId, taskId: g.taskId, state: "running" }) });
+  const questionBroker = options.questions ? new QuestionBroker({ sink: { emit: (sid, draft) => { service.logs.get(sid)?.append(draft); } } }) : undefined;
+  if (questionBroker) cleanups.push(() => questionBroker.dispose());
+  const bridge = new BridgeService({ credentials, broker, questionBroker, status: (g) => ({ sessionId: g.sessionId, taskId: g.taskId, state: "running" }) });
   const server = new ControlServer({
     socketPath, service, bridge,
     daemon: { version: "1", pid: process.pid, nonce: "n", status: () => ({}), requestRestart: () => ({ ok: true as const }) },
@@ -38,7 +40,7 @@ async function harness(options: { grantTools?: readonly string[] } = {}) {
   cleanups.push(() => server.close(), () => service.close(), () => broker.dispose());
   const credFile = join(dir, "credential");
   const { token } = credentials.issue({ ...GRANT, allowedTools: options.grantTools ?? GRANT.allowedTools }, credFile);
-  return { dir, clock, service, log, socketPath, broker, credentials, bridge, server, credFile, token };
+  return { dir, clock, service, log, socketPath, broker, questionBroker, credentials, bridge, server, credFile, token };
 }
 
 /** Drives runSessionMcpBridge over in-memory streams. */
@@ -363,11 +365,35 @@ describe("Claude structured questions", () => {
       expect(JSON.stringify([...h.log.readAfter(0)].filter(e => e.kind === "question.resolved"))).not.toContain(values.join(", "));
     });
   }
+  for (const disconnect of [false, true]) {
+    test(`question transport survives the approval limit then ${disconnect ? "disconnects" : "accepts a late answer"}`, async () => {
+      const h = await harness({ questions: true });
+      const clock = new FakeClock();
+      const nativeTimeout = globalThis.setTimeout;
+      const timerSpy = spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void, ms: number, ...args: unknown[]) =>
+        ms >= 960_000 ? clock.setTimeout(fn, ms) : nativeTimeout(fn, ms, ...args)) as typeof setTimeout);
+      const s = mcpSession({ DECK_SESSION_CREDENTIAL_FILE: h.credFile });
+      try {
+        s.send({ id: 1, method: "tools/call", params: { name: DECK_APPROVE_TOOL, arguments: { tool_name: "AskUserQuestion", input: { questions: [question] } } } });
+        await waitFor(() => h.questionBroker!.pending().length === 1);
+        clock.advance(960_000);
+        await sleep(20);
+        expect(s.out).toEqual([]);
+        if (disconnect) {
+          s.end(); await s.done;
+          await waitFor(() => h.questionBroker!.pending().length === 0);
+        } else {
+          h.questionBroker!.respond({ questionId: h.questionBroker!.pending()[0]!.questionId, answers: { q1: ["B"] }, by: "web" });
+          expect(JSON.parse(text(await s.reply(1)))).toMatchObject({ behavior: "allow", updatedInput: { answers: { "Which?": "B" } } });
+        }
+      } finally { timerSpy.mockRestore(); s.end(); await s.done; }
+    });
+  }
   test("duplicate texts use deterministic suffixes without overwriting literal suffixes", async () => {
     const h = await setup();
     const call = h.ask({ questions: [question, question, { ...question, question: "Which? (2)" }] });
     h.questionBroker.respond({ questionId: h.questionBroker.pending()[0]!.questionId, answers: { q1: ["A"], q2: ["B"], q3: ["custom"] }, by: "web" });
-    expect(await call).toMatchObject({ data: { updatedInput: { answers: { "Which?": "A", "Which? (3)": "B", "Which? (2)": "custom" } } } });
+    expect(await call).toEqual({ ok: true, data: { behavior: "allow", updatedInput: { questions: [question, { ...question, question: "Which? (3)" }, { ...question, question: "Which? (2)" }], answers: { "Which?": "A", "Which? (3)": "B", "Which? (2)": "custom" } } } });
   });
   for (const outcome of ["dismissed", "cancelled", "abort"] as const) {
     test(`${outcome} denies and clears the pending question`, async () => {

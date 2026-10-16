@@ -64,7 +64,7 @@ export class BridgeService implements BridgePort {
       try {
         const resolution = await request.resolution;
         if (resolution.outcome !== "answered") return { ok: true, data: { behavior: "deny", message: "The user dismissed the question." } };
-        return { ok: true, data: { behavior: "allow", updatedInput: { ...input, answers: claudeAnswers(questions, resolution.answers) } } };
+        return { ok: true, data: { behavior: "allow", updatedInput: claudeAnswers(input, questions, resolution.answers) } };
       } finally {
         signal?.removeEventListener("abort", onAbort);
       }
@@ -86,10 +86,11 @@ export class BridgeService implements BridgePort {
   }
 }
 
-function claudeAnswers(questions: Question[], answers: Record<string, string[]>): Record<string, string> {
+function claudeAnswers(input: Record<string, unknown>, questions: Question[], answers: Record<string, string[]>): Record<string, unknown> {
   const result: Record<string, string> = Object.create(null);
   const reserved = new Set(questions.map(q => q.prompt));
-  for (const question of questions) {
+  const updatedQuestions = (input.questions as Record<string, unknown>[]).slice();
+  for (const [index, question] of questions.entries()) {
     let key = question.prompt;
     // Claude keys answers by full text. Later duplicates get the first free numbered
     // suffix, reserving literal question texts so no answer can overwrite another.
@@ -97,7 +98,8 @@ function claudeAnswers(questions: Question[], answers: Record<string, string[]>)
       key = `${question.prompt} (${suffix})`;
       if (reserved.has(key)) key = question.prompt;
     }
+    if (key !== question.prompt) updatedQuestions[index] = { ...updatedQuestions[index], question: key };
     result[key] = answers[question.id]!.join(", ");
   }
-  return result;
+  return { ...input, questions: updatedQuestions, answers: result };
 }

@@ -436,7 +436,7 @@ export class SessionManager implements SessionService {
 
   private delegate(live: Live, d: Record<string, unknown>): ExecuteOutcome {
     if (typeof d.agent !== "string" || (d.agent === LEAD_MEMBER_ID || d.agent === "deck-lead") || typeof d.task !== "string" || !d.task.trim() || d.task.length > MAX_PROMPT_CHARS || (d.continueTaskId !== undefined && typeof d.continueTaskId !== "string")) return fail("invalid-arguments");
-    const agent = d.agent.startsWith("deck-") && d.agent !== "deck-lead" && this.memberAssignment(live, d.agent.slice(5)) ? d.agent.slice(5) : d.agent;
+    const agent = !this.memberAssignment(live, d.agent) && d.agent.startsWith("deck-") && d.agent !== "deck-lead" && this.memberAssignment(live, d.agent.slice(5)) ? d.agent.slice(5) : d.agent;
     const priorId = d.continueTaskId as string | undefined;
     const priorTask = priorId ? live.ledger.task(priorId) : undefined;
     if (priorId && !priorTask) return fail("task-unknown");

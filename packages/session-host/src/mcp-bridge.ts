@@ -85,9 +85,13 @@ export async function runSessionMcpBridge(options: McpBridgeOptions): Promise<vo
     if (args !== undefined && (typeof args !== "object" || args === null || Array.isArray(args))) throw new ToolFailure("invalid-arguments", "arguments must be an object");
     const { token, socketPath } = readCredential(options.env);
     const connection = await daemon(socketPath);
+    // Questions live with the task. Use the largest safe transport timer; closing stdin
+    // still closes the connection and cancels the daemon's pending question.
+    const isQuestion = name === DECK_APPROVE_TOOL && (args as Record<string, unknown> | undefined)?.tool_name === "AskUserQuestion";
+    const timeoutMs = isQuestion ? 2_147_483_647 : name === DECK_APPROVE_TOOL ? APPROVAL_TIMEOUT_MS + 60_000 : name === "deck_task_wait" ? 60_000 : CALL_TIMEOUT_MS;
     let reply;
     try {
-      reply = await connection.request({ t: "bridge.call", token, tool: name, arguments: args }, name === DECK_APPROVE_TOOL ? APPROVAL_TIMEOUT_MS + 60_000 : name === "deck_task_wait" ? 60_000 : CALL_TIMEOUT_MS);
+      reply = await connection.request({ t: "bridge.call", token, tool: name, arguments: args }, timeoutMs);
     } catch (error) {
       throw new ToolFailure((error as Error).message.includes("Timed out") ? "daemon-timeout" : "daemon-unreachable", "the Deck daemon did not answer");
     }
