@@ -1,4 +1,4 @@
-/** Runner-neutral questions. Answers are transient and must never enter session events. */
+/** Runner-neutral questions. Only non-secret answers may enter conversation events. */
 export type Question = {
   id: string; header?: string; prompt: string;
   options: { label: string; description?: string }[];
@@ -6,6 +6,11 @@ export type Question = {
 };
 export type DriverQuestionRequest = { questionId: string; questions: Question[] };
 export type DriverQuestionAnswer = { outcome: "answered"; answers: Record<string, string[]> } | { outcome: "dismissed" | "cancelled" };
+/** Public conversation record. Secret entries are removed by the question broker. */
+export type QuestionResolutionData = { questionId: string; by: string } & (
+  | { outcome: "answered"; answers?: Record<string, string[]> }
+  | { outcome: "dismissed" | "cancelled"; answers?: never }
+);
 export type QuestionValidation = { ok: true } | { ok: false; code: "question-answers-invalid" };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const id = (v: unknown): v is string => typeof v === "string" && v.length > 0 && !/[\x00-\x1f\x7f-\x9f]/.test(v);

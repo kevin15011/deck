@@ -6,6 +6,7 @@ import { HOOK_STATUSES, SESSION_EVENT_KINDS, TURN_COMPLETED_STATUSES } from "./e
 
 type Json = Record<string, unknown>;
 const nonEmptyString = { type: "string", minLength: 1 };
+const questionAnswers: Json = { type: "object", maxProperties: 8, propertyNames: { ...nonEmptyString, pattern: "^[^\\u0000-\\u001f\\u007f-\\u009f]+$" }, additionalProperties: { type: "array", minItems: 1, maxItems: 12, items: { ...nonEmptyString, maxLength: 4000 } } };
 const UUID_PATTERN = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
 
 function dataRule(kind: string, data: Json): Json {
@@ -65,7 +66,11 @@ export function buildSessionEventSchema(): Json {
       dataRule("approval.requested", requireId("approvalId")),
       dataRule("approval.resolved", requireId("approvalId")),
       dataRule("question.requested", requireId("questionId")),
-      dataRule("question.resolved", requireId("questionId")),
+      dataRule("question.resolved", {
+        type: "object", required: ["questionId", "outcome", "by"],
+        properties: { questionId: nonEmptyString, outcome: { enum: ["answered", "dismissed", "cancelled"] }, by: nonEmptyString, answers: questionAnswers },
+        allOf: [{ if: { required: ["answers"] }, then: { properties: { outcome: { const: "answered" } } } }],
+      }),
       dataRule("task.created", requireId("taskId")),
       dataRule("diagnostic", requireId("code")),
       dataRule("command.accepted", { type: "object", required: ["commandId", "type", "outcome"], properties: { commandId: nonEmptyString, type: nonEmptyString, outcome: { type: "object", required: ["ok"], properties: { ok: { type: "boolean" } } } } }),
@@ -90,7 +95,7 @@ const COMMAND_VARIANTS: ReadonlyArray<[string, Json, string[]]> = [
   ["prompt.resume", {}, []],
   ["turn.interrupt", { taskId: nonEmptyString }, ["taskId"]],
   ["approval.respond", { approvalId: nonEmptyString, decision: { enum: ["allow", "allow-once", "deny"] } }, ["approvalId", "decision"]],
-  ["question.answer", { questionId: nonEmptyString, answers: { type: "object", maxProperties: 8, propertyNames: { ...nonEmptyString, pattern: "^[^\\u0000-\\u001f\\u007f-\\u009f]+$" }, additionalProperties: { type: "array", minItems: 1, maxItems: 12, items: { ...nonEmptyString, maxLength: 4000 } } } }, ["questionId", "answers"]],
+  ["question.answer", { questionId: nonEmptyString, answers: questionAnswers }, ["questionId", "answers"]],
   ["question.dismiss", { questionId: nonEmptyString }, ["questionId"]],
   ["task.cancel", { taskId: nonEmptyString }, ["taskId"]],
   ["session.release", {}, []],

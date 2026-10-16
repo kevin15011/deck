@@ -82,3 +82,8 @@ test("per-session approvals accept only relay or yolo", () => {
   }
   expect(validateSessionCommand({ v: 1, commandId: id, type: "session.setApprovals" }).ok).toBe(false);
 });
+
+test("question answer commands retain all entries until the broker filters the event", () => {
+  const command = { v: 1, commandId: id, type: "question.answer", questionId: "request", answers: { public: ["visible"], private: ["transient"] } };
+  expect(validateSessionCommand(command)).toEqual({ ok: true, value: command });
+});

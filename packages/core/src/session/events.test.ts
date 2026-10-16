@@ -87,7 +87,7 @@ test("question events require a questionId", () => {
   for (const kind of ["question.requested", "question.resolved"]) {
     const event = { v: 1, sessionId: "s", seq: 1, ts: "2026-10-12T00:00:00Z", kind, source: {}, data: {} };
     expect(validateSessionEvent(event).ok).toBe(false);
-    expect(validateSessionEvent({ ...event, data: { questionId: "q" } }).ok).toBe(true);
+    expect(validateSessionEvent({ ...event, data: { questionId: "q", ...(kind === "question.resolved" ? { outcome: "answered", by: "user" } : {}) } }).ok).toBe(true);
   }
 });
 
@@ -101,4 +101,16 @@ test("approval mode events validate explicit modes and actor", () => {
     expect(validateSessionEvent({ ...base(), kind: "session.approvals", data: { mode, by: "client" } }).ok).toBe(false);
   }
   expect(validateSessionEvent({ ...base(), kind: "session.approvals", data: { mode: "relay" } }).ok).toBe(false);
+});
+
+test("resolved question answers are bounded and only allowed for answered outcomes", () => {
+  const event = (data: object) => ({ ...base(), kind: "question.resolved", data: { questionId: "r", outcome: "answered", by: "user", ...data } });
+  expect(validateSessionEvent(event({ answers: { q1: ["visible"] } })).ok).toBe(true);
+  expect(validateSessionEvent(event({ answers: {} })).ok).toBe(true);
+  expect(validateSessionEvent(event({ answers: Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`q${i}`, Array(12).fill("a".repeat(4000))])) })).ok).toBe(true);
+  for (const answers of [null, [], { q1: [] }, { q1: [1] }, { q1: Array(13).fill("A") }, { q1: ["a".repeat(4001)] }, { "bad\n": ["A"] }, Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`q${i}`, ["A"]]))]) expect(validateSessionEvent(event({ answers })).ok).toBe(false);
+  for (const outcome of ["dismissed", "cancelled"]) {
+    expect(validateSessionEvent(event({ outcome })).ok).toBe(true);
+    expect(validateSessionEvent(event({ outcome, answers: {} })).ok).toBe(false);
+  }
 });

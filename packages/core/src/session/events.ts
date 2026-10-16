@@ -2,6 +2,7 @@
  * deck-session-event-v1 — pure, provider-neutral event envelope and validators (XR-1.1–1.4).
  * No Node, network, or filesystem APIs.
  */
+import { isQuestionAnswers } from "./question";
 import { isApprovalMode } from "./commands";
 import { redactText } from "./redaction";
 
@@ -63,7 +64,10 @@ const DATA_RULES: Partial<Record<SessionEventKind, (d: Record<string, unknown>) 
   "approval.requested": (d) => isStr(d.approvalId) ? null : "data.approvalId required",
   "approval.resolved": (d) => isStr(d.approvalId) ? null : "data.approvalId required",
   "question.requested": (d) => isStr(d.questionId) ? null : "data.questionId required",
-  "question.resolved": (d) => isStr(d.questionId) ? null : "data.questionId required",
+  "question.resolved": (d) => !isStr(d.questionId) ? "data.questionId required"
+    : !["answered", "dismissed", "cancelled"].includes(d.outcome as string) ? "data.outcome invalid"
+    : !isStr(d.by) ? "data.by required"
+    : Object.hasOwn(d, "answers") && (d.outcome !== "answered" || !isQuestionAnswers(d.answers)) ? "data.answers invalid" : null,
   "task.created": (d) => isStr(d.taskId) ? null : "data.taskId required",
   "diagnostic": (d) => isStr(d.code) ? null : "data.code required",
   "command.accepted": (d) => !isStr(d.commandId) ? "data.commandId required" : !isStr(d.type) ? "data.type required" : !isObj(d.outcome) || typeof d.outcome.ok !== "boolean" ? "data.outcome required" : null,

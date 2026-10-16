@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { QuestionBroker } from "./question-broker";
 const questions = [{ id: "q1", prompt: "Choose", options: [], multiple: false, allowOther: true, secret: true }];
-test("first valid answer wins, invalid stays pending, events never contain answers", async () => {
+test("first valid answer wins, invalid stays pending, secret-only events never contain answers", async () => {
   const events: unknown[] = [];
   const broker = new QuestionBroker({ sink: { emit: (_, e) => { events.push(e); } } });
   const request = broker.request({ sessionId: "s", taskId: "t", questionId: "id", questions });
@@ -41,4 +41,35 @@ test("sink failure still releases the requester and drops transient state", asyn
   expect(() => broker.cancel("id", "shutdown")).toThrow("disk-full");
   expect(await request.resolution).toEqual({ outcome: "cancelled" });
   expect(broker.pending()).toEqual([]);
+});
+
+test("mixed requests persist only non-secret answers and keep driver delivery complete", async () => {
+  const events: any[] = [];
+  const broker = new QuestionBroker({ sink: { emit: (_, e) => { events.push(e); } } });
+  const request = broker.request({ sessionId: "s", taskId: "t", questionId: "mixed", questions: [
+    { ...questions[0]!, id: "public", secret: false }, { ...questions[0]!, id: "private" },
+  ] });
+  const answers = { public: ["visible response"], private: ["SECRET_MIXED_SENTINEL"] };
+  expect(broker.respond({ questionId: "mixed", answers, by: "user" })).toEqual({ ok: true });
+  expect(await request.resolution).toEqual({ outcome: "answered", answers });
+  expect(events.at(-1).data).toEqual({ questionId: "mixed", outcome: "answered", by: "user", answers: { public: ["visible response"] } });
+  expect(JSON.stringify(events)).not.toContain("SECRET_MIXED_SENTINEL");
+  answers.public[0] = "changed";
+  expect(events.at(-1).data.answers.public).toEqual(["visible response"]);
+});
+test("public answers are bounded before persistence and dismiss/cancel remain answer-free", async () => {
+  const events: any[] = [];
+  const broker = new QuestionBroker({ sink: { emit: (_, e) => { events.push(e); } } });
+  const input = { sessionId: "s", taskId: "t", questionId: "limits", questions: [{ ...questions[0]!, secret: false, multiple: true }] };
+  const request = broker.request(input);
+  for (const values of [Array(13).fill("A"), ["a".repeat(4001)]]) expect(broker.respond({ questionId: "limits", answers: { q1: values }, by: "u" })).toEqual({ ok: false, code: "question-answers-invalid" });
+  expect(events.filter(e => e.kind === "question.resolved")).toHaveLength(0);
+  const values = Array(12).fill("a".repeat(4000));
+  expect(broker.respond({ questionId: "limits", answers: { q1: values }, by: "u" }).ok).toBe(true);
+  await request.resolution;
+  expect(events.at(-1).data.answers).toEqual({ q1: values });
+  const dismissed = broker.request({ ...input, questionId: "dismiss" }); broker.dismiss({ questionId: "dismiss", by: "u" }); await dismissed.resolution;
+  expect(events.at(-1).data).not.toHaveProperty("answers");
+  const cancelled = broker.request({ ...input, questionId: "cancel" }); broker.cancel("cancel", "stop"); await cancelled.resolution;
+  expect(events.at(-1).data).not.toHaveProperty("answers");
 });

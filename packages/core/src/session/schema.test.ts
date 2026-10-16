@@ -57,6 +57,10 @@ const hookFixtures = [
 ];
 
 const eventFixtures: unknown[] = [
+  ...["answered", "dismissed", "cancelled"].flatMap(outcome => [
+    ev({ kind: "question.resolved", data: { questionId: "r", outcome, by: "user" } }),
+    ...[{}, { q1: ["visible"] }, null, [], { q1: [] }, { q1: Array(13).fill("A") }, { q1: ["x".repeat(4001)] }, { "bad\n": ["A"] }, Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`q${i}`, ["A"]]))].map(answers => ev({ kind: "question.resolved", data: { questionId: "r", outcome, by: "user", answers } })),
+  ]),
   ...["relay", "yolo", "runner-default", null].flatMap(mode => [ev({ data: { approvals: mode } }), ev({ kind: "session.approvals", data: { mode, by: "user" } })]),
   ev({ kind: "session.approvals", data: { mode: "relay" } }),
   ...["question.requested", "question.resolved"].flatMap(kind => [ev({ kind, data: {} }), ev({ kind, data: { questionId: "q" } })]),

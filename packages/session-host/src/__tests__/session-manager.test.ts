@@ -131,7 +131,7 @@ describe("persistent workspace sessions", () => {
         { kind: "task.created", source, data: { taskId, memberId: source.memberId, runnerId: "claude", modelId: "fast", state: i === 53 ? "ownership-unsettled" : i === 52 ? "queued" : "completed" } },
         { kind: "message.completed", source, data: { role: "user", text: `Inspect ${i} token=fixture-secret\nPrivate second line` } },
         { kind: "question.requested", source, data: { questionId: `q-${i}`, questions: [{ question: "Private question data" }] } },
-        { kind: "question.resolved", source, data: { questionId: `q-${i}`, answers: { value: "Private answer data" } } },
+        { kind: "question.resolved", source, data: { questionId: `q-${i}`, outcome: "answered", by: "fixture", answers: { value: ["Private answer data"] } } },
       );
     }
     t.manager.openLog(id)!.appendMany(drafts); await t.manager.close();
@@ -2186,4 +2186,39 @@ describe("per-session approval mode", () => {
     const continued = await reopened.run({ type: "session.continue" }, legacy);
     expect(await row(reopened, (continued as any).data.sessionId)).toMatchObject({ approvalMode: "relay", approvalModeSource: "default" });
   });
+});
+
+test("public question answers replay while mixed secret answers never enter durable state or diagnostics", async () => {
+  const diagnostics: unknown[] = [];
+  const record = (...values: unknown[]) => { diagnostics.push(values); };
+  const t = setup({ options: { logger: { info: record, warn: record, error: record } } }); const id = await t.create();
+  await t.run({ type: "prompt.send", text: "ask a mixed question" }, id);
+  await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "mixed question turn");
+  const turn = lastTurn(t.driver);
+  const q = { prompt: "Input", options: [], multiple: false, allowOther: true };
+  const answer = turn.ask([{ ...q, id: "public", secret: false }, { ...q, id: "private", secret: true }], "mixed-record");
+  const secret = "SECRET_DURABLE_QUESTION_SENTINEL";
+  const commandId = crypto.randomUUID();
+  const command = { type: "question.answer" as const, questionId: "mixed-record", answers: { public: ["visible conversation answer"], private: [secret] } };
+  expect((await t.runWithId(commandId, command, id)).ok).toBe(true);
+  expect(await answer).toEqual({ outcome: "answered", answers: command.answers });
+  const resolution = t.events(id).find(e => e.kind === "question.resolved")!;
+  expect(resolution.data).toEqual({ questionId: "mixed-record", outcome: "answered", by: "c-1", answers: { public: ["visible conversation answer"] } });
+  const receipt = t.events(id).find(e => e.kind === "command.accepted" && e.data.commandId === commandId)!;
+  expect(receipt.data).toEqual({ commandId, type: "question.answer", outcome: { ok: true } });
+  expect(JSON.stringify(receipt)).not.toContain("visible conversation answer");
+  expect(JSON.stringify(t.events(id))).not.toContain(secret);
+  turn.finish(); await t.idle(); await t.manager.close();
+  const sp = sessionPaths(t.paths, id);
+  const jsonl = readdirSync(sp.eventsDir).filter(name => name.endsWith(".jsonl")).map(name => readFileSync(join(sp.eventsDir, name), "utf8")).join("\n");
+  expect(jsonl).toContain("visible conversation answer"); expect(jsonl).not.toContain(secret);
+  const scan = (dir: string): void => { for (const item of readdirSync(dir, { withFileTypes: true })) { const path = join(dir, item.name); if (item.isDirectory()) scan(path); else if (item.isFile()) expect(readFileSync(path, "utf8")).not.toContain(secret); } };
+  scan(t.dir); expect(JSON.stringify(diagnostics)).not.toContain(secret);
+  rmSync(sp.ledgerSnapshotFile, { force: true }); recoverAllSessions({ paths: t.paths, probe: createNodeProbe() });
+  const reopened = setup({ dir: t.dir });
+  expect(reopened.events(id).find(e => e.kind === "question.resolved")).toEqual(resolution);
+  expect(await reopened.runWithId(commandId, command, id)).toMatchObject({ ok: true, duplicate: true });
+  expect(reopened.events(id).filter(e => e.kind === "question.resolved")).toHaveLength(1);
+  expect(JSON.stringify(reopened.events(id))).not.toContain(secret);
+  await reopened.manager.close(); scan(t.dir);
 });

@@ -1,4 +1,4 @@
-import { validateQuestionAnswers, validateQuestions, type Question, type DriverQuestionAnswer } from "@deck/core/session/question";
+import { validateQuestionAnswers, validateQuestions, type Question, type DriverQuestionAnswer, type QuestionResolutionData } from "@deck/core/session/question";
 import type { EventDraft } from "./event-log";
 
 export type QuestionRequest = { sessionId: string; taskId: string; memberId?: string; runnerId?: string; questionId: string; tool?: string; questions: Question[] };
@@ -50,7 +50,14 @@ export class QuestionBroker {
     const entry = this.entries.get(id); if (!entry) return false;
     this.entries.delete(id); this.resolved.add(id);
     if (this.resolved.size > 1000) this.resolved.delete(this.resolved.values().next().value!);
-    try { this.options.sink.emit(entry.request.sessionId, { kind: "question.resolved", source: this.source(entry.request), data: { questionId: id, outcome: answer.outcome, by } }); }
+    // Filter from the trusted request definitions, never from caller-supplied answer metadata.
+    const publicAnswers = answer.outcome === "answered" ? Object.fromEntries(entry.request.questions
+      .filter(question => question.secret === false)
+      .map(question => [question.id, [...answer.answers[question.id]!]])) : undefined;
+    const data: QuestionResolutionData = answer.outcome === "answered"
+      ? { questionId: id, outcome: "answered", by, ...(publicAnswers && Object.keys(publicAnswers).length ? { answers: publicAnswers } : {}) }
+      : { questionId: id, outcome: answer.outcome, by };
+    try { this.options.sink.emit(entry.request.sessionId, { kind: "question.resolved", source: this.source(entry.request), data }); }
     finally { entry.resolve(answer); }
     return true;
   }

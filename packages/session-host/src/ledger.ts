@@ -234,6 +234,7 @@ export class Ledger {
         break;
       }
       case "question.resolved": {
+        // Public answers stay in the replayable event log; this projection tracks pending requests only.
         const id = str(d.questionId);
         if (id && this.state.questions) delete this.state.questions[id];
         break;

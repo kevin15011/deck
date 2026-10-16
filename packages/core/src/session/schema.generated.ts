@@ -528,14 +528,62 @@ export const SESSION_EVENT_SCHEMA = {
           "data": {
             "type": "object",
             "required": [
-              "questionId"
+              "questionId",
+              "outcome",
+              "by"
             ],
             "properties": {
               "questionId": {
                 "type": "string",
                 "minLength": 1
+              },
+              "outcome": {
+                "enum": [
+                  "answered",
+                  "dismissed",
+                  "cancelled"
+                ]
+              },
+              "by": {
+                "type": "string",
+                "minLength": 1
+              },
+              "answers": {
+                "type": "object",
+                "maxProperties": 8,
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+                },
+                "additionalProperties": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 12,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  }
+                }
               }
-            }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "required": [
+                    "answers"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "outcome": {
+                      "const": "answered"
+                    }
+                  }
+                }
+              }
+            ]
           }
         }
       }
@@ -1366,4 +1414,4 @@ export const SESSION_COMMAND_SCHEMA = {
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "467caaee663c7bfd632fc6af572a97ff2b26b7e747f3f29913a3017c32f38274";
+export const SESSION_SCHEMA_DIGEST = "5380d30c9668a497699eea9f59af2a2bec87d9897a67087220a43e0f6c678cdd";

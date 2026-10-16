@@ -381,7 +381,7 @@ describe("Claude structured questions", () => {
       expect(h.broker.pending()).toEqual([]);
       expect(h.questionBroker.respond({ questionId: pending.questionId, answers: { q1: [...values] }, by: "web" })).toEqual({ ok: true });
       expect(await call).toEqual({ ok: true, data: { behavior: "allow", updatedInput: { ...input, answers: { "Which?": values.join(", ") } } } });
-      expect(JSON.stringify([...h.log.readAfter(0)].filter(e => e.kind === "question.resolved"))).not.toContain(values.join(", "));
+      expect([...h.log.readAfter(0)].find(e => e.kind === "question.resolved")?.data).toMatchObject({ outcome: "answered", answers: { q1: [...values] } });
     });
   }
   for (const disconnect of [false, true]) {
