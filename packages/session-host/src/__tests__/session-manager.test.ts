@@ -1,3 +1,5 @@
+import { Ledger, loadLedger } from "../ledger";
+import { EventLog } from "../event-log";
 import { afterEach, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1858,4 +1860,68 @@ test("global native memory role instructions omit canonical identity and project
   expect(prompt).not.toContain("canonical project scope");
   expect(prompt).not.toContain("undefined");
   lastTurn(t.driver).finish(); await t.idle();
+});
+
+
+describe("structured agent questions", () => {
+  const questions = [{ id: "q1", prompt: "Choose", options: [{ label: "A" }], multiple: false, allowOther: true, secret: true }];
+  async function asking() {
+    const t = setup(); const id = await t.create();
+    await t.run({ type: "prompt.send", text: "ask me" }, id);
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "question turn");
+    return { t, id, turn: lastTurn(t.driver) };
+  }
+  test("ask, ledger projection, invalid answer, session isolation, answer receipt and dismiss", async () => {
+    const { t, id, turn } = await asking();
+    const answer = turn.ask(questions, "question-1");
+    const requested = t.events(id).find(e => e.kind === "question.requested")!;
+    expect(requested.data).toMatchObject({ questionId: "question-1", questions });
+    const projection = Ledger.empty(id); for (const e of t.events(id)) projection.apply(e);
+    expect(projection.pendingQuestions()).toHaveLength(1);
+    expect((await t.manager.query("sessions.list", {}) as any).data.sessions.find((s: any) => s.sessionId === id).leadActivity.pendingQuestions).toBe(1);
+    expect(await t.run({ type: "question.answer", questionId: "question-1", answers: {} }, id)).toMatchObject({ ok: false, code: "question-answers-invalid" });
+    expect(t.manager.questionBroker.pending()).toHaveLength(1);
+    const other = await t.create();
+    expect(await t.run({ type: "question.answer", questionId: "question-1", answers: { q1: ["secret-answer"] } }, other)).toMatchObject({ ok: false, code: "unknown-question" });
+    const commandId = "00000000-0000-4000-8000-999999999999";
+    const command = { type: "question.answer" as const, questionId: "question-1", answers: { q1: ["secret-answer"] } };
+    expect((await t.runWithId(commandId, command, id)).ok).toBe(true);
+    expect(await answer).toEqual({ outcome: "answered", answers: { q1: ["secret-answer"] } });
+    expect(await t.runWithId(commandId, command, id)).toMatchObject({ ok: true, duplicate: true });
+    expect(t.events(id).find(e => e.kind === "question.resolved")?.data).toEqual({ questionId: "question-1", outcome: "answered", by: "c-1" });
+    expect(JSON.stringify(t.events(id))).not.toContain("secret-answer");
+    expect(t.events(id).some(e => Object.hasOwn(e.data, "answers"))).toBe(false);
+    expect((await t.manager.query("sessions.list", {}) as any).data.sessions.find((s: any) => s.sessionId === id).leadActivity.pendingQuestions).toBe(0);
+    const dismissed = turn.ask(questions, "question-2");
+    expect((await t.run({ type: "question.dismiss", questionId: "question-2" }, id)).ok).toBe(true);
+    expect(await dismissed).toEqual({ outcome: "dismissed" });
+    const ended = turn.ask(questions, "question-3"); turn.finish(); await t.idle();
+    expect(await ended).toEqual({ outcome: "cancelled" });
+  });
+  test("pending questions rebuild from the log on reattach and recovery cancels them", async () => {
+    const { t, id, turn } = await asking();
+    const answer = turn.ask(questions, "recover-question");
+    t.manager.openLog(id)!.flush();
+    const dir = tempDir(); const paths = resolveStatePaths({ env: { HOME: dir, XDG_STATE_HOME: join(dir, "state") }, tmpdir: dir });
+    ensureStateLayout(paths); cpSync(t.paths.sessionsDir, paths.sessionsDir, { recursive: true });
+    const sp = sessionPaths(paths, id);
+    const log = EventLog.open({ dir: sp.eventsDir, sessionId: id });
+    try { expect(loadLedger(log, sp.ledgerSnapshotFile).ledger.pendingQuestions()).toMatchObject([{ questionId: "recover-question", questions }]); } finally { log.close(); }
+    const report = recoverAllSessions({ paths, probe: createNodeProbe() });
+    expect(report.sessions.find(s => s.sessionId === id)?.questionsCancelled).toEqual(["recover-question"]);
+    const recovered = EventLog.open({ dir: sp.eventsDir, sessionId: id });
+    try {
+      expect(loadLedger(recovered, sp.ledgerSnapshotFile).ledger.pendingQuestions()).toEqual([]);
+      expect([...recovered.readAfter(0)].find(e => e.kind === "question.resolved")?.data).toEqual({ questionId: "recover-question", outcome: "cancelled", by: "daemon-restart" });
+    } finally { recovered.close(); }
+    turn.finish(); await t.idle(); expect(await answer).toEqual({ outcome: "cancelled" });
+  });
+  test.each(["turn.interrupt", "task.cancel", "session.stop", "session.release"] as const)("%s cancels questions immediately", async type => {
+    const { t, id, turn } = await asking(); turn.onInterrupt = undefined;
+    const answer = turn.ask(questions);
+    const command = type === "turn.interrupt" || type === "task.cancel" ? { type, taskId: turn.input.taskId } : { type };
+    expect((await t.run(command, id)).ok).toBe(true);
+    expect(await answer).toEqual({ outcome: "cancelled" });
+    turn.finish(); await t.idle();
+  });
 });

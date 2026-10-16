@@ -58,3 +58,6 @@ export {
 } from "./session-manager";
 
 export { WebService, type WebConfig, type WebAssets, type WebAsset, type WebServiceOptions } from "./web-service";
+
+export { QuestionBroker, type QuestionBrokerOptions, type QuestionRequest, type PendingQuestion, type QuestionRespondResult } from "./question-broker";
+export type { LedgerPendingQuestion } from "./ledger";

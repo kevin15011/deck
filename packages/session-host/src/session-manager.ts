@@ -1,3 +1,4 @@
+import { QuestionBroker } from "./question-broker";
 /**
  * SessionManager implements the `SessionService` port for cross-runner team sessions.
  * It owns per-task scheduling and lifecycle, the event
@@ -81,6 +82,7 @@ export type ChildMcpContext = { projectRoot: string; sessionId: string; taskId: 
 export type SessionManagerOptions = {
   paths: StatePaths;
   broker: ApprovalBroker;
+  questionBroker?: QuestionBroker;
   credentials: CredentialRegistry;
   supervisor: Supervisor;
   drivers: DriverLookup;
@@ -160,7 +162,7 @@ export type SessionSummary = {
   projectId: string; title: string; predecessorSessionId?: string;
   generation: number; assignmentRevision: number; members: CrossTeamAssignments; currentLeadTaskId: string;
   sharedWorkspace: true; sharedActiveSessions: number;
-  leadActivity: { taskId?: string; state: TaskState | "idle" | "preparing"; pendingApprovals: number; lastReplySeq: number };
+  leadActivity: { taskId?: string; state: TaskState | "idle" | "preparing"; pendingApprovals: number; pendingQuestions?: number; lastReplySeq: number };
   released?: boolean; releasing?: boolean; removing?: boolean; preparationStatus?: SessionPreparation["status"];
 };
 
@@ -181,7 +183,10 @@ export class SessionManager implements SessionService {
   private schedulerRestored = false;
   private readonly preparationJobs = new Map<PreparationJob, Live>();
 
+  readonly questionBroker: QuestionBroker;
+
   constructor(private readonly options: SessionManagerOptions) {
+    this.questionBroker = options.questionBroker ?? new QuestionBroker({ sink: { emit: (id, draft) => { this.openLog(id)?.append(draft); } } });
     this.clock = options.clock ?? systemClock;
     queueMicrotask(() => {
       if (this.closing) return;
@@ -252,6 +257,8 @@ export class SessionManager implements SessionService {
       case "prompt.resume": return this.resumePrompts(live, command);
       case "turn.interrupt": return this.interrupt(live, command, "interrupt");
       case "task.cancel": return this.interrupt(live, { ...command, type: "turn.interrupt" }, "cancel", command.type);
+      case "question.answer":
+      case "question.dismiss": return this.questionRespond(live, command, clientId);
       case "approval.respond": return this.approvalRespond(live, command, clientId);
       case "session.bindChange": return this.bindChange(live, command);
       case "session.release": return this.releaseSession(live,command);
@@ -359,6 +366,7 @@ export class SessionManager implements SessionService {
   }
 
   private async closeSessions(): Promise<void> {
+    this.questionBroker.dispose("shutdown");
     for (const live of this.sessions.values()) {
       if (live.wakeTimer !== undefined) this.clock.clearTimeout(live.wakeTimer);
       live.wakeTimer = undefined; live.notices.clear(); this.cancelQueued(live);
@@ -839,7 +847,7 @@ export class SessionManager implements SessionService {
   }
   private prepare(live: Live, command: Extract<SessionCommand, { type: "session.prepare" }>): ExecuteOutcome {
     if(live.releaseDrain || live.ledger.session.releasePending) return fail("session-releasing");
-    if (live.turns.size || live.queue.length || live.ledger.pendingApprovals().length) return fail("session-busy");
+    if (live.turns.size || live.queue.length || (live.ledger.pendingApprovals().length || live.ledger.pendingQuestions().length)) return fail("session-busy");
     if(this.ownershipBlocked(live)) return fail("ownership-unsettled");
     const reopening=!!live.ledger.session.released || live.ledger.session.state==="ended" || !!live.ledger.session.stopRequested;
     const epoch=live.ledger.session.releaseEpoch??0;
@@ -962,7 +970,7 @@ export class SessionManager implements SessionService {
   }
   private async assignMember(live: Live, command: Extract<SessionCommand, { type: "session.assignMember" }>): Promise<ExecuteOutcome> {
     if(live.releaseDrain || live.ledger.session.releasePending) return fail("session-busy");
-    const busy = () => live.turns.size || live.queue.length || this.waitingPrompts(live).length || live.wakeTimer !== undefined || live.notices.size || live.ledger.pendingApprovals().length || live.ledger.tasks().some(t => t.attempts.at(-1)?.state === "ownership-unsettled");
+    const busy = () => live.turns.size || live.queue.length || this.waitingPrompts(live).length || live.wakeTimer !== undefined || live.notices.size || (live.ledger.pendingApprovals().length || live.ledger.pendingQuestions().length) || live.ledger.tasks().some(t => t.attempts.at(-1)?.state === "ownership-unsettled");
     if (live.stopping || live.ledger.session.state === "ended") return fail("session-ended");
     if (busy()) return fail("session-busy");
     if (command.expectedRevision !== (live.ledger.session.assignmentRevision ?? 0)) return fail("assignment-revision-stale");
@@ -1231,6 +1239,10 @@ export class SessionManager implements SessionService {
           // Claude reports native init; OpenCode reports its prompt request boundary.
           if (event.kind === "turn.started") preparation("turn-started");
         },
+        question: async (req) => {
+          if (turn.controller.signal.aborted || this.closing || turn.kind) return { outcome: "cancelled" };
+          return this.questionBroker.request({ ...req, sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId }).resolution;
+        },
         approval: async (req) => {
           const pending = this.options.broker.request({ sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId, tool: req.tool, summary: req.summary, input: req.input });
           const resolution = await pending.resolution;
@@ -1282,6 +1294,7 @@ export class SessionManager implements SessionService {
     catch { if(resolver?.release) (live.cleanupFailures??=[]).push(()=>resolver!.release!()); outcome = { status: "failed", error: "Unable to release the managed MCP binding" }; }
     if (outcome.reasonCode === "native-session-not-found" && resume && !turn.reseeded && !turn.kind && !this.closing && !live.stopping) {
       this.options.broker.cancelTask(live.sessionId, turn.taskId, "task-ended");
+      this.questionBroker.cancelTask(live.sessionId, turn.taskId, "task-ended");
       this.options.credentials.revokeTask(live.sessionId, turn.taskId);
       const summary = this.taskSummary(live, turn.taskId);
       const source = { taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId };
@@ -1348,6 +1361,7 @@ export class SessionManager implements SessionService {
       };
       const task = stateFor();
       this.options.broker.cancelTask(live.sessionId, turn.taskId, "task-ended");
+      this.questionBroker.cancelTask(live.sessionId, turn.taskId, "task-ended");
       const source = { taskId: turn.taskId, memberId: turn.memberId, runnerId, ...(turn.nativeSessionId ? { nativeSessionId: turn.nativeSessionId } : {}) };
       const drafts: EventDraft[] = [
         { kind: "turn.completed", source, data: { status, ...(outcome.error ? { error: bounded(outcome.error) } : {}) } },
@@ -1392,7 +1406,19 @@ export class SessionManager implements SessionService {
     try { this.append(live, this.receiptDraft(receipt, { ok: true })); } catch { return fail("log-write-failed"); }
     turn.kind ??= kind;
     turn.controller.abort();
+    this.questionBroker.cancelTask(live.sessionId, turn.taskId, kind);
     void turn.handle?.interrupt().catch((error: Error) => this.options.logger?.warn("turn.interrupt-failed", { sessionId: live.sessionId, error: error.message }));
+    return ok();
+  }
+
+  private questionRespond(live: Live, command: Extract<SessionCommand, { type: "question.answer" | "question.dismiss" }>, clientId: string): ExecuteOutcome {
+    const pending = this.questionBroker.pending().find(p => p.questionId === command.questionId);
+    if (pending && pending.sessionId !== live.sessionId) return fail("unknown-question");
+    const result = command.type === "question.answer"
+      ? this.questionBroker.respond({ questionId: command.questionId, answers: command.answers, by: clientId })
+      : this.questionBroker.dismiss({ questionId: command.questionId, by: clientId });
+    if (!result.ok) return fail(result.code);
+    try { this.append(live, this.receiptDraft(command, { ok: true })); } catch { /* answer already took effect */ }
     return ok();
   }
 
@@ -1439,7 +1465,7 @@ export class SessionManager implements SessionService {
     const preparing=[...this.preparationJobs.entries()].filter(([,owner])=>owner===live).map(([job])=>job);
     preparing.forEach(job=>job.controller.abort());
     const turns=[...live.turns.values()];
-    for(const turn of turns) {turn.kind="release";turn.controller.abort();this.options.broker.cancelTask(live.sessionId,turn.taskId,"task-ended");this.options.credentials.revokeTask(live.sessionId,turn.taskId);void turn.handle?.interrupt().catch(()=>{});}
+    for(const turn of turns) {turn.kind="release";turn.controller.abort();this.options.broker.cancelTask(live.sessionId,turn.taskId,"task-ended");this.questionBroker.cancelTask(live.sessionId,turn.taskId,"task-ended");this.options.credentials.revokeTask(live.sessionId,turn.taskId);void turn.handle?.interrupt().catch(()=>{});}
     this.cancelQueued(live);
     if(!live.releaseDrain) {
       const drain=async()=>{
@@ -1494,7 +1520,7 @@ export class SessionManager implements SessionService {
     if (live.wakeTimer !== undefined) this.clock.clearTimeout(live.wakeTimer);
     live.wakeTimer = undefined; live.notices.clear();
     if (running.length) {
-      for (const turn of running) { turn.kind = "stop"; turn.controller.abort(); void turn.handle?.interrupt().catch(() => {}); }
+      for (const turn of running) { turn.kind = "stop"; turn.controller.abort(); this.questionBroker.cancelTask(live.sessionId, turn.taskId, "stop"); void turn.handle?.interrupt().catch(() => {}); }
     } else {
       try { saveLedgerSnapshot(live.ledger, live.log, live.paths.ledgerSnapshotFile); } catch { /* optimisation only */ }
     }
@@ -1534,7 +1560,7 @@ export class SessionManager implements SessionService {
         sessionId, projectRoot: meta.projectRoot, projectId: meta.projectId ?? projectIdentity(meta.projectRoot), title: ledger.session.title ?? meta.title ?? `Session ${meta.createdAt.slice(0, 10)}`,
         ...(meta.predecessorSessionId ? { predecessorSessionId: meta.predecessorSessionId } : {}), generation: ledger.session.generation ?? 0, assignmentRevision: ledger.session.assignmentRevision ?? 0,
         members, currentLeadTaskId, sharedWorkspace: true, sharedActiveSessions: 0,
-        leadActivity: { ...(leadAttempt ? { taskId: currentLeadTaskId } : {}), state: leadState, pendingApprovals: ledger.pendingApprovals().filter(approval => approval.taskId === currentLeadTaskId).length, lastReplySeq: ledger.lastLeadReplySeq },
+        leadActivity: { ...(leadAttempt ? { taskId: currentLeadTaskId } : {}), state: leadState, pendingApprovals: ledger.pendingApprovals().filter(approval => approval.taskId === currentLeadTaskId).length, pendingQuestions: ledger.pendingQuestions().filter(question => question.taskId === currentLeadTaskId).length, lastReplySeq: ledger.lastLeadReplySeq },
         ...(ledger.session.changeId ? { changeId: ledger.session.changeId } : {}),
         state: ledger.session.state, createdAt: meta.createdAt, updatedAt: ledger.lastEventTs ?? meta.createdAt, lastSeq: log.lastSeq,
         ...(lead ? { lead } : {}), running: !!cached && (!!cached.releaseDrain || !!cached.cleanupFailures?.length || cached.turns.size > 0 || cached.queue.length > 0 || [...this.preparationJobs.values()].some(owner => owner === cached)), tasks: ledger.tasks().length,

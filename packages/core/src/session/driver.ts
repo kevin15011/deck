@@ -1,3 +1,5 @@
+import type { DriverQuestionRequest, DriverQuestionAnswer } from "./question";
+export type { Question, DriverQuestionRequest, DriverQuestionAnswer } from "./question";
 /** RunnerSessionDriver contract (XR-4.1, D-6). Types only: no implementation in S0. */
 import type { DriverProtocol } from "./events";
 import type { RunnerQualifiedAssignment } from "./assignments";
@@ -90,6 +92,8 @@ export type SupervisedSpawn = (command: string, args: readonly string[], options
 export type DriverHostIo = {
   spawn: SupervisedSpawn;
   emit(e: DriverEvent): void;
+  /** Absent on older hosts: drivers treat this as dismissed. */
+  question?(req: DriverQuestionRequest): Promise<DriverQuestionAnswer>;
   approval(req: DriverApprovalRequest): Promise<DriverDecision>;
   /** Write a 0600 file into the task's private directory; returns its absolute path. Secrets never go to argv. */
   writePrivateFile(name: string, content: string): string;

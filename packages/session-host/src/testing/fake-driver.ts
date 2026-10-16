@@ -1,3 +1,4 @@
+import type { Question, DriverQuestionAnswer } from "@deck/core/session/question";
 /** TEST-ONLY scriptable RunnerSessionDriver for SessionManager tests (not exported from the package). */
 import { randomUUID } from "node:crypto";
 import type {
@@ -18,6 +19,7 @@ export class FakeTurn {
   emit(kind: string, data: Record<string, unknown> = {}, raw?: unknown): void { this.io.emit({ kind, data, ...(raw === undefined ? {} : { raw }) } as DriverEvent); }
   /** What a real driver emits when the native CLI confirms the session. */
   init(): void { this.emit("turn.started", { nativeSessionId: this.nativeSessionId, mcpServers: this.input.mcp.servers }, { type: "system", subtype: "init" }); }
+  ask(questions: Question[], questionId: string = randomUUID()): Promise<DriverQuestionAnswer> { return this.io.question?.({ questionId, questions }) ?? Promise.resolve({ outcome: "dismissed" }); }
   say(text: string): void { this.emit("message.completed", { text }); }
   finish(outcome: TurnOutcome = { status: "completed" }): void { if (this.finished) return; this.finished = true; this.resolveDone(outcome); }
 }

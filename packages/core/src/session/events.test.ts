@@ -61,7 +61,7 @@ describe("validateSessionEvent", () => {
     expect(SESSION_EVENT_KINDS).toContain("command.accepted");
     expect(SESSION_EVENT_KINDS).toContain("hook.started");
     expect(SESSION_EVENT_KINDS).toContain("hook.completed");
-    expect(SESSION_EVENT_KINDS.length).toBe(40);
+    expect(SESSION_EVENT_KINDS.length).toBe(42);
   });
 });
 
@@ -81,4 +81,12 @@ describe("boundRaw", () => {
     const r = boundRaw({ runnerId: "claude", protocol: "claude-stream-json", payload: { token: "abc123secret" } });
     expect(JSON.stringify(r.payload)).not.toContain("abc123secret");
   });
+});
+
+test("question events require a questionId", () => {
+  for (const kind of ["question.requested", "question.resolved"]) {
+    const event = { v: 1, sessionId: "s", seq: 1, ts: "2026-10-12T00:00:00Z", kind, source: {}, data: {} };
+    expect(validateSessionEvent(event).ok).toBe(false);
+    expect(validateSessionEvent({ ...event, data: { questionId: "q" } }).ok).toBe(true);
+  }
 });

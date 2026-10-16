@@ -1,3 +1,4 @@
+import { QuestionBroker } from "./question-broker";
 /**
  * Session daemon assembly (XR-3.1, design 6.3): lock -> recovery -> services -> control socket ->
  * discovery file -> idle policy. One daemon per OS user; clients start it on demand.
@@ -24,6 +25,7 @@ export type StopReason = string;
 
 export type DaemonServices = {
   broker: ApprovalBroker;
+  questionBroker: QuestionBroker;
   credentials: CredentialRegistry;
   supervisor: Supervisor;
   paths: StatePaths;
@@ -98,11 +100,15 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       clock,
       sink: { emit: (sessionId, draft) => { service?.openLog(sessionId)?.append(draft); } },
     });
+    const defaultQuestionBroker = new QuestionBroker({ sink: { emit: (sessionId, draft) => { service?.openLog(sessionId)?.append(draft); } } });
     const credentials = new CredentialRegistry({ socketPath: paths.socket.path });
     const supervisor = new Supervisor({ anchorCommand: options.anchorCommand, probe });
-    const services: DaemonServices = { broker, credentials, supervisor, paths, clock, logger, probe };
+    const services: DaemonServices = { broker, questionBroker: defaultQuestionBroker, credentials, supervisor, paths, clock, logger, probe };
     service = (options.createService ?? (() => new UnavailableSessionService()))(services);
     const svc = service;
+    // Older CLI compositions construct the manager with only the approval broker.
+    const questionBroker = svc.questionBroker ?? defaultQuestionBroker;
+    services.questionBroker = questionBroker;
     let draining = false;
     let admitted = 0;
     // Fence admission synchronously with restart acceptance. All transports share the same gate,
@@ -135,9 +141,9 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     const startedAt = clock.now();
     const nonce = lock.nonce;
     let stopRequested: ((reason: StopReason) => Promise<void>) | undefined;
-    const isBusy = () => admitted > 0 || svc.hasRunningWork() || broker.pending().length > 0;
+    const isBusy = () => admitted > 0 || svc.hasRunningWork() || broker.pending().length > 0 || questionBroker.pending().length > 0;
     const bridge = new BridgeService({
-      credentials, broker,
+      credentials, broker, questionBroker,
       status: (grant) => svc.taskStatus?.(grant) ?? { sessionId: grant.sessionId, taskId: grant.taskId, memberId: grant.memberId },
       callTaskTool: (grant, name, args, context) => svc.callTaskTool?.(grant, name, args, context) ?? Promise.resolve({ ok: false, code: "tool-unknown" }),
     });
@@ -152,7 +158,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
         version: options.version, pid, nonce,
         status: () => ({
           pid, nonce, version: options.version, startedAt: new Date(startedAt).toISOString(), uptimeMs: clock.now() - startedAt,
-          clients: server!.clientCount + (web?.clientCount ?? 0), web: web?.status(), runningWork: svc.hasRunningWork(), pendingApprovals: broker.pending().length, socketPath: paths.socket.path, stopping: draining,
+          clients: server!.clientCount + (web?.clientCount ?? 0), web: web?.status(), runningWork: svc.hasRunningWork(), pendingApprovals: broker.pending().length, pendingQuestions: questionBroker.pending().length, socketPath: paths.socket.path, stopping: draining,
         }),
         requestRestart: () => {
           if (draining) return { ok: true as const };
@@ -183,6 +189,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
         logger.info("daemon.stopping", { reason });
         idle.stop();
         broker.dispose("shutdown");
+        questionBroker.dispose("shutdown");
         // Let the manager abort readiness, drain native handles and release shared backend
         // leases before group containment. A stuck adapter still has a bounded grace period.
         const serviceClosing = Promise.resolve().then(() => svc.close?.()).catch((error) => { logger.warn("daemon.service-close-failed", { error: (error as Error).message }); });

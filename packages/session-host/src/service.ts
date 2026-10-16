@@ -3,11 +3,14 @@
  * The server owns transport concerns (framing, idempotency, attach); the service owns sessions.
  */
 import type { ImageAttachment, SessionCommand } from "@deck/core/session/commands";
+import type { QuestionBroker } from "./question-broker";
 import type { CredentialGrant } from "./credentials";
 import type { EventLog } from "./event-log";
 import type { CommandOutcome, ExecuteOutcome } from "./protocol";
 
 export interface SessionService {
+  /** Exposes the manager fallback when older compositions omit the shared broker option. */
+  readonly questionBroker?: QuestionBroker;
   /** Execute a validated command. Workspace registration and session creation need no sessionId. */
   execute(input: { sessionId?: string; command: SessionCommand; clientId: string }): Promise<ExecuteOutcome>;
   /** Authenticated browser images; managed files remain private to the host. */

@@ -1,3 +1,4 @@
+import type { QuestionBroker } from "./question-broker";
 /** Daemon side of the session MCP bridge: authenticates the task credential, enforces its tool grant, serves the tools. */
 import { DECK_APPROVE_TOOL, DECK_STATUS_TOOL } from "./bridge-config";
 import type { ApprovalBroker } from "./approval-broker";
@@ -8,6 +9,7 @@ import type { CommandOutcome } from "./protocol";
 export type BridgeServiceOptions = {
   credentials: CredentialRegistry;
   broker: ApprovalBroker;
+  questionBroker?: QuestionBroker;
   /** Current view of the calling task for `deck_status`. */
   status: (grant: CredentialGrant) => unknown;
   callTaskTool?: (grant: CredentialGrant, name: string, args: unknown, context: { signal?: AbortSignal }) => Promise<CommandOutcome>;

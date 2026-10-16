@@ -1,3 +1,4 @@
+import { isQuestionAnswers } from "./question";
 /** deck-session-command-v1 — pure command types and validator (XR-1.5). */
 import type { CrossTeamAssignments, RunnerQualifiedAssignment } from "./assignments";
 export type ImageAttachment = { attachmentId: string; mimeType: "image/png" | "image/jpeg" | "image/webp"; name: string; sizeBytes: number; width: number; height: number };
@@ -20,6 +21,8 @@ export type SessionCommandBody =
   | { type: "prompt.resume" }
   | { type: "turn.interrupt"; taskId: string }
   | { type: "approval.respond"; approvalId: string; decision: "allow" | "allow-once" | "deny" }
+  | { type: "question.answer"; questionId: string; answers: Record<string, string[]> }
+  | { type: "question.dismiss"; questionId: string }
   | { type: "task.cancel"; taskId: string }
   | { type: "session.release" }
   | { type: "session.rename"; title: string }
@@ -52,6 +55,8 @@ const FIELD_RULES: Record<string, (c: Record<string, unknown>) => string | null>
   "prompt.resume": () => null,
   "turn.interrupt": (c) => str(c.taskId) ? null : "taskId required",
   "approval.respond": (c) => !str(c.approvalId) ? "approvalId required" : c.decision !== "allow" && c.decision !== "allow-once" && c.decision !== "deny" ? "decision must be allow|allow-once|deny" : null,
+  "question.answer": (c) => !str(c.questionId) ? "questionId required" : !isQuestionAnswers(c.answers) ? "answers invalid" : null,
+  "question.dismiss": (c) => str(c.questionId) ? null : "questionId required",
   "task.cancel": (c) => str(c.taskId) ? null : "taskId required",
   "session.release": () => null,
   "session.rename": (c) => boundedString(c.title,160) ? null : "title invalid",

@@ -1,3 +1,4 @@
+import type { Question } from "@deck/core/session/question";
 /**
  * Ledger projection over the session event log (XR-3.3, D-12, D-15).
  *
@@ -37,6 +38,7 @@ export type TaskAttempt = {
 export type LedgerTask = { taskId: string; memberId: string; attempts: TaskAttempt[]; nativeConfirmed?: boolean };
 /** Durable idempotency receipt (XR-1.5): the command's type and its original outcome. */
 export type LedgerCommandReceipt = { type: string; outcome: { ok: boolean; [key: string]: unknown } };
+export type LedgerPendingQuestion = { questionId: string; taskId?: string; tool?: string; questions: Question[]; seq: number };
 export type LedgerPendingApproval = { approvalId: string; taskId?: string; seq: number };
 export type LedgerAnomaly = { code: string; seq: number; detail?: string };
 export type SessionHandoff = { text: string; sourceSessionId: string; sourceGeneration: number; sourceSeq: number; continuity: "reseeded" };
@@ -51,6 +53,7 @@ export type UserPrompt = {
 };
 export type LedgerState = {
   sessionId: string; seq: number; session: LedgerSession;
+  questions?: Record<string, LedgerPendingQuestion>;
   tasks: Record<string, LedgerTask>; approvals: Record<string, LedgerPendingApproval>; anomalies: LedgerAnomaly[];
   /** Accepted commands by commandId, oldest first, bounded by MAX_RECEIPTS. Absent in snapshots written before receipts existed. */
   commands?: Record<string, LedgerCommandReceipt>;
@@ -94,6 +97,7 @@ export class Ledger {
   tasks(): LedgerTask[] { return Object.values(this.state.tasks); }
   task(taskId: string): LedgerTask | undefined { return this.state.tasks[taskId]; }
   latest(taskId: string): TaskAttempt | undefined { return this.state.tasks[taskId]?.attempts.at(-1); }
+  pendingQuestions(): LedgerPendingQuestion[] { return Object.values(this.state.questions ?? {}); }
   pendingApprovals(): LedgerPendingApproval[] { return Object.values(this.state.approvals); }
   lifecycleReceipt(commandId: string) { return this.state.lifecycleCommands?.[commandId]; }
   receipt(commandId: string): LedgerCommandReceipt | undefined { return this.state.commands?.[commandId]; }
@@ -217,6 +221,16 @@ export class Ledger {
       case "message.completed": {
         const task = event.source.taskId ? this.state.tasks[event.source.taskId] : undefined;
         if (task?.memberId === "lead" && /^lead(?:-g[1-9]\d*)?$/.test(task.taskId) && (event.source.memberId === undefined || event.source.memberId === "lead") && event.data.role === "assistant" && !event.data.internal && typeof event.data.text === "string" && event.data.text.trim()) this.state.lastLeadReplySeq = event.seq;
+        break;
+      }
+      case "question.requested": {
+        const id = str(d.questionId);
+        if (id) Object.defineProperty(this.state.questions ??= {}, id, { enumerable: true, configurable: true, writable: true, value: { questionId: id, ...(str(d.taskId) ? { taskId: str(d.taskId) } : {}), ...(str(d.tool) ? { tool: str(d.tool) } : {}), questions: structuredClone(d.questions as Question[]), seq: event.seq } });
+        break;
+      }
+      case "question.resolved": {
+        const id = str(d.questionId);
+        if (id && this.state.questions) delete this.state.questions[id];
         break;
       }
       case "approval.requested": {

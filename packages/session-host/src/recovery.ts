@@ -60,6 +60,7 @@ export type RecoveryReport = {
   interrupted: string[];
   unsettled: Array<{ taskId: string; reason: UnsettledReason }>;
   approvalsDenied: string[];
+  questionsCancelled: string[];
   eventsAppended: number;
 };
 
@@ -74,7 +75,7 @@ const LIVE_SESSION_STATES = ["running", "idle", "stopping"];
 
 export function recoverSession(options: RecoverSessionOptions): RecoveryReport {
   const { log, ledger, probe } = options;
-  const report: RecoveryReport = { interrupted: [], unsettled: [], approvalsDenied: [], eventsAppended: 0 };
+  const report: RecoveryReport = { interrupted: [], unsettled: [], approvalsDenied: [], questionsCancelled: [], eventsAppended: 0 };
   if (ledger.session.state === "ended") return report;
 
   const drafts: EventDraft[] = [];
@@ -105,6 +106,11 @@ export function recoverSession(options: RecoverSessionOptions): RecoveryReport {
         drafts.push({ kind: "task.state", source: source(task.taskId, attempt, task.memberId), data: { taskId: task.taskId, state: "ownership-unsettled", reason: verdict.reason } });
       }
     }
+  }
+
+  for (const question of ledger.pendingQuestions()) {
+    drafts.push({ kind: "question.resolved", source: question.taskId ? { taskId: question.taskId } : {}, data: { questionId: question.questionId, outcome: "cancelled", by: "daemon-restart" } });
+    report.questionsCancelled.push(question.questionId);
   }
 
   for (const approval of ledger.pendingApprovals()) {

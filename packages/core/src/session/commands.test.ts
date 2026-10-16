@@ -64,3 +64,10 @@ describe("validateSessionCommand", () => {
  for(const fields of [{type:"session.release"},{type:"session.remove"},{type:"session.rename",title:"Renamed"}]) expect(validateSessionCommand({v:1,commandId:id,...fields}).ok).toBe(true);
  for(const title of [""," ","x".repeat(161),"bad\nname"]) expect(validateSessionCommand({v:1,commandId:id,type:"session.rename",title}).ok).toBe(false);
  });
+
+test("question commands enforce bounded answer shape", () => {
+  const command = (fields: object) => validateSessionCommand({ v: 1, commandId: id, type: "question.answer", questionId: "r", ...fields });
+  expect(command({ answers: { q1: ["A"] } }).ok).toBe(true);
+  expect(command({ type: "question.dismiss" }).ok).toBe(true);
+  for (const answers of [null, [], { q1: "A" }, { q1: [] }, { q1: [1] }, { q1: ["x".repeat(4001)] }, { q1: Array(13).fill("A") }, { "q\n": ["A"] }, Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`q${i}`, ["A"]]))]) expect(command({ answers }).ok).toBe(false);
+});

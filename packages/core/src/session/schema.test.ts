@@ -31,6 +31,9 @@ function check(schema: any, value: any): boolean {
   }
   if (typeof value === "number" && schema.minimum !== undefined && value < schema.minimum) return false;
   if (value && typeof value === "object" && !Array.isArray(value)) {
+    if (schema.maxProperties !== undefined && Object.keys(value).length > schema.maxProperties) return false;
+    if (schema.propertyNames && !Object.keys(value).every(key => check(schema.propertyNames, key))) return false;
+    if (schema.additionalProperties && !Object.entries(value).filter(([key]) => !(key in (schema.properties ?? {}))).every(([, v]) => check(schema.additionalProperties, v))) return false;
     for (const r of schema.required ?? []) if (!(r in value)) return false;
     for (const [k, s] of Object.entries(schema.properties ?? {})) if (k in value && !check(s, value[k])) return false;
   }
@@ -54,6 +57,7 @@ const hookFixtures = [
 ];
 
 const eventFixtures: unknown[] = [
+  ...["question.requested", "question.resolved"].flatMap(kind => [ev({ kind, data: {} }), ev({ kind, data: { questionId: "q" } })]),
   ev({}), ev({ kind: "nope" }), ev({ seq: 0 }), ev({ seq: 1.5 }), ev({ v: 2 }), ev({ ts: "bad" }),
   ev({ source: undefined }), ev({ data: [] }), ev({ source: { memberId: 1 } }),
   ev({ kind: "turn.completed", data: { status: "completed" } }), ev({ kind: "turn.completed", data: { status: "x" } }),
@@ -64,6 +68,8 @@ const eventFixtures: unknown[] = [
   ...["hook.started", "hook.completed"].flatMap(kind => hookFixtures.map(data => ev({ kind, data }))),
 ];
 const commandFixtures: unknown[] = [
+  ...[{}, { q1: ["A"] }, { q1: [] }, { q1: Array(13).fill("A") }, { "bad\n": ["A"] }, { q1: ["x".repeat(4001)] }, Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`q${i}`, ["A"]]))].map(answers => cm({ type: "question.answer", questionId: "q", answers })),
+  cm({ type: "question.dismiss", questionId: "q" }), cm({ type: "question.dismiss" }),
   cm({}), cm({ commandId: "nope" }), cm({ type: "x" }), cm({ v: 2 }),
   cm({ type: "session.create", projectRoot: "/p" }), cm({ type: "session.create" }),
   cm({ type: "session.create", projectId: "p" }), cm({ type: "session.create", projectRoot: "/p", projectId: "p" }),

@@ -13,6 +13,7 @@ export const SESSION_EVENT_KINDS = [
   "turn.started", "turn.completed",
   "message.delta", "message.completed", "reasoning.delta", "tool.started", "tool.completed",
   "hook.started", "hook.completed",
+  "question.requested", "question.resolved",
   "approval.requested", "approval.resolved", "memory.recalled", "memory.proposed", "memory.written",
   "usage", "rate-limit", "diagnostic", "runner.unmapped", "client.attached", "client.detached",
   /** Durable idempotency receipt: a command was accepted and its outcome is recorded (XR-1.5, survives daemon restart). */
@@ -58,6 +59,8 @@ const DATA_RULES: Partial<Record<SessionEventKind, (d: Record<string, unknown>) 
   "turn.completed": (d) => (TURN_COMPLETED_STATUSES as readonly string[]).includes(d.status as string) ? null : "data.status invalid",
   "approval.requested": (d) => isStr(d.approvalId) ? null : "data.approvalId required",
   "approval.resolved": (d) => isStr(d.approvalId) ? null : "data.approvalId required",
+  "question.requested": (d) => isStr(d.questionId) ? null : "data.questionId required",
+  "question.resolved": (d) => isStr(d.questionId) ? null : "data.questionId required",
   "task.created": (d) => isStr(d.taskId) ? null : "data.taskId required",
   "diagnostic": (d) => isStr(d.code) ? null : "data.code required",
   "command.accepted": (d) => !isStr(d.commandId) ? "data.commandId required" : !isStr(d.type) ? "data.type required" : !isObj(d.outcome) || typeof d.outcome.ok !== "boolean" ? "data.outcome required" : null,

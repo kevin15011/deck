@@ -24,7 +24,7 @@ const config: CrossRunnerConfig = {
   web: { port: 7421, trustedProxy: null, allowedOrigins: [], allowFunnel: false }, claudeTosAcknowledgedAt: "2026-10-12T00:00:00.000Z",
 };
 
-async function boot(web = false) {
+async function boot(web = false, sharedQuestions = false) {
   const base = tempDir();
   const paths = resolveStatePaths({ env: { HOME: base, XDG_STATE_HOME: join(base, "state") }, tmpdir: base });
   ensureStateLayout(paths);
@@ -34,7 +34,7 @@ async function boot(web = false) {
     ...(web ? {web:{config:{port:0,trustedProxy:null,allowedOrigins:[],allowFunnel:false}}} : {}),
     paths, version: "1.0.0", anchorCommand: [process.execPath, "run", ANCHOR_ENTRY],
     createService: (s) => new SessionManager({
-      paths: s.paths, broker: s.broker, credentials: s.credentials, supervisor: s.supervisor, clock: s.clock, logger: s.logger,
+      paths: s.paths, broker: s.broker, ...(sharedQuestions ? { questionBroker: s.questionBroker } : {}), credentials: s.credentials, supervisor: s.supervisor, clock: s.clock, logger: s.logger,
       drivers: { get: (id) => (id === "claude" ? driver : undefined), list: () => [driver] },
       config: () => config, sessionMcpCommand: ["/bin/deck", "internal", "session-mcp"],
     }),
@@ -146,4 +146,29 @@ test("real daemon web composition forwards managed image upload/read into native
  const read=await fetch(`${base}/api/sessions/${sessionId}/attachments/${attachmentId}`,{headers:{Cookie:cookie}});expect(Buffer.from(await read.arrayBuffer())).toEqual(bytes);
  expect((await client.command(cmd({type:"prompt.send",text:"",attachmentIds:[attachmentId]}),sessionId)).outcome.ok).toBe(true);await waitFor(()=>driver.turns.length===1);
  expect(readFileSync(driver.turns[0]!.input.images![0]!.path)).toEqual(bytes);driver.turns[0]!.finish();
+});
+
+
+test.each([false, true])("daemon question broker (injected=%s) reports pending work, relays socket answers, and cancels on shutdown", async sharedQuestions => {
+  const { client, project, driver, daemon } = await boot(false, sharedQuestions);
+  const created = await client.command(cmd({ type: "session.create", projectRoot: project }));
+  const sessionId = (created.outcome as { data: { sessionId: string } }).data.sessionId;
+  const events: SessionEvent[] = [];
+  await client.attach(sessionId, 0, { onEvent: e => { events.push(e); } });
+  await client.command(cmd({ type: "prompt.send", text: "ask" }), sessionId);
+  await waitFor(() => driver.turns.length === 1, 3000, "question turn");
+  const turn = driver.turns[0]!;
+  const questions = [{ id: "q1", prompt: "Input", options: [], multiple: false, allowOther: true, secret: true }];
+  const answer = turn.ask(questions, "socket-question");
+  await waitFor(() => events.some(e => e.kind === "question.requested"), 3000, "question event");
+  expect(await client.request({ t: "daemon.status" })).toMatchObject({ status: { pendingQuestions: 1 } });
+  expect(await client.request({ t: "daemon.restart" })).toMatchObject({ outcome: { ok: false, code: "busy" } });
+  expect((await client.command(cmd({ type: "question.answer", questionId: "socket-question", answers: { q1: ["private-response"] } }), sessionId)).outcome.ok).toBe(true);
+  expect(await answer).toEqual({ outcome: "answered", answers: { q1: ["private-response"] } });
+  await waitFor(() => events.some(e => e.kind === "question.resolved"), 3000, "question resolution");
+  expect(JSON.stringify(events)).not.toContain("private-response");
+  expect(await client.request({ t: "daemon.status" })).toMatchObject({ status: { pendingQuestions: 0 } });
+  const pending = turn.ask(questions, "shutdown-question");
+  await daemon.stop("test");
+  expect(await pending).toEqual({ outcome: "cancelled" });
 });

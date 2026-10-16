@@ -54,6 +54,8 @@ export const SESSION_EVENT_SCHEMA = {
         "tool.completed",
         "hook.started",
         "hook.completed",
+        "question.requested",
+        "question.resolved",
         "approval.requested",
         "approval.resolved",
         "memory.recalled",
@@ -423,6 +425,62 @@ export const SESSION_EVENT_SCHEMA = {
       "if": {
         "properties": {
           "kind": {
+            "const": "question.requested"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "questionId"
+            ],
+            "properties": {
+              "questionId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "question.resolved"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "questionId"
+            ],
+            "properties": {
+              "questionId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "task.created"
           }
         },
@@ -556,6 +614,8 @@ export const SESSION_COMMAND_SCHEMA = {
         "prompt.resume",
         "turn.interrupt",
         "approval.respond",
+        "question.answer",
+        "question.dismiss",
         "task.cancel",
         "session.release",
         "session.rename",
@@ -1015,6 +1075,72 @@ export const SESSION_COMMAND_SCHEMA = {
       "if": {
         "properties": {
           "type": {
+            "const": "question.answer"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "questionId",
+          "answers"
+        ],
+        "properties": {
+          "questionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "answers": {
+            "type": "object",
+            "maxProperties": 8,
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+            },
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 12,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "question.dismiss"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "questionId"
+        ],
+        "properties": {
+          "questionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
             "const": "task.cancel"
           }
         },
@@ -1145,4 +1271,4 @@ export const SESSION_COMMAND_SCHEMA = {
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "609cc460b85e6a1284409eb98b39080ca302cb6658b1641ad9a526eeba75c1a9";
+export const SESSION_SCHEMA_DIGEST = "dfb54e87041a8849018fd9b22691a83471044278853c768411946e9f881b2467";
