@@ -32,7 +32,7 @@ function toml(value: unknown): string {
   return `{${Object.entries(object(value)).map(([key, v]) => `${JSON.stringify(key)}=${toml(v)}`).join(",")}}`;
 }
 export function buildCodexLaunch(input: DriverTaskInput, inheritedIds: readonly string[] | undefined, options: CodexLaunchOptions = {}, inheritedPluginIds: readonly string[] = [], inheritedHooks: readonly CodexHookMetadata[] = []) {
-  const args = ["app-server", "--stdio"];
+  const args = ["app-server", "--stdio", "-c", `features.default_mode_request_user_input=${input.approvals === "relay"}`];
   for (const feature of ISOLATION_FEATURES) args.push("-c", `features.${feature}=${feature === "hooks" && input.nativeMemory?.status === "ready"}`);
   const hooks = codexMemoryHooks(input);
   hooks.state = Object.fromEntries(inheritedHooks.map(hook => [hook.key, isAdmittedCodexMemoryHook(hook, input) ? { enabled: true, trusted_hash: hook.currentHash } : { enabled: false }]));

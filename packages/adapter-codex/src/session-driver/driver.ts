@@ -1,3 +1,4 @@
+import { validateQuestions, type Question } from "@deck/core/session/question";
 import { prepareImages, redactImagePayload } from "./images";
 import { execFile } from "node:child_process";
 import type { DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
@@ -40,6 +41,7 @@ class CodexTask {
   private drain?: Promise<void>;
   private failure?: Promise<void>;
   private closing?: Promise<void>;
+  private readonly questions = new Set<string | number>();
   private readonly approvals = new Set<string | number>();
   private resolveId!: (id: string) => void;
   private rejectId!: (error: Error) => void;
@@ -194,7 +196,11 @@ class CodexTask {
   }
   private onMessage(message: RpcMessage): void {
     message = redactImagePayload(message);
-    if (message.id !== undefined && message.method) { void this.approve(message); return; }
+    if (message.id !== undefined && message.method) {
+      if (message.method === "item/tool/requestUserInput") void this.question(message);
+      else void this.approve(message);
+      return;
+    }
     const p = object(message.params);
     if (p.threadId !== undefined && this.threadId !== undefined && p.threadId !== this.threadId) {
       this.emit({ kind: "runner.unmapped", data: { nativeType: isHookNotification(message) ? redactText(message.method!, 128) : message.method, reason: "foreign-thread" }, ...(isHookNotification(message) ? {} : { raw: message }) }); return;
@@ -208,6 +214,32 @@ class CodexTask {
       return;
     }
     for (const event of mapCodexNotification(message, this.attestedMemory)) this.emit(event);
+  }
+  private async question(message: RpcMessage): Promise<void> {
+    const rpc = this.rpc, id = message.id!, p = object(message.params), activeTurn = this.turn;
+    // Keep only request IDs, never answers, for deduplication across the task lifetime.
+    if (this.questions.has(id)) return;
+    this.questions.add(id);
+    const questions: Question[] = (Array.isArray(p.questions) ? p.questions : []).map(value => {
+      const q = object(value);
+      return { id: q.id as string, header: q.header as string, prompt: q.question as string,
+        options: (q.options ?? []) as Question["options"], multiple: false, allowOther: !!q.isOther, secret: !!q.isSecret };
+    });
+    const valid = validateQuestions(questions);
+    // Empty arrays are allowed by ToolRequestUserInputResponse and express no answer.
+    let answers = Object.fromEntries(questions.filter(q => typeof q.id === "string").map(q => [q.id, { answers: [] as string[] }]));
+    try {
+      if (valid && activeTurn && !activeTurn.interrupted && !this.closed && activeTurn.id
+        && p.threadId === this.threadId && p.turnId === activeTurn.id) {
+        const result = await this.io.question?.({ questionId: `codex:${String(id)}`, questions });
+        if (result?.outcome === "answered" && !this.closed && this.turn === activeTurn
+          && !activeTurn.interrupted && activeTurn.id === p.turnId) {
+          answers = Object.fromEntries(questions.map(q => [q.id, { answers: result.answers[q.id] ?? [] }]));
+        }
+      }
+    } catch { /* Broker errors may contain secret answers: never emit their message or payload. */ }
+    try { rpc?.reply(id, { answers }); }
+    catch { void this.fail("codex-question-reply-failed"); }
   }
   private async approve(message: RpcMessage): Promise<void> {
     const rpc = this.rpc, id = message.id!, p = object(message.params);

@@ -317,3 +317,80 @@ test("foreign-thread hook notifications retain only metadata, never raw hook out
   expect(JSON.stringify(h.events)).not.toContain("PRIVATE_HOOK_STDOUT_SENTINEL");
   await task.close(); await task.done;
 });
+
+const questionRequest = { id: "question", method: "item/tool/requestUserInput", params: {
+  threadId: "native-thread", turnId: "turn", itemId: "item", isBlocking: true,
+  questions: [{ id: "choice", header: "Pick", question: "Choose", options: [{ label: "A", description: "First" }], isOther: true, isSecret: false },
+    { id: "secret", header: "Key", question: "Enter key", options: null, isOther: false, isSecret: true }],
+} };
+const emptyQuestionAnswers = { answers: { choice: { answers: [] }, secret: { answers: [] } } };
+describe("Codex user questions", () => {
+  test("maps choices and secret free text and only sends answers to RPC", async () => {
+    const h = harness(responder); const requests: unknown[] = [];
+    h.io.question = async request => { requests.push(request); return { outcome: "answered", answers: { choice: ["A"], secret: ["SECRET_SENTINEL"] } }; };
+    const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io); await task.nativeSessionId;
+    const child = h.children[1]!; child.stdout(questionRequest); await Promise.resolve();
+    expect(requests).toEqual([{ questionId: "codex:question", questions: [
+      { id: "choice", header: "Pick", prompt: "Choose", options: [{ label: "A", description: "First" }], multiple: false, allowOther: true, secret: false },
+      { id: "secret", header: "Key", prompt: "Enter key", options: [], multiple: false, allowOther: false, secret: true },
+    ] }]);
+    expect(child.writes.find(m => m.id === "question")?.result).toEqual({ answers: { choice: { answers: ["A"] }, secret: { answers: ["SECRET_SENTINEL"] } } });
+    expect(JSON.stringify(h.events)).not.toContain("SECRET_SENTINEL"); await task.close();
+  });
+  test.each(["dismissed", "cancelled", "absent", "throws"])("returns empty arrays for %s", async outcome => {
+    const h = harness(responder);
+    if (outcome !== "absent") h.io.question = async () => { if (outcome === "throws") throw new Error("SECRET_SENTINEL"); return { outcome: outcome as "dismissed" | "cancelled" }; };
+    const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
+    const child = h.children[1]!; child.stdout(questionRequest); await Promise.resolve();
+    expect(child.writes.find(m => m.id === "question")?.result).toEqual(emptyQuestionAnswers);
+    expect(JSON.stringify(h.events)).not.toContain("SECRET_SENTINEL"); await task.close();
+  });
+  test.each([{ threadId: "foreign" }, { turnId: "stale" }])("dismisses stale requests without relaying %j", async override => {
+    const h = harness(responder); let calls = 0; h.io.question = async () => { calls++; return { outcome: "dismissed" }; };
+    const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
+    const child = h.children[1]!; child.stdout({ ...questionRequest, params: { ...questionRequest.params, ...override } });
+    expect(calls).toBe(0); expect(child.writes.find(m => m.id === "question")?.result).toEqual(emptyQuestionAnswers); await task.close();
+  });
+  test("deduplicates pending and completed requests and discards answers after interruption", async () => {
+    const h = harness(responder); let calls = 0;
+    let release!: (v: { outcome: "answered"; answers: Record<string, string[]> }) => void;
+    h.io.question = () => { calls++; return new Promise(resolve => { release = resolve; }); };
+    const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
+    const child = h.children[1]!; child.stdout(questionRequest); child.stdout(questionRequest);
+    await task.interrupt(); release({ outcome: "answered", answers: { choice: ["A"], secret: ["SECRET_SENTINEL"] } }); await Promise.resolve();
+    child.stdout(questionRequest);
+    expect(calls).toBe(1); expect(child.writes.filter(m => m.id === "question")).toEqual([{ id: "question", result: emptyQuestionAnswers }]);
+    expect(JSON.stringify(h.events)).not.toContain("SECRET_SENTINEL"); await task.close();
+  });
+});
+
+test("Codex question answers from a previous turn cannot reach a replacement turn", async () => {
+  const h = harness(responder);
+  let release!: (v: { outcome: "answered"; answers: Record<string, string[]> }) => void;
+  h.io.question = () => new Promise(resolve => { release = resolve; });
+  const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
+  const child = h.children[1]!; child.stdout(questionRequest);
+  child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "completed" } } }); await task.done;
+  const next = task.send("next"); await Promise.resolve();
+  release({ outcome: "answered", answers: { choice: ["A"], secret: ["SECRET_SENTINEL"] } }); await Promise.resolve();
+  expect(child.writes.find(m => m.id === "question")?.result).toEqual(emptyQuestionAnswers);
+  expect(JSON.stringify(h.events)).not.toContain("SECRET_SENTINEL"); await task.interrupt(); await next; await task.close();
+});
+test("Codex question reply write failures redact secret-bearing errors", async () => {
+  const h = harness(responder);
+  h.io.question = async () => ({ outcome: "answered", answers: { choice: ["A"], secret: ["SECRET_SENTINEL"] } });
+  const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
+  const child = h.children[1]!;
+  child.responder = m => { if (m.id === "question") throw new Error("SECRET_SENTINEL"); responder(child, 2, m); };
+  child.stdout(questionRequest);
+  expect(await task.done).toMatchObject({ status: "failed", error: "codex-question-reply-failed" });
+  expect(JSON.stringify(h.events)).not.toContain("SECRET_SENTINEL"); await task.close();
+});
+test("Codex questions support zero request IDs and empty option arrays", async () => {
+  const h = harness(responder); let seen: unknown;
+  h.io.question = async request => { seen = request; return { outcome: "dismissed" }; };
+  const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
+  const child = h.children[1]!; child.stdout({ ...questionRequest, id: 0, params: { ...questionRequest.params, questions: [{ id: "text", header: "Text", question: "Type", options: [] }] } }); await Promise.resolve();
+  expect(seen).toMatchObject({ questionId: "codex:0", questions: [{ id: "text", options: [], multiple: false, allowOther: false, secret: false }] });
+  expect(child.writes.find(m => m.id === 0)?.result).toEqual({ answers: { text: { answers: [] } } }); await task.close();
+});
