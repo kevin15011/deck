@@ -1,3 +1,4 @@
+import { isSessionGrantKind, isApprovalToolKey, isApprovalRisk, type SessionGrant } from "@deck/core/session/approval";
 import { isApprovalMode, type ApprovalMode } from "@deck/core/session/commands";
 import type { Question } from "@deck/core/session/question";
 /**
@@ -54,6 +55,7 @@ export type UserPrompt = {
 };
 export type LedgerState = {
   sessionId: string; seq: number; session: LedgerSession;
+  grants?: SessionGrant[];
   questions?: Record<string, LedgerPendingQuestion>;
   tasks: Record<string, LedgerTask>; approvals: Record<string, LedgerPendingApproval>; anomalies: LedgerAnomaly[];
   /** Accepted commands by commandId, oldest first, bounded by MAX_RECEIPTS. Absent in snapshots written before receipts existed. */
@@ -99,6 +101,7 @@ export class Ledger {
   task(taskId: string): LedgerTask | undefined { return this.state.tasks[taskId]; }
   latest(taskId: string): TaskAttempt | undefined { return this.state.tasks[taskId]?.attempts.at(-1); }
   pendingQuestions(): LedgerPendingQuestion[] { return Object.values(this.state.questions ?? {}); }
+  grants(): SessionGrant[] { return structuredClone(this.state.grants ?? []); }
   pendingApprovals(): LedgerPendingApproval[] { return Object.values(this.state.approvals); }
   lifecycleReceipt(commandId: string) { return this.state.lifecycleCommands?.[commandId]; }
   receipt(commandId: string): LedgerCommandReceipt | undefined { return this.state.commands?.[commandId]; }
@@ -158,6 +161,16 @@ export class Ledger {
       case "session.approvals":
         if (isApprovalMode(d.mode)) this.state.session.approvals = d.mode;
         break;
+      case "session.grant": {
+        if (!str(d.grantId)) break;
+        const grants = this.state.grants ??= [];
+        this.state.grants = grants.filter(grant => grant.grantId !== d.grantId);
+        if (d.action === "added" && !this.state.session.released && !this.state.session.removalPending && !this.state.session.removed && this.state.session.state !== "ended" && isSessionGrantKind(d.kind) && isApprovalToolKey(d.toolKey) && isApprovalRisk(d.risk)) {
+          this.state.grants.push({ grantId: String(d.grantId), kind: d.kind, toolKey: d.toolKey, risk: d.risk, createdAt: event.ts, ...(str(d.exactKey) ? { exactKey: str(d.exactKey) } : {}) });
+          this.state.grants = this.state.grants.slice(-100);
+        }
+        break;
+      }
       case "session.assignment":
         this.state.session.generation = d.generation as number;
         this.state.session.assignmentRevision = d.revision as number;
@@ -167,6 +180,7 @@ export class Ledger {
       case "session.released": {
         const epoch=Number(d.epoch); if(!Number.isSafeInteger(epoch) || epoch<0) break;
         if(epoch < (this.state.session.releaseEpoch??0)) break;
+        this.state.grants = [];
         this.state.session.releaseEpoch=epoch; this.state.session.released=true;
         this.state.session.releasePending=d.phase!=="released";
         if(str(d.reasonCode)) this.state.session.releaseFailure=String(d.reasonCode); else delete this.state.session.releaseFailure;
@@ -186,6 +200,7 @@ export class Ledger {
         this.state.session.title=d.title; this.onLifecycle(event,"session.rename",JSON.stringify(d.title)); break;
       }
       case "session.removed": {
+        this.state.grants = [];
         this.state.session.removalPending=d.phase!=="removed"; this.state.session.removed=d.phase==="removed";
         if(d.phase==="removing") {
           this.state.session.released=true;this.state.session.releasePending=true;this.state.session.releaseEpoch=Number(d.epoch)||((this.state.session.releaseEpoch??0)+1);
@@ -204,6 +219,7 @@ export class Ledger {
       case "session.state": {
         const st = str(d.state) as SessionLifecycleState | undefined;
         if (st) this.state.session.state = st;
+        if (st === "ended" || d.cancelPrompts === true) this.state.grants = [];
         if (d.cancelPrompts === true) {
           this.state.session.stopRequested = true;
           for (const prompt of Object.values(this.state.prompts ?? {})) if (prompt.state === "queued") { prompt.state = "cancelled"; prompt.reason = "session-stopped"; delete prompt.text; }
@@ -211,7 +227,7 @@ export class Ledger {
         }
         break;
       }
-      case "session.ended": this.state.session.state = "ended"; break;
+      case "session.ended": this.state.session.state = "ended"; this.state.grants = []; break;
       case "session.recovered": this.state.session.state = "recovered"; break;
       case "command.accepted": return this.onCommandAccepted(event);
       case "turn.started": {

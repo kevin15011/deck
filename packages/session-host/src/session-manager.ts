@@ -1,3 +1,4 @@
+import type { SessionGrant } from "@deck/core/session/approval";
 import { isApprovalMode, type ApprovalMode } from "@deck/core/session/commands";
 import { QuestionBroker } from "./question-broker";
 /**
@@ -167,6 +168,7 @@ type Live = {
 };
 
 export type SessionSummary = {
+  grants: SessionGrant[];
   approvalMode: ApprovalMode; approvalModeSource: "session" | "default";
   sessionId: string; projectRoot: string; changeId?: string; state: string; createdAt: string; updatedAt: string; lastSeq: number;
   lead?: RunnerQualifiedAssignment; running: boolean; tasks: number;
@@ -201,6 +203,7 @@ export class SessionManager implements SessionService {
   constructor(private readonly options: SessionManagerOptions) {
     this.questionBroker = options.questionBroker ?? new QuestionBroker({ sink: { emit: (id, draft) => { this.openLog(id)?.append(draft); } } });
     this.clock = options.clock ?? systemClock;
+    this.options.broker.setGrantProvider(id => this.load(id)?.ledger.grants() ?? []);
     queueMicrotask(() => {
       if (this.closing) return;
       for (const id of this.sessionIds()) this.load(id);
@@ -272,6 +275,7 @@ export class SessionManager implements SessionService {
       case "task.cancel": return this.interrupt(live, { ...command, type: "turn.interrupt" }, "cancel", command.type);
       case "question.answer":
       case "question.dismiss": return this.questionRespond(live, command, clientId);
+      case "session.revokeGrant": return this.revokeGrant(live, command, clientId);
       case "approval.respond": return this.approvalRespond(live, command, clientId);
       case "session.bindChange": return this.bindChange(live, command);
       case "session.release": return this.releaseSession(live,command);
@@ -886,14 +890,14 @@ export class SessionManager implements SessionService {
       for (const id of input.sessionIds) assertSafeSegment(id as string, "session id");
     } catch { return fail("sessions-status-invalid"); }
     if (!this.projectStore().get(input.projectId, true)) return fail("project-unknown");
-    const sessions: Array<Pick<SessionSummary, "approvalMode" | "approvalModeSource" | "sessionId" | "leadActivity" | "lastSeq" | "state" | "running" | "activeTasks" | "updatedAt" | "generation" | "currentLeadTaskId" | "preparationStatus" | "released" | "releasing" | "removing">> = [];
+    const sessions: Array<Pick<SessionSummary, "grants" | "approvalMode" | "approvalModeSource" | "sessionId" | "leadActivity" | "lastSeq" | "state" | "running" | "activeTasks" | "updatedAt" | "generation" | "currentLeadTaskId" | "preparationStatus" | "released" | "releasing" | "removing">> = [];
     for (const id of new Set(input.sessionIds as string[])) {
       const meta = this.sessions.get(id)?.meta ?? this.readMeta(sessionPaths(this.options.paths, id));
       if (!meta || (meta.projectId ?? projectIdentity(meta.projectRoot)) !== input.projectId) continue;
       // Cache the verified projection once. Subsequent polls never replay the log.
       if (!this.load(id)) continue;
       const summary = this.summarize(id);
-      if (summary) sessions.push({ approvalMode: summary.approvalMode, approvalModeSource: summary.approvalModeSource, sessionId: id, leadActivity: summary.leadActivity, lastSeq: summary.lastSeq, state: summary.state, running: summary.running, activeTasks: summary.activeTasks, updatedAt: summary.updatedAt, generation: summary.generation, currentLeadTaskId: summary.currentLeadTaskId,preparationStatus:summary.preparationStatus,released:summary.released,releasing:summary.releasing,removing:summary.removing });
+      if (summary) sessions.push({ grants: summary.grants, approvalMode: summary.approvalMode, approvalModeSource: summary.approvalModeSource, sessionId: id, leadActivity: summary.leadActivity, lastSeq: summary.lastSeq, state: summary.state, running: summary.running, activeTasks: summary.activeTasks, updatedAt: summary.updatedAt, generation: summary.generation, currentLeadTaskId: summary.currentLeadTaskId,preparationStatus:summary.preparationStatus,released:summary.released,releasing:summary.releasing,removing:summary.removing });
     }
     return ok({ sessions });
   }
@@ -1328,9 +1332,9 @@ export class SessionManager implements SessionService {
           return this.questionBroker.request({ ...req, sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId }).resolution;
         },
         approval: async (req) => {
-          const pending = this.options.broker.request({ sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId, tool: req.tool, summary: req.summary, input: req.input });
+          const pending = this.options.broker.request({ sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId, tool: req.tool, summary: req.summary, input: req.input, toolKey: req.toolKey, exactKey: req.exactKey, risk: req.risk, nativeScopes: req.nativeScopes, alwaysNote: req.alwaysNote });
           const resolution = await pending.resolution;
-          return { decision: resolution.decision === "allow-once" ? "allow" : "deny" };
+          return { decision: resolution.decision === "allow-once" ? "allow" : "deny", scope: resolution.scope === "always" && req.nativeScopes?.includes("always") ? "always" : "once" };
         },
         writePrivateFile: (name, content) => {
           const file = join(taskDir, assertSafeSegment(name, "file name"));
@@ -1506,10 +1510,16 @@ export class SessionManager implements SessionService {
     return ok();
   }
 
+  private revokeGrant(live: Live, command: Extract<SessionCommand, { type: "session.revokeGrant" }>, clientId: string): ExecuteOutcome {
+    if (!this.options.broker.revokeGrant(live.sessionId, command.grantId, clientId)) return fail("unknown-grant");
+    this.append(live, this.receiptDraft(command, { ok: true }));
+    return ok();
+  }
+
   private approvalRespond(live: Live, command: Extract<SessionCommand, { type: "approval.respond" }>, clientId: string): ExecuteOutcome {
     const pending = this.options.broker.pending().find((p) => p.approvalId === command.approvalId);
     if (pending && pending.sessionId !== live.sessionId) return fail("unknown-approval");
-    const result = this.options.broker.respond({ approvalId: command.approvalId, decision: command.decision, by: clientId });
+    const result = this.options.broker.respond({ approvalId: command.approvalId, decision: command.decision, scope: command.scope, grant: command.grant, confirmed: command.confirmed, by: clientId });
     if (!result.ok) return fail(result.code);
     try { this.append(live, this.receiptDraft(command, { ok: true })); } catch { /* the decision already took effect */ }
     return ok();
@@ -1643,6 +1653,7 @@ export class SessionManager implements SessionService {
         released:!!ledger.session.released,releasing:!!ledger.session.releasePending,removing:!!ledger.session.removalPending,preparationStatus:cached ? this.readiness(cached).status : ledger.session.releasePending ? ledger.session.releaseFailure ? "failed" : "releasing" : "unprepared",
         sessionId, projectRoot: meta.projectRoot, projectId: meta.projectId ?? projectIdentity(meta.projectRoot), title: ledger.session.title ?? meta.title ?? `Session ${meta.createdAt.slice(0, 10)}`,
         ...(meta.predecessorSessionId ? { predecessorSessionId: meta.predecessorSessionId } : {}), generation: ledger.session.generation ?? 0, assignmentRevision: ledger.session.assignmentRevision ?? 0,
+        grants: ledger.grants(),
         ...this.approvalMode(meta, ledger),
         members, currentLeadTaskId, sharedWorkspace: true, sharedActiveSessions: 0,
         leadActivity: { ...(leadAttempt ? { taskId: currentLeadTaskId } : {}), state: leadState, pendingApprovals: ledger.pendingApprovals().filter(approval => approval.taskId === currentLeadTaskId).length, pendingQuestions: ledger.pendingQuestions().filter(question => question.taskId === currentLeadTaskId).length, lastReplySeq: ledger.lastLeadReplySeq },

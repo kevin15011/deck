@@ -37,6 +37,7 @@ export const SESSION_EVENT_SCHEMA = {
         "session.recovered",
         "session.assignment",
         "session.approvals",
+        "session.grant",
         "session.successor",
         "session.released",
         "session.reopened",
@@ -450,6 +451,43 @@ export const SESSION_EVENT_SCHEMA = {
               "approvalId": {
                 "type": "string",
                 "minLength": 1
+              },
+              "allowedScopes": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 3,
+                "uniqueItems": true,
+                "contains": {
+                  "const": "once"
+                },
+                "items": {
+                  "enum": [
+                    "once",
+                    "session",
+                    "always"
+                  ]
+                }
+              },
+              "toolKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[^:\\s\\u0000-\\u001f\\u007f-\\u009f]+:[^\\s\\u0000-\\u001f\\u007f-\\u009f]+$"
+              },
+              "exactKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "risk": {
+                "enum": [
+                  "normal",
+                  "high"
+                ]
+              },
+              "alwaysNote": {
+                "type": "string",
+                "maxLength": 1000
               }
             }
           }
@@ -478,8 +516,100 @@ export const SESSION_EVENT_SCHEMA = {
               "approvalId": {
                 "type": "string",
                 "minLength": 1
+              },
+              "scope": {
+                "enum": [
+                  "once",
+                  "session",
+                  "always"
+                ]
+              },
+              "auto": {
+                "type": "boolean"
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "session.grant"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "action",
+              "grantId",
+              "kind",
+              "toolKey",
+              "risk",
+              "by"
+            ],
+            "properties": {
+              "action": {
+                "enum": [
+                  "added",
+                  "revoked"
+                ]
+              },
+              "grantId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "enum": [
+                  "exact",
+                  "tool"
+                ]
+              },
+              "toolKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[^:\\s\\u0000-\\u001f\\u007f-\\u009f]+:[^\\s\\u0000-\\u001f\\u007f-\\u009f]+$"
+              },
+              "exactKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "risk": {
+                "enum": [
+                  "normal",
+                  "high"
+                ]
+              },
+              "by": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "const": "exact"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "exactKey"
+                  ]
+                }
+              }
+            ]
           }
         }
       }
@@ -729,6 +859,7 @@ export const SESSION_COMMAND_SCHEMA = {
         "question.answer",
         "question.dismiss",
         "task.cancel",
+        "session.revokeGrant",
         "session.release",
         "session.rename",
         "session.remove",
@@ -1210,6 +1341,22 @@ export const SESSION_COMMAND_SCHEMA = {
               "allow-once",
               "deny"
             ]
+          },
+          "scope": {
+            "enum": [
+              "once",
+              "session",
+              "always"
+            ]
+          },
+          "grant": {
+            "enum": [
+              "exact",
+              "tool"
+            ]
+          },
+          "confirmed": {
+            "type": "boolean"
           }
         }
       }
@@ -1297,6 +1444,29 @@ export const SESSION_COMMAND_SCHEMA = {
         ],
         "properties": {
           "taskId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session.revokeGrant"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "grantId"
+        ],
+        "properties": {
+          "grantId": {
             "type": "string",
             "minLength": 1
           }
@@ -1414,4 +1584,4 @@ export const SESSION_COMMAND_SCHEMA = {
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "5380d30c9668a497699eea9f59af2a2bec87d9897a67087220a43e0f6c678cdd";
+export const SESSION_SCHEMA_DIGEST = "62c2e6dd36f47936c90a759ea40ee5d94a11ce47d66e8f402440dbc455dc6d2a";

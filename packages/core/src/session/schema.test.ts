@@ -27,6 +27,7 @@ function check(schema: any, value: any): boolean {
   if (Array.isArray(value)) {
     if(schema.minItems !== undefined && value.length < schema.minItems || schema.maxItems !== undefined && value.length > schema.maxItems) return false;
     if(schema.uniqueItems && new Set(value.map(item => JSON.stringify(item))).size !== value.length) return false;
+    if(schema.contains && !value.some(item => check(schema.contains, item))) return false;
     if(schema.items && !value.every(item => check(schema.items,item))) return false;
   }
   if (typeof value === "number" && schema.minimum !== undefined && value < schema.minimum) return false;
@@ -57,6 +58,9 @@ const hookFixtures = [
 ];
 
 const eventFixtures: unknown[] = [
+  ...[{}, { allowedScopes: ["once"] }, { allowedScopes: ["session"] }, { allowedScopes: ["once", "once"] }, { allowedScopes: ["once", "session", "always"], toolKey: "claude:Bash", risk: "high" }, { toolKey: "Bash" }, { toolKey: "claude:bad key" }, { exactKey: "x".repeat(513) }, { risk: "low" }].map(data => ev({ kind: "approval.requested", data: { approvalId: "a", ...data } })),
+  ...["once", "session", "always", "forever"].map(scope => ev({ kind: "approval.resolved", data: { approvalId: "a", scope } })),
+  ...[{ kind: "exact", exactKey: "ls" }, { kind: "exact" }, { kind: "tool" }, { kind: "tool", toolKey: "bad" }].map(data => ev({ kind: "session.grant", data: { action: "added", grantId: "g", toolKey: "claude:Bash", risk: "high", by: "u", ...data } })),
   ...["answered", "dismissed", "cancelled"].flatMap(outcome => [
     ev({ kind: "question.resolved", data: { questionId: "r", outcome, by: "user" } }),
     ...[{}, { q1: ["visible"] }, null, [], { q1: [] }, { q1: Array(13).fill("A") }, { q1: ["x".repeat(4001)] }, { "bad\n": ["A"] }, Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`q${i}`, ["A"]]))].map(answers => ev({ kind: "question.resolved", data: { questionId: "r", outcome, by: "user", answers } })),
@@ -74,6 +78,8 @@ const eventFixtures: unknown[] = [
   ...["hook.started", "hook.completed"].flatMap(kind => hookFixtures.map(data => ev({ kind, data }))),
 ];
 const commandFixtures: unknown[] = [
+  ...[{}, { scope: "once" }, { scope: "session", grant: "exact" }, { scope: "always", confirmed: true }, { scope: "forever" }, { grant: "all" }, { confirmed: "yes" }].map(data => cm({ type: "approval.respond", approvalId: "a", decision: "allow", ...data })),
+  cm({ type: "session.revokeGrant", grantId: "g" }), cm({ type: "session.revokeGrant" }),
   ...["relay", "yolo", "runner-default", null].flatMap(mode => [cm({ type: "session.create", projectRoot: "/p", approvals: mode }), cm({ type: "session.setApprovals", mode })]),
   cm({ type: "session.setApprovals" }),
   ...[{}, { q1: ["A"] }, { q1: [] }, { q1: Array(13).fill("A") }, { "bad\n": ["A"] }, { q1: ["x".repeat(4001)] }, Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`q${i}`, ["A"]]))].map(answers => cm({ type: "question.answer", questionId: "q", answers })),

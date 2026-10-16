@@ -61,7 +61,7 @@ describe("validateSessionEvent", () => {
     expect(SESSION_EVENT_KINDS).toContain("command.accepted");
     expect(SESSION_EVENT_KINDS).toContain("hook.started");
     expect(SESSION_EVENT_KINDS).toContain("hook.completed");
-    expect(SESSION_EVENT_KINDS.length).toBe(43);
+    expect(SESSION_EVENT_KINDS.length).toBe(44);
   });
 });
 
@@ -113,4 +113,15 @@ test("resolved question answers are bounded and only allowed for answered outcom
     expect(validateSessionEvent(event({ outcome })).ok).toBe(true);
     expect(validateSessionEvent(event({ outcome, answers: {} })).ok).toBe(false);
   }
+});
+
+test("approval event extensions validate scopes, safe keys, risk and grants", () => {
+  const event = (kind: string, data: object) => validateSessionEvent({ ...base(), kind, data }).ok;
+  expect(event("approval.requested", { approvalId: "a", allowedScopes: ["once", "session"], toolKey: "claude:Bash", exactKey: "ls", risk: "high" })).toBe(true);
+  for (const data of [{ allowedScopes: ["session"] }, { allowedScopes: ["once", "once"] }, { risk: "low" }, { toolKey: "Bash" }, { exactKey: "x".repeat(513) }]) expect(event("approval.requested", { approvalId: "a", ...data })).toBe(false);
+  expect(event("approval.resolved", { approvalId: "a", scope: "session", auto: true })).toBe(true);
+  expect(event("approval.resolved", { approvalId: "a", scope: "forever" })).toBe(false);
+  const grant = { action: "added", grantId: "g", kind: "exact", toolKey: "claude:Bash", exactKey: "ls", risk: "high", by: "u" };
+  expect(event("session.grant", grant)).toBe(true);
+  expect(event("session.grant", { ...grant, exactKey: undefined })).toBe(false);
 });

@@ -84,6 +84,14 @@ test("per-session approvals accept only relay or yolo", () => {
 });
 
 test("question answer commands retain all entries until the broker filters the event", () => {
-  const command = { v: 1, commandId: id, type: "question.answer", questionId: "request", answers: { public: ["visible"], private: ["transient"] } };
+  const command = { v: 1 as const, commandId: id, type: "question.answer" as const, questionId: "request", answers: { public: ["visible"], private: ["transient"] } };
   expect(validateSessionCommand(command)).toEqual({ ok: true, value: command });
+});
+
+test("approval scopes and revoke commands preserve legacy syntax and reject malformed extensions", () => {
+  const command = (fields: object) => validateSessionCommand({ v: 1, commandId: id, type: "approval.respond", approvalId: "a", decision: "allow", ...fields }).ok;
+  for (const scope of [undefined, "once", "session", "always"]) expect(command({ scope, grant: "tool", confirmed: true })).toBe(true);
+  for (const fields of [{ scope: "forever" }, { scope: null }, { grant: "all" }, { confirmed: "yes" }]) expect(command(fields)).toBe(false);
+  expect(command({ type: "session.revokeGrant", grantId: "g" })).toBe(true);
+  expect(command({ type: "session.revokeGrant" })).toBe(false);
 });

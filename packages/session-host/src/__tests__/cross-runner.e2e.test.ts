@@ -274,7 +274,7 @@ test("authenticated socket delegation, approval relay and interrupt survive clie
   expect(delegated.t).toBe("bridge.result");
   await waitFor(() => t.drivers[1]!.turns.length === 1);
   const worker = t.drivers[1]!.turns[0]!;
-  const approval = worker.io.approval({ approvalId: "native", tool: "shell", input: { command: "echo safe" } });
+  const approval = worker.io.approval({ approvalId: "native", tool: "shell", toolKey: `${worker.input.assignment.runnerId}:shell`, risk: "high", input: { command: "echo safe" } });
   const second = await ControlClient.connect(t.paths.socket.path); resources.push(() => second.close());
   const replay: number[] = [];
   await second.attach(t.sessionId, cursor, { onEvent: (event) => replay.push(event.seq) });
@@ -282,7 +282,7 @@ test("authenticated socket delegation, approval relay and interrupt survive clie
   expect(replay).toEqual(Array.from({ length: t.events().length - cursor }, (_, i) => cursor + i + 1));
   const pending = t.broker.pending()[0]!;
   expect((await second.command({ v: 1, type: "approval.respond", commandId: randomUUID(), approvalId: pending.approvalId, decision: "deny" }, t.sessionId)).outcome.ok).toBe(true);
-  expect(await approval).toEqual({ decision: "deny" });
+  expect(await approval).toEqual({ decision: "deny", scope: "once" });
   expect((await second.command({ v: 1, type: "turn.interrupt", commandId: randomUUID(), taskId: worker.input.taskId }, t.sessionId)).outcome.ok).toBe(true);
   await waitFor(() => worker.closed);
   expect(t.events().find((e) => e.kind === "task.state" && e.source.taskId === worker.input.taskId && e.data.state === "interrupted")).toBeDefined();

@@ -17,6 +17,7 @@
     "./session/commands": "./src/session/commands.ts",
     "./session/redaction": "./src/session/redaction.ts",
     "./session/assignments": "./src/session/assignments.ts",
+    "./session/approval": "./src/session/approval.ts",
     "./session/question": "./src/session/question.ts",
     "./session/driver": "./src/session/driver.ts",
     "./session/schema": "./src/session/schema.ts",

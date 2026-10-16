@@ -33,9 +33,9 @@ describe("ApprovalBroker (XR-5.1, XR-5.2)", () => {
     const { events, req, broker } = setup();
     const r = req();
     const out = broker.respond({ approvalId: r.approvalId, decision: "allow", by: "device-1" });
-    expect(out).toEqual({ ok: true, resolution: { approvalId: "ap-1", decision: "allow-once", by: "device-1" } });
-    expect(await r.resolution).toEqual({ approvalId: "ap-1", decision: "allow-once", by: "device-1" });
-    expect(events.at(-1)).toMatchObject({ kind: "approval.resolved", data: { approvalId: "ap-1", decision: "allow-once", by: "device-1" } });
+    expect(out).toEqual({ ok: true, resolution: { approvalId: "ap-1", decision: "allow-once", by: "device-1", scope: "once" } });
+    expect(await r.resolution).toEqual({ approvalId: "ap-1", decision: "allow-once", by: "device-1", scope: "once" });
+    expect(events.at(-1)).toMatchObject({ kind: "approval.resolved", data: { approvalId: "ap-1", decision: "allow-once", by: "device-1", scope: "once" } });
     expect(broker.pending()).toEqual([]);
   });
 
@@ -70,8 +70,8 @@ describe("ApprovalBroker (XR-5.1, XR-5.2)", () => {
     clock.advance(APPROVAL_TIMEOUT_MS - 1);
     expect(broker.pending()).toHaveLength(1);
     clock.advance(1);
-    expect(await r.resolution).toEqual({ approvalId: "ap-1", decision: "deny", by: "timeout" });
-    expect(events.at(-1)).toMatchObject({ kind: "approval.resolved", data: { decision: "deny", by: "timeout" } });
+    expect(await r.resolution).toEqual({ approvalId: "ap-1", decision: "deny", by: "timeout", scope: "once" });
+    expect(events.at(-1)).toMatchObject({ kind: "approval.resolved", data: { decision: "deny", by: "timeout", scope: "once" } });
     // a late answer cannot revive it
     expect(broker.respond({ approvalId: r.approvalId, decision: "allow", by: "late" })).toEqual({ ok: false, code: "already-resolved" });
   });
@@ -105,7 +105,7 @@ describe("ApprovalBroker (XR-5.1, XR-5.2)", () => {
     const { events, req, broker } = setup();
     const a = req({ taskId: "t-1" }), b = req({ taskId: "t-2" });
     expect(broker.cancelTask("s-1", "t-1", "task-ended")).toBe(1);
-    expect(await a.resolution).toEqual({ approvalId: a.approvalId, decision: "deny", by: "task-ended" });
+    expect(await a.resolution).toEqual({ approvalId: a.approvalId, decision: "deny", by: "task-ended", scope: "once" });
     expect(broker.pending().map((p) => p.approvalId)).toEqual([b.approvalId]);
     expect(events.filter((e) => e.kind === "approval.resolved")).toHaveLength(1);
   });
@@ -149,4 +149,65 @@ describe("ApprovalBroker (XR-5.1, XR-5.2)", () => {
     clock.advance(APPROVAL_TIMEOUT_MS);
     expect((await r.resolution).by).toBe("timeout");
   });
+});
+
+describe("approval scopes", () => {
+  test("session exact grant audits later matches, isolates sessions/runners/actions, leaves existing pending alone", async () => {
+    const { broker, req, events } = setup();
+    const fields = { toolKey: "claude:Bash", exactKey: "ls", risk: "high" as const };
+    const first = req(fields), alreadyPending = req(fields);
+    expect(events[0]!.data).toMatchObject({ allowedScopes: ["once", "session"], ...fields });
+    expect(broker.respond({ approvalId: first.approvalId, decision: "allow", scope: "session", grant: "exact", by: "u" }).ok).toBe(true);
+    expect((await first.resolution).scope).toBe("session");
+    expect(broker.pending().some(p => p.approvalId === alreadyPending.approvalId)).toBe(true);
+    const next = req(fields);
+    expect(await next.resolution).toMatchObject({ decision: "allow-once", scope: "once", by: expect.stringContaining("session-grant:") });
+    expect(events.slice(-2).map(e => e.kind)).toEqual(["approval.requested", "approval.resolved"]);
+    expect(events.at(-1)!.data).toMatchObject({ auto: true, scope: "once" });
+    req({ ...fields, sessionId: "s-2" }); req({ ...fields, runnerId: "opencode", toolKey: "opencode:Bash" }); req({ ...fields, exactKey: "pwd" });
+    expect(broker.pending()).toHaveLength(4);
+    const grant = broker.grants("s-1")[0]!;
+    expect(broker.revokeGrant("s-2", grant.grantId, "u")).toBe(false);
+    expect(broker.revokeGrant("s-1", grant.grantId, "u")).toBe(true);
+    expect(broker.grants("s-1")).toEqual([]);
+    req(fields); expect(broker.pending()).toHaveLength(5); broker.dispose();
+  });
+  test("confirmations and native availability are enforced without settling pending approvals", async () => {
+    const { broker, req, events } = setup();
+    const r = req({ toolKey: "claude:Bash", risk: "high" });
+    expect(broker.respond({ approvalId: r.approvalId, decision: "allow", scope: "always", confirmed: true, by: "u" })).toEqual({ ok: false, code: "approval-scope-unsupported" });
+    expect(broker.respond({ approvalId: r.approvalId, decision: "allow", scope: "session", grant: "tool", by: "u" })).toEqual({ ok: false, code: "approval-confirmation-required" });
+    expect(broker.pending()).toHaveLength(1);
+    expect(broker.respond({ approvalId: r.approvalId, decision: "allow", scope: "session", grant: "tool", confirmed: true, by: "u" }).ok).toBe(true);
+    await r.resolution;
+    const native = req({ runnerId: "opencode", toolKey: "opencode:bash", nativeScopes: ["always"], alwaysNote: "Stored by OpenCode" });
+    expect(events.at(-1)!.data).toMatchObject({ allowedScopes: ["once", "session", "always"], alwaysNote: "Stored by OpenCode" });
+    expect(broker.respond({ approvalId: native.approvalId, decision: "allow", scope: "always", by: "u" })).toEqual({ ok: false, code: "approval-confirmation-required" });
+    broker.respond({ approvalId: native.approvalId, decision: "allow", scope: "always", confirmed: true, by: "u" });
+    expect((await native.resolution).scope).toBe("always");
+  });
+  test("exact keys redact secrets and bound display without broadening matches", async () => {
+    const { broker, req, events } = setup();
+    const first = req({ toolKey: "claude:Bash", exactKey: "token=SECRET_ONE " + "a".repeat(600), risk: "high" });
+    broker.respond({ approvalId: first.approvalId, decision: "allow", scope: "session", grant: "exact", by: "u" }); await first.resolution;
+    expect(broker.grants("s-1")[0]!.exactKey!.length).toBeLessThanOrEqual(512);
+    expect(JSON.stringify(events)).not.toContain("SECRET_ONE");
+    req({ toolKey: "claude:Bash", exactKey: "token=SECRET_TWO " + "a".repeat(600), risk: "high" });
+    expect(broker.pending()).toHaveLength(1);
+    req({ toolKey: "claude:Bash", exactKey: broker.grants("s-1")[0]!.exactKey, risk: "high" });
+    expect(broker.pending()).toHaveLength(2); broker.dispose();
+  });
+});
+
+test("session grant storage is bounded to the newest 100 with audited eviction", async () => {
+  const { broker, req, events } = setup();
+  for (let i = 0; i < 101; i++) {
+    const request = req({ toolKey: "claude:Read", exactKey: `/file/${i}`, risk: "normal" });
+    broker.respond({ approvalId: request.approvalId, decision: "allow", scope: "session", grant: "exact", by: "u" });
+    await request.resolution;
+  }
+  expect(broker.grants("s-1")).toHaveLength(100);
+  expect(broker.grants("s-1")[0]!.exactKey).toBe("/file/1");
+  expect(broker.grants("s-1").at(-1)!.exactKey).toBe("/file/100");
+  expect(events.filter(e => e.kind === "session.grant" && e.data?.action === "revoked")).toHaveLength(1);
 });

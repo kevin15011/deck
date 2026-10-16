@@ -210,8 +210,8 @@ describe("deck session subcommands (XR-9.2, XR-11.2)", () => {
 describe("formatSessionList", () => {
   test("aligns columns and flags running sessions", () => {
     const text = formatSessionList([
-      { approvalMode:"relay",approvalModeSource:"default",projectId:"p",title:"Session",generation:0,assignmentRevision:0,members:{},currentLeadTaskId:"lead",leadActivity:{state:'running',pendingApprovals:0,lastReplySeq:0},sharedWorkspace:true,sharedActiveSessions:1,sessionId: "s-1", projectRoot: "/p", state: "running", createdAt: "", updatedAt: "", lastSeq: 1, running: true, tasks: 1, activeTasks: 1, lead: { runnerId: "claude", modelId: "opus" } },
-      { approvalMode:"relay",approvalModeSource:"default",projectId:"q",title:"Closed",generation:0,assignmentRevision:0,members:{},currentLeadTaskId:"lead",leadActivity:{state:'idle',pendingApprovals:0,lastReplySeq:0},sharedWorkspace:true,sharedActiveSessions:0,sessionId: "s-22", projectRoot: "/q", changeId: "c", state: "ended", createdAt: "", updatedAt: "", lastSeq: 1, running: false, tasks: 0, activeTasks: 0 },
+      { grants:[],approvalMode:"relay",approvalModeSource:"default",projectId:"p",title:"Session",generation:0,assignmentRevision:0,members:{},currentLeadTaskId:"lead",leadActivity:{state:'running',pendingApprovals:0,lastReplySeq:0},sharedWorkspace:true,sharedActiveSessions:1,sessionId: "s-1", projectRoot: "/p", state: "running", createdAt: "", updatedAt: "", lastSeq: 1, running: true, tasks: 1, activeTasks: 1, lead: { runnerId: "claude", modelId: "opus" } },
+      { grants:[],approvalMode:"relay",approvalModeSource:"default",projectId:"q",title:"Closed",generation:0,assignmentRevision:0,members:{},currentLeadTaskId:"lead",leadActivity:{state:'idle',pendingApprovals:0,lastReplySeq:0},sharedWorkspace:true,sharedActiveSessions:0,sessionId: "s-22", projectRoot: "/q", changeId: "c", state: "ended", createdAt: "", updatedAt: "", lastSeq: 1, running: false, tasks: 0, activeTasks: 0 },
     ]);
     expect(text.split("\n")[0]).toMatch(/^ID\s+STATE\s+CHANGE\s+LEAD\s+PROJECT$/);
     expect(text).toContain("running*");

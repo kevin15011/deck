@@ -1,3 +1,4 @@
+import type { ApprovalRisk } from "./approval";
 import type { DriverQuestionRequest, DriverQuestionAnswer } from "./question";
 export type { Question, DriverQuestionRequest, DriverQuestionAnswer } from "./question";
 /** RunnerSessionDriver contract (XR-4.1, D-6). Types only: no implementation in S0. */
@@ -62,8 +63,8 @@ export type DriverTaskInput = {
   disableNativeDelegation: boolean;
 };
 
-export type DriverApprovalRequest = { approvalId: string; tool: string; summary?: string; input?: unknown };
-export type DriverDecision = { decision: "allow" | "deny"; updatedInput?: unknown };
+export type DriverApprovalRequest = { approvalId: string; tool: string; summary?: string; input?: unknown; toolKey: string; exactKey?: string; risk: ApprovalRisk; nativeScopes?: ("always")[]; alwaysNote?: string };
+export type DriverDecision = { decision: "allow" | "deny"; scope?: "once" | "always"; updatedInput?: unknown };
 export type DriverEvent = { kind: string; data: Record<string, unknown>; raw?: unknown };
 export type SupervisedChildExit = {
   /** True only for a clean code-0 exit whose output streams fully drained. */

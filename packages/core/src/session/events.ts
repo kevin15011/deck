@@ -1,3 +1,4 @@
+import { isApprovalScope, isApprovalRisk, isApprovalToolKey, isSessionGrantKind } from "./approval";
 /**
  * deck-session-event-v1 — pure, provider-neutral event envelope and validators (XR-1.1–1.4).
  * No Node, network, or filesystem APIs.
@@ -10,7 +11,7 @@ export const SESSION_EVENT_VERSION = 1 as const;
 export const RAW_PAYLOAD_LIMIT_BYTES = 64 * 1024;
 
 export const SESSION_EVENT_KINDS = [
-  "session.created", "session.bound", "session.state", "session.ended", "session.recovered", "session.assignment", "session.approvals", "session.successor", "session.released", "session.reopened", "session.renamed", "session.removed",
+  "session.created", "session.bound", "session.state", "session.ended", "session.recovered", "session.assignment", "session.approvals", "session.grant", "session.successor", "session.released", "session.reopened", "session.renamed", "session.removed",
   "task.created", "task.state", "task.continued", "task.result",
   "turn.started", "turn.completed",
   "message.delta", "message.completed", "reasoning.delta", "tool.started", "tool.completed",
@@ -61,8 +62,9 @@ const DATA_RULES: Partial<Record<SessionEventKind, (d: Record<string, unknown>) 
   "hook.started": hookData,
   "hook.completed": hookData,
   "turn.completed": (d) => (TURN_COMPLETED_STATUSES as readonly string[]).includes(d.status as string) ? null : "data.status invalid",
-  "approval.requested": (d) => isStr(d.approvalId) ? null : "data.approvalId required",
-  "approval.resolved": (d) => isStr(d.approvalId) ? null : "data.approvalId required",
+  "approval.requested": (d) => !isStr(d.approvalId) ? "data.approvalId required" : d.allowedScopes !== undefined && (!Array.isArray(d.allowedScopes) || !d.allowedScopes.includes("once") || d.allowedScopes.length > 3 || new Set(d.allowedScopes).size !== d.allowedScopes.length || !d.allowedScopes.every(isApprovalScope)) ? "data.allowedScopes invalid" : d.toolKey !== undefined && !isApprovalToolKey(d.toolKey) ? "data.toolKey invalid" : d.risk !== undefined && !isApprovalRisk(d.risk) ? "data.risk invalid" : d.exactKey !== undefined && (typeof d.exactKey !== "string" || !d.exactKey.length || d.exactKey.length > 512) ? "data.exactKey invalid" : d.alwaysNote !== undefined && (typeof d.alwaysNote !== "string" || d.alwaysNote.length > 1000) ? "data.alwaysNote invalid" : null,
+  "approval.resolved": (d) => !isStr(d.approvalId) ? "data.approvalId required" : d.scope !== undefined && !isApprovalScope(d.scope) ? "data.scope invalid" : d.auto !== undefined && typeof d.auto !== "boolean" ? "data.auto invalid" : null,
+  "session.grant": (d) => !["added", "revoked"].includes(d.action as string) || !isStr(d.grantId) || !isSessionGrantKind(d.kind) || !isApprovalToolKey(d.toolKey) || !isApprovalRisk(d.risk) || !isStr(d.by) || d.exactKey !== undefined && (typeof d.exactKey !== "string" || !d.exactKey.length || d.exactKey.length > 512) || d.kind === "exact" && !isStr(d.exactKey) ? "data.grant invalid" : null,
   "question.requested": (d) => isStr(d.questionId) ? null : "data.questionId required",
   "question.resolved": (d) => !isStr(d.questionId) ? "data.questionId required"
     : !["answered", "dismissed", "cancelled"].includes(d.outcome as string) ? "data.outcome invalid"

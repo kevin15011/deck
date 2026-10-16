@@ -2222,3 +2222,63 @@ test("public question answers replay while mixed secret answers never enter dura
   expect(JSON.stringify(reopened.events(id))).not.toContain(secret);
   await reopened.manager.close(); scan(t.dir);
 });
+
+describe("session approval grants", () => {
+  const row = async (t: ReturnType<typeof setup>, id: string) => (await t.manager.query("sessions.list", {}) as any).data.sessions.find((s: any) => s.sessionId === id);
+  const request = { approvalId: "native", tool: "Bash", toolKey: "claude:Bash", exactKey: "ls", risk: "high" as const };
+  test("session scope reaches driver as once, auto-approves all members and is revocable with receipts", async () => {
+    const t = setup(); const id = await t.create(); await t.run({ type: "prompt.send", text: "permissions" }, id);
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "approval turn");
+    const turn = lastTurn(t.driver); const answer = turn.io.approval(request);
+    const pending = t.broker.pending()[0]!;
+    expect(await t.run({ type: "approval.respond", approvalId: pending.approvalId, decision: "allow", scope: "session", grant: "tool" }, id)).toMatchObject({ ok: false, code: "approval-confirmation-required" });
+    expect(t.broker.pending()).toHaveLength(1);
+    expect((await t.run({ type: "approval.respond", approvalId: pending.approvalId, decision: "allow", scope: "session", grant: "exact" }, id)).ok).toBe(true);
+    expect(await answer).toEqual({ decision: "allow", scope: "once" });
+    const grants = (await row(t, id)).grants; expect(grants).toHaveLength(1);
+    const summary = await row(t, id);
+    expect(await t.manager.query("sessions.status", { projectId: summary.projectId, sessionIds: [id] })).toMatchObject({ data: { sessions: [{ grants }] } });
+    const auto = t.broker.request({ ...request, sessionId: id, taskId: "child", memberId: "investigate", runnerId: "claude" });
+    expect(await auto.resolution).toMatchObject({ decision: "allow-once", scope: "once", by: `session-grant:${grants[0].grantId}` });
+    expect(t.events(id).at(-1)?.data).toMatchObject({ auto: true });
+    const revokeId = crypto.randomUUID(); const revoke = { type: "session.revokeGrant" as const, grantId: grants[0].grantId };
+    expect((await t.runWithId(revokeId, revoke, id)).ok).toBe(true);
+    expect(await t.runWithId(revokeId, revoke, id)).toMatchObject({ ok: true, duplicate: true });
+    expect((await row(t, id)).grants).toEqual([]);
+    const again = turn.io.approval(request); expect(t.broker.pending()).toHaveLength(1);
+    await t.run({ type: "approval.respond", approvalId: t.broker.pending()[0]!.approvalId, decision: "deny" }, id);
+    expect(await again).toEqual({ decision: "deny", scope: "once" }); turn.finish(); await t.idle();
+  });
+  test("grants rebuild from ledger after restart and release clears them", async () => {
+    const t = setup(); const id = await t.create();
+    const pending = t.broker.request({ ...request, sessionId: id, taskId: "fixture", runnerId: "claude" });
+    t.broker.respond({ approvalId: pending.approvalId, decision: "allow", scope: "session", grant: "exact", by: "u" }); await pending.resolution;
+    await t.manager.close(); rmSync(sessionPaths(t.paths, id).ledgerSnapshotFile, { force: true }); recoverAllSessions({ paths: t.paths, probe: createNodeProbe() });
+    const reopened = setup({ dir: t.dir }); expect((await row(reopened, id)).grants).toHaveLength(1);
+    const auto = reopened.broker.request({ ...request, sessionId: id, taskId: "fixture2", runnerId: "claude" });
+    expect((await auto.resolution).by).toStartWith("session-grant:");
+    await reopened.runWithId(crypto.randomUUID(), { type: "session.release" }, id);
+    expect((await row(reopened, id)).grants).toEqual([]);
+    const later = reopened.broker.request({ ...request, sessionId: id, taskId: "fixture3", runnerId: "claude" });
+    expect(reopened.broker.pending()).toHaveLength(1); reopened.broker.cancel(later.approvalId, "test"); await later.resolution;
+  });
+  test("native always reaches only advertised drivers and legacy requests offer once", async () => {
+    const t = setup(); const id = await t.create(); await t.run({ type: "prompt.send", text: "native scope" }, id);
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "native turn");
+    const answer = lastTurn(t.driver).io.approval({ ...request, nativeScopes: ["always"], alwaysNote: "Native test policy" });
+    const pending = t.broker.pending()[0]!;
+    await t.run({ type: "approval.respond", approvalId: pending.approvalId, decision: "allow", scope: "always", confirmed: true }, id);
+    expect(await answer).toEqual({ decision: "allow", scope: "always" });
+    expect((await row(t, id)).grants).toEqual([]);
+    lastTurn(t.driver).finish(); await t.idle();
+  });
+});
+
+test.each(["session.stop", "session.remove"] as const)("%s clears grants from the ledger", async type => {
+  const t = setup(); const id = await t.create();
+  const request = t.broker.request({ sessionId: id, taskId: "fixture", runnerId: "claude", tool: "Read", toolKey: "claude:Read", risk: "normal" });
+  t.broker.respond({ approvalId: request.approvalId, decision: "allow", scope: "session", grant: "tool", by: "u" }); await request.resolution;
+  expect(t.broker.grants(id)).toHaveLength(1);
+  expect((await t.runWithId(crypto.randomUUID(), { type }, id)).ok).toBe(true);
+  expect(t.broker.grants(id)).toEqual([]);
+});
