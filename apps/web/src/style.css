@@ -542,3 +542,9 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .approval-shortened { display:block; width:fit-content; max-width:100%; padding:.25rem .375rem; border:1px solid var(--warning-border); background:var(--warning-bg); color:var(--warning); font-size:.75rem; white-space:normal; overflow-wrap:anywhere; }
 .approval-full-request { min-width:0; }
 .approval-full-request pre { max-height:25dvh; overflow:auto; overscroll-behavior:contain; padding:.625rem; border:1px solid var(--border); background:var(--canvas); color:var(--ink); white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; font-size:.75rem; }
+
+/* A bounded history window uses explicit row/offset anchoring across eviction. */
+.conversation { overflow-anchor: none; }
+.history-navigation { min-height: 2.5rem; color: var(--muted); font-size: .75rem; }
+
+.progressive-transcript { overflow-anchor: none; }

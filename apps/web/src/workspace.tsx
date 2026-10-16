@@ -1,3 +1,4 @@
+import { ProgressiveTranscript } from './progressive-transcript';
 import { AutoApprovalMessage } from './approvals';
 import { QuestionAnswerMessage } from './question-answer';
 import { StatusIndicator, VisibleReply, indicatorState, replyForTask, type ReadMarkers } from './status-indicator';
@@ -140,7 +141,7 @@ function TranscriptMessages({ model, visible, acknowledge }: { model: TaskModel;
     return <>{model.messages.map(event => event.autoApproval?<AutoApprovalMessage key={event.seq} detail={event.autoApproval} label={agentProfile(model.member).label}/>:event.questionResolution?<QuestionAnswerMessage key={event.seq} resolution={event.questionResolution} ts={event.ts} label={agentProfile(model.member).label}/>:<article key={event.seq}><p className="message-meta">{event.data.role === 'user' ? 'Delegation' : agentProfile(model.member).label}</p><VisibleReply visible={visible} replyKey={model.key} seq={model.reply?.seq === event.seq ? event.seq : 0} acknowledge={acknowledge}><Markdown text={displayValue(event.data.text ?? event.data.error)}/></VisibleReply></article>)}</>;
 }
 
-export function Subagents({ view, sessionId = '', visible = false, readMarkers = {}, acknowledge = () => {} }: { view: ViewState; sessionId?: string; visible?: boolean; readMarkers?: ReadMarkers; acknowledge?: (key: string, seq: number) => void }) {
+export function Subagents({ api,view, sessionId = '', visible = false, readMarkers = {}, acknowledge = () => {} }: { api?:Api;view: ViewState; sessionId?: string; visible?: boolean; readMarkers?: ReadMarkers; acknowledge?: (key: string, seq: number) => void }) {
     const entries = Object.entries(view.tasks).filter(([id, task]) => id !== 'lead' && task.memberId !== 'lead') as TaskEntry[];
     const models = entries.map(([id, task]) => taskModel(view, id, task, sessionId, readMarkers));
     const [openId, setOpenId] = useState('');
@@ -149,7 +150,7 @@ export function Subagents({ view, sessionId = '', visible = false, readMarkers =
     if (detail) return <section className="subagent-content subagent-detail">
         <div className="detail-bar"><button type="button" className="quiet detail-back" onClick={() => setOpenId('')}>← Subagents</button><div className="detail-switch" role="group" aria-label="Switch subagent">{models.map(model => <button key={model.id} type="button" className="quiet detail-pick" aria-pressed={model.id === detail.id} aria-label={`${agentProfile(model.member).label} (${String(model.task.state ?? 'created')})`} title={agentProfile(model.member).label} onClick={() => setOpenId(model.id)}><Avatar memberId={model.member} size={28}/>{model.unread && <span className="pick-unread" aria-label="Unread reply"/>}</button>)}</div></div>
         <article className="task-card detail-card"><TaskHeading model={detail}/><TaskResult model={detail} visible={visible} acknowledge={acknowledge}/></article>
-        <div className="detail-conversation"><h4>Conversation</h4><FollowTranscript className="task-transcript task-transcript--full" label={`${agentProfile(detail.member).label} conversation`} signal={detail.signal} active={visible}><TranscriptMessages model={detail} visible={visible} acknowledge={acknowledge}/></FollowTranscript></div>
+        <div className="detail-conversation"><h4>Conversation</h4>{api?<ProgressiveTranscript key={`${sessionId}:${detail.id}`} api={api} sessionId={sessionId} taskId={detail.id} active={visible} label={`${agentProfile(detail.member).label} conversation`}>{messages=><TranscriptMessages model={{...detail,messages}} visible={visible} acknowledge={acknowledge}/>}</ProgressiveTranscript>:<FollowTranscript className="task-transcript task-transcript--full" label={`${agentProfile(detail.member).label} conversation`} signal={detail.signal} active={visible}><TranscriptMessages model={detail} visible={visible} acknowledge={acknowledge}/></FollowTranscript>}</div>
     </section>;
     return <section className="subagent-content"><div className="panel-intro"><h2>Subagents</h2><p>Delegated work, actual assignments and results.</p></div>{!models.length && <p className="empty-note">No subagents yet. Delegated work will appear here.</p>}{models.map(model => <article className="task-card task-card--compact" data-activity={indicatorState(String(model.task.state ?? 'created'), model.approvals)} key={model.id}>
         <TaskHeading model={model} onOpen={() => setOpenId(model.id)}/>

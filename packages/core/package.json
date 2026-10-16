@@ -13,6 +13,7 @@
     "./team-catalog": "./src/team-catalog.ts",
     "./explorer-prompt": "./src/explorer-prompt.ts",
     "./orchestrator-prompt": "./src/orchestrator-prompt.ts",
+    "./session/chat-history": "./src/session/chat-history.ts",
     "./session/events": "./src/session/events.ts",
     "./session/commands": "./src/session/commands.ts",
     "./session/redaction": "./src/session/redaction.ts",

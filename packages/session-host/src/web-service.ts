@@ -1,4 +1,6 @@
 /** Loopback-only browser transport. Unix socket remains the sole administrative surface. */
+import { ChatHistory } from './chat-history';
+import type { EventLog } from './event-log';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -31,6 +33,8 @@ type SocketData = {
   deviceId: string;
   sessionId: string;
   after: number;
+  chat?: boolean;
+  taskId?:string;
   unsubscribe?: () => void;
 };
 export type WebServiceOptions = {
@@ -60,6 +64,13 @@ export class WebService {
   private readonly now: () => number;
   private error?: string;
   private uploadsInFlight = 0;
+  private histories = new Map<EventLog, {history:ChatHistory;unsubscribe:()=>void}>();
+  private history(log:EventLog) {
+    let entry=this.histories.get(log);
+    if(!entry){if(this.histories.size>=8){const [oldLog,old]=this.histories.entries().next().value!;old.unsubscribe();this.histories.delete(oldLog);}
+      const history=new ChatHistory(log);entry={history,unsubscribe:log.subscribe(event=>history.apply(event))};this.histories.set(log,entry);}
+    return entry.history;
+  }
   constructor(private readonly options: WebServiceOptions) {
     this.now = options.now ?? Date.now;
     if (options.config.hostname !== undefined && options.config.hostname !== "127.0.0.1")
@@ -102,6 +113,8 @@ export class WebService {
   async disable(persist = true) { await this.close(); this.challenge = undefined; if (persist)
     writePrivateFile(this.stateFile, JSON.stringify({ enabled: false })); return this.status(); }
   async close() {
+    for(const entry of this.histories.values())entry.unsubscribe();
+    this.histories.clear();
     for (const ws of this.sockets) {
       ws.data.unsubscribe?.();
       ws.close(1001, "Listener closed");
@@ -282,16 +295,36 @@ export class WebService {
             return this.response({ ok: false, code: 'command-use-events' }, 400);
           return this.response(await this.options.service.execute({ sessionId: body.sessionId as string | undefined, command: validated.value, clientId: `web:${device.id}` }));
         }
+        const historyMatch = /^\/api\/sessions\/([^/]+)\/history$/.exec(path);
+        if(historyMatch && r.method==='GET') {
+          const id=historyMatch[1]!;
+          const params=url.searchParams;
+          if(!safeId(id)||[...params.keys()].some(key=>!['before','after','limit','taskId'].includes(key)||params.getAll(key).length!==1)||params.has('before')&&params.has('after'))return this.response({ok:false,code:'cursor-invalid'},400);
+          const taskId=params.get('taskId')??undefined;
+          if(taskId!==undefined&&!safeId(taskId))return this.response({ok:false,code:'cursor-invalid'},400);
+          const parsed: {before?:number;after?:number;limit?:number;taskId?:string}={taskId};
+          for(const key of ['before','after','limit'] as const) {
+            const raw=params.get(key);if(raw===null)continue;
+            const value=Number(raw);
+            if(!/^\d+$/.test(raw)||!Number.isSafeInteger(value)||value<1||key==='limit'&&value>40)return this.response({ok:false,code:'cursor-invalid'},400);
+            parsed[key]=value;
+          }
+          const log=this.options.service.openLog(id);
+          if(!log)return this.response({ok:false,code:'session-unknown'},404);
+          return this.response(this.history(log).page(parsed));
+        }
         const match = /^\/api\/sessions\/([^/]+)\/events$/.exec(path);
         if (match && r.method === 'GET') {
           const id = match[1]!, raw = url.searchParams.get('after') ?? '0', after = Number(raw);
+          const taskId=url.searchParams.get('taskId')??undefined;
+          if(url.searchParams.getAll('taskId').length>1||taskId!==undefined&&!safeId(taskId))return this.response({ok:false,code:'cursor-invalid'},400);
           if (!safeId(id) || !/^\d+$/.test(raw) || !Number.isSafeInteger(after))
             return this.response({ ok: false, code: 'cursor-invalid' }, 400);
           const log = this.options.service.openLog(id);
           if (!log)
             return this.response({ ok: false, code: 'session-unknown' }, 404);
           if (r.headers.get('upgrade')?.toLowerCase() === 'websocket') {
-            if (s.upgrade(r, { data: { deviceId: device.id, sessionId: id, after }, headers: HEADERS }))
+            if (s.upgrade(r, { data: { deviceId: device.id, sessionId: id, after, chat: url.searchParams.get('view')==='chat', taskId }, headers: HEADERS }))
               return;
             return this.response({ ok: false, code: 'upgrade-failed' }, 400);
           }
@@ -329,7 +362,8 @@ export class WebService {
       return;
     }
     const send = (e: SessionEvent) => { if (e.seq <= ws.data.after)
-      return; const value = JSON.stringify({ type: 'event', event: e }); if (ws.getBufferedAmount() + Buffer.byteLength(value) > (this.options.maxQueuedBytes ?? 1024 * 1024) || ws.send(value) === -1) {
+      return; const history=ws.data.chat?this.history(log):undefined;history?.apply(e);
+      const value = JSON.stringify({ type: 'event', event: e, ...(history ? {message:history.messageAt(e,ws.data.taskId)} : {}) }); if (ws.getBufferedAmount() + Buffer.byteLength(value) > (this.options.maxQueuedBytes ?? 1024 * 1024) || ws.send(value) === -1) {
       ws.send(JSON.stringify({ type: 'resync' }));
       ws.close(1013, 'Resync required');
       ws.data.unsubscribe?.();

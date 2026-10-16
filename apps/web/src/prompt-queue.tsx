@@ -24,14 +24,22 @@ export function failedQueuedPrompts(events: SessionEvent[]) {
     }
     return [...failed.values()];
 }
+/** A lagging HTTP summary cannot reintroduce a cancelled/dispatched receipt.
+ * CurrentEvents retains the full current queue, so rebase from empty beyond its
+ * prompt watermark instead of replaying that projection over obsolete entries. */
+export function reconcileInbox(events:SessionEvent[],snapshot:PromptInbox):PromptInbox {
+    const latest=events.filter(event=>event.kind.startsWith('prompt.')).at(-1)?.seq??0;
+    return events.reduce(reduceInbox,snapshot.seq>=latest?snapshot:emptyInbox());
+}
 export function usePromptInbox(api: Api, sessionId: string, connected: boolean, events: SessionEvent[]) {
     const [snapshot,setSnapshot]=useState<{sessionId:string;data:PromptInbox}>({sessionId:'',data:emptyInbox()}),[error,setError]=useState<{sessionId:string;message:string}>({sessionId:'',message:''}),[revision,setRevision]=useState(0);
     const request=useRef(0);
+    const queueRevision=events.filter(event=>event.kind.startsWith('prompt.')).at(-1)?.seq??0;
     useEffect(()=>{if(!sessionId||!connected)return;const controller=new AbortController(),version=++request.current;
         setError({sessionId,message:''});void api(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`,{signal:controller.signal}).then(reply=>{if(!controller.signal.aborted&&version===request.current)setSnapshot({sessionId,data:reply.data});}).catch(cause=>{if(!controller.signal.aborted&&version===request.current)setError({sessionId,message:(cause as Error).message});});
         return()=>{++request.current;controller.abort();};
-    },[api,sessionId,connected,revision]);
-    const inbox=useMemo(()=>events.reduce(reduceInbox,snapshot.sessionId===sessionId?snapshot.data:emptyInbox()),[snapshot,sessionId,events]);
+    },[api,sessionId,connected,revision,queueRevision]);
+    const inbox=useMemo(()=>reconcileInbox(events,snapshot.sessionId===sessionId?snapshot.data:emptyInbox()),[snapshot,sessionId,events]);
     return {inbox,error:error.sessionId===sessionId?error.message:'',failed:useMemo(()=>failedQueuedPrompts(events),[events]),refresh:()=>setRevision(value=>value+1)};
 }
 export function PromptQueue({ items, paused, pauseReason, connected, busy, sending = false, error, failed = [], onCancel, onResume, onImage = () => {} }: { items: QueuedPrompt[]; paused: boolean; pauseReason?: string; connected: boolean; busy: boolean; sending?: boolean; error?: string; failed?: (QueuedPrompt & {reason:string})[]; onCancel: (promptId: string) => void; onResume: () => void; onImage?: (attachment:ImageAttachment)=>void }) {

@@ -263,3 +263,43 @@ test("image uploads bound in-flight body memory and release reservations after a
   controllers.forEach(controller=>controller.abort()); streams.forEach(controller=>{try{controller.close();}catch{}}); await Promise.all(requests);
   await waitFor(()=>(f.host as any).uploadsInFlight===0,2000,"all upload reservations released");
 });
+
+test('recent history is bounded, cursor-stable, private, and separate from current controls', async () => {
+  const f=fixture();
+  f.log.append({kind:'approval.requested',data:{approvalId:'old'}});
+  f.log.append({kind:'question.requested',data:{questionId:'secret',questions:[{id:'password',secret:true}]}});
+  f.log.append({kind:'question.resolved',data:{questionId:'secret',outcome:'answered',by:'test',answers:{password:['never expose']}}});
+  for(let i=0;i<180;i++)f.log.append({kind:'message.completed',source:{taskId:'lead'},data:{role:'assistant',text:`Message ${i}`}});
+  f.log.append({kind:'approval.resolved',data:{approvalId:'old'}});
+  f.log.append({kind:'approval.requested',data:{approvalId:'current'}});
+  const path=`${f.base}/api/sessions/s/history`;
+  expect((await fetch(path)).status).toBe(401);
+  const {cookie}=await pair(f), headers={Cookie:cookie};
+  const recent=await (await fetch(path,{headers})).json();
+  expect(recent.messages).toHaveLength(40);
+  expect(recent.messages.at(-1).data.text).toBe('Message 179');
+  expect(recent.events.filter((e:any)=>e.kind==='approval.requested').map((e:any)=>e.data.approvalId)).toEqual(['current']);
+  expect(recent.events.some((e:any)=>e.kind==='question.requested')).toBe(false);
+  const fence=recent.seq;
+  f.log.append({kind:'message.completed',data:{text:'Concurrent reply'}});
+  const rows=[...recent.messages];let before=recent.before;
+  while(before){const older=await(await fetch(`${path}?before=${before}`,{headers})).json();expect(older.messages.length).toBeLessThanOrEqual(40);rows.unshift(...older.messages);before=older.before;}
+  expect(rows.filter((e:any)=>e.kind==='message.completed')).toHaveLength(180);
+  expect(new Set(rows.map((e:any)=>e.historyId)).size).toBe(rows.length);
+  expect(JSON.stringify(rows)).not.toContain('never expose');
+  expect((await(await fetch(`${f.base}/api/sessions/s/events?after=${fence}`,{headers})).json()).events.at(-1).data.text).toBe('Concurrent reply');
+  for(const query of ['before=-1','before=1&before=2','limit=999999','after=0','before=NaN'])expect((await fetch(`${path}?${query}`,{headers})).status).toBe(400);
+});
+
+test('chat websocket replay bridges the snapshot fence with stable delta identities',async()=>{
+ const f=fixture();const {cookie}=await pair(f);const headers={Cookie:cookie};
+ f.log.append({kind:'message.delta',data:{text:'Before '}});
+ const page=await(await fetch(`${f.base}/api/sessions/s/history`,{headers})).json();
+ f.log.append({kind:'message.delta',data:{text:'during'}});
+ const socket=new NativeWebSocket(`${f.base.replace('http','ws')}/api/sessions/s/events?after=${page.seq}&view=chat`,{headers:{Cookie:cookie,Origin:f.base}});
+ const frames:any[]=[];socket.onmessage=e=>frames.push(JSON.parse(String(e.data)));
+ await waitFor(()=>frames.length===1);
+ expect(frames[0].event.seq).toBe(page.seq+1);expect(frames[0].message.historyId).toBe(page.messages[0].historyId);expect(frames[0].message.data.text).toBe('during');
+ f.log.append({kind:'message.completed',data:{text:'Completed stream'}});await waitFor(()=>frames.length===2);
+ expect(frames[1].message.historyId).toBe(page.messages[0].historyId);expect(frames[1].message.data.text).toBe('Completed stream');socket.close();
+});

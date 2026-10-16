@@ -4,6 +4,7 @@ import type { SessionEvent } from '../../../packages/core/src/session/events';
 import { isLeadEvent } from './event-source';
 export type ViewState = ApprovalSummary & {
     grants?:SessionGrant[];
+    grantsSeq?:number;
     seq: number;
     events: SessionEvent[];
     approvals: Record<string, SessionEvent>;
@@ -12,10 +13,13 @@ export type ViewState = ApprovalSummary & {
     state: string;
 };
 export const emptyState = (): ViewState => ({ seq: 0, events: [], approvals: {}, questions: {}, tasks: {}, state: 'idle' });
-export function reduceEvent(state: ViewState, event: SessionEvent): ViewState {
+export function reduceEvent(state:ViewState,event:SessionEvent):ViewState {
+    return reduceCurrentEvent(state,event);
+}
+export function reduceCurrentEvent(state: ViewState, event: SessionEvent, evidence?:SessionEvent[]): ViewState {
     if (event.seq <= state.seq)
         return state;
-    const next = { ...state, seq: event.seq, events: [...state.events, event], approvals: { ...state.approvals }, questions: { ...state.questions }, tasks: { ...state.tasks } };
+    const next = { ...state, seq: event.seq, events: evidence??[...state.events, event], approvals: event.kind.startsWith('approval.')?{ ...state.approvals }:state.approvals, questions: event.kind.startsWith('question.')?{ ...state.questions }:state.questions, tasks: event.kind.startsWith('task.')?{ ...state.tasks }:state.tasks };
     const id = String(event.data.taskId ?? event.source.taskId ?? 'lead');
     if (event.kind === 'approval.requested')
         next.approvals[String(event.data.approvalId)] = event;
@@ -30,6 +34,7 @@ export function reduceEvent(state: ViewState, event: SessionEvent): ViewState {
     if(mode==='relay'||mode==='yolo'){next.approvalMode=mode;next.approvalModeSource='session';}
     if (event.kind === 'session.state')
         next.state = String(event.data.state);
+    if(['session.grant','session.released','session.ended','session.removed'].includes(event.kind))next.grantsSeq=event.seq;
     if(event.kind==='session.grant'){
         const grantId=String(event.data.grantId), grants=(state.grants??[]).filter(grant=>grant.grantId!==grantId);
         if(event.data.action==='added')grants.push({grantId,kind:event.data.kind as SessionGrant['kind'],toolKey:String(event.data.toolKey),...(typeof event.data.exactKey==='string'?{exactKey:event.data.exactKey}:{}),risk:event.data.risk as SessionGrant['risk'],createdAt:event.ts});
@@ -42,9 +47,9 @@ export function reduceEvent(state: ViewState, event: SessionEvent): ViewState {
     return next;
 }
 /** A summary may supersede replay, but never a grant event newer than its cursor. */
-export function sessionGrants(state:Pick<ViewState,'events'|'grants'>, summary?:{grants?:SessionGrant[];lastSeq?:number}):SessionGrant[] {
-    const changedAt=state.events.reduce((seq,event)=>['session.grant','session.released','session.ended','session.removed'].includes(event.kind)?event.seq:seq,0);
-    return summary?.grants!==undefined&&(state.grants===undefined||summary.lastSeq===undefined||summary.lastSeq>=changedAt)?summary.grants:state.grants??summary?.grants??[];
+export function sessionGrants(state:Pick<ViewState,'events'|'grants'|'grantsSeq'>, summary?:{grants?:SessionGrant[];lastSeq?:number}):SessionGrant[] {
+    const changedAt=state.grantsSeq??state.events.reduce((seq,event)=>['session.grant','session.released','session.ended','session.removed'].includes(event.kind)?event.seq:seq,0);
+    return summary?.grants!==undefined&&(state.grants===undefined||summary.lastSeq!==undefined&&summary.lastSeq>=changedAt)?summary.grants:state.grants??summary?.grants??[];
 }
 export function pairingToken(location: {
     hash: string;

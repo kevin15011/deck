@@ -6,7 +6,7 @@
  * - A crash-truncated last line is dropped with a diagnostic; any other damage is fatal.
  */
 import {
-  closeSync, constants, fsyncSync, ftruncateSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, truncateSync, writeSync,
+  closeSync, constants, fsyncSync, ftruncateSync, mkdirSync, openSync, readSync, readFileSync, readdirSync, statSync, truncateSync, writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -56,6 +56,7 @@ const segmentName = (index: number) => `${String(index).padStart(6, "0")}.jsonl`
 
 export class EventLog {
   private readonly segments: Segment[] = [];
+  private locations: Map<number, { path: string; offset: number; length: number }> | undefined;
   private readonly listeners = new Set<(event: SessionEvent) => void>();
   private readonly diagnosticList: LogDiagnostic[] = [];
   private readonly io: EventLogIo;
@@ -212,6 +213,11 @@ export class EventLog {
     else if (this.activeBytes > 0 && this.activeBytes + buffer.length > this.options.segmentBytes) this.rotate(this.seq + 1);
 
     this.writeAll(buffer);
+    let offset=this.activeBytes;
+    if(this.locations)for(const event of events) {
+      const length=Buffer.byteLength(JSON.stringify(event));
+      this.locations.set(event.seq,{path:this.segments.at(-1)!.path,offset,length});offset+=length+1;
+    }
     this.activeBytes += buffer.length;
     this.seq += events.length;
     this.segments.at(-1)!.lastSeq = this.seq;
@@ -288,6 +294,24 @@ export class EventLog {
   }
 
   // ---- reading -----------------------------------------------------------------------------
+
+  /** Random access for derived history indexes; validates the same durable envelope. */
+  readEvent(seq: number): SessionEvent | undefined {
+    if(!this.locations){
+      this.locations=new Map();
+      for(const segment of this.segments){
+        const bytes=readFileSync(segment.path);let offset=0,seq=segment.firstSeq;
+        for(let end=bytes.indexOf(10);end!==-1;end=bytes.indexOf(10,offset)){
+          this.locations.set(seq++,{path:segment.path,offset,length:end-offset});offset=end+1;
+        }
+      }
+    }
+    const location=this.locations.get(seq);if(!location)return;
+    const fd=openSync(location.path,constants.O_RDONLY), bytes=Buffer.alloc(location.length);
+    try { let at=0;while(at<bytes.length){const n=readSync(fd,bytes,at,bytes.length-at,location.offset+at);if(!n)throw new EventLogCorruptError('Short event read',location.path);at+=n;} }
+    finally {closeSync(fd);}
+    return this.parseLine(bytes.toString('utf8'),location.path,seq);
+  }
 
   /** Every persisted event with `seq > after`, in order, across segments. */
   *readAfter(after: number): Generator<SessionEvent> {

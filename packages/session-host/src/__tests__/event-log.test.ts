@@ -261,3 +261,15 @@ describe("live subscription and failures", () => {
     expect(() => say(log, 1)).toThrow(/closed/i);
   });
 });
+
+test('random-access history reads preserve UTF-8 bytes across rotation and reopening',()=>{
+ const dir=tempDir();
+ try {
+  const options={dir,sessionId:'history',segmentBytes:256};
+  const log=EventLog.open(options);
+  const events=log.appendMany([{kind:'message.completed',data:{text:'Synthetic 🧪 ñ'}},{kind:'message.completed',data:{text:'Second synthetic'}}]);
+  events.push(log.append({kind:'message.completed',data:{text:'Rotated'}}));
+  expect(events.map(e=>log.readEvent(e.seq))).toEqual(events);expect(log.readEvent(0)).toBeUndefined();expect(log.readEvent(999)).toBeUndefined();log.close();
+  const reopened=EventLog.open(options);expect(events.map(e=>reopened.readEvent(e.seq))).toEqual(events);reopened.close();
+ } finally {rmSync(dir,{recursive:true,force:true});}
+});

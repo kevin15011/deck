@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { sessionGrants, joinQuestionResolution, conversationEvents, emptyState, pairingToken, reduceEvent } from './state';
+import { sessionGrants, joinQuestionResolution, conversationEvents, emptyState, pairingToken, reduceEvent, reduceCurrentEvent } from './state';
 import type { SessionEvent } from '../../../packages/core/src/session/events';
 const event = (seq: number, kind: SessionEvent['kind'], data: Record<string, unknown>): SessionEvent => ({ v: 1, sessionId: 's', seq, kind, data, source: { taskId: 'lead' }, ts: '2026-01-01T00:00:00Z' });
 test('replay retains pending approvals across long histories and deduplicates reconnects', () => {
@@ -142,4 +142,10 @@ test('fresh zero-grant summaries clear stale grants without hiding newer grant e
  expect(sessionGrants(state,{grants:[],lastSeq:10})).toEqual([]);
  expect(sessionGrants(state,{grants:[],lastSeq:9})).toHaveLength(1);
  expect(sessionGrants(emptyState(),{grants:[],lastSeq:0})).toEqual([]);
+});
+
+test('compacted grant evidence fences stale status summaries after a revoke',()=>{
+ const grant={grantId:'g',kind:'tool' as const,toolKey:'shell',risk:'normal' as const,createdAt:'2026-01-01T00:00:00Z'};
+ const revoked=reduceCurrentEvent({...emptyState(),grants:[grant]},event(30,'session.grant',{...grant,action:'revoked'}),[]);
+ expect(sessionGrants(revoked,{lastSeq:20,grants:[grant]})).toEqual([]);
 });

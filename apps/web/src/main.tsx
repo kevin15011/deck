@@ -1,10 +1,12 @@
+import { DraftBoundary, DraftStore } from './draft-boundary';
+import { useChatHistory } from './chat-history';
 import { Approvals, AutoApprovalMessage } from './approvals';
 import { QuestionAnswerMessage } from './question-answer';
 import { QuestionDock, type Question, type QuestionDrafts } from './questions';
 import { agentProfile } from './subagent-parts';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { sessionGrants, conversationEvents, emptyState, pairingToken, reduceEvent, type ViewState } from './state';
+import { sessionGrants, conversationEvents, emptyState, pairingToken, type ViewState } from './state';
 import { Markdown } from './markdown';
 import { MessageInput } from './message-input';
 import { leadProgress, LeadProgress, type PendingPrompt } from './lead-progress';
@@ -56,14 +58,12 @@ export function App() {
     const [questionDrafts,setQuestionDrafts]=useState<Record<string,QuestionDrafts>>(Object.create(null));
     const [queueErrors,setQueueErrors]=useState<Record<string,string>>({});
     const [pendingPrompts, setPendingPrompts] = useState<Record<string, PendingPrompt>>({});
-    const eventSession = useRef('');
-    const seq = useRef(0), conversation = useRef<HTMLElement>(null), drawer = useRef<HTMLDialogElement>(null), dialogReturnFocus = useRef<HTMLElement | null>(null);
+    const conversation = useRef<HTMLElement>(null), drawer = useRef<HTMLDialogElement>(null), dialogReturnFocus = useRef<HTMLElement | null>(null);
     const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('deck.sidebar-collapsed') === 'true'; } catch { return false; } });
     const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 1000px)').matches), [drawerOpen, setDrawerOpen] = useState(false);
-    const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('activity'), [mobileTab, setMobileTab] = useState<WorkspaceTab>('chat'), [drafts, setDrafts] = useState<Record<string, string>>({}), [unseen, setUnseen] = useState(false);
+    const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('activity'), [mobileTab, setMobileTab] = useState<WorkspaceTab>('chat'), [unseen, setUnseen] = useState(false);
     const following = useRef(true), restored = useRef('');
-    const text = drafts[selected] ?? '';
-    const setText = (value: string) => setDrafts(previous => ({ ...previous, [selected]: value }));
+    const drafts = useRef(new DraftStore());
     useEffect(() => { const media = window.matchMedia('(max-width: 1000px)'); const update = () => setNarrow(media.matches); media.addEventListener('change', update); return () => media.removeEventListener('change', update); }, []);
     useEffect(() => { if (narrow && drawerOpen) drawer.current?.showModal(); else drawer.current?.close(); }, [narrow, drawerOpen]);
     const [workspaceCollapsed, setWorkspaceCollapsed] = useState(() => { try { return localStorage.getItem('deck.workspace-collapsed') === 'true'; } catch { return false; } });
@@ -173,59 +173,39 @@ export function App() {
     })(); }, []);
     useEffect(() => { if (!paired)
         return; void load(); const timer = setInterval(() => void load(), 10000); return () => clearInterval(timer); }, [paired, projectId]);
-    useEffect(() => {
-        if (!selected || !paired)
-            return;
-        let closed = false, socket: WebSocket | undefined, timer: ReturnType<typeof setTimeout>;
-        if (eventSession.current !== selected) { setHydratedSession(''); seq.current = 0; setView(emptyState()); eventSession.current = selected; }
-        const apply = (event: any) => { if(event.kind==='question.resolved')setQuestionDrafts(old=>{const next=Object.assign(Object.create(null),old);delete next[`${event.sessionId}:${event.data.questionId}`];return next;}); if (closed || selectedSession.current !== selected || event.sessionId !== selected)
-            return; if(event.kind === 'session.removed' && event.data.phase === 'removed'){hideSession(selected);return;} seq.current = Math.max(seq.current, event.seq); setView(s => reduceEvent(s, event)); if(event.kind === 'session.renamed' && typeof event.data.title === 'string') renameSessionView(selected,event.data.title); };
-        async function connect() { try {
-            setConnection('Reconnecting');
-            let more = true;
-            while (more && !closed) {
-                const d = await api(`/api/sessions/${encodeURIComponent(selected)}/events?after=${seq.current}`);
-                for (const e of d.events)
-                    apply(e);
-                more = d.hasMore === true;
-            }
-            if (closed || selectedSession.current !== selected)
-                return;
-            setHydratedSession(selected);
-            const u = new URL(`/api/sessions/${encodeURIComponent(selected)}/events?after=${seq.current}`, location.href);
-            u.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            socket = new WebSocket(u);
-            socket.onopen = () => { if (!closed) setConnection('Connected'); };
-            socket.onmessage = m => { try {
-                const d = JSON.parse(m.data);
-                if (d.type === 'event')
-                    apply(d.event);
-                if (d.type === 'resync')
-                    socket?.close();
-            }
-            catch {
-                setError('Could not read a session update. Reconnect to retry.');
-            } };
-            socket.onclose = () => { if (!closed) {
-                setConnection('Reconnecting');
-                timer = setTimeout(() => void connect(), 1000);
-            } };
-            socket.onerror = () => socket?.close();
-        }
-        catch (e) {
-            if (!closed) {
-                setConnection('Disconnected');
-                setError((e as Error).message);
-                timer = setTimeout(() => void connect(), 2000);
-            }
-        } }
-        void connect();
-        return () => { closed = true; clearTimeout(timer); socket?.close(); };
-    }, [selected, paired, reconnectRevision]);
-    const messages = useMemo(() => conversationEvents(view.events).slice(-500), [view.events]);
+    const anchor = useRef<{id:string;offset:number}|undefined>(undefined);
+    const captureAnchor = () => {
+        const element=conversation.current;if(!element||!element.clientHeight||following.current)return;
+        const top=element.getBoundingClientRect().top;
+        const row=[...element.querySelectorAll<HTMLElement>('[data-history-id]')].find(row=>row.getBoundingClientRect().bottom>top);
+        if(row)anchor.current={id:row.dataset.historyId!,offset:row.getBoundingClientRect().top-top};
+    };
+    const history = useChatHistory({api,sessionId:selected,enabled:paired,revision:reconnectRevision,
+        beforeChange:captureAnchor,isFollowing:()=>following.current,onHydrated:setHydratedSession,onView:setView,onConnection:setConnection,onError:setError,
+        onEvent:event=>{
+            if(selectedSession.current!==selected)return;
+            if(event.kind==='question.resolved')setQuestionDrafts(old=>{const next=Object.assign(Object.create(null),old);delete next[`${event.sessionId}:${event.data.questionId}`];return next;});
+            if(event.kind==='session.removed'&&event.data.phase==='removed')hideSession(selected);
+            if(event.kind==='session.renamed'&&typeof event.data.title==='string')renameSessionView(selected,event.data.title);
+        }});
+    const messages=useMemo(()=>history.messages.flatMap(event=>conversationEvents([...(event.request?[event.request]:[]),event]).map(row=>({...row,historyId:event.historyId}))),[history.messages]);
+    const restoreAnchor=()=>{
+        const element=conversation.current,saved=anchor.current;if(!element||!element.clientHeight||!saved||following.current)return;
+        const row=element.querySelector<HTMLElement>(`[data-history-id="${saved.id}"]`);
+        if(row)element.scrollTop+=row.getBoundingClientRect().top-element.getBoundingClientRect().top-saved.offset;
+    };
+    useLayoutEffect(restoreAnchor,[messages]);
+    const historyGesture=useRef(false),touchY=useRef<number|undefined>(undefined);
+    function navigateHistory(direction:'older'|'newer') {
+        const element=conversation.current;if(!element)return;
+        if(direction==='newer'&&!history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<80){following.current=true;anchor.current=undefined;historyGesture.current=false;setUnseen(false);return;}
+        historyGesture.current=true;following.current=false;
+        if(direction==='older'&&element.scrollTop<200){historyGesture.current=false;void history.older();}
+        if(direction==='newer'&&history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<200){historyGesture.current=false;void history.newer();}
+    }
+    async function jumpLatest(){const owner=selected;anchor.current=undefined;following.current=true;await history.latest();if(selectedSession.current!==owner)return;if(conversation.current)conversation.current.scrollTop=conversation.current.scrollHeight;setUnseen(false);}
     const promptInbox=usePromptInbox(api,selected,paired&&connection==='Connected',view.events);
     const progress = useMemo(() => leadProgress(view.events, { sessionId: selected, pending: pendingPrompts[selected] ? {...pendingPrompts[selected],background:pendingPrompts[selected]?.background||promptInbox.inbox.paused} : undefined, connection }), [view.events, selected, pendingPrompts, connection, promptInbox.inbox.paused]);
-    const content = messages.map(event => `${event.seq}:${String(event.data.text ?? event.data.error ?? '')}`).join('\n');
     useLayoutEffect(() => {
         const element = conversation.current;
         if (!element || !selected || (narrow && mobileTab !== 'chat')) return;
@@ -235,16 +215,16 @@ export function App() {
             following.current = true; setUnseen(false);
             restored.current = selected;
         } else if (following.current) element.scrollTop = element.scrollHeight;
-        else setUnseen(true);
-    }, [content, selected, narrow, mobileTab, hydratedSession, connection, progress?.label]);
+        else if(!history.loading) setUnseen(true);
+    }, [messages, selected, narrow, mobileTab, hydratedSession, connection, progress?.label]);
     useLayoutEffect(() => {
         const element = conversation.current;
         if (!element || hydratedSession !== selected || (narrow && mobileTab !== 'chat')) return;
-        const observer = new ResizeObserver(() => { if (following.current && restored.current === selected) element.scrollTop = element.scrollHeight; });
-        observer.observe(element); return () => observer.disconnect();
+        const observer = new ResizeObserver(() => { if (following.current && restored.current === selected) element.scrollTop = element.scrollHeight; else restoreAnchor(); });
+        observer.observe(element); if(element.firstElementChild)observer.observe(element.firstElementChild); return () => observer.disconnect();
     }, [selected, hydratedSession, narrow, mobileTab]);
     function selectSession(id: string, closeDrawer = true) {
-        if (id !== selectedSession.current) { setOpenQuestion(''); selectedSession.current = id; eventSession.current = ''; seq.current = 0; setHydratedSession(''); setView(emptyState()); setConnection('Reconnecting'); setError(''); restored.current = ''; following.current = true; setUnseen(false); }
+        if (id !== selectedSession.current) { anchor.current=undefined;historyGesture.current=false;touchY.current=undefined;setOpenQuestion(''); selectedSession.current = id; setHydratedSession(''); setView(emptyState()); setConnection('Reconnecting'); setError(''); restored.current = ''; following.current = true; setUnseen(false); }
         setSelected(id); if (closeDrawer) setDrawerOpen(false);
     }
     function hideSession(id: string) {
@@ -428,34 +408,42 @@ export function App() {
         <Approvals key={`approvals:${selected}`} events={approvals} busy={busy||connection!=='Connected'} onRespond={body=>mutate(body,selected)}/>
         <div className="view-nav"><span className="chat-label">Conversation <small>You and the Lead</small></span><Tabs active={activeTab} onChange={changeTab}/></div>
         {narrow && mobileTab !== 'chat' && <LeadProgress progress={progress} mobile/>}
-        <div className="panes"><main id="panel-chat" className="chat-pane" hidden={narrow && mobileTab !== 'chat'} aria-labelledby="tab-chat"><section id="conversation" ref={conversation} tabIndex={-1} className="conversation" aria-label="Conversation" onScroll={event => { const element = event.currentTarget; following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; if (following.current) setUnseen(false); }}>
+        <div className="panes"><main id="panel-chat" className="chat-pane" hidden={narrow && mobileTab !== 'chat'} aria-labelledby="tab-chat"><section id="conversation" ref={conversation} tabIndex={-1} className="conversation" aria-label="Conversation" onWheelCapture={event=>navigateHistory(event.deltaY<0?'older':'newer')} onKeyDownCapture={event=>{if(['ArrowUp','PageUp','Home'].includes(event.key))navigateHistory('older');if(['ArrowDown','PageDown','End'].includes(event.key))navigateHistory('newer');}} onTouchStartCapture={event=>{touchY.current=event.touches[0]?.clientY;}} onTouchMoveCapture={event=>{const next=event.touches[0]?.clientY;if(next!==undefined&&touchY.current!==undefined)navigateHistory(next>touchY.current?'older':'newer');touchY.current=next;}} onPointerDownCapture={()=>{historyGesture.current=true;}} onScroll={event => {
+            const element=event.currentTarget;
+            if(history.loading)return;
+            following.current=!history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<80;
+            if(following.current){anchor.current=undefined;setUnseen(false);}else captureAnchor();
+            if(historyGesture.current){if(element.scrollTop<200){historyGesture.current=false;void history.older();}else if(history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<200){historyGesture.current=false;void history.newer();}}
+        }}>
+        <div className="history-content"><div className="history-navigation" role="status">{history.before?<button type="button" className="quiet" disabled={history.loading} onClick={()=>{following.current=false;void history.older();}}>{history.loading?'Loading history…':'Older messages'}</button>:messages.length>0?<span>Beginning of conversation</span>:null}{history.error&&<span role="alert">{history.error}</span>}</div>
         {!messages.length && <div className="empty"><span className="empty-mark" aria-hidden="true">d</span><h2>{selected ? 'What are we working on?' : 'Your work, across runners'}</h2><p>{selected ? 'Send a message to the Lead. Follow the tools, delegated work and documents in the workspace alongside it.' : 'Choose a session to continue the conversation and see its work.'}</p></div>}
-        {messages.map(event => event.autoApproval ? <AutoApprovalMessage key={event.seq} detail={event.autoApproval}/>:event.questionResolution ? <QuestionAnswerMessage key={event.seq} resolution={event.questionResolution} ts={event.ts}/>:event.kind === 'turn.completed' ? <article key={event.seq} className="message failed-message" role="alert"><p className="message-meta">Turn failed</p><p>{typeof event.data.error === 'string' && event.data.error ? event.data.error : 'The runner could not complete this turn. Try again.'}</p></article> : <article key={event.seq} className={`message ${event.data.role === 'user' ? 'user' : 'lead'}`}><div className="message-meta"><strong>{event.data.role === 'user' ? 'You' : 'Lead'}</strong>{event.data.role !== 'user' && <span>{event.source.runnerId ?? view.tasks[event.source.taskId ?? 'lead']?.runnerId as string ?? ''}{(event.data.modelId ?? view.tasks[event.source.taskId ?? 'lead']?.modelId) ? ` · ${String(event.data.modelId ?? view.tasks[event.source.taskId ?? 'lead']?.modelId)}` : ''}</span>}<time dateTime={event.ts}>{new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><VisibleReply visible={chatVisible} replyKey={selected} seq={event.seq === latestReplySeq ? event.seq : 0} acknowledge={acknowledge}><Markdown text={String(event.data.text ?? event.data.delta ?? '')}/><ImageReferences attachments={publicImages(event.data.attachments)} onPreview={previewAttachment}/></VisibleReply></article>)}
+        {messages.map(event => <div className="history-row" key={event.historyId} data-history-id={event.historyId}>{event.autoApproval ? <AutoApprovalMessage key={event.seq} detail={event.autoApproval}/>:event.questionResolution ? <QuestionAnswerMessage key={event.seq} resolution={event.questionResolution} ts={event.ts}/>:event.kind === 'turn.completed' ? <article key={event.seq} className="message failed-message" role="alert"><p className="message-meta">Turn failed</p><p>{typeof event.data.error === 'string' && event.data.error ? event.data.error : 'The runner could not complete this turn. Try again.'}</p></article> : <article key={event.seq} className={`message ${event.data.role === 'user' ? 'user' : 'lead'}`}><div className="message-meta"><strong>{event.data.role === 'user' ? 'You' : 'Lead'}</strong>{event.data.role !== 'user' && <span>{event.source.runnerId ?? view.tasks[event.source.taskId ?? 'lead']?.runnerId as string ?? ''}{(event.data.modelId ?? view.tasks[event.source.taskId ?? 'lead']?.modelId) ? ` · ${String(event.data.modelId ?? view.tasks[event.source.taskId ?? 'lead']?.modelId)}` : ''}</span>}<time dateTime={event.ts}>{new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><VisibleReply visible={chatVisible} replyKey={selected} seq={event.seq === latestReplySeq ? event.seq : 0} acknowledge={acknowledge}><Markdown text={String(event.data.text ?? event.data.delta ?? '')}/><ImageReferences attachments={publicImages(event.data.attachments)} onPreview={previewAttachment}/></VisibleReply></article>}</div>)}
+        {history.after&&<button type="button" className="quiet" disabled={history.loading} onClick={()=>{following.current=false;void history.newer();}}>Newer messages</button>}</div>
         </section>
-        <div className="conversation-feedback">{unseen && <button type="button" className="jump-latest" onClick={() => { if (conversation.current) conversation.current.scrollTop = conversation.current.scrollHeight; following.current = true; setUnseen(false); }}>Jump to latest ↓</button>}</div>
+        <div className="conversation-feedback">{(unseen||history.after) && <button type="button" className="jump-latest" onClick={()=>void jumpLatest()}>Jump to latest ↓</button>}</div>
         <LeadProgress progress={progress}/>
         {/* Connection changes remount docks so secret DOM values and refs are wiped; ordinary drafts live above them. */}
         <div className="question-docks">{Object.values(view.questions).sort((a,b)=>a.seq-b.seq).map(event=>{const id=String(event.data.questionId), draftKey=`${selected}:${id}`, member=String(event.source.memberId??view.tasks[String(event.data.taskId)]?.memberId??'lead');return <QuestionDock key={`${draftKey}:${connection}:${reconnectRevision}`} open={openQuestion===draftKey} onToggle={()=>setOpenQuestion(old=>old===draftKey?'':draftKey)} questionId={id} questions={event.data.questions as Question[]} label={member==='lead'?'The Lead':agentProfile(member).label} drafts={questionDrafts[draftKey]??Object.create(null)} onDrafts={draft=>setQuestionDrafts(old=>Object.assign(Object.create(null),old,{[draftKey]:draft}))} onCommand={body=>mutate(body,selected)} busy={busy||connection!=='Connected'}/>;})}</div>
         <PromptQueue key={selected} items={promptInbox.inbox.queued} paused={promptInbox.inbox.paused&&!ended} pauseReason={promptInbox.inbox.pauseReason} failed={promptInbox.failed} connected={connection==='Connected'&&canCompose} busy={busy} sending={pendingPrompts[selected]?.phase==='sending'&&!!pendingPrompts[selected]?.background} error={queueErrors[selected]||promptInbox.error} onCancel={id=>void queueCommand('prompt.cancel',id)} onResume={()=>void queueCommand('prompt.resume')} onImage={previewAttachment}/>
         <ImageDraftStrip items={draftImages} error={imageDrafts.errors[selected]} submitted={new Set(submittedImages[selected]??[])} onRemove={id=>imageDrafts.remove(selected,[id])} onRetry={id=>imageDrafts.retry(selected,id)} onPreview={item=>setPreviewImage({sessionId:selected,name:imageDisplayName(item.file.name),file:item.file})}/>
-        {canCompose ? <form className="composer" onSubmit={async event => {
+        <DraftBoundary key={selected} sessionId={selected} drafts={drafts.current}>{(text,setText)=>canCompose ? <form className="composer" onSubmit={async event => {
             event.preventDefault();const session=selected,prompt=text,images=[...draftImages],ids=images.map(item=>item.draftId);
             if(!canSend||(!prompt.trim()&&!images.length))return;
             setSubmittedImages(previous=>({...previous,[session]:ids}));
             try{if(await command({type:'prompt.send',text:prompt,...(images.length?{attachmentIds:images.map(item=>item.attachment!.attachmentId)}:{})})){
-                setDrafts(previous=>previous[session]===prompt?{...previous,[session]:''}:previous);imageDrafts.consume(session,ids);
+                if(drafts.current.get(session)===prompt){drafts.current.set(session,'');}imageDrafts.consume(session,ids);
             }}finally{setSubmittedImages(previous=>({...previous,[session]:[]}));}
         }}><label htmlFor="prompt">Message the lead</label><MessageInput id="prompt" value={text} onChange={event => setText(event.target.value)} disabled={!selected || ended} placeholder="Describe the next step…" aria-describedby="composer-help" onPaste={event=>{
             const files=clipboardImages(event.clipboardData);if(!files.length)return;event.preventDefault();const session=selected,input=event.currentTarget,pasted=event.clipboardData.getData('text/plain');
-            if(pasted){const inserted=insertPastedText(input.value,input.selectionStart,input.selectionEnd,pasted);setDrafts(previous=>({...previous,[session]:inserted.text}));requestAnimationFrame(()=>{if(selectedSession.current===session&&document.activeElement===input)input.setSelectionRange(inserted.caret,inserted.caret);});}
+            if(pasted){const inserted=insertPastedText(input.value,input.selectionStart,input.selectionEnd,pasted);setText(inserted.text);requestAnimationFrame(()=>{if(selectedSession.current===session&&document.activeElement===input)input.setSelectionRange(inserted.caret,inserted.caret);});}
             imageDrafts.add(session,files);
         }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }}/><div className="composer-actions"><ImagePicker sessionId={selected} disabled={!canCompose} onFiles={(files,owner)=>imageDrafts.add(owner,files)}/><span id="composer-help">{selected ? ended ? 'This session has ended.' : busy ? 'Saving message… Your draft is kept.' : draftImages.some(item=>item.status==='uploading') ? 'Uploading images…' : draftImages.some(item=>item.status==='error') ? 'Retry or remove failed images before sending.' : promptInbox.inbox.paused ? 'New messages wait until you resume the queue.' : promptInbox.inbox.active || promptInbox.inbox.queued.length ? 'Messages queue after current work · Enter to send' : 'Enter to send · Shift + Enter for a new line' : 'Choose a session to send a message.'}</span><button type="button" className="quiet" aria-label="Interrupt" title="Interrupt" disabled={!selected || busy || ended || !working} onClick={() => void command({ type: 'turn.interrupt', taskId: leadTaskId })}><svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button><button aria-label="Send prompt" title="Send prompt" disabled={!canSend || (!text.trim()&&!draftImages.length)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></div></form> : <div className="composer-gate" aria-label="Session connection"><p>{!selected ? 'Choose a session or create one to start.' : releaseFailed ? 'Session resources could not be fully released. You can retry.' : removing ? 'Removing session… Waiting for its resources to stop.' : closing ? 'Closing session… History and drafts are kept.' : connection !== 'Connected' ? 'Connect to this session to continue.' : readiness.preparation?.status === 'preparing' ? 'Checking session setup…' : readiness.preparation?.status === 'failed' ? 'Session preparation failed. You can retry.' : 'Prepare the session before sending a message.'}</p>{selected && <button type="button" disabled={busy || (closing && !releaseFailed)} onClick={() => {
             if (releaseFailed) { if(removing && currentSession) void removeSession(currentSession); else void lifecycle('session.release'); }
             else if (connection !== 'Connected') setReconnectRevision(value => value + 1);
             else if (readiness.preparation?.status === 'preparing') void lifecycle('session.prepare.cancel');
             else void lifecycle('session.prepare');
-        }}>{releaseFailed ? removing ? 'Retry removal' : 'Retry close' : closing ? removing ? 'Removing session…' : 'Closing session…' : connection !== 'Connected' ? 'Reconnect' : readiness.preparation?.status === 'preparing' ? 'Cancel preparation' : readiness.preparation?.status === 'failed' ? 'Retry preparation' : 'Prepare session'}</button>}{!!text && <small>Your draft is kept for this session.</small>}</div>}</main>
-        <aside className="workspace-pane" id="session-workspace" aria-label="Session workspace" hidden={narrow && mobileTab === 'chat'}><div className="workspace-panel" id="panel-activity" role="tabpanel" aria-labelledby="tab-activity" hidden={workspaceTab !== 'activity'} tabIndex={0}><Activity events={view.events} sessionId={selected} visible={paired && connection === 'Connected' && (narrow ? mobileTab === 'activity' : !workspaceCollapsed && workspaceTab === 'activity')}/></div><div className="workspace-panel" id="panel-subagents" role="tabpanel" aria-labelledby="tab-subagents" hidden={workspaceTab !== 'subagents'} tabIndex={0}><Subagents view={view} sessionId={selected} visible={hydratedSession === selected && !dialogKind && !drawerOpen && (narrow ? mobileTab === 'subagents' : !workspaceCollapsed && workspaceTab === 'subagents')} readMarkers={readMarkers} acknowledge={acknowledge}/></div><div className="workspace-panel" id="panel-openspec" role="tabpanel" aria-labelledby="tab-openspec" hidden={workspaceTab !== 'openspec'} tabIndex={0}><OpenSpec key={selected} sessionId={selected} visible={paired && (narrow ? mobileTab === 'openspec' : !workspaceCollapsed && workspaceTab === 'openspec')} api={api}/></div></aside></div>
+        }}>{releaseFailed ? removing ? 'Retry removal' : 'Retry close' : closing ? removing ? 'Removing session…' : 'Closing session…' : connection !== 'Connected' ? 'Reconnect' : readiness.preparation?.status === 'preparing' ? 'Cancel preparation' : readiness.preparation?.status === 'failed' ? 'Retry preparation' : 'Prepare session'}</button>}{!!text && <small>Your draft is kept for this session.</small>}</div>}</DraftBoundary></main>
+        <aside className="workspace-pane" id="session-workspace" aria-label="Session workspace" hidden={narrow && mobileTab === 'chat'}><div className="workspace-panel" id="panel-activity" role="tabpanel" aria-labelledby="tab-activity" hidden={workspaceTab !== 'activity'} tabIndex={0}><Activity events={view.events} sessionId={selected} visible={paired && connection === 'Connected' && (narrow ? mobileTab === 'activity' : !workspaceCollapsed && workspaceTab === 'activity')}/></div><div className="workspace-panel" id="panel-subagents" role="tabpanel" aria-labelledby="tab-subagents" hidden={workspaceTab !== 'subagents'} tabIndex={0}><Subagents api={api} view={view} sessionId={selected} visible={hydratedSession === selected && !dialogKind && !drawerOpen && (narrow ? mobileTab === 'subagents' : !workspaceCollapsed && workspaceTab === 'subagents')} readMarkers={readMarkers} acknowledge={acknowledge}/></div><div className="workspace-panel" id="panel-openspec" role="tabpanel" aria-labelledby="tab-openspec" hidden={workspaceTab !== 'openspec'} tabIndex={0}><OpenSpec key={selected} sessionId={selected} visible={paired && (narrow ? mobileTab === 'openspec' : !workspaceCollapsed && workspaceTab === 'openspec')} api={api}/></div></aside></div>
         </div><ImagePreview image={previewImage} onClose={()=>setPreviewImage(undefined)}/><WorkspaceDialog kind={dialogKind} project={dialogKind === 'session' || dialogKind === 'rename-project' ? creationProject : project} session={dialogKind === 'rename-session' ? actionSession : effectiveSession} api={api} mutate={mutate} returnFocus={dialogReturnFocus} onClose={() => setDialogKind(undefined)} onProject={next => { ++catalogRequest.current; setProjects(previous => previous.some(item => item.projectId === next.projectId) ? previous.map(item => item.projectId === next.projectId ? next : item) : [...previous, next]); if (dialogKind !== 'rename-project') expandProject(next.projectId); void load(); }} onCreated={id => { if (creationProject) { setProjectId(creationProject.projectId); expandProject(creationProject.projectId); void loadHistory(creationProject.projectId, undefined, true); } selectSession(id); void load(creationProject?.projectId); }} onRenamed={(id,title) => { ++sessionMutation.current; renameSessionView(id,title); if(actionSession?.projectId) void loadHistory(actionSession.projectId,undefined,true); }} onAssigned={() => { if (projectId) void loadHistory(projectId, undefined, true); void load(); void readiness.refresh(); }}/></div>;
 }
 if (typeof document !== 'undefined')
