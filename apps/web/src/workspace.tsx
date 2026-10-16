@@ -5,6 +5,7 @@ import { activityEvents, conversationEvents, type ViewState } from './state';
 import { Markdown } from './markdown';
 import { activityText, type HookActivity } from './activity';
 import { isLeadEvent } from './event-source';
+import { Avatar, agentProfile, FollowTranscript } from './subagent-parts';
 
 export type WorkspaceTab = 'chat' | 'activity' | 'subagents' | 'openspec';
 export type Api = (path: string, init?: RequestInit) => Promise<any>;
@@ -108,15 +109,49 @@ export function Activity({ events, sessionId = events[0]?.sessionId ?? '', visib
     }}>Jump to latest activity ↓</button>}</div>;
 }
 
+type TaskEntry = [string, ViewState['tasks'][string]];
+function taskModel(view: ViewState, id: string, task: TaskEntry[1], sessionId: string, readMarkers: ReadMarkers) {
+    const reply = replyForTask(view.events, id), key = `${sessionId}:${id}:${reply?.attempt ?? task.attempt ?? 1}`;
+    const messages = conversationEvents(view.events, id);
+    return {
+        id, task, reply, key, messages,
+        member: String(task.memberId ?? id),
+        approvals: Object.values(view.approvals).filter(event => event.source.taskId === id).length,
+        unread: !!reply && reply.seq > (readMarkers[key] ?? 0),
+        result: reply?.resultText,
+        resultMatches: !!reply && displayValue(reply.resultText) === reply.text,
+        signal: messages.map(event => `${event.seq}:${String(event.data.text ?? event.data.error ?? '').length}`).join(),
+    };
+}
+type TaskModel = ReturnType<typeof taskModel>;
+
+function TaskHeading({ model, onOpen }: { model: TaskModel; onOpen?: () => void }) {
+    const { label } = agentProfile(model.member), state = String(model.task.state ?? 'created');
+    return <div className="task-heading"><Avatar memberId={model.member} size={onOpen ? 40 : 64}/><div className="task-identity"><h3>{label}</h3><p className="runner">{String(model.task.runnerId ?? 'Runner pending')} <span>· {String(model.task.modelId ?? 'Model pending')} · Attempt {String(model.task.attempt ?? 1)}</span></p></div><StatusIndicator state={state} approvals={model.approvals} unread={model.unread}/><span className="status-chip">{state}</span>{onOpen && <button type="button" className="open-detail" onClick={onOpen}>Open full view<svg className="navigation-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M9.5 2.5h4v4M13.5 2.5 8.5 7.5M6.5 3.5h-3v9h9v-3"/></svg></button>}</div>;
+}
+function TaskResult({ model, visible, acknowledge, preview = false }: { model: TaskModel; visible: boolean; acknowledge: (key: string, seq: number) => void; preview?: boolean }) {
+    if (model.result === undefined) return null;
+    return <VisibleReply className={`task-result${preview ? ' task-result--preview' : ''}`} visible={visible} replyKey={model.key} seq={model.resultMatches ? model.reply!.seq : 0} acknowledge={acknowledge}>{!preview && <h4>Result</h4>}<Markdown text={displayValue(model.result)}/></VisibleReply>;
+}
+function TranscriptMessages({ model, visible, acknowledge }: { model: TaskModel; visible: boolean; acknowledge: (key: string, seq: number) => void }) {
+    return <>{model.messages.map(event => <article key={event.seq}><p className="message-meta">{event.data.role === 'user' ? 'Delegation' : agentProfile(model.member).label}</p><VisibleReply visible={visible} replyKey={model.key} seq={model.reply?.seq === event.seq ? event.seq : 0} acknowledge={acknowledge}><Markdown text={displayValue(event.data.text ?? event.data.error)}/></VisibleReply></article>)}</>;
+}
+
 export function Subagents({ view, sessionId = '', visible = false, readMarkers = {}, acknowledge = () => {} }: { view: ViewState; sessionId?: string; visible?: boolean; readMarkers?: ReadMarkers; acknowledge?: (key: string, seq: number) => void }) {
-    const tasks = Object.entries(view.tasks).filter(([id, task]) => id !== 'lead' && task.memberId !== 'lead');
-    return <section className="subagent-content"><div className="panel-intro"><h2>Subagents</h2><p>Delegated work, actual assignments and results.</p></div>{!tasks.length && <p className="empty-note">No subagents yet. Delegated work will appear here.</p>}{tasks.map(([id, task]) => {
-        const reply = replyForTask(view.events, id), key = `${sessionId}:${id}:${reply?.attempt ?? task.attempt ?? 1}`;
-        const approvals = Object.values(view.approvals).filter(event => event.source.taskId === id).length;
-        const result = reply?.resultText;
-        const resultMatches = reply && displayValue(result) === reply.text;
-        return <article className="task-card" key={id}><div className="task-heading"><h3>{String(task.memberId ?? id)}</h3><StatusIndicator state={String(task.state ?? 'created')} approvals={approvals} unread={!!reply && reply.seq > (readMarkers[key] ?? 0)}/><span className="status-chip">{String(task.state ?? 'created')}</span></div><p className="runner">{String(task.runnerId ?? 'Runner pending')} <span>· {String(task.modelId ?? 'Model pending')}</span></p><p className="muted">Attempt {String(task.attempt ?? 1)}</p>{result !== undefined && <VisibleReply className="task-result" visible={visible} replyKey={key} seq={resultMatches ? reply.seq : 0} acknowledge={acknowledge}><h4>Result</h4><Markdown text={displayValue(result)}/></VisibleReply>}<details><summary>Task conversation</summary><div className="task-transcript">{conversationEvents(view.events, id).map(event => <article key={event.seq}><p className="message-meta">{event.data.role === 'user' ? 'Delegation' : String(task.memberId ?? id)}</p><VisibleReply visible={visible} replyKey={key} seq={reply?.seq === event.seq ? event.seq : 0} acknowledge={acknowledge}><Markdown text={displayValue(event.data.text ?? event.data.error)}/></VisibleReply></article>)}</div></details></article>;
-    })}</section>;
+    const entries = Object.entries(view.tasks).filter(([id, task]) => id !== 'lead' && task.memberId !== 'lead') as TaskEntry[];
+    const models = entries.map(([id, task]) => taskModel(view, id, task, sessionId, readMarkers));
+    const [openId, setOpenId] = useState('');
+    useEffect(() => { setOpenId(''); }, [sessionId]);
+    const detail = models.find(model => model.id === openId);
+    if (detail) return <section className="subagent-content subagent-detail">
+        <div className="detail-bar"><button type="button" className="quiet detail-back" onClick={() => setOpenId('')}>← Subagents</button><div className="detail-switch" role="group" aria-label="Switch subagent">{models.map(model => <button key={model.id} type="button" className="quiet detail-pick" aria-pressed={model.id === detail.id} aria-label={`${agentProfile(model.member).label} (${String(model.task.state ?? 'created')})`} title={agentProfile(model.member).label} onClick={() => setOpenId(model.id)}><Avatar memberId={model.member} size={28}/>{model.unread && <span className="pick-unread" aria-label="Unread reply"/>}</button>)}</div></div>
+        <article className="task-card detail-card"><TaskHeading model={detail}/><TaskResult model={detail} visible={visible} acknowledge={acknowledge}/></article>
+        <div className="detail-conversation"><h4>Conversation</h4><FollowTranscript className="task-transcript task-transcript--full" label={`${agentProfile(detail.member).label} conversation`} signal={detail.signal} active={visible}><TranscriptMessages model={detail} visible={visible} acknowledge={acknowledge}/></FollowTranscript></div>
+    </section>;
+    return <section className="subagent-content"><div className="panel-intro"><h2>Subagents</h2><p>Delegated work, actual assignments and results.</p></div>{!models.length && <p className="empty-note">No subagents yet. Delegated work will appear here.</p>}{models.map(model => <article className="task-card task-card--compact" key={model.id}>
+        <TaskHeading model={model} onOpen={() => setOpenId(model.id)}/>
+        <TaskResult model={model} visible={visible} acknowledge={acknowledge} preview/>
+    </article>)}</section>;
 }
 
 type Artifact = { path: string; sizeBytes: number; updatedAt: string };

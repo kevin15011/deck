@@ -7,8 +7,14 @@ export type WebAssets = Readonly<Record<string, {
     contentType: string;
 }>>;
 export function computeWebDigest(assets: WebAssets): string { return createHash('sha256').update(JSON.stringify(Object.keys(assets).sort().map(path => [path, assets[path]!.contentType, assets[path]!.body]))).digest('hex'); }
+// The bundler's own png loaders emit empty strings for the browser target, so inline images explicitly.
+const pngDataUrl: Bun.BunPlugin = { name: 'png-data-url', setup(build) {
+    build.onLoad({ filter: /\.png$/ }, async ({ path }) => ({ contents: `export default ${JSON.stringify(`data:image/png;base64,${Buffer.from(await Bun.file(path).arrayBuffer()).toString('base64')}`)};`, loader: 'js' }));
+} };
+// Inline favicon: the brand mark (a "d" on the action colour) with square corners; percent-encoded so index.html stays free of absolute URLs.
+const FAVICON = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='#93c9b1'/><circle cx='14' cy='19' r='5' fill='none' stroke='#14251e' stroke-width='3.5'/><path d='M19.75 5v20.5' stroke='#14251e' stroke-width='3.5'/></svg>`;
 export async function buildWebAssets(): Promise<WebAssets> {
-    const result = await Bun.build({ entrypoints: [resolve(import.meta.dir, '../apps/web/src/main.tsx')], root: resolve(import.meta.dir, '../apps/web'), target: 'browser', minify: true, define: { 'process.env.NODE_ENV': JSON.stringify('production') }, naming: 'app.[ext]' });
+    const result = await Bun.build({ entrypoints: [resolve(import.meta.dir, '../apps/web/src/main.tsx')], root: resolve(import.meta.dir, '../apps/web'), target: 'browser', minify: true, plugins: [pngDataUrl], define: { 'process.env.NODE_ENV': JSON.stringify('production') }, naming: 'app.[ext]' });
     if (!result.success)
         throw new Error(result.logs.map(String).join('\n'));
     const assets: Record<string, {
@@ -22,7 +28,7 @@ export async function buildWebAssets(): Promise<WebAssets> {
     }
     if (!assets['/app.js'] || !assets['/app.css'])
         throw new Error('Web build did not emit JavaScript and CSS');
-    assets['/index.html'] = { contentType: 'text/html; charset=utf-8', body: '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Deck workspace</title><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>' };
+    assets['/index.html'] = { contentType: 'text/html; charset=utf-8', body: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Deck workspace</title><link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(FAVICON)}"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>` };
     return assets;
 }
 export async function generateWebAssets(output = resolve(import.meta.dir, '../apps/cli/src/runtime/web-assets.generated.ts')): Promise<void> {

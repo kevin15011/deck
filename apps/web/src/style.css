@@ -232,7 +232,7 @@ small, .muted, .empty-note { color: var(--muted); }
 summary { color: var(--muted); cursor: pointer; font-size: .75rem; padding: .25rem 0; }
 details > pre { border: 1px solid var(--border); padding: .75rem; background: var(--surface); }
 .task-card { margin: 0 1.5rem 1rem; padding: 1.25rem; background: var(--surface); border: 1px solid var(--border); }
-.task-heading { display: flex; align-items: center; gap: .5rem; justify-content: space-between; }
+.task-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: .75rem; }
 .task-heading h3 { font-size: .95rem; overflow-wrap: anywhere; }
 .status-chip { border: 1px solid var(--border); color: var(--muted); padding: .25rem .5rem; font-size: .65rem; }
 .runner { font-size: .7rem; overflow-wrap: anywhere; line-height: 1.7; margin-top: .75rem; }
@@ -421,3 +421,41 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .workspace-pane,.workspace-tabs{overflow:hidden}
 .app-body.workspace-collapsed .panes,.app-body.workspace-collapsed .view-nav{grid-template-columns:minmax(0px,1fr) minmax(0px,0fr)}
 .app-body.workspace-collapsed .workspace-pane,.app-body.workspace-collapsed .workspace-tabs{visibility:hidden;border-left-width:0}
+
+/* Subagent profiles, bounded conversation and full view */
+.agent-avatar{display:block;flex:none;object-fit:cover;image-rendering:pixelated;border:1px solid var(--border);background:var(--canvas)}
+.agent-avatar--fallback{display:inline-flex;align-items:center;justify-content:center;color:var(--muted);font-weight:600}
+.task-identity{min-width:0}
+.task-identity .runner{margin-top:.25rem;line-height:1.4}
+.task-identity .muted{margin:0}
+.transcript-frame{position:relative}
+.task-transcript{max-height:18rem;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.task-transcript--full{max-height:none;height:100%}
+.transcript-latest{position:absolute;right:.75rem;bottom:.75rem;font-size:.7rem;padding:.35rem .65rem;box-shadow:0 2px 8px #202b291a}
+.open-detail{display:inline-flex;align-items:center;gap:.4rem;font-size:.75rem;padding:.4rem .75rem}
+.subagent-detail{height:100%;min-height:0;display:flex;flex-direction:column}
+.detail-bar{flex:none;display:flex;align-items:center;gap:.75rem;padding:1rem 1.5rem .75rem}
+.detail-back{font-size:.75rem;padding:.35rem .6rem}
+.detail-switch{display:flex;gap:.25rem;margin-left:auto}
+.detail-pick{position:relative;padding:2px;border:1px solid transparent;background:transparent}
+.detail-pick[aria-pressed=true]{border-color:var(--action)}
+.pick-unread{position:absolute;top:-2px;right:-2px;width:7px;height:7px;background:var(--action)}
+.detail-card{flex:none;margin-bottom:.75rem}
+.detail-card .task-result{max-height:30vh;overflow:auto}
+.detail-conversation{flex:1;min-height:0;display:flex;flex-direction:column;margin:0 1.5rem 1rem}
+.detail-conversation h4{flex:none;font-size:.8rem;margin:0 0 .5rem}
+.detail-conversation .transcript-frame{flex:1;min-height:0;border:1px solid var(--border);background:var(--surface)}
+
+@media (max-width:1000px){.detail-bar{padding:.75rem 1rem .5rem}.detail-conversation{margin:0 1rem .75rem}}
+.task-identity .muted{font-size:.7rem}
+.task-card .transcript-frame{margin-top:.5rem;border:1px solid var(--border);background:var(--canvas)}
+.task-transcript{padding:0 .75rem}
+
+/* Compact subagent list */
+.task-card--compact{margin:0 1.5rem .5rem;padding:.75rem}
+.task-card--compact .task-heading{grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:.6rem}
+.task-card--compact h3{font-size:.85rem}
+.task-card--compact .runner{margin-top:.1rem;font-size:.65rem}
+.task-card--compact .task-result--preview{margin-top:.6rem;padding-top:.6rem;max-height:4.6em;overflow:hidden;font-size:.8rem;-webkit-mask-image:linear-gradient(#000 60%,transparent);mask-image:linear-gradient(#000 60%,transparent)}
+.task-card--compact .task-result--preview>*:first-child{margin-top:0}
+@media (max-width:1000px){.task-card--compact{margin:0 1rem .5rem}.task-card--compact .task-heading{grid-template-columns:auto minmax(0,1fr) auto auto}.task-card--compact .open-detail{grid-column:1/-1}}

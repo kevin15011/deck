@@ -136,7 +136,7 @@ try {
     await page.getByRole('tab', { name: 'Subagents', exact: true }).click();
     await page.getByText('Different available summary', { exact: true }).waitFor(); await Bun.sleep(100);
     assert.equal(await page.locator('.task-card [data-unread]').count(), 1, 'mismatched result and closed transcript do not read assistant reply');
-    await page.locator('.task-card summary').click();
+    await page.getByRole('button', { name: 'Open full view' }).click();
     await wait(async () => page.locator('.task-card [data-unread]').count().then(count => count === 0), 'visible actual child transcript read');
     child.finish(); await wait(() => child.finished, 'child final outcome');
     const childMarker = await read(`${first}:${childId}:1`); assert.ok(childMarker > 0);
