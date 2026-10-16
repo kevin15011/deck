@@ -490,3 +490,13 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 /* Colour frame: who is working or waiting on the user, at a glance */
 .task-card[data-activity=working]{border-color:var(--action);box-shadow:inset 0 0 0 1px var(--action)}
 .task-card[data-activity=approval],.task-card[data-activity=question]{border-color:var(--warning);box-shadow:inset 0 0 0 1px var(--warning)}
+
+.approval-mode-chip { display:inline-block; padding:.125rem .375rem; border:1px solid var(--border); border-radius:0; font-size:.65rem; line-height:1.5; color:var(--muted); white-space:nowrap; }
+.approval-mode-chip.is-yolo { color:var(--warning); background:var(--warning-bg); border-color:var(--warning-border); }
+.session-approval-controls { display:flex; flex-wrap:wrap; align-items:center; gap:.375rem; }
+.session-approval-controls > small { flex-basis:100%; font-size:.65rem; color:var(--muted); }
+.workspace-dialog .approval-checkbox { display:flex; flex-direction:row; align-items:flex-start; gap:.5rem; line-height:1.5; color:var(--ink); }
+.workspace-dialog .approval-checkbox input { width:auto; flex:none; margin-top:.125rem; accent-color:var(--action); }
+.yolo-warning { margin-top:.75rem; padding:.75rem; border:1px solid var(--warning-border); border-radius:0; background:var(--warning-bg); color:var(--ink); font-size:.75rem; line-height:1.6; }
+.yolo-warning ul { margin:0 0 .75rem; padding-left:1rem; }
+.yolo-warning li + li { margin-top:.375rem; }

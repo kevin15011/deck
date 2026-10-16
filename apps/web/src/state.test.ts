@@ -76,3 +76,13 @@ test('questions replay, deduplicate, and clear on every resolution outcome',()=>
  expect(reduceEvent(state,event(2,'question.resolved',{questionId:'q',outcome})).questions).toEqual({});
  }
 });
+test('approval mode replays session creation and live changes',()=>{
+ const initial=reduceEvent(emptyState(),event(1,'session.created',{approvals:'relay'}));
+ expect(initial.approvalMode).toBe('relay');expect(initial.approvalModeSource).toBe('session');
+ const yolo=reduceEvent(initial,event(2,'session.approvals',{mode:'yolo',by:'browser'}));
+ expect(yolo.approvalMode).toBe('yolo');
+ expect(reduceEvent(yolo,event(3,'session.approvals',{mode:'relay',by:'browser'})).approvalMode).toBe('relay');
+ const normal=reduceEvent(emptyState(),event(1,'session.created',{}));
+ expect(normal.approvalMode).toBe('relay');expect(normal.approvalModeSource).toBe('default');
+ expect(reduceEvent(normal,event(2,'session.approvals',{mode:'yolo',by:'browser'})).approvalModeSource).toBe('session');
+});

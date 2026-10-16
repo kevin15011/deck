@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { SessionApprovals, type ApprovalMode, type ApprovalModeSource } from './session-approvals';
 import type { Api } from './workspace';
 import type { Preparation } from './workspace-types';
 
@@ -22,7 +23,8 @@ export function useSessionPreparation(api: Api, sessionId: string, connected: bo
     return { preparation, error, update, refresh };
 }
 
-export function SessionControls({ connected, ended, working, busy, closing = false, releaseFailed = false, removing = false, preparation, error, sharedActive, predecessor, showPrimary = true, onReconnect, onPrepare, onCancel, onClose, onAssignments, onPredecessor }: {
+export function SessionControls({ approvalMode, approvalModeSource, onApprovals, connected, ended, working, busy, closing = false, releaseFailed = false, removing = false, preparation, error, sharedActive, predecessor, showPrimary = true, onReconnect, onPrepare, onCancel, onClose, onAssignments, onPredecessor }: {
+    approvalMode?:ApprovalMode; approvalModeSource?:ApprovalModeSource; onApprovals?:(mode:ApprovalMode)=>Promise<unknown>;
     connected: boolean; ended: boolean; working: boolean; busy: boolean; closing?: boolean; releaseFailed?: boolean; removing?: boolean; preparation?: Preparation; error?: string; sharedActive: number; predecessor?: string; showPrimary?: boolean;
     onReconnect: () => void; onPrepare: () => void; onCancel: () => void; onClose: () => void; onAssignments: () => void; onPredecessor: () => void;
 }) {
@@ -30,7 +32,7 @@ export function SessionControls({ connected, ended, working, busy, closing = fal
     const releasing = closing || preparation?.status === 'releasing';
     const status = releaseFailed ? removing ? 'Could not remove session' : 'Could not close session' : releasing ? removing ? 'Removing session…' : 'Closing session…' : !connected ? 'Connection unavailable. Your draft is kept.' : preparation?.status === 'preparing' ? 'Preparing session…' : ready ? 'Ready to send' : preparation?.status === 'failed' ? 'Preparation failed' : preparation?.status === 'cancelled' ? 'Preparation cancelled' : 'Prepare this session before sending.';
     return <section className="session-controls" aria-label="Session controls"><div className="session-control-status"><p role="status">{status}</p>{releasing ? <small>Waiting for session resources to stop. History and drafts are kept.</small> : !ready && connected && <small>Preparation checks setup without sending a model prompt.</small>}{preparation?.reasonCode && <small>{preparation.reasonCode}</small>}{sharedActive > 0 && <small className="shared-workspace">Shared directory · {sharedActive} other active {sharedActive === 1 ? 'session' : 'sessions'}</small>}{predecessor && <button type="button" className="quiet predecessor-link" onClick={onPredecessor}>Continued from {predecessor.slice(0, 8)}</button>}</div>
-        <div className="session-control-actions">{!connected && showPrimary && <button type="button" disabled={busy} onClick={onReconnect}>Reconnect</button>}
+        <div className="session-control-actions">{onApprovals&&<SessionApprovals mode={approvalMode} source={approvalModeSource} disabled={busy||!connected||releasing} onChange={onApprovals}/>}{!connected && showPrimary && <button type="button" disabled={busy} onClick={onReconnect}>Reconnect</button>}
             {(showPrimary || ready) && (releasing ? <button type="button" className="quiet" disabled={!releaseFailed || busy || !connected} onClick={onClose}>{releaseFailed ? removing ? 'Retry removal' : 'Retry close' : removing ? 'Removing session…' : 'Closing session…'}</button> : preparation?.status === 'preparing' ? <button type="button" className="quiet" disabled={busy || !preparation.preparationId} onClick={onCancel}>Cancel preparation</button> : <button type="button" className="quiet" disabled={busy || !connected || (working && !ended && ready)} onClick={onPrepare}>Prepare session</button>)}
             <button type="button" className="quiet" disabled={busy || !connected || releasing} onClick={onAssignments}>Assignments</button>{!ended && <button type="button" className="quiet" disabled={busy || !connected || releasing} onClick={onClose}>Close session</button>}
         </div>{error && <p className="error" role="alert">{error}</p>}</section>;

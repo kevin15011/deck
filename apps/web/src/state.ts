@@ -1,6 +1,7 @@
+import type { ApprovalSummary } from './session-approvals';
 import type { SessionEvent } from '../../../packages/core/src/session/events';
 import { isLeadEvent } from './event-source';
-export type ViewState = {
+export type ViewState = ApprovalSummary & {
     seq: number;
     events: SessionEvent[];
     approvals: Record<string, SessionEvent>;
@@ -22,6 +23,9 @@ export function reduceEvent(state: ViewState, event: SessionEvent): ViewState {
     if (event.kind === 'question.resolved') delete next.questions[String(event.data.questionId)];
     if (event.kind.startsWith('task.'))
         next.tasks[id] = { ...next.tasks[id], ...event.source, ...event.data };
+    const mode=event.kind==='session.created'?event.data.approvals:event.kind==='session.approvals'?event.data.mode:undefined;
+    if(event.kind==='session.created'&&mode===undefined){next.approvalMode='relay';next.approvalModeSource='default';}
+    if(mode==='relay'||mode==='yolo'){next.approvalMode=mode;next.approvalModeSource='session';}
     if (event.kind === 'session.state')
         next.state = String(event.data.state);
     if (event.kind === 'session.ended')
