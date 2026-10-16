@@ -5,7 +5,7 @@ import { animateIn, duration, ease, gsap, installInteractionMotion, reducedMotio
  * panel reveals, ambient loops and the sidebar width. Keeps components free of animation code.
  */
 const entrances: { selector: string; preset: Preset; vars?: gsap.TweenVars }[] = [
-    { selector: '.message', preset: 'rise' },
+    { selector: '.message, .question-answer', preset: 'rise' },
     { selector: '.activity-list > *, .activity-row', preset: 'rise' },
     { selector: '.prompt-queue, .prompt-queue li', preset: 'rise' },
     { selector: '.approvals .approval', preset: 'pop' },

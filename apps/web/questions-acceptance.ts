@@ -135,6 +135,19 @@ try {
     await send.click();
     assert.deepEqual(await result,{outcome:'answered',answers:{single:['Alpha'],multi:['Red','Blue'],text:['browser-free-answer'],secret:['browser-secret-answer'],other:['browser-other-answer']}});
     await wait(async()=>await dock.count()===0,'resolved dock');
+    const answerMessage=page.locator('.conversation .question-answer').filter({hasText:'browser-free-answer'});
+    await wait(async()=>await answerMessage.count()===1,'answered chat block');
+    for(const text of ['You answered','Pick one','Alpha','Red','Blue','browser-free-answer','browser-other-answer','Hidden answer'])assert.equal(await answerMessage.innerText().then(value=>value.includes(text)),true,text);
+    assert.equal(await answerMessage.locator('li').count(),2,'multiple values are listed');
+    assert.equal(await page.locator('.conversation').evaluate(el=>el.outerHTML.includes('browser-secret-answer')),false,'secret sentinel never enters chat DOM');
+    assert.equal(await answerMessage.locator('[data-reply-seq]').count(),0,'answers do not acknowledge assistant replies');
+    await page.screenshot({path:'/tmp/deck-question-answers-chat.png'});
+    await page.reload();
+    await page.getByRole('button',{name:'Questions',exact:true}).first().click();
+    await wait(async()=>await answerMessage.count()===1,'answered block replay after reload');
+    assert.equal(await answerMessage.innerText().then(value=>value.includes('Hidden answer')),true);
+    assert.equal(await page.locator('.conversation').evaluate(el=>el.outerHTML.includes('browser-secret-answer')),false,'replayed chat omits secrets');
+
     // Reuse the independent secret-option probe, with the expected fixed gating.
     const restricted=turn.ask([{...base,id:'__proto__',prompt:'Restricted secret',secret:true,allowOther:false,options:[{label:'Allowed'}]}],'secret-choice');
     await dock.locator('.question-toggle').click();
@@ -161,9 +174,23 @@ try {
         assert.deepEqual(await prototypeResult,{outcome:'answered',answers:Object.fromEntries([[id,['explicit-id-answer']]])});
         await wait(async()=>await dock.count()===0,'prototype resolved');
     }
+    const delegated=await manager.callTaskTool({sessionId:session,taskId:'lead',memberId:'lead',runnerId:'claude'} as never,'deck_delegate',{agent:'deck-investigate',task:'Ask a scoped question'});
+    assert.equal(delegated.ok,true,JSON.stringify(delegated));const childId=(delegated as any).data.taskId;
+    await wait(()=>claude.turns.some(turn=>turn.input.taskId===childId),'child question turn');
+    const child=claude.turns.find(turn=>turn.input.taskId===childId)!;
+    const childAnswer=child.ask([{...base,id:'child',header:'Child choice',prompt:'Subagent question',options:[]}],'child-question');
+    await dock.locator('.question-toggle').click();await dock.getByLabel('Your answer').fill('subagent-public-answer');await send.click();
+    assert.equal((await childAnswer).outcome,'answered');await wait(async()=>await dock.count()===0,'child resolved');
+    assert.equal(await page.locator('.conversation .question-answer').filter({hasText:'subagent-public-answer'}).count(),0,'child answer stays out of Lead chat');
+    await page.getByRole('tab',{name:'Subagents',exact:true}).click();
+    await page.locator('.task-card').getByRole('button',{name:'Open full view',exact:true}).click();
+    const childMessage=page.locator('.task-transcript').getByRole('article',{name:'You answered · Investigate',exact:true});
+    await childMessage.waitFor();assert.match(await childMessage.innerText(),/Subagent question/);assert.match(await childMessage.innerText(),/subagent-public-answer/);
+    child.finish();await page.getByRole('tab',{name:'Activity',exact:true}).click();
     // Tabs and actions stay outside the long question's scrollable body.
     for(const width of [1440,1000,390])for(const requestCount of [1,3]){
         await page.setViewportSize({width,height:width===390?844:1000});
+        if(width<=1000)await page.getByRole('tab',{name:'Chat',exact:true}).click();
         await page.emulateMedia({reducedMotion:width===390?'reduce':'no-preference'});
         const longQuestion={...base,id:'long',header:'Options',prompt:'Choose the options you want to explore',multiple:true,allowOther:false,options:Array.from({length:8},(_,i)=>({label:`Option ${i+1}`,description:'A detailed explanation of this choice, including the tradeoffs and the expected outcome. '.repeat(3)}))};
         const requests=Array.from({length:requestCount},(_,i)=>turn.ask([longQuestion,{...questions[2]!,header:'Details'}],`long:${width}:${requestCount}:${i}`));
@@ -201,6 +228,7 @@ try {
         await Promise.all(requests);await wait(async()=>await dock.count()===0,'long questions resolved');
     }
     await page.setViewportSize({width:390,height:844});
+    await page.getByRole('tab',{name:'Chat',exact:true}).click();
     const dismissed=turn.ask([questions[0]!]);
     await dock.locator('.question-toggle').click();
     await page.emulateMedia({reducedMotion:'reduce'});
@@ -208,6 +236,7 @@ try {
     assert.ok(await dock.locator('.question-panel').evaluate(el=>el.getBoundingClientRect().height<=innerHeight*.51),'panel scrolls within half viewport');
     await dock.getByRole('button',{name:'Dismiss',exact:true}).click();
     assert.equal((await dismissed).outcome,'dismissed');
+    await wait(async()=>await page.locator('.conversation').getByRole('article',{name:'You dismissed the questions · Lead',exact:true}).count()>0,'dismissed chat block');
     const pending=[turn.ask([questions[2]!],'codex:0'),turn.ask([questions[2]!],'mobile:1'),turn.ask([questions[2]!],'mobile:2')];
     await wait(async()=>await dock.count()===3,'three mobile docks');
     await dock.nth(0).locator('.question-toggle').click();
@@ -222,11 +251,12 @@ try {
     assert.equal(await page.locator('#prompt').evaluate(el=>{const r=el.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&document.activeElement===el;}),true,'composer reachable');
     await page.getByRole('button',{name:'Open sessions',exact:true}).click();
     await page.getByRole('button',{name:'Other session',exact:true}).first().click();
+    const turnsBeforeRestart=claude.turns.length;
     await manager.close(); manager=createManager();
     await Promise.all(pending);
     await command({type:'prompt.send',text:'Ask elsewhere'},otherSession);
-    await wait(()=>claude.turns.length===2,'other lead');
-    const other=claude.turns[1]!;
+    await wait(()=>claude.turns.length===turnsBeforeRestart+1,'other lead');
+    const other=claude.turns.at(-1)!;
     const otherResult=other.ask([questions[2]!],'codex:0');
     await wait(async()=>await dock.count()===1,'other question after restart');
     await dock.locator('.question-toggle').click();
@@ -237,7 +267,10 @@ try {
     await page.getByRole('button',{name:'Questions',exact:true}).first().click();
     await wait(async()=>await dock.count()===0,'inactive cancellations replay after restart');
     const events=JSON.stringify([...manager.openLog(session)!.readAfter(0)]);
-    for(const value of ['browser-free-answer','browser-secret-answer','browser-other-answer'])assert.equal(events.includes(value),false);
+    assert.equal(events.includes('browser-secret-answer'),false,'secret never enters ledger');
+    for(const value of ['browser-free-answer','browser-other-answer'])assert.equal(events.includes(value),true,'public answer persists');
+    await wait(async()=>await answerMessage.count()===1,'answer replay survives session switch and host restart');
+    await wait(async()=>await page.locator('.conversation').getByRole('article',{name:'Questions cancelled · Lead',exact:true}).count()>0,'cancelled questions replay');
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({ok:true,checks:41}));
+    console.log(JSON.stringify({ok:true,checks:48}));
 } catch(error) { console.error(error);  process.exitCode=1; } finally { await browser.close(); host.disable?.(); await manager.close(); rmSync(root,{recursive:true,force:true}); process.exit(process.exitCode??0); }

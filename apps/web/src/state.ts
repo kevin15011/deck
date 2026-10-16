@@ -46,10 +46,25 @@ export function pairingToken(location: {
         history.replaceState(null, '', location.pathname + location.search);
     return token;
 }
+export type QuestionAnswerRow = { id:string; header?:string; prompt?:string; secret:boolean; values:string[] };
+export type QuestionResolution = { outcome:string; rows:QuestionAnswerRow[] };
+export type ConversationEvent = SessionEvent & { questionResolution?:QuestionResolution };
+export function joinQuestionResolution(event:SessionEvent, request?:SessionEvent):QuestionResolution {
+    const outcome=String(event.data.outcome), answers=event.data.answers;
+    const entries=answers&&typeof answers==='object'&&!Array.isArray(answers)?Object.entries(answers):[];
+    const publicAnswers=new Map(entries.map(([id,values])=>[id,Array.isArray(values)?values.filter((value):value is string=>typeof value==='string'):[]]));
+    const questions=Array.isArray(request?.data.questions)?request.data.questions:[];
+    const rows:QuestionAnswerRow[]=questions.filter(q=>q&&typeof q==='object'&&typeof q.id==='string').map(q=>({id:q.id,header:typeof q.header==='string'?q.header:undefined,prompt:typeof q.prompt==='string'?q.prompt:undefined,secret:q.secret===true,values:q.secret===true?[]:publicAnswers.get(q.id)??[]}));
+    return {outcome,rows:outcome!=='answered'?[]:rows.length?rows:[...publicAnswers].map(([id,values])=>({id,secret:false,values}))};
+}
 /** Native runners stream deltas then a completed message. Render one message per stream. */
-export function conversationEvents(events: SessionEvent[], taskId = 'lead'): SessionEvent[] {
-    const messages: SessionEvent[] = [], pending = new Map<string, number>();
-    for (const e of events) {
+export function conversationEvents(events: SessionEvent[], taskId = 'lead'): ConversationEvent[] {
+    const messages: ConversationEvent[] = [], pending = new Map<string, number>(), requests=new Map<string,SessionEvent>();
+    for (const raw of events) {
+        const requestKey=JSON.stringify([raw.sessionId,raw.data.questionId]);
+        if(raw.kind==='question.requested'&&!raw.data.internal)requests.set(requestKey,raw);
+        const request=requests.get(requestKey);
+        const e:ConversationEvent=raw.kind==='question.resolved'?{...raw,source:{...request?.source,...raw.source},questionResolution:joinQuestionResolution(raw,request)}:raw;
         if (e.data.internal === true || !(taskId === 'lead' ? isLeadEvent(e) : (e.source.taskId ?? 'lead') === taskId) || e.data.role === 'system')
             continue;
         const task = e.source.taskId ?? 'lead';
@@ -73,6 +88,7 @@ export function conversationEvents(events: SessionEvent[], taskId = 'lead'): Ses
                 pending.delete(key);
             }
         }
+        else if(e.kind==='question.resolved'){pending.delete(task+':message');messages.push(e);}
         else if (e.kind === 'turn.completed' && e.data.status === 'failed')
             messages.push(e);
     }

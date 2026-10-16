@@ -502,3 +502,14 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .yolo-warning { margin-top:.75rem; padding:.75rem; border:1px solid var(--warning-border); border-radius:0; background:var(--warning-bg); color:var(--ink); font-size:.75rem; line-height:1.6; }
 .yolo-warning ul { margin:0 0 .75rem; padding-left:1rem; }
 .yolo-warning li + li { margin-top:.375rem; }
+
+.question-answer-row + .question-answer-row { border-top:1px solid var(--border); margin-top:.75rem; padding-top:.75rem; }
+.question-answer-label, .question-answer-prompt, .question-answer-value, .question-answer-hidden { margin:.25rem 0; overflow-wrap:anywhere; white-space:pre-wrap; }
+.question-answer-label { font-size:.85rem; }
+.question-answer-prompt { color:var(--muted); font-size:.85rem; }
+.question-answer ul { margin:.375rem 0; padding-left:1.25rem; }
+.question-answer-hidden { display:flex; align-items:center; gap:.375rem; color:var(--muted); }
+.question-answer-hidden svg { width:1rem; height:1rem; flex:none; }
+.task-transcript .question-answer.user { padding:.75rem; margin:.75rem 0 .75rem 1rem; border:1px solid var(--border); }
+
+.question-answer.muted .message-meta strong { color:var(--muted); }

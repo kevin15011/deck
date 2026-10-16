@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { conversationEvents, emptyState, pairingToken, reduceEvent } from './state';
+import { joinQuestionResolution, conversationEvents, emptyState, pairingToken, reduceEvent } from './state';
 import type { SessionEvent } from '../../../packages/core/src/session/events';
 const event = (seq: number, kind: SessionEvent['kind'], data: Record<string, unknown>): SessionEvent => ({ v: 1, sessionId: 's', seq, kind, data, source: { taskId: 'lead' }, ts: '2026-01-01T00:00:00Z' });
 test('replay retains pending approvals across long histories and deduplicates reconnects', () => {
@@ -85,4 +85,29 @@ test('approval mode replays session creation and live changes',()=>{
  const normal=reduceEvent(emptyState(),event(1,'session.created',{}));
  expect(normal.approvalMode).toBe('relay');expect(normal.approvalModeSource).toBe('default');
  expect(reduceEvent(normal,event(2,'session.approvals',{mode:'yolo',by:'browser'})).approvalModeSource).toBe('session');
+});
+
+test('question resolution joins request details and strips secret values',()=>{
+ const request=event(1,'question.requested',{questionId:'set',questions:[{id:'choice',header:'Choice',prompt:'Pick one',secret:false},{id:'token',prompt:'Token',secret:true}]});
+ const resolved=event(3,'question.resolved',{questionId:'set',outcome:'answered',answers:{choice:['One'],token:['never-retain-this']}});
+ const joined=joinQuestionResolution(resolved,request);
+ expect(joined.rows).toEqual([{id:'choice',header:'Choice',prompt:'Pick one',secret:false,values:['One']},{id:'token',header:undefined,prompt:'Token',secret:true,values:[]}]);
+ expect(JSON.stringify(joined)).not.toContain('never-retain-this');
+ const rows=conversationEvents([request,event(2,'message.delta',{text:'Before'}),resolved,event(4,'message.completed',{text:'After'})]);
+ expect(rows.map(row=>row.seq)).toEqual([2,3,4]);expect(rows[1]!.questionResolution).toEqual(joined);
+});
+test('question resolutions route to their own task across Lead generations',()=>{
+ const request={...event(1,'question.requested',{questionId:'child-q',questions:[{id:'q',prompt:'Child prompt',secret:false}]}),source:{taskId:'child',memberId:'investigate'}};
+ const child={...event(2,'question.resolved',{questionId:'child-q',outcome:'answered',answers:{q:['Child answer']}}),source:request.source};
+ const lead={...event(3,'question.resolved',{questionId:'lead-q',outcome:'dismissed'}),source:{taskId:'lead-g1',memberId:'lead'}};
+ expect(conversationEvents([request,child,lead]).map(row=>row.seq)).toEqual([3]);
+ expect(conversationEvents([request,child,lead],'child')[0]!.questionResolution!.rows[0]!.prompt).toBe('Child prompt');
+});
+test('missing requests use own answer ids and tolerate legacy resolutions',()=>{
+ const resolved=event(2,'question.resolved',{questionId:'missing',outcome:'answered',answers:Object.fromEntries([['__proto__',['Typed answer']]])});
+ expect(joinQuestionResolution(resolved).rows).toEqual([{id:'__proto__',secret:false,values:['Typed answer']}]);
+ expect(conversationEvents([resolved])[0]!.questionResolution!.rows).toHaveLength(1);
+ expect(joinQuestionResolution(event(3,'question.resolved',{outcome:'answered'})).rows).toEqual([]);
+ const foreign={...event(1,'question.requested',{questionId:'missing',questions:[{id:'__proto__',prompt:'Wrong session',secret:false}]}),sessionId:'other'};
+ expect(conversationEvents([foreign,resolved])[0]!.questionResolution!.rows[0]!.prompt).toBeUndefined();
 });

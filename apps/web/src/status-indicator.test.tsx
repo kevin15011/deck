@@ -41,3 +41,11 @@ test('pending questions wait for user and resolve independently',()=>{
  expect(indicatorState('running',0,1)).toBe('question');
  expect(leadActivityFromEvents([...events,event(2,'question.resolved',{questionId:'q'})],'lead').pendingQuestions).toBe(0);
 });
+
+test('question answers never become unread assistant replies',()=>{
+ const before=event(1,'message.completed',{text:'Assistant reply'});
+ const resolution=event(2,'question.resolved',{questionId:'set',outcome:'answered',answers:{q:['User answer']}});
+ expect(leadActivityFromEvents([before,resolution],'lead').lastReplySeq).toBe(1);
+ expect(replyForTask([before,resolution],'lead')?.seq).toBe(1);
+ expect(replyForTask([resolution],'lead')).toBeUndefined();
+});
