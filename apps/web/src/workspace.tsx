@@ -143,7 +143,7 @@ function TranscriptMessages({ model, visible, acknowledge }: { model: TaskModel;
 
 export function Subagents({ api,view, sessionId = '', visible = false, readMarkers = {}, acknowledge = () => {} }: { api?:Api;view: ViewState; sessionId?: string; visible?: boolean; readMarkers?: ReadMarkers; acknowledge?: (key: string, seq: number) => void }) {
     const entries = Object.entries(view.tasks).filter(([id, task]) => id !== 'lead' && task.memberId !== 'lead') as TaskEntry[];
-    const models = entries.map(([id, task]) => taskModel(view, id, task, sessionId, readMarkers));
+    const models = entries.map(([id, task]) => taskModel(view, id, task, sessionId, readMarkers)).sort((a, b) => (b.reply?.seq ?? 0) - (a.reply?.seq ?? 0));
     const [openId, setOpenId] = useState('');
     useEffect(() => { setOpenId(''); }, [sessionId]);
     const detail = models.find(model => model.id === openId);
