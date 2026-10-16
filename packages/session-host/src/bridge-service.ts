@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { validateQuestions, type Question } from "@deck/core/session/question";
 import type { QuestionBroker } from "./question-broker";
 /** Daemon side of the session MCP bridge: authenticates the task credential, enforces its tool grant, serves the tools. */
 import { DECK_APPROVE_TOOL, DECK_STATUS_TOOL } from "./bridge-config";
@@ -41,6 +43,32 @@ export class BridgeService implements BridgePort {
     if (signal?.aborted) return { ok: false, code: "aborted" };
     const { broker } = this.options;
     const input = (args.input ?? {}) as Record<string, unknown>;
+    const questionBroker = this.options.questionBroker;
+    if (args.tool_name === "AskUserQuestion" && questionBroker) {
+      const questions = Array.isArray(input.questions) ? input.questions.map((raw, index) => {
+        if (!isObj(raw)) return null;
+        return {
+          id: `q${index + 1}`, prompt: raw.question, header: raw.header,
+          options: raw.options, multiple: !!raw.multiSelect, allowOther: true, secret: false,
+        };
+      }) : undefined;
+      if (!validateQuestions(questions)) return { ok: false, code: "invalid-arguments", message: "AskUserQuestion needs valid questions" };
+      const request = questionBroker.request({
+        sessionId: grant.sessionId, taskId: grant.taskId, memberId: grant.memberId, runnerId: grant.runnerId,
+        questionId: randomUUID(), tool: args.tool_name, questions,
+      });
+      const onAbort = () => { questionBroker.cancel(request.questionId, "bridge-disconnected"); };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      // A synchronous event sink can abort while request() publishes the question.
+      if (signal?.aborted) onAbort();
+      try {
+        const resolution = await request.resolution;
+        if (resolution.outcome !== "answered") return { ok: true, data: { behavior: "deny", message: "The user dismissed the question." } };
+        return { ok: true, data: { behavior: "allow", updatedInput: { ...input, answers: claudeAnswers(questions, resolution.answers) } } };
+      } finally {
+        signal?.removeEventListener("abort", onAbort);
+      }
+    }
     const request = broker.request({
       sessionId: grant.sessionId, taskId: grant.taskId, memberId: grant.memberId, runnerId: grant.runnerId, tool: args.tool_name, input,
     });
@@ -56,4 +84,20 @@ export class BridgeService implements BridgePort {
       signal?.removeEventListener("abort", onAbort);
     }
   }
+}
+
+function claudeAnswers(questions: Question[], answers: Record<string, string[]>): Record<string, string> {
+  const result: Record<string, string> = Object.create(null);
+  const reserved = new Set(questions.map(q => q.prompt));
+  for (const question of questions) {
+    let key = question.prompt;
+    // Claude keys answers by full text. Later duplicates get the first free numbered
+    // suffix, reserving literal question texts so no answer can overwrite another.
+    for (let suffix = 2; Object.hasOwn(result, key); suffix++) {
+      key = `${question.prompt} (${suffix})`;
+      if (reserved.has(key)) key = question.prompt;
+    }
+    result[key] = answers[question.id]!.join(", ");
+  }
+  return result;
 }

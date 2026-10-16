@@ -3,6 +3,7 @@ import { chmodSync, existsSync, lstatSync, readFileSync, unlinkSync } from "node
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { QuestionBroker } from "../question-broker";
 import { ApprovalBroker } from "../approval-broker";
 import { sessionMcpServerSpec, DECK_APPROVE_TOOL, DECK_STATUS_TOOL, DEFAULT_ALLOWED_TOOLS } from "../bridge-config";
 import { BridgeService } from "../bridge-service";
@@ -333,5 +334,73 @@ describe("session MCP server spec: secrets by file path only (XR-4.7)", () => {
     expect(out).not.toContain(h.token);
     child.stdin!.end();
     await new Promise<void>((r) => child.once("exit", () => r()));
+  });
+});
+
+
+describe("Claude structured questions", () => {
+  const question = { question: "Which?", header: "Choice", options: [{ label: "A", description: "First" }, { label: "B" }], multiSelect: false };
+  async function setup() {
+    const h = await harness();
+    const questionBroker = new QuestionBroker({ sink: { emit: (sid, draft) => { h.service.logs.get(sid)?.append(draft); } } });
+    cleanups.push(() => questionBroker.dispose());
+    const bridge = new BridgeService({ credentials: h.credentials, broker: h.broker, questionBroker, status: () => ({}) });
+    const ask = (input: unknown, signal?: AbortSignal) => bridge.call({ token: h.token, tool: DECK_APPROVE_TOOL, arguments: { tool_name: "AskUserQuestion", input } }, { signal });
+    return { ...h, questionBroker, ask };
+  }
+  for (const [name, values, multiple] of [["single", ["A"], false], ["multiple", ["A", "B"], true], ["other text", [" my own answer "], false]] as const) {
+    test(`converts ${name} and returns answers keyed by full question text`, async () => {
+      const h = await setup();
+      const input = { questions: [{ ...question, multiSelect: multiple, secret: true }], extra: "preserved" };
+      const call = h.ask(input);
+      const pending = h.questionBroker.pending()[0]!;
+      expect(pending).toBeDefined();
+      const event = [...h.log.readAfter(0)].find(e => e.kind === "question.requested")!;
+      expect(event.data).toMatchObject({ questions: [{ id: "q1", prompt: "Which?", header: "Choice", options: question.options, multiple, allowOther: true, secret: false }] });
+      expect(h.broker.pending()).toEqual([]);
+      expect(h.questionBroker.respond({ questionId: pending.questionId, answers: { q1: [...values] }, by: "web" })).toEqual({ ok: true });
+      expect(await call).toEqual({ ok: true, data: { behavior: "allow", updatedInput: { ...input, answers: { "Which?": values.join(", ") } } } });
+      expect(JSON.stringify([...h.log.readAfter(0)].filter(e => e.kind === "question.resolved"))).not.toContain(values.join(", "));
+    });
+  }
+  test("duplicate texts use deterministic suffixes without overwriting literal suffixes", async () => {
+    const h = await setup();
+    const call = h.ask({ questions: [question, question, { ...question, question: "Which? (2)" }] });
+    h.questionBroker.respond({ questionId: h.questionBroker.pending()[0]!.questionId, answers: { q1: ["A"], q2: ["B"], q3: ["custom"] }, by: "web" });
+    expect(await call).toMatchObject({ data: { updatedInput: { answers: { "Which?": "A", "Which? (3)": "B", "Which? (2)": "custom" } } } });
+  });
+  for (const outcome of ["dismissed", "cancelled", "abort"] as const) {
+    test(`${outcome} denies and clears the pending question`, async () => {
+      const h = await setup();
+      const ac = new AbortController();
+      const call = h.ask({ questions: [question] }, ac.signal);
+      const id = h.questionBroker.pending()[0]!.questionId;
+      if (outcome === "abort") ac.abort();
+      else if (outcome === "dismissed") h.questionBroker.dismiss({ questionId: id, by: "web" });
+      else h.questionBroker.cancel(id, "task-ended");
+      expect(await call).toEqual({ ok: true, data: { behavior: "deny", message: "The user dismissed the question." } });
+      expect(h.questionBroker.pending()).toEqual([]);
+      if (outcome === "abort") expect([...h.log.readAfter(0)].at(-1)!.data).toMatchObject({ outcome: "cancelled", by: "bridge-disconnected" });
+    });
+  }
+  test("already aborted calls create no question", async () => {
+    const h = await setup();
+    expect(await h.ask({ questions: [question] }, AbortSignal.abort())).toMatchObject({ ok: false, code: "aborted" });
+    expect(h.questionBroker.pending()).toEqual([]);
+  });
+  test("without a question broker retains approval behavior", async () => {
+    const h = await harness();
+    const input = { questions: [question] };
+    const call = h.bridge.call({ token: h.token, tool: DECK_APPROVE_TOOL, arguments: { tool_name: "AskUserQuestion", input } });
+    h.broker.respond({ approvalId: h.broker.pending()[0]!.approvalId, decision: "allow", by: "web" });
+    expect(await call).toEqual({ ok: true, data: { behavior: "allow", updatedInput: input } });
+  });
+  test("malformed questions fail before either broker is invoked", async () => {
+    const h = await setup();
+    for (const questions of [undefined, {}, [], Array(9).fill(question), [null], [{ ...question, question: "" }], [{ ...question, options: [{ label: 1 }] }], [{ ...question, header: "h".repeat(121) }]]) {
+      expect(await h.ask({ questions })).toMatchObject({ ok: false, code: "invalid-arguments" });
+    }
+    expect(h.questionBroker.pending()).toEqual([]);
+    expect(h.broker.pending()).toEqual([]);
   });
 });

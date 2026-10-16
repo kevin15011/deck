@@ -97,6 +97,8 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   args.push("--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, disableAllHooks: !nativePlugin }));
   if (nativePlugin) args.push("--plugin-dir", nativePlugin.root);
   if (input.approvals === "relay") args.push("--permission-prompt-tool", DECK_APPROVE_PROMPT_TOOL);
+  // Verified on Claude 2.1.301: runner-default skips the permission-prompt path
+  // and does not expose AskUserQuestion. Structured questions require relay mode.
   else args.push("--dangerously-skip-permissions");
   if (input.disableNativeDelegation) args.push("--disallowedTools", NATIVE_DELEGATION_TOOLS);
   if (input.rolePrompt.length > 0) args.push("--append-system-prompt-file", files.writePrivateFile("role-prompt.md", input.rolePrompt));
