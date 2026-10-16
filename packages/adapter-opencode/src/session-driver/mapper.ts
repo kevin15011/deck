@@ -41,6 +41,10 @@ export function mapOpenCodeEvent(raw: unknown, partTypes = new Map<string, strin
   if (typeof raw.type === "string" && (raw.type === "question.asked" || raw.type === "question.replied" || raw.type === "question.rejected" || raw.type.startsWith("question.v2."))) return [];
   const p = record(raw.properties) ? raw.properties : {};
   const part = record(p.part) ? p.part : {};
+  if (raw.type === "message.part.delta") {
+    const key = partKey(p.messageID, p.partID);
+    if (key && partTypes.get(key) === "question") return [{ kind: "runner.unmapped", data: { type: raw.type } }];
+  }
   if (raw.type === "message.part.delta" && p.field === "text" && typeof p.delta === "string") {
     const key = partKey(p.messageID, p.partID);
     const type = key ? partTypes.get(key) : undefined;
@@ -49,8 +53,17 @@ export function mapOpenCodeEvent(raw: unknown, partTypes = new Map<string, strin
   if (raw.type === "message.part.updated") {
     const key = partKey(part.messageID, part.id);
     if (key && typeof part.type === "string") {
-      partTypes.set(key, part.type);
+      partTypes.set(key, part.type === "tool" && part.tool === "question" ? "question" : part.type);
       if (partTypes.size > 1024) partTypes.delete(partTypes.keys().next().value!);
+    }
+    // Question answers can occur anywhere in state (including input, title and
+    // metadata). Allow only identity/status, and never capture the native payload.
+    if (part.type === "tool" && part.tool === "question") {
+      const status = record(part.state) ? part.state.status : undefined;
+      const identity = { toolUseId: typeof part.callID === "string" ? part.callID : undefined, name: "question" };
+      if (status === "running") return [{ kind: "tool.started", data: { ...identity, status: "running" } }];
+      if (status === "completed" || status === "error") return [{ kind: "tool.completed", data: { ...identity, isError: status === "error", status: status === "error" ? "failed" : "completed" } }];
+      return [{ kind: "runner.unmapped", data: { type: raw.type } }];
     }
     if (part.type === "text" && typeof part.text === "string") return [{ kind: "message.completed", data: { text: part.text, messageId: part.messageID }, raw }];
     if (part.type === "reasoning" && typeof part.text === "string") return [{ kind: "reasoning.delta", data: { text: redactText(part.text, 8192), messageId: part.messageID, partId: part.id, reasoningKind: "text", format: "snapshot" }, raw }];
