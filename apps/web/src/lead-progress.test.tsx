@@ -85,3 +85,7 @@ test('pending question takes precedence and resolves back to work',()=>{
  expect(leadProgress(events,{sessionId:'s'})).toEqual({phase:'question',label:'Waiting for your answer'});
  expect(leadProgress([...events,event(4,'question.resolved',{questionId:'q'})],{sessionId:'s'})?.phase).toBe('responding');
 });
+test('session auto-approval does not leave the Lead waiting for permission',()=>{
+ const events=[event(1,'turn.started'),event(2,'approval.requested',{approvalId:'a'}),event(3,'approval.resolved',{approvalId:'a',auto:true,by:'session-grant:g'})];
+ expect(leadProgress(events,{sessionId:'s'})?.phase).not.toBe('approval');
+});

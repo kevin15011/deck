@@ -1,3 +1,4 @@
+import { AutoApprovalMessage } from './approvals';
 import { QuestionAnswerMessage } from './question-answer';
 import { StatusIndicator, VisibleReply, indicatorState, replyForTask, type ReadMarkers } from './status-indicator';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -136,7 +137,7 @@ function TaskResult({ model, visible, acknowledge, preview = false }: { model: T
     return <VisibleReply className={`task-result${preview ? ' task-result--preview' : ''}`} visible={visible} replyKey={model.key} seq={model.resultMatches ? model.reply!.seq : 0} acknowledge={acknowledge}>{!preview && <h4>Result</h4>}<Markdown text={displayValue(model.result)}/></VisibleReply>;
 }
 function TranscriptMessages({ model, visible, acknowledge }: { model: TaskModel; visible: boolean; acknowledge: (key: string, seq: number) => void }) {
-    return <>{model.messages.map(event => event.questionResolution?<QuestionAnswerMessage key={event.seq} resolution={event.questionResolution} ts={event.ts} label={agentProfile(model.member).label}/>:<article key={event.seq}><p className="message-meta">{event.data.role === 'user' ? 'Delegation' : agentProfile(model.member).label}</p><VisibleReply visible={visible} replyKey={model.key} seq={model.reply?.seq === event.seq ? event.seq : 0} acknowledge={acknowledge}><Markdown text={displayValue(event.data.text ?? event.data.error)}/></VisibleReply></article>)}</>;
+    return <>{model.messages.map(event => event.autoApproval?<AutoApprovalMessage key={event.seq} detail={event.autoApproval} label={agentProfile(model.member).label}/>:event.questionResolution?<QuestionAnswerMessage key={event.seq} resolution={event.questionResolution} ts={event.ts} label={agentProfile(model.member).label}/>:<article key={event.seq}><p className="message-meta">{event.data.role === 'user' ? 'Delegation' : agentProfile(model.member).label}</p><VisibleReply visible={visible} replyKey={model.key} seq={model.reply?.seq === event.seq ? event.seq : 0} acknowledge={acknowledge}><Markdown text={displayValue(event.data.text ?? event.data.error)}/></VisibleReply></article>)}</>;
 }
 
 export function Subagents({ view, sessionId = '', visible = false, readMarkers = {}, acknowledge = () => {} }: { view: ViewState; sessionId?: string; visible?: boolean; readMarkers?: ReadMarkers; acknowledge?: (key: string, seq: number) => void }) {

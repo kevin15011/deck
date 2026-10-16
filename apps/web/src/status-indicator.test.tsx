@@ -49,3 +49,7 @@ test('question answers never become unread assistant replies',()=>{
  expect(replyForTask([before,resolution],'lead')?.seq).toBe(1);
  expect(replyForTask([resolution],'lead')).toBeUndefined();
 });
+test('auto-approved permissions leave no pending status or unread reply',()=>{
+ const events=[event(1,'approval.requested',{approvalId:'a'}),event(2,'approval.resolved',{approvalId:'a',auto:true,by:'session-grant:g'})];
+ expect(leadActivityFromEvents(events,'lead').pendingApprovals).toBe(0);expect(replyForTask(events,'lead')).toBeUndefined();
+});

@@ -111,3 +111,22 @@ test('missing requests use own answer ids and tolerate legacy resolutions',()=>{
  const foreign={...event(1,'question.requested',{questionId:'missing',questions:[{id:'__proto__',prompt:'Wrong session',secret:false}]}),sessionId:'other'};
  expect(conversationEvents([foreign,resolved])[0]!.questionResolution!.rows[0]!.prompt).toBeUndefined();
 });
+test('session grants replay, revoke, deduplicate and clear when the session ends',()=>{
+ const added=event(1,'session.grant',{action:'added',grantId:'g',kind:'exact',toolKey:'codex:commandExecution',exactKey:'cat README.md',risk:'high'});
+ const state=reduceEvent(emptyState(),added);
+ expect(state.grants).toEqual([{grantId:'g',kind:'exact',toolKey:'codex:commandExecution',exactKey:'cat README.md',risk:'high',createdAt:added.ts}]);
+ expect(reduceEvent(state,added)).toBe(state);
+ expect(reduceEvent(state,event(2,'session.grant',{action:'revoked',grantId:'g'})).grants).toEqual([]);
+ expect(reduceEvent(state,event(2,'session.ended',{})).grants).toEqual([]);
+});
+test('auto approvals resolve pending requests and join the exact action into chat',()=>{
+ const request=event(1,'approval.requested',{approvalId:'a',tool:'Bash',exactKey:'cat README.md'});
+ const resolved=event(2,'approval.resolved',{approvalId:'a',decision:'allow-once',auto:true,by:'session-grant:g'});
+ expect([request,resolved].reduce(reduceEvent,emptyState()).approvals).toEqual({});
+ expect(conversationEvents([request,resolved])[0]!.autoApproval).toEqual({tool:'Bash',exactKey:'cat README.md'});
+ expect(conversationEvents([{...resolved,data:{...resolved.data,auto:false}}])).toEqual([]);
+});
+test('auto approvals stay in their task transcript and tolerate missing requests',()=>{
+ const resolved={...event(2,'approval.resolved',{approvalId:'a',auto:true,by:'session-grant:g'}),source:{taskId:'child',memberId:'investigate'}};
+ expect(conversationEvents([resolved])).toEqual([]);expect(conversationEvents([resolved],'child')[0]!.autoApproval?.tool).toBe('Tool request');
+});

@@ -513,3 +513,28 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .task-transcript .question-answer.user { padding:.75rem; margin:.75rem 0 .75rem 1rem; border:1px solid var(--border); }
 
 .question-answer.muted .message-meta strong { color:var(--muted); }
+
+.approval { flex-wrap:wrap; }
+.approval > div:first-child { flex:1 1 16rem; }
+.approval-pattern { min-width:0; display:grid; gap:.25rem; font-size:.8rem; }
+.approval-pattern code { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.approval-pattern--full code { white-space:pre-wrap; overflow-wrap:anywhere; overflow:visible; }
+.approval-actions { flex:0 1 auto; flex-wrap:wrap; align-items:flex-start; }
+.approval-scope-menu { min-width:0; max-width:100%; }
+.approval-scope-menu > summary { color:var(--ink); border:1px solid var(--border); padding:.5rem .625rem; list-style:none; }
+.approval-scope-menu > summary::-webkit-details-marker { display:none; }
+.approval-scope-choices { display:flex; flex-direction:column; align-items:stretch; gap:.25rem; max-width:20rem; padding:.5rem; border:1px solid var(--border); background:var(--surface); }
+.approval-scope-choices button { text-align:left; white-space:normal; overflow-wrap:anywhere; }
+.approval-risk { color:var(--warning); font-size:.75rem; line-height:1.5; }
+.approval-persistence { margin:0; padding:.75rem; background:var(--warning-bg); border-left:2px solid var(--warning); white-space:pre-wrap; overflow-wrap:anywhere; font-size:.8rem; }
+.approval-error { flex-basis:100%; }
+.auto-approval { font-size:.8rem; }
+.auto-approval > p { margin:0 0 .25rem; }
+.session-permissions { flex-basis:100%; min-width:0; font-size:.75rem; }
+.session-permissions > ul { max-height:25dvh; overflow:auto; overscroll-behavior:contain; margin:.25rem 0; padding:0; list-style:none; }
+.session-permissions li { display:flex; align-items:flex-start; justify-content:space-between; gap:.5rem; padding:.5rem; border-top:1px solid var(--border); }
+.session-permissions li > div { min-width:0; overflow-wrap:anywhere; }
+.session-permissions li span, .session-permissions li small { display:block; }
+.session-permissions li code { white-space:pre-wrap; overflow-wrap:anywhere; }
+.session-permissions li button { flex:none; font-size:.7rem; }
+@media(max-width:1000px) { .approval-actions { justify-content:flex-start; } }
