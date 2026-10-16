@@ -74,6 +74,46 @@ describe("question tool answer privacy", () => {
       expect(events[0]!.raw).toBeUndefined();
     }
   });
+  test("unclassified deltas and tool updates never capture answers", () => {
+    const mapper = new OpenCodeEventMapper();
+    for (const field of ["text", "input", "output", "metadata", "title", "error"]) {
+      expect(JSON.stringify(mapper.map({ type: "message.part.delta", properties: { messageID: "m1", partID: "q1", field, delta: answer } }))).not.toContain(answer);
+    }
+    for (const status of ["running", "completed", "error", "pending"]) {
+      expect(JSON.stringify(mapper.map(updated({ id: "q1", type: "tool", state: { status, input: answer, output: answer, metadata: answer, title: answer, error: answer } })))).not.toContain(answer);
+    }
+    mapper.map(updated({ id: "q1", type: "tool", tool: "question" }));
+  });
+  test("evicted question classifications remain safe for deltas and partial updates", () => {
+    const mapper = new OpenCodeEventMapper();
+    mapper.map(updated({ id: "q1", type: "tool", tool: "question" }));
+    for (let i = 0; i < 1024; i++) mapper.map(updated({ id: `p${i}`, type: "text", text: "" }));
+    for (const field of ["text", "output"]) {
+      expect(JSON.stringify(mapper.map({ type: "message.part.delta", properties: { messageID: "m1", partID: "q1", field, delta: answer } }))).not.toContain(answer);
+    }
+    expect(JSON.stringify(mapper.map(updated({ id: "q1", type: "tool", state: { status: "completed", output: answer } })))).not.toContain(answer);
+  });
+  test("partial updates preserve question classification before and after the tool name arrives", () => {
+    const mapper = new OpenCodeEventMapper();
+    const partial = updated({ id: "q1", type: "tool", callID: "cq", state: { status: "completed", input: answer, output: answer, metadata: answer, title: answer, error: answer } });
+    expect(JSON.stringify(mapper.map(partial))).not.toContain(answer);
+    mapper.map(updated({ id: "q1", type: "tool", tool: "question" }));
+    const events = mapper.map(partial);
+    expect(JSON.stringify(events)).not.toContain(answer);
+    expect(events[0]).toMatchObject({ kind: "tool.completed", data: { name: "question", status: "completed" } });
+    expect(JSON.stringify(mapper.map(delta("q1", answer)))).not.toContain(answer);
+  });
+  test("ordinary tool lifecycles and deltas retain normal payloads", () => {
+    const mapper = new OpenCodeEventMapper();
+    for (const tool of ["bash", "read"]) {
+      for (const status of ["running", "completed"]) {
+        const raw = updated({ id: tool, type: "tool", tool, callID: tool, state: { status, input: { path: "file" }, output: "ordinary output" } });
+        expect(mapper.map(raw)[0]).toMatchObject({ kind: status === "running" ? "tool.started" : "tool.completed", raw, data: { name: tool, status } });
+      }
+      const raw = delta(tool, "ordinary delta");
+      expect(mapper.map(raw)[0]!.raw).toBe(raw);
+    }
+  });
   test("other tools retain completion output and raw payload", () => {
     const raw = updated({ type: "tool", tool: "bash", callID: "c-bash", state: { status: "completed", input: { command: "pwd" }, output: "unchanged output" } });
     const events = mapOpenCodeEvent(raw);
