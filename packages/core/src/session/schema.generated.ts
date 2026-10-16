@@ -36,6 +36,7 @@ export const SESSION_EVENT_SCHEMA = {
         "session.ended",
         "session.recovered",
         "session.assignment",
+        "session.approvals",
         "session.successor",
         "session.released",
         "session.reopened",
@@ -119,6 +120,68 @@ export const SESSION_EVENT_SCHEMA = {
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "session.created"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "approvals": {
+                "enum": [
+                  "relay",
+                  "yolo"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "session.approvals"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "mode",
+              "by"
+            ],
+            "properties": {
+              "mode": {
+                "enum": [
+                  "relay",
+                  "yolo"
+                ]
+              },
+              "by": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
     {
       "if": {
         "properties": {
@@ -606,6 +669,7 @@ export const SESSION_COMMAND_SCHEMA = {
         "session.prepare",
         "session.prepare.cancel",
         "session.continue",
+        "session.setApprovals",
         "session.assignMember",
         "session.attach",
         "session.bindChange",
@@ -722,6 +786,12 @@ export const SESSION_COMMAND_SCHEMA = {
       "then": {
         "required": [],
         "properties": {
+          "approvals": {
+            "enum": [
+              "relay",
+              "yolo"
+            ]
+          },
           "projectRoot": {
             "type": "string",
             "minLength": 1
@@ -824,6 +894,31 @@ export const SESSION_COMMAND_SCHEMA = {
             "type": "string",
             "minLength": 1,
             "maxLength": 160
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session.setApprovals"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "enum": [
+              "relay",
+              "yolo"
+            ]
           }
         }
       }
@@ -1271,4 +1366,4 @@ export const SESSION_COMMAND_SCHEMA = {
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "dfb54e87041a8849018fd9b22691a83471044278853c768411946e9f881b2467";
+export const SESSION_SCHEMA_DIGEST = "467caaee663c7bfd632fc6af572a97ff2b26b7e747f3f29913a3017c32f38274";

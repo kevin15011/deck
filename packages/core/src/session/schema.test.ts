@@ -57,6 +57,8 @@ const hookFixtures = [
 ];
 
 const eventFixtures: unknown[] = [
+  ...["relay", "yolo", "runner-default", null].flatMap(mode => [ev({ data: { approvals: mode } }), ev({ kind: "session.approvals", data: { mode, by: "user" } })]),
+  ev({ kind: "session.approvals", data: { mode: "relay" } }),
   ...["question.requested", "question.resolved"].flatMap(kind => [ev({ kind, data: {} }), ev({ kind, data: { questionId: "q" } })]),
   ev({}), ev({ kind: "nope" }), ev({ seq: 0 }), ev({ seq: 1.5 }), ev({ v: 2 }), ev({ ts: "bad" }),
   ev({ source: undefined }), ev({ data: [] }), ev({ source: { memberId: 1 } }),
@@ -68,6 +70,8 @@ const eventFixtures: unknown[] = [
   ...["hook.started", "hook.completed"].flatMap(kind => hookFixtures.map(data => ev({ kind, data }))),
 ];
 const commandFixtures: unknown[] = [
+  ...["relay", "yolo", "runner-default", null].flatMap(mode => [cm({ type: "session.create", projectRoot: "/p", approvals: mode }), cm({ type: "session.setApprovals", mode })]),
+  cm({ type: "session.setApprovals" }),
   ...[{}, { q1: ["A"] }, { q1: [] }, { q1: Array(13).fill("A") }, { "bad\n": ["A"] }, { q1: ["x".repeat(4001)] }, Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`q${i}`, ["A"]]))].map(answers => cm({ type: "question.answer", questionId: "q", answers })),
   cm({ type: "question.dismiss", questionId: "q" }), cm({ type: "question.dismiss" }),
   cm({}), cm({ commandId: "nope" }), cm({ type: "x" }), cm({ v: 2 }),

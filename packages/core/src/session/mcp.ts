@@ -4,7 +4,7 @@ export type ChildMcpRole = "lead" | "member";
 export type ChildMcpSet = { servers: string[]; sessionTools: string[] };
 
 export const LEAD_SESSION_TOOLS = [
-  "deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel",
+  "deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel", "deck_task_list",
   "deck_memory_recall", "deck_memory_propose", "deck_approve",
 ] as const;
 export const MEMBER_SESSION_TOOLS = ["deck_memory_recall", "deck_memory_propose", "deck_approve"] as const;

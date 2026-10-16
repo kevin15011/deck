@@ -215,11 +215,13 @@ export type NormalizedDeckConfig = {
   crossRunner?: CrossRunnerConfig;
 };
 
+/** @deprecated Ignored: YOLO is enabled per session; retained for config compatibility. */
 export type CrossRunnerApprovalMode = "relay" | "runner-default";
 export type CrossRunnerConfig = {
   enabled: boolean;
   defaultRunner?: string;
   members: CrossTeamAssignments;
+  /** @deprecated Ignored: sessions relay approvals unless YOLO is explicitly enabled on that session. */
   approvals: Record<string, CrossRunnerApprovalMode>;
   maxConcurrentTasks: number;
   executionBudget?: { lead: number; delegated: number };
@@ -957,6 +959,7 @@ export function diagnoseDeckConfigDeprecations(config: unknown): readonly DeckCo
 const CROSS_RUNNER_FIELDS = new Set(["enabled", "defaultRunner", "members", "approvals", "maxConcurrentTasks", "executionBudget", "web", "claudeTosAcknowledgedAt"]);
 const CROSS_MEMBER_FIELDS = new Set(["runnerId", "modelId", "thinking"]);
 const CROSS_WEB_FIELDS = new Set(["port", "trustedProxy", "allowedOrigins", "allowFunnel"]);
+// Compatibility defaults only; session execution ignores crossRunner.approvals.
 const CROSS_APPROVAL_DEFAULTS: Record<string, CrossRunnerApprovalMode> = { claude: "runner-default", opencode: "runner-default", codex: "runner-default" };
 
 function crossInvalid(message: string, fieldPath: string, configPath?: string): DeckConfigError {

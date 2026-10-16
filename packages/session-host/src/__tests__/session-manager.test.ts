@@ -83,6 +83,78 @@ const lastTurn = (driver: FakeDriver): FakeTurn => driver.turns.at(-1)!;
 describe("persistent workspace sessions", () => {
   const grantFor = (t: ReturnType<typeof setup>, sessionId: string, taskId = "lead") => t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths, sessionId).taskCredentialFile(taskId), "utf8")).token)!;
 
+  for (const terminal of ["completed", "failed", "cancelled"] as const) {
+    test(`task roster and deck_task_list track ${terminal} delegation with safe summaries`, async () => {
+      const contexts: Array<{ member: string; context: any }> = [];
+      const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }),
+        options: { rolePrompt: (member, context) => { contexts.push({ member, context }); return "role"; } } });
+      const id = await t.create(); await t.run({ type: "prompt.send", text: "start" }, id);
+      await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "lead");
+      const grant = grantFor(t, id);
+      const taskId = (await t.manager.callTaskTool(grant, "deck_delegate", { agent: "investigate", task: "Inspect token=prompt-secret\nDo not include this second line" }) as any).data.taskId;
+      await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "child");
+      expect(contexts.find(c => c.member === "investigate")?.context.tasks).toBeUndefined();
+      expect(await t.manager.callTaskTool(grant, "deck_task_list", {})).toMatchObject({ ok: true, data: { tasks: [{ taskId, memberId: "investigate", state: "running", attempt: 1, runnerId: "claude", modelId: "fast", continuable: false, summary: "Inspect token=[redacted]" }] } });
+      expect(await t.manager.callTaskTool(grantFor(t, id, taskId), "deck_task_list", {})).toMatchObject({ ok: false, code: "tool-not-allowed" });
+      const child = lastTurn(t.driver);
+      child.say("Result password=result-secret " + "x".repeat(200));
+      if (terminal === "cancelled") await t.manager.callTaskTool(grant, "deck_task_cancel", { taskId });
+      else child.finish({ status: terminal });
+      await waitFor(() => child.closed && t.events(id).some(e => e.kind === "task.state" && e.source.taskId === taskId && e.data.state === terminal), PROGRESS_TIMEOUT_MS, "terminal child");
+      const listed = await t.manager.callTaskTool(grant, "deck_task_list", {});
+      expect(listed).toMatchObject({ ok: true, data: { tasks: [{ taskId, state: terminal, continuable: true }] } });
+      const summary = (listed as any).data.tasks[0].summary;
+      expect(summary.length).toBeLessThanOrEqual(120);
+      expect(summary).toContain("password=[redacted]");
+      expect(JSON.stringify(listed)).not.toContain("result-secret");
+      await t.run({ type: "prompt.send", text: "follow up" }, id);
+      t.driver.turns[0]!.finish();
+      await waitFor(() => contexts.some(c => c.member === "lead" && c.context.tasks?.length === 1), PROGRESS_TIMEOUT_MS, "lead roster");
+      const roster = contexts.find(c => c.member === "lead" && c.context.tasks?.length === 1)!.context.tasks;
+      expect(roster).toEqual([{ taskId, memberId: "investigate", state: terminal, attempt: 1, summary }]);
+      await waitFor(() => t.driver.turns.length === 3, PROGRESS_TIMEOUT_MS, "next lead turn");
+      const currentGrant = grantFor(t, id);
+      expect((await t.manager.callTaskTool(currentGrant, "deck_delegate", { agent: "investigate", task: "feedback", continueTaskId: taskId })).ok).toBe(true);
+      expect(await t.manager.callTaskTool(currentGrant, "deck_task_list", {})).toMatchObject({
+        ok: true, data: { tasks: [{ taskId, attempt: 2, continuable: false, summary }] },
+      });
+    });
+  }
+
+  test("task roster and deck_task_list are bounded and omit question and answer data", async () => {
+    const config = baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } });
+    const t = setup({ config }); const id = await t.create();
+    const drafts: any[] = [];
+    for (let i = 0; i < 55; i++) {
+      const taskId = `fixture-${i}`, source = { taskId, memberId: i === 54 ? "missing-owner" : "investigate", runnerId: "claude" };
+      drafts.push(
+        { kind: "task.created", source, data: { taskId, memberId: source.memberId, runnerId: "claude", modelId: "fast", state: i === 53 ? "ownership-unsettled" : i === 52 ? "queued" : "completed" } },
+        { kind: "message.completed", source, data: { role: "user", text: `Inspect ${i} token=fixture-secret\nPrivate second line` } },
+        { kind: "question.requested", source, data: { questionId: `q-${i}`, questions: [{ question: "Private question data" }] } },
+        { kind: "question.resolved", source, data: { questionId: `q-${i}`, answers: { value: "Private answer data" } } },
+      );
+    }
+    t.manager.openLog(id)!.appendMany(drafts); await t.manager.close();
+    const contexts: any[] = [];
+    const reopened = setup({ dir: t.dir, config, options: { rolePrompt: (_member, context) => { contexts.push(context); return "role"; } } });
+    await reopened.run({ type: "prompt.send", text: "recover roster" }, id);
+    await waitFor(() => reopened.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "reopened lead");
+    const roster = contexts.at(-1).tasks;
+    expect(roster).toHaveLength(50);
+    expect(roster[0].taskId).toBe("fixture-5");
+    expect(roster.at(-1).taskId).toBe("fixture-54");
+    const listed = await reopened.manager.callTaskTool(grantFor(reopened, id), "deck_task_list", {});
+    expect(listed.ok).toBe(true);
+    const tasks = (listed as any).data.tasks;
+    expect(tasks).toHaveLength(50);
+    expect(tasks[0].taskId).toBe("fixture-52");
+    expect(tasks.find((task: any) => task.taskId === "fixture-52").continuable).toBe(false);
+    expect(tasks.find((task: any) => task.taskId === "fixture-53").continuable).toBe(false);
+    expect(tasks.find((task: any) => task.taskId === "fixture-54").continuable).toBe(false);
+    const text = JSON.stringify({ roster, listed });
+    for (const secret of ["fixture-secret", "Private second line", "Private question data", "Private answer data"]) expect(text).not.toContain(secret);
+  });
+
   for (const [first, next] of [["investigate", "deck-investigate"], ["deck-investigate", "investigate"]]) {
     test(`delegation canonicalizes ${first} and continues with ${next}`, async () => {
       const promptMembers: Array<readonly string[] | undefined> = [];
@@ -1228,7 +1300,7 @@ describe("single-member Lead lifecycle (task 1.16)", () => {
     const input = turn.input;
     expect(input).toMatchObject({ taskId: "lead", memberId: "lead", cwd: t.project, approvals: "relay", disableNativeDelegation: true, assignment: { runnerId: "claude", modelId: "opus", thinking: "high" } });
     expect(input.mcp.servers).toEqual(["deck"]);
-    expect(input.mcp.sessionTools).toEqual(["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel", "deck_memory_recall", "deck_memory_propose", "deck_approve", "deck_status"]);
+    expect(input.mcp.sessionTools).toEqual(["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel", "deck_task_list", "deck_memory_recall", "deck_memory_propose", "deck_approve", "deck_status"]);
     const spec = input.mcpServerSpecs.deck!;
     if (spec.transport === "http") throw new Error("Deck session bridge must use stdio");
     expect(spec.command).toBe("/bin/deck");
@@ -1245,11 +1317,11 @@ describe("single-member Lead lifecycle (task 1.16)", () => {
     expect(existsSync(input.credentialFile)).toBe(false);
   });
 
-  test("native delegation is disabled for the lead and approvals follow the per-runner config", async () => {
+  test("native delegation is disabled and legacy runner-default config cannot bypass session approvals", async () => {
     const t = setup({ config: baseConfig({ approvals: { claude: "runner-default" } }) });
     const sessionId = await t.create();
     await t.run({ type: "prompt.send", text: "go" }, sessionId);
-    expect(lastTurn(t.driver).input.approvals).toBe("runner-default");
+    expect(lastTurn(t.driver).input.approvals).toBe("relay");
     lastTurn(t.driver).finish();
     await t.idle();
   });
@@ -1987,5 +2059,131 @@ describe("structured agent questions", () => {
     expect((await t.run(command, id)).ok).toBe(true);
     expect(await answer).toEqual({ outcome: "cancelled" });
     turn.finish(); await t.idle();
+  });
+});
+
+describe("per-session approval mode", () => {
+  const row = async (t: ReturnType<typeof setup>, id: string) => (await t.manager.query("sessions.list", {}) as any).data.sessions.find((s: any) => s.sessionId === id);
+  test.each(["relay", "yolo"] as const)("create persists %s and reports it in summaries", async mode => {
+    const t = setup();
+    const result = await t.run({ type: "session.create", projectRoot: t.project, approvals: mode } as any);
+    const id = (result as any).data.sessionId;
+    expect(t.events(id).find(e => e.kind === "session.created")?.data.approvals).toBe(mode);
+    expect(JSON.parse(readFileSync(sessionPaths(t.paths, id).sessionFile, "utf8")).approvals).toBe(mode);
+    const summary = await row(t, id);
+    expect(summary).toMatchObject({ approvalMode: mode, approvalModeSource: "session" });
+    expect(await t.manager.query("sessions.status", { projectId: summary.projectId, sessionIds: [id] })).toMatchObject({ data: { sessions: [{ approvalMode: mode, approvalModeSource: "session" }] } });
+    await t.run({ type: "prompt.send", text: "first" }, id);
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "first turn");
+    expect(lastTurn(t.driver).input.approvals).toBe(mode === "yolo" ? "runner-default" : "relay");
+    lastTurn(t.driver).finish(); await t.idle();
+  });
+  test("switches both ways during a turn, applies next turn to Lead and subagents, and receipts no-ops", async () => {
+    const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }) });
+    const id = (await t.run({ type: "session.create", projectRoot: t.project, approvals: "relay" } as any) as any).data.sessionId;
+    await t.run({ type: "prompt.send", text: "first" }, id); await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "first");
+    const first = lastTurn(t.driver); first.init();
+    const set = { type: "session.setApprovals", mode: "yolo" } as any;
+    const commandId = "00000000-0000-4000-8000-888888888881";
+    expect((await t.runWithId(commandId, set, id)).ok).toBe(true);
+    expect(first.input.approvals).toBe("relay");
+    expect(await t.runWithId(commandId, set, id)).toMatchObject({ ok: true, duplicate: true });
+    expect((await t.run(set, id)).ok).toBe(true);
+    expect(t.events(id).filter(e => e.kind === "session.approvals")).toHaveLength(1);
+    const grant = t.credentials.lookup(JSON.parse(readFileSync(first.input.credentialFile, "utf8")).token)!;
+    expect((await t.manager.callTaskTool(grant, "deck_delegate", { agent: "investigate", task: "check" })).ok).toBe(true);
+    await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "child");
+    expect(lastTurn(t.driver).input.approvals).toBe("runner-default"); lastTurn(t.driver).finish();
+    // Stop the Lead before another user turn; the pending child notice may create a wake turn.
+    await t.run({ type: "session.setApprovals", mode: "relay" } as any, id);
+    expect((await row(t, id)).approvalMode).toBe("relay");
+    expect(first.input.approvals).toBe("relay");
+    first.finish(); await waitFor(() => first.closed, PROGRESS_TIMEOUT_MS, "first close");
+    t.driver.autoComplete = true;
+    for (const turn of t.driver.turns) if (!turn.finished) turn.finish();
+    await t.idle();
+    await t.run({ type: "prompt.send", text: "next" }, id); await t.idle();
+    expect(lastTurn(t.driver).input.approvals).toBe("relay");
+    expect(t.events(id).filter(e => e.kind === "session.approvals").map(e => e.data)).toEqual([{ mode: "yolo", by: "c-1" }, { mode: "relay", by: "c-1" }]);
+  });
+  test("Lead snapshots the selected mode independently on every turn", async () => {
+    const t = setup(); const id = await t.create();
+    const launch = async (count: number) => {
+      await t.run({ type: "prompt.send", text: `turn ${count}` }, id);
+      await waitFor(() => t.driver.turns.length === count, PROGRESS_TIMEOUT_MS, "Lead turn");
+      const turn = lastTurn(t.driver); turn.init(); return turn;
+    };
+    const first = await launch(1);
+    await t.run({ type: "session.setApprovals", mode: "yolo" }, id);
+    expect(first.input.approvals).toBe("relay"); first.finish(); await t.idle();
+    const second = await launch(2);
+    expect(second.input.approvals).toBe("runner-default");
+    await t.run({ type: "session.setApprovals", mode: "relay" }, id);
+    expect(second.input.approvals).toBe("runner-default"); second.finish(); await t.idle();
+    const third = await launch(3);
+    expect(third.input.approvals).toBe("relay"); third.finish(); await t.idle();
+  });
+  test("missing runner config defaults to relay and invalid/removed updates are rejected", async () => {
+    const t = setup(); delete t.state.config!.approvals.claude;
+    const id = await t.create();
+    expect(await row(t, id)).toMatchObject({ approvalMode: "relay", approvalModeSource: "default" });
+    await t.run({ type: "prompt.send", text: "fallback" }, id);
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "fallback turn");
+    expect(lastTurn(t.driver).input.approvals).toBe("relay"); lastTurn(t.driver).finish(); await t.idle();
+    expect(await t.run({ type: "session.setApprovals", mode: "invalid" } as any, id)).toMatchObject({ ok: false, code: "approval-mode-invalid" });
+    expect((await row(t, id)).approvalModeSource).toBe("default");
+    await t.run({ type: "session.remove" }, id);
+    expect(await t.run({ type: "session.setApprovals", mode: "relay" }, id)).toMatchObject({ ok: false, code: "session-removed" });
+  });
+  test("create idempotency includes explicit mode and creation-only mode replays", async () => {
+    const t = setup(); const commandId = crypto.randomUUID();
+    const create = { type: "session.create" as const, projectRoot: t.project, approvals: "yolo" as const };
+    const result = await t.runWithId(commandId, create); const id = (result as any).data.sessionId;
+    expect(await t.runWithId(commandId, create)).toMatchObject({ ok: true, duplicate: true });
+    expect(await t.runWithId(commandId, { ...create, approvals: "relay" })).toMatchObject({ ok: false, code: "command-id-reused" });
+    const ledger = Ledger.empty(id); for (const event of t.events(id)) ledger.apply(event);
+    expect(ledger.session.approvals).toBe("yolo");
+    await t.run({ type: "session.setApprovals", mode: "yolo" }, id);
+    expect(t.events(id).filter(e => e.kind === "session.approvals")).toHaveLength(0);
+    expect(t.events(id).filter(e => e.kind === "command.accepted" && e.data.type === "session.setApprovals")).toHaveLength(1);
+  });
+  test("new and reattached legacy sessions relay despite runner-default config", async () => {
+    const config = baseConfig({ approvals: { claude: "runner-default", codex: "runner-default", opencode: "runner-default" } });
+    const t = setup({ config }); const id = await t.create();
+    expect(await row(t, id)).toMatchObject({ approvalMode: "relay", approvalModeSource: "default" });
+    const summary = await row(t, id);
+    expect(await t.manager.query("sessions.status", { projectId: summary.projectId, sessionIds: [id] })).toMatchObject({ data: { sessions: [{ approvalMode: "relay", approvalModeSource: "default" }] } });
+    await t.manager.close(); rmSync(sessionPaths(t.paths, id).ledgerSnapshotFile, { force: true });
+    recoverAllSessions({ paths: t.paths, probe: createNodeProbe() });
+    const reopened = setup({ dir: t.dir, config });
+    expect(await row(reopened, id)).toMatchObject({ approvalMode: "relay", approvalModeSource: "default" });
+    await reopened.runWithId(crypto.randomUUID(), { type: "prompt.send", text: "legacy turn" }, id);
+    await waitFor(() => reopened.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "legacy relay");
+    expect(lastTurn(reopened.driver).input.approvals).toBe("relay"); lastTurn(reopened.driver).finish(); await reopened.idle();
+    await reopened.runWithId(crypto.randomUUID(), { type: "session.stop" }, id);
+    const continued = await reopened.runWithId(crypto.randomUUID(), { type: "session.continue" }, id);
+    const nextId = (continued as any).data.sessionId;
+    expect(await row(reopened, nextId)).toMatchObject({ approvalMode: "relay", approvalModeSource: "default" });
+    expect(reopened.events(nextId).find(e => e.kind === "session.created")?.data).not.toHaveProperty("approvals");
+  });
+  test("legacy config is ignored, explicit overrides survive recovery and continuation", async () => {
+    const t = setup(); const id = await t.create();
+    expect(await row(t, id)).toMatchObject({ approvalMode: "relay", approvalModeSource: "default" });
+    t.state.config!.approvals.claude = "runner-default";
+    expect(await row(t, id)).toMatchObject({ approvalMode: "relay", approvalModeSource: "default" });
+    expect((await t.run({ type: "session.setApprovals", mode: "yolo" } as any, id)).ok).toBe(true);
+    t.state.config!.approvals.claude = "relay";
+    await t.manager.close();
+    rmSync(sessionPaths(t.paths, id).ledgerSnapshotFile, { force: true });
+    recoverAllSessions({ paths: t.paths, probe: createNodeProbe() });
+    const reopened = setup({ dir: t.dir });
+    expect(await row(reopened, id)).toMatchObject({ approvalMode: "yolo", approvalModeSource: "session" });
+    await reopened.run({ type: "session.stop" }, id);
+    expect(await reopened.runWithId(crypto.randomUUID(), { type: "session.setApprovals", mode: "relay" }, id)).toMatchObject({ ok: false, code: "session-ended" });
+    const next = await reopened.runWithId(crypto.randomUUID(), { type: "session.continue" }, id);
+    expect(await row(reopened, (next as any).data.sessionId)).toMatchObject({ approvalMode: "yolo", approvalModeSource: "session" });
+    const legacy = await reopened.create(); await reopened.run({ type: "session.stop" }, legacy);
+    const continued = await reopened.run({ type: "session.continue" }, legacy);
+    expect(await row(reopened, (continued as any).data.sessionId)).toMatchObject({ approvalMode: "relay", approvalModeSource: "default" });
   });
 });

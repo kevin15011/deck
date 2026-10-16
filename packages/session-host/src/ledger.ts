@@ -1,3 +1,4 @@
+import { isApprovalMode, type ApprovalMode } from "@deck/core/session/commands";
 import type { Question } from "@deck/core/session/question";
 /**
  * Ledger projection over the session event log (XR-3.3, D-12, D-15).
@@ -42,7 +43,7 @@ export type LedgerPendingQuestion = { questionId: string; taskId?: string; tool?
 export type LedgerPendingApproval = { approvalId: string; taskId?: string; seq: number };
 export type LedgerAnomaly = { code: string; seq: number; detail?: string };
 export type SessionHandoff = { text: string; sourceSessionId: string; sourceGeneration: number; sourceSeq: number; continuity: "reseeded" };
-export type LedgerSession = { projectRoot?: string; changeId?: string; state: SessionLifecycleState; generation?: number; assignmentRevision?: number; memberOverrides?: CrossTeamAssignments; handoff?: SessionHandoff; stopRequested?: boolean; released?: boolean; releasePending?: boolean; releaseEpoch?: number; removalPending?: boolean; removed?: boolean; releaseFailure?: string; title?: string };
+export type LedgerSession = { approvals?: ApprovalMode; projectRoot?: string; changeId?: string; state: SessionLifecycleState; generation?: number; assignmentRevision?: number; memberOverrides?: CrossTeamAssignments; handoff?: SessionHandoff; stopRequested?: boolean; released?: boolean; releasePending?: boolean; releaseEpoch?: number; removalPending?: boolean; removed?: boolean; releaseFailure?: string; title?: string };
 export type UserPrompt = {
   promptId: string; state: "queued" | "dispatched" | "completed" | "failed" | "interrupted" | "cancelled" | "ownership-unsettled";
   text?: string; textHash: string; by: string; generation: number; createdAt: string; seq: number;
@@ -148,10 +149,14 @@ export class Ledger {
         break;
       }
       case "session.created":
+        if (isApprovalMode(d.approvals)) this.state.session.approvals = d.approvals;
         this.state.session.projectRoot = str(d.projectRoot) ?? this.state.session.projectRoot;
         if (str(d.changeId) && !this.state.session.changeId) this.state.session.changeId = str(d.changeId);
         if (d.memberOverrides && typeof d.memberOverrides === "object") this.state.session.memberOverrides = structuredClone(d.memberOverrides) as CrossTeamAssignments;
         if (d.handoff && typeof d.handoff === "object") this.state.session.handoff = structuredClone(d.handoff) as SessionHandoff;
+        break;
+      case "session.approvals":
+        if (isApprovalMode(d.mode)) this.state.session.approvals = d.mode;
         break;
       case "session.assignment":
         this.state.session.generation = d.generation as number;

@@ -46,11 +46,22 @@ describe("crossRunner config (XR-2.1, XR-2.2, D-5)", () => {
     });
   });
 
-  test("preserves explicit relay opt-in for each runner", () => {
+  test("preserves deprecated explicit relay values for each runner", () => {
     const approvals = { claude: "relay", codex: "relay", opencode: "relay" } as const;
     const c = validateDeckConfig({ version: 1, crossRunner: { approvals } });
     expect(c.crossRunner?.approvals).toEqual(approvals);
     expect(validateDeckConfig(c).crossRunner?.approvals).toEqual(approvals);
+  });
+  test("deprecated approvals retain their exact accepted values and defaults", () => {
+    for (const mode of ["relay", "runner-default"] as const) {
+      const input = { version: 1, crossRunner: { approvals: { claude: mode, custom: mode } } };
+      const normalized = validateDeckConfig(input);
+      expect(normalized.crossRunner?.approvals).toEqual({ claude: mode, custom: mode, codex: "runner-default", opencode: "runner-default" });
+      expect(validateDeckConfig(normalized).crossRunner?.approvals).toEqual(normalized.crossRunner?.approvals);
+    }
+    for (const invalid of ["yolo", "default", "", null, false, 1]) {
+      expect(code(() => validateDeckConfig({ version: 1, crossRunner: { approvals: { claude: invalid } } }))).toBe("CROSS_RUNNER_CONFIG_INVALID");
+    }
   });
   test("normalizes independent native turn budgets with positive bounded capacity", () => {
     expect(validateDeckConfig({ version: 1, crossRunner: { executionBudget: { lead: 3 } } }).crossRunner?.executionBudget).toEqual({ lead: 3, delegated: 4 });

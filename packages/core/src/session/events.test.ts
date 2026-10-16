@@ -61,7 +61,7 @@ describe("validateSessionEvent", () => {
     expect(SESSION_EVENT_KINDS).toContain("command.accepted");
     expect(SESSION_EVENT_KINDS).toContain("hook.started");
     expect(SESSION_EVENT_KINDS).toContain("hook.completed");
-    expect(SESSION_EVENT_KINDS.length).toBe(42);
+    expect(SESSION_EVENT_KINDS.length).toBe(43);
   });
 });
 
@@ -89,4 +89,16 @@ test("question events require a questionId", () => {
     expect(validateSessionEvent(event).ok).toBe(false);
     expect(validateSessionEvent({ ...event, data: { questionId: "q" } }).ok).toBe(true);
   }
+});
+
+test("approval mode events validate explicit modes and actor", () => {
+  for (const mode of ["relay", "yolo"]) {
+    expect(validateSessionEvent({ ...base(), data: { approvals: mode } }).ok).toBe(true);
+    expect(validateSessionEvent({ ...base(), kind: "session.approvals", data: { mode, by: "client" } }).ok).toBe(true);
+  }
+  for (const mode of ["runner-default", "", null]) {
+    expect(validateSessionEvent({ ...base(), data: { approvals: mode } }).ok).toBe(false);
+    expect(validateSessionEvent({ ...base(), kind: "session.approvals", data: { mode, by: "client" } }).ok).toBe(false);
+  }
+  expect(validateSessionEvent({ ...base(), kind: "session.approvals", data: { mode: "relay" } }).ok).toBe(false);
 });

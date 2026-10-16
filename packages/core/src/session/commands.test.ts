@@ -71,3 +71,14 @@ test("question commands enforce bounded answer shape", () => {
   expect(command({ type: "question.dismiss" }).ok).toBe(true);
   for (const answers of [null, [], { q1: "A" }, { q1: [] }, { q1: [1] }, { q1: ["x".repeat(4001)] }, { q1: Array(13).fill("A") }, { "q\n": ["A"] }, Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`q${i}`, ["A"]]))]) expect(command({ answers }).ok).toBe(false);
 });
+test("per-session approvals accept only relay or yolo", () => {
+  for (const mode of ["relay", "yolo"]) {
+    expect(validateSessionCommand({ v: 1, commandId: id, type: "session.create", projectRoot: "/p", approvals: mode }).ok).toBe(true);
+    expect(validateSessionCommand({ v: 1, commandId: id, type: "session.setApprovals", mode }).ok).toBe(true);
+  }
+  for (const mode of ["runner-default", "allow", "", null, 1]) {
+    expect(validateSessionCommand({ v: 1, commandId: id, type: "session.create", projectRoot: "/p", approvals: mode }).ok).toBe(false);
+    expect(validateSessionCommand({ v: 1, commandId: id, type: "session.setApprovals", mode }).ok).toBe(false);
+  }
+  expect(validateSessionCommand({ v: 1, commandId: id, type: "session.setApprovals" }).ok).toBe(false);
+});

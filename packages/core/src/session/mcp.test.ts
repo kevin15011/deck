@@ -23,6 +23,8 @@ describe("computeChildMcpSet", () => {
     const lead = computeChildMcpSet({ ...base, role: "lead" });
     const member = computeChildMcpSet({ ...base, role: "member" });
     expect(lead.sessionTools).toContain("deck_delegate");
+    expect(lead.sessionTools).toContain("deck_task_list");
+    expect(member.sessionTools).not.toContain("deck_task_list");
     expect(member.sessionTools).not.toContain("deck_delegate");
     expect(member.sessionTools).toContain("deck_memory_recall");
     expect(member.sessionTools).toContain("deck_approve");

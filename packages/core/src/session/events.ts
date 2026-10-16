@@ -2,13 +2,14 @@
  * deck-session-event-v1 — pure, provider-neutral event envelope and validators (XR-1.1–1.4).
  * No Node, network, or filesystem APIs.
  */
+import { isApprovalMode } from "./commands";
 import { redactText } from "./redaction";
 
 export const SESSION_EVENT_VERSION = 1 as const;
 export const RAW_PAYLOAD_LIMIT_BYTES = 64 * 1024;
 
 export const SESSION_EVENT_KINDS = [
-  "session.created", "session.bound", "session.state", "session.ended", "session.recovered", "session.assignment", "session.successor", "session.released", "session.reopened", "session.renamed", "session.removed",
+  "session.created", "session.bound", "session.state", "session.ended", "session.recovered", "session.assignment", "session.approvals", "session.successor", "session.released", "session.reopened", "session.renamed", "session.removed",
   "task.created", "task.state", "task.continued", "task.result",
   "turn.started", "turn.completed",
   "message.delta", "message.completed", "reasoning.delta", "tool.started", "tool.completed",
@@ -54,6 +55,8 @@ const hookData = (d: Record<string, unknown>): string | null => {
 
 /** Kind-specific data checks; kinds not listed accept any object. */
 const DATA_RULES: Partial<Record<SessionEventKind, (d: Record<string, unknown>) => string | null>> = {
+  "session.created": (d) => d.approvals === undefined || isApprovalMode(d.approvals) ? null : "data.approvals invalid",
+  "session.approvals": (d) => !isApprovalMode(d.mode) ? "data.mode invalid" : !isStr(d.by) ? "data.by required" : null,
   "hook.started": hookData,
   "hook.completed": hookData,
   "turn.completed": (d) => (TURN_COMPLETED_STATUSES as readonly string[]).includes(d.status as string) ? null : "data.status invalid",

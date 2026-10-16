@@ -91,7 +91,7 @@ describe("deck cross developer (XR-9.1)", () => {
     t.feed("/detach");
     expect(await run).toBe(0);
     expect(t.driver.starts).toHaveLength(1);
-    expect(t.driver.starts[0]).toMatchObject({ cwd: t.project, assignment: { runnerId: "claude", modelId: "opus" }, approvals: "runner-default" });
+    expect(t.driver.starts[0]).toMatchObject({ cwd: t.project, assignment: { runnerId: "claude", modelId: "opus" }, approvals: "relay" });
 
     // a second launch for the same project re-attaches to the SAME session and continues it
     const again = runCrossLaunch(t.deps(), {});
@@ -210,8 +210,8 @@ describe("deck session subcommands (XR-9.2, XR-11.2)", () => {
 describe("formatSessionList", () => {
   test("aligns columns and flags running sessions", () => {
     const text = formatSessionList([
-      { projectId:"p",title:"Session",generation:0,assignmentRevision:0,members:{},currentLeadTaskId:"lead",leadActivity:{state:'running',pendingApprovals:0,lastReplySeq:0},sharedWorkspace:true,sharedActiveSessions:1,sessionId: "s-1", projectRoot: "/p", state: "running", createdAt: "", updatedAt: "", lastSeq: 1, running: true, tasks: 1, activeTasks: 1, lead: { runnerId: "claude", modelId: "opus" } },
-      { projectId:"q",title:"Closed",generation:0,assignmentRevision:0,members:{},currentLeadTaskId:"lead",leadActivity:{state:'idle',pendingApprovals:0,lastReplySeq:0},sharedWorkspace:true,sharedActiveSessions:0,sessionId: "s-22", projectRoot: "/q", changeId: "c", state: "ended", createdAt: "", updatedAt: "", lastSeq: 1, running: false, tasks: 0, activeTasks: 0 },
+      { approvalMode:"relay",approvalModeSource:"default",projectId:"p",title:"Session",generation:0,assignmentRevision:0,members:{},currentLeadTaskId:"lead",leadActivity:{state:'running',pendingApprovals:0,lastReplySeq:0},sharedWorkspace:true,sharedActiveSessions:1,sessionId: "s-1", projectRoot: "/p", state: "running", createdAt: "", updatedAt: "", lastSeq: 1, running: true, tasks: 1, activeTasks: 1, lead: { runnerId: "claude", modelId: "opus" } },
+      { approvalMode:"relay",approvalModeSource:"default",projectId:"q",title:"Closed",generation:0,assignmentRevision:0,members:{},currentLeadTaskId:"lead",leadActivity:{state:'idle',pendingApprovals:0,lastReplySeq:0},sharedWorkspace:true,sharedActiveSessions:0,sessionId: "s-22", projectRoot: "/q", changeId: "c", state: "ended", createdAt: "", updatedAt: "", lastSeq: 1, running: false, tasks: 0, activeTasks: 0 },
     ]);
     expect(text.split("\n")[0]).toMatch(/^ID\s+STATE\s+CHANGE\s+LEAD\s+PROJECT$/);
     expect(text).toContain("running*");

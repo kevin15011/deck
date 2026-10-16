@@ -71,6 +71,7 @@ function sessionDelegationPrompt(context: SessionRolePromptContext): string {
     "Session delegation",
     "The ONLY delegation path is the Deck MCP tools: deck_delegate {agent, task, continueTaskId?}, deck_task_wait {taskIds, timeoutSec<=50}, deck_task_result {taskId}, deck_task_cancel {taskId}; native Task/Agent subagents are disabled. deck_delegate returns immediately with a taskId; poll with deck_task_wait.",
     "OWNER RULE: A task belongs to the member that created it. To give feedback, iterate or follow up on the same area, ALWAYS call deck_delegate with that same member and continueTaskId=<that task's id>; the original runner/model/native context is reused. Never switch owners, and never start a new task for the same work. Start a new task only for a different area or when the owner cannot continue.",
+    "Use deck_task_list to recover this session’s delegated task ids and owners before delegating.",
     "Keep the returned taskId next to the member in your working notes and re-read the task roster before delegating.",
     "Route non-trivial or independent work to specialists; direct work is only for seconds-scale or clearly trivial changes. Run independent tasks in parallel, waiting with deck_task_wait.",
     `deck_delegate member ids: ${(context.delegableMembers ?? ["investigate", "architect", "apply-fast", "apply-deep", "quality"]).filter(id => id !== "lead").join(", ") || "(none)"}; a deck- prefix is also accepted.`,

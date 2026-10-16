@@ -6,7 +6,7 @@ import { PassThrough } from "node:stream";
 import { QuestionBroker } from "../question-broker";
 import { ApprovalBroker } from "../approval-broker";
 import { sessionMcpServerSpec, DECK_APPROVE_TOOL, DECK_STATUS_TOOL, DEFAULT_ALLOWED_TOOLS } from "../bridge-config";
-import { BridgeService } from "../bridge-service";
+import { BridgeService, type BridgeServiceOptions } from "../bridge-service";
 import { ControlServer } from "../control-server";
 import { CredentialRegistry } from "../credentials";
 import { runSessionMcpBridge } from "../mcp-bridge";
@@ -21,7 +21,7 @@ afterEach(async () => {
 
 const GRANT = { sessionId: "s-1", taskId: "lead", memberId: "lead", runnerId: "claude", allowedTools: DEFAULT_ALLOWED_TOOLS } as const;
 
-async function harness(options: { grantTools?: readonly string[]; questions?: boolean } = {}) {
+async function harness(options: { grantTools?: readonly string[]; questions?: boolean; callTaskTool?: BridgeServiceOptions["callTaskTool"] } = {}) {
   const dir = tempDir();
   const clock = new FakeClock();
   const service = new StubSessionService(join(dir, "sessions"));
@@ -31,7 +31,7 @@ async function harness(options: { grantTools?: readonly string[]; questions?: bo
   const credentials = new CredentialRegistry({ socketPath });
   const questionBroker = options.questions ? new QuestionBroker({ sink: { emit: (sid, draft) => { service.logs.get(sid)?.append(draft); } } }) : undefined;
   if (questionBroker) cleanups.push(() => questionBroker.dispose());
-  const bridge = new BridgeService({ credentials, broker, questionBroker, status: (g) => ({ sessionId: g.sessionId, taskId: g.taskId, state: "running" }) });
+  const bridge = new BridgeService({ credentials, broker, questionBroker, callTaskTool: options.callTaskTool, status: (g) => ({ sessionId: g.sessionId, taskId: g.taskId, state: "running" }) });
   const server = new ControlServer({
     socketPath, service, bridge,
     daemon: { version: "1", pid: process.pid, nonce: "n", status: () => ({}), requestRestart: () => ({ ok: true as const }) },
@@ -152,6 +152,25 @@ describe("BridgeService (daemon side of deck_approve / deck_status)", () => {
 });
 
 describe("MCP stdio bridge (D-11, XR-4.7)", () => {
+  test("Lead task list is advertised and forwarded over MCP; non-lead and ungranted callers are denied", async () => {
+    const calls: string[] = [];
+    const h = await harness({ grantTools: ["deck_task_list"], callTaskTool: async (_grant, name) => {
+      calls.push(name); return { ok: true, data: { tasks: [{ taskId: "task-1", memberId: "quality", continuable: true }] } };
+    } });
+    const s = mcpSession({ DECK_SESSION_CREDENTIAL_FILE: h.credFile });
+    try {
+      s.send({ id: 1, method: "tools/list" });
+      expect((await s.reply(1)).result).toMatchObject({ tools: [{ name: "deck_task_list", inputSchema: { type: "object" } }] });
+      s.send({ id: 2, method: "tools/call", params: { name: "deck_task_list", arguments: {} } });
+      expect(JSON.parse(text(await s.reply(2)))).toEqual({ tasks: [{ taskId: "task-1", memberId: "quality", continuable: true }] });
+      const member = h.credentials.issue({ ...GRANT, memberId: "quality", allowedTools: ["deck_task_list"] }, join(h.dir, "member-credential"));
+      expect(await h.bridge.call({ token: member.token, tool: "deck_task_list", arguments: {} })).toMatchObject({ ok: false, code: "tool-not-allowed" });
+      const ungranted = h.credentials.issue({ ...GRANT, allowedTools: DEFAULT_ALLOWED_TOOLS }, join(h.dir, "ungranted-credential"));
+      expect(await h.bridge.call({ token: ungranted.token, tool: "deck_task_list", arguments: {} })).toMatchObject({ ok: false, code: "tool-not-allowed" });
+      expect(calls).toEqual(["deck_task_list"]);
+    } finally { s.end(); await s.done; }
+  });
+
   test("role credential lists memory tools while hiding ungranted delegation tools", async () => {
     const h = await harness({ grantTools: ["deck_memory_recall", "deck_memory_propose", "deck_approve"] });
     const s = mcpSession({ DECK_SESSION_CREDENTIAL_FILE: h.credFile });

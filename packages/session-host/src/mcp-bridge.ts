@@ -23,6 +23,7 @@ export type McpBridgeOptions = {
 };
 
 const TOOLS = [
+  { name: "deck_task_list", description: "List this session's delegated tasks with owner and whether they can be continued; use before delegating to reuse the owner.", inputSchema: { type: "object", properties: {} } },
   { name: "deck_delegate", description: "Delegate a task to a configured member; continueTaskId preserves the original owner and native context.", inputSchema: { type: "object", properties: { agent: { type: "string" }, task: { type: "string" }, continueTaskId: { type: "string" } }, required: ["agent", "task"] } },
   { name: "deck_task_wait", description: "Wait for the requested tasks, for at most 50 seconds.", inputSchema: { type: "object", properties: { taskIds: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 100 }, timeoutSec: { type: "number", minimum: 0, maximum: 50 } }, required: ["taskIds"] } },
   { name: "deck_task_result", description: "Read the latest task attempt and bounded result.", inputSchema: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] } },

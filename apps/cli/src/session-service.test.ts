@@ -114,6 +114,7 @@ describe("createCrossSessionService (production composition)", () => {
       expect(text).toContain("deck_task_wait {taskIds, timeoutSec<=50}");
       expect(text).toContain("deck_task_result {taskId}");
       expect(text).toContain("deck_task_cancel {taskId}");
+      expect(text).toContain("Use deck_task_list to recover");
       expect(text).toContain("returns immediately with a taskId");
       expect(text).toContain("native Task/Agent subagents are disabled");
       expect(text).toContain("same member and continueTaskId=<that task's id>");

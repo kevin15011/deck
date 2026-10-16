@@ -1,3 +1,4 @@
+import { isApprovalMode, type ApprovalMode } from "@deck/core/session/commands";
 import { QuestionBroker } from "./question-broker";
 /**
  * SessionManager implements the `SessionService` port for cross-runner team sessions.
@@ -79,6 +80,16 @@ export type ChildMcpResolver = {
 
 export type ChildMcpContext = { projectRoot: string; sessionId: string; taskId: string; signal: AbortSignal };
 
+/** Structural counterpart of the CLI prompt context; session-host never imports the composition root. */
+export type SessionRolePromptContext = {
+  changeId?: string;
+  projectRoot: string;
+  runnerId: string;
+  delegableMembers?: readonly string[];
+  /** Oldest to newest, bounded to the latest 50 delegated tasks. */
+  tasks?: readonly { taskId: string; memberId: string; state: string; attempt: number; summary?: string }[];
+};
+
 export type SessionManagerOptions = {
   paths: StatePaths;
   broker: ApprovalBroker;
@@ -90,7 +101,7 @@ export type SessionManagerOptions = {
   config: () => CrossRunnerConfig | undefined;
   /** Command prefix that starts the session MCP bridge inside a child, e.g. [deck, "internal", "session-mcp"]. */
   sessionMcpCommand: readonly string[];
-  rolePrompt?: (memberId: string, context: { changeId?: string; projectRoot: string; runnerId: string; delegableMembers?: readonly string[] }) => string;
+  rolePrompt?: (memberId: string, context: SessionRolePromptContext) => string;
   childMcp?: ChildMcpResolver | ((runnerId: string, context: ChildMcpContext) => Promise<ChildMcpResolver>);
   closeChildMcp?: () => Promise<void>;
   memory?: (context: { sessionId: string; projectRoot: string; leadRunnerId: string }) => Promise<SessionMemoryPort | undefined>;
@@ -106,6 +117,7 @@ export type SessionPreparation = { preparationId?: string; status: "unprepared" 
 type PreparationJob = { epoch: number; reopening: boolean; state: SessionPreparation; controller: AbortController; done: Promise<void> };
 
 type SessionMeta = {
+  approvals?: ApprovalMode;
   v: 1; sessionId: string; projectRoot: string; changeId?: string; createdAt: string; createCommandId: string;
   createFingerprint?: string;
   members: CrossTeamAssignments;
@@ -155,6 +167,7 @@ type Live = {
 };
 
 export type SessionSummary = {
+  approvalMode: ApprovalMode; approvalModeSource: "session" | "default";
   sessionId: string; projectRoot: string; changeId?: string; state: string; createdAt: string; updatedAt: string; lastSeq: number;
   lead?: RunnerQualifiedAssignment; running: boolean; tasks: number;
   /** Tasks whose latest attempt is not terminal (running, or ownership-unsettled after a crash). */
@@ -267,6 +280,7 @@ export class SessionManager implements SessionService {
       case "session.stop": return this.stop(live, command);
       case "session.prepare": return this.prepare(live, command);
       case "session.prepare.cancel": return this.cancelPreparation(live, command);
+      case "session.setApprovals": return this.setApprovals(live, command, clientId);
       case "session.assignMember": return this.assignMember(live, command);
       case "session.continue": return this.continueSession(live, command, clientId);
       default: return fail("unsupported", "Unsupported command");
@@ -396,7 +410,7 @@ export class SessionManager implements SessionService {
 
   /** Called only after bridge authentication. Revalidate live ownership rather than trusting claimed role. */
   async callTaskTool(grant: CredentialGrant, name: string, args: unknown, context: { signal?: AbortSignal } = {}): Promise<CommandOutcome> {
-    const delegation = ["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel"].includes(name);
+    const delegation = ["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel", "deck_task_list"].includes(name);
     if (delegation && grant.memberId !== LEAD_MEMBER_ID) return fail("tool-not-allowed");
     const live = this.sessions.get(grant.sessionId);
     const caller = live?.turns.get(grant.taskId);
@@ -407,6 +421,7 @@ export class SessionManager implements SessionService {
     try {
       switch (name) {
         case "deck_delegate": return this.delegate(live, d);
+        case "deck_task_list": return ok({ tasks: this.delegatedTasks(live, true) });
         case "deck_task_result": return typeof d.taskId === "string" ? this.leadResult(live, d.taskId) : fail("invalid-arguments");
         case "deck_task_wait": return this.waitTasks(live, d, context.signal);
         case "deck_task_cancel": {
@@ -441,6 +456,7 @@ export class SessionManager implements SessionService {
     const priorTask = priorId ? live.ledger.task(priorId) : undefined;
     if (priorId && !priorTask) return fail("task-unknown");
     if (priorTask && priorTask.memberId !== agent) return fail("task-owner-mismatch");
+    if (priorTask && !this.memberAssignment(live, agent)) return this.unknownMember(agent, this.effectiveMembers(live.meta, live.ledger));
     if (priorId && (live.turns.has(priorId) || live.queue.some((turn) => turn.taskId === priorId))) return fail("task-running");
     const block = priorId ? continuationBlock(live.ledger, priorId) : undefined;
     if (block) return fail(block.code);
@@ -538,6 +554,44 @@ export class SessionManager implements SessionService {
     if (turn.memberId !== LEAD_MEMBER_ID && !this.closing && !live.stopping && live.acknowledgedAttempts.get(turn.taskId) !== turn.attempt) live.notices.set(turn.taskId, `${turn.taskId} ${state}`);
   }
 
+  /** Read-only discovery: never acknowledge completions or inspect question/answer events. */
+  private delegatedTasks(live: Live, newestRelevant = false) {
+    const active = (state: string) => state === "running" || state === "queued" || state === "created";
+    const selected = live.ledger.tasks().filter(task => task.memberId !== LEAD_MEMBER_ID)
+      .map(task => ({ task, latest: live.ledger.latest(task.taskId)!, result: [...task.attempts].reverse().find(attempt => attempt.result?.trim())?.result }))
+      .filter(row => row.latest)
+      .sort((a, b) => newestRelevant
+        ? Number(active(b.latest.state)) - Number(active(a.latest.state)) || b.latest.startedSeq - a.latest.startedSeq
+        : a.latest.startedSeq - b.latest.startedSeq);
+    const rows = newestRelevant ? selected.slice(0, 50) : selected.slice(-50);
+    const needed = new Set(rows.filter(row => !row.result).map(row => row.task.taskId));
+    const prompts = new Map<string, string>();
+    if (needed.size) for (const event of live.log.readAfter(0)) {
+      const id = event.source.taskId;
+      // The first user message is the original delegated instruction, never a follow-up answer.
+      if (id && needed.has(id) && !prompts.has(id) && event.kind === "message.completed" && event.data.role === "user" && typeof event.data.text === "string") {
+        prompts.set(id, event.data.text);
+      }
+    }
+    return rows.map(({ task, latest, result }) => {
+      const text = bounded(result?.trim() || prompts.get(task.taskId) || "", 8192);
+      const summary = bounded((text.split(/[\r\n\u2028\u2029]/u)[0] ?? "").replace(/\s+/gu, " ").trim(), 120);
+      return {
+        taskId: task.taskId, memberId: task.memberId, state: latest.state, attempt: latest.attempt,
+        runnerId: latest.runnerId, modelId: latest.modelId,
+        continuable: !!this.memberAssignment(live, task.memberId) && !!this.options.drivers.get(latest.runnerId)
+          && !live.turns.has(task.taskId) && !live.queue.some(turn => turn.taskId === task.taskId)
+          && !continuationBlock(live.ledger, task.taskId),
+        ...(summary ? { summary } : {}),
+      };
+    });
+  }
+
+  private taskRoster(live: Live): NonNullable<SessionRolePromptContext["tasks"]> {
+    return this.delegatedTasks(live).map(({ taskId, memberId, state, attempt, summary }) =>
+      ({ taskId, memberId, state, attempt, ...(summary ? { summary } : {}) }));
+  }
+
   /** Only authenticated Lead tools acknowledge results; observer log/ledger reads stay inert. */
   private leadResult(live: Live, taskId: string): ExecuteOutcome {
     const task = live.ledger.task(taskId); const latest = live.ledger.latest(taskId);
@@ -608,7 +662,7 @@ export class SessionManager implements SessionService {
       }
     });
     if (repairCreation && !ledger.session.projectRoot) {
-      this.append(live, { kind: "session.created", data: meta.creationData ?? { projectRoot: meta.projectRoot, members: meta.members, commandId: meta.createCommandId, createdBy: "recovery", ...(meta.changeId ? { changeId: meta.changeId } : {}) } });
+      this.append(live, { kind: "session.created", data: meta.creationData ?? { projectRoot: meta.projectRoot, members: meta.members, commandId: meta.createCommandId, createdBy: "recovery", ...(meta.approvals ? { approvals: meta.approvals } : {}), ...(meta.changeId ? { changeId: meta.changeId } : {}) } });
       if (meta.changeId && !ledger.session.changeId) this.append(live, { kind: "session.bound", data: { changeId: meta.changeId } });
     }
     if (ledger.session.state === "stopping" || ledger.session.stopRequested) live.stopping = true;
@@ -699,7 +753,8 @@ export class SessionManager implements SessionService {
   }
 
   private create(command: Extract<SessionCommand, { type: "session.create" }>, clientId: string, continuation?: { predecessorSessionId: string; handoff: SessionHandoff }): Promise<ExecuteOutcome> {
-    const fingerprint = continuation ? JSON.stringify(["session.continue", continuation.predecessorSessionId, command.title ?? null]) : command.projectRoot && command.title === undefined && command.members === undefined ? JSON.stringify([command.projectRoot, command.changeId ?? null]) : JSON.stringify([command.projectRoot ?? command.projectId, command.changeId ?? null, command.title ?? null, command.members ?? null]);
+    const baseFingerprint = continuation ? JSON.stringify(["session.continue", continuation.predecessorSessionId, command.title ?? null]) : command.projectRoot && command.title === undefined && command.members === undefined ? JSON.stringify([command.projectRoot, command.changeId ?? null]) : JSON.stringify([command.projectRoot ?? command.projectId, command.changeId ?? null, command.title ?? null, command.members ?? null]);
+    const fingerprint = command.approvals === undefined || continuation ? baseFingerprint : JSON.stringify([baseFingerprint, command.approvals]);
     const pending = this.creating.get(command.commandId);
     if (pending) return pending.fingerprint !== fingerprint ? Promise.resolve(fail("command-id-reused")) : pending.result.then((outcome) => outcome.ok ? { ...outcome, duplicate: true } : outcome);
     const result = Promise.resolve().then(() => this.performCreate(command, clientId, fingerprint, continuation));
@@ -710,12 +765,13 @@ export class SessionManager implements SessionService {
 
   private async performCreate(command: Extract<SessionCommand, { type: "session.create" }>, clientId: string, fingerprint: string, continuation?: { predecessorSessionId: string; handoff: SessionHandoff }): Promise<ExecuteOutcome> {
     if (this.closing) return fail("daemon-stopping");
+    if (command.approvals !== undefined && !isApprovalMode(command.approvals)) return fail("approval-mode-invalid");
     const existing = this.findCreatedBy(command.commandId);
     if (existing) {
       const live = this.load(existing);
       if (live?.meta.createFingerprint && live.meta.createFingerprint !== fingerprint) return fail("command-id-reused");
       if (live && !live.meta.createFingerprint) {
-        try { if (live.meta.projectRoot !== realpathSync(command.projectRoot!) || live.meta.changeId !== command.changeId) return fail("command-id-reused"); }
+        try { if (live.meta.projectRoot !== realpathSync(command.projectRoot!) || live.meta.changeId !== command.changeId || live.meta.approvals !== command.approvals) return fail("command-id-reused"); }
         catch { return fail("command-id-reused"); }
       }
       return { ok: true, data: { sessionId: existing, lastSeq: live?.log.lastSeq ?? 0 }, duplicate: true };
@@ -760,9 +816,10 @@ export class SessionManager implements SessionService {
     ensurePrivateDir(paths.dir);
     const meta: SessionMeta = {
       v: 1, sessionId, projectRoot, createdAt: new Date(this.clock.now()).toISOString(), createCommandId: command.commandId, createFingerprint: fingerprint,
+      ...(command.approvals ? { approvals: command.approvals } : {}),
       members, projectId, title: command.title?.trim() ?? `Session ${new Date(this.clock.now()).toISOString().slice(0, 10)}`, ...(continuation ? { predecessorSessionId: continuation.predecessorSessionId } : {}), ...(command.changeId ? { changeId: command.changeId } : {}),
     };
-    meta.creationData = { projectRoot, projectId, title: meta.title, commandId: command.commandId, createdBy: clientId, members, memberOverrides: structuredClone(command.members ?? {}), ...(continuation ? { predecessorSessionId: continuation.predecessorSessionId, handoff: continuation.handoff, continuity: "reseeded" } : {}), ...(command.changeId ? { changeId: command.changeId } : {}) };
+    meta.creationData = { ...(command.approvals ? { approvals: command.approvals } : {}), projectRoot, projectId, title: meta.title, commandId: command.commandId, createdBy: clientId, members, memberOverrides: structuredClone(command.members ?? {}), ...(continuation ? { predecessorSessionId: continuation.predecessorSessionId, handoff: continuation.handoff, continuity: "reseeded" } : {}), ...(command.changeId ? { changeId: command.changeId } : {}) };
     writePrivateFile(paths.sessionFile, JSON.stringify(meta));
     const live = this.open(paths, meta);
     this.sessions.set(sessionId, live);
@@ -829,14 +886,14 @@ export class SessionManager implements SessionService {
       for (const id of input.sessionIds) assertSafeSegment(id as string, "session id");
     } catch { return fail("sessions-status-invalid"); }
     if (!this.projectStore().get(input.projectId, true)) return fail("project-unknown");
-    const sessions: Array<Pick<SessionSummary, "sessionId" | "leadActivity" | "lastSeq" | "state" | "running" | "activeTasks" | "updatedAt" | "generation" | "currentLeadTaskId" | "preparationStatus" | "released" | "releasing" | "removing">> = [];
+    const sessions: Array<Pick<SessionSummary, "approvalMode" | "approvalModeSource" | "sessionId" | "leadActivity" | "lastSeq" | "state" | "running" | "activeTasks" | "updatedAt" | "generation" | "currentLeadTaskId" | "preparationStatus" | "released" | "releasing" | "removing">> = [];
     for (const id of new Set(input.sessionIds as string[])) {
       const meta = this.sessions.get(id)?.meta ?? this.readMeta(sessionPaths(this.options.paths, id));
       if (!meta || (meta.projectId ?? projectIdentity(meta.projectRoot)) !== input.projectId) continue;
       // Cache the verified projection once. Subsequent polls never replay the log.
       if (!this.load(id)) continue;
       const summary = this.summarize(id);
-      if (summary) sessions.push({ sessionId: id, leadActivity: summary.leadActivity, lastSeq: summary.lastSeq, state: summary.state, running: summary.running, activeTasks: summary.activeTasks, updatedAt: summary.updatedAt, generation: summary.generation, currentLeadTaskId: summary.currentLeadTaskId,preparationStatus:summary.preparationStatus,released:summary.released,releasing:summary.releasing,removing:summary.removing });
+      if (summary) sessions.push({ approvalMode: summary.approvalMode, approvalModeSource: summary.approvalModeSource, sessionId: id, leadActivity: summary.leadActivity, lastSeq: summary.lastSeq, state: summary.state, running: summary.running, activeTasks: summary.activeTasks, updatedAt: summary.updatedAt, generation: summary.generation, currentLeadTaskId: summary.currentLeadTaskId,preparationStatus:summary.preparationStatus,released:summary.released,releasing:summary.releasing,removing:summary.removing });
     }
     return ok({ sessions });
   }
@@ -890,7 +947,7 @@ export class SessionManager implements SessionService {
       const probe = await abortable(driver.probe({ cwd: live.meta.projectRoot }), signal);
       if (probe.status === "blocked") { failureCode = "driver-blocked"; throw new Error("driver-blocked"); }
       failureCode = "project-instructions-unavailable";
-      this.options.rolePrompt?.(LEAD_MEMBER_ID, { projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, changeId: live.ledger.session.changeId, delegableMembers: Object.keys(this.effectiveMembers(live.meta, live.ledger)).filter(id => id !== LEAD_MEMBER_ID) });
+      this.options.rolePrompt?.(LEAD_MEMBER_ID, { projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, changeId: live.ledger.session.changeId, delegableMembers: Object.keys(this.effectiveMembers(live.meta, live.ledger)).filter(id => id !== LEAD_MEMBER_ID), tasks: this.taskRoster(live) });
       update({ phase: "preparing-tools" });
       failureCode = "preparation-tools-failed";
       if (typeof this.options.childMcp === "function") {
@@ -973,6 +1030,27 @@ export class SessionManager implements SessionService {
     }
     return refs.length ? `Prior user image references (advisory; inspect with native image/file tools if needed):\n${refs.join("\n").slice(0,8192)}` : "";
   }
+  private explicitApprovals(meta: SessionMeta, ledger: Ledger): ApprovalMode | undefined {
+    return ledger.session.approvals ?? meta.approvals ?? (isApprovalMode(meta.creationData?.approvals) ? meta.creationData.approvals : undefined);
+  }
+
+  private approvalMode(meta: SessionMeta, ledger: Ledger): { approvalMode: ApprovalMode; approvalModeSource: "session" | "default" } {
+    const explicit = this.explicitApprovals(meta, ledger);
+    return explicit ? { approvalMode: explicit, approvalModeSource: "session" } : {
+      approvalMode: "relay",
+      approvalModeSource: "default",
+    };
+  }
+
+  private setApprovals(live: Live, command: Extract<SessionCommand, { type: "session.setApprovals" }>, clientId: string): ExecuteOutcome {
+    if (live.ledger.session.state === "ended") return fail("session-ended");
+    if (!isApprovalMode(command.mode)) return fail("approval-mode-invalid");
+    const drafts: EventDraft[] = [this.receiptDraft(command, { ok: true })];
+    if (this.explicitApprovals(live.meta, live.ledger) !== command.mode) drafts.push({ kind: "session.approvals", data: { mode: command.mode, by: clientId } });
+    this.append(live, drafts);
+    return ok();
+  }
+
   private async assignMember(live: Live, command: Extract<SessionCommand, { type: "session.assignMember" }>): Promise<ExecuteOutcome> {
     if(live.releaseDrain || live.ledger.session.releasePending) return fail("session-busy");
     const busy = () => live.turns.size || live.queue.length || this.waitingPrompts(live).length || live.wakeTimer !== undefined || live.notices.size || (live.ledger.pendingApprovals().length || live.ledger.pendingQuestions().length) || live.ledger.tasks().some(t => t.attempts.at(-1)?.state === "ownership-unsettled");
@@ -1004,7 +1082,8 @@ export class SessionManager implements SessionService {
   }
   private async continueSession(live: Live, command: Extract<SessionCommand, { type: "session.continue" }>, clientId: string): Promise<ExecuteOutcome> {
     if (live.ledger.session.state !== "ended") return fail("session-not-ended");
-    const result = await this.create({ ...command, type: "session.create", projectRoot: live.meta.projectRoot, ...(live.ledger.session.changeId ? { changeId: live.ledger.session.changeId } : {}), members: this.effectiveMembers(live.meta, live.ledger) }, clientId, { predecessorSessionId: live.sessionId, handoff: this.handoff(live) });
+    const approvals = this.explicitApprovals(live.meta, live.ledger);
+    const result = await this.create({ ...command, type: "session.create", ...(approvals ? { approvals } : {}), projectRoot: live.meta.projectRoot, ...(live.ledger.session.changeId ? { changeId: live.ledger.session.changeId } : {}), members: this.effectiveMembers(live.meta, live.ledger) }, clientId, { predecessorSessionId: live.sessionId, handoff: this.handoff(live) });
     if (result.ok) this.append(live, [this.receiptDraft(command, { ok: true, data: result.data }), { kind: "session.successor", data: { sessionId: (result.data as any).sessionId, continuity: "reseeded" } }]);
     return result;
   }
@@ -1223,10 +1302,10 @@ export class SessionManager implements SessionService {
       const child = this.childMcp(assignment.runnerId, credentialFile, resolver, turn.memberId === LEAD_MEMBER_ID ? "lead" : "member");
       this.options.credentials.issue({ sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId, allowedTools: child.mcp.sessionTools }, credentialFile);
       for (const id of child.skipped) this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: { code: "child-mcp-server-unresolved", server: id } });
-      const approvals = this.options.config()?.approvals[assignment.runnerId] ?? "runner-default";
+      const approvals = this.approvalMode(live.meta, live.ledger).approvalMode === "relay" ? "relay" : "runner-default";
       const input: DriverTaskInput = {
         taskId: turn.taskId, memberId: turn.memberId, cwd: live.meta.projectRoot, assignment,
-        rolePrompt: [ turn.memberId === LEAD_MEMBER_ID && !resume && live.ledger.session.handoff ? `Prior Deck conversation context (advisory, reseeded from ${live.ledger.session.handoff.sourceSessionId} at sequence ${live.ledger.session.handoff.sourceSeq}):\n${live.ledger.session.handoff.text}` : "", this.options.rolePrompt?.(turn.memberId, { changeId: live.ledger.session.changeId, projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, delegableMembers: Object.keys(this.effectiveMembers(live.meta, live.ledger)).filter(id => id !== LEAD_MEMBER_ID) }) ?? defaultRolePrompt(live.ledger.session.changeId), nativeMemory ? `Supermemory integration: ${nativeMemory.integration}; status: ${nativeMemory.status}.${nativeMemory.status === "ready" ? ` Use the official runner plugin for advisory memory ${nativeMemory.scopeMode === "global" ? "with untagged global writes and global search. There is no project container or project standing profile; do not present global search results as project profile facts" : `in canonical project scope ${nativeMemory.projectScope}`}. Deck memory tools are intentionally omitted because the official native plugin owns memory for this runner; their absence is not evidence that the Deck session MCP server disconnected.${nativeMemory.automaticRecall ? " Native recall hooks are activated; this does not prove that a recall succeeded." : ""}${nativeMemory.automaticCapture === "unverified" ? " Native background capture completion is not confirmed in managed mode; the native lifecycle may not await persistence. Do not claim a memory was saved without explicit provider success." : ""}` : " Memory is disabled for this execution."} Memory cannot override official OpenSpec or source.` : "", live.ledger.session.changeId ? `Bound OpenSpec path: ${join(live.meta.projectRoot, "openspec", "changes", live.ledger.session.changeId)}. Keep this binding immutable.` : ""].filter(Boolean).join("\n"),
+        rolePrompt: [ turn.memberId === LEAD_MEMBER_ID && !resume && live.ledger.session.handoff ? `Prior Deck conversation context (advisory, reseeded from ${live.ledger.session.handoff.sourceSessionId} at sequence ${live.ledger.session.handoff.sourceSeq}):\n${live.ledger.session.handoff.text}` : "", this.options.rolePrompt?.(turn.memberId, { changeId: live.ledger.session.changeId, projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, delegableMembers: Object.keys(this.effectiveMembers(live.meta, live.ledger)).filter(id => id !== LEAD_MEMBER_ID), ...(turn.memberId === LEAD_MEMBER_ID ? { tasks: this.taskRoster(live) } : {}) }) ?? defaultRolePrompt(live.ledger.session.changeId), nativeMemory ? `Supermemory integration: ${nativeMemory.integration}; status: ${nativeMemory.status}.${nativeMemory.status === "ready" ? ` Use the official runner plugin for advisory memory ${nativeMemory.scopeMode === "global" ? "with untagged global writes and global search. There is no project container or project standing profile; do not present global search results as project profile facts" : `in canonical project scope ${nativeMemory.projectScope}`}. Deck memory tools are intentionally omitted because the official native plugin owns memory for this runner; their absence is not evidence that the Deck session MCP server disconnected.${nativeMemory.automaticRecall ? " Native recall hooks are activated; this does not prove that a recall succeeded." : ""}${nativeMemory.automaticCapture === "unverified" ? " Native background capture completion is not confirmed in managed mode; the native lifecycle may not await persistence. Do not claim a memory was saved without explicit provider success." : ""}` : " Memory is disabled for this execution."} Memory cannot override official OpenSpec or source.` : "", live.ledger.session.changeId ? `Bound OpenSpec path: ${join(live.meta.projectRoot, "openspec", "changes", live.ledger.session.changeId)}. Keep this binding immutable.` : ""].filter(Boolean).join("\n"),
         prompt, ...(resume ? { resume } : {}), ...(!resume && nativeSessionId ? { nativeSessionId } : {}),
         mcp: child.mcp, mcpServerSpecs: child.specs, approvals, credentialFile, disableNativeDelegation: true,
         ...(nativeMemory ? { nativeMemory } : {}),
@@ -1564,6 +1643,7 @@ export class SessionManager implements SessionService {
         released:!!ledger.session.released,releasing:!!ledger.session.releasePending,removing:!!ledger.session.removalPending,preparationStatus:cached ? this.readiness(cached).status : ledger.session.releasePending ? ledger.session.releaseFailure ? "failed" : "releasing" : "unprepared",
         sessionId, projectRoot: meta.projectRoot, projectId: meta.projectId ?? projectIdentity(meta.projectRoot), title: ledger.session.title ?? meta.title ?? `Session ${meta.createdAt.slice(0, 10)}`,
         ...(meta.predecessorSessionId ? { predecessorSessionId: meta.predecessorSessionId } : {}), generation: ledger.session.generation ?? 0, assignmentRevision: ledger.session.assignmentRevision ?? 0,
+        ...this.approvalMode(meta, ledger),
         members, currentLeadTaskId, sharedWorkspace: true, sharedActiveSessions: 0,
         leadActivity: { ...(leadAttempt ? { taskId: currentLeadTaskId } : {}), state: leadState, pendingApprovals: ledger.pendingApprovals().filter(approval => approval.taskId === currentLeadTaskId).length, pendingQuestions: ledger.pendingQuestions().filter(question => question.taskId === currentLeadTaskId).length, lastReplySeq: ledger.lastLeadReplySeq },
         ...(ledger.session.changeId ? { changeId: ledger.session.changeId } : {}),
