@@ -54,6 +54,7 @@ try {
     const project = (await command({ type:'project.register', path:projectOne, name:'Questions' })).project.projectId;
     const session = (await command({ type:'session.create', projectId:project, title:'Questions' })).sessionId;
     const otherSession=(await command({type:'session.create',projectId:project,title:'Other session'})).sessionId;
+    await command({type:'session.prepare'},session);
     await page.goto(host.status().url!);
     await page.getByRole('button',{name:'Questions',exact:true}).first().click();
     await command({type:'prompt.send',text:'Ask me'},session);
@@ -75,6 +76,7 @@ try {
     assert.equal(await send.isEnabled(),false);
     await dock.getByRole('radio',{name:'Alpha First option'}).check();
     assert.equal(await dock.getByRole('tab',{name:'Multiple',exact:true}).getAttribute('aria-selected'),'true');
+    assert.equal(await dock.evaluate(el=>el.contains(document.activeElement)),true,'auto-advance retains focus');
     await dock.getByRole('checkbox',{name:'Red',exact:true}).check();
     await dock.getByRole('checkbox',{name:'Blue',exact:true}).check();
     await dock.getByRole('tab',{name:'Text',exact:true}).click();
@@ -83,13 +85,32 @@ try {
     const secret=dock.getByLabel('Secret answer');
     assert.equal(await secret.getAttribute('type'),'password');
     await secret.fill('browser-secret-answer');
+    assert.equal(await secret.evaluate(el=>{
+        const key=Object.keys(el).find(key=>key.startsWith('__reactFiber$'));
+        if(!key)throw new Error('React fiber not found');
+        const seen=new Set<object>();
+        function contains(value:any,depth:number):boolean {
+            if(typeof value==='string')return value.includes('browser-secret-answer');
+            if(!value||typeof value!=='object'||value instanceof Node||depth===0||seen.has(value))return false;
+            seen.add(value);
+            return Object.keys(value).some(key=>contains(value[key],depth-1));
+        }
+        const fibers=[(el as any)[key]], visited=new Set<object>();
+        for(let i=0;i<fibers.length&&i<10000;i++){
+            const fiber=fibers[i]; if(!fiber||visited.has(fiber))continue;visited.add(fiber);
+            if(contains(fiber.memoizedProps,12)||contains(fiber.memoizedState,12))return true;
+            fibers.push(fiber.return,fiber.child,fiber.sibling,fiber.alternate);
+        }
+        return false;
+    }),false,'secret stays out of React props and state');
     assert.equal(await send.isEnabled(),false);
     await page.getByRole('button',{name:'Other session',exact:true}).first().click();
     await wait(async()=>await dock.count()===0,'switch away');
     await page.getByRole('button',{name:'Questions',exact:true}).first().click();
     await dock.locator('.question-toggle').click();
-    await dock.getByRole('tab',{name:'Secret ✓',exact:true}).click();
-    assert.equal(await dock.getByLabel('Secret answer').inputValue(),'browser-secret-answer');
+    await dock.getByRole('tab',{name:'Secret',exact:true}).click();
+    assert.equal(await dock.getByLabel('Secret answer').inputValue(),'');
+    await dock.getByLabel('Secret answer').fill('browser-secret-answer');
     await dock.getByRole('tab',{name:'Custom',exact:true}).click();
     await dock.getByRole('textbox',{name:'Other answer'}).fill('browser-other-answer');
     await dock.locator('.question-toggle').click();
@@ -105,8 +126,11 @@ try {
     });
     await send.click();
     await dock.getByRole('alert').waitFor();
-    assert.match(await dock.getByRole('alert').innerText(),/question-answers-invalid/);
+    assert.match(await dock.getByRole('alert').innerText(),/Could not send/);
+    assert.equal(await send.isEnabled(),false,'failed send wipes secret');
     assert.equal(await dock.getByRole('textbox',{name:'Other answer'}).inputValue(),'browser-other-answer');
+    await dock.getByRole('tab',{name:'Secret',exact:false}).click();
+    await dock.getByLabel('Secret answer').fill('browser-secret-answer');
     await send.click();
     assert.deepEqual(await result,{outcome:'answered',answers:{single:['Alpha'],multi:['Red','Blue'],text:['browser-free-answer'],secret:['browser-secret-answer'],other:['browser-other-answer']}});
     await wait(async()=>await dock.count()===0,'resolved dock');
@@ -118,8 +142,36 @@ try {
     assert.ok(await dock.locator('.question-panel').evaluate(el=>el.getBoundingClientRect().height<=innerHeight*.51),'panel scrolls within half viewport');
     await dock.getByRole('button',{name:'Dismiss',exact:true}).click();
     assert.equal((await dismissed).outcome,'dismissed');
+    const pending=[turn.ask([questions[2]!],'codex:0'),turn.ask([questions[2]!],'mobile:1'),turn.ask([questions[2]!],'mobile:2')];
+    await wait(async()=>await dock.count()===3,'three mobile docks');
+    await dock.nth(0).locator('.question-toggle').click();
+    await dock.nth(0).getByLabel('Your answer').fill('scoped-draft');
+    await dock.nth(1).locator('.question-toggle').click();
+    await page.waitForTimeout(400);
+    assert.equal(await page.locator('.question-toggle[aria-expanded=true]').count(),1,'accordion');
+    await dock.nth(0).locator('.question-toggle').click();
+    assert.equal(await dock.nth(0).getByLabel('Your answer').inputValue(),'scoped-draft','collapse retains ordinary draft');
+    for(const toggle of await page.locator('.question-toggle').all())assert.equal(await toggle.evaluate(el=>{const r=el.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight;}),true,'dock toggle on screen');
+    await page.locator('#prompt').focus();
+    assert.equal(await page.locator('#prompt').evaluate(el=>{const r=el.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&document.activeElement===el;}),true,'composer reachable');
+    await page.getByRole('button',{name:'Open sessions',exact:true}).click();
+    await page.getByRole('button',{name:'Other session',exact:true}).first().click();
+    await manager.close(); manager=createManager();
+    await Promise.all(pending);
+    await command({type:'prompt.send',text:'Ask elsewhere'},otherSession);
+    await wait(()=>claude.turns.length===2,'other lead');
+    const other=claude.turns[1]!;
+    const otherResult=other.ask([questions[2]!],'codex:0');
+    await wait(async()=>await dock.count()===1,'other question after restart');
+    await dock.locator('.question-toggle').click();
+    assert.equal(await dock.getByLabel('Your answer').inputValue(),'','same request ID isolated after restart');
+    await command({type:'question.dismiss',questionId:'codex:0'},otherSession);
+    await otherResult;
+    await page.getByRole('button',{name:'Open sessions',exact:true}).click();
+    await page.getByRole('button',{name:'Questions',exact:true}).first().click();
+    await wait(async()=>await dock.count()===0,'inactive cancellations replay after restart');
     const events=JSON.stringify([...manager.openLog(session)!.readAfter(0)]);
     for(const value of ['browser-free-answer','browser-secret-answer','browser-other-answer'])assert.equal(events.includes(value),false);
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({ok:true,checks:14}));
+    console.log(JSON.stringify({ok:true,checks:22}));
 } catch(error) { console.error(error);  process.exitCode=1; } finally { await browser.close(); host.disable?.(); await manager.close(); rmSync(root,{recursive:true,force:true}); process.exit(process.exitCode??0); }

@@ -50,6 +50,7 @@ export function App() {
     selectedSession.current = selected;
     const [previewImage,setPreviewImage]=useState<PreviewImage>();
     const [submittedImages,setSubmittedImages]=useState<Record<string,string[]>>({});
+    const [openQuestion,setOpenQuestion]=useState('');
     const [questionDrafts,setQuestionDrafts]=useState<Record<string,QuestionDrafts>>({});
     const [queueErrors,setQueueErrors]=useState<Record<string,string>>({});
     const [pendingPrompts, setPendingPrompts] = useState<Record<string, PendingPrompt>>({});
@@ -173,8 +174,8 @@ export function App() {
             return;
         let closed = false, socket: WebSocket | undefined, timer: ReturnType<typeof setTimeout>;
         if (eventSession.current !== selected) { setHydratedSession(''); seq.current = 0; setView(emptyState()); eventSession.current = selected; }
-        const apply = (event: any) => { if (closed || selectedSession.current !== selected || event.sessionId !== selected)
-            return; if(event.kind === 'session.removed' && event.data.phase === 'removed'){hideSession(selected);return;} if(event.kind==='question.resolved')setQuestionDrafts(old=>{const next={...old};delete next[String(event.data.questionId)];return next;}); seq.current = Math.max(seq.current, event.seq); setView(s => reduceEvent(s, event)); if(event.kind === 'session.renamed' && typeof event.data.title === 'string') renameSessionView(selected,event.data.title); };
+        const apply = (event: any) => { if(event.kind==='question.resolved')setQuestionDrafts(old=>{const next={...old};delete next[`${event.sessionId}:${event.data.questionId}`];return next;}); if (closed || selectedSession.current !== selected || event.sessionId !== selected)
+            return; if(event.kind === 'session.removed' && event.data.phase === 'removed'){hideSession(selected);return;} seq.current = Math.max(seq.current, event.seq); setView(s => reduceEvent(s, event)); if(event.kind === 'session.renamed' && typeof event.data.title === 'string') renameSessionView(selected,event.data.title); };
         async function connect() { try {
             setConnection('Reconnecting');
             let more = true;
@@ -239,7 +240,7 @@ export function App() {
         observer.observe(element); return () => observer.disconnect();
     }, [selected, hydratedSession, narrow, mobileTab]);
     function selectSession(id: string, closeDrawer = true) {
-        if (id !== selectedSession.current) { selectedSession.current = id; eventSession.current = ''; seq.current = 0; setHydratedSession(''); setView(emptyState()); setConnection('Reconnecting'); setError(''); restored.current = ''; following.current = true; setUnseen(false); }
+        if (id !== selectedSession.current) { setOpenQuestion(''); selectedSession.current = id; eventSession.current = ''; seq.current = 0; setHydratedSession(''); setView(emptyState()); setConnection('Reconnecting'); setError(''); restored.current = ''; following.current = true; setUnseen(false); }
         setSelected(id); if (closeDrawer) setDrawerOpen(false);
     }
     function hideSession(id: string) {
@@ -412,7 +413,7 @@ export function App() {
         </section>
         <div className="conversation-feedback">{unseen && <button type="button" className="jump-latest" onClick={() => { if (conversation.current) conversation.current.scrollTop = conversation.current.scrollHeight; following.current = true; setUnseen(false); }}>Jump to latest ↓</button>}</div>
         <LeadProgress progress={progress}/>
-        {Object.values(view.questions).sort((a,b)=>a.seq-b.seq).map(event=>{const id=String(event.data.questionId), member=String(event.source.memberId??view.tasks[String(event.data.taskId)]?.memberId??'lead');return <QuestionDock key={id} questionId={id} questions={event.data.questions as Question[]} label={member==='lead'?'The Lead':agentProfile(member).label} drafts={questionDrafts[id]??{}} onDrafts={draft=>setQuestionDrafts(old=>({...old,[id]:draft}))} onCommand={body=>mutate(body,selected)} busy={busy||connection!=='Connected'}/>;})}
+        <div className="question-docks">{Object.values(view.questions).sort((a,b)=>a.seq-b.seq).map(event=>{const id=String(event.data.questionId), draftKey=`${selected}:${id}`, member=String(event.source.memberId??view.tasks[String(event.data.taskId)]?.memberId??'lead');return <QuestionDock key={draftKey} open={openQuestion===draftKey} onToggle={()=>setOpenQuestion(old=>old===draftKey?'':draftKey)} questionId={id} questions={event.data.questions as Question[]} label={member==='lead'?'The Lead':agentProfile(member).label} drafts={questionDrafts[draftKey]??{}} onDrafts={draft=>setQuestionDrafts(old=>({...old,[draftKey]:draft}))} onCommand={body=>mutate(body,selected)} busy={busy||connection!=='Connected'}/>;})}</div>
         <PromptQueue key={selected} items={promptInbox.inbox.queued} paused={promptInbox.inbox.paused&&!ended} pauseReason={promptInbox.inbox.pauseReason} failed={promptInbox.failed} connected={connection==='Connected'&&canCompose} busy={busy} sending={pendingPrompts[selected]?.phase==='sending'&&!!pendingPrompts[selected]?.background} error={queueErrors[selected]||promptInbox.error} onCancel={id=>void queueCommand('prompt.cancel',id)} onResume={()=>void queueCommand('prompt.resume')} onImage={previewAttachment}/>
         <ImageDraftStrip items={draftImages} error={imageDrafts.errors[selected]} submitted={new Set(submittedImages[selected]??[])} onRemove={id=>imageDrafts.remove(selected,[id])} onRetry={id=>imageDrafts.retry(selected,id)} onPreview={item=>setPreviewImage({sessionId:selected,name:imageDisplayName(item.file.name),file:item.file})}/>
         {canCompose ? <form className="composer" onSubmit={async event => {

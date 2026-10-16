@@ -13,8 +13,8 @@ test('all questions require nonempty valid answers',()=>{
 });
 test('SSR renders choices, multiple, free text, secret masking and disabled send',()=>{
  const questions=[q,{...q,id:'multi',multiple:true},{...q,id:'free',options:[]},{...q,id:'secret',options:[],secret:true}];
- const html=renderToStaticMarkup(<QuestionDock questions={questions} questionId="request" drafts={{secret:{values:['sensitive']}}} onDrafts={()=>{}} onCommand={async()=>{}}/>);
- expect(html).toContain('type="radio"'); expect(html).toContain('type="checkbox"'); expect(html).toContain('<textarea'); expect(html).toContain('type="password"'); expect(html).toContain('autoComplete="off"'); expect(html).not.toContain('sensitive'); expect(html).toContain('Send answers (1/4)'); expect(html).toContain('disabled'); expect(html).toContain('role="tablist"');
+ const html=renderToStaticMarkup(<QuestionDock open={false} onToggle={()=>{}} questions={questions} questionId="request" drafts={{secret:{values:['sensitive']}}} onDrafts={()=>{}} onCommand={async()=>{}}/>);
+ expect(html).toContain('type="radio"'); expect(html).toContain('type="checkbox"'); expect(html).toContain('<textarea'); expect(html).toContain('type="password"'); expect(html).toContain('autoComplete="off"'); expect(html).not.toContain('sensitive'); expect(html).toContain('Send answers (0/4)'); expect(html).toContain('disabled'); expect(html).toContain('role="tablist"');
 });
 test('answer validation covers option-only, custom, multiple and free text constraints',()=>{
  expect(answerReady([{...q,allowOther:false}],{q:{values:['Custom']}})).toBe(false);

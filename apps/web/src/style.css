@@ -484,3 +484,5 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .question-dock { flex:0 0 auto; box-sizing:border-box; }
 .lead-progress[data-phase=question] { color:var(--warning); }
 .lead-progress[data-phase=question] .lead-progress-dot { background:var(--warning); }
+
+.question-docks { flex:0 1 auto; min-height:0; max-height:45dvh; overflow:auto; }
