@@ -161,6 +161,45 @@ try {
         assert.deepEqual(await prototypeResult,{outcome:'answered',answers:Object.fromEntries([[id,['explicit-id-answer']]])});
         await wait(async()=>await dock.count()===0,'prototype resolved');
     }
+    // Tabs and actions stay outside the long question's scrollable body.
+    for(const width of [1440,1000,390])for(const requestCount of [1,3]){
+        await page.setViewportSize({width,height:width===390?844:1000});
+        await page.emulateMedia({reducedMotion:width===390?'reduce':'no-preference'});
+        const longQuestion={...base,id:'long',header:'Options',prompt:'Choose the options you want to explore',multiple:true,allowOther:false,options:Array.from({length:8},(_,i)=>({label:`Option ${i+1}`,description:'A detailed explanation of this choice, including the tradeoffs and the expected outcome. '.repeat(3)}))};
+        const requests=Array.from({length:requestCount},(_,i)=>turn.ask([longQuestion,{...questions[2]!,header:'Details'}],`long:${width}:${requestCount}:${i}`));
+        await wait(async()=>await dock.count()===requestCount,'long question requests');
+        for(let i=0;i<requestCount;i++){
+            const current=dock.nth(i);
+            await current.locator('.question-toggle').click();
+            await page.waitForTimeout(500);
+            const body=current.locator('.question-body');
+            assert.equal(await body.evaluate(el=>el.scrollHeight>el.clientHeight&&el.clientHeight>0),true,'long question body scrolls');
+            async function actionsVisible(){
+                for(const button of [current.getByRole('button',{name:/Send answers/}),current.getByRole('button',{name:'Dismiss',exact:true})]){
+                    const box=await button.boundingBox();assert.ok(box);
+                    const viewport=page.viewportSize()!;
+                    assert.ok(box.x>=0&&box.y>=0&&box.x+box.width<=viewport.width&&box.y+box.height<=viewport.height,'actions fully inside viewport');
+                    assert.equal(await button.evaluate(el=>{const r=el.getBoundingClientRect();return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===el;}),true,'action center is unobscured');
+                }
+                const footer=await current.locator('footer').boundingBox(),tabs=await current.getByRole('tablist').boundingBox(),bounds=await body.boundingBox();
+                assert.ok(footer&&tabs&&bounds);assert.ok(bounds.y+bounds.height<=footer.y+1,'body ends above footer');
+                assert.ok(tabs.y+tabs.height<=bounds.y+1,'tabs stay above body');
+            }
+            for(const bottom of [true,false]){await body.evaluate((el,bottom)=>{el.scrollTop=bottom?el.scrollHeight:0;},bottom);await actionsVisible();}
+            const options=current.getByRole('checkbox');
+            await options.first().focus();
+            for(let option=1;option<8;option++)await page.keyboard.press('Tab');
+            assert.equal(await options.last().evaluate(el=>document.activeElement===el),true,'Tab reaches last option in order');
+            const last=await options.last().boundingBox(),footer=await current.locator('footer').boundingBox(),bounds=await body.boundingBox();
+            assert.ok(last&&footer&&bounds);assert.ok(last.y>=bounds.y&&last.y+last.height<=footer.y,'last focused option stays above footer');
+            await actionsVisible();
+            for(const toggle of await page.locator('.question-toggle').all())assert.equal(await toggle.evaluate(el=>{const r=el.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight;}),true,'all long request toggles reachable');
+            assert.equal(await page.locator('#prompt').evaluate(el=>{const r=el.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight;}),true,'composer stays reachable beside long questions');
+            if(i===requestCount-1)await page.screenshot({path:`/tmp/deck-long-question-${width}-${requestCount}.png`});
+        }
+        for(let i=0;i<requestCount;i++)await command({type:'question.dismiss',questionId:`long:${width}:${requestCount}:${i}`},session);
+        await Promise.all(requests);await wait(async()=>await dock.count()===0,'long questions resolved');
+    }
     await page.setViewportSize({width:390,height:844});
     const dismissed=turn.ask([questions[0]!]);
     await dock.locator('.question-toggle').click();
@@ -200,5 +239,5 @@ try {
     const events=JSON.stringify([...manager.openLog(session)!.readAfter(0)]);
     for(const value of ['browser-free-answer','browser-secret-answer','browser-other-answer'])assert.equal(events.includes(value),false);
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({ok:true,checks:35}));
+    console.log(JSON.stringify({ok:true,checks:41}));
 } catch(error) { console.error(error);  process.exitCode=1; } finally { await browser.close(); host.disable?.(); await manager.close(); rmSync(root,{recursive:true,force:true}); process.exit(process.exitCode??0); }
