@@ -1,4 +1,4 @@
-import { StatusIndicator, VisibleReply, replyForTask, type ReadMarkers } from './status-indicator';
+import { StatusIndicator, VisibleReply, indicatorState, replyForTask, type ReadMarkers } from './status-indicator';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SessionEvent } from '../../../packages/core/src/session/events';
 import { activityEvents, conversationEvents, type ViewState } from './state';
@@ -149,7 +149,7 @@ export function Subagents({ view, sessionId = '', visible = false, readMarkers =
         <article className="task-card detail-card"><TaskHeading model={detail}/><TaskResult model={detail} visible={visible} acknowledge={acknowledge}/></article>
         <div className="detail-conversation"><h4>Conversation</h4><FollowTranscript className="task-transcript task-transcript--full" label={`${agentProfile(detail.member).label} conversation`} signal={detail.signal} active={visible}><TranscriptMessages model={detail} visible={visible} acknowledge={acknowledge}/></FollowTranscript></div>
     </section>;
-    return <section className="subagent-content"><div className="panel-intro"><h2>Subagents</h2><p>Delegated work, actual assignments and results.</p></div>{!models.length && <p className="empty-note">No subagents yet. Delegated work will appear here.</p>}{models.map(model => <article className="task-card task-card--compact" key={model.id}>
+    return <section className="subagent-content"><div className="panel-intro"><h2>Subagents</h2><p>Delegated work, actual assignments and results.</p></div>{!models.length && <p className="empty-note">No subagents yet. Delegated work will appear here.</p>}{models.map(model => <article className="task-card task-card--compact" data-activity={indicatorState(String(model.task.state ?? 'created'), model.approvals)} key={model.id}>
         <TaskHeading model={model} onOpen={() => setOpenId(model.id)}/>
         <TaskResult model={model} visible={visible} acknowledge={acknowledge} preview/>
     </article>)}</section>;

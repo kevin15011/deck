@@ -486,3 +486,7 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .lead-progress[data-phase=question] .lead-progress-dot { background:var(--warning); }
 
 .question-docks { flex:0 1 auto; min-height:0; max-height:45dvh; overflow:auto; }
+
+/* Colour frame: who is working or waiting on the user, at a glance */
+.task-card[data-activity=working]{border-color:var(--action);box-shadow:inset 0 0 0 1px var(--action)}
+.task-card[data-activity=approval],.task-card[data-activity=question]{border-color:var(--warning);box-shadow:inset 0 0 0 1px var(--warning)}

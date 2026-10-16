@@ -89,6 +89,8 @@ try {
     await card.getByRole('button', { name: 'Open full view' }).waitFor();
     assert.equal(await card.locator('details').count(), 0, 'the list carries no inline conversation');
     assert.ok((await card.boundingBox())!.height < 150, 'list cards are compact');
+    assert.equal(await card.getAttribute('data-activity'), 'working', 'a running subagent is marked as working');
+    assert.notEqual(await card.evaluate(el => getComputedStyle(el).borderTopColor), await page.locator('nav[aria-label="Sessions"]').evaluate(el => getComputedStyle(el).borderTopColor), 'working card carries an accent frame');
     assert.ok(await card.locator('.task-result--preview').evaluate(el => el.scrollHeight >= el.clientHeight && el.clientHeight <= 80), 'result is a short preview');
     await page.screenshot({ path: '/tmp/deck-subagents-list.png' });
     // Full view.
@@ -131,5 +133,6 @@ try {
     await page.waitForTimeout(250);
     assert.equal(await sessionIndicator.locator('svg *').evaluateAll(nodes => nodes.every(node => !node.hasAttribute('transform') && (node as SVGElement).style.transform === '')), true, 'completed check does not keep spinning');
     child.finish();
-    console.log(JSON.stringify({ ok: true, checks: ['avatar', 'compact-list', 'full-view', 'follow-bottom', 'pause-when-reading', 'back', 'auto-switch', 'favicon', 'indicator-stops'] }));
+    await wait(async () => (await page.locator('.task-card').first().getAttribute('data-activity')) !== 'working', 'frame clears when the subagent finishes');
+    console.log(JSON.stringify({ ok: true, checks: ['avatar', 'compact-list', 'full-view', 'follow-bottom', 'pause-when-reading', 'back', 'auto-switch', 'favicon', 'indicator-stops', 'working-frame'] }));
 } catch (error) { console.error(error); process.exitCode = 1; } finally { await browser.close(); host.disable?.(); await Bun.sleep(50); rmSync(root, { recursive: true, force: true }); process.exit(process.exitCode ?? 0); }
