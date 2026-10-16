@@ -1,6 +1,7 @@
 import { prepareImages, redactImagePayload } from "./images";
 import { execFile } from "node:child_process";
 import type { DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
+import { validateQuestions, validateQuestionAnswers, type DriverQuestionAnswer, type Question } from "@deck/core/session/question";
 import { redactText } from "@deck/core/session/redaction";
 import { buildOpenCodeLaunch, type OpenCodeLaunchOptions } from "./launch";
 import { OpenCodeEventMapper, OpenCodeSseParser, OPENCODE_PROTOCOL, record } from "./mapper";
@@ -27,6 +28,7 @@ class OpenCodeTask {
   private serverDead = false;
   private termination?: Promise<void>;
   private readonly seenPermissions = new Set<string>();
+  private readonly seenQuestions = new Set<string>();
   private stream?: Promise<void>;
   private authorization = "";
   private readonly mapper = new OpenCodeEventMapper();
@@ -88,6 +90,8 @@ class OpenCodeTask {
       this.stream = this.readStream(response.body);
       const pending = await this.request("/permission", undefined, startupSignal);
       for (const permission of Array.isArray(pending) ? pending : []) this.permission(permission);
+      const questions = await this.request("/question", undefined, startupSignal);
+      for (const question of Array.isArray(questions) ? questions : []) this.question(question);
     };
     try { await Promise.race([setup(), startupFailure]);
     } catch (error) { await this.close(); throw error; } finally { clearTimeout(timeout); }
@@ -123,6 +127,7 @@ class OpenCodeTask {
     for (const event of this.mapper.map(raw)) this.emit(event);
     if (!record(raw)) return;
     if (raw.type === "permission.asked") this.permission(p);
+    if (raw.type === "question.asked") this.question(p);
     if (raw.type === "session.error") {
       const aborted = this.current?.interrupted && record(p.error) && p.error.name === "MessageAbortedError";
       this.finish(aborted ? { status: "interrupted" } : { status: "failed", error: "OpenCode session error" });
@@ -143,6 +148,42 @@ class OpenCodeTask {
       if (!turn || this.current !== turn || turn.interrupted || turn.controller.signal.aborted) decision = "deny";
       await this.request(`/permission/${encodeURIComponent(raw.id)}/reply`, { reply: decision === "allow" ? "once" : "reject" });
     })().catch(error => { this.emit({ kind: "diagnostic", data: { code: "opencode-permission-reply-failed", message: redactText((error as Error).message, 300) } }); if (turn && this.current === turn) this.finish({ status: "failed", error: "OpenCode permission reply failed" }); });
+  }
+
+  private question(raw: unknown) {
+    if (!record(raw) || raw.sessionID !== this.nativeId || typeof raw.id !== "string" || this.seenQuestions.has(raw.id)) return;
+    this.seenQuestions.add(raw.id);
+    const turn = this.current;
+    void (async () => {
+      let answer: DriverQuestionAnswer = { outcome: "dismissed" };
+      let questions: Question[] = [];
+      try {
+        questions = raw.questions.map((q: Record<string, any>, index: number) => ({
+          id: `q${index + 1}`, prompt: q.question, header: q.header,
+          options: q.options.map((option: Record<string, any>) => ({ label: option.label, description: option.description })),
+          multiple: !!q.multiple, allowOther: q.custom !== false, secret: false,
+        }));
+        if (turn && !turn.interrupted && this.io.question && validateQuestions(questions)) {
+          answer = await this.io.question({ questionId: raw.id, questions });
+          if (answer.outcome === "answered" && !validateQuestionAnswers(questions, answer.answers).ok) answer = { outcome: "dismissed" };
+        }
+      } catch { answer = { outcome: "dismissed" }; }
+      if (this.closed) return;
+      if (!turn || this.current !== turn || turn.interrupted || turn.controller.signal.aborted) answer = { outcome: "cancelled" };
+      const path = `/question/${encodeURIComponent(raw.id)}`;
+      if (answer.outcome === "answered") {
+        try {
+          const answers = answer.answers;
+          await this.request(path + "/reply", { answers: questions.map(q => answers[q.id]) });
+          return;
+        } catch (error) {
+          // Reject the pending native request as well when delivering answers fails.
+          await this.request(path + "/reject", {}).catch(() => {});
+          throw error;
+        }
+      }
+      await this.request(path + "/reject", {});
+    })().catch(error => { this.emit({ kind: "diagnostic", data: { code: "opencode-question-reply-failed", message: redactText((error as Error).message, 300) } }); if (turn && this.current === turn) this.finish({ status: "failed", error: "OpenCode question reply failed" }); });
   }
 
   send(prompt: string, images?: readonly DriverImageInput[]): Promise<TurnOutcome> {

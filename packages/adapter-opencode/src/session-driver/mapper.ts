@@ -38,6 +38,7 @@ export class OpenCodeSseParser {
 
 export function mapOpenCodeEvent(raw: unknown, partTypes = new Map<string, string>()): DriverEvent[] {
   if (!record(raw)) return [{ kind: "runner.unmapped", data: { type: "unknown" }, raw }];
+  if (typeof raw.type === "string" && (raw.type === "question.asked" || raw.type === "question.replied" || raw.type === "question.rejected" || raw.type.startsWith("question.v2."))) return [];
   const p = record(raw.properties) ? raw.properties : {};
   const part = record(p.part) ? p.part : {};
   if (raw.type === "message.part.delta" && p.field === "text" && typeof p.delta === "string") {

@@ -49,7 +49,7 @@ describe("OpenCode SSE", () => {
   });
 });
 
-function fakeServer(options: { extraMcp?: boolean; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean } = {}) {
+function fakeServer(options: { extraMcp?: boolean; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number } = {}) {
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const requests: Array<{ path: string; body: any; auth: string | null }> = [];
   let messages = 0;
@@ -66,6 +66,8 @@ function fakeServer(options: { extraMcp?: boolean; hang?: boolean; pending?: boo
     if (path === "/session") return Response.json({ id: "ses_native" });
     if (path === "/session/ses_native") return Response.json({ id: "ses_native" }, { status: options.resumeStatus ?? 200 });
     if (path === "/permission") return Response.json(options.pending ? [{ id: "perm1", sessionID: "ses_native", permission: "bash", patterns: ["echo hello"] }] : []);
+    if (path === "/question") return Response.json(options.pendingQuestions ?? []);
+    if (path.startsWith("/question/")) return Response.json(true, { status: options.questionReplyStatus ?? 200 });
     if (path.endsWith("/reply")) return Response.json(true);
     if (path.endsWith("/abort")) { if (options.abortError) event("session.error", { sessionID: "ses_native", error: { name: "MessageAbortedError" } }); else if (!options.hang) event("session.idle", { sessionID: "ses_native" }); return Response.json(true); }
     if (path.endsWith("/message")) {
@@ -330,4 +332,100 @@ test("global memory explicitly admits native loader while dropping inherited pro
   expect(Object.keys(launch.env).some(key => /^(SUPERMEMORY_|DECK_MEMORY_)/.test(key))).toBe(false);
   expect(() => buildOpenCodeLaunch({ ...input(), nativeMemory: { ...nativeMemory, scopeMode: undefined } }, h.io)).toThrow("opencode-native-memory-invalid");
   expect(() => buildOpenCodeLaunch({ ...input(), nativeMemory: { ...nativeMemory, projectScope: "sm_project_v1_owner_repo" } }, h.io)).toThrow("opencode-native-memory-invalid");
+});
+
+const questionFixture = (id = "que_test") => ({
+  id, sessionID: "ses_native",
+  questions: [
+    { question: "Choose a mode", header: "Mode", options: [{ label: "Fast", description: "Quick result" }], custom: false },
+    { question: "Choose features", header: "Features", options: [{ label: "A", description: "Feature A" }], multiple: true },
+  ],
+  tool: { messageID: "msg_test", callID: "call_test" },
+});
+async function waitForRequest(s: ReturnType<typeof fakeServer>, path: string) {
+  for (let i = 0; i < 100 && !s.requests.some(r => r.path === path); i++) await new Promise(resolve => setTimeout(resolve, 1));
+  expect(s.requests.some(r => r.path === path)).toBe(true);
+}
+
+test("questions map v1 fields, order answers, dedupe and ignore foreign/v2 events", async () => {
+  const s = fakeServer({ hang: true }); const h = privateIo();
+  const calls: unknown[] = [];
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, question: async req => {
+      calls.push(req); return { outcome: "answered", answers: { q2: ["A", "Other"], q1: ["Fast"] } };
+    } });
+    s.event("question.asked", { ...questionFixture(), sessionID: "ses_foreign" });
+    s.event("question.v2.asked", questionFixture("que_v2"));
+    s.event("question.asked", questionFixture());
+    s.event("question.asked", questionFixture());
+    await waitForRequest(s, "/question/que_test/reply");
+    expect(calls).toEqual([{ questionId: "que_test", questions: [
+      { id: "q1", prompt: "Choose a mode", header: "Mode", options: [{ label: "Fast", description: "Quick result" }], multiple: false, allowOther: false, secret: false },
+      { id: "q2", prompt: "Choose features", header: "Features", options: [{ label: "A", description: "Feature A" }], multiple: true, allowOther: true, secret: false },
+    ] }]);
+    expect(s.requests.filter(r => r.path.startsWith("/question/"))).toHaveLength(1);
+    expect(s.requests.find(r => r.path === "/question/que_test/reply")?.body).toEqual({ answers: [["Fast"], ["A", "Other"]] });
+    expect(h.events.some(e => e.kind === "runner.unmapped" && String(e.data.type).startsWith("question."))).toBe(false);
+    expect(JSON.stringify(h.events)).not.toContain("Other");
+    await task.close();
+  } finally { await s.stop(); }
+});
+
+test.each(["dismissed", "cancelled", "absent", "throws"] as const)("rejects questions when host is %s", async mode => {
+  const s = fakeServer({ hang: true }); const h = privateIo();
+  try {
+    const question: DriverHostIo["question"] = mode === "absent" ? undefined : async () => {
+      if (mode === "throws") throw Error("broker failed");
+      return { outcome: mode === "cancelled" ? "cancelled" : "dismissed" };
+    };
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, question });
+    s.event("question.asked", questionFixture());
+    await waitForRequest(s, "/question/que_test/reject");
+    await task.close();
+  } finally { await s.stop(); }
+});
+
+test("replays pending questions, rejects pre-turn requests and deduplicates SSE replay", async () => {
+  const s = fakeServer({ hang: true, pendingQuestions: [questionFixture(), { ...questionFixture("que_foreign"), sessionID: "ses_foreign" }] }); const h = privateIo();
+  let calls = 0;
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, question: async () => { calls++; return { outcome: "dismissed" }; } });
+    await waitForRequest(s, "/question/que_test/reject");
+    s.event("question.asked", questionFixture());
+    s.event("question.asked", questionFixture("que_next"));
+    await waitForRequest(s, "/question/que_next/reject");
+    expect(calls).toBe(1);
+    expect(s.requests.filter(r => r.path.startsWith("/question/"))).toHaveLength(2);
+    await task.close();
+  } finally { await s.stop(); }
+});
+
+test.each(["interrupted", "completed"] as const)("rejects delayed question answers after %s even during another turn", async terminal => {
+  const s = fakeServer({ hang: true }); const h = privateIo();
+  let release!: (answer: { outcome: "answered"; answers: Record<string, string[]> }) => void;
+  let requested!: () => void;
+  const seen = new Promise<void>(resolve => { requested = resolve; });
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, question: () => { requested(); return new Promise(resolve => { release = resolve; }); } });
+    s.event("question.asked", questionFixture());
+    await seen;
+    if (terminal === "interrupted") { await task.interrupt(); s.event("session.idle", { sessionID: "ses_native" }); }
+    else s.completeMessages();
+    expect((await task.done).status).toBe(terminal);
+    const next = task.send("again");
+    release({ outcome: "answered", answers: { q1: ["Fast"], q2: ["A"] } });
+    await waitForRequest(s, "/question/que_test/reject");
+    await task.close(); await next;
+  } finally { await s.stop(); }
+});
+
+test("question reply failure emits diagnostic and fails active turn", async () => {
+  const s = fakeServer({ hang: true, questionReplyStatus: 500 }); const h = privateIo();
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, question: async () => ({ outcome: "answered", answers: { q1: ["Fast"], q2: ["A"] } }) });
+    s.event("question.asked", questionFixture());
+    expect(await task.done).toEqual({ status: "failed", error: "OpenCode question reply failed" });
+    expect(h.events.some(e => e.kind === "diagnostic" && e.data.code === "opencode-question-reply-failed")).toBe(true);
+    await task.close();
+  } finally { await s.stop(); }
 });
