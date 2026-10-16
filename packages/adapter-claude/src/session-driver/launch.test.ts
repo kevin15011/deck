@@ -72,6 +72,24 @@ describe("buildClaudeTurnLaunch (XR-4.3, design 4.1)", () => {
     expect(JSON.stringify(launch.env)).not.toContain(CRED);
   });
 
+  test("always loads only Deck tools for Lead and members without enabling global tool search", () => {
+    for (const memberId of ["lead", "investigate"]) {
+      for (const approvals of ["relay", "runner-default"] as const) {
+        const original = input();
+        const { launch, files } = build({ memberId, approvals,
+          mcp: { ...original.mcp, servers: [...original.mcp.servers, "context7"] },
+          mcpServerSpecs: { ...original.mcpServerSpecs, context7: { transport: "http", url: "https://mcp.context7.com/mcp" } },
+        });
+        expect(JSON.parse(files.get("mcp-config.json")!).mcpServers).toEqual({
+          ...original.mcpServerSpecs,
+          deck: { ...original.mcpServerSpecs.deck, alwaysLoad: true },
+          context7: { type: "http", url: "https://mcp.context7.com/mcp" },
+        });
+        expect(launch.env.ENABLE_TOOL_SEARCH).toBeUndefined();
+      }
+    }
+  });
+
   test("an id in the child set without a launch spec is a launch error, never silently dropped", () => {
     expect(() => build({ mcp: { servers: ["deck", "ghost"], sessionTools: [] } })).toThrow(ClaudeLaunchError);
   });

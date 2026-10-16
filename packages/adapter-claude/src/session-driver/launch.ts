@@ -64,7 +64,7 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   if (!sessionId || !UUID.test(sessionId)) throw new ClaudeLaunchError("claude-invalid-session-id", "Claude native session id must be a UUID");
 
   const diagnostics: ClaudeTurnLaunch["diagnostics"] = [];
-  const specs: Record<string, { command: string; args: readonly string[]; env: Readonly<Record<string, string>> } | { type: "http"; url: string; headers?: Record<string, string> }> = {};
+  const specs: Record<string, ({ command: string; args: readonly string[]; env: Readonly<Record<string, string>> } | { type: "http"; url: string; headers?: Record<string, string> }) & { alwaysLoad?: true }> = {};
   const memoryServers = nativePlugin?.mcpServers ?? {};
   for (const id of Object.keys(memoryServers)) if (input.mcp.servers.includes(id)) throw new ClaudeLaunchError("claude-memory-mcp-conflict", "Native memory MCP server conflicts with the ordinary child set");
   const expectedMcpServers = [...input.mcp.servers, ...Object.keys(memoryServers)];
@@ -79,6 +79,9 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
       }));
       specs[id] = { type: "http", url: spec.url, ...(Object.keys(headers).length ? { headers } : {}) };
     } else specs[id] = { command: spec.command, args: [...spec.args], env: { ...spec.env } };
+    // Claude 2.1.301 otherwise defers MCP schemas behind ToolSearch, hiding Deck
+    // delegation from the model. Credentials still restrict each member's tools.
+    if (id === DECK_SERVER_ID) specs[id]!.alwaysLoad = true;
   }
   if (input.approvals === "relay" && !(DECK_SERVER_ID in specs)) {
     throw new ClaudeLaunchError("claude-session-mcp-missing", "Relay approvals need the Deck session MCP server in the child set");
