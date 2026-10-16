@@ -121,7 +121,7 @@ test("approval event extensions validate scopes, safe keys, risk and grants", ()
   for (const data of [{ allowedScopes: ["session"] }, { allowedScopes: ["once", "once"] }, { risk: "low" }, { toolKey: "Bash" }, { exactKey: "x".repeat(513) }]) expect(event("approval.requested", { approvalId: "a", ...data })).toBe(false);
   expect(event("approval.resolved", { approvalId: "a", scope: "session", auto: true })).toBe(true);
   expect(event("approval.resolved", { approvalId: "a", scope: "forever" })).toBe(false);
-  const grant = { action: "added", grantId: "g", kind: "exact", toolKey: "claude:Bash", exactKey: "ls", risk: "high", by: "u" };
+  const grant = { action: "added", grantId: "g", kind: "exact", toolKey: "claude:Bash", exactKey: "ls", matchKey: "a".repeat(64), risk: "high", by: "u" };
   expect(event("session.grant", grant)).toBe(true);
   expect(event("session.grant", { ...grant, exactKey: undefined })).toBe(false);
 });

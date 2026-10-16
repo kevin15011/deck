@@ -58,9 +58,9 @@ const hookFixtures = [
 ];
 
 const eventFixtures: unknown[] = [
-  ...[{}, { allowedScopes: ["once"] }, { allowedScopes: ["session"] }, { allowedScopes: ["once", "once"] }, { allowedScopes: ["once", "session", "always"], toolKey: "claude:Bash", risk: "high" }, { toolKey: "Bash" }, { toolKey: "claude:bad key" }, { exactKey: "x".repeat(513) }, { risk: "low" }].map(data => ev({ kind: "approval.requested", data: { approvalId: "a", ...data } })),
+  ...[{ grantKinds: [] }, { grantKinds: ["exact", "tool"], exactKeyTruncated: false }, { grantKinds: ["exact", "exact"] }, { grantKinds: ["all"] }, { grantKinds: "exact" }, { exactKeyTruncated: "true" }, {}, { allowedScopes: ["once"] }, { allowedScopes: ["session"] }, { allowedScopes: ["once", "once"] }, { allowedScopes: ["once", "session", "always"], toolKey: "claude:Bash", risk: "high" }, { toolKey: "Bash" }, { toolKey: "claude:bad key" }, { exactKey: "x".repeat(513) }, { risk: "low" }].map(data => ev({ kind: "approval.requested", data: { approvalId: "a", ...data } })),
   ...["once", "session", "always", "forever"].map(scope => ev({ kind: "approval.resolved", data: { approvalId: "a", scope } })),
-  ...[{ kind: "exact", exactKey: "ls" }, { kind: "exact" }, { kind: "tool" }, { kind: "tool", toolKey: "bad" }].map(data => ev({ kind: "session.grant", data: { action: "added", grantId: "g", toolKey: "claude:Bash", risk: "high", by: "u", ...data } })),
+  ...[{ kind: "exact", exactKey: "ls", matchKey: "a".repeat(64) }, { kind: "exact", exactKey: "ls", matchKey: "raw-secret" }, { kind: "exact", exactKey: "ls" }, { kind: "exact" }, { kind: "tool" }, { kind: "tool", toolKey: "bad" }].map(data => ev({ kind: "session.grant", data: { action: "added", grantId: "g", toolKey: "claude:Bash", risk: "high", by: "u", ...data } })),
   ...["answered", "dismissed", "cancelled"].flatMap(outcome => [
     ev({ kind: "question.resolved", data: { questionId: "r", outcome, by: "user" } }),
     ...[{}, { q1: ["visible"] }, null, [], { q1: [] }, { q1: Array(13).fill("A") }, { q1: ["x".repeat(4001)] }, { "bad\n": ["A"] }, Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`q${i}`, ["A"]]))].map(answers => ev({ kind: "question.resolved", data: { questionId: "r", outcome, by: "user", answers } })),

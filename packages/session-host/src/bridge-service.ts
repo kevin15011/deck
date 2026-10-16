@@ -1,6 +1,7 @@
 import { redactText } from "@deck/core/session/redaction";
 import { isApprovalToolKey, type ApprovalRisk } from "@deck/core/session/approval";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { isAbsolute } from "node:path";
 import { validateQuestions, type Question } from "@deck/core/session/question";
 import type { QuestionBroker } from "./question-broker";
 /** Daemon side of the session MCP bridge: authenticates the task credential, enforces its tool grant, serves the tools. */
@@ -111,11 +112,15 @@ function claudeAnswers(input: Record<string, unknown>, questions: Question[], an
 
 const CLAUDE_READ_ONLY_TOOLS = new Set(["Read", "Glob", "Grep", "WebSearch", "TodoWrite", "TaskGet", "TaskList", "TaskOutput", "ListAgents"]);
 
-function claudeApprovalAction(tool: string, input: Record<string, unknown>): { exactKey?: string; risk: ApprovalRisk } {
+function claudeApprovalAction(tool: string, input: Record<string, unknown>): { identity?: string; exactKey?: string; risk: ApprovalRisk } {
   const risk = CLAUDE_READ_ONLY_TOOLS.has(tool) ? "normal" : "high";
+  // Full unredacted action identity is for the broker's in-memory matching only.
+  // Display redaction/truncation must never collapse distinct actions into a grant.
+  const canonical = JSON.stringify(sortClaudeArguments({ tool_name: tool, input }));
+  const identity = claudeHasExactContext(tool, input) && Buffer.byteLength(canonical, "utf8") <= 16 * 1024 ? { identity: canonical } : {};
   if (tool.startsWith("mcp__")) {
     const json = JSON.stringify(sortClaudeArguments(input));
-    return { risk, exactKey: createHash("sha256").update(redactText(json, json.length)).digest("hex") };
+    return { ...identity, risk, exactKey: redactText(`${tool}(${json})`, 4096) };
   }
   let action: unknown;
   switch (tool) {
@@ -125,12 +130,22 @@ function claudeApprovalAction(tool: string, input: Record<string, unknown>): { e
     case "WebFetch": action = input.url; break;
     case "WebSearch": action = input.query; break;
   }
-  if (typeof action !== "string" || !action) return { risk };
-  const redacted = redactText(action, 512);
-  // Keep lossy keys distinct: a shared truncated prefix must not grant a different command.
-  const exactKey = redacted === action ? redacted
-    : `${redacted.slice(0, 439)} #sha256:${createHash("sha256").update(action).digest("hex")}`;
-  return { risk, exactKey };
+  return { ...identity, risk, ...(typeof action === "string" && action ? { exactKey: redactText(action, 4096) } : {}) };
+}
+
+function claudeHasExactContext(tool: string, input: Record<string, unknown>): boolean {
+  if (tool.startsWith("mcp__") || tool === "WebFetch" || tool === "WebSearch") return true;
+  switch (tool) {
+    case "Edit": case "Write": case "MultiEdit": case "NotebookEdit": case "Read": {
+      const paths = [input.file_path, input.notebook_path].filter(path => path !== undefined);
+      return paths.length > 0 && paths.every(path => typeof path === "string" && isAbsolute(path));
+    }
+    default:
+      // The credential and bridge context carry no trusted effective runner cwd.
+      // Bash (even with a caller-supplied cwd), relative paths and unknown tools
+      // therefore cannot supply an exact identity. Once/tool grants still work.
+      return false;
+  }
 }
 
 function sortClaudeArguments(value: unknown): unknown {

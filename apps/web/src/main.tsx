@@ -4,7 +4,7 @@ import { QuestionDock, type Question, type QuestionDrafts } from './questions';
 import { agentProfile } from './subagent-parts';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { conversationEvents, emptyState, pairingToken, reduceEvent, type ViewState } from './state';
+import { sessionGrants, conversationEvents, emptyState, pairingToken, reduceEvent, type ViewState } from './state';
 import { Markdown } from './markdown';
 import { MessageInput } from './message-input';
 import { leadProgress, LeadProgress, type PendingPrompt } from './lead-progress';
@@ -119,6 +119,8 @@ export function App() {
                         if (mutation !== sessionMutation.current) continue;
                         const returned = new Set((response.data.sessions as WorkspaceSession[]).map(sessionIdOf));
                         for (const missing of ids.slice(offset, offset + 100)) if (!returned.has(missing)) hideSession(missing);
+                        const summary=(response.data.sessions as WorkspaceSession[]).find(row=>sessionIdOf(row)===selectedSession.current);
+                        if(summary)setView(previous=>{if(selectedSession.current!==sessionIdOf(summary))return previous;const grants=sessionGrants(previous,summary);return grants===previous.grants?previous:{...previous,grants};});
                         setHistories(previous => {
                             const old = previous[id]; if (!old) return previous;
                             const updates = new Map<string, WorkspaceSession>((response.data.sessions as WorkspaceSession[]).map(item => [sessionIdOf(item), item]));
@@ -292,7 +294,7 @@ export function App() {
         const activity = leadActivityFromEvents(view.events, leadTaskId);
         setHistories(previous => Object.fromEntries(Object.entries(previous).map(([id, history]) => [id, { ...history, sessions: history.sessions.map(session => {
             if (sessionIdOf(session) !== selected || (session.lastSeq ?? 0) > view.seq) return session;
-            const next = { ...session, lastSeq: view.seq, leadActivity: { ...activity, lastReplySeq: Math.max(activity.lastReplySeq, session.leadActivity?.lastReplySeq ?? 0) } };
+            const next = { ...session, lastSeq: view.seq, grants:sessionGrants(view,session), leadActivity: { ...activity, lastReplySeq: Math.max(activity.lastReplySeq, session.leadActivity?.lastReplySeq ?? 0) } };
             sessionMetadata.current.set(selected, next); return next;
         }) }])));
     }, [selected, hydratedSession, view.seq, leadTaskId]);
@@ -345,7 +347,7 @@ export function App() {
         if (commandInFlight.current) throw new Error('Another request is still pending.');
         commandInFlight.current = true; setBusy(true); setError('');
         const commandId = crypto.randomUUID(), prompt = body.type === 'prompt.send';
-        if(['session.rename','session.remove','session.release','session.setApprovals'].includes(String(body.type))) ++sessionMutation.current;
+        if(['session.rename','session.remove','session.release','session.setApprovals','session.revokeGrant'].includes(String(body.type))) ++sessionMutation.current;
         if (prompt && sessionId) setPendingPrompts(previous => ({ ...previous, [sessionId]: { commandId, afterSeq: view.seq, phase: 'sending', background: promptInbox.inbox.paused || !!promptInbox.inbox.active || promptInbox.inbox.queued.length>0 || (!!progress && progress.phase!=='connection') } }));
         try {
             const reply = await api('/api/commands', { method: 'POST', body: JSON.stringify({ ...(sessionId ? { sessionId } : {}), command: { v: 1, commandId, ...body } }) });
@@ -356,6 +358,17 @@ export function App() {
             if (prompt && sessionId) setPendingPrompts(previous => { if (previous[sessionId]?.commandId !== commandId) return previous; const next = { ...previous }; delete next[sessionId]; return next; });
             throw e;
         } finally { commandInFlight.current = false; setBusy(false); }
+    }
+    async function revokeGrant(owner:string, grantId:string) {
+        try{await mutate({type:'session.revokeGrant',grantId},owner);}
+        catch(cause){
+            if(!(cause instanceof Error)||!cause.message.includes('unknown-grant'))throw cause;
+            // The server has already removed it; recover without presenting a permanently failing action.
+            const old=sessionMetadata.current.get(owner);
+            if(old)sessionMetadata.current.set(owner,{...old,grants:(old.grants??[]).filter(grant=>grant.grantId!==grantId)});
+            setHistories(previous=>Object.fromEntries(Object.entries(previous).map(([id,history])=>[id,{...history,sessions:history.sessions.map(session=>sessionIdOf(session)===owner?{...session,grants:(session.grants??[]).filter(grant=>grant.grantId!==grantId)}:session)}])));
+            setView(previous=>selectedSession.current===owner?{...previous,grants:(previous.grants??old?.grants??[]).filter(grant=>grant.grantId!==grantId)}:previous);
+        }finally{++sessionMutation.current;}
     }
     async function changeApprovals(owner:string, mode:'relay'|'yolo') {
         await mutate({type:'session.setApprovals',mode},owner); ++sessionMutation.current;
@@ -411,7 +424,7 @@ export function App() {
         }}><div className="drawer-heading"><h2 id="drawer-title">Workspace</h2><button className="quiet drawer-close" type="button" onClick={() => setDrawerOpen(false)} aria-label="Close sessions"><NavigationIcon kind="close"/></button></div><nav aria-label="Mobile sessions">{sessionButtons}</nav></dialog>
         <div className={`app-body${!narrow && workspaceCollapsed ? ' workspace-collapsed' : ''}`}><header className="app-header"><button className="sidebar-toggle quiet" type="button" aria-label={narrow ? 'Open sessions' : collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={narrow ? drawerOpen : !collapsed} onClick={() => narrow ? setDrawerOpen(true) : setCollapsed(value => !value)}><NavigationIcon kind="menu"/></button><div className="session-identity"><h1>{selected ? currentSession ? sessionName(currentSession) : 'Session conversation' : project?.name ?? 'Choose a project'}</h1>{lead && <p className="lead-identity">Lead <strong>{String(lead.runnerId ?? 'Runner pending')}</strong><span title={String(lead.modelId ?? 'Model pending')}>{String(lead.modelId ?? 'Model pending')}</span></p>}</div><div className="connection"><span className={`connection-dot${canCompose ? ' ready' : ''}`} aria-hidden="true"/><span>{selected ? connection !== 'Connected' ? connection : canCompose ? 'Connected' : 'Disconnected' : 'Ready'}</span><small>{selected ? closing ? 'Closing' : ended ? 'Not prepared' : readiness.preparation?.status === 'ready' ? view.state : 'Not prepared' : 'Local'}</small></div>{!narrow && <button type="button" className="workspace-toggle quiet" aria-label={workspaceCollapsed ? 'Show workspace panel' : 'Hide workspace panel'} title={workspaceCollapsed ? 'Show workspace panel' : 'Hide workspace panel'} aria-expanded={!workspaceCollapsed} aria-controls="session-workspace" onClick={() => setWorkspaceCollapsed(value => !value)}><NavigationIcon kind="panel"/></button>}<button type="button" className="theme-toggle quiet" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{theme === 'dark' ? <><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></> : <path d="M20.9 13.1A9 9 0 0 1 10.9 3.1a9 9 0 1 0 10 10Z"/>}</svg></button></header>
         {error && <p className="error app-error" role="alert">{error}</p>}
-        {selected && <SessionControls key={selected} approvalMode={view.approvalMode??currentSession?.approvalMode} approvalModeSource={view.approvalModeSource??currentSession?.approvalModeSource} onApprovals={mode=>changeApprovals(selected,mode)} grants={view.grants??currentSession?.grants??[]} onRevokeGrant={grantId=>mutate({type:'session.revokeGrant',grantId},selected)} showPrimary={narrow && mobileTab !== 'chat'} connected={connection === 'Connected'} ended={ended} closing={closing} releaseFailed={releaseFailed} removing={removing} working={working} busy={busy} preparation={readiness.preparation} error={readiness.error} sharedActive={Math.max(0, (currentSession?.sharedActiveSessions ?? 0) - (currentSession?.running ? 1 : 0))} predecessor={currentSession?.predecessorSessionId} onReconnect={() => setReconnectRevision(value => value + 1)} onPrepare={() => void lifecycle('session.prepare')} onCancel={() => void lifecycle('session.prepare.cancel')} onClose={() => removing && currentSession ? void removeSession(currentSession) : void lifecycle('session.release')} onAssignments={() => showDialog('assignments')} onPredecessor={() => { if (currentSession?.predecessorSessionId) selectSession(currentSession.predecessorSessionId); }}/>}
+        {selected && <SessionControls key={selected} approvalMode={view.approvalMode??currentSession?.approvalMode} approvalModeSource={view.approvalModeSource??currentSession?.approvalModeSource} onApprovals={mode=>changeApprovals(selected,mode)} grants={sessionGrants(view,currentSession)} onRevokeGrant={grantId=>revokeGrant(selected,grantId)} showPrimary={narrow && mobileTab !== 'chat'} connected={connection === 'Connected'} ended={ended} closing={closing} releaseFailed={releaseFailed} removing={removing} working={working} busy={busy} preparation={readiness.preparation} error={readiness.error} sharedActive={Math.max(0, (currentSession?.sharedActiveSessions ?? 0) - (currentSession?.running ? 1 : 0))} predecessor={currentSession?.predecessorSessionId} onReconnect={() => setReconnectRevision(value => value + 1)} onPrepare={() => void lifecycle('session.prepare')} onCancel={() => void lifecycle('session.prepare.cancel')} onClose={() => removing && currentSession ? void removeSession(currentSession) : void lifecycle('session.release')} onAssignments={() => showDialog('assignments')} onPredecessor={() => { if (currentSession?.predecessorSessionId) selectSession(currentSession.predecessorSessionId); }}/>}
         <Approvals key={`approvals:${selected}`} events={approvals} busy={busy||connection!=='Connected'} onRespond={body=>mutate(body,selected)}/>
         <div className="view-nav"><span className="chat-label">Conversation <small>You and the Lead</small></span><Tabs active={activeTab} onChange={changeTab}/></div>
         {narrow && mobileTab !== 'chat' && <LeadProgress progress={progress} mobile/>}

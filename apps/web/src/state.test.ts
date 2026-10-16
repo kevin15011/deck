@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { joinQuestionResolution, conversationEvents, emptyState, pairingToken, reduceEvent } from './state';
+import { sessionGrants, joinQuestionResolution, conversationEvents, emptyState, pairingToken, reduceEvent } from './state';
 import type { SessionEvent } from '../../../packages/core/src/session/events';
 const event = (seq: number, kind: SessionEvent['kind'], data: Record<string, unknown>): SessionEvent => ({ v: 1, sessionId: 's', seq, kind, data, source: { taskId: 'lead' }, ts: '2026-01-01T00:00:00Z' });
 test('replay retains pending approvals across long histories and deduplicates reconnects', () => {
@@ -129,4 +129,17 @@ test('auto approvals resolve pending requests and join the exact action into cha
 test('auto approvals stay in their task transcript and tolerate missing requests',()=>{
  const resolved={...event(2,'approval.resolved',{approvalId:'a',auto:true,by:'session-grant:g'}),source:{taskId:'child',memberId:'investigate'}};
  expect(conversationEvents([resolved])).toEqual([]);expect(conversationEvents([resolved],'child')[0]!.autoApproval?.tool).toBe('Tool request');
+});
+
+test('release, end and removal clear replayed permissions',()=>{
+ const added=event(1,'session.grant',{action:'added',grantId:'g',kind:'tool',toolKey:'codex:commandExecution',risk:'high'});
+ for(const kind of ['session.released','session.ended','session.removed'] as const){
+ const state=reduceEvent(reduceEvent(emptyState(),added),event(2,kind,{}));expect(state.grants).toEqual([]);
+ }
+});
+test('fresh zero-grant summaries clear stale grants without hiding newer grant events',()=>{
+ const state=reduceEvent(emptyState(),event(10,'session.grant',{action:'added',grantId:'g',kind:'tool',toolKey:'codex:commandExecution',risk:'high'}));
+ expect(sessionGrants(state,{grants:[],lastSeq:10})).toEqual([]);
+ expect(sessionGrants(state,{grants:[],lastSeq:9})).toHaveLength(1);
+ expect(sessionGrants(emptyState(),{grants:[],lastSeq:0})).toEqual([]);
 });

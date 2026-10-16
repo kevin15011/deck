@@ -50,22 +50,28 @@ const wait = async (condition: () => boolean | Promise<boolean>, label: string) 
 };
 
 const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors:string[]=[],sent:any[]=[];
+let testedSession='';
 page.setDefaultTimeout(7000);page.on('pageerror',error=>errors.push(error.message));
 page.on('request',request=>{if(request.url().endsWith('/api/commands'))sent.push(request.postDataJSON().command);});
 try {
     const projectId=(await command({type:'project.register',path:projectOne,name:'Permissions'})).project.projectId;
     const session=(await command({type:'session.create',projectId,title:'Permissions',approvals:'relay',members:{lead:{runnerId:'codex',modelId:'codex-model'}}})).sessionId;
+    testedSession=session;
+    await page.addInitScript(()=>{
+        const descriptor=Object.getOwnPropertyDescriptor(WebSocket.prototype,'onmessage')!;
+        Object.defineProperty(WebSocket.prototype,'onmessage',{configurable:true,get(){return descriptor.get!.call(this);},set(listener){descriptor.set!.call(this,(event:MessageEvent)=>{let message:any;try{message=JSON.parse(event.data);}catch{}if((window as any).dropGrantRevocations&&message?.event?.kind==='session.grant'&&message.event.data.action==='revoked'){(window as any).droppedGrantRevocations=((window as any).droppedGrantRevocations??0)+1;return;}listener?.call(this,event);});}});
+    });
     await command({type:'session.prepare'},session);await page.goto(host.status().url!);
     await page.getByRole('button',{name:'Permissions',exact:true}).first().click();
     await command({type:'prompt.send',text:'Exercise approvals'},session);await wait(()=>codex.turns.length===1,'turn');
     const turn=codex.turns[0]!,card=page.getByRole('article',{name:'Approval for commandExecution',exact:true});
-    const request=(exactKey:string,extra:Record<string,unknown>={})=>turn.io.approval({approvalId:randomUUID(),tool:'commandExecution',toolKey:'codex:commandExecution',risk:'high',exactKey,summary:'Run this exact command',input:{command:exactKey},...extra} as Parameters<typeof turn.io.approval>[0]);
+    const request=(exactKey:string,extra:Record<string,unknown>={})=>turn.io.approval({approvalId:randomUUID(),tool:'commandExecution',toolKey:'codex:commandExecution',risk:'high',exactKey,identity:JSON.stringify({command:exactKey,cwd:projectOne}),summary:'Run this exact command',input:{command:exactKey},...extra} as Parameters<typeof turn.io.approval>[0]);
     const result=async(promise:ReturnType<typeof request>)=>await Promise.race([promise,Bun.sleep(7000).then(()=>{throw new Error('Approval did not resolve');})]);
     const settled=()=>wait(async()=>await card.count()===0,'approval card resolved');
     const menu=()=>card.locator('.approval-scope-menu > summary');
     const permissions=page.locator('.session-permissions');
     async function openPermissions(){await permissions.waitFor();if(!await permissions.evaluate(el=>(el as HTMLDetailsElement).open))await permissions.locator('summary').click();}
-    async function revoke(){await openPermissions();await permissions.getByRole('button',{name:'Revoke',exact:true}).click();await wait(async()=>await permissions.count()===0,'grant revoked');}
+    async function revoke(){await openPermissions();await permissions.getByRole('button',{name:'Revoke',exact:true}).click();await wait(async()=>await permissions.count()===0,'grant revoked');await wait(()=>approvalBroker.grants(session).length===0,'server confirms revocation');}
     let pending=request('printf once');await card.waitFor();
     assert.equal(await card.getByRole('button',{name:'Always allow…',exact:true}).count(),0,'always not advertised');
     await card.getByRole('button',{name:'Allow once',exact:true}).click();assert.deepEqual(await result(pending),{decision:'allow',scope:'once'});await settled();
@@ -114,6 +120,77 @@ try {
     assert.equal(await dialog.locator('.approval-pattern code').innerText(),long);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'mobile has no horizontal overflow');
     await page.screenshot({path:'/tmp/deck-approval-scopes-mobile.png'});await dialog.press('Escape');await card.getByRole('button',{name:'Deny',exact:true}).click();await result(pending);await settled();
+    const unclipped='printf "'+'harmless '.repeat(40)+'" && rm -rf ./IMPORTANT_TAIL';
+    assert.ok(unclipped.length<512,'fixture must remain below the display truncation limit');
+    pending=request(unclipped);await card.waitFor();
+    for(const width of [390,320,1440]){
+        await page.setViewportSize({width,height:width===1440?1000:844});
+        const pattern=card.locator('.approval-pattern code');
+        assert.equal(await pattern.innerText(),unclipped);
+        assert.equal(await card.locator('.approval-shortened').count(),0,'complete display needs no shortened warning');
+        const visible=await pattern.evaluate(el=>{
+            const box=el.getBoundingClientRect(),range=document.createRange();
+            const text=el.firstChild!;range.setStart(text,text.textContent!.indexOf('rm -rf'));range.setEnd(text,text.textContent!.length);
+            return {fits:el.scrollWidth<=el.clientWidth+1&&el.scrollHeight<=el.clientHeight+1,
+                tailInside:[...range.getClientRects()].every(r=>r.left>=box.left-1&&r.right<=box.right+1&&r.top>=box.top-1&&r.bottom<=box.bottom+1)};
+        });
+        assert.equal(visible.fits,true,`full action must fit its display at ${width}px`);
+        assert.equal(visible.tailInside,true,`destructive suffix must be inside the visible display at ${width}px`);
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+        if(width===390)await page.screenshot({path:'/tmp/deck-approval-full-pattern-mobile.png'});
+    }
+    await menu().click();await card.getByRole('button',{name:'This exact action',exact:true}).click();
+    assert.deepEqual(await result(pending),{decision:'allow',scope:'once'});await settled();
+    assert.equal(sent.at(-1).grant,'exact','fully visible action retains exact session grants');await revoke();
+    await page.setViewportSize({width:390,height:844});
+    const shortened='printf "'+'prefix '.repeat(100)+'DANGEROUS_TAIL"';
+    pending=request(shortened,{nativeScopes:['always'],alwaysNote});await card.waitFor();
+    const warning='Shortened — the full action is not displayed';
+    await card.getByText(warning,{exact:true}).waitFor();
+    assert.equal(await card.locator('.approval-pattern code').innerText().then(text=>text.includes('DANGEROUS_TAIL')),false,'bounded key omits the tail');
+    assert.equal(await card.getByRole('button',{name:'This exact action',exact:true}).count(),0);
+    assert.equal(await card.getByRole('button',{name:'Always allow…',exact:true}).count(),0);
+    await card.locator('.approval-full-request summary').click();
+    assert.match(await card.locator('.approval-full-request pre').innerText(),/DANGEROUS_TAIL/);
+    await menu().click();await card.getByRole('button',{name:'Any use of commandExecution',exact:true}).click();
+    dialog=page.getByRole('dialog',{name:'Allow any use for this session',exact:true});await dialog.getByText(warning,{exact:true}).waitFor();
+    await dialog.locator('.approval-full-request summary').click();
+    assert.match(await dialog.locator('.approval-full-request pre').innerText(),/DANGEROUS_TAIL/);
+    assert.equal(await dialog.locator('.approval-full-request pre').evaluate(el=>getComputedStyle(el).userSelect),'text');
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'expanded request fits mobile');
+    await dialog.locator('.approval-full-request pre').evaluate(el=>{el.scrollTop=el.scrollHeight;});
+    await page.screenshot({path:'/tmp/deck-approval-shortened-mobile.png'});await dialog.press('Escape');
+    await card.getByRole('button',{name:'Deny',exact:true}).click();await result(pending);await settled();
+    pending=request('printf without-identity',{identity:undefined,nativeScopes:['always'],alwaysNote});await card.waitFor();
+    assert.equal(await card.getByRole('button',{name:'This exact action',exact:true}).count(),0,'no exact grant without identity');
+    assert.equal(await card.getByRole('button',{name:'Always allow…',exact:true}).count(),0,'no native always without identity');
+    await card.getByRole('button',{name:'Deny',exact:true}).click();await result(pending);await settled();
+    async function grantExact(pattern:string){const answer=request(pattern);await card.waitFor();await menu().click();await card.getByRole('button',{name:'This exact action',exact:true}).click();await result(answer);await settled();await openPermissions();}
+    async function loseRevocation(){
+        const snapshot=await manager.query('sessions.status',{projectId,sessionIds:[session]}) as any;
+        const grantId=snapshot.data.sessions[0].grants[0].grantId;
+        await page.route('**/api/sessions/status?**',route=>route.fulfill({contentType:'application/json',body:JSON.stringify(snapshot)}));
+        const dropped=await page.evaluate(()=>(window as any).droppedGrantRevocations??0);
+        await page.evaluate(()=>{(window as any).dropGrantRevocations=true;});
+        await command({type:'session.revokeGrant',grantId},session);
+        await wait(async()=>await page.evaluate(()=>(window as any).droppedGrantRevocations??0)>dropped,'revocation intentionally withheld');
+        assert.equal(await permissions.count(),1,'fixture retained a stale permission');
+        await page.evaluate(()=>{(window as any).dropGrantRevocations=false;});
+    }
+    await grantExact('printf stale-revoke');await loseRevocation();
+    await permissions.getByRole('button',{name:'Revoke',exact:true}).click();
+    await page.unroute('**/api/sessions/status?**');
+    await wait(async()=>await permissions.count()===0,'unknown-grant removes stale entry');
+    assert.equal(sent.at(-1).type,'session.revokeGrant');
+    await grantExact('printf summary-zero');await loseRevocation();
+    await page.unroute('**/api/sessions/status?**');
+    await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    await wait(async()=>await permissions.count()===0,'zero-grant summary reconciles stale event projection');
+    await grantExact('printf release-grant');
+    await command({type:'session.release'},session);
+    await wait(async()=>await permissions.count()===0,'release clears permissions');
+    const afterRelease=await manager.query('sessions.status',{projectId,sessionIds:[session]}) as any;
+    assert.equal(afterRelease.data.sessions[0].grants.length,0,'backend grants are empty after release');
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({ok:true,checks:['once','once-does-not-grant','deny','verbatim-pattern','session-exact','auto-exact','auto-audit-line','no-pending-after-auto','grants-replay','revoke-inline-error','revoke-restores-prompt','high-risk-warning','confirmation-ack-gating','confirmation-inline-error','session-tool-confirmed','auto-tool','native-always-advertised','always-ack-gating','native-always-driver-decision','unsupported-inline-error','mobile-reduced-motion']}));
-} catch(error){console.error(error);console.error(errors);await Bun.write('/tmp/deck-scopes-failure.html',await page.content());console.log(await page.locator('.session-permissions').evaluateAll(nodes=>nodes.map(node=>({html:node.outerHTML,parent:node.parentElement?.className}))));process.exitCode=1;} finally{await browser.close();host.disable?.();await manager.close();rmSync(root,{recursive:true,force:true});process.exit(process.exitCode??0);}
+    console.log(JSON.stringify({ok:true,checks:['once','once-does-not-grant','deny','verbatim-pattern','session-exact','auto-exact','auto-audit-line','no-pending-after-auto','grants-replay','revoke-inline-error','revoke-restores-prompt','high-risk-warning','confirmation-ack-gating','confirmation-inline-error','session-tool-confirmed','auto-tool','native-always-advertised','always-ack-gating','native-always-driver-decision','unsupported-inline-error','mobile-reduced-motion','full-card-pattern-and-destructive-tail-320-390-1440','shortened-card-warning','shortened-dialog-warning','full-request-tail','truncated-scopes-hidden','missing-identity-scopes-hidden','unknown-grant-recovery','zero-summary-reconciliation','release-clears-permissions']}));
+} catch(error){console.error(error);console.error(errors);console.log('commands',JSON.stringify(sent));if(testedSession){console.log('backend-grants',JSON.stringify(approvalBroker.grants(testedSession)));await Bun.write('/tmp/deck-scopes-review-events.json',JSON.stringify([...manager.openLog(testedSession)!.readAfter(0)]));}await Bun.write('/tmp/deck-scopes-failure.html',await page.content());console.log(await page.locator('.session-permissions').evaluateAll(nodes=>nodes.map(node=>({html:node.outerHTML,parent:node.parentElement?.className}))));process.exitCode=1;} finally{await browser.close();host.disable?.();await manager.close();rmSync(root,{recursive:true,force:true});process.exit(process.exitCode??0);}

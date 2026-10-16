@@ -452,6 +452,20 @@ export const SESSION_EVENT_SCHEMA = {
                 "type": "string",
                 "minLength": 1
               },
+              "exactKeyTruncated": {
+                "type": "boolean"
+              },
+              "grantKinds": {
+                "type": "array",
+                "maxItems": 2,
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "exact",
+                    "tool"
+                  ]
+                }
+              },
               "allowedScopes": {
                 "type": "array",
                 "minItems": 1,
@@ -582,6 +596,10 @@ export const SESSION_EVENT_SCHEMA = {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 512
+              },
+              "matchKey": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
               },
               "risk": {
                 "enum": [
@@ -1584,4 +1602,4 @@ export const SESSION_COMMAND_SCHEMA = {
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "62c2e6dd36f47936c90a759ea40ee5d94a11ce47d66e8f402440dbc455dc6d2a";
+export const SESSION_SCHEMA_DIGEST = "227dfe79d2b76a9457619249360f40707a7d172073d011b3a3f58d9fa09e5240";

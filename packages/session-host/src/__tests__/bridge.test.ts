@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { chmodSync, existsSync, lstatSync, readFileSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { QuestionBroker } from "../question-broker";
@@ -486,10 +485,59 @@ describe("Claude structured questions", () => {
 describe("Claude approval scopes", () => {
   async function request(tool: string, input: Record<string, unknown>) {
     const h = await harness();
+    const observed = spyOn(h.broker, "request");
     const call = h.bridge.call({ token: h.token, tool: DECK_APPROVE_TOOL, arguments: { tool_name: tool, input } });
     const requested = [...h.log.readAfter(0)].find(e => e.kind === "approval.requested")!;
-    return { ...h, call, data: requested?.data as Record<string, unknown> };
+    const requestArgs = observed.mock.calls[0]![0] as { identity?: string; exactKey?: string };
+    observed.mockRestore();
+    return { ...h, call, requestArgs, data: requested?.data as Record<string, unknown> };
   }
+
+  test("cwd-dependent requests fail closed while once and tool grants remain usable", async () => {
+    for (const [tool, input] of [
+      ["Bash", { command: "./deploy" }], ["Bash", { command: "./deploy", cwd: "/unverified" }],
+      ...["Read", "Edit", "Write", "MultiEdit"].map(tool => [tool, { file_path: "./config.json", cwd: "/unverified" }]),
+      ["NotebookEdit", { notebook_path: "./book.ipynb" }],
+      ["NotebookEdit", { file_path: "/absolute/decoy", notebook_path: "./book.ipynb" }],
+      ["Glob", { pattern: "*.ts" }], ["Grep", { pattern: "secret", path: "./src" }],
+      ["Unknown", { command: "./deploy" }],
+    ] as Array<[string, Record<string, unknown>]>) {
+      const h = await request(tool, input);
+      expect(h.requestArgs.identity).toBeUndefined();
+      expect(h.data).toMatchObject({ allowedScopes: ["once", "session"], grantKinds: ["tool"] });
+      expect(h.broker.respond({ approvalId: h.broker.pending()[0]!.approvalId, decision: "allow", scope: "session", grant: "exact", by: "web" })).toMatchObject({ ok: false, code: "approval-scope-unsupported" });
+      h.broker.respond({ approvalId: h.broker.pending()[0]!.approvalId, decision: "allow", by: "web" });
+      expect(await h.call).toEqual({ ok: true, data: { behavior: "allow", updatedInput: input } });
+      const next = h.bridge.call({ token: h.token, tool: DECK_APPROVE_TOOL, arguments: { tool_name: tool, input } });
+      expect(h.broker.respond({ approvalId: h.broker.pending()[0]!.approvalId, decision: "allow", scope: "session", grant: "tool", confirmed: true, by: "web" })).toMatchObject({ ok: true });
+      await next;
+      expect(await h.bridge.call({ token: h.token, tool: DECK_APPROVE_TOOL, arguments: { tool_name: tool, input } })).toEqual({ ok: true, data: { behavior: "allow", updatedInput: input } });
+    }
+  });
+
+  test("an outer cwd cannot authorize an exact Bash grant or auto-approve another context", async () => {
+    const h = await harness();
+    for (const cwd of ["/sandbox", "/production"]) {
+      const call = h.bridge.call({ token: h.token, tool: DECK_APPROVE_TOOL,
+        arguments: { tool_name: "Bash", input: { command: "./deploy" }, cwd } });
+      expect(h.broker.pending()).toHaveLength(1);
+      expect(h.broker.respond({ approvalId: h.broker.pending()[0]!.approvalId, decision: "allow", scope: "session", grant: "exact", by: "web" })).toMatchObject({ ok: false, code: "approval-scope-unsupported" });
+      h.broker.respond({ approvalId: h.broker.pending()[0]!.approvalId, decision: "allow", by: "web" });
+      expect(await call).toEqual({ ok: true, data: { behavior: "allow", updatedInput: { command: "./deploy" } } });
+    }
+  });
+
+  test("absolute file operands preserve exact grants", async () => {
+    for (const tool of ["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"]) {
+      const input = tool === "NotebookEdit" ? { notebook_path: "/work/book.ipynb" } : { file_path: "/work/file.ts" };
+      const h = await request(tool, input);
+      expect(JSON.parse(h.requestArgs.identity!)).toEqual({ tool_name: tool, input });
+      expect(h.data.grantKinds).toEqual(["exact", "tool"]);
+      expect(h.broker.respond({ approvalId: h.broker.pending()[0]!.approvalId, decision: "allow", scope: "session", grant: "exact", by: "web" })).toMatchObject({ ok: true });
+      await h.call;
+      expect(await h.bridge.call({ token: h.token, tool: DECK_APPROVE_TOOL, arguments: { tool_name: tool, input } })).toEqual({ ok: true, data: { behavior: "allow", updatedInput: input } });
+    }
+  });
 
   test("maps native tool keys, exact actions and risk without offering native persistence", async () => {
     const cases: Array<[string, Record<string, unknown>, string | undefined, string]> = [
@@ -511,44 +559,98 @@ describe("Claude approval scopes", () => {
     }
   });
 
-  test("MCP exact keys digest recursively sorted redacted arguments", async () => {
-    const a = await request("mcp__fixture__run", { z: [{ b: 2, a: 1 }], api_key: "private-value-123" });
-    const b = await request("mcp__fixture__run", { api_key: "another-private-value", z: [{ a: 1, b: 2 }] });
-    const c = await request("mcp__fixture__run", { api_key: "private-value-123", z: [{ a: 2, b: 2 }] });
-    expect(a.data).toMatchObject({ toolKey: "claude:mcp__fixture__run", risk: "high", allowedScopes: ["once", "session"] });
-    expect(a.data.exactKey).toMatch(/^[a-f0-9]{64}$/);
-    expect(a.data.exactKey).toBe(createHash("sha256").update('{"api_key":[redacted],"z":[{"a":1,"b":2}]}').digest("hex"));
+  test("MCP identity preserves credentials while display arguments are redacted", async () => {
+    const a = await request("mcp__payments__transfer", { z: [{ b: 2, a: 1 }], api_key: "test-account-key" });
+    const b = await request("mcp__payments__transfer", { api_key: "production-account-key", z: [{ a: 1, b: 2 }] });
+    const c = await request("mcp__payments__transfer", { api_key: "test-account-key", z: [{ a: 1, b: 2 }] });
+    expect(a.requestArgs.identity).toBe(JSON.stringify({ input: { api_key: "test-account-key", z: [{ a: 1, b: 2 }] }, tool_name: "mcp__payments__transfer" }));
+    expect(a.requestArgs.identity).not.toBe(b.requestArgs.identity);
+    expect(a.requestArgs.identity).toBe(c.requestArgs.identity);
+    expect(a.data.exactKey).toBe('mcp__payments__transfer({"api_key":[redacted],"z":[{"a":1,"b":2}]})');
     expect(a.data.exactKey).toBe(b.data.exactKey);
-    expect(a.data.exactKey).not.toBe(c.data.exactKey);
-    expect(a.data.exactKey).not.toContain("private-value-123");
     for (const h of [a, b, c]) {
       h.broker.respond({ approvalId: h.broker.pending()[0]!.approvalId, decision: "deny", by: "web" });
       expect(await h.call).toEqual({ ok: true, data: { behavior: "deny", message: "Denied by web" } });
+      const events = JSON.stringify([...h.log.readAfter(0)]);
+      expect(events).not.toContain('"identity"');
+      expect(events).not.toContain("test-account-key");
+      expect(events).not.toContain("production-account-key");
     }
   });
 
-  test("exact keys redact secrets and remain bounded without merging long commands", async () => {
-    const keys: unknown[] = [];
+  test("an exact MCP grant cannot cross credentials", async () => {
+    const h = await harness();
+    const ask = (api_key: string) => h.bridge.call({ token: h.token, tool: DECK_APPROVE_TOOL,
+      arguments: { tool_name: "mcp__payments__transfer", input: { amount: 100, api_key } } });
+    const first = ask("test-account-key");
+    expect(h.broker.respond({ approvalId: h.broker.pending()[0]!.approvalId, decision: "allow", scope: "session", grant: "exact", by: "web" })).toMatchObject({ ok: true });
+    await first;
+    const second = ask("production-account-key");
+    expect(h.broker.pending()).toHaveLength(1);
+    h.broker.cancel(h.broker.pending()[0]!.approvalId, "test");
+    expect(await second).toMatchObject({ data: { behavior: "deny" } });
+    expect(await ask("test-account-key")).toMatchObject({ data: { behavior: "allow" } });
+    const events = JSON.stringify([...h.log.readAfter(0)]);
+    expect(events).not.toContain("test-account-key");
+    expect(events).not.toContain("production-account-key");
+    expect(events).not.toContain('"identity"');
+  });
+
+  test("display keys stay readable and broker marks shortened commands", async () => {
     for (const command of ["echo token=private-value-123", "x".repeat(600) + "a", "x".repeat(600) + "b"]) {
       const h = await request("Bash", { command });
-      expect(typeof h.data.exactKey).toBe("string");
-      expect((h.data.exactKey as string).length).toBeLessThanOrEqual(512);
-      expect(h.data.exactKey).not.toContain("private-value-123");
-      keys.push(h.data.exactKey);
+      expect(h.requestArgs.exactKey).not.toContain("private-value-123");
+      expect(h.requestArgs.exactKey).not.toContain("sha256");
+      expect(h.requestArgs.identity).toBeUndefined();
+      if (command.length > 512) {
+        expect(h.requestArgs.exactKey).toBe(command);
+        expect((h.data.exactKey as string).length).toBeLessThanOrEqual(512);
+        expect(h.data.exactKeyTruncated).toBe(true);
+      }
       h.broker.cancel(h.broker.pending()[0]!.approvalId, "test");
       await h.call;
     }
-    expect(keys[1]).not.toBe(keys[2]);
+  });
+
+  test("identity requires context-independent input and omits values over 16 KiB", async () => {
+    for (const [tool, input] of [
+      ["Bash", { command: "ls", extra: "preserved" }], ["Read", { file_path: "./file" }],
+      ["Unknown", { nested: { b: 2, a: 1 } }], ["WebFetch", { url: "https://example.com" }],
+      ["mcp__fixture__run", { value: "é".repeat(8192) }],
+    ] as Array<[string, Record<string, unknown>]>) {
+      const h = await request(tool, input);
+      if (["Bash", "Read", "Unknown"].includes(tool) || tool.startsWith("mcp__")) expect(h.requestArgs.identity).toBeUndefined();
+      else expect(JSON.parse(h.requestArgs.identity!)).toEqual({ tool_name: tool, input });
+      h.broker.cancel(h.broker.pending()[0]!.approvalId, "test");
+      await h.call;
+    }
+  });
+
+  test("credentialed URLs are redacted in display, summary, event input and grants", async () => {
+    const input = { url: "https://alice:SYNTHETIC_URL_PASSWORD@internal.example/status?api_key=SYNTHETIC_QUERY_SECRET&view=full" };
+    const h = await request("WebFetch", input);
+    expect(JSON.parse(h.requestArgs.identity!)).toEqual({ input, tool_name: "WebFetch" });
+    for (const field of [h.requestArgs.exactKey, h.data.exactKey, h.data.summary, JSON.stringify(h.data.input)]) {
+      expect(field).not.toContain("SYNTHETIC_URL_PASSWORD");
+      expect(field).not.toContain("SYNTHETIC_QUERY_SECRET");
+      expect(field).toContain("[redacted]");
+    }
+    expect(h.broker.respond({ approvalId: h.broker.pending()[0]!.approvalId, decision: "allow", scope: "session", grant: "exact", by: "web" })).toMatchObject({ ok: true });
+    expect(await h.call).toEqual({ ok: true, data: { behavior: "allow", updatedInput: input } });
+    const events = JSON.stringify([...h.log.readAfter(0)]);
+    expect(events).not.toContain("SYNTHETIC_URL_PASSWORD");
+    expect(events).not.toContain("SYNTHETIC_QUERY_SECRET");
+    expect(events).not.toContain('"identity"');
   });
 
   test("session grants return plain once-allow shapes and never updatedPermissions", async () => {
-    const h = await request("Bash", { command: "ls" });
+    const h = await request("Read", { file_path: "/work/file" });
     const id = h.broker.pending()[0]!.approvalId;
     expect(h.broker.respond({ approvalId: id, decision: "allow", scope: "always", confirmed: true, by: "web" })).toMatchObject({ ok: false, code: "approval-scope-unsupported" });
     expect(h.broker.respond({ approvalId: id, decision: "allow", scope: "session", grant: "exact", by: "web" })).toMatchObject({ ok: true });
-    const expected = { ok: true as const, data: { behavior: "allow", updatedInput: { command: "ls" } } };
+    const expected = { ok: true as const, data: { behavior: "allow", updatedInput: { file_path: "/work/file" } } };
     expect(await h.call).toEqual(expected);
-    expect(await h.bridge.call({ token: h.token, tool: DECK_APPROVE_TOOL, arguments: { tool_name: "Bash", input: { command: "ls" } } })).toEqual(expected);
+    expect(await h.bridge.call({ token: h.token, tool: DECK_APPROVE_TOOL, arguments: { tool_name: "Read", input: { file_path: "/work/file" } } })).toEqual(expected);
     expect(h.broker.pending()).toEqual([]);
   });
 });

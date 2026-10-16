@@ -36,10 +36,15 @@ export function reduceEvent(state: ViewState, event: SessionEvent): ViewState {
         next.grants=grants;
     }
     if (event.kind === 'session.ended'){next.state = 'ended';next.grants=[];}
-    if(event.kind==='session.removed'&&event.data.phase==='removed')next.grants=[];
+    if(event.kind==='session.released'||event.kind==='session.removed')next.grants=[];
     if (event.kind === 'session.reopened')
         next.state = String(event.data.state ?? 'idle');
     return next;
+}
+/** A summary may supersede replay, but never a grant event newer than its cursor. */
+export function sessionGrants(state:Pick<ViewState,'events'|'grants'>, summary?:{grants?:SessionGrant[];lastSeq?:number}):SessionGrant[] {
+    const changedAt=state.events.reduce((seq,event)=>['session.grant','session.released','session.ended','session.removed'].includes(event.kind)?event.seq:seq,0);
+    return summary?.grants!==undefined&&(state.grants===undefined||summary.lastSeq===undefined||summary.lastSeq>=changedAt)?summary.grants:state.grants??summary?.grants??[];
 }
 export function pairingToken(location: {
     hash: string;
@@ -75,7 +80,7 @@ export function conversationEvents(events: SessionEvent[], taskId = 'lead'): Con
         if(raw.kind==='approval.requested')approvalRequests.set(approvalKey,raw);
         const approval=approvalRequests.get(approvalKey);
         const auto=raw.kind==='approval.resolved'&&raw.data.auto===true&&String(raw.data.by).startsWith('session-grant:');
-        const e:ConversationEvent=raw.kind==='question.resolved'?{...raw,source:{...request?.source,...raw.source},questionResolution:joinQuestionResolution(raw,request)}:auto?{...raw,source:{...approval?.source,...raw.source},autoApproval:{tool:String(approval?.data.tool??approval?.data.toolKey??raw.data.tool??'Tool request'),...(typeof approval?.data.exactKey==='string'?{exactKey:approval.data.exactKey}:{})}}:raw;
+        const e:ConversationEvent=raw.kind==='question.resolved'?{...raw,source:{...request?.source,...raw.source},questionResolution:joinQuestionResolution(raw,request)}:auto?{...raw,source:{...approval?.source,...raw.source},autoApproval:{tool:String(approval?.data.tool??approval?.data.toolKey??raw.data.tool??'Tool request'),...(typeof approval?.data.exactKey==='string'?{exactKey:approval.data.exactKey}:{}),...(approval?.data.exactKeyTruncated===true?{exactKeyTruncated:true,input:approval.data.input}:{})}}:raw;
         if (e.data.internal === true || !(taskId === 'lead' ? isLeadEvent(e) : (e.source.taskId ?? 'lead') === taskId) || e.data.role === 'system')
             continue;
         const task = e.source.taskId ?? 'lead';

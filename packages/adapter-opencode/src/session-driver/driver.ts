@@ -142,13 +142,18 @@ class OpenCodeTask {
     void (async () => {
       let decision: DriverDecision = { decision: "deny" };
       const permission = String(raw.permission ?? "unknown");
-      const exactKey = Array.isArray(raw.patterns) ? redactText(raw.patterns.join(" "), 512) : "";
+      const patterns = Array.isArray(raw.patterns) ? raw.patterns : [];
+      const exactKey = redactText(patterns.join(" "), 4096);
+      // Keep full-fidelity matching separate from the redacted display key.
+      const identity = patterns.length ? JSON.stringify({ permission, patterns }) : undefined;
+      const boundedIdentity = identity && Buffer.byteLength(identity, "utf8") <= 16 * 1024 ? identity : undefined;
       const supportsAlways = Array.isArray(raw.always) && raw.always.length > 0;
       if (turn && !turn.interrupted && this.input.approvals === "relay") {
         try {
           decision = await this.io.approval({
             approvalId: raw.id, tool: permission, toolKey: `opencode:${permission}`,
             ...(exactKey ? { exactKey } : {}),
+            ...(boundedIdentity ? { identity: boundedIdentity } : {}),
             risk: ["read", "glob", "grep", "list"].includes(permission) ? "normal" : "high",
             ...(supportsAlways ? {
               nativeScopes: ["always"],

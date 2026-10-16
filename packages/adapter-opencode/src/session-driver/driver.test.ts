@@ -488,7 +488,7 @@ test("permission exact keys are redacted and bounded", async () => {
     const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, approval: async req => { calls.push(req); return { decision: "deny" }; } });
     s.event("permission.asked", { id: "key", sessionID: "ses_native", permission: "bash", patterns: ["TOKEN=private-secret", "x".repeat(600)] });
     await waitForRequest(s, "/permission/key/reply");
-    expect(calls[0]?.exactKey?.length).toBeLessThanOrEqual(512);
+    expect(calls[0]?.exactKey).toBe("TOKEN=[redacted] " + "x".repeat(600));
     expect(calls[0]?.exactKey).not.toContain("private-secret");
     await task.close();
   } finally { await s.stop(); }
@@ -520,6 +520,54 @@ test("permission reply failures preserve diagnostic and fail the active turn", a
     s.event("permission.asked", { id: "fail", sessionID: "ses_native", permission: "bash" });
     expect(await task.done).toEqual({ status: "failed", error: "OpenCode permission reply failed" });
     expect(h.events.some(e => e.kind === "diagnostic" && e.data.code === "opencode-permission-reply-failed")).toBe(true);
+    await task.close();
+  } finally { await s.stop(); }
+});
+
+test.each([
+  { name: "pattern boundaries", first: ["a b"], second: ["a", "b"], same: false },
+  { name: "suffix after 512 characters", first: ["x".repeat(530) + " first"], second: ["x".repeat(530) + " second"], same: false },
+  { name: "secret-only difference", first: ["TOKEN=first deploy"], second: ["TOKEN=second deploy"], same: false },
+  { name: "pattern order", first: ["a", "b"], second: ["b", "a"], same: false },
+  { name: "identical requests", first: ["a", "b"], second: ["a", "b"], same: true },
+])("permission match identity preserves $name", async ({ first, second, same }) => {
+  const s = fakeServer({ hang: true }); const h = privateIo();
+  const calls: Parameters<DriverHostIo["approval"]>[0][] = [];
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, approval: async req => { calls.push(req); return { decision: "deny" }; } });
+    for (const [index, patterns] of [first, second].entries()) {
+      s.event("permission.asked", { id: `identity-${index}`, sessionID: "ses_native", permission: "bash", patterns });
+      await waitForRequest(s, `/permission/identity-${index}/reply`);
+    }
+    // Inspect the transient host boundary without printing the unredacted identity on failure.
+    expect(calls.every((req, index) => req.identity === JSON.stringify({ permission: "bash", patterns: [first, second][index] }))).toBe(true);
+    expect(calls[0]?.identity === calls[1]?.identity).toBe(same);
+    expect(calls.every(req => req.exactKey !== undefined && req.exactKey.length <= 4096)).toBe(true);
+    expect(JSON.stringify(h.events).includes('"identity":')).toBe(false);
+    expect(JSON.stringify(s.requests).includes('"identity":')).toBe(false);
+    await task.close();
+  } finally { await s.stop(); }
+});
+
+const identityOverhead = JSON.stringify({ permission: "bash", patterns: [""] }).length;
+test.each([
+  { name: "absent patterns", patterns: undefined, included: false },
+  { name: "empty patterns", patterns: [], included: false },
+  { name: "exactly 16 KiB", patterns: ["x".repeat(16 * 1024 - identityOverhead)], included: true },
+  { name: "over 16 KiB", patterns: ["x".repeat(16 * 1024 - identityOverhead + 1)], included: false },
+  { name: "multibyte over 16 KiB", patterns: ["界".repeat(6000)], included: false },
+])("permission identity bounds handle $name", async ({ patterns, included }) => {
+  const s = fakeServer({ hang: true }); const h = privateIo();
+  const calls: Parameters<DriverHostIo["approval"]>[0][] = [];
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, approval: async req => { calls.push(req); return { decision: "deny" }; } });
+    s.event("permission.asked", { id: "bounded", sessionID: "ses_native", permission: "bash", patterns });
+    await waitForRequest(s, "/permission/bounded/reply");
+    expect(calls).toHaveLength(1);
+    expect(Object.hasOwn(calls[0]!, "identity")).toBe(included);
+    if (included) expect(Buffer.byteLength(calls[0]!.identity!) <= 16 * 1024).toBe(true);
+    if (patterns?.length) expect(calls[0]?.exactKey?.length).toBe(4096);
+    else expect(calls[0]?.exactKey).toBeUndefined();
     await task.close();
   } finally { await s.stop(); }
 });

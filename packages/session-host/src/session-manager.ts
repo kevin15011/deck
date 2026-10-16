@@ -37,7 +37,7 @@ import { EventLog, type EventDraft } from "./event-log";
 import { Ledger, loadLedger, saveLedgerSnapshot, TERMINAL_TASK_STATES, type SessionHandoff, type TaskState, type UserPrompt } from "./ledger";
 import { ProjectStore, projectIdentity } from "./project-store";
 import type { DaemonLogger } from "./daemon-logger";
-import { assertOutsideProject, assertSafeSegment, ensurePrivateDir, sessionPaths, writePrivateFile, type SessionPaths, type StatePaths } from "./paths";
+import { assertPrivateFile, assertOutsideProject, assertSafeSegment, ensurePrivateDir, sessionPaths, writePrivateFile, type SessionPaths, type StatePaths } from "./paths";
 import { MemoryBroker, type SessionMemoryPort } from "./memory-broker";
 import { listOpenSpecArtifacts, readOpenSpecArtifact } from "./openspec-artifacts";
 import { continuationBlock } from "./recovery";
@@ -168,7 +168,7 @@ type Live = {
 };
 
 export type SessionSummary = {
-  grants: SessionGrant[];
+  grants: Omit<SessionGrant, "matchKey">[];
   approvalMode: ApprovalMode; approvalModeSource: "session" | "default";
   sessionId: string; projectRoot: string; changeId?: string; state: string; createdAt: string; updatedAt: string; lastSeq: number;
   lead?: RunnerQualifiedAssignment; running: boolean; tasks: number;
@@ -204,6 +204,17 @@ export class SessionManager implements SessionService {
     this.questionBroker = options.questionBroker ?? new QuestionBroker({ sink: { emit: (id, draft) => { this.openLog(id)?.append(draft); } } });
     this.clock = options.clock ?? systemClock;
     this.options.broker.setGrantProvider(id => this.load(id)?.ledger.grants() ?? []);
+    this.options.broker.setSessionKeyProvider(id => {
+      const file = join(sessionPaths(this.options.paths, id).dir, "approval-session.key");
+      try { assertPrivateFile(file); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        writePrivateFile(file, randomBytes(32));
+        assertPrivateFile(file);
+      }
+      const key = readFileSync(file);
+      if (key.length !== 32) throw new Error("approval-session-key-invalid");
+      return key;
+    });
     queueMicrotask(() => {
       if (this.closing) return;
       for (const id of this.sessionIds()) this.load(id);
@@ -1332,7 +1343,7 @@ export class SessionManager implements SessionService {
           return this.questionBroker.request({ ...req, sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId }).resolution;
         },
         approval: async (req) => {
-          const pending = this.options.broker.request({ sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId, tool: req.tool, summary: req.summary, input: req.input, toolKey: req.toolKey, exactKey: req.exactKey, risk: req.risk, nativeScopes: req.nativeScopes, alwaysNote: req.alwaysNote });
+          const pending = this.options.broker.request({ sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId, tool: req.tool, summary: req.summary, input: req.input, toolKey: req.toolKey, identity: req.identity, exactKey: req.exactKey, risk: req.risk, nativeScopes: req.nativeScopes, alwaysNote: req.alwaysNote });
           const resolution = await pending.resolution;
           return { decision: resolution.decision === "allow-once" ? "allow" : "deny", scope: resolution.scope === "always" && req.nativeScopes?.includes("always") ? "always" : "once" };
         },
@@ -1653,7 +1664,7 @@ export class SessionManager implements SessionService {
         released:!!ledger.session.released,releasing:!!ledger.session.releasePending,removing:!!ledger.session.removalPending,preparationStatus:cached ? this.readiness(cached).status : ledger.session.releasePending ? ledger.session.releaseFailure ? "failed" : "releasing" : "unprepared",
         sessionId, projectRoot: meta.projectRoot, projectId: meta.projectId ?? projectIdentity(meta.projectRoot), title: ledger.session.title ?? meta.title ?? `Session ${meta.createdAt.slice(0, 10)}`,
         ...(meta.predecessorSessionId ? { predecessorSessionId: meta.predecessorSessionId } : {}), generation: ledger.session.generation ?? 0, assignmentRevision: ledger.session.assignmentRevision ?? 0,
-        grants: ledger.grants(),
+        grants: ledger.grants().map(({ matchKey: _, ...grant }) => grant),
         ...this.approvalMode(meta, ledger),
         members, currentLeadTaskId, sharedWorkspace: true, sharedActiveSessions: 0,
         leadActivity: { ...(leadAttempt ? { taskId: currentLeadTaskId } : {}), state: leadState, pendingApprovals: ledger.pendingApprovals().filter(approval => approval.taskId === currentLeadTaskId).length, pendingQuestions: ledger.pendingQuestions().filter(question => question.taskId === currentLeadTaskId).length, lastReplySeq: ledger.lastLeadReplySeq },

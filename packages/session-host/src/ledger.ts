@@ -166,7 +166,7 @@ export class Ledger {
         const grants = this.state.grants ??= [];
         this.state.grants = grants.filter(grant => grant.grantId !== d.grantId);
         if (d.action === "added" && !this.state.session.released && !this.state.session.removalPending && !this.state.session.removed && this.state.session.state !== "ended" && isSessionGrantKind(d.kind) && isApprovalToolKey(d.toolKey) && isApprovalRisk(d.risk)) {
-          this.state.grants.push({ grantId: String(d.grantId), kind: d.kind, toolKey: d.toolKey, risk: d.risk, createdAt: event.ts, ...(str(d.exactKey) ? { exactKey: str(d.exactKey) } : {}) });
+          this.state.grants.push({ grantId: String(d.grantId), kind: d.kind, toolKey: d.toolKey, risk: d.risk, createdAt: event.ts, ...(str(d.exactKey) ? { exactKey: str(d.exactKey) } : {}), ...(typeof d.matchKey === "string" && /^[a-f0-9]{64}$/.test(d.matchKey) ? { matchKey: d.matchKey } : {}) });
           this.state.grants = this.state.grants.slice(-100);
         }
         break;

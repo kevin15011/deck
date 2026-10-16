@@ -2225,7 +2225,7 @@ test("public question answers replay while mixed secret answers never enter dura
 
 describe("session approval grants", () => {
   const row = async (t: ReturnType<typeof setup>, id: string) => (await t.manager.query("sessions.list", {}) as any).data.sessions.find((s: any) => s.sessionId === id);
-  const request = { approvalId: "native", tool: "Bash", toolKey: "claude:Bash", exactKey: "ls", risk: "high" as const };
+  const request = { approvalId: "native", tool: "Bash", toolKey: "claude:Bash", exactKey: "ls", identity: "ls", risk: "high" as const };
   test("session scope reaches driver as once, auto-approves all members and is revocable with receipts", async () => {
     const t = setup(); const id = await t.create(); await t.run({ type: "prompt.send", text: "permissions" }, id);
     await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "approval turn");
@@ -2236,6 +2236,8 @@ describe("session approval grants", () => {
     expect((await t.run({ type: "approval.respond", approvalId: pending.approvalId, decision: "allow", scope: "session", grant: "exact" }, id)).ok).toBe(true);
     expect(await answer).toEqual({ decision: "allow", scope: "once" });
     const grants = (await row(t, id)).grants; expect(grants).toHaveLength(1);
+    expect(grants[0]).not.toHaveProperty("matchKey");
+    expect(t.events(id).find(e => e.kind === "session.grant")?.data.matchKey).toMatch(/^[a-f0-9]{64}$/);
     const summary = await row(t, id);
     expect(await t.manager.query("sessions.status", { projectId: summary.projectId, sessionIds: [id] })).toMatchObject({ data: { sessions: [{ grants }] } });
     const auto = t.broker.request({ ...request, sessionId: id, taskId: "child", memberId: "investigate", runnerId: "claude" });
@@ -2253,8 +2255,12 @@ describe("session approval grants", () => {
     const t = setup(); const id = await t.create();
     const pending = t.broker.request({ ...request, sessionId: id, taskId: "fixture", runnerId: "claude" });
     t.broker.respond({ approvalId: pending.approvalId, decision: "allow", scope: "session", grant: "exact", by: "u" }); await pending.resolution;
+    expect(lstatSync(join(sessionPaths(t.paths, id).dir, "approval-session.key")).mode & 0o777).toBe(0o600);
+    const sessionKey = readFileSync(join(sessionPaths(t.paths, id).dir, "approval-session.key")).toString("hex");
+    expect(JSON.stringify(t.events(id))).not.toContain(sessionKey);
     await t.manager.close(); rmSync(sessionPaths(t.paths, id).ledgerSnapshotFile, { force: true }); recoverAllSessions({ paths: t.paths, probe: createNodeProbe() });
     const reopened = setup({ dir: t.dir }); expect((await row(reopened, id)).grants).toHaveLength(1);
+    expect((await row(reopened, id)).grants[0]).not.toHaveProperty("matchKey");
     const auto = reopened.broker.request({ ...request, sessionId: id, taskId: "fixture2", runnerId: "claude" });
     expect((await auto.resolution).by).toStartWith("session-grant:");
     await reopened.runWithId(crypto.randomUUID(), { type: "session.release" }, id);
@@ -2281,4 +2287,44 @@ test.each(["session.stop", "session.remove"] as const)("%s clears grants from th
   expect(t.broker.grants(id)).toHaveLength(1);
   expect((await t.runWithId(crypto.randomUUID(), { type }, id)).ok).toBe(true);
   expect(t.broker.grants(id)).toEqual([]);
+});
+
+test("WebFetch credential URLs never survive approval or grant persistence", async () => {
+  const t = setup(); const id = await t.create();
+  const url = "https://url-user:url-pass@example.com/page?token=url-token&sig=url-sig&view=full";
+  const request = t.broker.request({ sessionId: id, taskId: "fixture", tool: "WebFetch", runnerId: "claude", toolKey: "claude:WebFetch", identity: url, exactKey: url, summary: `Fetch ${url}`, input: { url }, risk: "high" });
+  expect(t.broker.respond({ approvalId: request.approvalId, decision: "allow", scope: "session", grant: "exact", by: "u" }).ok).toBe(true);
+  await request.resolution;
+  const events = t.events(id);
+  const approval = events.find(e => e.kind === "approval.requested")!;
+  expect(approval.data.exactKey).toBe("https://[redacted]@example.com/page?token=[redacted]&sig=[redacted]&view=full");
+  expect(JSON.stringify(approval.data.input)).toContain("view=full");
+  const grant = t.broker.grants(id)[0]!;
+  t.broker.revokeGrant(id, grant.grantId, "u");
+  const files = readdirSync(sessionPaths(t.paths, id).eventsDir);
+  const persisted = files.map(file => readFileSync(join(sessionPaths(t.paths, id).eventsDir, file), "utf8")).join("\n");
+  for (const secret of ["url-user", "url-pass", "url-token", "url-sig", '"identity"']) expect(persisted).not.toContain(secret);
+  expect(events.filter(e => e.kind !== "session.grant").every(e => !("matchKey" in e.data))).toBe(true);
+  expect(events.find(e => e.kind === "session.grant")!.data.matchKey).toMatch(/^[a-f0-9]{64}$/);
+});
+
+test.each([
+  ["userinfo", "https://alice:prefix@SYNTHETIC_PASSWORD@internal.example/status?view=full", "SYNTHETIC_PASSWORD"],
+  ["encoded query", "https://internal.example/status?%73ig=SYNTHETIC_SIG&view=full", "SYNTHETIC_SIG"],
+])("URL credential regression persists no secrets: %s", async (_label, url, secret) => {
+  const t = setup(); const id = await t.create();
+  const pending = t.broker.request({ sessionId: id, taskId: "fixture", runnerId: "claude", tool: "WebFetch", toolKey: "claude:WebFetch", identity: url, exactKey: url, summary: url, input: { url }, risk: "high" });
+  expect(t.broker.respond({ approvalId: pending.approvalId, decision: "allow", scope: "session", grant: "exact", by: "test" }).ok).toBe(true);
+  await pending.resolution;
+  t.broker.revokeGrant(id, t.broker.grants(id)[0]!.grantId, "test");
+  const events = t.events(id);
+  const approval = events.find(e => e.kind === "approval.requested")!;
+  for (const value of [approval.data.summary, approval.data.input, approval.data.exactKey, ...events.filter(e => e.kind === "session.grant").map(e => e.data)]) {
+    expect(JSON.stringify(value)).not.toContain(secret!);
+    expect(JSON.stringify(value)).toContain("view=full");
+  }
+  await t.manager.close();
+  const eventsDir = sessionPaths(t.paths, id).eventsDir;
+  const disk = readdirSync(eventsDir).map(file => readFileSync(join(eventsDir, file), "utf8")).join("\n");
+  expect(disk).not.toContain(secret!);
 });

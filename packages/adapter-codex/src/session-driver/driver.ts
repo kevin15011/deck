@@ -2,6 +2,7 @@ import { validateQuestions, type Question } from "@deck/core/session/question";
 import { prepareImages, redactImagePayload } from "./images";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import type { DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
 import { redactText } from "@deck/core/session/redaction";
 import { CODEX_PROTOCOL, codexTurnStatus, mapCodexNotification } from "./mapper";
@@ -27,6 +28,15 @@ function nativeModel(modelId: string): { model: string; modelProvider?: string }
 }
 type Turn = { id?: string; resolve(outcome: TurnOutcome): void; interrupted: boolean; escalation?: ReturnType<typeof setTimeout> };
 const isHookNotification = (message: RpcMessage) => message.method?.startsWith("hook/") === true;
+
+// Canonical action data is passed only to the in-memory approval broker, never emitted.
+function canonicalApprovalJson(value: unknown): string | undefined {
+  const sorted = (item: unknown): unknown => Array.isArray(item) ? item.map(sorted)
+    : item !== null && typeof item === "object"
+      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, child]) => [key, sorted(child)]))
+      : item;
+  return JSON.stringify(sorted(value));
+}
 
 class CodexTask {
   private readonly nativeInput: DriverTaskInput;
@@ -249,14 +259,15 @@ class CodexTask {
     const rpc = this.rpc, id = message.id!, p = object(message.params);
     const schema = object(p.requestedSchema), meta = object(p._meta);
     const prefix = `Allow the ${String(p.serverName)} MCP server to run tool "`;
-    const nativeTool = typeof p.message === "string" && p.message.startsWith(prefix) && p.message.endsWith('"?') ? p.message.slice(prefix.length, -2) : undefined;
+    const messageTool = typeof p.message === "string" && p.message.startsWith(prefix) && p.message.endsWith('"?') ? p.message.slice(prefix.length, -2) : undefined;
+    const nativeTool = [p.toolName, p.tool_name, meta.tool_name, meta.toolName, messageTool]
+      .find((value): value is string => typeof value === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(value));
     // Codex wraps tool approval in an empty form; a general MCP elicitation can request
     // arbitrary user data and must never be treated as permission to run a tool.
     const mcpApproval = message.method === "mcpServer/elicitation/request" && p.mode === "form"
       && meta.codex_approval_kind === "mcp_tool_call" && typeof p.serverName === "string" && this.nativeInput.mcp.servers.includes(p.serverName)
       && schema.type === "object" && typeof schema.properties === "object" && schema.properties !== null && !Array.isArray(schema.properties)
-      && Object.keys(object(schema.properties)).length === 0 && Object.keys(schema).every((key) => key === "type" || key === "properties")
-      && nativeTool !== undefined && /^[A-Za-z0-9_.-]{1,128}$/.test(nativeTool);
+      && Object.keys(object(schema.properties)).length === 0 && Object.keys(schema).every((key) => key === "type" || key === "properties");
     const commandApproval = message.method === "item/commandExecution/requestApproval";
     const fileApproval = message.method === "item/fileChange/requestApproval";
     const permissionsApproval = message.method === "item/permissions/requestApproval";
@@ -274,21 +285,33 @@ class CodexTask {
       && p.proposedExecpolicyAmendment.every(part => typeof part === "string" && part.trim().length > 0)
       ? p.proposedExecpolicyAmendment as string[] : undefined;
     const fileSummary = [p.grantRoot, p.reason].filter((value): value is string => typeof value === "string" && value.length > 0).join("\n");
-    const exact = commandApproval ? typeof p.command === "string" ? p.command : undefined
-      : fileApproval ? fileSummary || (Array.isArray(p.paths) ? p.paths.filter(value => typeof value === "string").join("\n") : undefined)
-      : permissionsApproval ? JSON.stringify(object(p.permissions)) : undefined;
-    const exactKey = exact ? redactText(exact, 512) : undefined;
+    const cwd = resolve(this.input.cwd, typeof p.cwd === "string" ? p.cwd : this.input.cwd);
+    const paths = Array.isArray(p.paths) ? p.paths : Array.isArray(p.changes) ? p.changes.map(change => object(change).path) : undefined;
+    const fileIdentity = paths?.length && paths.every(path => typeof path === "string" && path.length > 0)
+      ? { paths: [...new Set((paths as string[]).map(path => resolve(cwd, path)))].sort(),
+        ...(typeof p.grantRoot === "string" && p.grantRoot ? { grantRoot: resolve(cwd, p.grantRoot) } : {}) } : undefined;
+    const action = commandApproval && typeof p.command === "string" ? { command: p.command, cwd }
+      : fileApproval ? fileIdentity : permissionsApproval ? { cwd, permissions: p.permissions }
+      : mcpApproval && nativeTool ? meta.tool_params : undefined;
+    const canonical = canonicalApprovalJson(action);
+    // Never truncate match identity: an oversized action cannot receive an exact grant.
+    const identity = canonical !== undefined && Buffer.byteLength(canonical, "utf8") <= 16 * 1024 ? canonical : undefined;
+    const display = canonical ?? (fileApproval ? fileSummary : undefined);
+    const exactKey = display ? redactText(display, 4096) : undefined;
+    // Missing names must never share tool grants across otherwise unidentified tools.
+    const mcpToolKey = nativeTool ?? `unknown:${randomUUID()}`;
     const summary = mcpApproval ? p.message as string : commandApproval ? typeof p.command === "string" ? p.command : "Codex command execution"
       : permissionsApproval ? `Codex permissions: ${exactKey}` : fileSummary || "Codex file changes";
     let decision: "accept" | "decline" | { acceptWithExecpolicyAmendment: { execpolicy_amendment: string[] } } = "decline";
     try {
       if (this.input.approvals === "relay") {
         const result = await this.io.approval({ approvalId: `codex:${String(id)}`,
-          tool: mcpApproval ? `mcp__${p.serverName}__${nativeTool}` : message.method!,
+          tool: mcpApproval ? `mcp__${p.serverName}__${nativeTool ?? "unknown"}` : message.method!,
           summary,
-          toolKey: mcpApproval ? `codex:mcp:${p.serverName}` : commandApproval ? "codex:commandExecution" : fileApproval ? "codex:fileChange" : "codex:permissions",
+          toolKey: mcpApproval ? `codex:mcp:${p.serverName}:${mcpToolKey}` : commandApproval ? "codex:commandExecution" : fileApproval ? "codex:fileChange" : "codex:permissions",
           ...(exactKey ? { exactKey } : {}),
-          risk: !mcpApproval || /(?:exec|shell|command|write|edit|patch|delete|remove|fetch|network)/i.test(nativeTool!) ? "high" : "normal",
+          ...(identity !== undefined ? { identity } : {}),
+          risk: !mcpApproval || !nativeTool || /(?:exec|shell|command|write|edit|patch|delete|remove|fetch|network)/i.test(nativeTool!) ? "high" : "normal",
           ...(amendment ? { nativeScopes: ["always"] as "always"[],
             alwaysNote: `Codex adds this command prefix to its exec-policy rules on this machine: ${amendment.join(" ")}; it applies to future sessions and Deck cannot revoke it` } : {}),
           input: mcpApproval ? meta.tool_params : p });

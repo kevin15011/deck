@@ -63,7 +63,7 @@ export type DriverTaskInput = {
   disableNativeDelegation: boolean;
 };
 
-export type DriverApprovalRequest = { approvalId: string; tool: string; summary?: string; input?: unknown; toolKey: string; exactKey?: string; risk: ApprovalRisk; nativeScopes?: ("always")[]; alwaysNote?: string };
+export type DriverApprovalRequest = { approvalId: string; tool: string; summary?: string; input?: unknown; toolKey: string; /** Full canonical unredacted action identity; memory only, at most 16 KiB UTF-8. */ identity?: string; /** Full redacted display string, at most 4096 characters; host bounds to 512. */ exactKey?: string; risk: ApprovalRisk; nativeScopes?: ("always")[]; alwaysNote?: string };
 export type DriverDecision = { decision: "allow" | "deny"; scope?: "once" | "always"; updatedInput?: unknown };
 export type DriverEvent = { kind: string; data: Record<string, unknown>; raw?: unknown };
 export type SupervisedChildExit = {

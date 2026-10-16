@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, truncateSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DriverTaskInput } from "@deck/core/session/driver";
+import type { DriverApprovalRequest, DriverTaskInput } from "@deck/core/session/driver";
 import { createCodexSessionDriver } from "./driver";
 import { ISOLATION_FEATURES } from "./launch";
 import { FakeChild, harness } from "./test-support";
@@ -71,7 +71,7 @@ describe("Codex session driver", () => {
     await task.nativeSessionId;
     const child = h.children[1]!; child.stdout(mcpMemoryApproval);
     await Promise.resolve(); await Promise.resolve();
-    expect(approvals).toEqual([{ approvalId: "codex:0", toolKey: "codex:mcp:deck-session-task-deck", risk: "normal", tool: "mcp__deck-session-task-deck__deck_memory_recall", summary: mcpMemoryApproval.params.message, input: { query: "acceptance" } }]);
+    expect(approvals).toEqual([{ approvalId: "codex:0", toolKey: "codex:mcp:deck-session-task-deck:deck_memory_recall", identity: JSON.stringify({ query: "acceptance" }), exactKey: JSON.stringify({ query: "acceptance" }), risk: "normal", tool: "mcp__deck-session-task-deck__deck_memory_recall", summary: mcpMemoryApproval.params.message, input: { query: "acceptance" } }]);
     expect(child.writes.find((m) => m.id === 0)?.result).toEqual({ action: decision === "allow" ? "accept" : "decline", content: decision === "allow" ? {} : null, _meta: null });
     await task.close(); await task.done;
   });
@@ -416,9 +416,9 @@ test("Codex questions support zero request IDs and empty option arrays", async (
 });
 
 const scopeRequests = [
-  { name: "commandExecution", params: { command: "git status", cwd: "/work", proposedExecpolicyAmendment: ["git", "status"] }, exactKey: "git status", risk: "high" },
+  { name: "commandExecution", params: { command: "git status", cwd: "/work", proposedExecpolicyAmendment: ["git", "status"] }, exactKey: JSON.stringify({ command: "git status", cwd: "/work" }), risk: "high" },
   { name: "fileChange", params: { grantRoot: "/work/src", reason: "Edit source" }, exactKey: "/work/src\nEdit source", risk: "high" },
-  { name: "permissions", params: { cwd: "/work", permissions: { fileSystem: { write: ["/work/src"] }, network: { enabled: true } }, reason: "Build" }, exactKey: JSON.stringify({ fileSystem: { write: ["/work/src"] }, network: { enabled: true } }), risk: "high" },
+  { name: "permissions", params: { cwd: "/work", permissions: { fileSystem: { write: ["/work/src"] }, network: { enabled: true } }, reason: "Build" }, exactKey: JSON.stringify({ cwd: "/work", permissions: { fileSystem: { write: ["/work/src"] }, network: { enabled: true } } }), risk: "high" },
 ] as const;
 const nativeApproval = (name: string, params: object = {}) => ({ id: "scoped", method: `item/${name}/requestApproval`, params: { threadId: "native-thread", turnId: "turn", ...params } });
 describe("Codex approval scopes", () => {
@@ -476,15 +476,15 @@ describe("Codex approval scopes", () => {
       expect(child.writes.find(m => m.id === "scoped")?.result).toEqual({ decision: "accept" });
     } finally { await task.close(); }
   });
-  test("redacts and bounds exact commands without adding cwd; omits unavailable file keys", async () => {
+  test("redacts full command displays including cwd; omits unavailable file identities", async () => {
     const h = harness(responder); const seen: any[] = [];
     h.io.approval = async req => { seen.push(req); return { decision: "deny" }; };
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
     try {
       await task.nativeSessionId; const child = h.children[1]!;
       child.stdout(nativeApproval("commandExecution", { command: `TOKEN=SECRET_SENTINEL echo ${"x".repeat(600)}`, cwd: "/PRIVATE_CWD" })); await Promise.resolve();
-      expect(seen[0].exactKey).toHaveLength(512); expect(seen[0].exactKey).toContain("[redacted]");
-      expect(seen[0].exactKey).not.toContain("SECRET_SENTINEL"); expect(seen[0].exactKey).not.toContain("PRIVATE_CWD");
+      expect(seen[0].exactKey).toHaveLength(JSON.stringify({ command: `TOKEN=[redacted] echo ${"x".repeat(600)}`, cwd: "/PRIVATE_CWD" }).length); expect(seen[0].exactKey).toContain("[redacted]");
+      expect(seen[0].exactKey).not.toContain("SECRET_SENTINEL"); expect(seen[0].exactKey).toContain("PRIVATE_CWD");
       child.stdout({ ...nativeApproval("fileChange"), id: "file" }); await Promise.resolve(); expect(seen[1].exactKey).toBeUndefined();
     } finally { await task.close(); }
   });
@@ -517,4 +517,82 @@ test("Codex permissions from a previous turn cannot authorize a replacement turn
     expect(child.writes.find(m => m.id === "scoped")?.result).toEqual({ permissions: {} });
     await task.interrupt(); await next;
   } finally { await task.close(); }
+});
+
+async function captureApprovalRequests(messages: object[]): Promise<DriverApprovalRequest[]> {
+  const h = harness(responder); const requests: DriverApprovalRequest[] = [];
+  h.io.approval = async request => { requests.push(request); return { decision: "deny" }; };
+  const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
+  try {
+    await task.nativeSessionId;
+    for (const [index, message] of messages.entries()) {
+      h.children[1]!.stdout({ ...message, id: `identity-${index}` }); await Promise.resolve();
+    }
+    expect(requests).toHaveLength(messages.length);
+    expect(JSON.stringify(h.events)).not.toContain("IDENTITY_SECRET_SENTINEL");
+    expect(JSON.stringify(h.events)).not.toContain('"identity"');
+    return requests;
+  } finally { await task.close(); }
+}
+describe("Codex approval match identities", () => {
+  test.each([
+    [{ command: "./deploy", cwd: "/sandbox" }, { command: "./deploy", cwd: "/production" }],
+    [{ command: "x".repeat(600) + " safe", cwd: "/work" }, { command: "x".repeat(600) + " dangerous", cwd: "/work" }],
+    [{ command: "TOKEN=IDENTITY_SECRET_SENTINEL_A deploy", cwd: "/work" }, { command: "TOKEN=IDENTITY_SECRET_SENTINEL_B deploy", cwd: "/work" }],
+  ])("keeps distinct commands apart (%#)", async (a, b) => {
+    const requests = await captureApprovalRequests([a, b, a].map(params => nativeApproval("commandExecution", params)));
+    expect(typeof requests[0].identity === "string").toBe(true);
+    expect(requests[0].identity !== requests[1].identity).toBe(true);
+    expect(requests[0].identity === requests[2].identity).toBe(true);
+  });
+  test("passes the full redacted display past 512 characters, capped at 4096", async () => {
+    const requests = await captureApprovalRequests([600, 5000].map(size => nativeApproval("commandExecution", { command: `TOKEN=IDENTITY_SECRET_SENTINEL ${"x".repeat(size)}`, cwd: "/work" })));
+    expect(requests[0].exactKey).toBe(JSON.stringify({ command: `TOKEN=[redacted] ${"x".repeat(600)}`, cwd: "/work" }));
+    expect(requests[1].exactKey).toHaveLength(4096);
+  });
+  test("omits identities exceeding 16 KiB in UTF-8 bytes", async () => {
+    const requests = await captureApprovalRequests(["x".repeat(17 * 1024), "界".repeat(6000)].map(command => nativeApproval("commandExecution", { command, cwd: "/work" })));
+    expect(requests.every(request => request.identity === undefined)).toBe(true);
+  });
+  test("separates MCP tools on one server and canonicalizes full arguments", async () => {
+    const mcp = (name: string, args: object) => ({ ...mcpMemoryApproval, params: { ...mcpMemoryApproval.params, message: `Allow the deck-session-task-deck MCP server to run tool "${name}"?`, _meta: { ...mcpMemoryApproval.params._meta, tool_params: args } } });
+    const requests = await captureApprovalRequests([
+      mcp("deck_memory_recall", { b: 2, a: { y: 2, x: 1 } }), mcp("delete_records", { table: "all" }),
+      mcp("deck_memory_recall", { a: { x: 1, y: 2 }, b: 2 }), mcp("deck_memory_recall", { b: 3, a: { y: 2, x: 1 } }),
+    ]);
+    expect(requests[0].toolKey).toBe("codex:mcp:deck-session-task-deck:deck_memory_recall");
+    expect(requests[1].toolKey).toBe("codex:mcp:deck-session-task-deck:delete_records");
+    expect(requests[0].identity === requests[2].identity).toBe(true);
+    expect(requests[0].identity !== requests[3].identity).toBe(true);
+    expect(requests[1].risk).toBe("high");
+  });
+  test("recognizes explicit MCP tool metadata and isolates missing names", async () => {
+    const mcp = (_meta: object) => ({ ...mcpMemoryApproval, params: { ...mcpMemoryApproval.params, message: "MCP approval", _meta: { ...mcpMemoryApproval.params._meta, ..._meta } } });
+    const requests = await captureApprovalRequests([mcp({ tool_name: "delete_records" }), mcp({}), mcp({})]);
+    expect(requests[0].toolKey).toBe("codex:mcp:deck-session-task-deck:delete_records");
+    expect(requests[1].risk).toBe("high"); expect(requests[1].identity === undefined).toBe(true);
+    expect(requests[1].toolKey !== requests[2].toolKey).toBe(true);
+  });
+  test("file identities require paths, normalize and sort them, and include grantRoot", async () => {
+    const requests = await captureApprovalRequests([
+      nativeApproval("fileChange", { paths: ["src/../b.ts", "a.ts"], cwd: "/work", grantRoot: "." }),
+      nativeApproval("fileChange", { paths: ["/work/a.ts", "/work/b.ts"], grantRoot: "/work" }),
+      nativeApproval("fileChange", { paths: ["/work/a.ts", "/work/c.ts"], grantRoot: "/work" }),
+      nativeApproval("fileChange", { grantRoot: "/work", reason: "Edit" }),
+    ]);
+    expect(typeof requests[0].identity === "string").toBe(true);
+    expect(requests[0].identity === requests[1].identity).toBe(true);
+    expect(requests[0].identity !== requests[2].identity).toBe(true);
+    expect(requests[3].identity === undefined).toBe(true);
+  });
+  test("permissions identities include cwd and canonical nested permissions", async () => {
+    const a = { network: { enabled: true }, fileSystem: { write: ["/work"] } };
+    const b = { fileSystem: { write: ["/work"] }, network: { enabled: true } };
+    const requests = await captureApprovalRequests([
+      nativeApproval("permissions", { cwd: "/sandbox", permissions: a }), nativeApproval("permissions", { cwd: "/production", permissions: a }),
+      nativeApproval("permissions", { cwd: "/sandbox", permissions: b }),
+    ]);
+    expect(requests[0].identity !== requests[1].identity).toBe(true);
+    expect(requests[0].identity === requests[2].identity).toBe(true);
+  });
 });

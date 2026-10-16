@@ -1,4 +1,4 @@
-import { matchesGrant, validateApprovalResponse, isApprovalToolKey, isApprovalRisk, type ApprovalScope, type ApprovalRisk, type ApprovalResponse, type SessionGrant } from "@deck/core/session/approval";
+import { matchesGrant, validateApprovalResponse, isApprovalToolKey, isApprovalRisk, type ApprovalScope, type ApprovalRisk, type ApprovalResponse, type SessionGrantKind, type SessionGrant } from "@deck/core/session/approval";
 /**
  * ApprovalBroker (XR-5.1, XR-5.2, design 7): turns a runner's permission prompt into an
  * `approval.requested` event and blocks the requester until a client answers, the timeout
@@ -6,7 +6,7 @@ import { matchesGrant, validateApprovalResponse, isApprovalToolKey, isApprovalRi
  */
 import { boundRaw, RAW_PAYLOAD_LIMIT_BYTES } from "@deck/core/session/events";
 import { redactText } from "@deck/core/session/redaction";
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID, createHmac, randomBytes } from "node:crypto";
 import { systemClock, type Clock, type TimerHandle } from "./clock";
 import type { EventDraft } from "./event-log";
 
@@ -18,7 +18,7 @@ export type ApprovalDecision = "allow-once" | "deny";
 export type ApprovalRequest = {
   sessionId: string; taskId: string; memberId?: string; runnerId?: string;
   tool: string; summary?: string; input?: unknown;
-  toolKey?: string; exactKey?: string; risk?: ApprovalRisk; nativeScopes?: readonly ("always")[]; alwaysNote?: string;
+  toolKey?: string; identity?: string; exactKey?: string; risk?: ApprovalRisk; nativeScopes?: readonly ("always")[]; alwaysNote?: string;
 };
 export type ApprovalResolution = { approvalId: string; decision: ApprovalDecision; by: string; scope: ApprovalScope };
 export type RespondResult = { ok: true; resolution: ApprovalResolution } | { ok: false; code: "already-resolved" | "unknown-approval" | "approval-scope-unsupported" | "approval-confirmation-required" };
@@ -36,7 +36,7 @@ export type ApprovalBrokerOptions = {
 };
 
 type Entry = {
-  request: ApprovalRequest & { risk: ApprovalRisk; allowedScopes: ApprovalScope[] }; approvalId: string; timer: TimerHandle;
+  request: Omit<ApprovalRequest, "identity"> & { risk: ApprovalRisk; allowedScopes: ApprovalScope[]; grantKinds: SessionGrantKind[]; exactKeyTruncated?: boolean; matchKey?: string }; approvalId: string; timer: TimerHandle;
   resolve: (r: ApprovalResolution) => void;
 };
 
@@ -55,6 +55,15 @@ function summarize(tool: string, input: unknown): string {
 
 export class ApprovalBroker {
   private readonly grantsBySession = new Map<string, SessionGrant[]>();
+  private readonly sessionKeys = new Map<string, Uint8Array>();
+  private sessionKeyProvider?: (sessionId: string) => Uint8Array;
+  setSessionKeyProvider(provider: (sessionId: string) => Uint8Array): void { this.sessionKeyProvider = provider; }
+  private sessionKey(sessionId: string): Uint8Array {
+    if (this.sessionKeyProvider) return this.sessionKeyProvider(sessionId);
+    let key = this.sessionKeys.get(sessionId);
+    if (!key) { key = randomBytes(32); this.sessionKeys.set(sessionId, key); }
+    return key;
+  }
   private grantProvider?: (sessionId: string) => readonly SessionGrant[];
 
   /** The host ledger owns durable grants; standalone brokers use the local projection. */
@@ -64,7 +73,7 @@ export class ApprovalBroker {
     const grant = this.grants(sessionId).find(g => g.grantId === grantId);
     if (!grant) return false;
     const { createdAt: _, ...data } = grant;
-    this.options.sink.emit(sessionId, { kind: "session.grant", data: { ...data, action: "revoked", by } });
+    this.options.sink.emit(sessionId, { kind: "session.grant", data: { ...data, ...(data.exactKey ? { exactKey: redactText(data.exactKey, 512) } : {}), action: "revoked", by } });
     if (!this.grantProvider) this.grantsBySession.set(sessionId, this.grants(sessionId).filter(g => g.grantId !== grantId));
     return true;
   }
@@ -82,11 +91,16 @@ export class ApprovalBroker {
 
   request(request: ApprovalRequest): { approvalId: string; resolution: Promise<ApprovalResolution> } {
     if (request.toolKey !== undefined && (!isApprovalToolKey(request.toolKey) || request.runnerId && !request.toolKey.startsWith(`${request.runnerId}:`)) || request.risk !== undefined && !isApprovalRisk(request.risk)) throw new Error("approval-request-invalid");
-    const allowedScopes: ApprovalScope[] = ["once", ...(request.toolKey ? ["session" as const] : []), ...(request.nativeScopes?.includes("always") ? ["always" as const] : [])];
-    let exactKey = request.exactKey ? redactText(request.exactKey, 512) : undefined;
-    // Keep lossy display keys distinct without writing raw secrets into grants or events.
-    if (exactKey !== undefined && (exactKey !== request.exactKey || /#sha256:[a-f0-9]{64}$/.test(request.exactKey!))) exactKey = `${exactKey.slice(0, 439)}#sha256:${createHash("sha256").update(request.exactKey!).digest("hex")}`;
-    const normalized = { ...request, risk: request.risk ?? "normal", allowedScopes, exactKey };
+    if (request.identity !== undefined && (typeof request.identity !== "string" || !request.identity.length || Buffer.byteLength(request.identity, "utf8") > 16 * 1024) || request.exactKey !== undefined && (typeof request.exactKey !== "string" || request.exactKey.length > 4096)) throw new Error("approval-request-invalid");
+    const display = request.exactKey ? redactText(request.exactKey, 4096) : undefined;
+    const exactKeyTruncated = !!display && display.length > 512;
+    const exactKey = display?.slice(0, 512);
+    const matchKey = request.identity && request.toolKey ? createHmac("sha256", this.sessionKey(request.sessionId)).update(request.toolKey + "\0" + request.identity).digest("hex") : undefined;
+    const grantKinds: SessionGrantKind[] = request.toolKey ? [...(matchKey && exactKey && !exactKeyTruncated ? ["exact" as const] : []), "tool"] : [];
+    const allowedScopes: ApprovalScope[] = ["once", ...(request.toolKey ? ["session" as const] : []), ...(request.identity && !exactKeyTruncated && request.nativeScopes?.includes("always") ? ["always" as const] : [])];
+    // Never retain raw identity in pending state or spread it into an event.
+    const { identity: _, ...safeRequest } = request;
+    const normalized = { ...safeRequest, risk: request.risk ?? "normal", allowedScopes, grantKinds, exactKey, exactKeyTruncated, matchKey };
     const approvalId = (this.options.newId ?? randomUUID)();
     let resolve!: (r: ApprovalResolution) => void;
     const resolution = new Promise<ApprovalResolution>((res) => { resolve = res; });
@@ -100,9 +114,9 @@ export class ApprovalBroker {
     this.options.sink.emit(request.sessionId, {
       kind: "approval.requested",
       source: this.source(request),
-      data: { approvalId, taskId: request.taskId, tool: request.tool, summary: request.summary ? redactText(request.summary, SUMMARY_LIMIT) : summarize(request.tool, request.input), allowedScopes, risk: normalized.risk, ...(request.toolKey ? { toolKey: request.toolKey } : {}), ...(exactKey ? { exactKey } : {}), ...(allowedScopes.includes("always") && request.alwaysNote ? { alwaysNote: redactText(request.alwaysNote, 1000) } : {}), ...(input === undefined ? {} : { input }) },
+      data: { approvalId, taskId: request.taskId, tool: request.tool, summary: request.summary ? redactText(request.summary, SUMMARY_LIMIT) : summarize(request.tool, request.input), allowedScopes, grantKinds, ...(exactKeyTruncated ? { exactKeyTruncated: true } : {}), risk: normalized.risk, ...(request.toolKey ? { toolKey: request.toolKey } : {}), ...(exactKey ? { exactKey } : {}), ...(allowedScopes.includes("always") && request.alwaysNote ? { alwaysNote: redactText(request.alwaysNote, 1000) } : {}), ...(input === undefined ? {} : { input }) },
     });
-    const grant = this.grants(request.sessionId).find(g => matchesGrant(g, normalized));
+    const grant = this.grants(request.sessionId).find(g => grantKinds.includes(g.kind) && matchesGrant(g, normalized));
     if (grant) this.settle(approvalId, "allow-once", `session-grant:${grant.grantId}`, "once", true);
     return { approvalId, resolution };
   }
@@ -115,7 +129,7 @@ export class ApprovalBroker {
     if (validation.scope === "session") {
       const grants = this.grants(entry.request.sessionId);
       if (grants.length >= 100) this.revokeGrant(entry.request.sessionId, grants[0]!.grantId, "grant-limit");
-      const grant: SessionGrant = { grantId: randomUUID(), kind: input.grant!, toolKey: entry.request.toolKey!, risk: entry.request.risk, createdAt: new Date(this.clock.now()).toISOString(), ...(input.grant === "exact" ? { exactKey: entry.request.exactKey! } : {}) };
+      const grant: SessionGrant = { grantId: randomUUID(), kind: input.grant!, toolKey: entry.request.toolKey!, risk: entry.request.risk, createdAt: new Date(this.clock.now()).toISOString(), ...(input.grant === "exact" ? { exactKey: entry.request.exactKey!, matchKey: entry.request.matchKey! } : {}) };
       const { createdAt: _, ...data } = grant;
       this.options.sink.emit(entry.request.sessionId, { kind: "session.grant", source: this.source(entry.request), data: { ...data, action: "added", by: input.by, approvalId: input.approvalId } });
       // Only standalone brokers need a separate in-memory grant projection.
