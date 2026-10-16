@@ -4,19 +4,22 @@ export type ViewState = {
     seq: number;
     events: SessionEvent[];
     approvals: Record<string, SessionEvent>;
+    questions: Record<string, SessionEvent>;
     tasks: Record<string, Record<string, unknown>>;
     state: string;
 };
-export const emptyState = (): ViewState => ({ seq: 0, events: [], approvals: {}, tasks: {}, state: 'idle' });
+export const emptyState = (): ViewState => ({ seq: 0, events: [], approvals: {}, questions: {}, tasks: {}, state: 'idle' });
 export function reduceEvent(state: ViewState, event: SessionEvent): ViewState {
     if (event.seq <= state.seq)
         return state;
-    const next = { ...state, seq: event.seq, events: [...state.events, event], approvals: { ...state.approvals }, tasks: { ...state.tasks } };
+    const next = { ...state, seq: event.seq, events: [...state.events, event], approvals: { ...state.approvals }, questions: { ...state.questions }, tasks: { ...state.tasks } };
     const id = String(event.data.taskId ?? event.source.taskId ?? 'lead');
     if (event.kind === 'approval.requested')
         next.approvals[String(event.data.approvalId)] = event;
     if (event.kind === 'approval.resolved')
         delete next.approvals[String(event.data.approvalId)];
+    if (event.kind === 'question.requested') next.questions[String(event.data.questionId)] = event;
+    if (event.kind === 'question.resolved') delete next.questions[String(event.data.questionId)];
     if (event.kind.startsWith('task.'))
         next.tasks[id] = { ...next.tasks[id], ...event.source, ...event.data };
     if (event.kind === 'session.state')

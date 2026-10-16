@@ -80,3 +80,8 @@ test('exact prompt terminal settles accepted pending progress before a delayed H
  const active=[event(1,'turn.started'),event(2,'tool.started',{toolCallId:'live',toolName:'Read'}),failed];
  expect(leadProgress(active,{sessionId:'s',pending:{...pending,background:true}})).toMatchObject({phase:'tool'});
 });
+test('pending question takes precedence and resolves back to work',()=>{
+ const events=[event(1,'turn.started'),event(2,'question.requested',{questionId:'q'}),event(3,'message.delta',{text:'Still running'})];
+ expect(leadProgress(events,{sessionId:'s'})).toEqual({phase:'question',label:'Waiting for your answer'});
+ expect(leadProgress([...events,event(4,'question.resolved',{questionId:'q'})],{sessionId:'s'})?.phase).toBe('responding');
+});

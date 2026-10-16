@@ -67,3 +67,12 @@ test('Lead generations share the conversation while retaining their recorded run
     expect(rows[0]!.source.runnerId).toBe('claude'); expect(rows[1]!.source.runnerId).toBe('codex');
     expect(rows[0]!.data.modelId).toBe('old-model'); expect(rows[1]!.data.modelId).toBe('new-model');
 });
+test('questions replay, deduplicate, and clear on every resolution outcome',()=>{
+ for(const outcome of ['answered','dismissed','cancelled']){
+ const requested=event(1,'question.requested',{questionId:'q',questions:[]});
+ const state=reduceEvent(emptyState(),requested);
+ expect(state.questions.q).toEqual(requested);
+ expect(reduceEvent(state,requested)).toBe(state);
+ expect(reduceEvent(state,event(2,'question.resolved',{questionId:'q',outcome})).questions).toEqual({});
+ }
+});

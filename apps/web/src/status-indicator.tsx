@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { SessionEvent } from '../../../packages/core/src/session/events';
-export type LeadActivity = { taskId?: string; state: string; pendingApprovals: number; lastReplySeq: number };
-export function indicatorState(state: string, approvals = 0) {
+export type LeadActivity = { taskId?: string; state: string; pendingApprovals: number; pendingQuestions?: number; lastReplySeq: number };
+export function indicatorState(state: string, approvals = 0, questions = 0) {
+    if (questions) return 'question';
     if (approvals) return 'approval';
     if (state === 'running') return 'working';
     if (['failed', 'ownership-unsettled'].includes(state)) return 'error';
@@ -12,19 +13,21 @@ export function indicatorState(state: string, approvals = 0) {
 }
 export function leadActivityFromEvents(events: SessionEvent[], taskId: string): LeadActivity {
     let state = 'idle', preparing = false, lastReplySeq = 0;
-    const approvals = new Set<string>();
+    const approvals = new Set<string>(), questions = new Set<string>();
     for (const event of events) {
         const owner = String(event.source.taskId ?? event.data.taskId ?? '');
         const lead = /^lead(?:-g[1-9]\d*)?$/.test(owner) && (event.source.memberId === undefined || event.source.memberId === 'lead');
         if (lead && event.kind === 'message.completed' && !event.data.internal && event.data.role === 'assistant' && typeof event.data.text === 'string' && event.data.text.trim()) lastReplySeq = event.seq;
         if (event.kind === 'diagnostic' && event.data.code === 'session.preparation' && Number(event.data.generation ?? 0) === (taskId === 'lead' ? 0 : Number(taskId.slice(6)))) { preparing = event.data.status === 'preparing'; }
         if (event.kind === 'approval.resolved') approvals.delete(String(event.data.approvalId));
+        if (event.kind === 'question.resolved') questions.delete(String(event.data.questionId));
         if (owner !== taskId) continue;
+        if (event.kind === 'question.requested') questions.add(String(event.data.questionId));
         if (event.kind === 'task.state') state = String(event.data.state ?? state);
         if (event.kind === 'approval.requested') approvals.add(String(event.data.approvalId));
         if (event.kind === 'approval.resolved') approvals.delete(String(event.data.approvalId));
     }
-    return { taskId, state: preparing ? 'preparing' : state, pendingApprovals: approvals.size, lastReplySeq };
+    return { taskId, state: preparing ? 'preparing' : state, pendingApprovals: approvals.size, pendingQuestions: questions.size, lastReplySeq };
 }
 export function replyForTask(events: SessionEvent[], taskId: string) {
     let attempt = 1, assistant: { seq: number; text: string; attempt: number } | undefined, result: typeof assistant;
@@ -49,13 +52,13 @@ export function useReadMarkers() {
     useEffect(() => { const changed = (event: StorageEvent) => { if (event.key !== 'deck.read-replies') return; try { const incoming = JSON.parse(event.newValue ?? '{}'); setMarkers(old => Object.entries(incoming).reduce((next, [key, seq]) => advanceRead(next, key, Number(seq)), old)); } catch { } }; window.addEventListener('storage', changed); return () => window.removeEventListener('storage', changed); }, []);
     return { markers, acknowledge: (key: string, seq: number) => setMarkers(old => advanceRead(old, key, seq)) };
 }
-const labels = { working: 'Working', approval: 'Waiting for approval', waiting: 'Waiting', error: 'Error', completed: 'Completed', stopped: 'Stopped', idle: 'Idle' };
-export const indicatorLabel = (state: string, approvals = 0, unread = false) => `${labels[indicatorState(state, approvals)]}${unread ? ' · Unread reply' : ''}`;
-export function StatusIndicator({ state, approvals = 0, unread = false }: { state: string; approvals?: number; unread?: boolean }) {
-    const kind = indicatorState(state, approvals), ref = useRef<HTMLSpanElement>(null), [onscreen, setOnscreen] = useState(false), [pageVisible, setPageVisible] = useState(typeof document !== 'undefined' && document.visibilityState === 'visible');
+const labels = { question: 'Waiting for your answer', working: 'Working', approval: 'Waiting for approval', waiting: 'Waiting', error: 'Error', completed: 'Completed', stopped: 'Stopped', idle: 'Idle' };
+export const indicatorLabel = (state: string, approvals = 0, unread = false, questions = 0) => `${labels[indicatorState(state, approvals, questions)]}${unread ? ' · Unread reply' : ''}`;
+export function StatusIndicator({ state, approvals = 0, questions = 0, unread = false }: { state: string; approvals?: number; questions?: number; unread?: boolean }) {
+    const kind = indicatorState(state, approvals, questions), ref = useRef<HTMLSpanElement>(null), [onscreen, setOnscreen] = useState(false), [pageVisible, setPageVisible] = useState(typeof document !== 'undefined' && document.visibilityState === 'visible');
     useEffect(() => { const observer = new IntersectionObserver(([entry]) => setOnscreen(!!entry?.isIntersecting)); if (ref.current) observer.observe(ref.current); const show = () => setPageVisible(document.visibilityState === 'visible'); document.addEventListener('visibilitychange', show); return () => { observer.disconnect(); document.removeEventListener('visibilitychange', show); }; }, []);
-    const label = indicatorLabel(state, approvals, unread);
-    return <span ref={ref} className={`agent-indicator agent-indicator--${kind}`} data-state={kind} data-unread={unread || undefined} data-animate={kind === 'working' && onscreen && pageVisible || undefined} role="img" aria-label={label} title={label}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">{kind === 'working' ? <path key="working" className="work-orbit" d="M8 2a6 6 0 1 1-6 6"/> : kind === 'completed' ? <path key="completed" d="m3 8 3 3 7-7"/> : kind === 'error' ? <><path d="m8 2 6 11H2Z"/><path d="M8 6v3m0 2h.01"/></> : kind === 'approval' ? <><path d="M5 2h6v3L8 8l3 3v3H5v-3l3-3-3-3Z"/></> : kind === 'waiting' ? <><circle cx="8" cy="8" r="5.5"/><path d="M8 4v4l2 1"/></> : kind === 'stopped' ? <rect x="4" y="4" width="8" height="8" rx="1"/> : <circle cx="8" cy="8" r="3"/>}</svg>{unread && <svg className="unread-dot" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" fill="currentColor"/></svg>}</span>;
+    const label = indicatorLabel(state, approvals, unread, questions);
+    return <span ref={ref} className={`agent-indicator agent-indicator--${kind}`} data-state={kind} data-unread={unread || undefined} data-animate={kind === 'working' && onscreen && pageVisible || undefined} role="img" aria-label={label} title={label}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">{kind === 'working' ? <path key="working" className="work-orbit" d="M8 2a6 6 0 1 1-6 6"/> : kind === 'completed' ? <path key="completed" d="m3 8 3 3 7-7"/> : kind === 'error' ? <><path d="m8 2 6 11H2Z"/><path d="M8 6v3m0 2h.01"/></> : (kind === 'approval' || kind === 'question') ? <><path d="M5 2h6v3L8 8l3 3v3H5v-3l3-3-3-3Z"/></> : kind === 'waiting' ? <><circle cx="8" cy="8" r="5.5"/><path d="M8 4v4l2 1"/></> : kind === 'stopped' ? <rect x="4" y="4" width="8" height="8" rx="1"/> : <circle cx="8" cy="8" r="3"/>}</svg>{unread && <svg className="unread-dot" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" fill="currentColor"/></svg>}</span>;
 }
 /** A read acknowledgement is tied to this exact rendered response, never to a newer poll cursor. */
 export function VisibleReply({ children, visible, replyKey, seq, acknowledge, className }: { children: React.ReactNode; visible: boolean; replyKey: string; seq: number; acknowledge: (key: string, seq: number) => void; className?: string }) {

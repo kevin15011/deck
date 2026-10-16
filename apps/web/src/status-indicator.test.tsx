@@ -9,7 +9,7 @@ test('status distinguishes work, preparation, approvals and terminal outcomes', 
 });
 test('Lead summary uses current generation state and public replies across generations only', () => {
  const events = [event(1,'message.completed',{text:'Old answer'}),event(2,'task.state',{state:'running'},'child'),event(3,'message.completed',{text:'Child'},'child'),event(4,'message.completed',{text:'Internal',internal:true}),event(5,'task.state',{state:'queued'},'lead-g1','lead'),event(6,'message.completed',{role:'user',text:'Request'},'lead-g1','lead')];
- expect(leadActivityFromEvents(events,'lead-g1')).toEqual({taskId:'lead-g1',state:'queued',pendingApprovals:0,lastReplySeq:1});
+ expect(leadActivityFromEvents(events,'lead-g1')).toEqual({taskId:'lead-g1',state:'queued',pendingApprovals:0,pendingQuestions:0,lastReplySeq:1});
  expect(leadActivityFromEvents([...events,event(7,'message.completed',{text:'New answer'},'lead-g1','lead')],'lead-g1')?.lastReplySeq).toBe(7);
 });
 test('subagent reply belongs to the current attempt, prefers real assistant completion over repeated result', () => {
@@ -34,4 +34,10 @@ test('preparation override restores the actual previous Lead outcome',()=>{
  const events=[event(1,'task.state',{state:'completed'}),{...event(2,'diagnostic',{code:'session.preparation',generation:0,status:'preparing'}),source:{}},{...event(3,'diagnostic',{code:'session.preparation',generation:0,status:'ready'}),source:{}}];
  expect(leadActivityFromEvents(events.slice(0,2),'lead').state).toBe('preparing');
  expect(leadActivityFromEvents(events,'lead').state).toBe('completed');
+});
+test('pending questions wait for user and resolve independently',()=>{
+ const events=[event(1,'question.requested',{questionId:'q'})];
+ expect(leadActivityFromEvents(events,'lead').pendingQuestions).toBe(1);
+ expect(indicatorState('running',0,1)).toBe('question');
+ expect(leadActivityFromEvents([...events,event(2,'question.resolved',{questionId:'q'})],'lead').pendingQuestions).toBe(0);
 });
