@@ -51,6 +51,7 @@ const wait = async (condition: () => boolean | Promise<boolean>, label: string) 
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }), page = await context.newPage(), errors: string[] = [];
 page.setDefaultTimeout(7000); page.on('pageerror', error => errors.push(error.message));
 try {
+    await page.addInitScript(()=>{const WS=window.WebSocket;(window as any).__sockets=[];window.WebSocket=class extends WS{constructor(url:string|URL,protocols?:string|string[]){super(url,protocols);(window as any).__sockets.push(this);}};});
     const project = (await command({ type:'project.register', path:projectOne, name:'Questions' })).project.projectId;
     const session = (await command({ type:'session.create', projectId:project, title:'Questions' })).sessionId;
     const otherSession=(await command({type:'session.create',projectId:project,title:'Other session'})).sessionId;
@@ -134,6 +135,32 @@ try {
     await send.click();
     assert.deepEqual(await result,{outcome:'answered',answers:{single:['Alpha'],multi:['Red','Blue'],text:['browser-free-answer'],secret:['browser-secret-answer'],other:['browser-other-answer']}});
     await wait(async()=>await dock.count()===0,'resolved dock');
+    // Reuse the independent secret-option probe, with the expected fixed gating.
+    const restricted=turn.ask([{...base,id:'__proto__',prompt:'Restricted secret',secret:true,allowOther:false,options:[{label:'Allowed'}]}],'secret-choice');
+    await dock.locator('.question-toggle').click();
+    await dock.getByLabel('Secret answer').fill('Disallowed');
+    assert.equal(await send.isEnabled(),false,'disallowed secret cannot send');
+    await dock.getByLabel('Secret answer').fill('Allowed');
+    assert.equal(await send.isEnabled(),true);
+    const oldInput=await dock.getByLabel('Secret answer').elementHandle();
+    await page.evaluate(()=>{for(const socket of (window as any).__sockets)socket.close();});
+    await wait(async()=>await oldInput!.evaluate(el=>(el as HTMLInputElement).value)==='','disconnect wipes detached secret');
+    await wait(async()=>await page.locator('.connection').innerText().then(text=>text.includes('Connected')),'reconnected');
+    assert.equal(await dock.getByLabel('Secret answer').inputValue(),'');
+    assert.equal(await send.isEnabled(),false,'reconnect requires re-entry');
+    await dock.getByLabel('Secret answer').fill('Allowed');
+    await send.click();
+    assert.deepEqual(await restricted,{outcome:'answered',answers:Object.fromEntries([['__proto__',['Allowed']]])});
+    await wait(async()=>await dock.count()===0,'restricted resolved');
+    for(const id of ['constructor','__proto__','toString']){
+        const prototypeResult=turn.ask([{...base,id,prompt:'Prototype-safe answer',options:[]}],`prototype:${id}`);
+        await dock.locator('.question-toggle').click();
+        assert.equal(await send.isEnabled(),false,'prototype id starts unanswered');
+        await dock.getByLabel('Your answer').fill('explicit-id-answer');
+        await send.click();
+        assert.deepEqual(await prototypeResult,{outcome:'answered',answers:Object.fromEntries([[id,['explicit-id-answer']]])});
+        await wait(async()=>await dock.count()===0,'prototype resolved');
+    }
     await page.setViewportSize({width:390,height:844});
     const dismissed=turn.ask([questions[0]!]);
     await dock.locator('.question-toggle').click();
@@ -173,5 +200,5 @@ try {
     const events=JSON.stringify([...manager.openLog(session)!.readAfter(0)]);
     for(const value of ['browser-free-answer','browser-secret-answer','browser-other-answer'])assert.equal(events.includes(value),false);
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({ok:true,checks:22}));
+    console.log(JSON.stringify({ok:true,checks:35}));
 } catch(error) { console.error(error);  process.exitCode=1; } finally { await browser.close(); host.disable?.(); await manager.close(); rmSync(root,{recursive:true,force:true}); process.exit(process.exitCode??0); }
