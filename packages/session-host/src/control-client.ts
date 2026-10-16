@@ -10,7 +10,7 @@ export type AttachHandlers = {
   onResync?(reason: string): void;
 };
 
-type Pending = { resolve: (f: ServerFrame) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
+type Pending = { resolve: (f: ServerFrame) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | undefined };
 
 export class ControlClient {
   private readonly pending = new Map<string, Pending>();
@@ -24,7 +24,7 @@ export class ControlClient {
     this.closed = new Promise<void>((resolve) => {
       socket.once("close", () => {
         this.isClosed = true;
-        for (const [id, p] of this.pending) { clearTimeout(p.timer); p.reject(new Error("Connection closed")); this.pending.delete(id); }
+        for (const [id, p] of this.pending) { if (p.timer !== undefined) clearTimeout(p.timer); p.reject(new Error("Connection closed")); this.pending.delete(id); }
         resolve();
       });
     });
@@ -57,7 +57,7 @@ export class ControlClient {
     if ("id" in frame && frame.id !== undefined && this.pending.has(frame.id)) {
       const p = this.pending.get(frame.id)!;
       this.pending.delete(frame.id);
-      clearTimeout(p.timer);
+      if (p.timer !== undefined) clearTimeout(p.timer);
       p.resolve(frame);
       return;
     }
@@ -66,11 +66,12 @@ export class ControlClient {
     else if (frame.t === "resync") { const h = this.attachments.get(frame.sessionId); this.attachments.delete(frame.sessionId); h?.onResync?.(frame.reason); }
   }
 
-  request(frame: ClientFrame, timeoutMs = 10000): Promise<ServerFrame> {
+  /** Pass null to wait for a reply or connection close without a transport timer. */
+  request(frame: ClientFrame, timeoutMs: number | null = 10000): Promise<ServerFrame> {
     if (this.isClosed) return Promise.reject(new Error("Connection closed"));
     const id = frame.id ?? `r${++this.counter}`;
     return new Promise<ServerFrame>((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Timed out waiting for ${frame.t} reply`)); }, timeoutMs);
+      const timer = timeoutMs === null ? undefined : setTimeout(() => { this.pending.delete(id); reject(new Error(`Timed out waiting for ${frame.t} reply`)); }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.socket.write(encodeFrame({ ...frame, id } as ClientFrame));
     });

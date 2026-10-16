@@ -366,7 +366,7 @@ describe("Claude structured questions", () => {
     });
   }
   for (const disconnect of [false, true]) {
-    test(`question transport survives the approval limit then ${disconnect ? "disconnects" : "accepts a late answer"}`, async () => {
+    test(`question transport arms no timer and survives an arbitrarily long wait then ${disconnect ? "disconnects" : "accepts a late answer"}`, async () => {
       const h = await harness({ questions: true });
       const clock = new FakeClock();
       const nativeTimeout = globalThis.setTimeout;
@@ -376,9 +376,12 @@ describe("Claude structured questions", () => {
       try {
         s.send({ id: 1, method: "tools/call", params: { name: DECK_APPROVE_TOOL, arguments: { tool_name: "AskUserQuestion", input: { questions: [question] } } } });
         await waitFor(() => h.questionBroker!.pending().length === 1);
-        clock.advance(960_000);
+        const transportTimers = timerSpy.mock.calls.filter(([, ms]) => Number(ms) >= 960_000);
+        clock.advance(100 * 365 * 24 * 60 * 60 * 1000);
         await sleep(20);
         expect(s.out).toEqual([]);
+        expect(transportTimers).toEqual([]);
+        expect(h.questionBroker!.pending()).toHaveLength(1);
         if (disconnect) {
           s.end(); await s.done;
           await waitFor(() => h.questionBroker!.pending().length === 0);
@@ -389,6 +392,35 @@ describe("Claude structured questions", () => {
       } finally { timerSpy.mockRestore(); s.end(); await s.done; }
     });
   }
+  test("daemon shutdown settles a question and clears the broker request", async () => {
+    const h = await harness({ questions: true });
+    const s = mcpSession({ DECK_SESSION_CREDENTIAL_FILE: h.credFile });
+    try {
+      s.send({ id: 1, method: "tools/call", params: { name: DECK_APPROVE_TOOL, arguments: { tool_name: "AskUserQuestion", input: { questions: [question] } } } });
+      await waitFor(() => h.questionBroker!.pending().length === 1);
+      await h.server.close();
+      await waitFor(() => h.questionBroker!.pending().length === 0);
+      expect(text(await s.reply(1))).toContain("daemon-unreachable");
+    } finally { s.end(); await s.done; }
+  });
+  test("ordinary approvals retain their transport timeout", async () => {
+    const h = await harness();
+    const clock = new FakeClock();
+    const nativeTimeout = globalThis.setTimeout;
+    const timerSpy = spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void, ms: number, ...args: unknown[]) =>
+      ms >= 960_000 ? clock.setTimeout(fn, ms) : nativeTimeout(fn, ms, ...args)) as typeof setTimeout);
+    const s = mcpSession({ DECK_SESSION_CREDENTIAL_FILE: h.credFile });
+    try {
+      s.send({ id: 1, method: "tools/call", params: { name: DECK_APPROVE_TOOL, arguments: { tool_name: "Bash", input: {} } } });
+      await waitFor(() => h.broker.pending().length === 1);
+      expect(timerSpy.mock.calls.filter(([, ms]) => Number(ms) >= 960_000).map(([, ms]) => ms)).toEqual([960_000]);
+      clock.advance(959_999);
+      await sleep(20);
+      expect(s.out).toEqual([]);
+      clock.advance(1);
+      expect(text(await s.reply(1))).toContain("daemon-timeout");
+    } finally { timerSpy.mockRestore(); s.end(); await s.done; }
+  });
   test("duplicate texts use deterministic suffixes without overwriting literal suffixes", async () => {
     const h = await setup();
     const call = h.ask({ questions: [question, question, { ...question, question: "Which? (2)" }] });
