@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { chmodSync, existsSync, lstatSync, readFileSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { QuestionBroker } from "../question-broker";
@@ -478,6 +479,76 @@ describe("Claude structured questions", () => {
       expect(await h.ask({ questions })).toMatchObject({ ok: false, code: "invalid-arguments" });
     }
     expect(h.questionBroker.pending()).toEqual([]);
+    expect(h.broker.pending()).toEqual([]);
+  });
+});
+
+describe("Claude approval scopes", () => {
+  async function request(tool: string, input: Record<string, unknown>) {
+    const h = await harness();
+    const call = h.bridge.call({ token: h.token, tool: DECK_APPROVE_TOOL, arguments: { tool_name: tool, input } });
+    const requested = [...h.log.readAfter(0)].find(e => e.kind === "approval.requested")!;
+    return { ...h, call, data: requested?.data as Record<string, unknown> };
+  }
+
+  test("maps native tool keys, exact actions and risk without offering native persistence", async () => {
+    const cases: Array<[string, Record<string, unknown>, string | undefined, string]> = [
+      ["Bash", { command: "ls -la" }, "ls -la", "high"],
+      ...["Edit", "Write", "MultiEdit", "Read"].map(tool => [tool, { file_path: "/work/a.ts" }, "/work/a.ts", tool === "Read" ? "normal" : "high"] as [string, Record<string, unknown>, string, string]),
+      ["NotebookEdit", { notebook_path: "/work/a.ipynb" }, "/work/a.ipynb", "high"],
+      ["WebFetch", { url: "https://example.com" }, "https://example.com", "high"],
+      ["WebSearch", { query: "bun tests" }, "bun tests", "normal"],
+      ...["Glob", "Grep", "TodoWrite"].map(tool => [tool, {}, undefined, "normal"] as [string, Record<string, unknown>, undefined, string]),
+      ["MysteryTool", { command: "do something" }, undefined, "high"],
+    ];
+    for (const [tool, input, exactKey, risk] of cases) {
+      const h = await request(tool, input);
+      expect(h.data).toMatchObject({ toolKey: `claude:${tool}`, risk, allowedScopes: ["once", "session"] });
+      expect(h.data.exactKey).toBe(exactKey);
+      expect(h.data.alwaysNote).toBeUndefined();
+      h.broker.respond({ approvalId: h.broker.pending()[0]!.approvalId, decision: "allow", by: "web" });
+      expect(await h.call).toEqual({ ok: true, data: { behavior: "allow", updatedInput: input } });
+    }
+  });
+
+  test("MCP exact keys digest recursively sorted redacted arguments", async () => {
+    const a = await request("mcp__fixture__run", { z: [{ b: 2, a: 1 }], api_key: "private-value-123" });
+    const b = await request("mcp__fixture__run", { api_key: "another-private-value", z: [{ a: 1, b: 2 }] });
+    const c = await request("mcp__fixture__run", { api_key: "private-value-123", z: [{ a: 2, b: 2 }] });
+    expect(a.data).toMatchObject({ toolKey: "claude:mcp__fixture__run", risk: "high", allowedScopes: ["once", "session"] });
+    expect(a.data.exactKey).toMatch(/^[a-f0-9]{64}$/);
+    expect(a.data.exactKey).toBe(createHash("sha256").update('{"api_key":[redacted],"z":[{"a":1,"b":2}]}').digest("hex"));
+    expect(a.data.exactKey).toBe(b.data.exactKey);
+    expect(a.data.exactKey).not.toBe(c.data.exactKey);
+    expect(a.data.exactKey).not.toContain("private-value-123");
+    for (const h of [a, b, c]) {
+      h.broker.respond({ approvalId: h.broker.pending()[0]!.approvalId, decision: "deny", by: "web" });
+      expect(await h.call).toEqual({ ok: true, data: { behavior: "deny", message: "Denied by web" } });
+    }
+  });
+
+  test("exact keys redact secrets and remain bounded without merging long commands", async () => {
+    const keys: unknown[] = [];
+    for (const command of ["echo token=private-value-123", "x".repeat(600) + "a", "x".repeat(600) + "b"]) {
+      const h = await request("Bash", { command });
+      expect(typeof h.data.exactKey).toBe("string");
+      expect((h.data.exactKey as string).length).toBeLessThanOrEqual(512);
+      expect(h.data.exactKey).not.toContain("private-value-123");
+      keys.push(h.data.exactKey);
+      h.broker.cancel(h.broker.pending()[0]!.approvalId, "test");
+      await h.call;
+    }
+    expect(keys[1]).not.toBe(keys[2]);
+  });
+
+  test("session grants return plain once-allow shapes and never updatedPermissions", async () => {
+    const h = await request("Bash", { command: "ls" });
+    const id = h.broker.pending()[0]!.approvalId;
+    expect(h.broker.respond({ approvalId: id, decision: "allow", scope: "always", confirmed: true, by: "web" })).toMatchObject({ ok: false, code: "approval-scope-unsupported" });
+    expect(h.broker.respond({ approvalId: id, decision: "allow", scope: "session", grant: "exact", by: "web" })).toMatchObject({ ok: true });
+    const expected = { ok: true as const, data: { behavior: "allow", updatedInput: { command: "ls" } } };
+    expect(await h.call).toEqual(expected);
+    expect(await h.bridge.call({ token: h.token, tool: DECK_APPROVE_TOOL, arguments: { tool_name: "Bash", input: { command: "ls" } } })).toEqual(expected);
     expect(h.broker.pending()).toEqual([]);
   });
 });

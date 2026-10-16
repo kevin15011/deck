@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { redactText } from "@deck/core/session/redaction";
+import { isApprovalToolKey, type ApprovalRisk } from "@deck/core/session/approval";
+import { createHash, randomUUID } from "node:crypto";
 import { validateQuestions, type Question } from "@deck/core/session/question";
 import type { QuestionBroker } from "./question-broker";
 /** Daemon side of the session MCP bridge: authenticates the task credential, enforces its tool grant, serves the tools. */
@@ -69,7 +71,10 @@ export class BridgeService implements BridgePort {
         signal?.removeEventListener("abort", onAbort);
       }
     }
+    const toolKey = `claude:${args.tool_name}`;
+    if (!isApprovalToolKey(toolKey)) return { ok: false, code: "invalid-arguments", message: "Invalid Claude tool name" };
     const request = broker.request({
+      ...claudeApprovalAction(args.tool_name, input), toolKey,
       sessionId: grant.sessionId, taskId: grant.taskId, memberId: grant.memberId, runnerId: grant.runnerId, tool: args.tool_name, input,
     });
     // The child went away (bridge connection closed): nobody can act on the decision any more.
@@ -102,4 +107,34 @@ function claudeAnswers(input: Record<string, unknown>, questions: Question[], an
     result[key] = answers[question.id]!.join(", ");
   }
   return { ...input, questions: updatedQuestions, answers: result };
+}
+
+const CLAUDE_READ_ONLY_TOOLS = new Set(["Read", "Glob", "Grep", "WebSearch", "TodoWrite", "TaskGet", "TaskList", "TaskOutput", "ListAgents"]);
+
+function claudeApprovalAction(tool: string, input: Record<string, unknown>): { exactKey?: string; risk: ApprovalRisk } {
+  const risk = CLAUDE_READ_ONLY_TOOLS.has(tool) ? "normal" : "high";
+  if (tool.startsWith("mcp__")) {
+    const json = JSON.stringify(sortClaudeArguments(input));
+    return { risk, exactKey: createHash("sha256").update(redactText(json, json.length)).digest("hex") };
+  }
+  let action: unknown;
+  switch (tool) {
+    case "Bash": action = input.command; break;
+    case "Edit": case "Write": case "MultiEdit": case "NotebookEdit": case "Read":
+      action = input.file_path ?? input.notebook_path; break;
+    case "WebFetch": action = input.url; break;
+    case "WebSearch": action = input.query; break;
+  }
+  if (typeof action !== "string" || !action) return { risk };
+  const redacted = redactText(action, 512);
+  // Keep lossy keys distinct: a shared truncated prefix must not grant a different command.
+  const exactKey = redacted === action ? redacted
+    : `${redacted.slice(0, 439)} #sha256:${createHash("sha256").update(action).digest("hex")}`;
+  return { risk, exactKey };
+}
+
+function sortClaudeArguments(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortClaudeArguments);
+  if (!isObj(value)) return value;
+  return Object.fromEntries(Object.keys(value).sort().map(key => [key, sortClaudeArguments(value[key])]));
 }
