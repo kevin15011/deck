@@ -66,12 +66,12 @@ describe("Codex session driver", () => {
   test.each(["allow", "deny"] as const)("relays observed native MCP approval form (%s), including request id zero", async (decision) => {
     const h = harness(responder);
     const approvals: unknown[] = [];
-    h.io.approval = async (request) => { approvals.push(request); return { decision }; };
+    h.io.approval = async (request) => { approvals.push(request); return { decision, scope: "always" }; };
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
     await task.nativeSessionId;
     const child = h.children[1]!; child.stdout(mcpMemoryApproval);
     await Promise.resolve(); await Promise.resolve();
-    expect(approvals).toEqual([{ approvalId: "codex:0", tool: "mcp__deck-session-task-deck__deck_memory_recall", summary: mcpMemoryApproval.params.message, input: { query: "acceptance" } }]);
+    expect(approvals).toEqual([{ approvalId: "codex:0", toolKey: "codex:mcp:deck-session-task-deck", risk: "normal", tool: "mcp__deck-session-task-deck__deck_memory_recall", summary: mcpMemoryApproval.params.message, input: { query: "acceptance" } }]);
     expect(child.writes.find((m) => m.id === 0)?.result).toEqual({ action: decision === "allow" ? "accept" : "decline", content: decision === "allow" ? {} : null, _meta: null });
     await task.close(); await task.done;
   });
@@ -413,4 +413,108 @@ test("Codex questions support zero request IDs and empty option arrays", async (
   const child = h.children[1]!; child.stdout({ ...questionRequest, id: 0, params: { ...questionRequest.params, questions: [{ id: "text", header: "Text", question: "Type", options: [] }] } }); await Promise.resolve();
   expect(seen).toMatchObject({ questionId: expect.stringMatching(/^codex:task:0:[0-9a-f-]{36}$/), questions: [{ id: "text", options: [], multiple: false, allowOther: false, secret: false }] });
   expect(child.writes.find(m => m.id === 0)?.result).toEqual({ answers: { text: { answers: [] } } }); await task.close();
+});
+
+const scopeRequests = [
+  { name: "commandExecution", params: { command: "git status", cwd: "/work", proposedExecpolicyAmendment: ["git", "status"] }, exactKey: "git status", risk: "high" },
+  { name: "fileChange", params: { grantRoot: "/work/src", reason: "Edit source" }, exactKey: "/work/src\nEdit source", risk: "high" },
+  { name: "permissions", params: { cwd: "/work", permissions: { fileSystem: { write: ["/work/src"] }, network: { enabled: true } }, reason: "Build" }, exactKey: JSON.stringify({ fileSystem: { write: ["/work/src"] }, network: { enabled: true } }), risk: "high" },
+] as const;
+const nativeApproval = (name: string, params: object = {}) => ({ id: "scoped", method: `item/${name}/requestApproval`, params: { threadId: "native-thread", turnId: "turn", ...params } });
+describe("Codex approval scopes", () => {
+  for (const request of scopeRequests) {
+    test.each(["once", "always", "deny"] as const)(`${request.name} advertises fields and maps %s`, async scope => {
+      const h = harness(responder); let seen: unknown;
+      h.io.approval = async req => { seen = req; return { decision: scope === "deny" ? "deny" : "allow", scope: scope === "always" ? "always" : "once" }; };
+      const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
+      try {
+        await task.nativeSessionId; const child = h.children[1]!;
+        child.stdout(nativeApproval(request.name, request.params)); await Promise.resolve();
+        expect(seen).toMatchObject({ toolKey: `codex:${request.name}`, exactKey: request.exactKey, risk: request.risk });
+        if (request.name === "commandExecution") {
+          expect((seen as any).nativeScopes).toEqual(["always"]);
+          expect((seen as any).alwaysNote).toContain("git status");
+          expect((seen as any).alwaysNote).toContain("future sessions and Deck cannot revoke it");
+        } else {
+          expect((seen as any).nativeScopes).toBeUndefined(); expect((seen as any).alwaysNote).toBeUndefined();
+        }
+        const expected = request.name === "permissions" ? scope === "deny" ? { permissions: {} } : { permissions: request.params.permissions, scope: "turn" }
+          : { decision: scope === "deny" ? "decline" : request.name === "commandExecution" && scope === "always" ? { acceptWithExecpolicyAmendment: { execpolicy_amendment: request.params.proposedExecpolicyAmendment } } : "accept" };
+        expect(child.writes.find(m => m.id === "scoped")?.result).toEqual(expected);
+        expect(JSON.stringify(child.writes)).not.toContain("acceptForSession");
+        expect(JSON.stringify(child.writes)).not.toContain("applyNetworkPolicyAmendment");
+      } finally { await task.close(); }
+    });
+    test(`${request.name} denies an interrupted pending allow`, async () => {
+      const h = harness(responder); let release!: (value: { decision: "allow"; scope: "always" }) => void;
+      h.io.approval = () => new Promise(resolve => { release = resolve; });
+      const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
+      try {
+        await task.nativeSessionId; const child = h.children[1]!; child.stdout(nativeApproval(request.name, request.params));
+        await task.interrupt(); release({ decision: "allow", scope: "always" }); await Promise.resolve();
+        expect(child.writes.find(m => m.id === "scoped")?.result).toEqual(request.name === "permissions" ? { permissions: {} } : { decision: "decline" });
+      } finally { await task.close(); }
+    });
+    test(`${request.name} rejects stale requests without asking the broker`, async () => {
+      const h = harness(responder); let calls = 0; h.io.approval = async () => { calls++; return { decision: "allow" }; };
+      const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
+      try {
+        await task.nativeSessionId; const child = h.children[1]!;
+        child.stdout(nativeApproval(request.name, { ...request.params, turnId: "old" }));
+        expect(child.writes.find(m => m.id === "scoped")?.error).toMatchObject({ code: -32601 }); expect(calls).toBe(0);
+      } finally { await task.close(); }
+    });
+  }
+  test.each([undefined, [], [""]])("does not offer persistence for absent or empty amendment %j", async amendment => {
+    const h = harness(responder); let seen: any;
+    h.io.approval = async req => { seen = req; return { decision: "allow", scope: "always" }; };
+    const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
+    try {
+      await task.nativeSessionId; const child = h.children[1]!;
+      child.stdout(nativeApproval("commandExecution", { command: "echo hi", proposedExecpolicyAmendment: amendment, proposedNetworkPolicyAmendments: [{ host: "example.com", action: "allow" }] })); await Promise.resolve();
+      expect(seen.nativeScopes).toBeUndefined(); expect(seen.alwaysNote).toBeUndefined();
+      expect(child.writes.find(m => m.id === "scoped")?.result).toEqual({ decision: "accept" });
+    } finally { await task.close(); }
+  });
+  test("redacts and bounds exact commands without adding cwd; omits unavailable file keys", async () => {
+    const h = harness(responder); const seen: any[] = [];
+    h.io.approval = async req => { seen.push(req); return { decision: "deny" }; };
+    const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
+    try {
+      await task.nativeSessionId; const child = h.children[1]!;
+      child.stdout(nativeApproval("commandExecution", { command: `TOKEN=SECRET_SENTINEL echo ${"x".repeat(600)}`, cwd: "/PRIVATE_CWD" })); await Promise.resolve();
+      expect(seen[0].exactKey).toHaveLength(512); expect(seen[0].exactKey).toContain("[redacted]");
+      expect(seen[0].exactKey).not.toContain("SECRET_SENTINEL"); expect(seen[0].exactKey).not.toContain("PRIVATE_CWD");
+      child.stdout({ ...nativeApproval("fileChange"), id: "file" }); await Promise.resolve(); expect(seen[1].exactKey).toBeUndefined();
+    } finally { await task.close(); }
+  });
+  test("permissions broker failure denies without exposing secret errors", async () => {
+    const h = harness(responder); h.io.approval = async () => { throw new Error("SECRET_SENTINEL"); };
+    const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
+    try {
+      await task.nativeSessionId; const child = h.children[1]!; child.stdout(nativeApproval("permissions", scopeRequests[2].params)); await Promise.resolve();
+      expect(child.writes.find(m => m.id === "scoped")?.result).toEqual({ permissions: {} }); expect(JSON.stringify(h.events)).not.toContain("SECRET_SENTINEL");
+    } finally { await task.close(); }
+  });
+});
+
+test("Codex unknown approval methods stay unsupported", async () => {
+  const h = harness(responder); let calls = 0; h.io.approval = async () => { calls++; return { decision: "allow" }; };
+  const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
+  try {
+    await task.nativeSessionId; const child = h.children[1]!; child.stdout(nativeApproval("unknown"));
+    expect(child.writes.find(m => m.id === "scoped")?.error).toMatchObject({ code: -32601 }); expect(calls).toBe(0);
+  } finally { await task.close(); }
+});
+test("Codex permissions from a previous turn cannot authorize a replacement turn", async () => {
+  const h = harness(responder); let release!: (value: { decision: "allow" }) => void;
+  h.io.approval = () => new Promise(resolve => { release = resolve; });
+  const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
+  try {
+    await task.nativeSessionId; const child = h.children[1]!; child.stdout(nativeApproval("permissions", scopeRequests[2].params));
+    child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "completed" } } }); await task.done;
+    const next = task.send("next"); await Promise.resolve(); release({ decision: "allow" }); await Promise.resolve();
+    expect(child.writes.find(m => m.id === "scoped")?.result).toEqual({ permissions: {} });
+    await task.interrupt(); await next;
+  } finally { await task.close(); }
 });

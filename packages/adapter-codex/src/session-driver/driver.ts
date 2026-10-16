@@ -257,29 +257,51 @@ class CodexTask {
       && schema.type === "object" && typeof schema.properties === "object" && schema.properties !== null && !Array.isArray(schema.properties)
       && Object.keys(object(schema.properties)).length === 0 && Object.keys(schema).every((key) => key === "type" || key === "properties")
       && nativeTool !== undefined && /^[A-Za-z0-9_.-]{1,128}$/.test(nativeTool);
-    const known = mcpApproval || ["item/commandExecution/requestApproval", "item/fileChange/requestApproval"].includes(message.method!);
+    const commandApproval = message.method === "item/commandExecution/requestApproval";
+    const fileApproval = message.method === "item/fileChange/requestApproval";
+    const permissionsApproval = message.method === "item/permissions/requestApproval";
+    const known = mcpApproval || commandApproval || fileApproval || permissionsApproval;
     const activeTurn = this.turn;
-    if (!known || !activeTurn || typeof activeTurn.id !== "string" || activeTurn.id.length === 0
+    if (!known || !activeTurn || activeTurn.interrupted || this.closed || typeof activeTurn.id !== "string" || activeTurn.id.length === 0
       || p.threadId !== this.threadId || p.turnId !== activeTurn.id) {
       this.emit({ kind: "runner.unmapped", data: { nativeType: isHookNotification(message) ? redactText(message.method!, 128) : message.method }, ...(isHookNotification(message) ? {} : { raw: message }) });
       rpc?.reject(id, -32601, "Unsupported or stale server request"); return;
     }
     if (this.approvals.has(id)) return;
     this.approvals.add(id);
-    let decision = "decline";
+    const amendment = commandApproval && Array.isArray(p.proposedExecpolicyAmendment)
+      && p.proposedExecpolicyAmendment.length > 0
+      && p.proposedExecpolicyAmendment.every(part => typeof part === "string" && part.trim().length > 0)
+      ? p.proposedExecpolicyAmendment as string[] : undefined;
+    const fileSummary = [p.grantRoot, p.reason].filter((value): value is string => typeof value === "string" && value.length > 0).join("\n");
+    const exact = commandApproval ? typeof p.command === "string" ? p.command : undefined
+      : fileApproval ? fileSummary || (Array.isArray(p.paths) ? p.paths.filter(value => typeof value === "string").join("\n") : undefined)
+      : permissionsApproval ? JSON.stringify(object(p.permissions)) : undefined;
+    const exactKey = exact ? redactText(exact, 512) : undefined;
+    const summary = mcpApproval ? p.message as string : commandApproval ? typeof p.command === "string" ? p.command : "Codex command execution"
+      : permissionsApproval ? `Codex permissions: ${exactKey}` : fileSummary || "Codex file changes";
+    let decision: "accept" | "decline" | { acceptWithExecpolicyAmendment: { execpolicy_amendment: string[] } } = "decline";
     try {
       if (this.input.approvals === "relay") {
         const result = await this.io.approval({ approvalId: `codex:${String(id)}`,
           tool: mcpApproval ? `mcp__${p.serverName}__${nativeTool}` : message.method!,
-          summary: mcpApproval ? p.message as string : typeof p.command === "string" ? p.command : "Codex file changes",
+          summary,
+          toolKey: mcpApproval ? `codex:mcp:${p.serverName}` : commandApproval ? "codex:commandExecution" : fileApproval ? "codex:fileChange" : "codex:permissions",
+          ...(exactKey ? { exactKey } : {}),
+          risk: !mcpApproval || /(?:exec|shell|command|write|edit|patch|delete|remove|fetch|network)/i.test(nativeTool!) ? "high" : "normal",
+          ...(amendment ? { nativeScopes: ["always"] as "always"[],
+            alwaysNote: `Codex adds this command prefix to its exec-policy rules on this machine: ${amendment.join(" ")}; it applies to future sessions and Deck cannot revoke it` } : {}),
           input: mcpApproval ? meta.tool_params : p });
-        decision = result.decision === "allow" ? "accept" : "decline";
+        decision = result.decision !== "allow" ? "decline" : result.scope === "always" && amendment
+          ? { acceptWithExecpolicyAmendment: { execpolicy_amendment: amendment } } : "accept";
       } else if (mcpApproval) decision = "accept"; // The approved runner-default bypass covers isolated MCP tools too.
     } catch { /* broker failure denies */ }
     finally { this.approvals.delete(id); }
     // Never approve work after a close, interrupt, or turn completion.
     if (this.closed || this.turn !== activeTurn || activeTurn.interrupted || activeTurn.id !== p.turnId) decision = "decline";
-    try { rpc?.reply(id, mcpApproval ? { action: decision, content: decision === "accept" ? {} : null, _meta: null } : { decision }); }
+    try { rpc?.reply(id, mcpApproval ? { action: decision, content: decision === "accept" ? {} : null, _meta: null } : permissionsApproval
+      ? decision === "accept" ? { permissions: object(p.permissions), scope: "turn" } : { permissions: {} }
+      : { decision }); }
     catch { void this.fail("codex-approval-reply-failed"); }
   }
   async send(prompt: string, images?: readonly DriverImageInput[]): Promise<TurnOutcome> {
