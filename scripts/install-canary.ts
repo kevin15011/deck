@@ -5,7 +5,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildBinary, codeSign, getGitCommit, getHostBuildTarget, getVersion, ROOT, type BuildTarget } from "./build-binaries";
+import { buildBinary, codeSign, generateWebAssets, getGitCommit, getHostBuildTarget, getVersion, ROOT, type BuildTarget } from "./build-binaries";
 
 export const CANARY_BINARY_NAME = "deck-canary";
 const PAYLOAD_PREFIX = ".deck-canary.payload-";
@@ -247,6 +247,7 @@ function createPayload(compiledPath: string, payloadPath: string, digest: string
   validatePayload(payloadPath, digest, f);
 }
 async function defaultBuildCanaryBinary(options: { target: BuildTarget; version: string; outputDir: string }): Promise<string> {
+  await generateWebAssets();
   const targetName = `${options.target[0]}-${options.target[1]}`;
   const binaryPath = await buildBinary(options.target[0], options.target[1], options.target[2], options.version, {
     binaryName: CANARY_BINARY_NAME,

@@ -116,6 +116,60 @@ describe("install-canary workspace readiness", () => {
   });
 });
 
+// A subprocess isolates Bun.spawnSync interception while exercising the actual default builder.
+function defaultBuildFixture(failGeneration = false) {
+  const root = tempRoot("deck-canary-default-build-");
+  const fixture = join(root, "fixture.ts");
+  writeFileSync(fixture, `
+    import { installCanary } from ${JSON.stringify(join(ROOT, "scripts/install-canary.ts"))};
+    import { getVersion } from ${JSON.stringify(join(ROOT, "scripts/build-binaries.ts"))};
+    import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+    import { join } from "node:path";
+    const root = ${JSON.stringify(root)}, calls: string[] = [], errors: string[] = [];
+    const asset = join(root, "web-assets.generated.ts");
+    writeFileSync(asset, "stale-web-assets");
+    Bun.spawnSync = (({cmd}) => {
+      if (cmd[0] === "git") return {success:true,stdout:Buffer.from("fixture-head"),stderr:Buffer.from("")};
+      if (cmd.at(-1) === ${JSON.stringify(join(ROOT, "scripts/generate-web-assets.ts"))}) {
+        calls.push("web-assets");
+        if (${failGeneration}) return {success:false, stderr:Buffer.from("fixture generation failure")};
+        writeFileSync(asset, "fresh-checkout-web-assets");
+      } else if (cmd.includes("--compile")) {
+        calls.push("compile");
+        writeFileSync(cmd[cmd.indexOf("--outfile") + 1], readFileSync(asset), {mode:0o755});
+      } else throw new Error("Unexpected build effect: " + JSON.stringify(cmd));
+      return {success:true, stdout:Buffer.from(""), stderr:Buffer.from("")};
+    }) as typeof Bun.spawnSync;
+    mkdirSync(join(root, "build"));
+    const code = await installCanary(["--dir", join(root, "bin")], {
+      homeDir:root, platform:"linux", arch:"x64", env:{PATH:""}, tempDir:()=>join(root,"build"),
+      stdout:{log:()=>{},warn:()=>{}}, stderr:{error:value=>errors.push(String(value))},
+      spawnSync:(()=>({success:true,stdout:Buffer.from("deck " + getVersion()),stderr:Buffer.from("")})) as typeof Bun.spawnSync,
+    });
+    writeFileSync(join(root,"result.json"),JSON.stringify({code,calls,errors}));
+  `);
+  const child = spawnSync(process.execPath, ["run", fixture], { cwd: ROOT, encoding: "utf-8" });
+  expect(child.status).toBe(0);
+  return { root, ...JSON.parse(readFileSync(join(root, "result.json"), "utf-8")) };
+}
+
+describe("install-canary default web build", () => {
+  test("refreshes stale web assets before compiling through the default builder", () => {
+    const result = defaultBuildFixture();
+    expect(result.code).toBe(0);
+    expect(result.calls).toEqual(["web-assets", "compile"]);
+    expect(readFileSync(join(result.root, "bin", "deck-canary"), "utf-8")).toBe("fresh-checkout-web-assets");
+  });
+
+  test("web generation failure prevents compilation and activation", () => {
+    const result = defaultBuildFixture(true);
+    expect(result.code).toBe(1);
+    expect(result.calls).toEqual(["web-assets"]);
+    expect(result.errors.join("\n")).toContain("fixture generation failure");
+    expect(existsSync(join(result.root, "bin"))).toBe(false);
+  });
+});
+
 describe("install-canary hermetic install effects", () => {
   test("dry-run plans without compiling or writing", async () => {
     const home = tempRoot("deck-canary-dry-");
