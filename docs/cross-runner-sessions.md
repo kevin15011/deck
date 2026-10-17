@@ -110,10 +110,34 @@ Claude setup and launch use the existing native login without a separate subscri
 
 The listener binds only `127.0.0.1`. Host and Origin checks, strict content security policy and device authentication protect the browser surface; it exposes no session bridge, daemon administration or general file browser. Project folder completion is authenticated, bounded and confined to canonical home directories; OpenSpec reads have their own restricted scope. Forwarding headers are rejected unless explicit proxy/origin configuration permits them; device authentication still applies. No exposure command runs automatically.
 
-This feature is for one user on one machine. It provides no shared daemon, remote runner credentials, OS service, mobile/PWA installation, push notifications or automatic network exposure. Tailscale is not required. Automatic local access trusts processes and browsers that can reach this machine's loopback interface, including other local OS accounts. It is not an OS-user authentication boundary. Foreign web origins and forwarded requests cannot use the local bootstrap; remote access still requires a device credential.
+This feature is for one user on one machine. It provides no shared daemon, remote runner credentials, OS service, mobile/PWA installation, push notifications or automatic network exposure. Tailscale is not required. Automatic local access trusts processes and browsers that can reach this machine's loopback interface, including other local OS accounts. It is not an OS-user authentication boundary. Foreign web origins and forwarded requests cannot use the local bootstrap; remote access still requires a device credential, issued by pairing or the opt-in Serve bootstrap below.
 
 ## Verification and downgrade
 
 `deck session self-test` checks embedded assets and contract schemas without network access. Live driver checks are opt-in; normal tests use fake runners and provider transports. The [acceptance record](../openspec/changes/cross-runner-session-core/apply-progress.md) distinguishes native checks, compiled runtime checks and build-only platforms.
 
 Older Deck versions may reject newer configuration fields or session events. Preserve configuration and session state before a downgrade; do not erase history or rewrite recorded owners to make an older binary accept it. A compatible binary is required to resume sessions that use workspace assignment generations.
+
+## Optional private Tailscale Serve access
+
+Pairing remains the default for remote browsers. To let Tailscale network access authorize browsers without a code, explicitly configure `crossRunner.web`:
+
+```json
+{
+  "port": 7421,
+  "trustedProxy": "127.0.0.1",
+  "allowedOrigins": ["https://lpmddog12448.tail0c4aea.ts.net"],
+  "allowFunnel": false,
+  "tailscaleServeAccess": true
+}
+```
+
+Use your own exact Serve HTTPS origin. Configure Tailscale Serve separately to proxy HTTPS 443 to `http://127.0.0.1:7421`; Deck does not configure exposure. The listener stays on loopback. This setting defaults to `false` and requires a loopback trusted proxy and an explicit HTTPS `.ts.net` origin. It takes effect when the daemon next starts with that configuration.
+
+The browser calls the existing `/api/local-access` bootstrap. Automatic Serve access requires the actual socket peer to match the configured loopback proxy, matching allowed HTTPS Host/Origin, and a nonempty `Tailscale-User-Login` supplied by Serve. A hostname or forwarding header alone grants nothing. Requests with Funnel headers cannot enroll automatically, even with `allowFunnel: true`; real Funnel requests lack the required identity header. Existing Host/Origin and content-type checks remain in effect.
+
+Deck issues a Secure, HttpOnly, SameSite=Strict session cookie and stores only its token hash plus a hash binding it to the Serve origin and login. That binding is checked on authenticated HTTP and WebSocket handshakes. Disabling this option invalidates automatic Serve credentials; explicitly paired credentials retain their existing behavior. `deck session devices` and `deck session devices revoke <device-id>` retain their existing device management behavior, including closing active sockets. A revoked or invalid cookie cannot silently re-enroll. Clearing browser cookies permits fresh enrollment while Tailscale still authorizes access; revoke tailnet access to prevent that. Established sockets are not continuously checked against tailnet policy; use device revocation to close them immediately.
+
+[Tailscale's identity-header contract](https://tailscale.com/docs/features/tailscale-serve#identity-headers) states that Serve strips client-supplied identity headers and adds the user's login; Funnel and tagged devices receive no identity headers. Tagged devices must pair instead. Shared external users can receive identity headers, so restrict access using your Tailscale grants/ACLs and sharing policy. This grants the same workspace authority as pairing to every user Serve allows through. Trust only a direct Tailscale Serve deployment at the configured loopback peer: local processes, including other OS users, can forge these headers. Deck cannot distinguish local programs sharing the same loopback address. Do not put a generic proxy that passes arbitrary identity headers at that address.
+
+Focused verification: `bun test packages/core/src/config/deck-config-cross-runner.test.ts packages/session-host/src/__tests__/web-service.test.ts`; fresh production browser bootstrap: `bun apps/web/acceptance/tailscale-access.ts` (optionally set `DECK_TEST_CHROME`). These use a fake Serve contract and temporary state, not a live tailnet.

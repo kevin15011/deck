@@ -13,3 +13,9 @@ test('Doctor checks listener bind/port and warns for exposure without invoking t
   expect((await checkSessionWeb(undefined, async () => { calls++; return undefined; })).status).toBe('ok');
   expect(calls).toBe(0);
 });
+test('Doctor reports opt-in Serve authentication without claiming pairing is required', async () => {
+ const c=validateDeckConfig({version:1,crossRunner:{enabled:true,web:{tailscaleServeAccess:true,trustedProxy:'127.0.0.1',allowedOrigins:['https://deck.tail123.ts.net']}}}).crossRunner!;
+ const report=await checkSessionWeb(c,async()=>({enabled:true,hostname:'127.0.0.1',port:7421}));
+ expect(report.items[1]!.message).toContain('without pairing');
+ expect(report.items[1]!.message).toContain('Funnel cannot enroll automatically');
+});

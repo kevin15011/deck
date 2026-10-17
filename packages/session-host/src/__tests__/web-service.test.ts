@@ -303,3 +303,64 @@ test('chat websocket replay bridges the snapshot fence with stable delta identit
  f.log.append({kind:'message.completed',data:{text:'Completed stream'}});await waitFor(()=>frames.length===2);
  expect(frames[1].message.historyId).toBe(page.messages[0].historyId);expect(frames[1].message.data.text).toBe('Completed stream');socket.close();
 });
+
+const serveOrigin = 'https://deck.tail123.ts.net';
+const serveHeaders = { Host: 'deck.tail123.ts.net', Origin: serveOrigin, 'Content-Type': 'application/json', 'Tailscale-User-Login': 'alice@example.com' };
+const serveConfig = { port: 0, trustedProxy: '127.0.0.1', allowedOrigins: [serveOrigin], allowFunnel: true, tailscaleServeAccess: true };
+test('opt-in Serve bootstrap issues a Secure revocable cookie bound to proxy identity', async () => {
+ const f = fixture({config: serveConfig});
+ const r = await fetch(`${f.base}/api/local-access`, {method:'POST',headers:serveHeaders,body:'{}'});
+ expect(r.status).toBe(200);
+ const cookie = r.headers.get('set-cookie')!.split(';')[0]!;
+ expect(r.headers.get('set-cookie')).toContain('HttpOnly; SameSite=Strict; Secure');
+ const headers = {...serveHeaders, Cookie:cookie};
+ expect((await fetch(`${f.base}/api/sessions`,{headers})).status).toBe(200);
+ const reused = await fetch(`${f.base}/api/local-access`,{method:'POST',headers,body:'{}'});
+ expect(reused.status).toBe(200);expect(reused.headers.get('set-cookie')).toBeNull();
+ for (const changed of [{'Tailscale-User-Login':''}, {'Tailscale-User-Login':'bob@example.com'}, {'Tailscale-Funnel-Request':'true'}] as Record<string,string>[])
+  expect((await fetch(`${f.base}/api/sessions`,{headers:{...headers,...changed}})).ok).toBe(false);
+ expect((await fetch(`${f.base}/api/sessions`,{headers:{Cookie:cookie}})).status).toBe(401);
+ const ws = new NativeWebSocket(`${f.base.replace('http:','ws:')}/api/sessions/s/events`,{headers});
+ await new Promise<void>((resolve,reject)=>{ws.onopen=()=>resolve();ws.onerror=()=>reject(new Error('Serve websocket failed'));});
+ f.host.revoke(f.host.devices()[0]!.id);
+ await waitFor(()=>ws.readyState===WebSocket.CLOSED);
+ expect((await fetch(`${f.base}/api/sessions`,{headers})).status).toBe(401);
+ const revoked = await fetch(`${f.base}/api/local-access`,{method:'POST',headers,body:'{}'});
+ expect(revoked.status).toBe(403);expect((await revoked.json()).code).toBe('device-revoked');
+ expect(f.host.devices()).toHaveLength(1);
+});
+test('Serve enrollment fails closed without mode, identity, peer, HTTPS allowed origin, or with Funnel', async () => {
+ for (const config of [serveConfig,{...serveConfig,tailscaleServeAccess:undefined},{...serveConfig,tailscaleServeAccess:false},{...serveConfig,trustedProxy:null},{...serveConfig,trustedProxy:'192.0.2.1'}]) {
+  const f=fixture({config});
+  const noOrigin: Record<string,string> = {...serveHeaders}; delete noOrigin.Origin;
+  const variants: Record<string,string>[] = config===serveConfig ? [
+   noOrigin,
+   {...serveHeaders,'Tailscale-User-Login':''}, {...serveHeaders,'Tailscale-User-Login':'alice,bob'},
+   {...serveHeaders,Origin:''}, {...serveHeaders,Origin:'https://evil.ts.net'},
+   {...serveHeaders,Origin:'http://deck.tail123.ts.net'}, {...serveHeaders,'Tailscale-Funnel-Request':'false'},
+  ] : [serveHeaders];
+  for(const headers of variants){const r=await fetch(`${f.base}/api/local-access`,{method:'POST',headers,body:'{}'});expect(r.status).toBe(403);expect(r.headers.get('set-cookie')).toBeNull();}
+  const request=new Request(`${f.base}/api/local-access`,{method:'POST',headers:serveHeaders,body:'{}'});
+  for(const address of [undefined,'192.0.2.5']) {
+   const r=await (f.host as any).fetch(request.clone(),{port:new URL(f.base).port,requestIP:()=>address?{address}:null});expect(r.status).toBe(403);
+  }
+  expect(f.host.devices()).toHaveLength(0);
+ }
+});
+test('Serve credentials retain identity binding after reload and stop authenticating when mode is off', async () => {
+ const f=fixture({config:{...serveConfig}});
+ const response=await fetch(`${f.base}/api/local-access`,{method:'POST',headers:serveHeaders,body:'{}'});
+ const Cookie=response.headers.get('set-cookie')!.split(';')[0]!;
+ await f.host.close();
+ const service:SessionService={execute:async()=>({ok:true}),openLog:()=>undefined,hasRunningWork:()=>false,query:()=>({ok:true})};
+ for(const tailscaleServeAccess of [true,false]){
+  const restarted=new WebService({paths:f.paths,service,config:{...serveConfig,tailscaleServeAccess}});hosts.push(restarted);restarted.enable();
+  expect((await fetch(`${restarted.status().url}/api/sessions`,{headers:{...serveHeaders,Cookie}})).status).toBe(tailscaleServeAccess?200:401);
+  if(tailscaleServeAccess){
+   const ws=new NativeWebSocket(`${restarted.status().url!.replace('http:','ws:')}/api/sessions/s/events`,{headers:{...serveHeaders,Cookie,'Tailscale-User-Login':''}});
+   await new Promise<void>((resolve,reject)=>{ws.onopen=()=>reject(new Error('Unverified Serve websocket opened'));ws.onerror=()=>resolve();});
+   expect(restarted.clientCount).toBe(0);
+  }
+  await restarted.close();
+ }
+});

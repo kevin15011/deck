@@ -41,7 +41,7 @@ describe("crossRunner config (XR-2.1, XR-2.2, D-5)", () => {
       approvals: { claude: "runner-default", opencode: "runner-default", codex: "runner-default" },
       maxConcurrentTasks: 4,
       executionBudget: { lead: 2, delegated: 4 },
-      web: { port: 7421, trustedProxy: null, allowedOrigins: [], allowFunnel: false },
+      web: { port: 7421, trustedProxy: null, allowedOrigins: [], allowFunnel: false, tailscaleServeAccess: false },
       claudeTosAcknowledgedAt: null,
     });
   });
@@ -127,4 +127,12 @@ describe("crossRunner config (XR-2.1, XR-2.2, D-5)", () => {
     expect(c.crossRunner?.approvals.codex).toBe("relay");
     expect(c.crossRunner?.approvals.claude).toBe("runner-default");
   });
+});
+
+test('Serve auth defaults off and validates explicit opt-in', () => {
+ expect(validateDeckConfig({version:1,crossRunner:{}}).crossRunner?.web.tailscaleServeAccess).toBe(false);
+ const web={tailscaleServeAccess:true,trustedProxy:'127.0.0.1',allowedOrigins:['https://deck.tail123.ts.net']};
+ expect(validateDeckConfig({version:1,crossRunner:{web}}).crossRunner?.web.tailscaleServeAccess).toBe(true);
+ for(const invalid of [{...web,tailscaleServeAccess:'true'},{...web,trustedProxy:null},{...web,trustedProxy:'192.0.2.1'},{...web,allowedOrigins:[]},{...web,allowedOrigins:['http://deck.tail123.ts.net']},{...web,allowedOrigins:['https://deck.example']}])
+  expect(()=>validateDeckConfig({version:1,crossRunner:{web:invalid}})).toThrow();
 });

@@ -163,7 +163,11 @@ export function App() {
     useEffect(() => { void (async () => {
         try {
             if (initialToken) await api('/pair', { method: 'POST', body: JSON.stringify({ token: initialToken, name: 'Desktop browser' }) });
-            else if (['127.0.0.1', 'localhost'].includes(window.location.hostname)) await api('/api/local-access', { method: 'POST', body: JSON.stringify({ name: 'Local browser' }) });
+            else {
+                // The server decides whether loopback or opt-in Serve access is trusted.
+                // Paired remote browsers must still load when automatic access is denied.
+                try { await api('/api/local-access', { method: 'POST', body: JSON.stringify({ name: 'Browser' }) }); } catch { }
+            }
             await load();
         } catch (e) { setError((e as Error).message); }
         finally { setConnecting(false); }

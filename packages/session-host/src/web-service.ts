@@ -15,6 +15,7 @@ export type WebConfig = {
   trustedProxy: string | null;
   allowedOrigins: readonly string[];
   allowFunnel: boolean;
+  tailscaleServeAccess?: boolean;
   hostname?: string;
 };
 export type WebAsset = {
@@ -28,6 +29,7 @@ type Device = {
   createdAt: string;
   hash: string;
   revokedAt?: string;
+  tailscaleIdentity?: string;
 };
 type SocketData = {
   deviceId: string;
@@ -83,7 +85,7 @@ export class WebService {
     if (existsSync(options.paths.devicesFile)) {
       assertPrivateFile(options.paths.devicesFile);
       const value = JSON.parse(readFileSync(options.paths.devicesFile, "utf8"));
-      if (!Array.isArray(value) || !value.every(d => d && typeof d.id === 'string' && typeof d.name === 'string' && typeof d.createdAt === 'string' && /^[a-f0-9]{64}$/.test(d.hash)))
+      if (!Array.isArray(value) || !value.every(d => d && typeof d.id === 'string' && typeof d.name === 'string' && typeof d.createdAt === 'string' && /^[a-f0-9]{64}$/.test(d.hash) && (d.tailscaleIdentity === undefined || typeof d.tailscaleIdentity === 'string' && /^[a-f0-9]{64}$/.test(d.tailscaleIdentity))))
         throw new Error("Invalid web device store");
       this.records = value;
     }
@@ -125,10 +127,10 @@ export class WebService {
     this.server = undefined; // Bun stops accepting connections synchronously. Its returned promise can remain pending after a WebSocket close handshake.
     server?.stop(true).catch(() => { });
   }
-  status() { return { enabled: !!this.server, hostname: "127.0.0.1", port: this.server?.port ?? this.options.config.port, url: this.server ? `http://127.0.0.1:${this.server.port}` : undefined, clients: this.clientCount, error: this.error, exposure: { trustedProxy: this.options.config.trustedProxy, allowedOrigins: this.options.config.allowedOrigins, allowFunnel: this.options.config.allowFunnel } }; }
+  status() { return { enabled: !!this.server, hostname: "127.0.0.1", port: this.server?.port ?? this.options.config.port, url: this.server ? `http://127.0.0.1:${this.server.port}` : undefined, clients: this.clientCount, error: this.error, exposure: { trustedProxy: this.options.config.trustedProxy, allowedOrigins: this.options.config.allowedOrigins, allowFunnel: this.options.config.allowFunnel, tailscaleServeAccess: this.options.config.tailscaleServeAccess ?? false } }; }
   pair() { if (!this.server)
     throw new Error("Web listener disabled"); const code = String(randomBytes(4).readUInt32BE() % 100000000).padStart(8, "0"), token = randomBytes(32).toString("base64url"); this.challenge = { codeHash: hash(code), tokenHash: hash(token), expiresAt: this.now() + 300000, attempts: 0 }; return { code, url: `${this.status().url}/#pair=${token}`, expiresAt: new Date(this.challenge.expiresAt).toISOString() }; }
-  devices() { return this.records.map(({ hash, ...d }) => d); }
+  devices() { return this.records.map(({ hash, tailscaleIdentity, ...d }) => d); }
   revoke(id: string) { const d = this.records.find(d => d.id === id); if (!d)
     return false; d.revokedAt = new Date(this.now()).toISOString(); this.save(); for (const ws of this.sockets)
     if (ws.data.deviceId === id) {
@@ -151,16 +153,32 @@ export class WebService {
     return { ok: false, code: "web-unavailable" };
   } }
   private response(data: unknown, status = 200, extra: Record<string, string> = {}) { return new Response(JSON.stringify(data), { status, headers: { ...HEADERS, "Content-Type": "application/json", ...extra } }); }
-  private issueDevice(r: Request, body: Record<string, unknown>) {
+  private issueDevice(r: Request, body: Record<string, unknown>, tailscaleIdentity?: string) {
     const token = randomBytes(32).toString('base64url');
-    const d: Device = { id: randomUUID(), name: typeof body.name === 'string' ? body.name.slice(0, 80) : 'Browser', createdAt: new Date(this.now()).toISOString(), hash: hash(token) };
+    const d: Device = { id: randomUUID(), name: typeof body.name === 'string' ? body.name.slice(0, 80) : 'Browser', createdAt: new Date(this.now()).toISOString(), hash: hash(token), ...(tailscaleIdentity ? { tailscaleIdentity } : {}) };
     this.records.push(d);
     this.save();
     const secure = r.headers.get('origin')?.startsWith('https://') ? '; Secure' : '';
     return this.response({ ok: true, device: this.devices().find(x => x.id === d.id) }, 200, { 'Set-Cookie': `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict${secure}` });
   }
-  private device(r: Request) { const cookies = r.headers.get("cookie") ?? ""; const token = cookies.split(';').map(s => s.trim()).find(s => s.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1); if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token))
-    return; const h = hash(token); return this.records.find(d => !d.revokedAt && equal(d.hash, h)); }
+  private device(r: Request, s: Server<SocketData>) { const cookies = r.headers.get("cookie") ?? ""; const token = cookies.split(';').map(s => s.trim()).find(s => s.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1); if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token))
+    return; const h = hash(token); return this.records.find(d => !d.revokedAt && equal(d.hash, h) && (!d.tailscaleIdentity || d.tailscaleIdentity === this.serveIdentity(r, s))); }
+  // Serve strips inbound identity headers and adds its verified user login. Trust
+  // this contract only on the explicitly configured loopback proxy deployment.
+  private serveIdentity(r: Request, s: Server<SocketData>) {
+    const config = this.options.config;
+    const peer = s.requestIP(r)?.address;
+    if (!config.tailscaleServeAccess || !peer || peer !== config.trustedProxy || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(peer) || [...r.headers.keys()].some(h => h.includes('funnel')))
+      return;
+    const origin = config.allowedOrigins.find(o => {
+      const u = new URL(o);
+      return u.protocol === 'https:' && u.hostname.endsWith('.ts.net') && u.host === r.headers.get('host');
+    });
+    if (!origin || (r.headers.has('origin') && r.headers.get('origin') !== origin)) return;
+    const login = r.headers.get('tailscale-user-login');
+    if (!login || login !== login.trim() || login.length > 512 || /[\s,\x00-\x1f\x7f]/.test(login)) return;
+    return hash(JSON.stringify([origin, login]));
+  }
   private boundary(r: Request, s: Server<SocketData>) { const config = this.options.config, host = r.headers.get('host'), origin = r.headers.get('origin'); const origins = [`http://127.0.0.1:${s.port}`, `http://localhost:${s.port}`, ...config.allowedOrigins]; if (!origins.some(o => new URL(o).host === host))
     return false; const forwarded = [...r.headers.keys()].some(h => h === 'forwarded' || h.startsWith('x-forwarded-')); const funnel = [...r.headers.keys()].some(h => h.includes('funnel')); if (forwarded || funnel) {
     const ip = s.requestIP(r)?.address;
@@ -197,15 +215,19 @@ export class WebService {
         const host = r.headers.get('host'), origin = r.headers.get('origin');
         const localOrigins = [`http://127.0.0.1:${s.port}`, `http://localhost:${s.port}`];
         const peer = s.requestIP(r)?.address;
-        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(peer ?? '') || !origin || !localOrigins.includes(origin) || new URL(origin).host !== host || [...r.headers.keys()].some(h => h === 'forwarded' || h.startsWith('x-forwarded-') || h.includes('funnel')))
+        const tailscaleIdentity = this.serveIdentity(r, s);
+        const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(peer ?? '')
+          && origin !== null && localOrigins.includes(origin) && new URL(origin).host === host
+          && ![...r.headers.keys()].some(h => h === 'forwarded' || h.startsWith('x-forwarded-') || h.includes('funnel'));
+        if (!tailscaleIdentity && !local)
           return this.response({ ok: false, code: 'request-forbidden' }, 403);
         const body = await this.json(r);
-        const existing = this.device(r);
+        const existing = this.device(r, s);
         if (existing) return this.response({ ok: true, device: this.devices().find(d => d.id === existing.id) });
         // A revoked or invalid credential must not silently obtain a replacement.
         if ((r.headers.get('cookie') ?? '').split(';').some(c => c.trim().startsWith(`${COOKIE}=`)))
           return this.response({ ok: false, code: 'device-revoked' }, 403);
-        return this.issueDevice(r, body);
+        return this.issueDevice(r, body, tailscaleIdentity);
       }
       if (path === '/pair' && r.method === 'POST') {
         const body = await this.json(r), c = this.challenge;
@@ -219,7 +241,7 @@ export class WebService {
         return this.issueDevice(r, body);
       }
       if (path.startsWith('/api/')) {
-        const device = this.device(r);
+        const device = this.device(r, s);
         if (!device)
           return this.response({ ok: false, code: 'device-required' }, 401);
         const attachments = /^\/api\/sessions\/([^/]+)\/attachments(?:\/([^/]+))?$/.exec(path);

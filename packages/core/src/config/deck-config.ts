@@ -225,7 +225,7 @@ export type CrossRunnerConfig = {
   approvals: Record<string, CrossRunnerApprovalMode>;
   maxConcurrentTasks: number;
   executionBudget?: { lead: number; delegated: number };
-  web: { port: number; trustedProxy: string | null; allowedOrigins: string[]; allowFunnel: boolean };
+  web: { port: number; trustedProxy: string | null; allowedOrigins: string[]; allowFunnel: boolean; tailscaleServeAccess?: boolean };
   claudeTosAcknowledgedAt: string | null;
 };
 
@@ -958,7 +958,7 @@ export function diagnoseDeckConfigDeprecations(config: unknown): readonly DeckCo
 
 const CROSS_RUNNER_FIELDS = new Set(["enabled", "defaultRunner", "members", "approvals", "maxConcurrentTasks", "executionBudget", "web", "claudeTosAcknowledgedAt"]);
 const CROSS_MEMBER_FIELDS = new Set(["runnerId", "modelId", "thinking"]);
-const CROSS_WEB_FIELDS = new Set(["port", "trustedProxy", "allowedOrigins", "allowFunnel"]);
+const CROSS_WEB_FIELDS = new Set(["port", "trustedProxy", "allowedOrigins", "allowFunnel", "tailscaleServeAccess"]);
 // Compatibility defaults only; session execution ignores crossRunner.approvals.
 const CROSS_APPROVAL_DEFAULTS: Record<string, CrossRunnerApprovalMode> = { claude: "runner-default", opencode: "runner-default", codex: "runner-default" };
 
@@ -1022,7 +1022,7 @@ function normalizeCrossRunnerConfig(value: unknown, configPath?: string): CrossR
     }
   }
 
-  const web = { port: 7421, trustedProxy: null as string | null, allowedOrigins: [] as string[], allowFunnel: false };
+  const web = { port: 7421, trustedProxy: null as string | null, allowedOrigins: [] as string[], allowFunnel: false, tailscaleServeAccess: false };
   if (value.web !== undefined) {
     assertPlainObject(value.web, "crossRunner.web", configPath);
     assertKnownFields(value.web, CROSS_WEB_FIELDS, "crossRunner.web", configPath);
@@ -1039,11 +1039,19 @@ function normalizeCrossRunnerConfig(value: unknown, configPath?: string): CrossR
       if (!Array.isArray(w.allowedOrigins) || !w.allowedOrigins.every(nonEmpty)) throw crossInvalid("crossRunner.web.allowedOrigins must be an array of non-empty strings.", "crossRunner.web.allowedOrigins", configPath);
       web.allowedOrigins = w.allowedOrigins.map((o: string) => o.trim());
     }
+    if (w.tailscaleServeAccess !== undefined) {
+      if (typeof w.tailscaleServeAccess !== "boolean") throw crossInvalid("crossRunner.web.tailscaleServeAccess must be a boolean.", "crossRunner.web.tailscaleServeAccess", configPath);
+      web.tailscaleServeAccess = w.tailscaleServeAccess;
+    }
     if (w.allowFunnel !== undefined) {
       if (typeof w.allowFunnel !== "boolean") throw crossInvalid("crossRunner.web.allowFunnel must be a boolean.", "crossRunner.web.allowFunnel", configPath);
       web.allowFunnel = w.allowFunnel;
     }
   }
+
+  if (web.tailscaleServeAccess && (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(web.trustedProxy ?? '') || !web.allowedOrigins.some(origin => {
+    try { const u = new URL(origin); return u.origin === origin && u.protocol === 'https:' && u.hostname.endsWith('.ts.net') && !u.username && !u.password; } catch { return false; }
+  }))) throw crossInvalid("Serve authentication requires a trusted loopback proxy and an explicit HTTPS .ts.net allowed origin.", "crossRunner.web.tailscaleServeAccess", configPath);
 
   let ack: string | null = null;
   if (value.claudeTosAcknowledgedAt !== undefined && value.claudeTosAcknowledgedAt !== null) {

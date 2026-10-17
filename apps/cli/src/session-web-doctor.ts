@@ -37,7 +37,7 @@ export async function checkSessionWeb(config: CrossRunnerConfig | undefined, ins
     else
       items.push({ status: 'ok', message: status.enabled ? `Session web listener binds 127.0.0.1:${status.port}.` : 'Session web listener is disabled.' });
     if (config.web.trustedProxy || config.web.allowedOrigins.length || config.web.allowFunnel)
-      items.push({ status: 'warning', message: `External web exposure is configured${config.web.allowFunnel ? ' with Funnel allowed' : ''}; device pairing remains required. Doctor did not run exposure commands.` });
+      items.push({ status: 'warning', message: `External web exposure is configured${config.web.allowFunnel ? ' with Funnel allowed' : ''}; ${config.web.tailscaleServeAccess ? 'verified Tailscale Serve users can enroll without pairing; Funnel cannot enroll automatically' : 'device pairing remains required'}. Doctor did not run exposure commands.` });
   }
   return { category: 'Session Web', status: items.some(i => i.status === 'error') ? 'error' : items.some(i => i.status === 'warning') ? 'warning' : 'ok', items };
 }

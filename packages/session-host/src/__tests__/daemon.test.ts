@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { validateDeckConfig } from "@deck/core/config/deck-config";
 import { ControlClient } from "../control-client";
 import { startDaemon, type DaemonOptions, type RunningDaemon } from "../daemon";
 import { readDaemonInfo } from "../daemon-lock";
@@ -320,4 +321,25 @@ describe("crash leftovers", () => {
     expect(JSON.parse(readFileSync(paths.lockFile, "utf8")).nonce).not.toBe("ghost");
     expect(readDaemonInfo(paths)?.nonce).not.toBe("ghost");
   });
+});
+
+
+test("normalized Serve opt-in reaches the daemon's production web composition", async () => {
+  const origin = 'https://deck.tail123.ts.net';
+  const config = validateDeckConfig({version:1,crossRunner:{web:{tailscaleServeAccess:true,trustedProxy:'127.0.0.1',allowedOrigins:[origin]}}}).crossRunner!.web;
+  const {result,paths}=await start(undefined,{web:{config:{...config,port:0}},createService:()=>({execute:async()=>({ok:true}),openLog:()=>undefined,hasRunningWork:()=>false,query:()=>({ok:true,data:{projects:[]}})})});
+  if(!result.ok)throw new Error('expected start');
+  const client=await connect(paths);
+  const status=await client.request({t:'daemon.status'});
+  expect(status).toMatchObject({status:{web:{exposure:{tailscaleServeAccess:true}}}});
+  const base=(status as {status:{web:{url:string}}}).status.web.url;
+  const headers={Host:new URL(origin).host,Origin:origin,'Content-Type':'application/json','Tailscale-User-Login':'alice@example.com'};
+  const response=await fetch(`${base}/api/local-access`,{method:'POST',headers,body:'{}'});
+  expect(response.status).toBe(200);
+  const Cookie=response.headers.get('set-cookie')!.split(';')[0]!;
+  expect((await fetch(`${base}/api/projects`,{headers:{...headers,Cookie}})).status).toBe(200);
+  const devices=await client.request({t:'query',name:'web.devices'});
+  const id=(devices as {outcome:{data:{devices:Array<{id:string}>}}}).outcome.data.devices[0]!.id;
+  expect(await client.request({t:'query',name:'web.revoke',args:{deviceId:id}})).toMatchObject({outcome:{ok:true}});
+  expect((await fetch(`${base}/api/projects`,{headers:{...headers,Cookie}})).status).toBe(401);
 });
