@@ -2,6 +2,8 @@ export const THEMES = [
     { id: 'dark', label: 'Dark' },
     { id: 'light', label: 'Light' },
     { id: 'green', label: 'Green' },
+    { id: 'eva01', label: 'EVA-01' },
+    { id: 'cyberpunk', label: 'Cyberpunk' },
 ] as const;
 export type Theme = typeof THEMES[number]['id'];
 const THEME_KEY = 'deck.theme';

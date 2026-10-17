@@ -109,7 +109,9 @@ test('late animation rejection, watchdog and finished callbacks cannot clean a n
 
 
 test('only dark/green pairs have a destination accent wave, captured once and removed on completion/cancellation', async () => {
-    for (const [source, target, color] of [['dark', 'green', '#93c9b1'], ['green', 'dark', '#ff7040'], ['dark', 'light', null], ['light', 'dark', null], ['light', 'green', null], ['green', 'light', null]] as const) {
+    const themes = ['dark', 'light', 'green', 'eva01', 'cyberpunk'] as const;
+    for (const source of themes) for (const target of themes.filter(theme => theme !== source)) {
+        const color = source === 'dark' && target === 'green' ? '#93c9b1' : source === 'green' && target === 'dark' ? '#ff7040' : null;
         const f = fixture();
         if (source !== 'dark') { f.motion.select(source, bounds); f.motion.cancel(); }
         f.motion.select(target, bounds); const t = f.transitions.at(-1)!;

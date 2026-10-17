@@ -32,6 +32,24 @@
     font-size: 15px;
     color: var(--ink);
     background: var(--canvas);
+    --md-text: var(--ink);
+    --md-heading: var(--accent);
+    --md-link: var(--accent);
+    --md-inline: var(--focus);
+    --md-inline-bg: var(--canvas);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #e8c17b;
+    --md-strong: #ffe1bd;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--accent-border);
+    --md-unordered: var(--accent);
+    --md-ordered: var(--warning);
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--canvas);
+    --md-rule: var(--border);
+    --md-task: var(--action);
 }
 :root[data-theme=light] {
     color-scheme: light;
@@ -62,6 +80,24 @@
     --error-bg: #fff2f0;
     --error-border: #e9bcb5;
     --backdrop: #20232666;
+    --md-text: var(--ink);
+    --md-heading: #923515;
+    --md-link: var(--accent);
+    --md-inline: #803824;
+    --md-inline-bg: var(--canvas);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #87511c;
+    --md-strong: #4d2b18;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--accent-border);
+    --md-unordered: #923515;
+    --md-ordered: #87511c;
+    --md-table-head: #4d2b18;
+    --md-table-bg: var(--canvas);
+    --md-rule: var(--border);
+    --md-task: var(--action);
 }
 /* The original dark green palette remains an explicit opt-in theme. */
 :root[data-theme=green] {
@@ -94,7 +130,140 @@
     --error-bg: #342323;
     --error-border: #704747;
     --backdrop: #00000099;
+    --md-text: var(--ink);
+    --md-heading: var(--accent);
+    --md-link: var(--accent);
+    --md-inline: #a5d7c0;
+    --md-inline-bg: var(--canvas);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #e8c17b;
+    --md-strong: var(--ink);
+    --md-quote: var(--muted);
+    --md-quote-border: var(--accent-border);
+    --md-unordered: var(--accent);
+    --md-ordered: var(--warning);
+    --md-table-head: var(--accent);
+    --md-table-bg: var(--canvas);
+    --md-rule: var(--border);
+    --md-task: var(--action);
 }
+/* OpenCode EVA palette with an opaque violet canvas for the web. */
+:root[data-theme=eva01] {
+    color-scheme: dark;
+    --canvas: #1a1625;
+    --surface: #332342;
+    --logo-ink: #fff3e3;
+    --card: #332342;
+    --console: #21192d;
+    --input: #46305c;
+    --soft: #b780ff;
+    --quiet: #af9dbe;
+    --accent: #b780ff;
+    --link: #72d6f2;
+    --action-hover: #7fd13b;
+    --focus: #57e3cf;
+    --terracotta: #b780ff;
+    --hairline: #4c375d;
+    --accent-border: #6e42a3;
+    --ink: #f5f0fa;
+    /* Slightly lifted from #a997b8 to retain 4.5:1 on element/input surfaces. */
+    --muted: #af9dbe;
+    --action: #a6ff4d;
+    --on-action: #1a1625;
+    --border: #76558e;
+    --tint: #46305c;
+    --warning: #ffd166;
+    --warning-bg: #332342;
+    --warning-border: rgba(255, 209, 102, .38);
+    --error: #ff5c7a;
+    --danger: var(--error);
+    --error-bg: #462231;
+    --error-border: rgba(255, 92, 122, .45);
+    --backdrop: #100c18cc;
+    --success: #7fd13b;
+    --md-text: var(--ink);
+    --md-heading: #a6ff4d;
+    --md-link: #72d6f2;
+    --md-inline: #b780ff;
+    --md-inline-bg: var(--canvas);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #ff9d3d;
+    --md-strong: #ffd166;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--accent-border);
+    --md-unordered: #a6ff4d;
+    --md-ordered: #b780ff;
+    --md-table-head: #a6ff4d;
+    --md-table-bg: var(--canvas);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+/* Cyberpunk plugin palette, b56a60d; opaque source backgrounds. */
+:root[data-theme=cyberpunk] {
+    color-scheme: dark;
+    --canvas: #05050f;
+    --surface: #0a0a1a;
+    --logo-ink: #fff3e3;
+    --card: #0f0f2a;
+    --console: #0a0a1a;
+    --input: #0f0f2a;
+    --soft: #b0b0d0;
+    --quiet: #8585b5;
+    --accent: #ff00ff;
+    --link: #00ffff;
+    --action-hover: #00ff41;
+    --focus: #00ff41;
+    --terracotta: #ff00ff;
+    --hairline: #1a1a3e;
+    --accent-border: #ff00ff;
+    --ink: #e0e0ff;
+    /* Lift source grayLight slightly for readable text on raised surfaces. */
+    --muted: #8585b5;
+    --action: #00ffff;
+    --on-action: #05050f;
+    --border: #3a3a6a;
+    --tint: #1a1a3e;
+    --warning: #fffc00;
+    --warning-bg: #1a1a0a;
+    --warning-border: #fffc0066;
+    --error: #ff0055;
+    --danger: var(--error);
+    --error-bg: #1a0a0a;
+    --error-border: #ff005566;
+    --backdrop: #05050fcc;
+    --success: #00ff41;
+    --md-text: #b0b0d0;
+    --md-heading: #ff00ff;
+    --md-link: #00ffff;
+    --md-inline: #fffc00;
+    --md-inline-bg: var(--canvas);
+    --md-code: #e0e0ff;
+    --md-code-bg: var(--console);
+    --md-toolbar: #b0b0d0;
+    --md-em: #ff6600;
+    --md-strong: #ff00ff;
+    /* Source grayMid is decorative; use accessible grayLight for quote text. */
+    --md-quote: var(--muted);
+    --md-quote-border: #3a3a6a;
+    --md-unordered: #00ffff;
+    --md-ordered: #ff00ff;
+    --md-table-head: #ff00ff;
+    --md-table-bg: var(--canvas);
+    --md-rule: #1a1a3e;
+    --md-task: #00ff41;
+}
+:root[data-theme=cyberpunk] input::placeholder,
+:root[data-theme=cyberpunk] textarea::placeholder,
+:root[data-theme=eva01] input::placeholder,
+:root[data-theme=eva01] textarea::placeholder { color: var(--muted); opacity: 1; }
+:root[data-theme=cyberpunk] .connection-dot.ready,
+:root[data-theme=cyberpunk] .session-readiness.ready,
+:root[data-theme=eva01] .connection-dot.ready,
+:root[data-theme=eva01] .session-readiness.ready { background: var(--success); }
 * { box-sizing: border-box; }
 body { margin: 0; }
 button, input, textarea, select { font: inherit; }
@@ -108,7 +277,7 @@ button.quiet:hover:not(:disabled) { background: var(--tint); color: var(--ink); 
 [hidden] { display: none !important; }
 h1, h2, h3, h4 { font-family: 'Avenir Next', 'Segoe UI', sans-serif; letter-spacing: -.025em; font-weight: 600; line-height: 1.3; margin: 0; }
 p { margin: .5rem 0; }
-a { color: var(--accent); text-underline-offset: 3px; }
+a { color: var(--link, var(--accent)); text-underline-offset: 3px; }
 code, pre, .runner, .lead-identity { font-family: SFMono-Regular, Consolas, 'Cascadia Code', monospace; }
 pre { margin: .75rem 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; line-height: 1.6; }
 small, .muted, .empty-note { color: var(--muted); }
@@ -155,7 +324,7 @@ small, .muted, .empty-note { color: var(--muted); }
 .app-body { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); }
 .app-header { display: flex; align-items: center; gap: .75rem; min-height: 56px; padding: .5rem 1rem; border-bottom: 1px solid var(--border); }
 .sidebar-toggle { padding: .5rem; font-size: 1.25rem; flex: 0 0 36px; }
-.theme-select { flex: 0 0 auto; width: 5.25rem; height: 40px; padding: .375rem .25rem; border: 1px solid var(--border); background: var(--canvas); color: var(--ink); font-size: .75rem; }
+.theme-select { flex: 0 0 auto; width: 6.5rem; height: 40px; padding: .375rem .25rem; border: 1px solid var(--border); background: var(--canvas); color: var(--ink); font-size: .75rem; }
 .session-identity { min-width: 0; display: flex; align-items: center; gap: 1rem; flex: 1; }
 .eyebrow { font-size: .65rem; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 0 0 .35rem; }
 .app-header h1 { font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -330,7 +499,7 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .markdown th { font-weight: 600; background: var(--canvas); }
 .markdown tr:last-child td { border-bottom: 0; }
 .markdown input[type=checkbox] { accent-color: var(--action); }
-.text-link { display: inline; padding: 0; background: transparent; color: var(--accent); text-decoration: underline; font: inherit; text-underline-offset: 3px; border: 0; }
+.text-link { display: inline; padding: 0; background: transparent; color: var(--link, var(--accent)); text-decoration: underline; font: inherit; text-underline-offset: 3px; border: 0; }
 .image-placeholder { color: var(--muted); font-size: .85em; }
 .error { color: var(--error); background: var(--error-bg); border: 1px solid var(--error-border); padding: .75rem 1rem; font-size: .85rem; line-height: 1.6; overflow-wrap: anywhere; }
 .app-error { margin: .75rem 1.5rem; flex-shrink: 0; }
@@ -628,3 +797,22 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 :root[data-theme-reveal]::view-transition-new(deck-theme-wave) { pointer-events: none; animation: none; mix-blend-mode: normal; }
 :root[data-theme-reveal]::view-transition-group(deck-theme-wave) { z-index: 3; }
 :root[data-theme-reveal]::view-transition-image-pair(deck-theme-wave) { isolation: auto; }
+
+/* Semantic Markdown colors are shared by conversations, subagents and documents. */
+.markdown { color: var(--md-text); }
+.markdown :is(h1, h2, h3, h4, h5, h6) { color: var(--md-heading); }
+.markdown strong { color: var(--md-strong); }
+.markdown em { color: var(--md-em); }
+.markdown a, .markdown .text-link { color: var(--md-link); }
+.markdown blockquote { color: var(--md-quote); border-left-color: var(--md-quote-border); }
+.markdown code { color: var(--md-inline); background: var(--md-inline-bg); border-color: var(--md-rule); }
+.markdown ul > li::marker { color: var(--md-unordered); }
+.markdown ol > li::marker { color: var(--md-ordered); }
+.markdown .code-block { color: var(--md-code); background: var(--md-code-bg); border-color: var(--md-rule); }
+.markdown .code-block code { color: inherit; background: none; }
+.markdown .code-toolbar { color: var(--md-toolbar); background: var(--md-code-bg); border-bottom-color: var(--md-rule); }
+.markdown .code-toolbar button.quiet { color: var(--md-toolbar); }
+.markdown .code-toolbar button.quiet:hover { color: var(--md-text); }
+.markdown th { color: var(--md-table-head); background: var(--md-table-bg); }
+.markdown th, .markdown td, .markdown .table-scroll, .markdown hr { border-color: var(--md-rule); }
+.markdown input[type=checkbox] { accent-color: var(--md-task); }

@@ -6,13 +6,13 @@ import { ThemeSelect } from './theme-select';
 import { DeckBrand } from './deck-logo';
 
 test('theme registry has unique stable IDs; only registered values are accepted and dark is default', () => {
-    expect(THEMES.map(theme => [theme.id, theme.label])).toEqual([['dark', 'Dark'], ['light', 'Light'], ['green', 'Green']]);
+    expect(THEMES.map(theme => [theme.id, theme.label])).toEqual([['dark', 'Dark'], ['light', 'Light'], ['green', 'Green'], ['eva01', 'EVA-01'], ['cyberpunk', 'Cyberpunk']]);
     expect(new Set(THEMES.map(theme => theme.id)).size).toBe(THEMES.length);
     for (const { id } of THEMES) expect(resolveTheme(id)).toBe(id);
     for (const invalid of [null, undefined, '', 'unknown', 'Green', '__proto__', 'toString', {}, 0]) expect(resolveTheme(invalid)).toBe('dark');
 });
 
-test('theme storage preserves old preferences and Green using deck.theme', () => {
+test('theme storage preserves old preferences and all opt-in themes using deck.theme', () => {
     const values = new Map<string, string>();
     const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
     expect(readTheme(() => storage)).toBe('dark');
@@ -21,6 +21,10 @@ test('theme storage preserves old preferences and Green using deck.theme', () =>
         expect(values.get('deck.theme')).toBe(id);
         expect(readTheme(() => storage)).toBe(id);
     }
+    values.set('deck.theme', 'cyberpunk');
+    expect(readTheme(() => storage)).toBe('cyberpunk'); // No palette-identity migration.
+    values.set('deck.theme', 'eva01');
+    expect(readTheme(() => storage)).toBe('eva01');
     values.set('deck.theme', 'unregistered');
     expect(readTheme(() => storage)).toBe('dark');
 });
@@ -34,10 +38,10 @@ test('blocked storage getters and operations never prevent theme switching', () 
 });
 
 test('native theme list exposes its label and selection from the registry', () => {
-    const html = renderToStaticMarkup(<ThemeSelect value="green" onChange={() => {}}/>);
+    const html = renderToStaticMarkup(<ThemeSelect value="cyberpunk" onChange={() => {}}/>);
     expect(html).toContain('<select');
     expect(html).toContain('aria-label="Theme"');
-    expect(html).toContain('<option value="green" selected="">Green</option>');
+    expect(html).toContain('<option value="cyberpunk" selected="">Cyberpunk</option>');
     expect((html.match(/<option/g) ?? []).length).toBe(THEMES.length);
 });
 
