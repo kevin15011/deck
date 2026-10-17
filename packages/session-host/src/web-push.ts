@@ -33,6 +33,9 @@ type Delivery = {
   attention: PushAttention;
   record: RecordEntry;
   expires: number;
+  acknowledgeBy: number;
+  retryAt?: number;
+  deferred?: boolean;
 };
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const validId = (id: unknown): id is string =>
@@ -206,6 +209,28 @@ export function pushAttention(event: SessionEvent): PushAttention | undefined {
   if (event.kind === 'session.released' && event.data.reasonCode)
     return { ...base, kind: 'failure' };
 }
+export type PushDeliveryStatus = {
+  eligible: number;
+  sent: number;
+  suppressed: number;
+  deferred: number;
+  stale: number;
+  failed: number;
+  expired: number;
+  queueFull: number;
+  lastOutcome?:
+    | 'accepted'
+    | 'viewed'
+    | 'waiting-for-view'
+    | 'stale'
+    | 'expired'
+    | 'queue-full'
+    | 'rejected'
+    | 'transport-error'
+    | 'payload-error';
+  lastStatus?: number;
+  updatedAt?: string;
+};
 export type WebPushOptions = {
   paths: StatePaths;
   isDeviceActive: (id: string) => boolean;
@@ -220,6 +245,7 @@ export type WebPushOptions = {
 export class WebPush {
   private store?: Store;
   private queue = new Map<string, Delivery>();
+  private delivery = new Map<string, PushDeliveryStatus>();
   private seen = new Map<string, number>();
   private presenceTabs = new Map<
     string,
@@ -229,9 +255,11 @@ export class WebPush {
       sessionId: string | null;
       until: number;
       revision: number;
+      seenSeq?: number;
     }
   >();
   private timer?: ReturnType<typeof setTimeout>;
+  private timerDue?: number;
   private controllers = new Map<AbortController, RecordEntry>();
   private closed = false;
   private readonly now: () => number;
@@ -284,12 +312,62 @@ export class WebPush {
   private save() {
     writePrivateFile(this.file, JSON.stringify(this.store));
   }
+  private deliveryKey(deviceId: string, origin: string) {
+    return JSON.stringify([deviceId, origin]);
+  }
+  private deliveryStatus(deviceId: string, origin: string): PushDeliveryStatus {
+    return (
+      this.delivery.get(this.deliveryKey(deviceId, origin)) ?? {
+        eligible: 0,
+        sent: 0,
+        suppressed: 0,
+        deferred: 0,
+        stale: 0,
+        failed: 0,
+        expired: 0,
+        queueFull: 0,
+      }
+    );
+  }
+  private record(
+    record: RecordEntry,
+    counter: keyof Pick<
+      PushDeliveryStatus,
+      | 'eligible'
+      | 'sent'
+      | 'suppressed'
+      | 'deferred'
+      | 'stale'
+      | 'failed'
+      | 'expired'
+      | 'queueFull'
+    >,
+    outcome?: PushDeliveryStatus['lastOutcome'],
+    status?: number,
+  ) {
+    const key = this.deliveryKey(record.deviceId, record.origin),
+      previous = this.deliveryStatus(record.deviceId, record.origin);
+    const next = {
+      ...previous,
+      [counter]: Math.min(Number.MAX_SAFE_INTEGER, previous[counter] + 1),
+    };
+    if (outcome) {
+      next.lastOutcome = outcome;
+      next.lastStatus = status;
+      next.updatedAt = new Date(this.now()).toISOString();
+    }
+    this.delivery.delete(key);
+    this.delivery.set(key, next);
+    if (this.delivery.size > 256)
+      this.delivery.delete(this.delivery.keys().next().value!);
+  }
   status(deviceId: string, origin: string) {
     return {
       enabled: !!this.store?.subscriptions.some(
         (r) => r.deviceId === deviceId && r.origin === origin,
       ),
       publicKey: this.identity().keys.publicKey,
+      delivery: { ...this.deliveryStatus(deviceId, origin) },
     };
   }
   subscribe(deviceId: string, origin: string, value: unknown, renew = false) {
@@ -357,8 +435,14 @@ export class WebPush {
     tabId: string,
     sessionId: string | null,
     revision?: number,
+    seenSeq?: number,
   ) {
     if (!validId(tabId) || (sessionId !== null && !validId(sessionId)))
+      throw new Error('push-presence-invalid');
+    if (
+      seenSeq !== undefined &&
+      (!Number.isSafeInteger(seenSeq) || seenSeq < 0)
+    )
       throw new Error('push-presence-invalid');
     const key = JSON.stringify([deviceId, origin, tabId]);
     this.prunePresence();
@@ -379,20 +463,32 @@ export class WebPush {
       sessionId,
       until: this.now() + 45_000,
       revision,
+      seenSeq,
     });
+    this.schedule(true);
   }
   private prunePresence() {
     for (const [key, p] of this.presenceTabs)
       if (p.until <= this.now()) this.presenceTabs.delete(key);
   }
-  private viewing(r: RecordEntry, id: string) {
+  private viewing(
+    r: RecordEntry,
+    attention: PushAttention,
+  ): 'viewed' | 'pending' | undefined {
     this.prunePresence();
-    return [...this.presenceTabs.values()].some(
+    const tabs = [...this.presenceTabs.values()].filter(
       (p) =>
         p.deviceId === r.deviceId &&
         p.origin === r.origin &&
-        p.sessionId === id,
+        p.sessionId === attention.sessionId,
     );
+    return tabs.some(
+      (p) => p.seenSeq !== undefined && p.seenSeq >= attention.seq,
+    )
+      ? 'viewed'
+      : tabs.length
+        ? 'pending'
+        : undefined;
   }
   accept(event: SessionEvent) {
     if (this.closed || !this.store?.subscriptions.length) return;
@@ -413,38 +509,86 @@ export class WebPush {
           ? attention.seq
           : undefined,
       ]);
-      if (this.queue.size >= 256 && !this.queue.has(key)) continue;
-      this.queue.set(key, { attention, record, expires: this.now() + 30_000 });
+      this.record(record, 'eligible');
+      if (this.queue.size >= 256 && !this.queue.has(key)) {
+        this.record(record, 'queueFull', 'queue-full');
+        continue;
+      }
+      this.queue.set(key, {
+        attention,
+        record,
+        expires: this.now() + 30_000,
+        acknowledgeBy: this.now() + 2000,
+      });
     }
-    this.schedule();
+    this.schedule(true);
   }
-  private schedule() {
-    if (this.closed || this.timer || !this.queue.size) return;
-    this.timer = setTimeout(() => {
-      this.timer = undefined;
-      this.pump();
-    }, 20);
+  private schedule(wake = false) {
+    if (
+      this.closed ||
+      !this.queue.size ||
+      this.controllers.size >= 4
+    )
+      return;
+    const now = this.now();
+    const due = wake
+      ? now + 20
+      : Math.max(now + 20, Math.min(
+          ...[...this.queue.values()].map(
+            (job) => job.retryAt ?? now + 20,
+          ),
+        ));
+    if (this.timer) {
+      // A wake may advance a pending pump, but must never postpone it.
+      if (this.timerDue! <= due) return;
+      clearTimeout(this.timer);
+    }
+    this.timerDue = due;
+    this.timer = setTimeout(
+      () => {
+        this.timer = undefined;
+        this.timerDue = undefined;
+        this.pump();
+      },
+      due - now,
+    );
   }
   private pump() {
-    while (!this.closed && this.controllers.size < 4 && this.queue.size) {
-      const [key, job] = this.queue.entries().next().value!;
+    for (const [key, job] of [...this.queue]) {
+      if (this.closed || this.controllers.size >= 4) break;
       this.queue.delete(key);
       const { attention: a, record: r } = job;
+      if (!this.store?.subscriptions.includes(r)) continue;
       if (!this.options.isDeviceActive(r.deviceId)) {
+        this.record(r, 'expired', 'expired');
         this.removeRecord(r);
         continue;
       }
-      if (
-        job.expires < this.now() ||
-        !this.store?.subscriptions.includes(r) ||
-        this.viewing(r, a.sessionId) ||
-        !this.options.isCurrent(a)
-      )
+      if (job.expires < this.now()) {
+        this.record(r, 'expired', 'expired');
         continue;
+      }
+      if (!this.options.isCurrent(a)) {
+        this.record(r, 'stale', 'stale');
+        continue;
+      }
+      const viewing = this.viewing(r, a);
+      if (viewing === 'viewed') {
+        this.record(r, 'suppressed', 'viewed');
+        continue;
+      }
+      if (viewing === 'pending' && this.now() < job.acknowledgeBy) {
+        if (!job.deferred) this.record(r, 'deferred', 'waiting-for-view');
+        job.deferred = true;
+        job.retryAt = job.acknowledgeBy;
+        this.queue.set(key, job);
+        continue;
+      }
       if (
         r.subscription.expirationTime &&
         r.subscription.expirationTime <= this.now()
       ) {
+        this.record(r, 'expired', 'expired');
         this.removeRecord(r);
         continue;
       }
@@ -453,6 +597,7 @@ export class WebPush {
       const deadline = setTimeout(() => controller.abort(), 5000);
       // Execution leaves the event-log callback before any crypto, disk or network work.
       void (async () => {
+        let attempted = false;
         try {
           const topic = createHash('sha256')
             .update(JSON.stringify([a.sessionId, a.kind, a.seq]))
@@ -471,6 +616,7 @@ export class WebPush {
               topic,
             },
           );
+          attempted = true;
           const status = await new Promise<number>((resolve, reject) => {
             const abort = () => reject(new Error('push-deadline'));
             controller.signal.addEventListener('abort', abort, { once: true });
@@ -483,9 +629,24 @@ export class WebPush {
                 controller.signal.removeEventListener('abort', abort),
               );
           });
+          if (status >= 200 && status < 300)
+            this.record(r, 'sent', 'accepted', status);
+          else
+            this.record(
+              r,
+              'failed',
+              'rejected',
+              status >= 100 && status <= 599 ? status : undefined,
+            );
           if (!this.closed && (status === 404 || status === 410))
             this.removeRecord(r);
         } catch {
+          if (!this.closed && this.store?.subscriptions.includes(r))
+            this.record(
+              r,
+              'failed',
+              attempted ? 'transport-error' : 'payload-error',
+            );
           /* Delivery is best effort. Never log endpoints, keys or provider response bodies. */
         } finally {
           clearTimeout(deadline);
@@ -494,6 +655,7 @@ export class WebPush {
         }
       })();
     }
+    this.schedule();
   }
   private removeRecord(record: RecordEntry) {
     if (!this.store?.subscriptions.includes(record)) return;
@@ -506,6 +668,7 @@ export class WebPush {
     this.closed = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
+    this.timerDue = undefined;
     this.queue.clear();
     this.presenceTabs.clear();
     for (const c of this.controllers.keys()) c.abort();

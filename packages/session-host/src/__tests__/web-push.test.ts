@@ -66,6 +66,53 @@ function fixture(extra: Record<string, unknown> = {}) {
 async function drain() {
   await Bun.sleep(40);
 }
+test('sustained presence wakes cannot postpone unrelated exactly-once delivery', async () => {
+  let now = 0, nextTimer = 0;
+  const timers = new Map<number, { at: number; run: () => void }>();
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const deliveries: { seq: number; at: number }[] = [];
+  const { p } = fixture({
+    now: () => now,
+    send: async (_request: unknown, payload: { seq: number }) => {
+      deliveries.push({ seq: payload.seq, at: now });
+      return 201;
+    },
+  });
+  globalThis.setTimeout = ((callback: (...args: any[]) => void, delay = 0, ...args: any[]) => {
+    const id = ++nextTimer;
+    timers.set(id, { at: now + delay, run: () => callback(...args) });
+    return id;
+  }) as unknown as typeof setTimeout;
+  globalThis.clearTimeout = ((id: unknown) => { timers.delete(Number(id)); }) as typeof clearTimeout;
+  try {
+    p.accept(event(1));
+    p.accept(event(1));
+    // Deliver timer callbacks before each next 10ms wake, for longer than the job TTL.
+    for (let target = 10; target <= 31_000; target += 10) {
+      while (true) {
+        const due = [...timers].filter(([, timer]) => timer.at <= target)
+          .sort((a, b) => a[1].at - b[1].at)[0];
+        if (!due) break;
+        now = due[1].at;
+        timers.delete(due[0]);
+        due[1].run();
+        for (let turn = 0; turn < 8; turn++) await Promise.resolve();
+      }
+      now = target;
+      p.presence('other-device', 'https://deck.test', 'other-tab', 'other-session', target);
+      if (target === 1000) {
+        p.accept(event(2));
+        p.accept(event(2));
+      }
+    }
+    expect(deliveries).toEqual([{ seq: 1, at: 20 }, { seq: 2, at: 1020 }]);
+  } finally {
+    p.close();
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+});
 test('only known browser HTTPS providers and valid key material are accepted', () => {
   for (const host of [
     'fcm.googleapis.com',
@@ -311,4 +358,28 @@ test('distinct transmitted completions use occurrence-specific provider topics',
 });
 test('expired device authorization removes its subscription before delivery',async()=>{
  let active=true;const {p,sent}=fixture({isDeviceActive:()=>active});active=false;p.accept(event(1));await drain();expect(sent).toHaveLength(0);expect(p.status('d','https://deck.test').enabled).toBe(false);
+});
+
+test('lost hidden-tab release cannot discard repeated new completions behind a stale lease',async()=>{
+ let now=1000;const {p,sent}=fixture({now:()=>now});
+ p.presence('d','https://deck.test','suspended-tab','s',1,0);
+ p.accept(event(1));await drain();expect(sent).toHaveLength(0);
+ now+=2100;await Bun.sleep(2100);expect(sent).toHaveLength(1);
+ p.accept(event(2));now+=2100;await Bun.sleep(2100);expect(sent).toHaveLength(2);
+});
+test('a live foreground acknowledgement suppresses only the event actually received',async()=>{
+ const {p,sent}=fixture();p.presence('d','https://deck.test','reading','s',1,0);p.accept(event(1));await drain();
+ p.presence('d','https://deck.test','reading','s',2,1);await drain();expect(sent).toHaveLength(0);
+ p.presence('d','https://deck.test','background',null,1,0);p.accept(event(2));await Bun.sleep(2150);expect(sent).toHaveLength(1);
+ expect(p.status('d','https://deck.test').delivery).toMatchObject({suppressed:1,sent:1});
+});
+
+test('bounded diagnostics distinguish provider acceptance, rejection and network errors without sensitive details',async()=>{
+ for(const status of [201,403]){const {p}=fixture({send:async()=>status});p.accept(event(1));await drain();const d=p.status('d','https://deck.test').delivery;expect(d.eligible).toBe(1);expect(d.lastStatus).toBe(status);expect(d.lastOutcome).toBe(status===201?'accepted':'rejected');}
+ const {p}=fixture({send:async()=>{throw new Error('https://provider.test/private-endpoint secret-key raw-error');}});p.accept(event(1));await drain();const d=p.status('d','https://deck.test').delivery;expect(d.lastOutcome).toBe('transport-error');expect(JSON.stringify(d)).not.toMatch(/private-endpoint|secret-key|raw-error|provider\.test/);
+});
+test('multi-tab acknowledgement ordering cannot acknowledge future completions or let stale release clear a new view',async()=>{
+ const {p,sent}=fixture();p.presence('d','https://deck.test','one','s',2,2);p.presence('d','https://deck.test','one',null,1,0);p.presence('d','https://deck.test','two',null,1,0);
+ p.accept(event(2));await drain();expect(p.status('d','https://deck.test').delivery.suppressed).toBe(1);
+ p.accept(event(3));await Bun.sleep(2100);expect(sent).toHaveLength(1);expect(sent[0][1].seq).toBe(3);
 });

@@ -370,3 +370,13 @@ test('Lead waiting on delegated work is quiet until the resumed Lead actually fi
 test('a user-requested forced interruption does not create a failure alert',async()=>{
  const f=await fixture();await f.call('/api/push','POST',{subscription:sub()});await f.run({type:'prompt.send',text:'start'},f.id);await waitFor(()=>f.driver.turns.length===1);f.driver.turns[0]!.onInterrupt={status:'interrupted-forced'};await f.run({type:'turn.interrupt',taskId:'lead'},f.id);await tick();expect(f.sent).toHaveLength(0);
 });
+
+test('HTTP foreground acknowledgement suppresses the received turn but cannot swallow the next suspended turn',async()=>{
+ const f=await fixture();await f.call('/api/push','POST',{subscription:sub()});
+ await f.call('/api/push/presence','POST',{tabId:'mobile',sessionId:f.id,revision:1,seenSeq:0});
+ await f.run({type:'prompt.send',text:'one'},f.id);await waitFor(()=>f.driver.turns.length===1);f.driver.turns[0]!.finish();await waitFor(()=>!f.manager.hasRunningWork());
+ await f.call('/api/push/presence','POST',{tabId:'mobile',sessionId:f.id,revision:2,seenSeq:f.manager.openLog(f.id)!.lastSeq});await tick();
+ expect((await(await f.call('/api/push')).json()).delivery.suppressed).toBe(1);expect(f.sent).toHaveLength(0);
+ await f.run({type:'prompt.send',text:'two'},f.id);await waitFor(()=>f.driver.turns.length===2);f.driver.turns[1]!.finish();await waitFor(()=>f.sent.length===1,4000);
+ const status=(await(await f.call('/api/push')).json()).delivery;expect(status.sent).toBe(1);expect(status.lastOutcome).toBe('accepted');expect(status.lastStatus).toBe(201);
+});

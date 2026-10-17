@@ -65,11 +65,16 @@ export function usePushPresence(
   enabled: boolean,
   sessionId: string,
   conversationVisible: boolean,
+  seenSeq: number,
 ) {
   const tabId = useRef(crypto.randomUUID()),
-    revision = useRef(0);
+    revision = useRef(0),
+    sequence = useRef(seenSeq),
+    acknowledge = useRef<(() => void) | undefined>(undefined);
+  sequence.current = seenSeq;
   useEffect(() => {
     if (!enabled || pushSetupHint()) return;
+    let ackTimer: ReturnType<typeof setTimeout> | undefined;
     const send = () => {
       void api('/api/push/presence', {
         method: 'POST',
@@ -77,6 +82,7 @@ export function usePushPresence(
         body: JSON.stringify({
           tabId: tabId.current,
           revision: ++revision.current,
+          seenSeq: sequence.current,
           sessionId:
             conversationVisible &&
             document.visibilityState === 'visible' &&
@@ -97,13 +103,31 @@ export function usePushPresence(
         }),
       }).catch(() => {});
     };
+    acknowledge.current = () => {
+      if (
+        ackTimer ||
+        !conversationVisible ||
+        document.visibilityState !== 'visible'
+      )
+        return;
+      ackTimer = setTimeout(() => {
+        ackTimer = undefined;
+        send();
+      }, 100);
+    };
     send();
     const timer = setInterval(send, 15000);
     document.addEventListener('visibilitychange', send);
     window.addEventListener('focus', send);
     window.addEventListener('blur', send);
     window.addEventListener('pagehide', release);
+    window.addEventListener('pageshow', send);
+    window.addEventListener('online', send);
     return () => {
+      acknowledge.current = undefined;
+      clearTimeout(ackTimer);
+      window.removeEventListener('pageshow', send);
+      window.removeEventListener('online', send);
       clearInterval(timer);
       document.removeEventListener('visibilitychange', send);
       window.removeEventListener('focus', send);
@@ -112,6 +136,9 @@ export function usePushPresence(
       release();
     };
   }, [api, enabled, sessionId, conversationVisible]);
+  useEffect(() => {
+    acknowledge.current?.();
+  }, [seenSeq]);
 }
 export function PushNotifications({ api }: { api: Api }) {
   const hint = pushSetupHint();
@@ -120,6 +147,10 @@ export function PushNotifications({ api }: { api: Api }) {
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(!hint),
     [message, setMessage] = useState(''),
+    [delivery, setDelivery] =
+      useState<
+        import('../../../packages/session-host/src/web-push').PushDeliveryStatus
+      >(),
     [denied, setDenied] = useState(
       !hint && Notification.permission === 'denied',
     );
@@ -131,6 +162,7 @@ export function PushNotifications({ api }: { api: Api }) {
         api('/api/push'),
         worker(),
       ]);
+      setDelivery(status.delivery);
       const subscription = await registration.pushManager.getSubscription();
       if (status.enabled && Notification.permission !== 'granted')
         await api('/api/push', { method: 'DELETE' });
@@ -300,7 +332,43 @@ export function PushNotifications({ api }: { api: Api }) {
           </>
         )}
         {message && <p role="status">{message}</p>}
+        {!hint && (
+          <div className="push-delivery">
+            <p role="status">{pushDeliveryText(delivery)}</p>
+            <button
+              type="button"
+              className="quiet"
+              onClick={() => void refresh()}
+            >
+              Refresh delivery status
+            </button>
+          </div>
+        )}
       </section>
     </details>
   );
+}
+
+export function pushDeliveryText(
+  status?: import('../../../packages/session-host/src/web-push').PushDeliveryStatus,
+): string {
+  if (!status?.eligible)
+    return 'No eligible alerts recorded for this browser since the daemon started.';
+  const last =
+    status.lastOutcome === 'accepted'
+      ? 'Push service accepted the last alert; device display is not confirmed.'
+      : status.lastOutcome === 'viewed'
+        ? 'Last alert was already received by your visible conversation.'
+        : status.lastOutcome === 'waiting-for-view'
+          ? 'Waiting briefly for your visible conversation to receive the alert.'
+          : status.lastOutcome === 'stale'
+            ? 'Last alert no longer required attention before delivery.'
+            : status.lastOutcome === 'rejected'
+              ? `Push service rejected the last alert${status.lastStatus ? ` (HTTP ${status.lastStatus})` : ''}.`
+              : status.lastOutcome === 'transport-error'
+                ? 'Could not reach the push service for the last alert.'
+                : status.lastOutcome === 'expired'
+                  ? 'The last alert or browser authorization expired.'
+                  : 'Last alert could not be delivered.';
+  return `${last} Accepted: ${status.sent}; viewed: ${status.suppressed}; failed: ${status.failed}.`;
 }

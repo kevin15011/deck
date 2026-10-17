@@ -290,7 +290,7 @@ export class WebService {
               device.expiresAt = new Date(this.now() + PUSH_COOKIE_MAX_AGE * 1000).toISOString(); this.save();
               return this.response({ok:true},200,{'Set-Cookie':this.deviceCookie(r,this.cookieToken(r)!,true)});
             }
-            this.push.presence(device.id,origin,body.tabId,body.sessionId,body.revision);
+            this.push.presence(device.id,origin,body.tabId,body.sessionId,body.revision,body.seenSeq);
             return this.response({ok:true});
           }
           return this.response({ok:false,code:'route-unknown'},404);

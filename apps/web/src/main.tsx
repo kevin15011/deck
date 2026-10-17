@@ -309,7 +309,7 @@ export function App() {
     const approvals = Object.values(view.approvals);
     const ended = (view.events.length ? view.state : currentSession?.state) === 'ended';
     const working = (view.events.length ? view.state === 'running' : currentSession?.state === 'running') || Object.values(view.tasks).some(task => ['queued', 'running'].includes(String(task.state))) || approvals.length > 0 || promptInbox.inbox.queued.length > 0 || !!promptInbox.inbox.active;
-    usePushPresence(api, paired, selected, chatVisible && connection === 'Connected');
+    usePushPresence(api, paired, selected, chatVisible && connection === 'Connected', view.seq);
     const preparationSignal = view.events.filter(event => event.kind === 'session.assignment' || event.kind === 'session.reopened' || (event.kind === 'diagnostic' && event.data.code === 'session.preparation')).at(-1)?.seq ?? 0;
     const readiness = useSessionPreparation(api, selected, paired && connection === 'Connected', generation, preparationSignal);
     const removing = currentSession?.removing === true || removingSessions.current.has(selected);

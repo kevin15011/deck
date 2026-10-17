@@ -45,3 +45,35 @@ test('failed browser unsubscribe cannot reuse an endpoint owned by a previous de
   ).rejects.toThrow();
   expect(f.counts().created).toBe(0);
 });
+
+test('delivery status distinguishes provider acceptance, read suppression and safe failures', async () => {
+  const { pushDeliveryText } = await import('./push-notifications');
+  const base = {
+    eligible: 1,
+    sent: 0,
+    suppressed: 0,
+    deferred: 0,
+    stale: 0,
+    failed: 0,
+    expired: 0,
+    queueFull: 0,
+  };
+  expect(pushDeliveryText()).toContain('No eligible alerts');
+  expect(
+    pushDeliveryText({ ...base, sent: 1, lastOutcome: 'accepted' }),
+  ).toContain('device display is not confirmed');
+  expect(
+    pushDeliveryText({ ...base, suppressed: 1, lastOutcome: 'viewed' }),
+  ).toContain('visible conversation');
+  expect(
+    pushDeliveryText({
+      ...base,
+      failed: 1,
+      lastOutcome: 'rejected',
+      lastStatus: 403,
+    }),
+  ).toContain('HTTP 403');
+  expect(
+    pushDeliveryText({ ...base, failed: 1, lastOutcome: 'transport-error' }),
+  ).toContain('Could not reach');
+});
