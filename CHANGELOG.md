@@ -9,6 +9,34 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-17
+
+### Added
+
+- Cross-browser opt-in push notifications for Lead completion, pending questions, approvals and actionable failures, with private notification text and delivery diagnostics.
+- Runner-neutral question handling and explicit approval scopes, revocable session permissions and per-session YOLO controls.
+- Deck branding, animated theme selection and Dark, Light, Green, EVA-01 and Cyberpunk themes, including rendered Markdown.
+- Optional automatic access through a trusted private Tailscale Serve proxy.
+
+### Changed
+
+- Chat history loads progressively with a bounded rendered window, and typing remains isolated from history updates.
+- Subagents move to the top when delegated or when they respond; profiles, compact cards and full detail views improve navigation.
+- Mobile avatar navigation scrolls horizontally and the composer follows the visible keyboard viewport.
+
+### Fixed
+
+- Recover chat connections after browser suspension and preserve unseen push notifications through foreground acknowledgment races.
+- Resume long Codex conversations without hydrating the entire native history.
+- Allow standalone Claude launches without a Git repository or origin by disabling Deck memory for that launch only; invalid repository identities still fail closed.
+- Preserve exact approval identity, protect sensitive question answers, and keep review controls visible.
+- Regenerate embedded web assets during canary installation and disable spellcheck in the chat input.
+
+### Compatibility and limits
+
+- Push notifications require browser permission and a supported secure context; mobile Safari requires installation on the Home Screen. Ordinary subagent completions do not notify.
+- Trusted Tailscale access is opt-in; pairing remains the default. Runner CLIs and external integrations remain separate prerequisites.
+
 ## [0.11.3] - 2026-10-15
 
 ### Added
