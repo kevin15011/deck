@@ -523,13 +523,13 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
     .chat-label small { display: none; }
 }
 @media (max-width: 1000px) {
-    .workbench, .workbench.sidebar-collapsed { display: block; }
+    .workbench, .workbench.sidebar-collapsed { display: block; top: var(--mobile-viewport-top, 0px); bottom: auto; height: var(--mobile-viewport-height, 100dvh); }
     .sidebar { display: none; }
     .project-toggle.quiet, .project-new.quiet, .session { min-height: 40px; }
     .project-new.quiet { flex-basis: 40px; }
     .project-toolbar button { min-height: 40px; }
     .directory-options [role=option], .directory-state button { min-height: 40px; }
-    .app-body { height: 100dvh; }
+    .app-body { height: 100%; }
     .app-header { padding: .5rem .75rem; gap: .5rem; }
     .session-identity { display: block; }
     .app-header h1 { font-size: .9rem; }
@@ -544,8 +544,9 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
     .panes { display: flex; }
     .chat-pane, .workspace-pane { width: 100%; flex: 1; }
     .workspace-pane { border: 0; }
-    .conversation { padding: 1.5rem; }
-    .composer { margin: 0 1rem 1rem; }
+    .conversation { padding: 0; }
+    .conversation > .history-content { padding: 1.5rem; }
+    .composer { flex-shrink: 0; margin: 0 1rem max(1rem, env(safe-area-inset-bottom)); }
     .approval { gap: .75rem; }
     .approval-actions { flex-wrap: wrap; justify-content: flex-end; }
 }
@@ -554,10 +555,10 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
     .connection span:not(.connection-dot) { display: none; }
     .connection { gap: .375rem; }
     .connection small { font-size: .6rem; border: 0; padding: 0; }
-    .conversation { padding: 1.25rem 1rem; }
+    .conversation > .history-content { padding: 1.25rem 1rem; }
     .message.user { margin-left: 1rem; padding: .875rem 1rem; }
     .message { font-size: 1rem; }
-    .composer { margin: 0 .75rem .75rem; }
+    .composer { margin: 0 .75rem max(.75rem, env(safe-area-inset-bottom)); }
     .approval { flex-direction: column; }
     .approval-actions { align-self: flex-end; }
     .panel-intro { padding: 1.25rem 1rem 1rem; }
@@ -663,9 +664,10 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .open-detail{display:inline-flex;align-items:center;gap:.4rem;font-size:.75rem;padding:.4rem .75rem}
 .subagent-detail{height:100%;min-height:0;display:flex;flex-direction:column}
 .detail-bar{flex:none;display:flex;align-items:center;gap:.75rem;padding:1rem 1.5rem .75rem}
-.detail-back{font-size:.75rem;padding:.35rem .6rem}
-.detail-switch{display:flex;gap:.25rem;margin-left:auto}
-.detail-pick{position:relative;padding:2px;border:1px solid transparent;background:transparent}
+.detail-back{flex:none;white-space:nowrap;font-size:.75rem;padding:.35rem .6rem}
+.detail-switch{display:flex;min-width:0;gap:.25rem;margin-left:auto;padding:2px;overflow-x:auto;overscroll-behavior-x:contain}
+.detail-pick{flex:none;position:relative;padding:2px;border:1px solid transparent;background:transparent}
+.detail-pick:focus-visible{outline-offset:-2px}
 .detail-pick[aria-pressed=true]{border-color:var(--accent-border)}
 .pick-unread{position:absolute;top:-2px;right:-2px;width:7px;height:7px;background:var(--action)}
 .detail-card{flex:none;margin-bottom:.75rem}

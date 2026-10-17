@@ -9,6 +9,7 @@ import { createRoot } from 'react-dom/client';
 import { sessionGrants, conversationEvents, emptyState, pairingToken, type ViewState } from './state';
 import { Markdown } from './markdown';
 import { MessageInput } from './message-input';
+import { installMobileViewport } from './mobile-viewport';
 import { leadProgress, LeadProgress, type PendingPrompt } from './lead-progress';
 import { Activity, OpenSpec, Subagents, Tabs, type WorkspaceTab } from './workspace';
 import { NavigationIcon, ProjectNavigation, type ProjectHistory } from './project-navigation';
@@ -28,6 +29,7 @@ const initialToken = pairingToken(window.location, window.history);
 const initialTheme = readTheme();
 document.documentElement.dataset.theme = initialTheme;
 export function App() {
+    useLayoutEffect(() => installMobileViewport(document.documentElement), []);
     const { markers: readMarkers, acknowledge } = useReadMarkers();
     const [hydratedSession, setHydratedSession] = useState('');
     const historiesRef = useRef<Record<string, ProjectHistory>>({});

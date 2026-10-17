@@ -86,3 +86,15 @@ Screenshots: /tmp/deck-palette-{before,after}-{desktop,mobile}-{dark,light}.png.
 The broader desktop script times out after 30 seconds waiting for the Research complete heading under both baseline and current CSS. An isolated fixture substituting only /app.css reproduces the same compact researcher card and Open full view button in both cases. Commands: `DECK_PALETTE_CSS=baseline DECK_TEST_CHROME=/snap/bin/chromium bun run /tmp/deck-palette-repro.ts` and the same command with `DECK_PALETTE_CSS=current`. Logs: /tmp/deck-palette-repro-{baseline,current}.log. Assertions after this shared timeout remain unverified; no unrelated behavior was changed.
 
 Status: implemented and verified within the presentation-only scope. No commit, installation, daemon restart or changes to deck-landing occurred.
+
+## Mobile subagent avatar overflow fix
+
+User reported horizontal overflow in subagent detail with many avatars. Restricted `.detail-switch` to the available flex width and enabled horizontal scrolling with contained overscroll. Back and avatar buttons retain their size; focus outlines remain inside the scroll region. No component structure, theme or ordering changes.
+
+Verified with 25 subagents in Chromium at 320px, 390px and 1440px: touch scrolling, last-avatar selection, keyboard focus, stable and functional Back, no document overflow or browser errors. Scratch asset build and `git diff --check` passed. Evidence: `/tmp/deck-avatar-after.log`, `/tmp/deck-avatar-after-{320,390,1440}.png`. Lead inspected the 320px screenshot. Implementation owner: apply-fast task-6ab38e1a-b785-4741-8a7b-63541b267166 attempt 14. Canary installation follows; daemon restart remains with the user. No commit requested for this delta.
+
+## Mobile keyboard and composer visibility
+
+User reported a partially hidden composer while the mobile keyboard is open, especially when pausing to edit existing draft text. Added a mobile-only visible viewport observer with resize/scroll updates coalesced into animation frames and cleanup on unmount. Pinch zoom remains browser-controlled. The shell follows visual viewport height and offset; the composer does not shrink and retains safe-area spacing. Moved mobile conversation padding onto its existing history-content wrapper to let the scroll region shrink. Existing four-line textarea behavior, focus, selection and draft ownership remain unchanged.
+
+Implementation owner: apply-fast task-6ab38e1a-b785-4741-8a7b-63541b267166 attempt 15. Verified 320/390px layouts with a 420px visible area: composer bottom 833px before versus 409px after. Opening/closing/panning, idle editing, selection, touch caret placement, internal textarea scroll, draft/focus preservation and conversation/history stability passed. Desktop geometry matched baseline at 1100/1440px. 11 tests / 61 assertions, scratch asset build, focused TypeScript and diff checks passed. Evidence: `/tmp/deck-keyboard-after.log`, `/tmp/deck-keyboard-acceptance.ts`, `/tmp/deck-keyboard-after-390-open.png`. Chromium simulation and native window resizing only; physical device confirmation remains pending. No commit requested.
