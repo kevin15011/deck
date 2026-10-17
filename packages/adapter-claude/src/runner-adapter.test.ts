@@ -385,7 +385,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
       const globalPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: outsideProject, environmentId: "claude-development", deckConfig: config });
       expect(globalPlan.blocked).toBe(false);
       expect((await adapter.applyDeveloperTeamInstall({ projectRoot: outsideProject, environmentId: "claude-development", plan: globalPlan })).changedCount).toBeGreaterThan(0);
-      expect((await adapter.buildLaunchPlan!({ ...input, projectRoot: outsideProject })).status).toBe("blocked");
+      expect((await adapter.buildLaunchPlan!({ ...input, projectRoot: outsideProject })).status).toBe("ready");
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: config });
       expect(plan.blocked).toBe(false);
       await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan });
@@ -396,6 +396,11 @@ describe("Claude Deck-owned global plugin adapter", () => {
       expect(ready.plan.envOverlay?.SUPERMEMORY_CC_API_KEY?.sensitive).toBe(true);
       expect(ready.plan.envOverlay?.SUPERMEMORY_REPO_TAG?.value).toBe("sm_project_v1_acme_repo");
       expect(JSON.stringify(plan.files)).not.toContain("fixture-shared-memory-token");
+      const mismatched = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), officialPluginManifest: manifest, resolveMemoryCredential: () => ({ token: "fixture-private-mismatch", profile: "default", canonicalRepoTag: "sm_project_v1_other_repo" }) });
+      const rejected = await mismatched.buildLaunchPlan!(input);
+      expect(rejected.status).toBe("blocked");
+      if (rejected.status === "blocked") expect(rejected.code).toBe("claude-memory-profile-unavailable");
+      expect(JSON.stringify(rejected)).not.toContain("fixture-private-mismatch");
       const withoutNode = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), officialPluginManifest: manifest, verifyNodeRuntime: () => false, resolveMemoryCredential: () => ({ token: "fixture-shared-memory-token", profile: "default", canonicalRepoTag: "sm_project_v1_acme_repo" }) });
       expect((await withoutNode.buildLaunchPlan!(input)).status).toBe("blocked");
       expect(withoutNode.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: config }).blocked).toBe(true);

@@ -40,7 +40,7 @@ test("default Claude composition requires verified global plugin and passes only
     } });
     expect(called).toBe(true);
     expect(outcome.exitCode).toBe(0);
-    expect((await adapter.buildLaunchPlan!({ ...input, deckConfig: { ...deckConfig, adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: true, activeProvider: "supermemory" } } })).status).toBe("blocked");
+    expect((await adapter.buildLaunchPlan!({ ...input, deckConfig: { ...deckConfig, adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: true, activeProvider: "supermemory" } } })).status).toBe("ready");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -153,5 +153,48 @@ test("official memory plus shared Web Search bind only selected secrets to the C
     } });
     expect(result.stdout).toBe("[REDACTED]");
     expect(result.stderr).toBe("[REDACTED]");
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+for (const noOrigin of [false, true]) test(`standalone Claude skips memory for proven absent identity (Git initialized: ${noOrigin}) before plugin readiness`, async () => {
+  const home = await mkdtemp(join(tmpdir(), "deck-claude-absent-identity-"));
+  try {
+    if (noOrigin) execFileSync("git", ["init", "-q"], { cwd: home });
+    let credentialReads = 0;
+    const adapter = createDefaultAdapterRegistry({ claude: {
+      homeDir: home, dataRoot: join(home, "data", "deck"), verifyNodeRuntime: () => false,
+      resolveMemoryCredential: () => { credentialReads++; throw new Error("fixture-private-secret"); },
+    } }).get("claude");
+    const config = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const } } as ReturnType<typeof getDefaultDeckConfig>;
+    const before = JSON.stringify(config);
+    const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: getDefaultDeckConfig() });
+    await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan });
+    const launch = await adapter.buildLaunchPlan!({ projectRoot: home, teamId: "developer-team", mode: "interactive", deckConfig: config });
+    expect(launch.status).toBe("ready");
+    expect(credentialReads).toBe(0);
+    expect(JSON.stringify(config)).toBe(before);
+    if (launch.status !== "ready") return;
+    expect(launch.plan.args.filter((arg) => arg === "--plugin-dir")).toHaveLength(1);
+    expect(launch.plan.envOverlay?.SUPERMEMORY_CC_API_KEY).toBeUndefined();
+    expect(launch.diagnostics.some((item) => item.code === "claude-memory-session-disabled")).toBe(true);
+    await executeRunnerLaunchPlan(launch.plan, { inheritedEnv: { PATH: "/bin", SUPERMEMORY_CC_API_KEY: "fixture-inherited-secret", SUPERMEMORY_REPO_TAG: "wrong" }, spawn: async (_command, _args, options) => {
+      expect(options.env.SUPERMEMORY_CC_API_KEY).toBeUndefined();
+      expect(options.env.SUPERMEMORY_REPO_TAG).toBeUndefined();
+      return { exitCode: 0, stdout: "", stderr: "" };
+    } });
+    expect(JSON.stringify(launch)).not.toContain("fixture-private-secret");
+    expect((await adapter.inspectProject!(home)).diagnostics[0]?.message).toContain("this launch");
+    if (noOrigin) {
+      execFileSync("git", ["remote", "add", "origin", "not-a-canonical-origin"], { cwd: home });
+      const invalid = await adapter.buildLaunchPlan!({ projectRoot: home, teamId: "developer-team", mode: "interactive", deckConfig: config });
+      expect(invalid.status).toBe("blocked");
+      if (invalid.status === "blocked") expect(invalid.code).toBe("claude-project-identity-unverified");
+      expect(credentialReads).toBe(0);
+      execFileSync("git", ["remote", "set-url", "origin", "https://github.com/acme/repo.git"], { cwd: home });
+      execFileSync("git", ["config", "--add", "remote.origin.url", "https://github.com/other/repo.git"], { cwd: home });
+      const ambiguous = await adapter.buildLaunchPlan!({ projectRoot: home, teamId: "developer-team", mode: "interactive", deckConfig: config });
+      expect(ambiguous.status).toBe("blocked");
+      expect(credentialReads).toBe(0);
+    }
   } finally { await rm(home, { recursive: true, force: true }); }
 });
