@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@deck/core": "workspace:*"
+    "@deck/core": "workspace:*",
+    "web-push": "3.6.7"
   },
   "exports": {
     ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "@types/web-push": "3.6.4"
   }
 }

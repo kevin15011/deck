@@ -1,4 +1,5 @@
 /** Loopback-only browser transport. Unix socket remains the sole administrative surface. */
+import { WebPush, type WebPushOptions } from './web-push';
 import { ChatHistory } from './chat-history';
 import type { EventLog } from './event-log';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -29,6 +30,7 @@ type Device = {
   createdAt: string;
   hash: string;
   revokedAt?: string;
+  expiresAt?: string;
   tailscaleIdentity?: string;
 };
 type SocketData = {
@@ -45,16 +47,20 @@ export type WebServiceOptions = {
   config: WebConfig;
   assets?: WebAssets;
   now?: () => number;
+  push?: Pick<WebPushOptions, "send">;
   maxReplayEvents?: number;
   maxQueuedBytes?: number;
 };
 const COOKIE = "deck_device";
+const PUSH_COOKIE_MAX_AGE = 180 * 24 * 60 * 60;
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
 const equal = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const HEADERS = { "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store", "Permissions-Policy": "camera=(), microphone=(), geolocation=()" };
 const safeId = (v: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(v) && !v.includes("..");
 export class WebService {
   private server?: Server<SocketData>;
+  private push?: WebPush;
+  private unsubscribePush?: () => void;
   private records: Device[] = [];
   private sockets = new Set<ServerWebSocket<SocketData>>();
   private challenge?: {
@@ -85,7 +91,7 @@ export class WebService {
     if (existsSync(options.paths.devicesFile)) {
       assertPrivateFile(options.paths.devicesFile);
       const value = JSON.parse(readFileSync(options.paths.devicesFile, "utf8"));
-      if (!Array.isArray(value) || !value.every(d => d && typeof d.id === 'string' && typeof d.name === 'string' && typeof d.createdAt === 'string' && /^[a-f0-9]{64}$/.test(d.hash) && (d.tailscaleIdentity === undefined || typeof d.tailscaleIdentity === 'string' && /^[a-f0-9]{64}$/.test(d.tailscaleIdentity))))
+      if (!Array.isArray(value) || !value.every(d => d && typeof d.id === 'string' && typeof d.name === 'string' && typeof d.createdAt === 'string' && /^[a-f0-9]{64}$/.test(d.hash) && (d.expiresAt === undefined || typeof d.expiresAt === 'string' && Number.isFinite(Date.parse(d.expiresAt))) && (d.tailscaleIdentity === undefined || typeof d.tailscaleIdentity === 'string' && /^[a-f0-9]{64}$/.test(d.tailscaleIdentity))))
         throw new Error("Invalid web device store");
       this.records = value;
     }
@@ -102,6 +108,13 @@ export class WebService {
       try {
         this.server = Bun.serve<SocketData>({ hostname: "127.0.0.1", port: this.options.config.port, maxRequestBodySize: IMAGE_ATTACHMENT_LIMITS.maxFileBytes + 1024 * 1024, fetch: (r, s) => this.fetch(r, s), websocket: { maxPayloadLength: 1024, backpressureLimit: this.options.maxQueuedBytes ?? 1024 * 1024, closeOnBackpressureLimit: false, open: ws => this.open(ws), message: ws => ws.close(1008, "Read-only stream"), close: ws => { ws.data.unsubscribe?.(); this.sockets.delete(ws); } } });
         this.error = undefined;
+        try {
+          this.push = new WebPush({paths:this.options.paths, now:this.now,
+            isDeviceActive:id=>this.records.some(d=>d.id===id&&this.activeDevice(d)),
+            isCurrent:attention=>this.options.service.isPushAttentionCurrent?.(attention)??false,
+            ...this.options.push});
+          this.unsubscribePush = this.options.service.subscribeEvents?.(event=>this.push?.accept(event));
+        } catch { this.push = undefined; }
       }
       catch {
         this.error = "web-listen-failed";
@@ -115,6 +128,7 @@ export class WebService {
   async disable(persist = true) { await this.close(); this.challenge = undefined; if (persist)
     writePrivateFile(this.stateFile, JSON.stringify({ enabled: false })); return this.status(); }
   async close() {
+    this.unsubscribePush?.(); this.unsubscribePush=undefined; this.push?.close(); this.push=undefined;
     for(const entry of this.histories.values())entry.unsubscribe();
     this.histories.clear();
     for (const ws of this.sockets) {
@@ -132,7 +146,11 @@ export class WebService {
     throw new Error("Web listener disabled"); const code = String(randomBytes(4).readUInt32BE() % 100000000).padStart(8, "0"), token = randomBytes(32).toString("base64url"); this.challenge = { codeHash: hash(code), tokenHash: hash(token), expiresAt: this.now() + 300000, attempts: 0 }; return { code, url: `${this.status().url}/#pair=${token}`, expiresAt: new Date(this.challenge.expiresAt).toISOString() }; }
   devices() { return this.records.map(({ hash, tailscaleIdentity, ...d }) => d); }
   revoke(id: string) { const d = this.records.find(d => d.id === id); if (!d)
-    return false; d.revokedAt = new Date(this.now()).toISOString(); this.save(); for (const ws of this.sockets)
+    return false; d.revokedAt = new Date(this.now()).toISOString(); this.save();
+    if(this.push)this.push.revoke(id);
+    else if(existsSync(join(this.options.paths.webDir,'push.json'))){
+      const dormant=new WebPush({paths:this.options.paths,isDeviceActive:deviceId=>this.records.some(record=>record.id===deviceId&&this.activeDevice(record)),isCurrent:()=>false});dormant.revoke(id);dormant.close();
+    } for (const ws of this.sockets)
     if (ws.data.deviceId === id) {
       ws.data.unsubscribe?.();
       ws.close(1008, "Device revoked");
@@ -158,11 +176,20 @@ export class WebService {
     const d: Device = { id: randomUUID(), name: typeof body.name === 'string' ? body.name.slice(0, 80) : 'Browser', createdAt: new Date(this.now()).toISOString(), hash: hash(token), ...(tailscaleIdentity ? { tailscaleIdentity } : {}) };
     this.records.push(d);
     this.save();
-    const secure = r.headers.get('origin')?.startsWith('https://') ? '; Secure' : '';
-    return this.response({ ok: true, device: this.devices().find(x => x.id === d.id) }, 200, { 'Set-Cookie': `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict${secure}` });
+    return this.response({ ok: true, device: this.devices().find(x => x.id === d.id) }, 200, { 'Set-Cookie': this.deviceCookie(r, token) });
   }
-  private device(r: Request, s: Server<SocketData>) { const cookies = r.headers.get("cookie") ?? ""; const token = cookies.split(';').map(s => s.trim()).find(s => s.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1); if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token))
-    return; const h = hash(token); return this.records.find(d => !d.revokedAt && equal(d.hash, h) && (!d.tailscaleIdentity || d.tailscaleIdentity === this.serveIdentity(r, s))); }
+  private cookieToken(r: Request) { return (r.headers.get('cookie') ?? '').split(';').map(c => c.trim()).find(c => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1); }
+  private deviceCookie(r: Request, token: string, persistent = false) {
+    const secure = r.headers.get('origin')?.startsWith('https://') ? '; Secure' : '';
+    const lifetime = persistent ? `; Max-Age=${PUSH_COOKIE_MAX_AGE}; Expires=${new Date(this.now() + PUSH_COOKIE_MAX_AGE * 1000).toUTCString()}` : '';
+    return `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict${secure}${lifetime}`;
+  }
+  private activeDevice(d: Device) { return !d.revokedAt && (d.expiresAt === undefined || Date.parse(d.expiresAt) > this.now()); }
+  private device(r: Request, s: Server<SocketData>) {
+    const token = this.cookieToken(r); if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return;
+    const h = hash(token);
+    return this.records.find(d => this.activeDevice(d) && equal(d.hash, h) && (!d.tailscaleIdentity || d.tailscaleIdentity === this.serveIdentity(r, s)));
+  }
   // Serve strips inbound identity headers and adds its verified user login. Trust
   // this contract only on the explicitly configured loopback proxy deployment.
   private serveIdentity(r: Request, s: Server<SocketData>) {
@@ -244,6 +271,36 @@ export class WebService {
         const device = this.device(r, s);
         if (!device)
           return this.response({ ok: false, code: 'device-required' }, 401);
+        if (path === '/api/push' || path === '/api/push/presence') {
+          const origins=[`http://127.0.0.1:${s.port}`,`http://localhost:${s.port}`,...this.options.config.allowedOrigins];
+          const referer=r.headers.get('referer');
+          const supplied=r.headers.get('origin')??(referer?new URL(referer).origin:undefined);
+          const origin=supplied??origins.find(o=>new URL(o).host===r.headers.get('host'))!;
+          if (!origins.includes(origin) || new URL(origin).host!==r.headers.get('host')) return this.response({ok:false,code:'request-forbidden'},403);
+          if (!this.push || !this.options.service.subscribeEvents) return this.response({ok:false,code:'push-unavailable'},503);
+          if (path === '/api/push' && r.method === 'GET') return this.response({ok:true,...this.push.status(device.id,origin)});
+          if (path === '/api/push' && r.method === 'DELETE') { this.push.unsubscribe(device.id,origin); return this.response({ok:true}); }
+          if (r.method === 'POST') {
+            if (!/^application\/json(?:\s*;|$)/i.test(r.headers.get('content-type')??'')) return this.response({ok:false,code:'request-invalid'},400);
+            const body=JSON.parse(new TextDecoder().decode(await this.boundedBody(r,8192)));
+            // A revoke may race a streaming upload; recheck authorization after reading it.
+            if (!this.device(r,s)) return this.response({ok:false,code:'device-required'},401);
+            if (path === '/api/push') {
+              this.push.subscribe(device.id,origin,body.subscription,body.renew===true);
+              device.expiresAt = new Date(this.now() + PUSH_COOKIE_MAX_AGE * 1000).toISOString(); this.save();
+              return this.response({ok:true},200,{'Set-Cookie':this.deviceCookie(r,this.cookieToken(r)!,true)});
+            }
+            this.push.presence(device.id,origin,body.tabId,body.sessionId,body.revision);
+            return this.response({ok:true});
+          }
+          return this.response({ok:false,code:'route-unknown'},404);
+        }
+        const summary = /^\/api\/sessions\/([^/]+)\/summary$/.exec(path);
+        if(summary && r.method==='GET') {
+          if(!safeId(summary[1]!))return this.response({ok:false,code:'session-invalid'},400);
+          const outcome=await this.options.service.query?.('session.summary',{sessionId:summary[1]})??{ok:false as const,code:'query-unavailable'};
+          return this.response(outcome,outcome.ok?200:404);
+        }
         const attachments = /^\/api\/sessions\/([^/]+)\/attachments(?:\/([^/]+))?$/.exec(path);
         if (attachments && (r.method === 'POST' || r.method === 'GET')) {
           const sessionId=attachments[1]!, attachmentId=attachments[2];
@@ -373,7 +430,7 @@ export class WebService {
     }
   }
   private open(ws: ServerWebSocket<SocketData>) {
-    if (!this.records.some(d => d.id === ws.data.deviceId && !d.revokedAt)) {
+    if (!this.records.some(d => d.id === ws.data.deviceId && this.activeDevice(d))) {
       ws.close(1008, 'Device revoked');
       return;
     }

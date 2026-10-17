@@ -42,6 +42,7 @@ import { MemoryBroker, type SessionMemoryPort } from "./memory-broker";
 import { listOpenSpecArtifacts, readOpenSpecArtifact } from "./openspec-artifacts";
 import { continuationBlock } from "./recovery";
 import type { CommandOutcome, ExecuteOutcome } from "./protocol";
+import type { PushAttention } from "./web-push";
 import type { SessionService } from "./service";
 import type { Supervisor } from "./supervisor";
 
@@ -186,6 +187,7 @@ const ok = (data?: unknown): ExecuteOutcome => ({ ok: true, ...(data === undefin
 const bounded = (text: string, cap = REASON_LIMIT) => redactText(text, cap);
 
 export class SessionManager implements SessionService {
+  private readonly eventListeners = new Set<(event: SessionEvent) => void>();
   private readonly sessions = new Map<string, Live>();
   private readonly creating = new Map<string, { fingerprint: string; result: Promise<ExecuteOutcome> }>();
   private readonly executing = new Map<string, { fingerprint: string; result: Promise<ExecuteOutcome> }>();
@@ -334,6 +336,27 @@ export class SessionManager implements SessionService {
     return this.load(sessionId)?.log;
   }
 
+  subscribeEvents(listener: (event: SessionEvent) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => { this.eventListeners.delete(listener); };
+  }
+
+  isPushAttentionCurrent(attention: PushAttention): boolean {
+    const live = this.sessions.get(attention.sessionId);
+    if (!live || live.broken || this.closing || live.stopping || live.ledger.session.removed || live.ledger.session.state === "ended") return false;
+    if (attention.kind === "question") return live.ledger.pendingQuestions().some(q => q.seq === attention.seq);
+    if (attention.kind === "approval") return live.ledger.pendingApprovals().some(a => a.seq === attention.seq);
+    if (this.leadBusy(live)) return false;
+    if (attention.kind === "failure") return live.ledger.latest(this.leadTaskId(live))?.state === "failed"
+      || live.ledger.latest(this.leadTaskId(live))?.state === "ownership-unsettled"
+      || live.preparation?.state.status === "failed" || !!live.ledger.session.releaseFailure
+      || live.ledger.promptQueue.paused && !["interrupted", "interrupted-forced", "session-released", "session-stopped"].includes(live.ledger.promptQueue.reason ?? "");
+    const latest = live.ledger.latest(this.leadTaskId(live));
+    return !live.ledger.session.released && latest?.state === "completed" && latest.startedSeq <= attention.seq
+      && live.turns.size === 0 && live.queue.length === 0 && !live.wakeTimer && !live.notices.size && !this.waitingPrompts(live).length
+      && !live.ledger.pendingQuestions().length && !live.ledger.pendingApprovals().length;
+  }
+
   hasRunningWork(): boolean {
     if (this.preparationJobs.size) return true;
     for (const live of this.sessions.values()) if (live.releaseDrain || live.cleanupFailures?.length || live.ledger.session.releasePending && !!live.memory || live.turns.size || live.queue.length || live.wakeTimer !== undefined || live.preparation?.state.status === "preparing") return true;
@@ -352,6 +375,11 @@ export class SessionManager implements SessionService {
 
   async query(name: string, args: unknown): Promise<CommandOutcome> {
     switch (name) {
+      case "session.summary": {
+        const id = (args as {sessionId?:unknown} | null)?.sessionId;
+        const summary = typeof id === "string" ? this.summarize(id) : undefined;
+        return summary ? ok({session: summary}) : fail("unknown-session");
+      }
       case "projects.list": return ok({ projects: this.projectStore().list() });
       case "directories.list":
         try { return ok(this.projectStore().directories((args ?? {}) as never)); } catch { return fail("directory-invalid", "Select a directory inside your home folder."); }
@@ -675,6 +703,7 @@ export class SessionManager implements SessionService {
         live.broken = true;
         this.options.logger?.error("ledger.apply-failed", { sessionId: meta.sessionId, seq: event.seq, error: (error as Error).message });
       }
+      for (const listener of this.eventListeners) { try { listener(event); } catch { /* observers never affect session work */ } }
     });
     if (repairCreation && !ledger.session.projectRoot) {
       this.append(live, { kind: "session.created", data: meta.creationData ?? { projectRoot: meta.projectRoot, members: meta.members, commandId: meta.createCommandId, createdBy: "recovery", ...(meta.approvals ? { approvals: meta.approvals } : {}), ...(meta.changeId ? { changeId: meta.changeId } : {}) } });

@@ -1,3 +1,4 @@
+import { PushNotifications, usePushPresence, sessionFromURL } from './push-notifications';
 import { DraftBoundary, DraftStore } from './draft-boundary';
 import { useChatHistory } from './chat-history';
 import { Approvals, AutoApprovalMessage } from './approvals';
@@ -49,6 +50,7 @@ export function App() {
     const sessions = histories[projectId]?.sessions ?? [];
     const catalogRequest = useRef(0), sessionMetadata = useRef(new Map<string, WorkspaceSession>());
     const commandInFlight = useRef(false);
+    const notificationSession = useRef(sessionFromURL(window.location.href));
     const selectedSession = useRef(selected);
     selectedSession.current = selected;
     const [previewImage,setPreviewImage]=useState<PreviewImage>();
@@ -152,10 +154,17 @@ export function App() {
             if (version !== catalogRequest.current) return;
             const available = reply.data.projects as Project[];
             let saved = ''; try { saved = localStorage.getItem('deck.project') ?? ''; } catch { }
-            const requested = projectOverride ?? activeProjectId.current;
+            let linkedSession: WorkspaceSession | undefined;
+            if (notificationSession.current) {
+                const id = notificationSession.current; notificationSession.current = '';
+                try { linkedSession = (await api(`/api/sessions/${encodeURIComponent(id)}/summary`)).data.session; }
+                catch { setError('This notification’s session is no longer available.'); }
+            }
+            const requested = linkedSession?.projectId ?? projectOverride ?? activeProjectId.current;
             const chosen = available.some(item => item.projectId === requested) ? requested : available.some(item => item.projectId === saved) ? saved : available[0]?.projectId ?? '';
             setProjects(available);
             if (activeProjectId.current !== chosen) { const previous = activeProjectId.current; activeProjectId.current = chosen; setProjectId(chosen); if (previous) selectSession(''); if (chosen) expandProject(chosen); }
+            if (linkedSession) { sessionMetadata.current.set(sessionIdOf(linkedSession), linkedSession); selectSession(sessionIdOf(linkedSession)); setMobileTab('chat'); }
             setPaired(true);
             const ids = new Set(expandedProjectIds.current); if (chosen) ids.add(chosen);
             await Promise.all([...ids].map(id => loadHistory(id)));
@@ -228,8 +237,21 @@ export function App() {
     }, [selected, hydratedSession, narrow, mobileTab]);
     function selectSession(id: string, closeDrawer = true) {
         if (id !== selectedSession.current) { anchor.current=undefined;historyGesture.current=false;touchY.current=undefined;setOpenQuestion(''); selectedSession.current = id; setHydratedSession(''); setView(emptyState()); setConnection('Reconnecting'); setError(''); restored.current = ''; following.current = true; setUnseen(false); }
+        const route = new URL(window.location.href); if(id) route.searchParams.set('session',id); else route.searchParams.delete('session'); window.history.replaceState(null,'',route);
         setSelected(id); if (closeDrawer) setDrawerOpen(false);
     }
+    useEffect(() => {
+        if(!paired || !('serviceWorker' in navigator))return;
+        const open=(event:MessageEvent)=>{
+            const id=event.data?.sessionId;
+            if(event.data?.type!=='deck.open-session'||typeof id!=='string'||sessionFromURL(`${window.location.origin}/?session=${encodeURIComponent(id)}`)!==id)return;
+            notificationSession.current=id;
+            event.ports[0]?.postMessage({opened:true});
+            void load();
+        };
+        navigator.serviceWorker.addEventListener('message',open);
+        return()=>navigator.serviceWorker.removeEventListener('message',open);
+    },[paired]);
     function hideSession(id: string) {
         removedSessions.current.add(id); removingSessions.current.delete(id); sessionMetadata.current.delete(id); ++sessionMutation.current;
         setHistories(previous => Object.fromEntries(Object.entries(previous).map(([project, history]) => [project, {...history, sessions: history.sessions.filter(session => sessionIdOf(session) !== id)}])));
@@ -287,6 +309,7 @@ export function App() {
     const approvals = Object.values(view.approvals);
     const ended = (view.events.length ? view.state : currentSession?.state) === 'ended';
     const working = (view.events.length ? view.state === 'running' : currentSession?.state === 'running') || Object.values(view.tasks).some(task => ['queued', 'running'].includes(String(task.state))) || approvals.length > 0 || promptInbox.inbox.queued.length > 0 || !!promptInbox.inbox.active;
+    usePushPresence(api, paired, selected, chatVisible && connection === 'Connected');
     const preparationSignal = view.events.filter(event => event.kind === 'session.assignment' || event.kind === 'session.reopened' || (event.kind === 'diagnostic' && event.data.code === 'session.preparation')).at(-1)?.seq ?? 0;
     const readiness = useSessionPreparation(api, selected, paired && connection === 'Connected', generation, preparationSignal);
     const removing = currentSession?.removing === true || removingSessions.current.has(selected);
@@ -405,7 +428,7 @@ export function App() {
             const bounds = event.currentTarget.getBoundingClientRect();
             if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) setDrawerOpen(false);
         }}><div className="drawer-heading"><h2 id="drawer-title">Workspace</h2><button className="quiet drawer-close" type="button" onClick={() => setDrawerOpen(false)} aria-label="Close sessions"><NavigationIcon kind="close"/></button></div><nav aria-label="Mobile sessions">{sessionButtons}</nav></dialog>
-        <div className={`app-body${!narrow && workspaceCollapsed ? ' workspace-collapsed' : ''}`}><header className="app-header"><button className="sidebar-toggle quiet" type="button" aria-label={narrow ? 'Open sessions' : collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={narrow ? drawerOpen : !collapsed} onClick={() => narrow ? setDrawerOpen(true) : setCollapsed(value => !value)}><NavigationIcon kind="menu"/></button><div className="session-identity"><h1>{selected ? currentSession ? sessionName(currentSession) : 'Session conversation' : project?.name ?? 'Choose a project'}</h1>{lead && <p className="lead-identity">Lead <strong>{String(lead.runnerId ?? 'Runner pending')}</strong><span title={String(lead.modelId ?? 'Model pending')}>{String(lead.modelId ?? 'Model pending')}</span></p>}</div><div className="connection"><span className={`connection-dot${canCompose ? ' ready' : ''}`} aria-hidden="true"/><span>{selected ? connection !== 'Connected' ? connection : canCompose ? 'Connected' : 'Disconnected' : 'Ready'}</span><small>{selected ? closing ? 'Closing' : ended ? 'Not prepared' : readiness.preparation?.status === 'ready' ? view.state : 'Not prepared' : 'Local'}</small></div>{!narrow && <button type="button" className="workspace-toggle quiet" aria-label={workspaceCollapsed ? 'Show workspace panel' : 'Hide workspace panel'} title={workspaceCollapsed ? 'Show workspace panel' : 'Hide workspace panel'} aria-expanded={!workspaceCollapsed} aria-controls="session-workspace" onClick={() => setWorkspaceCollapsed(value => !value)}><NavigationIcon kind="panel"/></button>}<ThemeSelect value={theme} onChange={setTheme}/></header>
+        <div className={`app-body${!narrow && workspaceCollapsed ? ' workspace-collapsed' : ''}`}><header className="app-header"><button className="sidebar-toggle quiet" type="button" aria-label={narrow ? 'Open sessions' : collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={narrow ? drawerOpen : !collapsed} onClick={() => narrow ? setDrawerOpen(true) : setCollapsed(value => !value)}><NavigationIcon kind="menu"/></button><div className="session-identity"><h1>{selected ? currentSession ? sessionName(currentSession) : 'Session conversation' : project?.name ?? 'Choose a project'}</h1>{lead && <p className="lead-identity">Lead <strong>{String(lead.runnerId ?? 'Runner pending')}</strong><span title={String(lead.modelId ?? 'Model pending')}>{String(lead.modelId ?? 'Model pending')}</span></p>}</div><div className="connection"><span className={`connection-dot${canCompose ? ' ready' : ''}`} aria-hidden="true"/><span>{selected ? connection !== 'Connected' ? connection : canCompose ? 'Connected' : 'Disconnected' : 'Ready'}</span><small>{selected ? closing ? 'Closing' : ended ? 'Not prepared' : readiness.preparation?.status === 'ready' ? view.state : 'Not prepared' : 'Local'}</small></div>{!narrow && <button type="button" className="workspace-toggle quiet" aria-label={workspaceCollapsed ? 'Show workspace panel' : 'Hide workspace panel'} title={workspaceCollapsed ? 'Show workspace panel' : 'Hide workspace panel'} aria-expanded={!workspaceCollapsed} aria-controls="session-workspace" onClick={() => setWorkspaceCollapsed(value => !value)}><NavigationIcon kind="panel"/></button>}<PushNotifications api={api}/><ThemeSelect value={theme} onChange={setTheme}/></header>
         {error && <p className="error app-error" role="alert">{error}</p>}
         {selected && <SessionControls key={selected} approvalMode={view.approvalMode??currentSession?.approvalMode} approvalModeSource={view.approvalModeSource??currentSession?.approvalModeSource} onApprovals={mode=>changeApprovals(selected,mode)} grants={sessionGrants(view,currentSession)} onRevokeGrant={grantId=>revokeGrant(selected,grantId)} showPrimary={narrow && mobileTab !== 'chat'} connected={connection === 'Connected'} ended={ended} closing={closing} releaseFailed={releaseFailed} removing={removing} working={working} busy={busy} preparation={readiness.preparation} error={readiness.error} sharedActive={Math.max(0, (currentSession?.sharedActiveSessions ?? 0) - (currentSession?.running ? 1 : 0))} predecessor={currentSession?.predecessorSessionId} onReconnect={() => setReconnectRevision(value => value + 1)} onPrepare={() => void lifecycle('session.prepare')} onCancel={() => void lifecycle('session.prepare.cancel')} onClose={() => removing && currentSession ? void removeSession(currentSession) : void lifecycle('session.release')} onAssignments={() => showDialog('assignments')} onPredecessor={() => { if (currentSession?.predecessorSessionId) selectSession(currentSession.predecessorSessionId); }}/>}
         <Approvals key={`approvals:${selected}`} events={approvals} busy={busy||connection!=='Connected'} onRespond={body=>mutate(body,selected)}/>

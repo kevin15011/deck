@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createECDH, randomBytes, randomUUID } from "node:crypto";
 import { EventLog } from "../event-log";
 import { resolveStatePaths, ensureStateLayout } from "../paths";
 import { WebService } from "../web-service";
@@ -363,4 +363,30 @@ test('Serve credentials retain identity binding after reload and stop authentica
   }
   await restarted.close();
  }
+});
+
+const pushSubscription = (suffix:string) => {
+ const key=createECDH('prime256v1');key.generateKeys();return {endpoint:`https://fcm.googleapis.com/fcm/send/${suffix}`,keys:{p256dh:key.getPublicKey().toString('base64url'),auth:randomBytes(16).toString('base64url')}};
+};
+const pushService:SessionService={execute:async()=>({ok:true}),openLog:()=>undefined,hasRunningWork:()=>false,subscribeEvents:()=>()=>{},isPushAttentionCurrent:()=>true};
+test('push opt-in persists current revocable cookie for 180 days and enforces its expiry after reload',async()=>{
+ let now=Date.now();const f=fixture({now:()=>now,service:pushService});const {cookie,response:paired}=await pair(f);expect(paired.headers.get('set-cookie')).not.toContain('Max-Age');
+ const enabled=await fetch(`${f.base}/api/push`,{method:'POST',headers:{Cookie:cookie,Origin:f.base,'Content-Type':'application/json'},body:JSON.stringify({subscription:pushSubscription('durable')})});expect(enabled.status).toBe(200);const renewed=enabled.headers.get('set-cookie')!;expect(renewed).toContain('Max-Age=15552000');expect(renewed).toContain('HttpOnly; SameSite=Strict');expect(renewed.split(';')[0]).toBe(cookie);
+ expect(f.host.devices()[0]?.expiresAt).toBe(new Date(now+180*86400_000).toISOString());
+ await f.host.close();const host=new WebService({paths:f.paths,service:pushService,now:()=>now,config:{port:0,trustedProxy:null,allowedOrigins:[],allowFunnel:false}});hosts.push(host);host.enable();const base=host.status().url!;
+ expect((await fetch(`${base}/api/push`,{headers:{Cookie:cookie}})).status).toBe(200);now+=180*86400_000+1;expect((await fetch(`${base}/api/push`,{headers:{Cookie:cookie}})).status).toBe(401);
+});
+test('re-enrollment cannot steal surviving subscription; fresh subscription succeeds without weakening Origin checks',async()=>{
+ const f=fixture({service:pushService});const first=await pair(f);const original=pushSubscription('former-device');const send=(cookie:string,subscription:unknown,origin=f.base)=>fetch(`${f.base}/api/push`,{method:'POST',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({subscription})});expect((await send(first.cookie,original)).status).toBe(200);
+ const fresh=await fetch(`${f.base}/api/local-access`,{method:'POST',headers:{Origin:f.base,'Content-Type':'application/json'},body:'{}'});const cookie=fresh.headers.get('set-cookie')!.split(';')[0]!;expect(cookie).not.toBe(first.cookie);
+ expect((await send(cookie,original)).status).toBe(400);expect((await send(cookie,pushSubscription('fresh-device'),'https://evil.test')).status).toBe(403);expect((await send(cookie,pushSubscription('fresh-device'))).status).toBe(200);
+ const stored=JSON.parse(readFileSync(join(f.paths.webDir,'push.json'),'utf8')).subscriptions;expect(stored).toHaveLength(2);expect(stored.find((r:any)=>r.subscription.endpoint===original.endpoint).deviceId).toBe(f.host.devices()[0]!.id);
+});
+
+test('durable push opt-in retains HTTPS flags, Serve identity binding and immediate revocation',async()=>{
+ const origin='https://deck.test.ts.net';const f=fixture({service:pushService,config:{port:0,trustedProxy:'127.0.0.1',allowedOrigins:[origin],allowFunnel:false,tailscaleServeAccess:true}});
+ const headers={Host:'deck.test.ts.net',Origin:origin,'X-Forwarded-Proto':'https','Tailscale-User-Login':'alice@example.test','Content-Type':'application/json'};
+ const paired=await fetch(`${f.base}/api/local-access`,{method:'POST',headers,body:'{}'});expect(paired.status).toBe(200);const cookie=paired.headers.get('set-cookie')!.split(';')[0]!;
+ const enabled=await fetch(`${f.base}/api/push`,{method:'POST',headers:{...headers,Cookie:cookie},body:JSON.stringify({subscription:pushSubscription('secure')})});expect(enabled.status).toBe(200);expect(enabled.headers.get('set-cookie')).toContain('HttpOnly; SameSite=Strict; Secure; Max-Age=15552000');
+ expect((await fetch(`${f.base}/api/push`,{headers:{...headers,Cookie:cookie,'Tailscale-User-Login':'bob@example.test'}})).status).toBe(401);f.host.revoke(f.host.devices()[0]!.id);expect((await fetch(`${f.base}/api/push`,{headers:{...headers,Cookie:cookie}})).status).toBe(401);
 });

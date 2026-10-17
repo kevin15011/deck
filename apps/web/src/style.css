@@ -818,3 +818,16 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .markdown th { color: var(--md-table-head); background: var(--md-table-bg); }
 .markdown th, .markdown td, .markdown .table-scroll, .markdown hr { border-color: var(--md-rule); }
 .markdown input[type=checkbox] { accent-color: var(--md-task); }
+
+/* Browser-specific, opt-in attention alerts. Uses the existing workspace palette. */
+.push-control{position:relative;flex:none}
+.push-control>summary{cursor:pointer;display:flex;align-items:center;justify-content:center;min-width:36px;min-height:40px;list-style:none;color:var(--muted)}
+.push-control>summary::-webkit-details-marker{display:none}
+.push-control>summary:hover{color:var(--ink)}
+.push-control>summary svg{width:19px;height:19px}
+.push-enabled{position:absolute;width:6px;height:6px;background:var(--accent);border-radius:50%;right:6px;top:6px}
+.push-settings{position:absolute;z-index:40;right:0;top:calc(100% + 8px);width:320px;max-width:calc(100vw - 24px);padding:16px;border:1px solid var(--border);background:var(--surface);box-shadow:0 12px 32px #0005;font-size:13px;line-height:1.5}
+.push-settings h2{font-size:16px;margin:0 0 12px}
+.push-settings p{margin:0 0 12px;color:var(--muted)}
+.push-settings button{min-height:40px}
+@media(max-width:1000px){.push-settings{position:fixed;right:12px;top:64px}.push-control>summary{min-width:32px}}

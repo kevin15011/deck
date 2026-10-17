@@ -2,6 +2,8 @@
  * Port between the control server and the session manager (S1b implements it).
  * The server owns transport concerns (framing, idempotency, attach); the service owns sessions.
  */
+import type { SessionEvent } from "@deck/core/session/events";
+import type { PushAttention } from "./web-push";
 import type { ImageAttachment, SessionCommand } from "@deck/core/session/commands";
 import type { QuestionBroker } from "./question-broker";
 import type { CredentialGrant } from "./credentials";
@@ -18,6 +20,10 @@ export interface SessionService {
   readAttachment?(sessionId: string, attachmentId: string): {attachment: ImageAttachment; bytes: Uint8Array} | undefined;
   /** The event log of a known session, or undefined. */
   openLog(sessionId: string): EventLog | undefined;
+  /** Live appended events only: no history replay and independent of attached clients. */
+  subscribeEvents?(listener: (event: SessionEvent) => void): () => void;
+  /** Recheck queued attention against the current in-memory ledger before delivery. */
+  isPushAttentionCurrent?(attention: PushAttention): boolean;
   /** True while any task runs: keeps the daemon alive and blocks version-skew restarts. */
   hasRunningWork(): boolean;
   /** Read-only/admin queries from clients (`sessions.list`, `sessions.prune`, `drivers.status`, ...). Optional. */

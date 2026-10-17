@@ -28,7 +28,10 @@ export async function buildWebAssets(): Promise<WebAssets> {
     }
     if (!assets['/app.js'] || !assets['/app.css'])
         throw new Error('Web build did not emit JavaScript and CSS');
-    assets['/index.html'] = { contentType: 'text/html; charset=utf-8', body: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Deck workspace</title><link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(FAVICON)}"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>` };
+    assets['/service-worker.js'] = {body: await readFile(resolve(import.meta.dir, '../apps/web/src/service-worker.js'), 'utf8'), contentType: 'text/javascript; charset=utf-8'};
+    assets['/manifest.webmanifest'] = {body: JSON.stringify({id:'/',name:'Deck workspace',short_name:'Deck',start_url:'/',scope:'/',display:'standalone',icons:[{src:'/icon.svg',sizes:'any',type:'image/svg+xml',purpose:'any'}]}),contentType:'application/manifest+json'};
+    assets['/icon.svg'] = {body:FAVICON,contentType:'image/svg+xml'};
+    assets['/index.html'] = { contentType: 'text/html; charset=utf-8', body: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icon.svg"><title>Deck workspace</title><link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(FAVICON)}"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>` };
     return assets;
 }
 export async function generateWebAssets(output = resolve(import.meta.dir, '../apps/cli/src/runtime/web-assets.generated.ts')): Promise<void> {

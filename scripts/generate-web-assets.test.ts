@@ -12,7 +12,7 @@ async function generate(path: string) {
 async function temporaryAssets() { const dir = await mkdtemp(join(tmpdir(), 'deck-web-build-')); const path = join(dir, 'assets.ts'); await generate(path); const module = await import(path); await rm(dir, { recursive: true, force: true }); return module.WEB_ASSETS; }
 test('browser production assets are local and have no inline scripts', async () => {
     const a = await temporaryAssets();
-    expect(Object.keys(a).sort()).toEqual(['/app.css', '/app.js', '/index.html']);
+    expect(Object.keys(a).sort()).toEqual(['/app.css', '/app.js', '/icon.svg', '/index.html', '/manifest.webmanifest', '/service-worker.js']);
     expect(a['/index.html']!.body).not.toMatch(/https?:|<script[^>]*>[^<]+/);
     expect(a['/app.js']!.body).not.toContain('Proyects/deck');
     expect(computeWebDigest({ ...a, '/app.js': { ...a['/app.js']!, body: 'tampered' } })).not.toBe(computeWebDigest(a));
