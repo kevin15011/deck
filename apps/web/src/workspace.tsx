@@ -143,7 +143,15 @@ function TranscriptMessages({ model, visible, acknowledge }: { model: TaskModel;
 
 export function Subagents({ api,view, sessionId = '', visible = false, readMarkers = {}, acknowledge = () => {} }: { api?:Api;view: ViewState; sessionId?: string; visible?: boolean; readMarkers?: ReadMarkers; acknowledge?: (key: string, seq: number) => void }) {
     const entries = Object.entries(view.tasks).filter(([id, task]) => id !== 'lead' && task.memberId !== 'lead') as TaskEntry[];
-    const models = entries.map(([id, task]) => taskModel(view, id, task, sessionId, readMarkers)).sort((a, b) => (b.reply?.seq ?? 0) - (a.reply?.seq ?? 0));
+    // Compact reconnect history retains these lifecycle events as well as replies.
+    const delegations = new Map<string, number>();
+    for (const event of view.events) {
+        if (event.kind !== 'task.created' && event.kind !== 'task.continued') continue;
+        const id = event.source.taskId ?? event.data.taskId;
+        if (typeof id === 'string') delegations.set(id, Math.max(delegations.get(id) ?? 0, event.seq));
+    }
+    const models = entries.map(([id, task]) => ({ ...taskModel(view, id, task, sessionId, readMarkers), delegationSeq: delegations.get(id) ?? 0 }))
+        .sort((a, b) => Math.max(b.delegationSeq, b.reply?.seq ?? 0) - Math.max(a.delegationSeq, a.reply?.seq ?? 0));
     const [openId, setOpenId] = useState('');
     useEffect(() => { setOpenId(''); }, [sessionId]);
     const detail = models.find(model => model.id === openId);

@@ -4,6 +4,36 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { SessionEvent } from '../../../packages/core/src/session/events';
 import { emptyState } from './state';
 import { Subagents } from './workspace';
+import { CurrentEvents } from '../../../packages/core/src/session/chat-history';
+import { snapshotView } from './chat-history';
+import { reduceEvent } from './state';
+
+test('creation and continuation promote immediately in live and compact reconnect views', () => {
+    const event = (seq: number, taskId: string, kind: SessionEvent['kind'], data: Record<string, unknown> = {}): SessionEvent => ({ v: 1, sessionId: 's', seq, kind, data: { taskId, ...data }, source: { taskId }, ts: '2026-01-01T00:00:00Z' });
+    let view = emptyState();
+    const current = new CurrentEvents();
+    const append = (...events: SessionEvent[]) => {
+        for (const event of events) { view = reduceEvent(view, event); current.apply(event); }
+    };
+    const expectOrder = (expected: string[]) => {
+        for (const state of [view, snapshotView(current.values(), view.seq)]) {
+            const html = renderToStaticMarkup(<Subagents view={state} sessionId="s"/>);
+            expect([...html.matchAll(/<h3>([^<]+)<\/h3>/g)].map(match => match[1])).toEqual(expected);
+        }
+    };
+    append(event(1, 'reused', 'task.created'), event(2, 'reused', 'message.completed', { role: 'assistant', text: 'Old reply' }), event(3, 'prior', 'task.created'), event(4, 'prior', 'message.completed', { role: 'assistant', text: 'Prior reply' }));
+    expectOrder(['prior', 'reused']);
+    append(event(5, 'fresh', 'task.created'));
+    expectOrder(['fresh', 'prior', 'reused']);
+    append(event(6, 'reused', 'task.continued', { attempt: 2 }));
+    expectOrder(['reused', 'fresh', 'prior']);
+    append(event(7, 'prior', 'tool.started', { name: 'Read' }), event(8, 'fresh', 'message.delta', { text: 'Streaming' }), event(9, 'prior', 'task.state', { state: 'running' }));
+    expectOrder(['reused', 'fresh', 'prior']);
+    append(event(10, 'fresh', 'message.completed', { role: 'assistant', text: 'Fresh reply' }));
+    expectOrder(['fresh', 'reused', 'prior']);
+    append(event(11, 'prior', 'task.continued', { attempt: 2 }));
+    expectOrder(['prior', 'fresh', 'reused']);
+});
 
 test('subagents render newest public reply first with stable unanswered ordering', () => {
     const view = emptyState();
