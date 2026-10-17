@@ -821,7 +821,29 @@ test("D-REACH-SKILL-05 canonical plugin records correlated native skill errors a
   expect(JSON.parse(await tool.execute({ operation: "status" }, { sessionID: "native", messageID: "lead" }))).toEqual({ outcome: "failed" });
 });
 
-test("D-REACH-SKILL-06 canonical plugin keeps one active workflow generation per native session", async () => {
+// Exercise the default composition without consuming the developer's installed skills
+// or project registry. A child process also keeps HOME isolated from parallel tests.
+function runIsolatedNativeSkillDiscoveryTest(exercise: () => Promise<void>): void {
+  const root = mkdtempSync(join(tmpdir(), "deck-native-inventory-"));
+  try {
+    const home = join(root, "home");
+    const project = join(root, "project");
+    mkdirSync(home, { recursive: true });
+    mkdirSync(project, { recursive: true });
+    const pluginUrl = pathToFileURL(join(process.cwd(), "packages/adapter-opencode/assets/opencode/plugins/developer-team-execution.ts")).href;
+    const script = `
+      import { expect } from "bun:test";
+      import createOpenCodeDeveloperTeamExecutionPluginDefault from ${JSON.stringify(pluginUrl)};
+      await (${exercise.toString()})();
+    `;
+    const run = Bun.spawnSync({ cmd: [process.execPath, "--eval", script], cwd: project, env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
+    expect({ exitCode: run.exitCode, stderr: run.stderr.toString() }).toEqual({ exitCode: 0, stderr: "" });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("D-REACH-SKILL-06 canonical plugin keeps one active workflow generation per native session", () => runIsolatedNativeSkillDiscoveryTest(async () => {
   const hooks = await createOpenCodeDeveloperTeamExecutionPluginDefault({ directory: process.cwd(), worktree: process.cwd(), client: { request: async () => [{ name: "helper", dir: "/tmp/helper", taskSignals: ["native-only"] }] } } as any);
   const tool = hooks.tool?.deck_skill_discovery;
   if (!tool) throw new Error("missing skill discovery tool");
@@ -836,9 +858,9 @@ test("D-REACH-SKILL-06 canonical plugin keeps one active workflow generation per
   await hooks["tool.execute.after"]({ tool: "skill", sessionID: "parent", callID: "call-1" }, { metadata: { name: "helper", dir: "/tmp/helper" } });
   expect(JSON.parse(await tool.execute({ operation: "status" }, { sessionID: "parent", messageID: "m4" }))).toEqual({ outcome: "loaded" });
   expect(JSON.parse(await tool.execute({ operation: "status" }, { sessionID: "child", messageID: "child-m2" }))).toEqual({ outcome: "unobserved" });
-});
+}));
 
-test("D-REACH-SKILL-07 canonical plugin invalidates old generation after a new search", async () => {
+test("D-REACH-SKILL-07 canonical plugin invalidates old generation after a new search", () => runIsolatedNativeSkillDiscoveryTest(async () => {
   const hooks = await createOpenCodeDeveloperTeamExecutionPluginDefault({ directory: process.cwd(), worktree: process.cwd(), client: { request: async () => [{ name: "helper", dir: "/tmp/helper", taskSignals: ["native-only"] }] } } as any);
   const tool = hooks.tool?.deck_skill_discovery;
   if (!tool) throw new Error("missing skill discovery tool");
@@ -848,9 +870,9 @@ test("D-REACH-SKILL-07 canonical plugin invalidates old generation after a new s
   await hooks["tool.execute.before"]({ tool: "skill", sessionID: "native", callID: "call-1" }, { args: { name: "helper" } });
   await hooks["tool.execute.after"]({ tool: "skill", sessionID: "native", callID: "call-1" }, { metadata: { name: "helper", dir: "/tmp/helper" } });
   expect(JSON.parse(await tool.execute({ operation: "status" }, { sessionID: "native", messageID: "m4" }))).toEqual({ outcome: "unobserved" });
-});
+}));
 
-test("D-REACH-SKILL-08 default export constructs real discovery host from raw native plugin input", async () => {
+test("D-REACH-SKILL-08 default export constructs real discovery host from raw native plugin input", () => runIsolatedNativeSkillDiscoveryTest(async () => {
   const calls: unknown[] = [];
   const hooks = await createOpenCodeDeveloperTeamExecutionPluginDefault({
     directory: process.cwd(),
@@ -872,9 +894,9 @@ test("D-REACH-SKILL-08 default export constructs real discovery host from raw na
   await hooks["tool.execute.before"]({ tool: "skill", sessionID: "native", callID: "skill-1" }, { args: { name: "helper" } });
   await hooks["tool.execute.after"]({ tool: "skill", sessionID: "native", callID: "skill-1" }, { metadata: { name: "helper", dir: "/native/helper" } });
   expect(JSON.parse(await tool.execute({ operation: "status" }, { sessionID: "native", messageID: "m3" }))).toEqual({ outcome: "loaded" });
-});
+}));
 
-test("D-REACH-SKILL-08B default export reads OpenCode SDK skill envelope without content and correlates SKILL.md locations", async () => {
+test("D-REACH-SKILL-08B default export reads OpenCode SDK skill envelope without content and correlates SKILL.md locations", () => runIsolatedNativeSkillDiscoveryTest(async () => {
   let contentRead = false;
   const calls: unknown[] = [];
   const projectLocation = "/native/project-helper/SKILL.md";
@@ -916,7 +938,7 @@ test("D-REACH-SKILL-08B default export reads OpenCode SDK skill envelope without
   await hooks["tool.execute.after"]({ tool: "skill", sessionID: "native", callID: "skill-1" }, { metadata: { name: "project-helper", dir: "/native/project-helper" } });
   expect(JSON.parse(await tool.execute({ operation: "status" }, { sessionID: "native", messageID: "m3" }))).toEqual({ outcome: "loaded" });
   expect(contentRead).toBe(false);
-});
+}));
 
 test("D-REACH-SKILL-08C native SDK fallback is used only when public inventory methods are unavailable", async () => {
   let lowLevelCalls = 0;
@@ -1217,7 +1239,7 @@ test("D-REACH-SKILL-09B native inventory envelope semantics and descriptor fallb
   }
 });
 
-test("D-REACH-SKILL-09C native inventory bounds never read content or row 65", async () => {
+test("D-REACH-SKILL-09C native inventory bounds never read content or row 65", () => runIsolatedNativeSkillDiscoveryTest(async () => {
   let contentRead = false;
   const row = { name: "helper", dir: "/native/helper", taskSignals: ["native-only"], get content() { contentRead = true; throw new Error("content read"); } };
   let hooks = await createOpenCodeDeveloperTeamExecutionPluginDefault({ directory: process.cwd(), worktree: process.cwd(), client: { request: async () => [row] } } as any);
@@ -1236,9 +1258,9 @@ test("D-REACH-SKILL-09C native inventory bounds never read content or row 65", a
   const tooMany = JSON.parse(await tool.execute({ operation: "search", terms: ["native-only"] }, { sessionID: "native-row65", messageID: "m1" }));
   expect(tooMany.candidates.length).toBe(0);
   expect(row65Read).toBe(false);
-});
+}));
 
-test("D-REACH-SKILL-10 changed native exposure rejects old prepared rendezvous", async () => {
+test("D-REACH-SKILL-10 changed native exposure rejects old prepared rendezvous", () => runIsolatedNativeSkillDiscoveryTest(async () => {
   let dir = "/native/a";
   const hooks = await createOpenCodeDeveloperTeamExecutionPluginDefault({
     directory: process.cwd(), worktree: process.cwd(), client: { request: async () => [{ name: "helper", dir, taskSignals: ["native-only"] }] },
@@ -1251,9 +1273,9 @@ test("D-REACH-SKILL-10 changed native exposure rejects old prepared rendezvous",
   await expect(hooks["tool.execute.before"]({ tool: "skill", sessionID: "native", callID: "skill-1" }, { args: { name: "helper" } })).rejects.toThrow("invalid-evidence");
   await hooks["tool.execute.after"]({ tool: "skill", sessionID: "native", callID: "skill-1" }, { metadata: { name: "helper", dir: "/native/a" } });
   expect(JSON.parse(await tool.execute({ operation: "status" }, { sessionID: "native", messageID: "m3" }))).toEqual({ outcome: "unobserved" });
-});
+}));
 
-test("D-REACH-SKILL-11 mismatch is terminal, missing evidence is unobserved, and message part errors fail", async () => {
+test("D-REACH-SKILL-11 mismatch is terminal, missing evidence is unobserved, and message part errors fail", () => runIsolatedNativeSkillDiscoveryTest(async () => {
   const hooks = await createOpenCodeDeveloperTeamExecutionPluginDefault({
     directory: process.cwd(), worktree: process.cwd(), client: { request: async () => [{ name: "helper", dir: "/native/helper", taskSignals: ["native-only"] }] },
   } as any);
@@ -1277,9 +1299,9 @@ test("D-REACH-SKILL-11 mismatch is terminal, missing evidence is unobserved, and
   await hooks["tool.execute.before"]({ tool: "skill", sessionID: "native", callID: "call-error" }, { args: { name: "helper" } });
   await hooks.event({ event: { type: "message.part.updated", sessionID: "native", properties: { part: { type: "tool", tool: "skill", callID: "call-error", state: { status: "error" }, args: { name: "helper" } } } } as any });
   expect(JSON.parse(await tool.execute({ operation: "status" }, { sessionID: "native", messageID: "m9" }))).toEqual({ outcome: "failed" });
-});
+}));
 
-test("D-REACH-SKILL-13 nested message part error uses part session and call without root session", async () => {
+test("D-REACH-SKILL-13 nested message part error uses part session and call without root session", () => runIsolatedNativeSkillDiscoveryTest(async () => {
   const hooks = await createOpenCodeDeveloperTeamExecutionPluginDefault({
     directory: process.cwd(), worktree: process.cwd(), client: { request: async () => [{ name: "helper", dir: "/native/helper", taskSignals: ["native-only"] }] },
   } as any);
@@ -1292,7 +1314,7 @@ test("D-REACH-SKILL-13 nested message part error uses part session and call with
   expect(JSON.parse(await tool.execute({ operation: "status" }, { sessionID: "native", messageID: "m3" }))).toEqual({ outcome: "failed" });
   await hooks["tool.execute.after"]({ tool: "skill", sessionID: "native", callID: "call-error" }, { metadata: { name: "helper", dir: "/native/helper" } });
   expect(JSON.parse(await tool.execute({ operation: "status" }, { sessionID: "native", messageID: "m4" }))).toEqual({ outcome: "failed" });
-});
+}));
 
 test("D-REACH-SKILL-14 debug state is not agent-facing and inspector is option-only", async () => {
   const defaultInputSnapshots: Array<{ activeGenerations: number; bindings: number; calls: number; prepared: number; candidateNames: number }> = [];
