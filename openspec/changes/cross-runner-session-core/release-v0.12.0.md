@@ -21,3 +21,15 @@ The user requested committing the Claude missing-repository fix and preparing pu
 
 ## Delivery constraints
 Main worktree contains pre-existing modified generated files and an untracked cache. Preserve those changes. No active daemon restart, real provider calls or configuration changes are required for release verification. Runtime rollout/cohort eligibility is not expanded by this code release.
+
+## Final verification
+- Release-gate discovery failures were caused by ambient user skills exhausting the discovery bound before fake runner inventory. Test-only child isolation preserves production validation and all assertions. Owner apply-fast task-1b48a320-8c60-46e3-aab3-a5da466b62f0; committed as d9e9f2b. Full affected file under ambient HOME: 72 passed, zero failures.
+- Frozen-lockfile installation with Bun 1.3.12: 306 installs checked, no changes.
+- Final full suite with isolated HOME and pinned Bun 1.3.12: **7,150 passed, 3 skipped, zero failed**, 47,788 assertions, 513 files, 1,350.25 seconds. Log: /tmp/deck-release-clean-tests.log. This supersedes interrupted ambient runs; skips are reported by the suite, not removed tests.
+- TypeScript passes after the test isolation delta; diff check passes.
+- Benchmark, compiled memory verification and OpenSpec validation passed. Runner asset regeneration is repeatable with no further tracked changes.
+- Extracted linux-x64 artifact at 9c188ba passed 67 compiled web/session checks plus memory health/profile/search/capture/credential safety with Landlock denying reads from the checkout and user home to it and all descendants. Harness, runtime and fake runner fixture were copied outside the checkout; the negative file-open control passed. No real provider traffic. Subsequent changes affect tests and this evidence record only.
+- Local descriptor matches the host archive checksum; the publication workflow must produce all four platform archives, combined checksums and release.json. Darwin execution/signing remains CI-owned.
+
+## Ready for publication confirmation
+All local verification gates passed. Final build metadata will be refreshed from this evidence commit before publication. Remote main at 77f358df04db8a5114c13fd6980fa7451f1f2ed6 is an ancestor of the candidate. Push the reviewed candidate to remote main by fast-forward, then create/push v0.12.0 only after the required new user confirmation; observe workflow and verify published assets. Preserve the dirty local main worktree. No tag, push, release publication or active user daemon restart has occurred.
