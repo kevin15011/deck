@@ -112,7 +112,7 @@ process.stdin.on("data", async (chunk) => {
       bridge.on("exit", code => { if (code) reject(new Error("Bridge exited")); });
     });
     bridge.stdin.write(JSON.stringify({jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2024-11-05",capabilities:{},clientInfo:{name:"fixture",version:"1"}}}) + "\n");
-    bridge.stdin.write(JSON.stringify({jsonrpc:"2.0",id:2,method:"tools/call",params:{name:"deck_approve",arguments:{tool_name:"Read workspace",input:{path:"README.md"}}}}) + "\n");
+    bridge.stdin.write(JSON.stringify({jsonrpc:"2.0",id:2,method:"tools/call",params:{name:"deck_approve",arguments:{tool_name:"Read",input:{file_path:"README.md"}}}}) + "\n");
     await reply;
     bridge.stdin.end();
   }
