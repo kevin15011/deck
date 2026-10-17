@@ -183,8 +183,12 @@ if (import.meta.main) {
   // A supervisor signal closes the owned control channel; Pi's native shutdown settles its Deck jobs.
   const stop = () => process.stdin.destroy();
   process.on("SIGINT", stop); process.on("SIGTERM", stop);
+  const piCommand: Record<string, string> = process.env.DECK_UI_PI_COMMAND ? { piCommand: process.env.DECK_UI_PI_COMMAND } : {};
   const result = await runPiClientProof({ adapter: createPiRunnerAdapter({piCommand:process.env.DECK_UI_PI_COMMAND}),
-    launch: { mode: resumeTarget?"resume-by-id":"interactive", ...(resumeTarget?{sessionId:resumeTarget.sessionId}:{}), runnerNative:{piCommand:process.env.DECK_UI_PI_COMMAND,...(resumeTarget?{resumeTarget:JSON.stringify(resumeTarget)}:{})}, projectRoot, teamId: "developer-team", deckConfig: createDeckConfigStoreFromEnvironment({ projectRoot }).readRequired() },
+    launch: { projectRoot, teamId: "developer-team", deckConfig: createDeckConfigStoreFromEnvironment({ projectRoot }).readRequired(),
+      ...(resumeTarget
+        ? { mode: "resume-by-id" as const, sessionId: resumeTarget.sessionId, runnerNative: { ...piCommand, resumeTarget: JSON.stringify(resumeTarget) } }
+        : { mode: "interactive" as const, runnerNative: { ...piCommand } }) },
     interactiveClient: flags.includes('--interactive-client'), yes: flags.includes('--yes'), channel: { input: process.stdin, output: process.stdout },
   });
   await writeProofRecord(process.stdout, { type: "deck_proof_closed", status: result.status,

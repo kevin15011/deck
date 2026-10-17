@@ -1,6 +1,6 @@
-# Release correction in progress
+# Release v0.11.2 published
 
-The v0.11.0 and v0.11.1 stable CI runs blocked publication. Their tags remain unchanged. The authorized release continues as v0.11.2 after clean-checkout, Linux verification and output-relay fixes; see `release-v0.11.0.md`.
+Release v0.11.2 is published at https://github.com/kevin15011/deck/releases/tag/v0.11.2 from 43d1e88. Stable CI, all four platform artifacts, all published asset hashes, and the published Darwin arm64 binary with checkout reads denied are verified. The v0.11.0 and v0.11.1 tags remain as failed-attempt history. See `release-v0.11.0.md` for the full evidence; older preparation/publishing-pending notes below are historical.
 
 # Handoff: cross-runner-session-core (read this first)
 
