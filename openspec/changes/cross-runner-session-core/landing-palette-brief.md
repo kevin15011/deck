@@ -1,0 +1,74 @@
+# Landing palette transfer (2026-10-16)
+
+## Current visual agreement
+
+Lead avatar delta completed (same owner, attempt 9): main.tsx reuses lead.png via Avatar(memberId="lead", size=32) beside the Conversation / You and the Lead heading. Header remains 52px high with unchanged bounds. Existing mobile chat-label hiding remains, with no overflow at 320/390px. Asset generation, diff check and Chromium checks passed; rendered image matched the Lead asset byte-for-byte, no browser errors. Evidence: /tmp/deck-lead-avatar-browser.log and /tmp/deck-lead-avatar-desktop-{dark,light,green}.png (Lead inspected dark). Canary rebuilt; no daemon restart or commit.
+
+Motion refinement completed (same owner, attempt 8): reveal now lasts 1,000ms with a 1,600ms watchdog. Dark/Green gets a transient destination-accent annulus at the reveal edge (green toward Green, orange toward Dark), captured as a separate named decorative snapshot. Permanent palette and clean dark/light transition remain unchanged. Cancellation, reduced-motion and failure cleanup include this extra snapshot and its single temporary element.
+
+Refinement checks: 11 theme-reveal tests, focused TypeScript check, asset build and diff check passed. Chromium exercised both directions, mobile, rapid changes, input, resize, reduced motion and capture failure with no stranded overlays/errors. Lead inspected /tmp/deck-wave-desktop-dark-to-green-mid.png and /tmp/deck-wave-mobile-green-to-dark-mid.png. Additional evidence: /tmp/deck-wave-browser.log and /tmp/deck-wave-desktop-dark-to-light-mid.png. Canary rebuilt and installed; no restart or commit performed.
+
+Theme motion delta completed: a 580ms circular new-theme reveal originates at the selector using native View Transitions snapshots and WAAPI pseudo-element animation, not cloned chat DOM or per-message interpolation. No additional GSAP accent was needed; existing GSAP interactions remain. Layout, themes and brand are retained. Reduced motion and unsupported APIs switch immediately; initial load is static. Rapid choices resolve to the latest theme. Capture/animation failures, resize, visibility changes and unmount clean up safely; typing, clicking or scrolling dismisses snapshots to prioritize interaction. Same theme owner, attempt 7. Reference: MDN Using the View Transition API and ViewTransition.ready documentation (checked 2026-10-16).
+
+Motion verification: 15 focused tests, focused TypeScript check, asset generation and diff checks passed. Chromium browser verification covered all three themes, keyboard, rapid changes, persistence, failure fallback, focus/draft/scroll/geometry preservation, and no stranded overlays or page errors. Other engines were not exercised. Evidence: /tmp/deck-reveal-browser.log; /tmp/deck-reveal-desktop-light-mid.png (inspected by Lead), /tmp/deck-reveal-mobile-light-mid.png, and final screenshots referenced by the log. Canary rebuilt after validation; no daemon restart or commit performed.
+
+Follow-up completed: empty-state brand now uses a 96px desktop / 72px mobile logo with proportional lettering, preserving the 24px sidebar mark. Sidebar collapse only hides its own wordmark, not the empty-state lettering. Nine visual checks across three themes, 320/390px overflow checks and asset build passed. Evidence: /tmp/deck-large-brand-browser.log and /tmp/deck-large-brand-desktop-dark.png (also inspected by Lead).
+
+Subagent ordering now uses the maximum of task.created/task.continued and public reply sequences, promoting delegation and continuation immediately. Routine tool/stream/status activity does not reshuffle tasks. A single event pass gathers delegation sequences; stable ties and ID-based detail selection remain. Live and compact reconnect render regression failed before the fix and passed afterward; all 11 focused tests passed. No browser ordering validation was performed. Existing owners retained their scopes: theme task-6ab38e1a-b785-4741-8a7b-63541b267166 attempt 6 and ordering task-ca837013-d6d4-45b5-a11b-b8cc526516d3 attempt 3. Canary rebuilt with both changes; restart remains user-controlled. No commit made.
+
+New requested delta: display the landing D artwork followed by "eck" in the sidebar and a larger empty-state brand. Replace the binary toggle with an accessible extensible theme list: Dark (current neutral/orange), Light (current white/orange), Green (original pre-landing dark green). Preserve localStorage deck.theme and existing dark/light selections; unknown values fall back to dark. Keep existing layout and mobile controls usable. Same owner, implemented in attempt 5; previous delta results below remain historical evidence.
+
+Theme-list/brand verification: seven focused theme tests passed; asset generation and diff checks passed. Native select uses a typed theme registry; storage access failures safely retain switching and default to Dark on initialization. Browser checks covered keyboard selection, reload persistence, unknown values, blocked storage, all three themes, empty-state branding, collapsed sidebar, and 320/390px mobile bounds. Tested text contrast pairs were at least 5.63:1. Evidence: /tmp/deck-themes-browser.log and /tmp/deck-themes-{desktop,mobile}-{dark,light,green}-empty.png. Lead visually inspected desktop dark and mobile green. Canary rebuilt after verification; active daemon restart remains user-controlled. No commit made.
+
+User feedback supersedes the warm background direction below: restore the former gray dark canvas (#141819), gray panels (#1c2123), and neutral gray/white light backgrounds. Keep the accepted orange accents and existing candidate text colors. Remove brown/cream tints from ordinary surfaces. Integrate the actual sibling landing SVG logo in the existing 24px sidebar brand slot, retaining the adjacent wordmark and all layout metrics. Ownership remains task-6ab38e1a-b785-4741-8a7b-63541b267166. This delta is complete; earlier verification below applies to the first palette candidate only.
+
+### Feedback delta verification
+
+Attempt 3 updated style.css, main.tsx and the new deck-logo.tsx. SVG paths match deck-landing/public/assets/deck-logo.svg, with unique React mask identifiers and an accessible Deck name on the brand. Ivory segments use a dark variant in light mode for visibility. Geometry stays at 24px.
+
+Asset generation passed: `bun run scripts/generate-web-assets.ts /tmp/deck-neutral-assets.ts`. Scratch browser verification covered desktop/mobile, light/dark and collapsed sidebar; geometry and 1,465 non-paint CSS declarations remain unchanged. Checked text contrast pairs exceed 4.5:1 and focus exceeds 3:1. `git diff --check` passed. Lead inspected desktop dark and collapsed light screenshots. Evidence: /tmp/deck-neutral-browser.log; /tmp/deck-neutral-after-{desktop,mobile}-{dark,light}.png; /tmp/deck-neutral-collapsed-{dark,light}.png. The known unrelated desktop timeout and broad suites were not rerun. No commit, installation or restart occurred.
+
+## Initial visual agreement (background direction superseded)
+
+### Canary delivery follow-up
+
+User rebuilt and restarted canary but received stale UI. The running daemon executable matched the newly installed payload; install-canary's default build omitted web generation, embedding old ignored web-assets.generated.ts. Fixed the default builder to await the existing generateWebAssets helper before compilation. This regenerates ignored web assets only, preserving the no tracked-source-regeneration guarantee.
+
+Two regressions failed before the fix and passed afterward: stale assets refresh before compile; generation failure prevents compilation/activation. `bun test scripts/install-canary.test.ts scripts/generate-web-assets.test.ts`: 23 passed, 1 skipped (full compile/install smoke). A separate real scratch compile ran successfully and contained the current web digest, orange CSS and SVG logo; evidence /tmp/deck-canary-web-compile.log. Owner task-6ab38e1a-b785-4741-8a7b-63541b267166 attempt 4. Lead rebuilt the installed canary from this worktree after verification; daemon restart remains user-controlled to avoid interrupting the active session.
+
+Bring the visual identity of the sibling deck-landing project to the existing Deck web workspace. The user's supplied palette and public/assets/site.css in that project govern the palette. Audience: developers using a dense working application. Character: warm ember black, ivory text, orange actions, restrained translucent warm borders.
+
+Preserve all organization, component structure, dimensions, spacing, typography metrics, density, square corners, responsive layout and motion. No landing hero, shader, decorative animation, new dependencies or behavior changes. Keep light/dark theme switching, using accessible warm equivalents in light mode. Preserve distinct semantic warnings/errors and keyboard focus visibility.
+
+## Palette mapping
+
+- Canvas #090807; panels #14100E; warm translucent card, console and input surfaces from the supplied palette.
+- Primary text #FFF3E6; soft #CDBDAF; muted #C8B8AA; quiet #AD9C8F.
+- Action #FF7040 with #090807 text; hover #FF875C; accent text #FF946F; focus #FFB08F; terracotta #E28360.
+- Ivory hairlines at 10%, borders at 14%, orange borders at 34%.
+- Light mode uses warm cream, dark brown and darker orange with readable contrast.
+
+## Ownership and checks
+
+Lead selected deck-frontend-design for reference-driven aesthetic routing. The implementation owner uses frontend-ui-engineering for applying the existing CSS system and playwright-cli for visual verification. Existing layout and fonts remain authoritative; no competing general aesthetic direction is introduced.
+
+Implementation owner: apply-fast task-6ab38e1a-b785-4741-8a7b-63541b267166. Primary target: apps/web/src/style.css. Graph tools were unavailable; source fallback inspected the existing root variables/light theme and the landing root palette.
+
+Acceptance: desktop/mobile and light/dark visual checks; unchanged geometry; readable action/focus/semantic states; relevant web checks. No tests mirroring CSS literals. No commit, deployment or daemon restart requested.
+
+## Result
+
+Implemented in apps/web/src/style.css only. Lead visually inspected desktop dark/light and mobile dark screenshots. Palette pairs checked exceed 4.5:1 for text and 3:1 for focus; this is not an exhaustive accessibility audit.
+
+- `bun test apps/web/src scripts/generate-web-assets.test.ts`: 120 passed.
+- `bun run scripts/generate-web-assets.ts /tmp/deck-palette-assets.ts`: passed.
+- `DECK_TEST_CHROME=/snap/bin/chromium bun run /tmp/deck-palette-acceptance.ts`: four desktop/mobile, light/dark comparisons passed.
+- Narrowed wrapper comparisons include anonymous containers except content inside closed details. Closed-detail width differences also reproduced with identical HEAD CSS on both sides; DOM remained identical. Logs: /tmp/deck-palette-wrapper-check.log and /tmp/deck-palette-wrapper-control.log.
+- `python3 /tmp/deck-palette-source-compare.py`: 1,465 retained non-paint declarations match, including selectors, media rules, fonts, dimensions, spacing, border widths and shadow geometry. Paint values and the removed hover-brightness filter were explicitly excluded. Result: /tmp/deck-palette-source-compare.json.
+- `git diff --check`: passed.
+
+Screenshots: /tmp/deck-palette-{before,after}-{desktop,mobile}-{dark,light}.png. These are temporary verification artifacts, not product assets.
+
+The broader desktop script times out after 30 seconds waiting for the Research complete heading under both baseline and current CSS. An isolated fixture substituting only /app.css reproduces the same compact researcher card and Open full view button in both cases. Commands: `DECK_PALETTE_CSS=baseline DECK_TEST_CHROME=/snap/bin/chromium bun run /tmp/deck-palette-repro.ts` and the same command with `DECK_PALETTE_CSS=current`. Logs: /tmp/deck-palette-repro-{baseline,current}.log. Assertions after this shared timeout remain unverified; no unrelated behavior was changed.
+
+Status: implemented and verified within the presentation-only scope. No commit, installation, daemon restart or changes to deck-landing occurred.
