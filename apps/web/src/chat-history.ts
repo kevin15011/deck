@@ -46,6 +46,7 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
         latestRequested: boolean;
         live: HistoryMessage[];
         floor: number;
+        pageRequest?: AbortController;
     } | undefined>(undefined);
     const rows = useRef(messages);
     rows.current = messages;
@@ -67,16 +68,46 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
         setLoading(false);
         if (!sessionId || !enabled)
             return;
-        const run = { id: sessionId, scope, controller: new AbortController(), seq: 0, current: new CurrentEvents(), loading: false, latestRequested: false, live: [] as HistoryMessage[], floor: 0 };
+        const run = { id: sessionId, scope, controller: new AbortController(), seq: 0, current: new CurrentEvents(), loading: false, latestRequested: false, live: [] as HistoryMessage[], floor: 0, pageRequest: undefined as AbortController | undefined };
         owner.current = run;
-        let socket: WebSocket | undefined, timer: ReturnType<typeof setTimeout>;
+        let socket: WebSocket | undefined, timer: ReturnType<typeof setTimeout> | undefined, deadline: ReturnType<typeof setTimeout> | undefined, request: AbortController | undefined, attempt = 0;
         const active = () => owner.current === run && selectedSession.current === run.scope && !run.controller.signal.aborted;
         const url = `/api/sessions/${encodeURIComponent(sessionId)}`;
         async function connect() {
+            if (!active()) return;
+            const generation = ++attempt;
+            clearTimeout(timer);
+            clearTimeout(deadline);
+            request?.abort();
+            if (run.pageRequest) {
+                run.pageRequest.abort();
+                run.pageRequest = undefined;
+                run.loading = false;
+                run.latestRequested = false;
+                setLoading(false);
+            }
+            socket?.close();
+            socket = undefined;
+            const controller = new AbortController();
+            request = controller;
+            const current = () => active() && attempt === generation && !controller.signal.aborted;
+            const retry = (delay: number) => {
+                if (!current()) return;
+                controller.abort();
+                clearTimeout(deadline);
+                socket?.close();
+                callbacks.current.onConnection('Reconnecting');
+                timer = setTimeout(() => void connect(), delay);
+            };
+            deadline = setTimeout(() => {
+                if (!current()) return;
+                callbacks.current.onError('Connection timed out. Retrying…');
+                void connect();
+            }, 10000);
             try {
                 callbacks.current.onConnection('Reconnecting');
-                const page: HistoryPage = await api(`${url}/history${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''}`, { signal: run.controller.signal });
-                if (!active())
+                const page: HistoryPage = await api(`${url}/history${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''}`, { signal: controller.signal });
+                if (!current())
                     return;
                 run.seq = page.seq;
                 run.live = [];
@@ -104,8 +135,8 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
                     if (before !== undefined) {
                         before++;
                         for (let count = 0; count < Math.ceil(HISTORY_WINDOW_SIZE / 40); count++) {
-                            const refreshed: HistoryPage = await api(`${url}/history?before=${before}${taskId ? `&taskId=${encodeURIComponent(taskId)}` : ''}`, { signal: run.controller.signal });
-                            if (!active())
+                            const refreshed: HistoryPage = await api(`${url}/history?before=${before}${taskId ? `&taskId=${encodeURIComponent(taskId)}` : ''}`, { signal: controller.signal });
+                            if (!current())
                                 return;
                             for (const row of refreshed.messages)
                                 incoming.set(row.historyId, row);
@@ -129,29 +160,32 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
                 stream.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
                 socket = new WebSocket(stream);
                 socket.onopen = () => {
-                    if (active())
+                    if (current()) {
+                        clearTimeout(deadline);
+                        callbacks.current.onError('');
                         callbacks.current.onConnection('Connected');
+                    }
                 };
                 socket.onmessage = message => {
-                    if (!active())
+                    if (!current())
                         return;
                     try {
                         const frame = JSON.parse(message.data);
                         if (frame.type === 'resync') {
-                            socket?.close();
+                            retry(0);
                             return;
                         }
                         const event = frame.event as SessionEvent;
                         if (frame.type !== 'event' || event.sessionId !== sessionId || event.seq <= run.seq)
                             return;
                         if (event.seq !== run.seq + 1) {
-                            socket?.close();
+                            retry(0);
                             return;
                         }
                         run.seq = event.seq;
                         run.current.apply(event);
                         const evidence = run.current.values();
-                        callbacks.current.onView(previous => active() ? reduceCurrentEvent(previous, event, evidence) : previous);
+                        callbacks.current.onView(previous => current() ? reduceCurrentEvent(previous, event, evidence) : previous);
                         callbacks.current.onEvent(event);
                         if (frame.message) {
                             const row = frame.message as HistoryMessage;
@@ -180,28 +214,40 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
                     }
                     catch {
                         callbacks.current.onError('Could not read a session update. Reconnect to retry.');
-                        socket?.close();
+                        retry(1000);
                     }
                 };
-                socket.onclose = () => {
-                    if (active()) {
-                        callbacks.current.onConnection('Reconnecting');
-                        timer = setTimeout(() => void connect(), 1000);
-                    }
-                };
-                socket.onerror = () => socket?.close();
+                socket.onclose = () => retry(1000);
+                socket.onerror = () => retry(1000);
             }
             catch (error) {
-                if (active()) {
+                if (current()) {
+                    retry(2000);
                     callbacks.current.onConnection('Disconnected');
                     callbacks.current.onError((error as Error).message);
-                    timer = setTimeout(() => void connect(), 2000);
                 }
             }
         }
+        const resume = () => {
+            if (document.visibilityState === 'visible' && active()) {
+                clearTimeout(timer);
+                timer = setTimeout(() => void connect(), 0);
+            }
+        };
+        document.addEventListener('visibilitychange', resume);
+        window.addEventListener('online', resume);
+        window.addEventListener('focus', resume);
+        window.addEventListener('pageshow', resume);
         void connect();
         return () => {
+            document.removeEventListener('visibilitychange', resume);
+            window.removeEventListener('online', resume);
+            window.removeEventListener('focus', resume);
+            window.removeEventListener('pageshow', resume);
             run.controller.abort();
+            run.pageRequest?.abort();
+            request?.abort();
+            clearTimeout(deadline);
             clearTimeout(timer);
             socket?.close();
             if (owner.current === run)
@@ -222,13 +268,17 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
         const cursor = direction === 'older' ? boundsRef.current.before : boundsRef.current.after;
         if (direction !== 'latest' && !cursor)
             return;
+        const controller = new AbortController();
+        run.pageRequest = controller;
+        let timedOut = false;
+        const deadline = setTimeout(() => { timedOut = true; controller.abort(); }, 10000);
         run.loading = true;
         setLoading(true);
         setHistoryError('');
         try {
             const query = direction === 'latest' ? '' : `?${direction === 'older' ? 'before' : 'after'}=${cursor}`;
-            const result: HistoryPage = await api(`/api/sessions/${encodeURIComponent(run.id)}/history${query}${taskId ? `${query ? '&' : '?'}taskId=${encodeURIComponent(taskId)}` : ''}`, { signal: run.controller.signal });
-            if (owner.current !== run || selectedSession.current !== run.scope || run.controller.signal.aborted)
+            const result: HistoryPage = await api(`/api/sessions/${encodeURIComponent(run.id)}/history${query}${taskId ? `${query ? '&' : '?'}taskId=${encodeURIComponent(taskId)}` : ''}`, { signal: controller.signal });
+            if (owner.current !== run || selectedSession.current !== run.scope || run.controller.signal.aborted || controller.signal.aborted)
                 return;
             callbacks.current.beforeChange();
             if ((direction === 'latest' || direction === 'newer' && !result.after) && result.seq < run.floor)
@@ -248,11 +298,13 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
             setBounds(nextBounds);
         }
         catch (error) {
-            if (owner.current === run && selectedSession.current === run.scope && !run.controller.signal.aborted)
-                setHistoryError((error as Error).message);
+            if (owner.current === run && run.pageRequest === controller && selectedSession.current === run.scope && !run.controller.signal.aborted && (!controller.signal.aborted || timedOut))
+                setHistoryError(timedOut ? 'History request timed out. Try again.' : (error as Error).message);
         }
         finally {
-            if (owner.current === run) {
+            clearTimeout(deadline);
+            if (owner.current === run && run.pageRequest === controller) {
+                run.pageRequest = undefined;
                 run.loading = false;
                 setLoading(false);
                 if (run.latestRequested) {
