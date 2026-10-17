@@ -29,5 +29,5 @@ export function MessageInput({ value, ...props }: Omit<TextareaHTMLAttributes<HT
         observer.observe(element);
         return () => observer.disconnect();
     }, []);
-    return <textarea {...props} ref={input} value={value} rows={1}/>;
+    return <textarea {...props} ref={input} value={value} rows={1} spellCheck={false}/>;
 }
