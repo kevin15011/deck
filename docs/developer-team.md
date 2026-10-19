@@ -40,7 +40,7 @@ Quality is conditional, not a universal final phase. The objective is one functi
 
 ## Runner materialization
 
-The role inventory is runner-neutral, but installation effects are runner-native. Pi writes the Developer Team into the project team surface shown by its installer; OpenCode writes its corresponding runner-native configuration. The TUI shows the target and included roles before applying the plan.
+The role inventory is runner-neutral, but installation effects are runner-native. Pi installs the Developer Team globally as one Deck-owned package under its agent directory, never into projects; OpenCode, Codex and Claude write their corresponding runner-native configuration. The TUI shows the target and included roles before applying the plan.
 
 Model assignment is per role. The configuration flow discovers providers and models through the active runner, then lets you set reasoning/thinking levels where the selected model supports them. See [Configuration](configuration.md).
 

@@ -12,6 +12,7 @@ Support labels are scoped to a surface. “Supported” for one capability does 
 | Label | Meaning |
 |---|---|
 | **Supported** | The product has an implemented path and source-backed checks for the named surface. |
+| **Full team, instruction-level safety** | The complete Developer Team, tools and memory are materialized and launchable, but protected execution controls (invocation authorization, controlled effects, execution dossier, registry coordination, bound verification) are carried by instructions because the runner exposes no host lifecycle hook to enforce them. |
 | **Runner-specific** | The capability exists only through a particular runner's native package, configuration, or effect. |
 | **Experimental** | The path is intentionally available but its contract or runtime validation is not considered stable. |
 | **Manual verification required** | Automated evidence is incomplete; the user or maintainer must verify the result. |
@@ -36,14 +37,14 @@ The browser workspace supports persistent projects and session history, explicit
 
 ## Operational runner matrix
 
-Pi and OpenCode are operational Deck runners. Codex and Claude have route-limited adapters; Codex adds Deck-owned shared tools, hooks, and the official Supermemory plugin, and Claude carries the Developer Team in a Deck-owned global plugin. The cells use the status vocabulary above; runner-specific details are described below the table.
+Pi and OpenCode are operational Deck runners. Codex and Claude carry the full team with instruction-level safety (see the vocabulary above); Codex adds Deck-owned shared tools, hooks, and the official Supermemory plugin, and Claude carries the Developer Team in a Deck-owned global plugin. The cells use the status vocabulary above; runner-specific details are described below the table.
 
 | Surface | Pi | OpenCode | Codex | Claude |
 |---|---|---|---|---|
 | Binary detection | Supported | Supported | Supported | Supported |
 | Version/config preflight | Supported; **Pi >= 1.0.0 only** (`@earendil-works/pi-coding-agent`), older or unparseable versions block install and launch | Supported | Supported; Codex 0.145.0+ | Detection and launch-route checks only |
-| Package and MCP review | Supported; built-in MCP (Deck servers in the global `mcp.json`, absolute commands, direct exposure) | Supported | Supported with static-compatible route limits | Supported with route limits |
-| Developer Team materialization | Supported; **global** under the Pi agent directory (`PI_CODING_AGENT_DIR`, default `~/.pi/agent`) as one Deck-owned package, never into projects | Supported | Supported with static-compatible route limits; global (Codex home and `~/.agents/skills`), never into projects | Global Deck-owned plugin files |
+| Package and MCP review | Supported; built-in MCP (Deck servers in the global `mcp.json`, absolute commands, direct exposure) | Supported | Supported; instruction-level safety | Supported; instruction-level safety |
+| Developer Team materialization | Supported; **global** under the Pi agent directory (`PI_CODING_AGENT_DIR`, default `~/.pi/agent`) as one Deck-owned package, never into projects | Supported | Supported; instruction-level safety; global (Codex home and `~/.agents/skills`), never into projects | Global Deck-owned plugin files |
 | Subagents and per-role models | Supported; Deck-owned `subagent` extension, one child `pi` process per role with that role's model and thinking level | Supported; native agents | Supported; native custom agents | Supported; plugin agents |
 | Model discovery and per-role assignment | Supported | Supported | Supported | Supported |
 | Adaptive-memory runner configuration | Runner-specific; Deck loopback memory through the `deck-memory` extension (see below) | Runner-specific | Runner-specific; the pinned official plugin hooks receive the stored profile credential in the started process only | Runner-specific; official Supermemory plugin |
@@ -64,12 +65,12 @@ Project-local discovery is always scoped to the active runner. Pi and OpenCode c
 - **Memory.** In a Deck-managed session the `deck-memory` extension recalls through the Deck loopback host (an ephemeral system-prompt append, never a stored message) and captures the user prompt and each completed assistant turn. The bearer token travels through a `0600` file, never the environment. Child roles recall once at start and never capture.
 - **MCP.** Pi's built-in MCP is used. Deck removes the `pi-mcp-adapter` entry it added in earlier versions (it disables built-in MCP); a user-added entry is reported as a blocking diagnostic.
 
-## Route-limited runtimes
+## Instruction-level safety runtimes
 
 | Runtime | Status | Deck scope |
 |---|---|---|
-| Claude | Supported with route limits | Global plugin files, pinned shared tools, and the official Supermemory plugin; limited Claude sessions started through the Deck CLI. |
-| Codex | Supported with route limits | Deck can configure and launch the Developer Team, install the shared tools, and register the official Supermemory plugin hooks; protected execution controls remain static-compatible. |
+| Claude | Full team, instruction-level safety | Global plugin files with the seven roles, pinned shared tools, and the official Supermemory plugin; static-compatible sessions started through the Deck CLI. Co-loaded user plugins and hooks are not isolated. |
+| Codex | Full team, instruction-level safety | Deck can configure and launch the Developer Team, install the shared tools, and register the official Supermemory plugin hooks; protected execution controls remain static-compatible. |
 
 ## Runner-independent surfaces
 

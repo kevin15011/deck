@@ -32,7 +32,7 @@ Codex CLI 0.146 does not provide an OpenCode-style root custom-agent selector or
 | 29 standalone bundles/support files | Supported | Complete ownership manifest verifies. |
 | `deck-onboard`, `deck-archive` | Supported | Native skill metadata verifies. |
 | Six package instruction bundles | Supported | Canonical metadata/order/tool policy are preserved; Codex translation removes OpenCode/Claude-specific hook, installer, and tool names. Only `code-economy` defaults on, independently of runtime readiness. |
-| Interactive / exec / resume | Supported with route limits | Launches pass the documented per-process bypass flags; Deck-owned hooks run without per-hook review for that process. Protected execution controls remain static-compatible. |
+| Interactive / exec / resume | Supported; instruction-level safety | Launches pass the documented per-process bypass flags; Deck-owned hooks run without per-hook review for that process. Protected execution controls remain static-compatible. |
 | Context7 | Supported | Semantic streamable HTTP MCP config. Credentials remain external. |
 | context-mode | Shared | Usable shared or Deck-owned pinned binary; MCP entry pinned to its absolute path. |
 | codebase-memory | Shared | Existing shared binary or Deck-owned pinned native release; MCP entry pinned to its absolute path plus project index readiness. |

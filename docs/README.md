@@ -26,7 +26,8 @@ Deck's product docs explain the path from installation to an operating AI work e
 ## Guides
 
 - [Getting started](getting-started.md) — installer, source checkout, first TUI run, and readiness checks.
-- [Runners](runners.md) — Claude and Codex route limits and operational Pi/OpenCode support.
+- [Runners](runners.md) — Pi and OpenCode with enforced execution controls; Claude and Codex with the full team and instruction-level safety.
+- [Cross-runner sessions](cross-runner-sessions.md) — one team across Claude, Codex and OpenCode from the local web workspace.
 - [Configuration](configuration.md) — Deck config, packages, MCP, models, reasoning, and runner-specific persistence.
 - [Developer Team](developer-team.md) — the seven roles, adaptive routing, and conditional Quality.
 - [Skills](skills.md) — lifecycle skills, all 29 bundled external skills, and project-local discovery boundaries.

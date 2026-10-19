@@ -24,8 +24,6 @@ const productSurfaces = [
   "docs/reference/support-matrix.md",
 ] as const;
 const brandAssets = [
-  "docs/assets/brand/deck-hero-dark.png",
-  "docs/assets/brand/deck-hero-panel-background.png",
   "docs/assets/brand/deck-logo-horizontal-dark.png",
   "docs/assets/brand/deck-logo-horizontal-light.png",
   "docs/assets/brand/deck-logo-stacked-dark.png",
@@ -425,7 +423,11 @@ describe("documentation governance", () => {
 
   test("product entry points reference the maintained Deck brand assets", () => {
     const readme = content("README.md");
-    expect(readme).toContain("![Deck command deck with modular signal paths and a reserved runner panel](docs/assets/brand/deck-hero-dark.png)");
+    expect(readme).toContain('src="docs/assets/brand/deck-hero-readme-v2.jpg"');
+    expect(readme).toContain('src="docs/assets/screenshots/web-workspace-dark.png"');
+    for (const file of ["docs/assets/brand/deck-hero-readme-v2.jpg", "docs/assets/screenshots/web-workspace-dark.png", "docs/assets/screenshots/web-workspace-light.png"]) {
+      expect(existsSync(resolve(root, file)), `DOC_BRAND_ASSET_MISSING: ${file}`).toBe(true);
+    }
 
     const docsHub = content("docs/README.md");
     expect(docsHub).toContain('srcset="assets/brand/deck-logo-horizontal-light.png"');
@@ -445,7 +447,8 @@ describe("documentation governance", () => {
 
   test("README keeps the product narrative before governance metadata", () => {
     const text = content("README.md");
-    expect(text.trimStart().startsWith("# Deck")).toBe(true);
+    expect(text.trimStart().startsWith('<p align="center">'), "DOC_ORDER_INVALID: README must open with the Deck brand").toBe(true);
+    expect(text.indexOf('alt="Deck'), "DOC_ORDER_INVALID: README must open with the Deck brand").toBeLessThan(text.indexOf("## "));
     const narrative = text.indexOf("## Choose your next move");
     expect(narrative, "DOC_REQUIRED_ENTRY_POINT_INVALID: README lacks product navigation").toBeGreaterThanOrEqual(0);
     for (const label of ["Audience:", "Authority:", "Maintainer:", "Evidence:"]) {

@@ -80,7 +80,7 @@ The TUI follows this shape:
 5. Review the planned actions.
 6. Apply the plan and inspect the completion diagnostics.
 
-Deck keeps runner differences visible. Claude and Codex have route-limited adapters; Pi and OpenCode have full operational adapters. Codex protected execution controls remain route-limited, and Codex adaptive memory uses the pinned official Supermemory plugin hooks.
+Deck keeps runner differences visible. Every runner receives the full Developer Team. Pi and OpenCode also enforce Deck's protected execution controls through runner hooks; Claude and Codex carry those controls as instructions (instruction-level safety). Codex adaptive memory uses the pinned official Supermemory plugin hooks.
 
 The no-argument command is interactive. In a non-interactive terminal Deck renders a compact home view instead of attempting to drive the TUI.
 

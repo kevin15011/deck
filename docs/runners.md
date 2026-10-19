@@ -15,8 +15,10 @@ For a team whose members use different native CLIs, see [cross-runner sessions](
 |---|---|---|
 | Pi | **Supported** (Pi >= 1.0.0) | Detects the binary, enforces the minimum version, reviews tools and MCP, configures capabilities, materializes the Developer Team globally under the Pi agent directory, and launches `deck pi developer` with Pi's normal interactive TUI. |
 | OpenCode | **Supported** | Detects the binary, reads runner configuration and package evidence, configures capabilities, and materializes the Developer Team through the TUI. |
-| Claude | **Supported with route limits** | A Deck-owned global plugin carries the Developer Team files, pinned shared tools, and the official Supermemory plugin; the Deck CLI starts limited sessions. Protected execution controls and Deck's memory runtime are not part of this route. |
-| Codex | **Supported with route limits** | Deck can configure and launch the Developer Team for Codex through the TUI and the Deck CLI: native roles and skills, shared tools pinned to verified executables, an RTK `PreToolUse` hook, and the official Supermemory plugin hooks. Protected execution controls remain static-compatible. |
+| Claude | **Full team, instruction-level safety** | A Deck-owned global plugin carries the Developer Team files, pinned shared tools, and the official Supermemory plugin; the Deck CLI starts static-compatible sessions. Protected execution controls are carried by instructions rather than a runner hook, and Deck's memory runtime is not part of this route. |
+| Codex | **Full team, instruction-level safety** | Deck can configure and launch the Developer Team for Codex through the TUI and the Deck CLI: native roles and skills, shared tools pinned to verified executables, an RTK `PreToolUse` hook, and the official Supermemory plugin hooks. Protected execution controls remain static-compatible: they are carried by instructions because Codex exposes no host lifecycle hook to enforce them. |
+
+The status vocabulary is defined in the [support matrix](reference/support-matrix.md#status-vocabulary).
 
 Detection is not parity. A detected binary does not imply that Deck can install packages, write runner configuration, launch a team, or verify runner-specific effects for that runtime. Codex has a Developer Team adapter with shared tool installs, owned hooks, and the official Supermemory plugin, but it still does not claim first-class protected execution controls.
 
