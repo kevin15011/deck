@@ -543,7 +543,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   if (first === "claude") {
     if (rest.length === 1 && rest[0] === "developer") return { command: "claude-team-launch" };
-    const usage = "Usage: deck claude developer | deck claude native [resume <session-id> | resume --last]. Developer is a limited plugin-file session; memory and protected execution are unsupported. Native uses safe mode without Deck team files.";
+    const usage = "Usage: deck claude developer | deck claude native [resume <session-id> | resume --last]. Developer delivers the team as plugin files; memory uses the official Supermemory plugin when selected, and protected execution is instruction-level. Native uses safe mode without Deck team files.";
     if (rest[0] !== "native") return { command: "error", message: usage };
     if (rest.length === 1) return { command: "claude-native-launch", launch: { mode: "interactive" } };
     if (rest.length === 3 && rest[1] === "resume") {
