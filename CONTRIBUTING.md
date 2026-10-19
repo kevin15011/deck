@@ -5,70 +5,143 @@
 > **Maintainer:** Deck maintainers.
 > **Evidence:** [root package metadata](package.json), [TypeScript configuration](tsconfig.json), [OpenSpec configuration](openspec/config.yaml), and [registry schema](openspec/registry-schema.md).
 
+Deck coordinates a Developer Team across coding runners. Read the [architecture](docs/architecture.md) for package boundaries and [AGENTS.md](AGENTS.md) for the agent navigation and safety map.
+
 ## Prerequisites and setup
 
-Use Bun 1.3.12, as pinned by `.bun-version` and `package.json`, plus Git. From a repository checkout, install dependencies before running commands:
+Use Git and **Bun 1.3.12**, pinned in [.bun-version](.bun-version), [package.json](package.json), and the [release workflow](.github/workflows/release.yml). From the repository root:
 
 ```sh
 bun install --frozen-lockfile
 ```
 
-Build and generation commands fail closed on a different Bun version because tracked runtime assets must remain reproducible.
+Tracked runner execution assets, skill bundles, and build metadata enforce the release workflow's Bun version before writing output; the release binary build invokes that guard too. A mismatch fails closed. The standalone web asset generator and canary installer do **not** enforce this guard themselves; still use the pinned version for reproducible work.
 
-## Supported root commands
+To exercise a real runner, install and authenticate its native CLI separately. Cross sessions support Claude, Codex, and OpenCode; Pi uses its native Deck workflow.
 
-The root [package metadata](package.json) is authoritative for scripts:
+## Run from source
 
-| Command | Use |
-|---|---|
-| `bun run deck` | Run the CLI from the workspace. |
-| `bun run build` | Build every release target; Darwin targets require macOS because signing fails closed elsewhere. |
-| `bun run build:dry-run` | Exercise the binary build flow without publishing. |
-| `bun run canary:install` | Compile this checkout and install a `deck-canary` binary for local cross-project testing without replacing stable `deck`. |
-| `bun run deck:run` | Build and run the local debug CLI. |
-| `bun run test` | Run the repository test suite. |
+```sh
+bun run deck
+```
 
-Direct supported forms are `bun test tests/documentation-governance.test.ts`, `bunx tsc --noEmit`, and `bun run scripts/prepare-release.ts`. Use `deck version` and the [CLI reference](docs/reference/cli.md) for the current parser-backed CLI surface.
+This runs the workspace CLI and opens its TUI. For testing the compiled checkout in another project, use a canary.
 
-`bun run canary:install -- --dir /absolute/bin` builds only the current host target, installs the binary as `deck-canary`, and runs a bounded `deck-canary version` smoke. It does not regenerate tracked source artifacts, create release archives, checksums, release descriptors, shell-profile edits, or stable `deck` replacements. The default destination is `DECK_CANARY_BIN_DIR` when set, otherwise `~/.local/bin`; use `--dry-run` to print the planned path without compiling or writing. The command stores immutable digest-named payloads next to an atomic relative `deck-canary` symlink alias; old payloads may remain for manual rollback by retargeting the alias.
+## Test your changes with a canary
 
-## Manual Linux installation sandbox
+A canary is a host-target build of this checkout installed as a separate **deck-canary** command. It never replaces stable **deck**.
 
-Use `bun sandbox:clean` to test the official Deck download, or `bun sandbox` to open a clean runner environment with a checkout-built canary. `bun sandbox:update` refreshes stable runner versions while reusing cached Linux layers. See [sandbox instructions](sandbox/linux-install/README.md) for requirements, temporary session cleanup and agent inspection.
+```sh
+bun run canary:install -- --dry-run
+bun run canary:install
+```
 
-## Verification tiers
+The dry run prints the destination without compiling or writing. Installation defaults to `DECK_CANARY_BIN_DIR`, then `~/.local/bin`; `--dir` overrides both and accepts an absolute or `~/` path:
 
-Start with the smallest affected test, then use broader gates when the change requires them:
+```sh
+bun run canary:install -- --dir "$HOME/.local/bin"
+```
+
+Ensure the destination is on your `PATH`; the installer does not edit shell profiles. It regenerates the ignored web asset bundle before compilation, embeds checkout build metadata, installs an atomic symlink to a digest-named payload, and checks the installed version. It does not regenerate tracked source assets or create release archives or descriptors. Regenerate affected tracked assets yourself as described below.
+
+From the project you want to test, choose a native workflow:
+
+```sh
+deck-canary pi developer
+deck-canary opencode developer
+deck-canary codex developer
+deck-canary claude developer
+```
+
+Claude's Developer mode delivers the team as plugin files: memory comes from the official Supermemory plugin when it was selected, and protected execution controls are instruction-level. For configured cross-runner sessions, use:
+
+```sh
+deck-canary cross developer
+deck-canary web
+```
+
+The cross command creates or attaches to a project session. The web command starts the local daemon and opens the browser workspace; it does not register a project, create a session, install runners, or enable disabled cross-runner execution. Configure member assignments first; see [cross-runner sessions](docs/cross-runner-sessions.md).
+
+**Canary and stable share configuration, HOME/XDG state, and the daemon** when launched in the same environment. A canary is a separate executable, not an isolated profile. After installing a new canary, switch the daemon to that build:
+
+```sh
+deck-canary daemon restart
+```
+
+An existing daemon keeps its old build even after the executable changes, including builds with the same version number. Restart uses the invoking executable and preserves history and assignments. It refuses running work or pending approvals; finish or explicitly cancel those first, then restart and reload the browser or reopen the cross client.
+
+## Test in a clean Linux environment
+
+With Docker Engine running, Bash, and an interactive terminal:
+
+```sh
+bun sandbox
+bun sandbox:clean
+bun sandbox:update
+```
+
+- `bun sandbox` builds a temporary checkout canary and copies it into a disposable runner environment; building it locally requires Linux and installed checkout dependencies.
+- `bun sandbox:clean` starts with runners and no Deck, for manual official-installer testing.
+- `bun sandbox:update` rebuilds the image with refreshed runner channels, reusing cached layers where possible.
+
+The sandbox mounts no host HOME, repository, or credentials. Exit its main shell to remove the container. See the [sandbox guide](sandbox/linux-install/README.md) for prerequisites, supplying an existing Linux binary, authentication, and inspection.
+
+## Verify your change
+
+Run the smallest affected test first. For example, for documentation:
 
 ```sh
 bun test tests/documentation-governance.test.ts
+```
+
+Then run the relevant broader checks:
+
+```sh
 bunx tsc --noEmit
 bun run test
 ```
 
-Use the [baseline ledger](openspec/baseline-health.yaml) when assessing a broad-suite failure. Do not relabel a new fingerprint as known without updating its evidence through the approved workflow.
+The test script sets a 30-second per-test timeout. Release CI also runs the full suite and typecheck, plus release-specific checks. Compare broad-suite failures with [openspec/baseline-health.yaml](openspec/baseline-health.yaml); do not label a new fingerprint as known without evidence through the approved workflow.
 
-## OpenSpec contribution path
+## Work on the web UI
 
-For planned work, locate or create an active change under `openspec/changes/`, then follow its proposal, specification, design, tasks, and registry state in order. Treat `state.yaml` and `events.yaml` as the lifecycle record, preserve historical artifacts, and record implementation evidence in the active change's `apply-progress.md`. The [OpenSpec configuration](openspec/config.yaml) and [registry schema](openspec/registry-schema.md) define the current contract.
+Regenerate the embedded browser assets after UI changes and before running browser harnesses:
 
-## Generated and external-tool boundaries
-
-Codex execution-hook output at `packages/adapter-codex/assets/codex/hooks/developer-team-execution.generated.js` is generated. Edit its TypeScript source and run:
-
-```bash
-bun scripts/generate-runner-execution-assets.ts
+```sh
+bun run scripts/generate-web-assets.ts
+DECK_TEST_CHROME=/snap/bin/chromium bun run apps/web/subagents-acceptance.ts
 ```
 
-Never hand-edit generated runner assets. Codex changes should use focused adapter, bridge, config, runner-sync, doctor, and render-only TUI tests. Tests must inject temporary project/journal roots and must not install binaries, contact MCP providers, alter repository trust, or write to the user's home directory.
+Set `DECK_TEST_CHROME` to your installed Chromium executable. Choose the relevant scripts under `apps/web/*-acceptance.ts`; they are separate executable harnesses, not part of automatic `bun test` discovery. The Subagents harness uses the real SessionManager and WebService with fake inference. Check each harness's setup and output paths; some write captures to `/tmp`, which snap Chromium confinement may restrict.
 
-Do not hand-edit generated outputs, including `packages/core/src/skills/external/content.generated.ts` and `apps/cli/src/runtime/build-info.generated.ts`; their generators and existing tests own freshness.
+Regenerate the README product screenshots with:
 
-For external development tools, use canonical upstream sources: [RTK](https://github.com/rtk-ai/rtk), [context-mode](https://github.com/mksglu/context-mode), and [codebase-memory](https://github.com/DeusData/codebase-memory-mcp). Detect RTK, context-mode, codebase-memory, and Supermemory by their binaries rather than guessing Pi package names. Pi-native packages remain runner-specific configuration, and OpenCode installation state must be verified from its configuration and available binaries.
+```sh
+DECK_TEST_CHROME=/snap/bin/chromium bun run apps/web/showcase-screenshots.ts
+```
 
-## Further guidance
+This uses fake drivers and temporary state under HOME, blocks remote browser requests, and writes dark/light desktop and dark mobile PNGs to `docs/assets/screenshots/`. The conversations and results are scripted demonstrations, not real runner work. Visually inspect all three images before submitting them.
 
-- [AI-agent navigation](AGENTS.md)
-- [Architecture](docs/architecture.md)
-- [Release procedure](docs/maintainers/releasing.md)
-- [Release descriptor reference](docs/release-descriptor.md)
+## Follow the OpenSpec contribution path
+
+For planned work, locate or create an active change under `openspec/changes/`. Follow its proposal, specification, design, tasks, and registry state in order. Keep `state.yaml` and `events.yaml` as the lifecycle record, preserve historical artifacts, and record implementation evidence in the active change's `apply-progress.md`. The [OpenSpec configuration](openspec/config.yaml) and [registry schema](openspec/registry-schema.md) define the contract.
+
+## Regenerate generated files
+
+Edit source inputs, never generated outputs. Run only the generators affected by your change, using the pinned Bun:
+
+| Generated output | Generator command |
+|---|---|
+| Runner execution bundles, including `packages/adapter-codex/assets/codex/hooks/developer-team-execution.generated.js` | `bun scripts/generate-runner-execution-assets.ts` |
+| `packages/core/src/skills/external/content.generated.ts` | `bun scripts/generate-skill-bundle.ts` |
+| `apps/cli/src/runtime/build-info.generated.ts` | `bun scripts/generate-build-info.ts` |
+| `packages/core/src/session/schema.generated.ts` | `bun scripts/generate-session-schemas.ts` |
+| `apps/cli/src/runtime/web-assets.generated.ts` (ignored) | `bun scripts/generate-web-assets.ts` |
+
+Codex changes should exercise focused adapter, bridge, config, runner-sync, doctor, and render-only TUI tests. Automated tests must inject temporary project/journal roots, avoid real installations and MCP providers, and leave user HOME and repository trust untouched. Explicit manual canary installation and the showcase capture above have their documented local effects.
+
+## Submit a change
+
+Branch from `main`, keep the change focused, and use conventional commit subjects such as `fix(web): preserve search across tabs` or `docs: clarify canary testing`, following repository history. Run the relevant checks, then open a pull request against `main` explaining the behavior changed and the validation performed. Never commit credentials, API keys, or other secrets.
+
+Deck is [MIT licensed](LICENSE); contributions are under the same license. Release maintainers should follow the [release procedure](docs/maintainers/releasing.md) and [release descriptor reference](docs/maintainers/release-descriptor.md).
