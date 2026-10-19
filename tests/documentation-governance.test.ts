@@ -18,7 +18,6 @@ const productSurfaces = [
   "docs/skills.md",
   "docs/adaptive-memory.md",
   "docs/operations.md",
-  "docs/project-workflows.md",
   "docs/troubleshooting.md",
   "docs/reference/cli.md",
   "docs/reference/support-matrix.md",
@@ -35,10 +34,9 @@ const maintainedSurfaces = [
   "AGENTS.md",
   "CHANGELOG.md",
   "docs/architecture.md",
-  "docs/developer-team-execution.md",
-  "docs/runner-support.md",
+  "docs/maintainers/developer-team-execution.md",
   "docs/maintainers/releasing.md",
-  "docs/release-descriptor.md",
+  "docs/maintainers/release-descriptor.md",
   ".agents/skills/deck-release-publish/SKILL.md",
   ".agents/skills/openspec-retrospective-audit/SKILL.md",
 ];
@@ -103,6 +101,10 @@ function isDocumentedDeckCommandShape(args: string[]): boolean {
   if (first === "doctor" || first === "version") return rest.length === 0;
   if (first === "web") return new Set(rest).size === rest.length && rest.every(flag => flag === "--json" || flag === "--no-open");
   if (first === "cross") return rest.length === 1 && rest[0] === "developer";
+  // Runner launchers and session/daemon management: parseArgs validates flags; reject duplicates here.
+  if (first === "opencode" || first === "codex" || first === "claude" || first === "daemon" || first === "session") {
+    return new Set(rest).size === rest.length;
+  }
 
   if (first === "update" || first === "upgrade") {
     return rest.length <= 1 && rest.every((flag) => flag === "--yes" || flag === "-y");
@@ -269,6 +271,11 @@ function isSupportedDirectCommand(command: string): boolean {
     "pi",
     "web",
     "cross",
+    "opencode",
+    "codex",
+    "claude",
+    "daemon",
+    "session",
   ]);
   if (!supportedTopLevelCommands.has(args[0]!)) return false;
   if (!isDocumentedDeckCommandShape(args)) return false;
@@ -415,7 +422,7 @@ describe("documentation governance", () => {
     expect(readme).not.toContain("marker-owned `AGENTS.md` section");
     expect(readme).toContain("native Codex roles and skills");
 
-    const support = content("docs/runner-support.md");
+    const support = content("docs/runners.md");
     expect(support).not.toContain("exact Deck marker span in `AGENTS.md`");
     expect(support).toContain("ownership-verified legacy cleanup");
     expect(content("docs/runners.md")).toContain("[Codex adapter](../packages/adapter-codex/src/runner-adapter.ts)");

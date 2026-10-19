@@ -5,7 +5,7 @@ The Developer Team is Deck's adaptive work-routing system. It does not force eve
 > **Audience:** People using Deck's Developer Team.
 > **Authority:** Product behavior and role inventory; the canonical catalog, runner adapters, and execution contracts define current behavior.
 > **Maintainer:** Deck maintainers.
-> **Evidence:** [role catalog](../packages/core/src/teams/developer/catalog.ts), [Developer Team content registry](../packages/core/src/teams/developer/content-registry.ts), [Pi adapter](../packages/adapter-pi/src/developer-team-install.ts), [OpenCode adapter](../packages/adapter-opencode/src/developer-team-install.ts), and [documentation governance](../tests/documentation-governance.test.ts).
+> **Evidence:** [role catalog](../packages/core/src/teams/developer/catalog.ts), [Developer Team content registry](../packages/core/src/teams/developer/content-registry.ts), [Pi adapter](../packages/adapter-pi/src/developer-team-install.ts), [OpenCode adapter](../packages/adapter-opencode/src/developer-team-install.ts), [OpenSpec configuration](../openspec/config.yaml), [CLI validator](../apps/cli/src/openspec-validate-command.ts), and [documentation governance](../tests/documentation-governance.test.ts).
 
 ## Role inventory
 
@@ -44,21 +44,30 @@ The role inventory is runner-neutral, but installation effects are runner-native
 
 Model assignment is per role. The configuration flow discovers providers and models through the active runner, then lets you set reasoning/thinking levels where the selected model supports them. See [Configuration](configuration.md).
 
-Pi can launch the installed Developer Team explicitly:
+Each runner has a launcher for the installed team:
 
 ```sh
 deck pi developer
-deck pi developer --continue
-deck pi developer --resume
+deck opencode developer
+deck codex developer
+deck claude developer
 ```
 
-The memory choice is also explicit for that launch path:
+Pi also accepts `--continue` and `--resume`. Memory is explicit per launch with `--memory=supermemory` or `--memory=none` on the Pi, OpenCode and Codex launchers; `deck claude developer` has no memory flag and uses the official plugin when it was selected. To run one team across several runners from the browser, use `deck web` (see [Cross-runner sessions](cross-runner-sessions.md)).
+
+## Project workflows
+
+For work that needs durable planning or an auditable lifecycle, the Lead uses an OpenSpec change under `openspec/changes/`: its proposal, specification, design, tasks, state, events and lifecycle records define the change. A clear, low-risk delta stays on the direct route with focused evidence and does not need every planning artifact. Onboard and Archive are separate lifecycle skills.
+
+Validate the project's OpenSpec records with:
 
 ```sh
-deck pi developer --memory=none
-deck pi developer --memory=supermemory
-deck pi developer --memory=supermemory
+deck openspec validate
+deck openspec validate --json --root .
+deck openspec validate --change change-id
 ```
+
+Human output groups issues by change; JSON output is stable for automation. Exit status `0` means no validation errors, `1` means errors were found, and `2` means the command could not complete or the requested change was not found. Project-local skill discovery is described in [Skills](skills.md#project-local-skills).
 
 ## Authority and safety
 
@@ -68,5 +77,7 @@ deck pi developer --memory=supermemory
 - Runner hooks provide trusted execution context; agent-supplied context is not authority.
 - Protected writes require the applicable authorization and Git-safety boundaries.
 - Verification starts focused and broadens only when the change or risk requires it.
+- Runner behavior stays runner-specific even when the product capability is shared across Pi, OpenCode, Codex and Claude.
+- A successful source build or release gate is not proof that an automatic runtime cohort may expand.
 
-For maintainers operating the rollout controls, see [Developer Team execution](developer-team-execution.md). For user-facing setup, see [Getting started](getting-started.md).
+For maintainers operating the rollout controls, see [Developer Team execution](maintainers/developer-team-execution.md). For user-facing setup, see [Getting started](getting-started.md).

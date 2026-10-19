@@ -9,7 +9,7 @@ Keep Deck evolving with its runners. This is a project-local maintenance skill, 
 
 ## Baseline and scope
 
-Locate the Deck repository root and read `docs/runner-evolution/README.md` and `docs/runner-evolution/registry.json`. Read the selected runners' previous reports for unresolved findings and carry them forward with their current disposition, even when they predate the release cursor. Work in the user's current checkout. Review the requested runner(s); default to Codex, OpenCode, and Claude Code. Do not add runners silently.
+Locate the Deck repository root and read `docs/maintainers/runner-evolution/README.md` and `docs/maintainers/runner-evolution/registry.json`. Read the selected runners' previous reports for unresolved findings and carry them forward with their current disposition, even when they predate the release cursor. Work in the user's current checkout. Review the requested runner(s); default to Codex, OpenCode, and Claude Code. Do not add runners silently.
 
 Use each runner's `last_complete_review` as the release investigation cursor. Installed versions, sandbox image versions, partial reviews, and `last_runtime_validation` are evidence, not substitutes for that cursor. A null cursor means no established review baseline: inspect available repository history for evidence and state the initial release range explicitly. Do not invent an earlier supported version or claim that all historical releases were covered.
 
@@ -27,7 +27,7 @@ Each finding needs an upstream reference, a Deck source path/symbol, its practic
 
 ## Result and persistence
 
-Write a dated report under `docs/runner-evolution/reviews/` using the report contract in the README. Explain what Deck should adopt, what may break, and which focused tests or runtime checks establish the next step. Review alone does not authorize implementation, runner upgrades, release publication, or global configuration changes. Continue implementation when already authorized by the user; apply Deck Lead's proportional routing and centralized OpenSpec writing.
+Write a dated report under `docs/maintainers/runner-evolution/reviews/` using the report contract in the README. Explain what Deck should adopt, what may break, and which focused tests or runtime checks establish the next step. Review alone does not authorize implementation, runner upgrades, release publication, or global configuration changes. Continue implementation when already authorized by the user; apply Deck Lead's proportional routing and centralized OpenSpec writing.
 
 Preserve historical reports. Add a review entry to `registry.json` and advance `last_complete_review` only for a fully investigated declared interval with source-backed Deck impact dispositions. A complete review may still identify unresolved incompatibilities: it is not a support certification. Advance `last_runtime_validation` independently only for successful checks actually executed, recording their exact surfaces, platform, Deck revision/dirty state, and results. Record failed checks in the report; failed-only validation cannot advance this cursor, and mixed results must identify both the successful scope and the failures. Keep unresolved findings visible in their reports even after advancing a review cursor. Do not replace a newer cursor with an older version without explaining the correction.
 

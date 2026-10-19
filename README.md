@@ -129,7 +129,7 @@ Details: [Developer Team](docs/developer-team.md).
 | Codex | **Full team, instruction-level safety** | Native Codex roles and skills installed globally, per-role models, shared tools and hooks, the official Supermemory plugin, and interactive, exec and resume launches. Protected execution controls are guided by instructions rather than enforced by a runner hook. Full driver in cross-runner sessions. |
 | Cross-runner sessions and web workspace | **Experimental** | Local daemon and browser workspace with Claude, Codex and OpenCode drivers; Pi stays on its native workflow. |
 | Adaptive memory | **Optional** | Off by default; Supermemory integration differs per runner and never overrides official artifacts. |
-| Bundled skills | **Supported** | 29 standalone skills shipped as content and cataloged by goal. |
+| Bundled skills | **Supported** | 59 standalone skills shipped as content and cataloged by goal. |
 
 Known gaps are listed explicitly in the [support matrix](docs/reference/support-matrix.md), the single source of truth for runner status.
 
@@ -172,7 +172,7 @@ Deck previews changes before applying them globally: marker blocks in `$CODEX_HO
 
 > **Warning:** Every non-install-only Codex Developer Team launch passes `--dangerously-bypass-approvals-and-sandbox`. Sandboxing and command approvals are disabled for that Codex process, so it may modify or delete files and run commands without approval. Deck does not persist this bypass in project or global Codex configuration.
 
-See [runner support](docs/runner-support.md) for MCP, memory, ownership, rollback and known gaps.
+See [Runners](docs/runners.md#codex) for MCP, memory, ownership, rollback and known gaps.
 
 </details>
 
@@ -188,7 +188,7 @@ See [runner support](docs/runner-support.md) for MCP, memory, ownership, rollbac
 | Browse lifecycle and bundled skills | [Skills](docs/skills.md) |
 | Decide whether memory belongs in your workflow | [Adaptive memory](docs/adaptive-memory.md) |
 | Run updates, rollback or diagnostics | [Operations](docs/operations.md) |
-| Validate OpenSpec or discover project-local skills | [Project workflows](docs/project-workflows.md) |
+| Validate OpenSpec or discover project-local skills | [Developer Team](docs/developer-team.md#project-workflows) and [Skills](docs/skills.md#project-local-skills) |
 | Look up exact command forms | [CLI reference](docs/reference/cli.md) |
 | Recover from a blocked setup | [Troubleshooting](docs/troubleshooting.md) |
 | Contribute | [Contributing](CONTRIBUTING.md) and [Architecture](docs/architecture.md) |
@@ -203,4 +203,4 @@ Deck is released under the [MIT License](LICENSE) and maintained by Kevin LondoÃ
 > **Maintainer:** Deck maintainers.
 > **Evidence:** [CLI parser](apps/cli/src/cli-args.ts), [CLI composition](apps/cli/src/main.tsx), [installer](scripts/install.sh), [runner capability registry](packages/core/src/runner-capability-registry.ts), and [documentation governance](tests/documentation-governance.test.ts).
 
-Maintainer procedures: [release guidance](docs/maintainers/releasing.md), [release descriptors](docs/release-descriptor.md) and the [OpenSpec configuration](openspec/config.yaml).
+Maintainer procedures: [release guidance](docs/maintainers/releasing.md), [release descriptors](docs/maintainers/release-descriptor.md) and the [OpenSpec configuration](openspec/config.yaml).

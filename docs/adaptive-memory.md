@@ -5,13 +5,13 @@ Adaptive memory is optional context that can persist useful learnings between se
 > **Audience:** People deciding whether and how to configure adaptive memory.
 > **Authority:** Provider and governance behavior; core contracts, provider adapters, and runner MCP configuration define current behavior.
 > **Maintainer:** Deck maintainers.
-> **Evidence:** [memory contract](../packages/core/src/memory/adaptive-memory-contract.ts), [memory composition](../packages/core/src/memory/adaptive-memory.ts), [governance](../packages/core/src/memory/adaptive-memory-governance.ts), [Supermemory adapter](../packages/adapter-supermemory/src/index.ts), and [Supermemory adapter](../packages/adapter-supermemory/src/index.ts).
+> **Evidence:** [memory contract](../packages/core/src/memory/adaptive-memory-contract.ts), [memory composition](../packages/core/src/memory/adaptive-memory.ts), [governance](../packages/core/src/memory/adaptive-memory-governance.ts), [Supermemory adapter](../packages/adapter-supermemory/src/index.ts), and [Claude adapter](../packages/adapter-claude/src/runner-adapter.ts).
 
 ## Enablement
 
 Adaptive Memory is either **Disabled** or **Enabled**. The default is disabled, which adds no memory injection and does not block normal work. When enabled, Supermemory is the only durable backend.
 
-Automatic recall and capture run only inside a **Deck-managed** launch, such as Deck's OpenCode, Pi, or Codex developer launch commands. A runner started directly is **runner-standalone/static-compatible**: installed agents, skills, prompts, and optional MCP surfaces can still be useful, but automatic Adaptive Memory is not provided and runner hooks must not autobootstrap Deck Runtime.
+Use a **Deck-managed** developer launch for Deck's configured automatic memory: OpenCode, Pi, Codex, or Claude. The command `deck claude developer` has no `--memory` flag; select Official Supermemory and its shared protected profile in Review & Install. Claude's verified official plugin owns recall/capture; Deck supplies the process-local profile and canonical repository scope. A runner started directly is **runner-standalone/static-compatible**: Deck does not supply its managed activation/profile handoff, and runner hooks must not autobootstrap Deck Runtime. Independently configured native plugins or hooks may still run; Deck does not assert those external memory effects are disabled.
 
 Within one managed Deck process, duplicate runner event IDs are coalesced while an effect is in flight and replay-suppressed only after success. Failed event IDs remain retryable. Deck does not claim distributed exactly-once effects beyond any idempotency guarantee provided by Supermemory.
 
@@ -26,6 +26,7 @@ Current automatic-capture route truth:
 
 | Route | Automatic recall | Prompt capture | Final assistant capture |
 |---|---:|---:|---:|
+| Claude developer with Official Supermemory selected | Official plugin | Owned by the official plugin | Owned by the official plugin; Deck does not capture Claude output |
 | Codex (all routes) with Supermemory selected | Official plugin `UserPromptSubmit` hook, not Deck loopback | Official plugin `Stop` flush | Owned by the plugin; Deck does not capture Codex output |
 | Codex without Supermemory | Deck loopback hooks fail open when no memory provider is active | None | None |
 | Pi interactive under Deck supervision | Yes, through Deck loopback (`deck-memory` extension) | Yes, from `before_agent_start` | Yes, the assistant text of each completed turn, flushed on `agent_end` |
@@ -39,7 +40,7 @@ Deck stores a small owner-local project/session map so a new Deck-supervised top
 
 ## Explicit memory tools (on-demand search and save)
 
-Automatic recall/capture is not the only channel: every runner also offers the model an explicit, on-demand way to search and save project memory. Pi and Codex gained theirs without ever exposing the Supermemory API key to the runner process.
+Automatic recall/capture is not the only channel: every runner also offers the model an explicit, on-demand way to search and save project memory. Pi and Codex explicit loopback tools do not receive the Supermemory API key.
 
 | Runner | Explicit search | Explicit save | Mechanism |
 |---|---|---|---|

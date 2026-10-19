@@ -5,7 +5,7 @@ Use this page to move from a symptom to the smallest diagnostic or recovery step
 > **Audience:** People recovering a blocked installation, runner setup, or project workflow.
 > **Authority:** Recovery guidance; diagnostic output, CLI parser behavior, and runner adapters define the actual state.
 > **Maintainer:** Deck maintainers.
-> **Evidence:** [doctor diagnostics](../apps/cli/src/doctor-command/doctor-diagnostics.ts), [CLI parser](../apps/cli/src/cli-args.ts), [runner preflight](../packages/adapter-pi/src/preflight.ts), [OpenCode preflight](../packages/adapter-opencode/src/preflight.ts), and [rollback](../apps/cli/src/upgrade-command/rollback.ts).
+> **Evidence:** [doctor diagnostics](../apps/cli/src/doctor-command/doctor-diagnostics.ts), [CLI parser](../apps/cli/src/cli-args.ts), [runner preflight](../packages/adapter-pi/src/preflight.ts), [OpenCode preflight](../packages/adapter-opencode/src/preflight.ts), [Codex adapter](../packages/adapter-codex/src/runner-adapter.ts), [Claude adapter](../packages/adapter-claude/src/runner-adapter.ts), and [rollback](../apps/cli/src/upgrade-command/rollback.ts).
 
 ## The command is not found
 
@@ -28,7 +28,7 @@ If the screen opens but a plan cannot run, inspect the dashboard's blocked diagn
 Detection and operational support are different:
 
 - Pi and OpenCode have Deck adapters and runner-specific preflight.
-- Claude is detection-only. Codex has a Deck-supervised adaptive-memory hook bridge for launches started by Deck; protected execution controls remain static-compatible.
+- Codex and Claude have registered Deck adapters and developer launchers. Claude delivers the full team with instruction-level safety; protected execution is not host-enforced. Doctor's Claude runtime check reports PATH presence only, while Codex also has adapter project diagnostics.
 
 Run:
 
@@ -49,11 +49,11 @@ Nested skill directories and legacy SDD files are reported as cleanup warnings. 
 Choose `none` to continue without adaptive memory, or complete the selected provider's runner setup. For Supermemory, follow the active runner's path:
 
 - **Pi:** re-run setup so Deck validates the token and stores it in the Deck secret store; Pi configuration must not contain the bearer credential (Deck hands Pi only the loopback endpoint and a token-file path). Run `deck doctor` to check the Pi install, `pi-mcp-adapter` conflicts, stale `pi-memory-*` directories and legacy files; `deck pi developer --cleanup-legacy` removes unmodified legacy Deck files.
-- **OpenCode/Codex:** provide the Deck runtime API token so Deck can validate it and store it in the Deck secret store. Separately, Deck can write the remote endpoint and `x-sm-project` scope; authenticate that optional MCP path with `/connect`, `opencode mcp auth supermemory`, or `codex mcp login supermemory` as appropriate. Runner OAuth credentials do not replace the Deck runtime bearer credential.
+- **OpenCode/Codex/Claude:** select the official Supermemory integration in Review & Install and configure its shared protected profile. The official plugin owns recall/capture; Deck supplies the credential to the launched process and does not register a raw Supermemory MCP entry alongside it. Claude's developer launcher has no `--memory` flag.
 
-Expect degraded/unknown health until the selected runner's authenticated runtime validation succeeds. Project scope is represented by the runner's `x-sm-project` configuration; user identity for runtime calls comes from the Deck secret-store token, while optional MCP identity comes from the runner OAuth session where used.
+Check the active route's authenticated readiness rather than assuming a detected plugin is ready. Claude requires verified plugin content, a matching protected profile, and canonical Git repository identity for memory activation. A missing repository identity disables Deck's selected memory for that launch without changing saved settings; invalid identity or missing required credentials blocks the selected launch.
 
-Supermemory is experimental and its common-contract adapter operations are bounded; existing MCP tool bindings may still be visible. Memory failure is intended to be fail-open for normal work. See [Adaptive memory](adaptive-memory.md).
+Supermemory is the durable adaptive-memory backend, with runner-specific route limits. Pi uses the Deck loopback; official plugins own OpenCode, Claude, and Codex memory. Runtime memory failures are intended to be fail-open for normal work, while setup and launch validation can require remediation. See [Adaptive memory](adaptive-memory.md).
 
 ## Skill registry is not ready
 

@@ -19,7 +19,8 @@ The report groups checks into Deck installation, runtimes, memory providers, MCP
 - state directory, current version, and active operation locks;
 - Deck config directory readability;
 - Pi and OpenCode versions and package evidence;
-- Claude presence in `PATH` as a detection-only signal and Codex adapter readiness;
+- Claude presence in `PATH` only (no version or installation verification in that runtime check);
+- Codex adapter project diagnostics when detected, requiring a verified project root and readable global config;
 - Supermemory and Serena binary visibility;
 - known runner MCP entries;
 - release availability, executable identity, and bundled skill count.
@@ -32,7 +33,7 @@ The report redacts home paths, temporary paths, credentials, and secret-like val
 deck version
 ```
 
-The version command prints the Deck version, commit, build date, target, and channel. Use it after installation, after an update, or when comparing a diagnostic report with a release asset.
+The flags `--version` and `-v` are equivalent aliases when passed to Deck. The version command prints the Deck version, commit, build date, target, and channel. Use it after installation, after an update, or when comparing a diagnostic report with a release asset.
 
 ## Update Deck
 

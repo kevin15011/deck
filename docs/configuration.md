@@ -1,6 +1,6 @@
 # Configuration
 
-Deck separates project choices, runner-native configuration, and credentials. The TUI writes normalized Deck configuration, while adapters own the files and package formats of the active runner.
+Deck separates its own preferences, runner-native configuration, and credentials. The TUI writes normalized Deck configuration, while adapters own the files and package formats of the active runner.
 
 > **Audience:** People configuring an installed Deck environment.
 > **Authority:** Configuration reference; source validation and runner adapters define accepted fields and persistence behavior.
@@ -9,7 +9,7 @@ Deck separates project choices, runner-native configuration, and credentials. Th
 
 ## Where settings live
 
-When Deck has a project root, it prefers the project configuration at `.deck/config.json`. When no project root is available, the TUI uses the global configuration path:
+Deck preferences have one active source: the global configuration file. Project roots are execution and materialization targets; Deck no longer creates or updates `<project>/.deck/config.json`, which is read only as legacy migration input.
 
 | Purpose | Primary path | Environment override |
 |---|---|---|
@@ -26,10 +26,12 @@ The supported top-level fields are:
 
 - `version` — currently `1`.
 - `adaptiveMemory` — active provider and non-secret Supermemory options.
+- `webSearch` — `enabled` and the selected `provider` (for example Tavily); the provider credential stays in its environment variable.
 - `packageInstructions` — per-runner toggles for `codebase-memory`, `code-economy`, `context-mode`, `rtk`, `adaptive-memory`, and `serena`.
 - `orchestratorPersonality` — `guia` or `pragmatica`; the default is `pragmatica`.
 - `developerTeamExecution` — advanced execution-contract, routing, authorization, prompt, telemetry, and cohort controls.
 - `profiles` and `activeProfile` — named configuration profiles.
+- `crossRunner` — cross-runner sessions: `enabled`, per-member `members` assignments (`runnerId`, `modelId`, optional `thinking`), `maxConcurrentTasks`, `executionBudget`, and the `web` listener settings. The legacy `approvals` field is deprecated and ignored. See [Cross-runner sessions](cross-runner-sessions.md).
 
 A minimal, credential-free example is:
 
@@ -53,24 +55,24 @@ A minimal, credential-free example is:
 }
 ```
 
-Unknown fields, unsupported versions, invalid enum values, malformed JSON, and credential-like fields are rejected. Do not place tokens, API keys, passwords, or other secrets in `.deck/config.json`.
+Unknown fields, unsupported versions, invalid enum values, malformed JSON, and credential-like fields are rejected. Do not place tokens, API keys, passwords, or other secrets in `config.json`.
 
 ## Packages and MCP
 
 The runner dashboard shows package evidence and lets you toggle configurable or optional capabilities. Required or internal runner packages are not treated as ordinary toggles. Deck checks whether a binary is usable and whether an MCP entry is configured; a package declaration by itself is not proof of a working tool.
 
-The shared capability set includes Context Mode, Codebase Memory, RTK, Serena, Context7, and Supermemory tool bindings. The exact install/configuration action is runner-specific. Use [Runners](runners.md) when the same capability has different Pi and OpenCode effects.
+The shared capability set includes Context Mode, Codebase Memory, RTK, Serena, Context7, and Supermemory tool bindings. The exact install/configuration action is runner-specific. Use [Runners](runners.md) when the same capability has different effects on each runner.
 
 Package instructions are separate from adaptive-memory context. Enabled package instructions are official configured prompt content; memory is auxiliary context injected by the selected provider.
 
 ## Adaptive memory
 
-Adaptive Memory is a boolean product setting: **Disabled** or **Enabled**. Legacy `activeProvider` values are normalized only for compatibility (`supermemory` maps to enabled, `none` maps to disabled). The explicit launch flag `--memory=none` overrides globally enabled config for that launch. Supermemory setup is runner-specific:
+Adaptive Memory is a boolean product setting: **Disabled** or **Enabled**. Legacy `activeProvider` values are normalized only for compatibility (`supermemory` maps to enabled, `none` maps to disabled). The launch flag `--memory=none` overrides globally enabled config for that launch on `deck pi developer`, `deck opencode developer` and `deck codex developer`; `deck claude developer` has no memory flag. Supermemory setup is runner-specific:
 
 | Runner | Setup input and effect | Persisted configuration boundary |
 |---|---|---|
-| Pi | The TUI validates a token and stores the runtime credential in Deck's owner-only secret store. Pi receives only the Deck loopback endpoint and a `0600` token-file path; no credential or Supermemory MCP entry is written to Pi configuration. | Deck config stores only Adaptive Memory enablement and non-secret options; the token is not written to `.deck/config.json` or Pi configuration. |
-| OpenCode/Codex | Deck runtime still requires a Supermemory API token, which is read-only validated and stored in Deck's owner-only secret store. Separately, Deck can write the remote Supermemory endpoint and `x-sm-project` scope to the runner MCP config. Authenticate optional MCP with native OAuth through `/connect`, `opencode mcp auth supermemory`, or `codex mcp login supermemory`. | Runner MCP config contains endpoint and project scope only. OAuth credentials live outside project configuration, do not replace the Deck runtime bearer credential, and Deck does not persist an `Authorization` header. |
+| Pi | The TUI validates a token and stores the runtime credential in Deck's owner-only secret store. Pi receives only the Deck loopback endpoint and a `0600` token-file path; no credential or Supermemory MCP entry is written to Pi configuration. | Deck config stores only Adaptive Memory enablement and non-secret options; the token is not written to Deck's `config.json` or Pi configuration. |
+| OpenCode, Claude and Codex | Deck installs the pinned official Supermemory plugin for the runner. The TUI validates the Supermemory key and stores it as a shared profile credential in Deck's owner-only secret store; Deck injects it only into the runner process it starts. | No credential is written to runner configuration, and a raw Supermemory MCP entry is never registered beside the plugin. |
 
 See [Adaptive memory](adaptive-memory.md) for provider behavior and governance.
 
@@ -90,7 +92,7 @@ The profile schema accepts partial phase overrides; it does not require every ph
 
 ## Models and reasoning
 
-The TUI discovers model choices through the active runner. Pi reads its settings, `pi --list-models`, and provider environment variables when available. OpenCode uses runner-native discovery and model-specific variants.
+The TUI discovers model choices through the active runner. Pi reads its settings, `pi --list-models`, and provider environment variables when available. OpenCode uses runner-native discovery and model-specific variants. Codex and Claude have their own model discovery screens based on runtime-reported metadata; account entitlement is not guaranteed.
 
 The Developer Team can assign a model and reasoning/thinking level to each of its seven roles. Pi exposes `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`; OpenCode choices come from the selected model's available reasoning variants. If a model does not expose reasoning, Deck hides the unsupported choice or falls back to `off` according to the runner contract.
 
@@ -110,7 +112,7 @@ The `developerTeamExecution` section is optional advanced configuration. Normal 
 | `telemetry` | `off` or `local-safe`. | `off` | Operators who explicitly need local evidence. |
 | `cohortPercent` | Finite number from `0` through `100`. | `0` | Maintainers controlling rollout exposure. |
 
-The safe default keeps execution in observe/shadow mode with no cohort rollout and telemetry off. See [Developer Team execution](developer-team-execution.md) for maintainer-facing rollout evidence.
+The safe default keeps execution in observe/shadow mode with no cohort rollout and telemetry off. See [Developer Team execution](maintainers/developer-team-execution.md) for maintainer-facing rollout evidence.
 
 ## Persistence checklist
 

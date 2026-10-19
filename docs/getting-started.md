@@ -74,7 +74,7 @@ deck
 The TUI follows this shape:
 
 1. Detect the available runner binaries.
-2. Select Pi or OpenCode and review runner-specific preflight evidence.
+2. Select a runner (Pi, OpenCode, Codex or Claude), or the cross-runner setup, and review its preflight evidence.
 3. Review required and optional packages, MCP configuration, and shared binaries.
 4. Select the Developer Team, adaptive-memory provider, and model/reasoning assignments when those surfaces are available.
 5. Review the planned actions.
@@ -94,7 +94,7 @@ deck doctor
 
 The report checks Deck state and manifest data, detected runtimes, runner configuration, Supermemory runtime readiness, optional MCP configuration, binary information, and release information. Errors include an actionable suggestion; paths and credential-like values are redacted.
 
-Use [Runners](runners.md) to understand a Pi/OpenCode result, [Configuration](configuration.md) to change persisted choices, and [Troubleshooting](troubleshooting.md) when a check is blocked.
+Use [Runners](runners.md) to understand a runner-specific result, [Configuration](configuration.md) to change persisted choices, and [Troubleshooting](troubleshooting.md) when a check is blocked.
 
 ## Run from a source checkout
 
@@ -113,8 +113,22 @@ bun run build:dry-run
 
 Source execution is a contributor path, not a substitute for the published binary installer. See [Contributing](../CONTRIBUTING.md) for verification tiers and [CLI reference](reference/cli.md) for parser-backed commands.
 
+## Launch the team
+
+After Review & Install, start the team in the runner you configured:
+
+```sh
+deck pi developer
+deck opencode developer
+deck codex developer
+deck claude developer
+```
+
+To mix runners in one session, open the browser workspace with `deck web` and see [Cross-runner sessions](cross-runner-sessions.md).
+
 ## Choose the next guide
 
 - [Runners](runners.md) — capability and detection boundaries.
+- [Cross-runner sessions](cross-runner-sessions.md) — one team across Claude, Codex and OpenCode in the web workspace.
 - [Configuration](configuration.md) — persisted settings, packages, memory, models, and reasoning.
 - [Operations](operations.md) — diagnostics, updates, and rollback.

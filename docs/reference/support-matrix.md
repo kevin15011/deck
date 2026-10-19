@@ -42,7 +42,7 @@ Pi and OpenCode are operational Deck runners. Codex and Claude carry the full te
 | Surface | Pi | OpenCode | Codex | Claude |
 |---|---|---|---|---|
 | Binary detection | Supported | Supported | Supported | Supported |
-| Version/config preflight | Supported; **Pi >= 1.0.0 only** (`@earendil-works/pi-coding-agent`), older or unparseable versions block install and launch | Supported | Supported; Codex 0.145.0+ | Detection and launch-route checks only |
+| Version/config preflight | Supported; **Pi >= 1.0.0 only** (`@earendil-works/pi-coding-agent`), older or unparseable versions block install and launch | Supported | Supported; Codex 0.145.0+ | Supported; Claude Code 2.1.218+ |
 | Package and MCP review | Supported; built-in MCP (Deck servers in the global `mcp.json`, absolute commands, direct exposure) | Supported | Supported; instruction-level safety | Supported; instruction-level safety |
 | Developer Team materialization | Supported; **global** under the Pi agent directory (`PI_CODING_AGENT_DIR`, default `~/.pi/agent`) as one Deck-owned package, never into projects | Supported | Supported; instruction-level safety; global (Codex home and `~/.agents/skills`), never into projects | Global Deck-owned plugin files |
 | Subagents and per-role models | Supported; Deck-owned `subagent` extension, one child `pi` process per role with that role's model and thinking level | Supported; native agents | Supported; native custom agents | Supported; plugin agents |
@@ -89,7 +89,7 @@ Project-local discovery is always scoped to the active runner. Pi and OpenCode c
 | Context7 | Supported | MCP server configuration is validated by the active adapter. |
 | Supermemory | Supported with route limits | OpenCode, Claude, and Codex use the pinned official plugin with a profile credential injected into the started process only; Pi uses Deck's loopback memory runtime through the `deck-memory` extension (no Supermemory credential in Pi configuration, no raw MCP entry). A raw Supermemory MCP entry is never registered beside a plugin. |
 | Developer Team | Supported | Seven canonical roles plus separate Onboard and Archive lifecycle skills. |
-| Bundled external skills | Supported | 29 standalone content bundles; separate from project-local discovery. |
+| Bundled external skills | Supported | 59 standalone content bundles; separate from project-local discovery. |
 | Local skill registry | Supported | Read-only validation/discovery is bounded; refresh requires explicit authority and complete evidence. |
 
 ## Explicit limits

@@ -1,6 +1,6 @@
 # Runner evolution record
 
-This record tracks how far Deck's Codex, OpenCode, and Claude Code integrations have been investigated and tested. It does not pin runner versions or certify universal compatibility. The repository-local [deck-runner-evolution skill](../../.agents/skills/deck-runner-evolution/SKILL.md) maintains it.
+This record tracks how far Deck's Codex, OpenCode, and Claude Code integrations have been investigated and tested. It does not pin runner versions or certify universal compatibility. The repository-local [deck-runner-evolution skill](../../../.agents/skills/deck-runner-evolution/SKILL.md) maintains it.
 
 Invoke the skill with a request such as: “Use deck-runner-evolution to review stable runner releases since our last complete reviews and identify changes Deck should adopt.” A review can target one runner or all three.
 

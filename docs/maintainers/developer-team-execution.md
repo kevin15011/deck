@@ -5,7 +5,7 @@ Developer Team installs seven adaptive roles plus the standalone Onboard and Arc
 > **Audience:** Contributors and maintainers changing or operating Developer Team execution.
 > **Authority:** explanatory methodology; active OpenSpec requirements and runtime source remain authoritative.
 > **Maintainer:** Deck maintainers.
-> **Evidence:** [runtime policy](../packages/sdd-runtime/src/execution/rollout-policy.ts), [safe telemetry](../packages/sdd-runtime/src/execution/telemetry.ts), [control plane](../packages/sdd-runtime/src/execution/execution-control-plane.ts), and [configuration](../packages/core/src/config/deck-config.ts).
+> **Evidence:** [runtime policy](../../packages/sdd-runtime/src/execution/rollout-policy.ts), [safe telemetry](../../packages/sdd-runtime/src/execution/telemetry.ts), [control plane](../../packages/sdd-runtime/src/execution/execution-control-plane.ts), and [configuration](../../packages/core/src/config/deck-config.ts).
 
 ## Safe path
 

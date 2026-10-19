@@ -19,7 +19,7 @@ Deck's product docs explain the path from installation to an operating AI work e
 |---|---|---|
 | First installation | [Getting started](getting-started.md) | [Runners](runners.md) |
 | Configure an existing environment | [Configuration](configuration.md) | [Operations](operations.md) |
-| Understand AI work routing | [Developer Team](developer-team.md) | [Project workflows](project-workflows.md) |
+| Understand AI work routing | [Developer Team](developer-team.md) | [Cross-runner sessions](cross-runner-sessions.md) |
 | Add context carefully | [Adaptive memory](adaptive-memory.md) | [Troubleshooting](troubleshooting.md) |
 | Find a command or status | [CLI reference](reference/cli.md) | [Support matrix](reference/support-matrix.md) |
 
@@ -30,10 +30,9 @@ Deck's product docs explain the path from installation to an operating AI work e
 - [Cross-runner sessions](cross-runner-sessions.md) — one team across Claude, Codex and OpenCode from the local web workspace.
 - [Configuration](configuration.md) — Deck config, packages, MCP, models, reasoning, and runner-specific persistence.
 - [Developer Team](developer-team.md) — the seven roles, adaptive routing, and conditional Quality.
-- [Skills](skills.md) — lifecycle skills, all 29 bundled external skills, and project-local discovery boundaries.
+- [Skills](skills.md) — lifecycle skills, all 59 bundled external skills, and project-local discovery boundaries.
 - [Adaptive memory](adaptive-memory.md) — none, Supermemory runtime, optional scoped MCP recall, governance, and authority.
 - [Operations](operations.md) — doctor, version, updates, release advisories, rollback, and recovery signals.
-- [Project workflows](project-workflows.md) — onboarding, implementation, validation, discovery, and closure.
 - [Troubleshooting](troubleshooting.md) — symptom-first recovery paths.
 
 ## References
@@ -43,4 +42,4 @@ Deck's product docs explain the path from installation to an operating AI work e
 
 ## Repository boundaries
 
-Product docs intentionally stay separate from contributor and maintainer internals. Use [Architecture](architecture.md) for stable package boundaries, [Developer Team execution](developer-team-execution.md) for runtime rollout details, and [release guidance](maintainers/releasing.md) for maintainer-only release procedure.
+Product docs intentionally stay separate from contributor and maintainer internals. Use [Architecture](architecture.md) for stable package boundaries, [Developer Team execution](maintainers/developer-team-execution.md) for runtime rollout details, and [release guidance](maintainers/releasing.md) for maintainer-only release procedure.
