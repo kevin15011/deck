@@ -7,6 +7,9 @@ export class CodexRpcFrameError extends Error {
   constructor(readonly code: "codex-rpc-invalid-frame" | "codex-rpc-frame-too-large") { super(code); }
 }
 
+export class CodexRpcError extends Error {
+  constructor(readonly code: number | undefined, readonly diagnostic: string | undefined) { super(`codex-rpc-error: ${code ?? "unknown"}`); }
+}
 export class CodexRpc {
   private buffer = "";
   private serial = 0;
@@ -45,7 +48,7 @@ export class CodexRpc {
           const p = typeof m.id === "number" ? this.pending.get(m.id) : undefined;
           if (p) {
             this.pending.delete(m.id as number); clearTimeout(p.timer);
-            if (m.error) p.reject(new Error(p.missingThreadMessages?.includes(m.error.message ?? "") ? "codex-native-session-not-found" : `codex-rpc-error: ${m.error.code ?? "unknown"}`)); else p.resolve(m.result);
+            if (m.error) p.reject(p.missingThreadMessages?.includes(m.error.message ?? "") ? new Error("codex-native-session-not-found") : new CodexRpcError(m.error.code, m.error.message)); else p.resolve(m.result);
           } else this.message(m);
         } else this.message(m);
       }

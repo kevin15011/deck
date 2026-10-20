@@ -22,7 +22,10 @@ export interface SessionService {
   openLog(sessionId: string): EventLog | undefined;
   /** Live appended events only: no history replay and independent of attached clients. */
   subscribeEvents?(listener: (event: SessionEvent) => void): () => void;
-  /** Recheck queued attention against the current in-memory ledger before delivery. */
+  /** Derive current unresolved attention from durable evidence; reading never resolves it. */
+  pushAttentionItems?(sessionId: string): import("./push-attention").AttentionItem[];
+  pushAttentionSessions?(): string[];
+  canNotifyReplies?(sessionId:string):boolean;
   isPushAttentionCurrent?(attention: PushAttention): boolean;
   /** True while any task runs: keeps the daemon alive and blocks version-skew restarts. */
   hasRunningWork(): boolean;

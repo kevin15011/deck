@@ -47,6 +47,9 @@ export const SESSION_EVENT_SCHEMA = {
         "task.state",
         "task.continued",
         "task.result",
+        "task.delivery",
+        "task.retrieval",
+        "task.integration",
         "turn.started",
         "turn.completed",
         "message.delta",
@@ -70,6 +73,13 @@ export const SESSION_EVENT_SCHEMA = {
         "client.attached",
         "client.detached",
         "command.accepted",
+        "decision.command",
+        "decision.opened",
+        "decision.revised",
+        "decision.state",
+        "decision.reply",
+        "prompt.steering",
+        "prompt.steered",
         "prompt.queued",
         "prompt.dispatched",
         "prompt.state",
@@ -177,6 +187,1622 @@ export const SESSION_EVENT_SCHEMA = {
               "by": {
                 "type": "string",
                 "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "decision.command"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "object",
+                "required": [
+                  "commandId",
+                  "fingerprint",
+                  "type",
+                  "outcome"
+                ],
+                "properties": {
+                  "commandId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "fingerprint": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "outcome": {
+                    "type": "object",
+                    "required": [
+                      "ok",
+                      "data"
+                    ],
+                    "properties": {
+                      "ok": {
+                        "const": true
+                      },
+                      "data": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "decision.opened"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "decision",
+              "command"
+            ],
+            "properties": {
+              "decision": {
+                "type": "object",
+                "required": [
+                  "decisionId",
+                  "revision",
+                  "questionRevision",
+                  "questionSeq",
+                  "createdSeq",
+                  "updatedSeq",
+                  "question",
+                  "state",
+                  "origin",
+                  "source",
+                  "key",
+                  "openingFingerprint",
+                  "relatedTaskIds"
+                ],
+                "properties": {
+                  "decisionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "questionRevision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "questionSeq": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "createdSeq": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "updatedSeq": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "deferred",
+                      "answered",
+                      "cancelled",
+                      "superseded"
+                    ]
+                  },
+                  "source": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "promptId"
+                        ],
+                        "properties": {
+                          "promptId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "taskId",
+                          "attempt"
+                        ],
+                        "properties": {
+                          "taskId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                          },
+                          "attempt": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "origin": {
+                    "type": "object",
+                    "required": [
+                      "taskId",
+                      "attempt",
+                      "admissionSeq"
+                    ],
+                    "properties": {
+                      "taskId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                      },
+                      "attempt": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "admissionSeq": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      }
+                    }
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "openingFingerprint": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "relatedTaskIds": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "openSpecRef": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "previousDecisionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "replacementDecisionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "scopePromptId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "resolution": {
+                    "type": "object",
+                    "required": [
+                      "promptId",
+                      "disposition"
+                    ],
+                    "properties": {
+                      "promptId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                      },
+                      "disposition": {
+                        "enum": [
+                          "allow",
+                          "deny",
+                          "informational"
+                        ]
+                      },
+                      "action": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                      }
+                    },
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": {
+                            "disposition": {
+                              "const": "allow"
+                            }
+                          },
+                          "required": [
+                            "disposition"
+                          ]
+                        },
+                        "then": {
+                          "required": [
+                            "action"
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "state": {
+                          "const": "answered"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "resolution",
+                        "note"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "state": {
+                          "enum": [
+                            "deferred",
+                            "cancelled",
+                            "superseded"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "note"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "state": {
+                          "const": "superseded"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "scopePromptId"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "command": {
+                "type": "object",
+                "required": [
+                  "commandId",
+                  "fingerprint",
+                  "type",
+                  "outcome"
+                ],
+                "properties": {
+                  "commandId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "fingerprint": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "outcome": {
+                    "type": "object",
+                    "required": [
+                      "ok",
+                      "data"
+                    ],
+                    "properties": {
+                      "ok": {
+                        "const": true
+                      },
+                      "data": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "decision.revised"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "decision",
+              "command"
+            ],
+            "properties": {
+              "decision": {
+                "type": "object",
+                "required": [
+                  "decisionId",
+                  "revision",
+                  "questionRevision",
+                  "questionSeq",
+                  "createdSeq",
+                  "updatedSeq",
+                  "question",
+                  "state",
+                  "origin",
+                  "source",
+                  "key",
+                  "openingFingerprint",
+                  "relatedTaskIds"
+                ],
+                "properties": {
+                  "decisionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "questionRevision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "questionSeq": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "createdSeq": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "updatedSeq": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "deferred",
+                      "answered",
+                      "cancelled",
+                      "superseded"
+                    ]
+                  },
+                  "source": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "promptId"
+                        ],
+                        "properties": {
+                          "promptId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "taskId",
+                          "attempt"
+                        ],
+                        "properties": {
+                          "taskId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                          },
+                          "attempt": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "origin": {
+                    "type": "object",
+                    "required": [
+                      "taskId",
+                      "attempt",
+                      "admissionSeq"
+                    ],
+                    "properties": {
+                      "taskId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                      },
+                      "attempt": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "admissionSeq": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      }
+                    }
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "openingFingerprint": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "relatedTaskIds": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "openSpecRef": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "previousDecisionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "replacementDecisionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "scopePromptId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "resolution": {
+                    "type": "object",
+                    "required": [
+                      "promptId",
+                      "disposition"
+                    ],
+                    "properties": {
+                      "promptId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                      },
+                      "disposition": {
+                        "enum": [
+                          "allow",
+                          "deny",
+                          "informational"
+                        ]
+                      },
+                      "action": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                      }
+                    },
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": {
+                            "disposition": {
+                              "const": "allow"
+                            }
+                          },
+                          "required": [
+                            "disposition"
+                          ]
+                        },
+                        "then": {
+                          "required": [
+                            "action"
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "state": {
+                          "const": "answered"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "resolution",
+                        "note"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "state": {
+                          "enum": [
+                            "deferred",
+                            "cancelled",
+                            "superseded"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "note"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "state": {
+                          "const": "superseded"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "scopePromptId"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "command": {
+                "type": "object",
+                "required": [
+                  "commandId",
+                  "fingerprint",
+                  "type",
+                  "outcome"
+                ],
+                "properties": {
+                  "commandId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "fingerprint": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "outcome": {
+                    "type": "object",
+                    "required": [
+                      "ok",
+                      "data"
+                    ],
+                    "properties": {
+                      "ok": {
+                        "const": true
+                      },
+                      "data": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "decision.state"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "decision",
+              "command"
+            ],
+            "properties": {
+              "decision": {
+                "type": "object",
+                "required": [
+                  "decisionId",
+                  "revision",
+                  "questionRevision",
+                  "questionSeq",
+                  "createdSeq",
+                  "updatedSeq",
+                  "question",
+                  "state",
+                  "origin",
+                  "source",
+                  "key",
+                  "openingFingerprint",
+                  "relatedTaskIds"
+                ],
+                "properties": {
+                  "decisionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "questionRevision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "questionSeq": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "createdSeq": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "updatedSeq": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "deferred",
+                      "answered",
+                      "cancelled",
+                      "superseded"
+                    ]
+                  },
+                  "source": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "promptId"
+                        ],
+                        "properties": {
+                          "promptId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "taskId",
+                          "attempt"
+                        ],
+                        "properties": {
+                          "taskId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                          },
+                          "attempt": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "origin": {
+                    "type": "object",
+                    "required": [
+                      "taskId",
+                      "attempt",
+                      "admissionSeq"
+                    ],
+                    "properties": {
+                      "taskId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                      },
+                      "attempt": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "admissionSeq": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      }
+                    }
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "openingFingerprint": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "relatedTaskIds": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "openSpecRef": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "previousDecisionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "replacementDecisionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "scopePromptId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "resolution": {
+                    "type": "object",
+                    "required": [
+                      "promptId",
+                      "disposition"
+                    ],
+                    "properties": {
+                      "promptId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                      },
+                      "disposition": {
+                        "enum": [
+                          "allow",
+                          "deny",
+                          "informational"
+                        ]
+                      },
+                      "action": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                      }
+                    },
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": {
+                            "disposition": {
+                              "const": "allow"
+                            }
+                          },
+                          "required": [
+                            "disposition"
+                          ]
+                        },
+                        "then": {
+                          "required": [
+                            "action"
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "state": {
+                          "const": "answered"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "resolution",
+                        "note"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "state": {
+                          "enum": [
+                            "deferred",
+                            "cancelled",
+                            "superseded"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "note"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "state": {
+                          "const": "superseded"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "scopePromptId"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "command": {
+                "type": "object",
+                "required": [
+                  "commandId",
+                  "fingerprint",
+                  "type",
+                  "outcome"
+                ],
+                "properties": {
+                  "commandId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "fingerprint": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                  },
+                  "outcome": {
+                    "type": "object",
+                    "required": [
+                      "ok",
+                      "data"
+                    ],
+                    "properties": {
+                      "ok": {
+                        "const": true
+                      },
+                      "data": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "decision.reply"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "decisionId",
+              "revision",
+              "promptId",
+              "taskId",
+              "attempt",
+              "admittedSeq",
+              "stale"
+            ],
+            "properties": {
+              "decisionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "promptId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+              },
+              "taskId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+              },
+              "attempt": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "admittedSeq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "questionRevision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "stale": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "prompt.steering"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "promptId",
+              "taskId",
+              "attempt",
+              "nativeThreadId",
+              "nativeTurnId",
+              "clientUserMessageId",
+              "text"
+            ],
+            "properties": {
+              "promptId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "taskId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "attempt": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "runnerId": {
+                "enum": [
+                  "codex",
+                  "claude"
+                ]
+              },
+              "nativeThreadId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "nativeTurnId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "clientUserMessageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 263168
+              },
+              "targetQuestionRevision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "prompt.steered"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "promptId",
+              "steeringSeq",
+              "state",
+              "eligible",
+              "stale"
+            ],
+            "properties": {
+              "promptId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "steeringSeq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "state": {
+                "enum": [
+                  "accepted",
+                  "not-accepted",
+                  "unknown"
+                ]
+              },
+              "eligible": {
+                "type": "boolean"
+              },
+              "stale": {
+                "type": "boolean"
+              },
+              "via": {
+                "enum": [
+                  "receipt",
+                  "history"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "queueFallback": {
+                "type": "boolean"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "state": {
+                      "const": "accepted"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "via"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "unknown",
+                        "not-accepted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "stale": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "stale"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "queueFallback": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "queueFallback"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "state": {
+                      "const": "not-accepted"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "task.delivery"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "taskId",
+              "attempt",
+              "leadTaskId",
+              "leadAttempt"
+            ],
+            "properties": {
+              "taskId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "attempt": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "leadTaskId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "leadAttempt": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "promptId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "task.retrieval"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "taskId",
+              "attempt",
+              "leadTaskId",
+              "leadAttempt"
+            ],
+            "properties": {
+              "taskId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "attempt": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "leadTaskId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "leadAttempt": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "promptId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "task.integration"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "taskId",
+              "attempt",
+              "leadTaskId",
+              "leadAttempt",
+              "commandId",
+              "state",
+              "note",
+              "evidenceSeqs"
+            ],
+            "properties": {
+              "taskId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "attempt": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "leadTaskId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "leadAttempt": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "promptId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "commandId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "\\S"
+              },
+              "state": {
+                "enum": [
+                  "integrated",
+                  "blocked",
+                  "discarded"
+                ]
+              },
+              "note": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "pattern": "\\S"
+              },
+              "evidenceSeqs": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
               }
             }
           }
@@ -870,6 +2496,9 @@ export const SESSION_COMMAND_SCHEMA = {
         "session.attach",
         "session.bindChange",
         "prompt.send",
+        "decision.defer",
+        "decision.cancel",
+        "decision.reopen",
         "prompt.cancel",
         "prompt.resume",
         "turn.interrupt",
@@ -1246,6 +2875,30 @@ export const SESSION_COMMAND_SCHEMA = {
           },
           "target": {
             "const": "lead"
+          },
+          "delivery": {
+            "const": "current-turn"
+          },
+          "decisionTarget": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "decisionId",
+              "revision"
+            ],
+            "properties": {
+              "decisionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
           }
         },
         "anyOf": [
@@ -1268,6 +2921,120 @@ export const SESSION_COMMAND_SCHEMA = {
             }
           }
         ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "decision.defer"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "decisionId",
+          "expectedRevision",
+          "note"
+        ],
+        "properties": {
+          "decisionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "decision.cancel"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "decisionId",
+          "expectedRevision",
+          "note"
+        ],
+        "properties": {
+          "decisionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "decision.reopen"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "decisionId",
+          "expectedRevision",
+          "note"
+        ],
+        "properties": {
+          "decisionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+          }
+        }
       }
     },
     {
@@ -1602,4 +3369,4 @@ export const SESSION_COMMAND_SCHEMA = {
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "227dfe79d2b76a9457619249360f40707a7d172073d011b3a3f58d9fa09e5240";
+export const SESSION_SCHEMA_DIGEST = "56d559c29eff83b04f7b02b5da07f5688302ac90351e67a85edaa438206d1286";

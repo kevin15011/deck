@@ -1,0 +1,465 @@
+{
+  "folded": {
+    "target": {
+      "nativeThreadId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+      "nativeTurnId": "24e11c6f-34bb-480c-99fe-0367f602ea2a",
+      "clientUserMessageId": "427b197a-12f7-429f-bae4-836b214aea8b",
+      "text": "Reply with CONSUMED_PARITY_0d60505c58b5408aac85dcd9ac70bcae"
+    },
+    "records": [
+      {
+        "type": "attachment",
+        "uuid": "2475f007-47af-49b1-b5e8-b35d92acf56f",
+        "parentUuid": "24e11c6f-34bb-480c-99fe-0367f602ea2a",
+        "sessionId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "attachment": {
+          "type": "session_context"
+        }
+      },
+      {
+        "type": "attachment",
+        "uuid": "a21679fd-4971-4297-b4bc-27b46c133657",
+        "parentUuid": "2475f007-47af-49b1-b5e8-b35d92acf56f",
+        "sessionId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "attachment": {
+          "type": "date"
+        }
+      },
+      {
+        "type": "attachment",
+        "uuid": "948b47e2-64b8-4702-8885-35dc950d803b",
+        "parentUuid": "a21679fd-4971-4297-b4bc-27b46c133657",
+        "sessionId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "attachment": {
+          "type": "remote_session_change"
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "24e11c6f-34bb-480c-99fe-0367f602ea2a",
+        "parentUuid": null,
+        "sessionId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "message": {
+          "role": "user",
+          "content": "Run only /bin/sleep 1, then reply BASE_ONLY."
+        }
+      },
+      {
+        "type": "assistant",
+        "uuid": "5e4716c3-f7e0-4b3f-873f-b0b0a5877063",
+        "parentUuid": "948b47e2-64b8-4702-8885-35dc950d803b",
+        "sessionId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "message": {
+          "id": "msg_fixture_tool_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-haiku-4-5-20251001",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "tool_fixture_sleep",
+              "name": "Bash",
+              "input": {
+                "command": "/bin/sleep 1",
+                "description": "Bounded local read-only fixture",
+                "timeout": 2000
+              }
+            }
+          ],
+          "stop_reason": "tool_use",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 5,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 5,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "stop_details": null
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "b9bc00c9-177f-4411-8ae3-a0dc492934a3",
+        "parentUuid": "5e4716c3-f7e0-4b3f-873f-b0b0a5877063",
+        "sessionId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "tool_use_id": "tool_fixture_sleep",
+              "type": "tool_result",
+              "content": "(Bash completed with no output)",
+              "is_error": false
+            }
+          ]
+        },
+        "sourceToolAssistantUUID": "5e4716c3-f7e0-4b3f-873f-b0b0a5877063",
+        "toolUseResult": {
+          "stdout": "",
+          "stderr": "",
+          "interrupted": false,
+          "isImage": false,
+          "noOutputExpected": false
+        }
+      },
+      {
+        "type": "attachment",
+        "uuid": "15f45c4a-fd27-4610-8f91-42d7b14176d8",
+        "parentUuid": "b9bc00c9-177f-4411-8ae3-a0dc492934a3",
+        "sessionId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "attachment": {
+          "type": "queued_command",
+          "prompt": "Reply with CONSUMED_PARITY_0d60505c58b5408aac85dcd9ac70bcae",
+          "source_uuid": "427b197a-12f7-429f-bae4-836b214aea8b",
+          "delivery_id": "5e7d3bd7-f6ae-491c-b1c3-9d08e2a03902",
+          "commandMode": "prompt",
+          "origin": {
+            "kind": "human"
+          },
+          "timestamp": "2026-10-19T06:25:56.993Z",
+          "humanTurn": true
+        }
+      },
+      {
+        "type": "queue-operation",
+        "operation": "remove",
+        "timestamp": "2026-10-19T06:25:57.886Z",
+        "sessionId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "content": "Reply with CONSUMED_PARITY_0d60505c58b5408aac85dcd9ac70bcae",
+        "reason": "absorbed_mid_turn",
+        "commandUuid": "427b197a-12f7-429f-bae4-836b214aea8b",
+        "deliveryId": "5e7d3bd7-f6ae-491c-b1c3-9d08e2a03902"
+      },
+      {
+        "type": "assistant",
+        "uuid": "6f005546-30a8-4fe0-96cd-e7edb0cc2ac4",
+        "parentUuid": "15f45c4a-fd27-4610-8f91-42d7b14176d8",
+        "sessionId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "message": {
+          "id": "msg_fixture_2",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-haiku-4-5-20251001",
+          "content": [
+            {
+              "type": "text",
+              "text": "CONSUMED_PARITY_0d60505c58b5408aac85dcd9ac70bcae"
+            }
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 5,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 5,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "stop_details": null
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "9b8ee573-4f0f-4160-b72e-162a12c15cc2",
+        "parentUuid": "6f005546-30a8-4fe0-96cd-e7edb0cc2ac4",
+        "sessionId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "message": {
+          "role": "user",
+          "content": "PARITY_LATE_PARITY_0d60505c58b5408aac85dcd9ac70bcae"
+        },
+        "queueTranscriptOnly": true,
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "01de136a-5957-4040-b053-6b1ba878281e",
+        "parentUuid": "9b8ee573-4f0f-4160-b72e-162a12c15cc2",
+        "sessionId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "message": {
+          "role": "user",
+          "content": "A new independent genuine prompt."
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "type": "assistant",
+        "uuid": "810a5197-16e9-4cbd-8227-d22abb666f51",
+        "parentUuid": "01de136a-5957-4040-b053-6b1ba878281e",
+        "sessionId": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "message": {
+          "id": "msg_fixture_3",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-haiku-4-5-20251001",
+          "content": [
+            {
+              "type": "text",
+              "text": "CONSUMED_PARITY_0d60505c58b5408aac85dcd9ac70bcae"
+            }
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 5,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 5,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "stop_details": null
+        }
+      }
+    ],
+    "results": [
+      {
+        "subtype": "success",
+        "session_id": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "num_turns": 2
+      },
+      {
+        "subtype": "success",
+        "session_id": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "num_turns": 0
+      },
+      {
+        "subtype": "success",
+        "session_id": "888e0a4e-9bfc-4789-b66d-570ea6a24e0b",
+        "num_turns": 1
+      }
+    ]
+  },
+  "transcriptOnly": {
+    "target": {
+      "nativeThreadId": "d6cd1d6f-5f91-4cc1-9ebf-2a0c312563ec",
+      "nativeTurnId": "03831bf5-c688-4524-8e81-0837f1148c84",
+      "clientUserMessageId": "6cdf4984-0ebc-47de-bada-17aea28e10f6",
+      "text": "Reply with CONSUMED_PARITY_6d1708fce3854ff88884f3dcdfb39c68"
+    },
+    "records": [
+      {
+        "type": "attachment",
+        "uuid": "94800e50-e06f-4700-977d-8bb2bd6837bd",
+        "parentUuid": "03831bf5-c688-4524-8e81-0837f1148c84",
+        "sessionId": "d6cd1d6f-5f91-4cc1-9ebf-2a0c312563ec",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "attachment": {
+          "type": "session_context"
+        }
+      },
+      {
+        "type": "attachment",
+        "uuid": "0ad7852e-8d91-4ecf-8099-45b324533d13",
+        "parentUuid": "94800e50-e06f-4700-977d-8bb2bd6837bd",
+        "sessionId": "d6cd1d6f-5f91-4cc1-9ebf-2a0c312563ec",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "attachment": {
+          "type": "date"
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "03831bf5-c688-4524-8e81-0837f1148c84",
+        "parentUuid": null,
+        "sessionId": "d6cd1d6f-5f91-4cc1-9ebf-2a0c312563ec",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "message": {
+          "role": "user",
+          "content": "Reply BASE_ONLY."
+        }
+      },
+      {
+        "type": "assistant",
+        "uuid": "a9929aef-ae48-4b2e-95ce-0ca37d2f3485",
+        "parentUuid": "0ad7852e-8d91-4ecf-8099-45b324533d13",
+        "sessionId": "d6cd1d6f-5f91-4cc1-9ebf-2a0c312563ec",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "message": {
+          "id": "msg_fixture_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-haiku-4-5-20251001",
+          "content": [
+            {
+              "type": "text",
+              "text": "BASE_ONLY"
+            }
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 5,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 5,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "stop_details": null
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "6cdf4984-0ebc-47de-bada-17aea28e10f6",
+        "parentUuid": "a9929aef-ae48-4b2e-95ce-0ca37d2f3485",
+        "sessionId": "d6cd1d6f-5f91-4cc1-9ebf-2a0c312563ec",
+        "version": "2.1.296",
+        "isSidechain": false,
+        "message": {
+          "role": "user",
+          "content": "Reply with CONSUMED_PARITY_6d1708fce3854ff88884f3dcdfb39c68"
+        },
+        "queueTranscriptOnly": true,
+        "origin": {
+          "kind": "human"
+        }
+      }
+    ],
+    "results": [
+      {
+        "subtype": "success",
+        "session_id": "d6cd1d6f-5f91-4cc1-9ebf-2a0c312563ec",
+        "num_turns": 1,
+        "user_message_uuid": "03831bf5-c688-4524-8e81-0837f1148c84",
+        "user_message_uuids": [
+          "03831bf5-c688-4524-8e81-0837f1148c84"
+        ],
+        "result_index": 0
+      },
+      {
+        "subtype": "success",
+        "session_id": "d6cd1d6f-5f91-4cc1-9ebf-2a0c312563ec",
+        "num_turns": 0,
+        "user_message_uuid": "6cdf4984-0ebc-47de-bada-17aea28e10f6",
+        "user_message_uuids": [
+          "6cdf4984-0ebc-47de-bada-17aea28e10f6"
+        ],
+        "result_index": 1
+      }
+    ]
+  },
+  "provenance": {
+    "version": "2.1.296",
+    "source": "attempt13 isolated installed native CLI, deterministic loopback provider; no real model inference",
+    "scope": "Only irrelevant context attachment payloads removed; UUID ancestry preserved. Folded input used priority next, shouldQuery false, origin human.",
+    "evidenceReport": "/private/tmp/deck-runner-steer-paths-iigs8tpl/REPORT.md"
+  },
+  "composedResult": {
+    "originalExecutionUUID": "9f474b28-0380-4a65-99ab-5c8c53ed9af3",
+    "clientUUID": "4fada492-3848-4173-aa22-3d1fcac2ce07",
+    "nativeSessionId": "a6d2735c-695f-4361-b4e0-8d7ce1838543",
+    "wireOptions": {
+      "priority": "next",
+      "shouldQuery": false,
+      "client_composed": true,
+      "origin": {
+        "kind": "human"
+      }
+    },
+    "payload": {
+      "type": "result",
+      "subtype": "success",
+      "uuid": "f096b5f8-4162-41e2-94a9-d786ed724fd4",
+      "session_id": "a6d2735c-695f-4361-b4e0-8d7ce1838543",
+      "result": "CONSUMED_PARITY_45b6366adf384397bf53f18fdf64adfd",
+      "user_message_uuid": "9f474b28-0380-4a65-99ab-5c8c53ed9af3",
+      "user_message_uuids": [
+        "9f474b28-0380-4a65-99ab-5c8c53ed9af3",
+        "4fada492-3848-4173-aa22-3d1fcac2ce07"
+      ],
+      "result_index": 0,
+      "is_error": false,
+      "num_turns": 2
+    },
+    "source": "isolated installed Claude2.1.296 and deterministic local provider; no real inference"
+  }
+}

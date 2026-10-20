@@ -1,15 +1,32 @@
+import type {SteeringDelivery} from "./steering";
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionEvent } from '../../../packages/core/src/session/events';
 import type { Api } from './workspace';
 import { ImageReferences, publicImages, type ImageAttachment } from './image-attachments';
 import { NavigationIcon } from './project-navigation';
 export type QueuedPrompt = { promptId: string; text: string; createdAt?: string; position?: number; attachments?: ImageAttachment[] };
-export type PromptInbox = { seq: number; paused: boolean; pauseReason?: string; queued: QueuedPrompt[]; active?: {promptId:string;taskId:string;attempt:number;state:'dispatched'} };
+export type PromptInbox = { seq: number; paused: boolean; pauseReason?: string; queued: QueuedPrompt[]; steeringAvailable?:boolean; steeringRunnerId?:string; deliveries?:SteeringDelivery[]; omittedDeliveries?:number; active?: {promptId:string;taskId:string;attempt:number;state:'dispatched'} };
 export const emptyInbox = (): PromptInbox => ({seq:0,paused:false,queued:[]});
 export function reduceInbox(inbox: PromptInbox, event: SessionEvent): PromptInbox {
     if(event.seq<=inbox.seq) return inbox;
     const next={...inbox,seq:event.seq}, id=String(event.data.promptId??'');
     if(event.kind==='prompt.queued' && id && typeof event.data.text==='string' && !inbox.queued.some(item=>item.promptId===id)) next.queued=[...inbox.queued,{promptId:id,text:event.data.text,createdAt:String(event.data.createdAt??event.ts),position:Number(event.data.position),attachments:publicImages(event.data.attachments)}];
+    if(event.kind==='diagnostic'&&event.data.code==='prompt.steering-capability'&&!event.source.runnerId){next.steeringAvailable=event.data.available===true;next.steeringRunnerId=typeof event.data.runnerId==='string'?event.data.runnerId:undefined;}
+    if((event.kind==='turn.completed'&&event.source.memberId==='lead')||event.kind==='session.released'||event.kind==='session.ended')next.steeringAvailable=false;
+    if(event.kind==='prompt.steering'){
+        const item=inbox.queued.find(p=>p.promptId===id);next.queued=inbox.queued.filter(p=>p.promptId!==id);next.steeringAvailable=false;
+        const runnerId=typeof event.data.runnerId==='string'?event.data.runnerId:inbox.steeringRunnerId;
+        next.deliveries=[...(inbox.deliveries??[]).filter(d=>d.promptId!==id),{promptId:id,text:item?.text??'',state:'sending',...(runnerId?{runnerId}:{})}];
+    }
+    if(event.kind==='prompt.steered'){
+        const delivery=(inbox.deliveries??[]).find(d=>d.promptId===id);
+        next.deliveries=(inbox.deliveries??[]).filter(d=>d.promptId!==id);
+        if(event.data.state==='not-accepted'){
+            if(event.data.queueFallback===true && delivery?.state==='sending')next.queued=[{promptId:id,text:delivery.text},...next.queued];
+            else next.deliveries=[...next.deliveries,{promptId:id,text:delivery?.text??'',state:'not-accepted',...(delivery?.runnerId?{runnerId:delivery.runnerId}:{})}];
+        }
+        else next.deliveries=[...next.deliveries,{promptId:id,text:delivery?.text??'',state:event.data.state==='accepted'?'accepted':'unknown',...(delivery?.runnerId?{runnerId:delivery.runnerId}:{}),...(typeof event.data.eligible==='boolean'?{historical:!event.data.eligible}:{})}];
+    }
     if(event.kind==='prompt.dispatched') {next.queued=inbox.queued.filter(item=>item.promptId!==id);next.active={promptId:id,taskId:String(event.data.taskId),attempt:Number(event.data.attempt),state:'dispatched'};}
     if(event.kind==='prompt.state'){next.queued=inbox.queued.filter(item=>item.promptId!==id);if(inbox.active?.promptId===id)next.active=undefined;}
     if(event.kind==='prompt.queue'){next.paused=event.data.paused===true;next.pauseReason=typeof event.data.reason==='string'?event.data.reason:undefined;}

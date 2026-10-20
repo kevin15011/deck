@@ -8,6 +8,7 @@ type Row = {
     seqs: number[];
     text?: string;
     request?: number;
+    steering?: { prompt: number; fence: number; receipt: number };
 };
 const lead = (e: SessionEvent) => e.source.memberId !== undefined ? e.source.memberId === 'lead' : (e.source.taskId ?? 'lead') === 'lead';
 /** Derived, disposable index: only seq references survive a completed message.
@@ -20,6 +21,8 @@ export class ChatHistory {
     private requests = new Map<string, number>();
     private seq = 0;
     private bySeq = new Map<number, Row>();
+    private queued = new Map<string, number>();
+    private steered = new Map<string, Row>();
     constructor(private log: EventLog) {
         for (const event of log.readAfter(0))
             this.apply(event);
@@ -29,6 +32,21 @@ export class ChatHistory {
             return;
         this.seq = event.seq;
         this.current.apply(event);
+        const promptId = String(event.data.promptId ?? '');
+        if (event.kind === 'prompt.queued') this.queued.set(promptId, event.seq);
+        if (event.kind === 'prompt.dispatched' || event.kind === 'prompt.state') this.queued.delete(promptId);
+        if (event.kind === 'prompt.steered' && event.data.state === 'accepted' && !event.source.runnerId && !this.steered.has(promptId)) {
+            const fence = this.log.readEvent(Number(event.data.steeringSeq));
+            const prompt = this.queued.get(promptId);
+            if (fence?.kind === 'prompt.steering' && !fence.source.runnerId && fence.data.promptId === promptId && prompt) {
+                const row: Row = { taskId: String(fence.data.taskId), lead: true, id: fence.seq, seqs: [event.seq], steering: { prompt, fence: fence.seq, receipt: event.seq } };
+                this.addRow(row);
+                this.steered.set(promptId, row);
+                this.bySeq.set(event.seq, row);
+                this.queued.delete(promptId);
+            }
+            return;
+        }
         const key = event.kind.startsWith('question.') ? `q:${event.data.questionId}` : `a:${event.data.approvalId}`;
         if (event.kind === 'question.requested' || event.kind === 'approval.requested')
             this.requests.set(key, event.seq);
@@ -66,6 +84,12 @@ export class ChatHistory {
             }
         }
         else if (event.kind === 'message.completed') {
+            const accepted = this.steered.get(promptId);
+            if (accepted && event.data.role === 'user' && event.data.steering === true && !event.source.runnerId && event.data.steeringSeq === accepted.id) {
+                accepted.seqs = [event.seq];
+                this.bySeq.set(event.seq, accepted);
+                return;
+            }
             row = event.data.role === 'user' ? undefined : this.pending.get(task);
             if (row) {
                 row.seqs = [event.seq];
@@ -86,17 +110,29 @@ export class ChatHistory {
         return undefined;
     }
     private addRow(row: Row) {
+        const insert = (rows: Row[]) => {
+            if (!rows.length || rows.at(-1)!.id < row.id) { rows.push(row); return; }
+            let lo = 0, hi = rows.length;
+            while (lo < hi) { const mid = (lo + hi) >>> 1; if (rows[mid]!.id < row.id) lo = mid + 1; else hi = mid; }
+            rows.splice(lo, 0, row);
+        };
         if (row.lead)
-            this.rows.push(row);
+            insert(this.rows);
         let rows = this.taskRows.get(row.taskId);
         if (!rows) {
             rows = [];
             this.taskRows.set(row.taskId, rows);
         }
-        rows.push(row);
+        insert(rows);
     }
     private materialize(row: Row): HistoryMessage {
         const first = this.log.readEvent(row.seqs[0]!)!;
+        if (row.steering) {
+            const prompt = this.log.readEvent(row.steering.prompt)!;
+            const fence = this.log.readEvent(row.steering.fence)!;
+            const receipt = this.log.readEvent(row.steering.receipt)!;
+            return { ...first, kind: 'message.completed', source: { taskId: row.taskId, memberId: 'lead' }, ts: fence.ts, historyId: row.id, data: { role: 'user', text: prompt.data.text, promptId: prompt.data.promptId, steering: true, steeringSeq: fence.seq,steeringRunnerId:fence.data.runnerId, historical: receipt.data.eligible !== true, ...(receipt.data.stale ? { decisionReply: { stale: true } } : {}) } };
+        }
         const request = row.request ? this.log.readEvent(row.request) : undefined;
         const data = { ...first.data };
         if (first.kind === 'message.delta')
@@ -116,11 +152,12 @@ export class ChatHistory {
         if (!row || (taskId ? row.taskId !== taskId : !row.lead))
             return;
         // Live deltas stay deltas on the wire; snapshots alone carry joined text.
-        return event.kind === 'message.delta' || event.kind === 'message.completed' ? { ...event, historyId: row.id } : this.materialize(row);
+        return !row.steering && (event.kind === 'message.delta' || event.kind === 'message.completed') ? { ...event, historyId: row.id } : this.materialize(row);
     }
-    page({ before, after, taskId, limit = HISTORY_PAGE_SIZE }: {
+    page({ before, after, around, taskId, limit = HISTORY_PAGE_SIZE }: {
         taskId?: string;
         before?: number;
+        around?: number;
         after?: number;
         limit?: number;
     } = {}): HistoryPage {
@@ -137,9 +174,12 @@ export class ChatHistory {
             }
             return lo;
         };
-        const end = before === undefined ? after === undefined ? entries.length : Math.min(entries.length, lower(after + 1) + limit) : lower(before);
-        const start = after === undefined ? Math.max(0, end - limit) : lower(after + 1);
+        const target=around===undefined?undefined:this.bySeq.get(around);
+        if(around!==undefined&&(!target||(taskId?target.taskId!==taskId:!target.lead)))throw Error('history-message-unavailable');
+
+        const end = target ? Math.min(entries.length,lower(target.id)+Math.ceil(limit/2)) : before === undefined ? after === undefined ? entries.length : Math.min(entries.length, lower(after + 1) + limit) : lower(before);
+        const start = target ? Math.max(0,end-limit) : after === undefined ? Math.max(0, end - limit) : lower(after + 1);
         const rows = entries.slice(start, end);
-        return { messages: rows.map(row => this.materialize(row)), ...(start > 0 && rows.length ? { before: rows[0]!.id } : {}), ...(end < entries.length && rows.length ? { after: rows.at(-1)!.id } : {}), seq: this.seq, events: before === undefined && after === undefined ? this.current.values() : [] };
+        return { messages: rows.map(row => this.materialize(row)), ...(start > 0 && rows.length ? { before: rows[0]!.id } : {}), ...(end < entries.length && rows.length ? { after: rows.at(-1)!.id } : {}), seq: this.seq, events: around === undefined && before === undefined && after === undefined ? this.current.values() : [] };
     }
 }

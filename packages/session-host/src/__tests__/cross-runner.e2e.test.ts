@@ -70,7 +70,7 @@ for (const tool of ["deck_task_wait", "deck_task_result"]) {
   });
 }
 
-test("Lead wake contains only completions not delivered by its wait", async () => {
+test("Lead notice contains only new completions while continuity retains retrieved history", async () => {
   const clock = new FakeClock();
   const t = await setup(clock);
   const seen = (await t.call("deck_delegate", { agent: "architect", task: "seen" }) as any).data.taskId;
@@ -86,7 +86,8 @@ test("Lead wake contains only completions not delivered by its wait", async () =
   clock.advance(20);
   await waitFor(() => t.drivers[0]!.turns.length === 2);
   expect(t.drivers[0]!.turns[1]!.input.prompt).toContain(`${unseen} completed`);
-  expect(t.drivers[0]!.turns[1]!.input.prompt).not.toContain(seen);
+  expect(t.drivers[0]!.turns[1]!.input.prompt.split("\n\nContinuity context")[0]).not.toContain(seen);
+  expect(t.drivers[0]!.turns[1]!.input.prompt).toContain(seen);
 });
 
 test("a timed-out wait acknowledges terminal snapshots but preserves pending attempts", async () => {
@@ -106,7 +107,8 @@ test("a timed-out wait acknowledges terminal snapshots but preserves pending att
   clock.advance(20);
   await waitFor(() => t.drivers[0]!.turns.length === 2);
   expect(t.drivers[0]!.turns[1]!.input.prompt).toContain(ids[1]);
-  expect(t.drivers[0]!.turns[1]!.input.prompt).not.toContain(ids[0]);
+  expect(t.drivers[0]!.turns[1]!.input.prompt.split("\n\nContinuity context")[0]).not.toContain(ids[0]);
+  expect(t.drivers[0]!.turns[1]!.input.prompt).toContain(ids[0]);
 });
 
 test("reading running results and observer logs does not consume a later completion", async () => {

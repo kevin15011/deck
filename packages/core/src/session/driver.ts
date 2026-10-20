@@ -1,6 +1,7 @@
 import type { ApprovalRisk } from "./approval";
 import type { DriverQuestionRequest, DriverQuestionAnswer } from "./question";
 export type { Question, DriverQuestionRequest, DriverQuestionAnswer } from "./question";
+import type { SteeringInput, SteeringOutcome, SteeringTarget } from "./steering";
 /** RunnerSessionDriver contract (XR-4.1, D-6). Types only: no implementation in S0. */
 import type { DriverProtocol } from "./events";
 import type { RunnerQualifiedAssignment } from "./assignments";
@@ -51,6 +52,9 @@ export type NativeMemoryDescriptor = {
 export type DriverImageInput = { path: string; mimeType: "image/png" | "image/jpeg" | "image/webp"; name: string };
 
 export type DriverTaskInput = {
+  steeringVersion?: "0.162.1" | "2.1.296";
+  /** Provenance of the original host-composed input, distinct from later genuine steering. */
+  inputOrigin?: "user" | "host";
   taskId: string; memberId: string; cwd: string; assignment: RunnerQualifiedAssignment;
   rolePrompt: string; prompt: string; images?: readonly DriverImageInput[]; resume?: { nativeSessionId: string };
   /** Caller-assigned native session id for a fresh native session; set only for drivers that expose `newNativeSessionId`. */
@@ -104,6 +108,10 @@ export type TurnOutcome = { status: "completed" | "interrupted" | "interrupted-f
 
 export type DriverTaskHandle = {
   nativeSessionId: Promise<string>;
+  /** Optional verified exact-turn text capability. Never use send for concurrent delivery. */
+  steeringTarget?(): SteeringTarget | undefined;
+  steer?(input: SteeringInput): Promise<SteeringOutcome>;
+  reconcileSteering?(input: SteeringInput): Promise<SteeringOutcome>;
   /** Run a follow-up turn on the same native session; resolves with that turn's outcome. */
   send(prompt: string, images?: readonly DriverImageInput[]): Promise<TurnOutcome>;
   interrupt(): Promise<void>;

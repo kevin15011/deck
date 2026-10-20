@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { redactText } from "@deck/core/session/redaction";
+import {CLAUDE_STEERING_CAPABILITY,matchesSteering,type SteeringInput,type SteeringOutcome} from '@deck/core/session/steering';
 import type {
   DriverEvent, DriverHostIo, DriverImageInput, DriverProbe, DriverProbeContext, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver,
   SupervisedChild, SupervisedChildExit, TurnOutcome,
@@ -13,6 +14,7 @@ import type {
 import { prepareImages, redactImagePayload } from "./images";
 import { buildClaudeTurnLaunch, ClaudeLaunchError, encodeUserMessage, type ClaudeTurnLaunch } from "./launch";
 import { CLAUDE_PROTOCOL, ClaudeLineSplitter, ClaudeStreamMapper, parseClaudeLine, type ClaudeInit, type ClaudeResult } from "./mapper";
+import {claudeTranscriptPath,readClaudeTranscript,reconcileClaudeHistory} from './steering';
 
 export const CLAUDE_TESTED_VERSIONS = { min: "2.1.296", maxTested: "2.1.296" } as const;
 export const INTERRUPT_ESCALATION_MS = 10_000;
@@ -57,7 +59,17 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+type PendingSteering = {input:SteeringInput;promise:Promise<SteeringOutcome>;resolve:(result:SteeringOutcome)=>void;settled:boolean};
 type TurnState = {
+  executionId: string;
+  guarded: boolean;
+  originalObserved: boolean;
+  historyVerified: boolean;
+  originalText: string;
+  stdinEnded: boolean;
+  historyReads: number;
+  historyTimer?: unknown;
+  steering: Map<string,PendingSteering>;
   child?: SupervisedChild;
   interruptRequested: boolean;
   interruptDelivered: boolean;
@@ -74,6 +86,7 @@ type TurnState = {
 class ClaudeTask {
   private current: TurnState | undefined;
   private closed = false;
+  private historyPath?: string;
 
   constructor(
     private readonly input: DriverTaskInput,
@@ -91,7 +104,8 @@ class ClaudeTask {
     if (this.closed) throw new Error("Claude task is closed");
     if (this.current) throw new Error("A Claude turn is already running");
     let userMessage: string;
-    try { userMessage = encodeUserMessage(prompt, prepareImages(images)); }
+    const executionId=randomUUID(),guarded=this.input.steeringVersion==='2.1.296'&&!images?.length;
+    try { userMessage = encodeUserMessage(prompt, prepareImages(images),guarded?{uuid:executionId,session_id:this.nativeId,origin:{kind:this.input.inputOrigin==='user'?'human':'coordinator'}}:undefined); }
     catch { return { status: "failed", error: "image-input-invalid" }; }
     const resume = this.input.resume !== undefined || !this.firstTurnPending;
     this.firstTurnPending = false;
@@ -111,7 +125,8 @@ class ClaudeTask {
     }
     for (const d of launch.diagnostics) emit({ kind: "diagnostic", data: { ...d } });
 
-    const state: TurnState = { interruptRequested: false, interruptDelivered: false, forced: false, closing: false, finished: false, stderr: "" };
+    this.historyPath=claudeTranscriptPath(this.input.cwd,this.nativeId,launch.env);
+    const state: TurnState = {executionId,guarded,originalObserved:false,historyVerified:false,originalText:prompt,stdinEnded:false,historyReads:0,steering:new Map(), interruptRequested: false, interruptDelivered: false, forced: false, closing: false, finished: false, stderr: "" };
     this.current = state;
     let child: SupervisedChild;
     try {
@@ -128,7 +143,7 @@ class ClaudeTask {
     child.onStderr((chunk) => { state.stderr = (state.stderr + chunk).slice(-STDERR_TAIL); });
     if (state.interruptRequested) this.deliverInterrupt(state);
     child.writeStdin(userMessage);
-    child.endStdin();
+    if(!guarded)this.endStdin(state);
 
     let exit: SupervisedChildExit;
     try { exit = await child.exited; } catch (error) {
@@ -137,6 +152,8 @@ class ClaudeTask {
     for (const line of splitter.flush()) onLine(line);
     if (splitter.overflowed) emit({ kind: "diagnostic", data: { code: "claude-line-too-long" } });
     state.finished = true;
+    if(state.historyTimer!==undefined)this.options.clock.clearTimeout(state.historyTimer);
+    this.refreshSteering(state,true);
     if (state.escalation !== undefined) this.options.clock.clearTimeout(state.escalation);
     this.current = undefined;
     return this.outcome(state, exit);
@@ -148,14 +165,40 @@ class ClaudeTask {
     const events = parsed.ok ? undefined : mapper.unparsable(imageTurn ? "Image turn native diagnostic omitted" : redactImagePayload(line));
     if (events) { for (const e of events) emit(e); return; }
     if (!parsed.ok) return;
+    const message=parsed.message;
+    if(state.guarded&&message.type==='result'){
+      if(message.session_id!==this.nativeId){this.fail(state,'claude-result-session-mismatch');return;}
+      const ids=message.user_message_uuids;
+      if(message.num_turns===0&&typeof message.user_message_uuid==='string'&&state.steering.has(message.user_message_uuid)){
+        if(message.subtype!=='success'||message.is_error===true||!Array.isArray(ids)||ids.length!==1||ids[0]!==message.user_message_uuid){this.fail(state,'claude-result-correlation-mismatch');return;}
+        this.resolveSteering(state.steering.get(message.user_message_uuid)!,{state:'unknown',reason:'claude-transcript-only'});
+        return; // A no-query receipt cannot overwrite or complete the original execution.
+      }
+      if(message.user_message_uuid!==state.executionId||!Array.isArray(ids)||!ids.includes(state.executionId)){this.fail(state,'claude-result-correlation-mismatch');return;}
+    }
     const out = mapper.map(redactImagePayload(parsed.message));
     for (const e of out.events) emit(e);
-    if (out.result) state.result = out.result;
+    if (out.result) {
+      if(state.guarded&&out.result.sessionId!==this.nativeId){this.fail(state,'claude-result-session-mismatch');return;}
+      if(state.guarded)state.result ??= out.result;else state.result=out.result;
+      if(state.guarded){this.endStdin(state);emit({kind:'diagnostic',data:{code:'claude-steering-ended'}});this.refreshSteering(state);}
+    }
     if (out.init) { state.init = out.init; this.checkInit(out.init, state, launch, emit); }
+    if(state.guarded&&message.type==='user'&&message.session_id===this.nativeId){
+      const content=message.message as {role?:unknown;content?:unknown}|undefined;
+      if(message.uuid===state.executionId&&content?.role==='user'&&content.content===state.originalText)state.originalObserved=true;
+      if(typeof message.uuid==='string'&&state.steering.has(message.uuid))this.refreshSteering(state);
+    }
+    if(state.guarded&&state.originalObserved&&!state.historyVerified&&!state.result&&state.historyReads<32){
+      const roots=readClaudeTranscript(this.historyPath).filter((v:any)=>v?.uuid===state.executionId);state.historyReads++;
+      const root=roots[0] as {type?:unknown;sessionId?:unknown;version?:unknown;queueTranscriptOnly?:unknown;message?:{role?:unknown;content?:unknown}}|undefined;
+      if(roots.length===1&&root?.type==='user'&&root.sessionId===this.nativeId&&root.version==='2.1.296'&&root.queueTranscriptOnly!==true&&root.message?.role==='user'&&root.message.content===state.originalText){state.historyVerified=true;emit({kind:'diagnostic',data:{code:'claude-steering-ready'}});}
+    }
   }
 
   /** Fail closed when the native CLI does not run the isolated configuration Deck asked for. */
   private checkInit(init: ClaudeInit, state: TurnState, launch: ClaudeTurnLaunch, emit: (e: DriverEvent) => void): void {
+    if(state.guarded&&init.version!=='2.1.296'){state.guarded=false;this.endStdin(state);}
     const expected = launch.expectedMcpServers;
     const actual = init.mcpServers.map((s) => s.name);
     const missing = expected.filter((n) => !actual.includes(n));
@@ -175,6 +218,53 @@ class ClaudeTask {
     if (init.sessionId !== this.nativeId) {
       emit({ kind: "diagnostic", data: { code: "claude-session-id-mismatch", expected: this.nativeId, actual: init.sessionId } });
       this.fail(state, "claude-session-id-mismatch: the native CLI reported a different session id than the one assigned");
+    }
+  }
+
+  private endStdin(state:TurnState):void {
+    if(!state.stdinEnded&&state.child){state.stdinEnded=true;state.child.endStdin();}
+  }
+
+  steeringTarget() {
+    const state=this.current;
+    if(this.closed||this.input.steeringVersion!=='2.1.296'||!this.historyPath||!state?.guarded||!state.originalObserved||!state.historyVerified||state.init?.version!=='2.1.296'||state.init.sessionId!==this.nativeId||state.result||state.finished||state.fatal||state.closing||state.interruptRequested||state.steering.size>=32)return undefined;
+    return {nativeThreadId:this.nativeId,nativeTurnId:state.executionId};
+  }
+
+  steer(input:SteeringInput):Promise<SteeringOutcome> {
+    const state=this.current,previous=state?.steering.get(input.clientUserMessageId);
+    if(previous)return matchesSteering(previous.input,input)?previous.promise:Promise.resolve({state:'unknown',reason:'client-id-reused'});
+    const target=this.steeringTarget();
+    if(!state||!target||target.nativeThreadId!==input.nativeThreadId||target.nativeTurnId!==input.nativeTurnId||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.clientUserMessageId)||input.clientUserMessageId===state.executionId||!input.text||input.text.length>263168)return Promise.resolve({state:'unknown',reason:'native-target-unavailable'});
+    let resolve!:(value:SteeringOutcome)=>void;const promise=new Promise<SteeringOutcome>(r=>{resolve=r;});
+    const pending={input:{...input},promise,resolve,settled:false};state.steering.set(input.clientUserMessageId,pending);
+    try{
+      // False is essential: crossing native completion may retain context but cannot start another query.
+      state.child!.writeStdin(JSON.stringify({type:'user',uuid:input.clientUserMessageId,session_id:this.nativeId,origin:{kind:'human'},priority:'next',shouldQuery:false,client_composed:true,message:{role:'user',content:input.text}})+'\n');
+      this.refreshSteering(state);
+    }catch{this.resolveSteering(pending,{state:'unknown',reason:'native-write-unconfirmed'});}
+    return promise;
+  }
+
+  async reconcileSteering(input:SteeringInput):Promise<SteeringOutcome> {
+    if(this.input.steeringVersion!=='2.1.296'||input.nativeThreadId!==this.nativeId)return {state:'unknown',reason:'native-history-unavailable'};
+    return reconcileClaudeHistory(input,readClaudeTranscript(this.historyPath));
+  }
+
+  private resolveSteering(pending:PendingSteering,result:SteeringOutcome):void {
+    if(!pending.settled){pending.settled=true;pending.resolve(result);}
+  }
+
+  private refreshSteering(state:TurnState,final=false,retry=0):void {
+    const pending=[...state.steering.values()].filter(p=>!p.settled);if(!pending.length)return;
+    const rows=readClaudeTranscript(this.historyPath);state.historyReads++;
+    for(const item of pending){
+      const result=reconcileClaudeHistory(item.input,rows);
+      if(final||result.state==='accepted'||result.state==='unknown'&&result.reason==='claude-transcript-only')this.resolveSteering(item,result);
+    }
+    // Native history flush can follow its replay echo. Bounded reads never write/resend or wake a turn.
+    if(!final&&!state.finished&&retry<4&&state.historyReads<32&&state.historyTimer===undefined&&[...state.steering.values()].some(p=>!p.settled)){
+      state.historyTimer=this.options.clock.setTimeout(()=>{state.historyTimer=undefined;this.refreshSteering(state,false,retry+1);},50);
     }
   }
 
@@ -270,7 +360,7 @@ export function createClaudeSessionDriver(options: ClaudeSessionDriverOptions = 
       if (compareVersions(version, CLAUDE_TESTED_VERSIONS.maxTested) > 0) {
         return { version, status: "degraded", reasonCode: "claude-version-untested", capabilities: [...CAPABILITIES], mcpIsolationVerified: false };
       }
-      return { version, status: "ready", capabilities: [...CAPABILITIES], mcpIsolationVerified: true };
+      return { version, status: "ready", capabilities: [...CAPABILITIES,CLAUDE_STEERING_CAPABILITY], mcpIsolationVerified: true };
     },
 
     async startTask(input: DriverTaskInput, io: DriverHostIo): Promise<DriverTaskHandle> {
@@ -279,6 +369,7 @@ export function createClaudeSessionDriver(options: ClaudeSessionDriverOptions = 
       const done = task.runTurn(input.prompt, input.images);
       return {
         nativeSessionId: Promise.resolve(task.id),
+        ...(input.steeringVersion==='2.1.296'?{steeringTarget:()=>task.steeringTarget(),steer:(message:SteeringInput)=>task.steer(message),reconcileSteering:(message:SteeringInput)=>task.reconcileSteering(message)}:{}),
         send: (prompt, images) => task.runTurn(prompt, images),
         interrupt: () => task.interrupt(),
         done,

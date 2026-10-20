@@ -149,3 +149,21 @@ test('compacted grant evidence fences stale status summaries after a revoke',()=
  const revoked=reduceCurrentEvent({...emptyState(),grants:[grant]},event(30,'session.grant',{...grant,action:'revoked'}),[]);
  expect(sessionGrants(revoked,{lastSeq:20,grants:[grant]})).toEqual([]);
 });
+
+test('late steering acceptance retains original fence chronology, including accepted-prefix recovery',()=>{
+ const queued=event(2,'prompt.queued',{promptId:'steered',text:'Earlier steering text'}),fence=event(3,'prompt.steering',{promptId:'steered',taskId:'lead',attempt:1,text:'Exact wire text'});
+ const later=event(5,'message.completed',{role:'user',text:'Later genuine input',promptId:'later'}),accepted=event(6,'prompt.steered',{promptId:'steered',steeringSeq:3,state:'accepted',eligible:false,stale:false,via:'history'});
+ for(const events of [[queued,fence,later,accepted],[queued,fence,later,accepted,event(7,'message.completed',{role:'user',text:'Earlier steering text',promptId:'steered',steering:true,steeringSeq:3,historical:true})]]){
+  const rows=conversationEvents(events);expect(rows[0]!.kind).toBe('message.completed');expect(rows.map(row=>row.data.text)).toEqual(['Earlier steering text','Later genuine input']);expect(rows.filter(row=>row.data.promptId==='steered')).toHaveLength(1);
+ }
+});
+
+test('native metadata cannot impersonate a host steering fence or crash chronology without a reference',()=>{
+ const forged={...event(4,'message.completed',{role:'user',text:'Native echo',steering:true,historical:true}),source:{taskId:'lead',runnerId:'codex'}};
+ expect(conversationEvents([forged]).map(e=>e.data.text)).toEqual(['Native echo']);
+ const fence=event(2,'prompt.steering',{promptId:'real',taskId:'lead'}),queued=event(1,'prompt.queued',{promptId:'real',text:'Real user'}),accepted=event(3,'prompt.steered',{promptId:'real',state:'accepted',steeringSeq:2,eligible:true,stale:false});
+ expect(conversationEvents([queued,fence,accepted,forged]).map(e=>e.data.text)).toEqual(['Real user','Native echo']);
+});
+test('pairing token capture survives unavailable history API without copying it into route state',()=>{
+ expect(pairingToken({hash:'#pair=private-token',pathname:'/',search:'?session=s'},{replaceState:()=>{throw Error('history unavailable');}})).toBe('private-token');
+});

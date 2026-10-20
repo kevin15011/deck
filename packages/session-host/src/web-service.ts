@@ -1,5 +1,7 @@
 /** Loopback-only browser transport. Unix socket remains the sole administrative surface. */
 import { WebPush, type WebPushOptions } from './web-push';
+import { LeadReplies } from './lead-replies';
+import { validReplyId } from '@deck/core/session/lead-replies';
 import { ChatHistory } from './chat-history';
 import type { EventLog } from './event-log';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -60,6 +62,20 @@ const safeId = (v: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(v) && !v.
 export class WebService {
   private server?: Server<SocketData>;
   private push?: WebPush;
+  private replies?: LeadReplies;
+  private replyError = false;
+  private replyTimer?: ReturnType<typeof setInterval>;
+  private replyCursor = 0;
+  private pendingReplies=new Set<string>();
+  private pendingRevocations=new Set<string>();
+  private syncReplies(id?: string) {
+    if(!this.replies)throw Error("reply-storage-unavailable");
+    let pending=false;
+    const all=this.options.service.pushAttentionSessions?.()??[];
+    const ids=id?[id]:Array.from({length:Math.min(4,all.length)},()=>all[this.replyCursor++%all.length]!);
+    for(const key of ids){const log=this.options.service.openLog(key);if(log){const more=this.replies.sync(log);if(more)this.pendingReplies.add(key);else this.pendingReplies.delete(key);pending=more||pending;}}
+    this.replyError=false;return pending||this.pendingReplies.size>0;
+  }
   private unsubscribePush?: () => void;
   private records: Device[] = [];
   private sockets = new Set<ServerWebSocket<SocketData>>();
@@ -94,6 +110,7 @@ export class WebService {
       if (!Array.isArray(value) || !value.every(d => d && typeof d.id === 'string' && typeof d.name === 'string' && typeof d.createdAt === 'string' && /^[a-f0-9]{64}$/.test(d.hash) && (d.expiresAt === undefined || typeof d.expiresAt === 'string' && Number.isFinite(Date.parse(d.expiresAt))) && (d.tailscaleIdentity === undefined || typeof d.tailscaleIdentity === 'string' && /^[a-f0-9]{64}$/.test(d.tailscaleIdentity))))
         throw new Error("Invalid web device store");
       this.records = value;
+      for(const d of this.records)if(d.revokedAt)this.pendingRevocations.add(d.id);
     }
   }
   get clientCount() { return this.sockets.size; }
@@ -109,12 +126,56 @@ export class WebService {
         this.server = Bun.serve<SocketData>({ hostname: "127.0.0.1", port: this.options.config.port, maxRequestBodySize: IMAGE_ATTACHMENT_LIMITS.maxFileBytes + 1024 * 1024, fetch: (r, s) => this.fetch(r, s), websocket: { maxPayloadLength: 1024, backpressureLimit: this.options.maxQueuedBytes ?? 1024 * 1024, closeOnBackpressureLimit: false, open: ws => this.open(ws), message: ws => ws.close(1008, "Read-only stream"), close: ws => { ws.data.unsubscribe?.(); this.sockets.delete(ws); } } });
         this.error = undefined;
         try {
+          this.replies=new LeadReplies(this.options.paths.webDir,this.now);
+          for(const id of this.options.service.pushAttentionSessions?.()??[])this.pendingReplies.add(id);
+          if(this.replies.fresh)for(const id of this.options.service.pushAttentionSessions?.()??[]){const log=this.options.service.openLog(id);if(log)this.replies.initialize(log);}
+          for(const d of this.records)if(this.activeDevice(d))this.replies.enroll(d.id);
+        }catch{this.replyError=true;}
+
+        try {
           this.push = new WebPush({paths:this.options.paths, now:this.now,
             isDeviceActive:id=>this.records.some(d=>d.id===id&&this.activeDevice(d)),
+            attentionItems:this.options.service.pushAttentionItems ? id=>this.options.service.pushAttentionItems!(id).filter(item=>item.kind!=='result'&&item.kind!=='finished') : undefined,
+            replyAttentionPage:(id,after)=>{
+              try{
+                this.syncReplies(id);
+                if(this.options.service.canNotifyReplies?.(id)===false)return {items:[]};
+                const page=this.replies!.attentionPage(id,after),current=this.options.service.pushAttentionItems?.(id)??[];
+                return {...page,items:page.items.map(reply=>{
+                  const existing=current.find(item=>item.seq===reply.seq&&(item.kind==='result'||item.kind==='finished'));
+                  return {...reply,...(existing?{kind:existing.kind,othersActive:existing.othersActive}:{})};
+                })};
+              }catch{this.replyError=true;return {items:[]};}
+            },
+            replyAttentionItem:(id,replyId)=>{
+              try{
+                if(this.options.service.canNotifyReplies?.(id)===false)return;
+                const reply=this.replies?.attentionReply(id,replyId);if(!reply)return;
+                const current=this.options.service.pushAttentionItems?.(id).find(item=>item.seq===reply.seq&&(item.kind==='result'||item.kind==='finished'));
+                return {...reply,...(current?{kind:current.kind,othersActive:current.othersActive}:{})};
+              }catch{this.replyError=true;return;}
+            },
+            isReplyDisplayed:(deviceId,sessionId,replyId)=>this.replies?.isDisplayed(deviceId,sessionId,replyId)??false,
+            attentionSessions:this.options.service.pushAttentionSessions ? ()=>this.options.service.pushAttentionSessions!() : undefined,
             isCurrent:attention=>this.options.service.isPushAttentionCurrent?.(attention)??false,
             ...this.options.push});
-          this.unsubscribePush = this.options.service.subscribeEvents?.(event=>this.push?.accept(event));
+          this.unsubscribePush = this.options.service.subscribeEvents?.(event=>{
+            this.pendingReplies.add(event.sessionId);
+            if(event.kind==='session.removed')this.push?.retireSession(event.sessionId);
+            // Defer until the complete append batch has been applied.
+            if(event.kind==='turn.completed'||event.kind==='session.removed'&&event.data.phase==='removed')queueMicrotask(()=>{try{this.syncReplies(event.sessionId);this.push?.evaluate(event.sessionId);}catch{this.replyError=true;}});
+            this.push?.accept(event);
+          });
         } catch { this.push = undefined; }
+        // Revoked device records are durable cleanup intents, including after restart.
+        // Retry separately from reply replay so an unavailable index cannot skip
+        // push cancellation or socket teardown.
+        this.replyTimer=setInterval(()=>{
+          for(const id of [...this.pendingRevocations].slice(0,4))this.cleanupRevocation(id);
+          const ids=this.options.service.pushAttentionSessions?.()??[];
+          for(let n=0;n<Math.min(4,ids.length);n++){const id=ids[this.replyCursor++%ids.length]!;try{this.syncReplies(id);}catch{this.replyError=true;}}
+        },250);this.replyTimer.unref();
+        for(const id of [...this.pendingRevocations].slice(0,4))this.cleanupRevocation(id);
       }
       catch {
         this.error = "web-listen-failed";
@@ -128,6 +189,8 @@ export class WebService {
   async disable(persist = true) { await this.close(); this.challenge = undefined; if (persist)
     writePrivateFile(this.stateFile, JSON.stringify({ enabled: false })); return this.status(); }
   async close() {
+    clearInterval(this.replyTimer);this.replyTimer=undefined;
+    this.replies?.close();this.replies=undefined;this.pendingReplies.clear();
     this.unsubscribePush?.(); this.unsubscribePush=undefined; this.push?.close(); this.push=undefined;
     for(const entry of this.histories.values())entry.unsubscribe();
     this.histories.clear();
@@ -141,20 +204,42 @@ export class WebService {
     this.server = undefined; // Bun stops accepting connections synchronously. Its returned promise can remain pending after a WebSocket close handshake.
     server?.stop(true).catch(() => { });
   }
-  status() { return { enabled: !!this.server, hostname: "127.0.0.1", port: this.server?.port ?? this.options.config.port, url: this.server ? `http://127.0.0.1:${this.server.port}` : undefined, clients: this.clientCount, error: this.error, exposure: { trustedProxy: this.options.config.trustedProxy, allowedOrigins: this.options.config.allowedOrigins, allowFunnel: this.options.config.allowFunnel, tailscaleServeAccess: this.options.config.tailscaleServeAccess ?? false } }; }
+  status() { return { enabled: !!this.server, hostname: "127.0.0.1", port: this.server?.port ?? this.options.config.port, url: this.server ? `http://127.0.0.1:${this.server.port}` : undefined, clients: this.clientCount, error: this.error ?? (this.pendingRevocations.size ? 'device-revocation-cleanup-pending' : this.replyError ? 'reply-storage-unavailable' : undefined), exposure: { trustedProxy: this.options.config.trustedProxy, allowedOrigins: this.options.config.allowedOrigins, allowFunnel: this.options.config.allowFunnel, tailscaleServeAccess: this.options.config.tailscaleServeAccess ?? false } }; }
   pair() { if (!this.server)
     throw new Error("Web listener disabled"); const code = String(randomBytes(4).readUInt32BE() % 100000000).padStart(8, "0"), token = randomBytes(32).toString("base64url"); this.challenge = { codeHash: hash(code), tokenHash: hash(token), expiresAt: this.now() + 300000, attempts: 0 }; return { code, url: `${this.status().url}/#pair=${token}`, expiresAt: new Date(this.challenge.expiresAt).toISOString() }; }
   devices() { return this.records.map(({ hash, tailscaleIdentity, ...d }) => d); }
   revoke(id: string) { const d = this.records.find(d => d.id === id); if (!d)
-    return false; d.revokedAt = new Date(this.now()).toISOString(); this.save();
-    if(this.push)this.push.revoke(id);
-    else if(existsSync(join(this.options.paths.webDir,'push.json'))){
-      const dormant=new WebPush({paths:this.options.paths,isDeviceActive:deviceId=>this.records.some(record=>record.id===deviceId&&this.activeDevice(record)),isCurrent:()=>false});dormant.revoke(id);dormant.close();
-    } for (const ws of this.sockets)
-    if (ws.data.deviceId === id) {
-      ws.data.unsubscribe?.();
-      ws.close(1008, "Device revoked");
-    } return true; }
+    return false; d.revokedAt ??= new Date(this.now()).toISOString();this.pendingRevocations.add(id);
+    if(!this.cleanupRevocation(id))throw Error('device-revocation-cleanup-pending');return true; }
+  private disconnectDevice(id:string) {
+    let complete=true;
+    for(const ws of this.sockets)if(ws.data.deviceId===id){
+      this.sockets.delete(ws);
+      try{ws.data.unsubscribe?.();}catch{complete=false;}
+      finally{ws.data.unsubscribe=undefined;try{ws.close(1008,'Device revoked');}catch{complete=false;try{ws.terminate();}catch{}}}
+    }
+    return complete;
+  }
+  private cleanupRevocation(id:string) {
+    let complete=true;
+    const attempt=(cleanup:()=>void)=>{try{cleanup();}catch{complete=false;}};
+    attempt(()=>{if(!this.disconnectDevice(id))complete=false;});
+    attempt(()=>this.save());
+    attempt(()=>{
+      if(this.push)this.push.revoke(id);
+      else if(existsSync(join(this.options.paths.webDir,'push.json'))){
+        const dormant=new WebPush({paths:this.options.paths,isDeviceActive:deviceId=>this.records.some(record=>record.id===deviceId&&this.activeDevice(record)),isCurrent:()=>false});
+        try{dormant.revoke(id);}finally{dormant.close();}
+      }
+    });
+    attempt(()=>{
+      if(this.replies)this.replies.revoke(id);
+      else if(existsSync(join(this.options.paths.webDir,'lead-replies.sqlite'))||existsSync(join(this.options.paths.webDir,'lead-replies.json'))){
+        const dormant=new LeadReplies(this.options.paths.webDir,this.now);try{dormant.revoke(id);}finally{dormant.close();}
+      }
+    });
+    if(complete)this.pendingRevocations.delete(id);return complete;
+  }
   private save() { writePrivateFile(this.options.paths.devicesFile, JSON.stringify(this.records)); }
   async query(name: string, args: unknown): Promise<CommandOutcome> { try {
     switch (name) {
@@ -167,13 +252,14 @@ export class WebService {
       default: return { ok: false, code: "query-unknown" };
     }
   }
-  catch {
-    return { ok: false, code: "web-unavailable" };
+  catch (error) {
+    return { ok: false, code: "web-unavailable", ...((error as Error).message==='device-revocation-cleanup-pending'?{message:'Device access is blocked; revocation cleanup is pending.'}:{}) };
   } }
   private response(data: unknown, status = 200, extra: Record<string, string> = {}) { return new Response(JSON.stringify(data), { status, headers: { ...HEADERS, "Content-Type": "application/json", ...extra } }); }
   private issueDevice(r: Request, body: Record<string, unknown>, tailscaleIdentity?: string) {
     const token = randomBytes(32).toString('base64url');
     const d: Device = { id: randomUUID(), name: typeof body.name === 'string' ? body.name.slice(0, 80) : 'Browser', createdAt: new Date(this.now()).toISOString(), hash: hash(token), ...(tailscaleIdentity ? { tailscaleIdentity } : {}) };
+    this.replies?.enroll(d.id);
     this.records.push(d);
     this.save();
     return this.response({ ok: true, device: this.devices().find(x => x.id === d.id) }, 200, { 'Set-Cookie': this.deviceCookie(r, token) });
@@ -271,6 +357,43 @@ export class WebService {
         const device = this.device(r, s);
         if (!device)
           return this.response({ ok: false, code: 'device-required' }, 401);
+        if(path==='/api/replies' || /^\/api\/sessions\/[^/]+\/replies(?:\/[^/]+)?$/.test(path)) {
+          if(!this.replies)return this.response({ok:false,code:'reply-storage-unavailable'},503);
+          const match=/^\/api\/sessions\/([^/]+)\/replies(?:\/([^/]+))?$/.exec(path);
+          const sessionId=match?.[1],replyId=match?.[2];
+          if(sessionId&&!safeId(sessionId)||replyId&&!validReplyId(replyId))return this.response({ok:false,code:'reply-invalid'},400);
+          if(sessionId&&!this.options.service.openLog(sessionId))return this.response({ok:false,code:'session-unknown'},404);
+          try {
+            // Receipt replay belongs after the body await: source changes while
+            // reading it must be validated, with only one 4096-event batch per POST.
+            const syncing=r.method==='POST'&&replyId?false:this.syncReplies(sessionId);this.replies.enroll(device.id);
+            if(r.method==='GET'&&replyId){const reply=this.replies.get(sessionId!,replyId);return reply?this.response({ok:true,reply}):this.response({ok:false,code:'reply-unknown'},404);}
+            if(r.method==='POST'&&replyId){
+              if(!this.replies.get(sessionId!,replyId))return this.response({ok:false,code:'reply-unknown'},404);
+              let body:Record<string,unknown>;try{body=await this.json(r);}catch{return this.response({ok:false,code:'reply-receipt-invalid'},400);}
+              if(body.displayed!==true||Object.keys(body).some(k=>k!=='displayed'))return this.response({ok:false,code:'reply-receipt-invalid'},400);
+              if(!this.device(r,s))return this.response({ok:false,code:'device-required'},401);
+              const log=this.options.service.openLog(sessionId!);
+              if(!log)return this.response({ok:false,code:'session-unknown'},404);
+              if(this.replies.sync(log)){this.pendingReplies.add(sessionId!);return this.response({ok:false,code:'reply-history-syncing'},503);}
+              this.pendingReplies.delete(sessionId!);
+              if(!this.replies.get(sessionId!,replyId))return this.response({ok:false,code:'reply-unknown'},404);
+              this.replies.displayed(device.id,sessionId!,replyId);this.push?.evaluate(sessionId);
+              return this.response({ok:true});
+            }
+            if(r.method==='GET'&&!replyId&&sessionId&&url.searchParams.has('messageSeq')){
+              const values=url.searchParams.getAll('messageSeq');
+              if([...url.searchParams.keys()].some(k=>k!=='messageSeq')||values.length>120||values.some(v=>!/^\d+$/.test(v)||!Number.isSafeInteger(Number(v))||Number(v)<1))return this.response({ok:false,code:'cursor-invalid'},400);
+              return this.response({ok:true,replies:this.replies.forMessages(device.id,sessionId,values.map(Number)),syncing});
+            }
+            if(r.method==='GET'&&!replyId){
+              const raw=url.searchParams.get('cursor')??'0';
+              if([...url.searchParams.keys()].some(k=>k!=='cursor')||url.searchParams.getAll('cursor').length>1||!/^\d+$/.test(raw)||!Number.isSafeInteger(Number(raw)))return this.response({ok:false,code:'cursor-invalid'},400);
+              return this.response({ok:true,...this.replies.list(device.id,Number(raw),sessionId),syncing});
+            }
+            return this.response({ok:false,code:'route-unknown'},404);
+          }catch{return this.response({ok:false,code:'reply-storage-unavailable'},503);}
+        }
         if (path === '/api/push' || path === '/api/push/presence') {
           const origins=[`http://127.0.0.1:${s.port}`,`http://localhost:${s.port}`,...this.options.config.allowedOrigins];
           const referer=r.headers.get('referer');
@@ -340,6 +463,12 @@ export class WebService {
           const outcome = await this.options.service.query?.(names[path]!, args) ?? { ok: false as const, code: 'query-unavailable' };
           return this.response(outcome, outcome.ok ? 200 : 400);
         }
+        const decisions = /^\/api\/sessions\/([^/]+)\/decisions$/.exec(path);
+        if (decisions && r.method === "GET") {
+          if (!safeId(decisions[1]!)) return this.response({ok:false,code:"session-invalid"},400);
+          const outcome = await this.options.service.query?.("decisions.list",{sessionId:decisions[1]}) ?? {ok:false as const,code:"query-unavailable"};
+          return this.response(outcome,outcome.ok?200:404);
+        }
         const prompts = /^\/api\/sessions\/([^/]+)\/prompts$/.exec(path);
         if (prompts && r.method === 'GET') {
           if (!safeId(prompts[1]!)) return this.response({ ok: false, code: 'session-invalid' }, 400);
@@ -378,11 +507,11 @@ export class WebService {
         if(historyMatch && r.method==='GET') {
           const id=historyMatch[1]!;
           const params=url.searchParams;
-          if(!safeId(id)||[...params.keys()].some(key=>!['before','after','limit','taskId'].includes(key)||params.getAll(key).length!==1)||params.has('before')&&params.has('after'))return this.response({ok:false,code:'cursor-invalid'},400);
+          if(!safeId(id)||[...params.keys()].some(key=>!['before','after','around','limit','taskId'].includes(key)||params.getAll(key).length!==1)||['before','after','around'].filter(key=>params.has(key)).length>1)return this.response({ok:false,code:'cursor-invalid'},400);
           const taskId=params.get('taskId')??undefined;
           if(taskId!==undefined&&!safeId(taskId))return this.response({ok:false,code:'cursor-invalid'},400);
-          const parsed: {before?:number;after?:number;limit?:number;taskId?:string}={taskId};
-          for(const key of ['before','after','limit'] as const) {
+          const parsed: {before?:number;after?:number;around?:number;limit?:number;taskId?:string}={taskId};
+          for(const key of ['before','after','around','limit'] as const) {
             const raw=params.get(key);if(raw===null)continue;
             const value=Number(raw);
             if(!/^\d+$/.test(raw)||!Number.isSafeInteger(value)||value<1||key==='limit'&&value>40)return this.response({ok:false,code:'cursor-invalid'},400);
@@ -440,7 +569,7 @@ export class WebService {
       ws.close(1008, 'Unknown session');
       return;
     }
-    const send = (e: SessionEvent) => { if (e.seq <= ws.data.after)
+    const send = (e: SessionEvent) => { if(!this.records.some(d=>d.id===ws.data.deviceId&&this.activeDevice(d))){this.disconnectDevice(ws.data.deviceId);return false;} if (e.seq <= ws.data.after)
       return; const history=ws.data.chat?this.history(log):undefined;history?.apply(e);
       const value = JSON.stringify({ type: 'event', event: e, ...(history ? {message:history.messageAt(e,ws.data.taskId)} : {}) }); if (ws.getBufferedAmount() + Buffer.byteLength(value) > (this.options.maxQueuedBytes ?? 1024 * 1024) || ws.send(value) === -1) {
       ws.send(JSON.stringify({ type: 'resync' }));

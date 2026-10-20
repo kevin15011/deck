@@ -217,6 +217,15 @@ describe("createCrossSessionService (production composition)", () => {
         for (let i = 0; i < 100 && service.hasRunningWork(); i++) await new Promise((r) => setTimeout(r, 1));
       }
       expect(inputs).toHaveLength(2);
+      for (const input of inputs) {
+        expect(input.rolePrompt).toContain("yield promptly");
+        expect(input.rolePrompt).toContain("last action of the turn");
+        expect(input.rolePrompt).toContain("Reports remain unverified until you review evidence");
+        expect(input.mcp.sessionTools).toContain("deck_task_integrate");
+        expect(input.mcp.sessionTools).toContain("deck_decision_resolve");
+        expect(input.rolePrompt).toContain("Host validates structural references");
+        expect(input.rolePrompt).toContain("Native Lead tools and undeclared work are outside");
+      }
       expect(inputs[1]?.resume).toEqual({ nativeSessionId: "fixture-native-session" });
       if (runnerId === "claude") {
         expect(inputs[0]?.rolePrompt).toContain(first);

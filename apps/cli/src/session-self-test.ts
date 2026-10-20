@@ -14,7 +14,7 @@ import { getBuildInfo } from "./runtime/build-info";
 export type SelfTestCheck = { id: string; ok: boolean; detail?: string };
 export type SelfTestReport = { ok: boolean; version: string; target: string; checks: SelfTestCheck[] };
 export type SelfTestOptions = {
-  web?: { assets: Readonly<Record<string, {body:string;contentType:string}>>; digest:string };
+  web?: { assets: Readonly<Record<string, {body:string|Uint8Array;contentType:string}>>; digest:string };
   schemas?: { event: unknown; command: unknown; digest: string };
   env?: Readonly<Record<string, string | undefined>>;
 };
@@ -31,7 +31,7 @@ export function runSessionSelfTest(options: SelfTestOptions = {}): SelfTestRepor
   const schemas = options.schemas ?? { event: SESSION_EVENT_SCHEMA, command: SESSION_COMMAND_SCHEMA, digest: SESSION_SCHEMA_DIGEST };
   const checks: SelfTestCheck[] = [];
   const web = options.web ?? {assets: WEB_ASSETS, digest: WEB_ASSETS_DIGEST};
-  const webDigest = createHash("sha256").update(JSON.stringify(Object.keys(web.assets).sort().map(path => [path, web.assets[path]!.contentType, web.assets[path]!.body]))).digest("hex");
+  const webDigest = createHash("sha256").update(JSON.stringify(Object.keys(web.assets).sort().map(path => { const asset=web.assets[path]!;return [path,asset.contentType,typeof asset.body==='string'?asset.body:Array.from(asset.body)]; }))).digest("hex");
   checks.push({id: "web-assets-digest", ok: webDigest === web.digest, detail: webDigest === web.digest ? web.digest.slice(0,12) : "embedded web assets do not match their manifest digest"});
   checks.push({id: "web-assets-complete", ok: ["/index.html", "/app.js", "/app.css"].every(path => Boolean(web.assets[path]?.body))});
 

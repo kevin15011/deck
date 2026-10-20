@@ -1,6 +1,9 @@
 import type { SessionGrant } from "@deck/core/session/approval";
 import { isApprovalMode, type ApprovalMode } from "@deck/core/session/commands";
 import { QuestionBroker } from "./question-broker";
+import {CLAUDE_STEERING_CAPABILITY,CODEX_STEERING_CAPABILITY,matchesSteering,type SteeringFence,type SteeringOutcome} from "@deck/core/session/steering";
+import { DecisionService, decisionFingerprint } from "./decision-service";
+import { DECISION_GUIDANCE, validDependencyInput, idList, object, text, validDecisionTarget, type DecisionReply, type DecisionTarget, type DurableDecisionCommand } from "@deck/core/session/decisions";
 /**
  * SessionManager implements the `SessionService` port for cross-runner team sessions.
  * It owns per-task scheduling and lifecycle, the event
@@ -26,7 +29,8 @@ import type {
   ChildMcpServerSpec, DriverImageInput, DriverEvent, DriverHostIo, DriverTaskHandle, DriverTaskInput, NativeMemoryDescriptor, RunnerSessionDriver, TurnOutcome,
 } from "@deck/core/session/driver";
 import { boundRaw, SESSION_EVENT_KINDS, type SessionEvent, type SessionEventKind } from "@deck/core/session/events";
-import { computeChildMcpSet } from "@deck/core/session/mcp";
+import { continuityContext } from "./continuity";
+import { CROSS_RUNNER_LEAD_CONTINUITY_GUIDANCE, validTaskIntegration, computeChildMcpSet } from "@deck/core/session/mcp";
 import { redactText } from "@deck/core/session/redaction";
 import type { ApprovalBroker } from "./approval-broker";
 import { SESSION_MCP_SERVER_ID, sessionMcpServerSpec } from "./bridge-config";
@@ -43,6 +47,7 @@ import { listOpenSpecArtifacts, readOpenSpecArtifact } from "./openspec-artifact
 import { continuationBlock } from "./recovery";
 import type { CommandOutcome, ExecuteOutcome } from "./protocol";
 import type { PushAttention } from "./web-push";
+import { deriveAttention, type AttentionItem } from "./push-attention";
 import type { SessionService } from "./service";
 import type { Supervisor } from "./supervisor";
 
@@ -108,6 +113,7 @@ export type SessionManagerOptions = {
   closeChildMcp?: () => Promise<void>;
   memory?: (context: { sessionId: string; projectRoot: string; leadRunnerId: string }) => Promise<SessionMemoryPort | undefined>;
   clock?: Clock;
+  steeringTimeoutMs?: number;
   logger?: DaemonLogger;
   newSessionId?: () => string;
   homeDir?: string;
@@ -144,6 +150,7 @@ type Turn = {
   noticeSnapshot?: Array<{ taskId: string; attempt: number; text: string }>;
   noticeContext?: string;
   admissionSeq?: number;
+  nativeEnded?: boolean; steeringAllowed?: boolean; steeringPublished?: boolean;
   done: Promise<void>;
   resolveDone: () => void;
 };
@@ -157,8 +164,8 @@ type Live = {
   unsubscribe: () => void;
   turns: Map<string, Turn>;
   queue: Turn[];
-  notices: Map<string, string>;
-  acknowledgedAttempts: Map<string, number>;
+  steering?: {seq:number;turn:Turn;barrier:Promise<void>};
+  notices: Map<string, { taskId: string; attempt: number; text: string }>;
   wakeTimer?: ReturnType<Clock["setTimeout"]>;
   memory?: MemoryBroker;
   stopping: boolean;
@@ -222,6 +229,7 @@ export class SessionManager implements SessionService {
       for (const id of this.sessionIds()) this.load(id);
       for (const live of this.sessions.values()) {
         for (const prompt of live.ledger.prompts()) {
+          if(prompt.steering?.state==="pending"){this.append(live,{kind:"prompt.steered",data:{promptId:prompt.promptId,steeringSeq:prompt.steering.seq,state:"unknown",eligible:false,stale:false,reason:"daemon-restart"}});this.flush(live);}
           if (prompt.state !== "dispatched" || !prompt.taskId) continue;
           const attempt = live.ledger.task(prompt.taskId)?.attempts.find(attempt => attempt.attempt === prompt.attempt);
           if (attempt && (TERMINAL_TASK_STATES.includes(attempt.state) || attempt.state === "ownership-unsettled")) {
@@ -234,7 +242,9 @@ export class SessionManager implements SessionService {
           if(!this.ownershipBlocked(live)) this.finishRelease(live);
           else if(!live.ledger.session.releaseFailure) {this.append(live,{kind:"session.released",data:{phase:"releasing",epoch:live.ledger.session.releaseEpoch??0,reasonCode:"ownership-unsettled"}});this.flush(live);}
         }
+        this.refreshNotices(live);
         this.pumpPrompts(live);
+        this.scheduleWake(live);
       }
       this.schedule();
     });
@@ -244,7 +254,7 @@ export class SessionManager implements SessionService {
 
   execute(input: { sessionId?: string; command: SessionCommand; clientId: string }): Promise<ExecuteOutcome> {
     const key = `${input.sessionId ?? ""}:${input.command.commandId}`;
-    const fingerprint = JSON.stringify(input.command);
+    const fingerprint = input.command.type.startsWith("decision.") ? decisionFingerprint(input.command.type,input.command as unknown as Record<string,unknown>) : JSON.stringify(input.command);
     const pending = this.executing.get(key);
     if (pending) return pending.fingerprint !== fingerprint ? Promise.resolve(fail("command-id-reused")) : pending.result.then(result => result.ok ? { ...result, duplicate: true } : result);
     const result = this.performExecute(input);
@@ -267,8 +277,12 @@ export class SessionManager implements SessionService {
     if (!live) return fail("unknown-session");
 
     if (live.broken) return fail("log-write-failed");
+    const identity = live.ledger.mutationIdentity(command.commandId);
+    if (identity && (identity.type !== command.type || identity.fingerprint && identity.fingerprint !== decisionFingerprint(command.type, command as unknown as Record<string, unknown>))) return fail("command-id-reused");
     const permanentPrompt = live.ledger.prompt(command.commandId);
-    if (permanentPrompt && (command.type !== "prompt.send" || permanentPrompt.textHash !== this.promptHash(command.text, command.attachmentIds))) return fail("command-id-reused");
+    if (permanentPrompt && (command.type !== "prompt.send" || permanentPrompt.textHash !== this.promptHash(command.text, command.attachmentIds, command.decisionTarget, command.delivery))) return fail("command-id-reused");
+    const decisionReceipt = live.ledger.decisionCommand(command.commandId);
+    if (decisionReceipt) return this.decisions(live).duplicate(command.type, command as unknown as Record<string, unknown>)!;
     const lifecycle = live.ledger.lifecycleReceipt(command.commandId);
     if (lifecycle) {
       if(lifecycle.type!==command.type || lifecycle.fingerprint!==(command.type==="session.rename" ? JSON.stringify(command.title.trim()) : "")) return fail("command-id-reused");
@@ -280,7 +294,12 @@ export class SessionManager implements SessionService {
       if (receipt.type !== command.type) return fail("command-id-reused", `commandId was used for ${receipt.type}`);
       return { ...(receipt.outcome as CommandOutcome), duplicate: true };
     }
+    if (identity && !permanentPrompt) return fail("command-outcome-unavailable");
     switch (command.type) {
+      case "decision.defer": case "decision.cancel": case "decision.reopen":
+        if (live.stopping || live.ledger.session.state === "ended") return fail("session-ended");
+        if (live.ledger.session.released) return fail("session-released");
+        return this.decisions(live).user(command.type, command as unknown as Record<string, unknown>);
       case "prompt.send": return this.promptSend(live, command, clientId);
       case "prompt.cancel": return this.cancelPrompt(live, command);
       case "prompt.resume": return this.resumePrompts(live, command);
@@ -304,9 +323,10 @@ export class SessionManager implements SessionService {
     }
   }
 
-  private promptHash(text: string, attachmentIds?: readonly string[]): string {
+  private promptHash(text: string, attachmentIds?: readonly string[], decisionTarget?: DecisionTarget, delivery?: "current-turn"): string {
+    if(delivery)return createHash("sha256").update(JSON.stringify([text,attachmentIds??[],decisionTarget??null,delivery])).digest("hex");
     // Preserve existing text-only receipt fingerprints across upgrade.
-    return createHash("sha256").update(attachmentIds?.length ? JSON.stringify([text, attachmentIds]) : text).digest("hex");
+    return createHash("sha256").update(decisionTarget ? JSON.stringify([text, attachmentIds ?? [], decisionTarget.decisionId, decisionTarget.revision]) : attachmentIds?.length ? JSON.stringify([text, attachmentIds]) : text).digest("hex");
   }
   private attachmentStore(live: Live): AttachmentStore { return new AttachmentStore(live.paths.attachmentsDir); }
   uploadAttachment(input: {sessionId: string; bytes: Uint8Array; mimeType: string; name: string}): CommandOutcome {
@@ -339,6 +359,24 @@ export class SessionManager implements SessionService {
   subscribeEvents(listener: (event: SessionEvent) => void): () => void {
     this.eventListeners.add(listener);
     return () => { this.eventListeners.delete(listener); };
+  }
+
+  pushAttentionSessions(): string[] { return this.sessionIds(); }
+
+  canNotifyReplies(sessionId:string):boolean {
+    const live=this.load(sessionId);if(!live)return false;
+    const s=live.ledger.session;
+    return !live.broken&&!this.closing&&!live.stopping&&!s.removed&&!s.removalPending&&!s.stopRequested&&!s.released&&!['ended','stopping'].includes(s.state);
+  }
+
+  pushAttentionItems(sessionId: string): AttentionItem[] {
+    const live = this.load(sessionId);
+    if (!live) return [];
+    return deriveAttention({ ledger: live.ledger, events: (after = 0) => live.log.readAfter(after), leadTaskId: this.leadTaskId(live),
+      running: new Set([...live.turns.values()].map(t => `${t.taskId}:${t.attempt}`)),
+      disabled: !!live.broken || this.closing || live.stopping,
+      idle: live.turns.size === 0 && live.queue.length === 0 && !live.wakeTimer && !live.notices.size && !this.waitingPrompts(live).length && !live.ledger.pendingQuestions().length && !live.ledger.pendingApprovals().length,
+      notices: live.notices.size, preparationFailed: live.preparation?.state.status === "failed" });
   }
 
   isPushAttentionCurrent(attention: PushAttention): boolean {
@@ -379,6 +417,18 @@ export class SessionManager implements SessionService {
         const id = (args as {sessionId?:unknown} | null)?.sessionId;
         const summary = typeof id === "string" ? this.summarize(id) : undefined;
         return summary ? ok({session: summary}) : fail("unknown-session");
+      }
+      case "decisions.list": {
+        const id = (args as {sessionId?: unknown} | null)?.sessionId;
+        const live = typeof id === "string" ? this.load(id) : undefined;
+        return live ? this.decisions(live).list() : fail("unknown-session");
+      }
+      case "task.result": {
+        const input = args as { sessionId?: unknown; taskId?: unknown } | null;
+        if (!input || typeof input.sessionId !== "string" || typeof input.taskId !== "string") return fail("invalid-arguments");
+        const live = this.load(input.sessionId);
+        const task = live?.ledger.task(input.taskId);
+        return task ? ok(structuredClone(task)) : fail("task-unknown");
       }
       case "projects.list": return ok({ projects: this.projectStore().list() });
       case "directories.list":
@@ -453,20 +503,25 @@ export class SessionManager implements SessionService {
 
   /** Called only after bridge authentication. Revalidate live ownership rather than trusting claimed role. */
   async callTaskTool(grant: CredentialGrant, name: string, args: unknown, context: { signal?: AbortSignal } = {}): Promise<CommandOutcome> {
-    const delegation = ["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel", "deck_task_list"].includes(name);
+    const delegation = ["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel", "deck_task_list", "deck_task_integrate", "deck_decision_open", "deck_decision_list", "deck_decision_revise", "deck_decision_resolve"].includes(name);
     if (delegation && grant.memberId !== LEAD_MEMBER_ID) return fail("tool-not-allowed");
     const live = this.sessions.get(grant.sessionId);
     const caller = live?.turns.get(grant.taskId);
-    if (!live || !caller || delegation && grant.taskId !== this.leadTaskId(live) || caller.memberId !== grant.memberId || (grant.runnerId && caller.assignment.runnerId !== grant.runnerId) || caller.kind || live.stopping || live.ledger.session.released || this.closing) return fail("credential-revoked");
+    if (!live || !caller || delegation && grant.taskId !== this.leadTaskId(live) || caller.memberId !== grant.memberId || (grant.runnerId && caller.assignment.runnerId !== grant.runnerId) || caller.kind || caller.nativeEnded || live.broken || live.ledger.session.removed || live.ledger.session.removalPending || live.stopping || live.ledger.session.released || this.closing) return fail("credential-revoked");
     if (!args || typeof args !== "object" || Array.isArray(args)) return fail("invalid-arguments");
     if (context.signal?.aborted) return fail("aborted");
     const d = args as Record<string, unknown>;
     try {
       switch (name) {
-        case "deck_delegate": return this.delegate(live, d);
+        case "deck_decision_open": case "deck_decision_list": case "deck_decision_revise": case "deck_decision_resolve":
+          if (!caller.admissionSeq) return fail("credential-revoked");
+          if (typeof d.commandId === "string" && (live.ledger.prompt(d.commandId) || live.ledger.receipt(d.commandId) || live.ledger.lifecycleReceipt(d.commandId))) return fail("command-id-reused");
+          return this.decisions(live).tool(name, d, caller);
+        case "deck_delegate": return this.delegate(live, d, caller);
+        case "deck_task_result": return typeof d.taskId === "string" ? this.leadResult(live, d.taskId, caller, d.attempt) : fail("invalid-arguments");
+        case "deck_task_wait": return this.waitTasks(live, d, caller, context.signal);
+        case "deck_task_integrate": return this.integrateTask(live, d, caller);
         case "deck_task_list": return ok({ tasks: this.delegatedTasks(live, true) });
-        case "deck_task_result": return typeof d.taskId === "string" ? this.leadResult(live, d.taskId) : fail("invalid-arguments");
-        case "deck_task_wait": return this.waitTasks(live, d, context.signal);
         case "deck_task_cancel": {
           if (typeof d.taskId !== "string" || live.ledger.task(d.taskId)?.memberId === LEAD_MEMBER_ID) return fail("invalid-arguments");
           return this.interrupt(live, { v: 1, type: "turn.interrupt", commandId: randomUUID(), taskId: d.taskId }, "cancel");
@@ -492,7 +547,16 @@ export class SessionManager implements SessionService {
     } catch (error) { return fail("task-tool-failed", bounded((error as Error).message)); }
   }
 
-  private delegate(live: Live, d: Record<string, unknown>): ExecuteOutcome {
+  private decisions(live: Live): DecisionService {
+    return new DecisionService({ ledger: live.ledger, lastSeq: () => live.log.lastSeq, append: draft => { this.append(live, draft); }, flush: () => this.flush(live) });
+  }
+
+  private delegate(live: Live, d: Record<string, unknown>, caller?: Turn): ExecuteOutcome {
+    if (d.commandId !== undefined) {
+      if (!text(d.commandId) || !d.replan) return fail("invalid-arguments");
+      const duplicate = this.decisions(live).duplicate("deck_delegate", d); if (duplicate) return duplicate;
+      if (live.ledger.prompt(d.commandId) || live.ledger.receipt(d.commandId) || live.ledger.lifecycleReceipt(d.commandId)) return fail("command-id-reused");
+    }
     if (typeof d.agent !== "string" || (d.agent === LEAD_MEMBER_ID || d.agent === "deck-lead") || typeof d.task !== "string" || !d.task.trim() || d.task.length > MAX_PROMPT_CHARS || (d.continueTaskId !== undefined && typeof d.continueTaskId !== "string")) return fail("invalid-arguments");
     const agent = !this.memberAssignment(live, d.agent) && d.agent.startsWith("deck-") && d.agent !== "deck-lead" && this.memberAssignment(live, d.agent.slice(5)) ? d.agent.slice(5) : d.agent;
     const priorId = d.continueTaskId as string | undefined;
@@ -503,6 +567,19 @@ export class SessionManager implements SessionService {
     if (priorId && (live.turns.has(priorId) || live.queue.some((turn) => turn.taskId === priorId))) return fail("task-running");
     const block = priorId ? continuationBlock(live.ledger, priorId) : undefined;
     if (block) return fail(block.code);
+    if (!validDependencyInput(d)) return fail(d.replan !== undefined ? "dependency-replan-required" : "invalid-arguments");
+    const dependsOn = (d.dependsOn as string[] | undefined) ?? priorTask?.dependsOn ?? [];
+    const action = (d.action as string | undefined) ?? priorTask?.action;
+    const changedDependencies = !!priorTask && (JSON.stringify(dependsOn) !== JSON.stringify(priorTask.dependsOn ?? []) || priorTask.action !== undefined && action !== priorTask.action);
+    let decisionCommand: DurableDecisionCommand | undefined;
+    if (d.replan !== undefined || changedDependencies) {
+      if (!caller || !object(d.replan) || Object.keys(d.replan).some(k => !["promptId", "note"].includes(k)) || !text(d.replan.note, 512) || !text(d.commandId) || !priorTask) return fail("dependency-replan-required");
+      const duplicate = this.decisions(live).duplicate("deck_delegate", d); if (duplicate) return duplicate;
+      if (!this.decisions(live).evidence(caller, d.replan.promptId, Math.max(...(priorTask.dependsOn ?? []).map(id => live.ledger.decision(id)?.updatedSeq ?? 0), 0))) return fail("decision-evidence-invalid");
+      decisionCommand = { commandId: d.commandId, fingerprint: decisionFingerprint("deck_delegate", d), type: "deck_delegate", outcome: { ok: true, data: { taskId: priorTask.taskId } } };
+    }
+    if (dependsOn.some(id => !live.ledger.decision(id))) return fail("decision-unknown");
+    if (!this.decisions(live).dependencies(dependsOn, action)) return fail("decision-dependency-blocked");
     const prior = priorId ? live.ledger.latest(priorId) : undefined;
     const assignment = prior ? { runnerId: prior.runnerId, modelId: prior.modelId, ...(prior.thinking ? { thinking: prior.thinking } : {}) } : this.memberAssignment(live, agent);
     if (!assignment) return this.unknownMember(agent, this.effectiveMembers(live.meta, live.ledger));
@@ -514,11 +591,12 @@ export class SessionManager implements SessionService {
     const resume = prior && native && live.ledger.nativeConfirmed(taskId) ? { nativeSessionId: native } : undefined;
     const source = { taskId, memberId: agent, runnerId: assignment.runnerId };
     this.append(live, [
-      prior ? { kind: "task.continued", source, data: { taskId, attempt, continuity: "native", ...(native ? { nativeSessionId: native } : {}) } }
-        : { kind: "task.created", source, data: { taskId, memberId: agent, ...assignment, state: "created", ...(native ? { nativeSessionId: native } : {}) } },
+      prior ? { kind: "task.continued", source, data: { taskId, attempt, continuity: "native", dependsOn, ...(action ? {action} : {}), ...(d.replan ? {replan:d.replan} : {}), ...(decisionCommand ? {decisionCommand} : {}), ...(native ? { nativeSessionId: native } : {}) } }
+        : { kind: "task.created", source, data: { taskId, memberId: agent, ...assignment, dependsOn, ...(action ? {action} : {}), state: "created", ...(native ? { nativeSessionId: native } : {}) } },
       { kind: "message.completed", source, data: { role: "user", text: d.task } },
       { kind: "task.state", source, data: { taskId, state: "queued", reason: "global-delegated-capacity" } },
     ]);
+    if (decisionCommand) this.flush(live);
     live.queue.push(this.newTurn(taskId, agent, { ...assignment }, attempt, d.task, native, resume));
     this.schedule(live);
     return ok({ taskId });
@@ -569,11 +647,12 @@ export class SessionManager implements SessionService {
   }
 
   private scheduleWake(live: Live): void {
-    if (this.closing || live.stopping || live.ledger.session.released || live.broken || live.ledger.promptQueue.paused || this.waitingPrompts(live).length || !live.notices.size || this.leadBusy(live) || live.wakeTimer !== undefined) return;
+    this.refreshNotices(live);
+    if (this.closing || live.stopping || live.ledger.session.released || live.broken || live.ledger.promptQueue.paused || this.waitingPrompts(live).length || !live.notices.size || live.ledger.tasks().some(t => t.attempts.at(-1)?.state === "ownership-unsettled") || this.leadBusy(live) || live.wakeTimer !== undefined) return;
     live.wakeTimer = this.clock.setTimeout(() => {
       live.wakeTimer = undefined;
-      if (this.closing || live.stopping || live.ledger.session.released || live.ledger.promptQueue.paused || this.waitingPrompts(live).length || this.leadBusy(live) || !live.notices.size) return;
-      const prompt = bounded(`Delegated task completion notice:\n${[...live.notices.values()].join("\n")}\nUse deck_task_result for details.`, 8192);
+      if (this.closing || live.stopping || live.ledger.session.released || live.ledger.promptQueue.paused || this.waitingPrompts(live).length || this.leadBusy(live) || live.ledger.tasks().some(t => t.attempts.at(-1)?.state === "ownership-unsettled") || !live.notices.size) return;
+      const prompt = bounded(`Delegated task completion notice:\n${[...live.notices.values()].map(n => n.text).join("\n")}\nUse deck_task_result for details.`, 8192);
       const outcome = this.promptSend(live, { v: 1, type: "prompt.send", commandId: randomUUID(), text: prompt }, "daemon");
       if (!outcome.ok) this.options.logger?.warn("lead.wake-refused", { sessionId: live.sessionId, code: outcome.code });
     }, 20);
@@ -589,12 +668,6 @@ export class SessionManager implements SessionService {
       turn.resolveDone();
     }
     this.scheduleWake(live);
-  }
-
-  private queueNotice(live: Live, turn: Turn, state: string): void {
-    // Waiters can receive the terminal ledger event before finishTurn queues its notice.
-    // Remember the delivered attempt so a later enqueue cannot wake Lead a second time.
-    if (turn.memberId !== LEAD_MEMBER_ID && !this.closing && !live.stopping && live.acknowledgedAttempts.get(turn.taskId) !== turn.attempt) live.notices.set(turn.taskId, `${turn.taskId} ${state}`);
   }
 
   /** Read-only discovery: never acknowledge completions or inspect question/answer events. */
@@ -635,24 +708,72 @@ export class SessionManager implements SessionService {
       ({ taskId, memberId, state, attempt, ...(summary ? { summary } : {}) }));
   }
 
-  /** Only authenticated Lead tools acknowledge results; observer log/ledger reads stay inert. */
-  private leadResult(live: Live, taskId: string): ExecuteOutcome {
-    const task = live.ledger.task(taskId); const latest = live.ledger.latest(taskId);
-    if (!task || !latest) return fail("task-unknown");
-    if (TERMINAL_TASK_STATES.includes(latest.state)) {
-      live.acknowledgedAttempts.set(taskId, latest.attempt);
-      live.notices.delete(taskId);
+  private refreshNotices(live: Live): void {
+    live.notices.clear();
+    for (const task of live.ledger.tasks()) if (task.memberId !== LEAD_MEMBER_ID) for (const attempt of task.attempts) {
+      if (TERMINAL_TASK_STATES.includes(attempt.state) && !attempt.delivery && !attempt.retrieval) live.notices.set(`${task.taskId}:${attempt.attempt}`, { taskId: task.taskId, attempt: attempt.attempt, text: `${task.taskId} ${attempt.state} (attempt ${attempt.attempt})` });
     }
-    return ok({ taskId, memberId: task.memberId, ...latest });
   }
 
-  private waitTasks(live: Live, d: Record<string, unknown>, signal?: AbortSignal): Promise<ExecuteOutcome> {
+  private queueNotice(live: Live, _turn: Turn, _state: string): void { this.refreshNotices(live); }
+
+  /** Only authenticated Lead retrieval writes accounting; observer reads stay inert. */
+  private leadResult(live: Live, taskId: string, caller: Turn, attemptNo?: unknown): ExecuteOutcome {
+    if (live.turns.get(caller.taskId) !== caller || caller.kind || caller.controller.signal.aborted || live.broken || live.stopping || live.ledger.session.released || this.closing) return fail("credential-revoked");
+    if (attemptNo !== undefined && (!Number.isSafeInteger(attemptNo) || Number(attemptNo) < 1)) return fail("invalid-arguments");
+    const task = live.ledger.task(taskId);
+    const attempt = attemptNo === undefined ? live.ledger.latest(taskId) : task?.attempts.find(a => a.attempt === attemptNo);
+    if (!task || !attempt) return fail("task-unknown");
+    if (task.memberId !== LEAD_MEMBER_ID && TERMINAL_TASK_STATES.includes(attempt.state) && !attempt.retrieval) {
+      this.append(live, { kind: "task.retrieval", source: { taskId: caller.taskId, memberId: LEAD_MEMBER_ID }, data: { taskId, attempt: attempt.attempt, leadTaskId: caller.taskId, leadAttempt: caller.attempt, ...(caller.promptId ? { promptId: caller.promptId } : {}) } });
+      this.flush(live); this.refreshNotices(live);
+    }
+    return ok({ taskId, memberId: task.memberId, ...attempt });
+  }
+
+  private integrateTask(live: Live, d: Record<string, unknown>, caller: Turn): ExecuteOutcome {
+    if (!validTaskIntegration(d) || Object.keys(d).some(k => !["commandId", "taskId", "attempt", "state", "note", "evidenceSeqs"].includes(k))) return fail("invalid-arguments");
+    const identity = live.ledger.mutationIdentity(d.commandId);
+    if (identity && (identity.type !== "deck_task_integrate" || identity.fingerprint && identity.fingerprint !== decisionFingerprint("deck_task_integrate", d))) return fail("command-id-reused");
+    // Canonical field order makes identity independent of JSON object property order.
+    const content = (v: Record<string, unknown>) => JSON.stringify([v.taskId, v.attempt, v.state, v.note, v.evidenceSeqs]);
+    for (const task of live.ledger.tasks()) for (const a of task.attempts) for (const record of a.integrations ?? []) if (record.commandId === d.commandId) {
+      return content({ taskId: task.taskId, attempt: a.attempt, ...record }) === content(d) ? { ...ok({ taskId: task.taskId, attempt: a.attempt, integration: record }), duplicate: true } : fail("command-id-reused");
+    }
+    const task = live.ledger.task(String(d.taskId)); const attempt = task?.attempts.find(a => a.attempt === d.attempt);
+    if (!task || task.memberId === LEAD_MEMBER_ID || !attempt) return fail("task-unknown");
+    if (!TERMINAL_TASK_STATES.includes(attempt.state) || !attempt.retrieval || !caller.admissionSeq) return fail("integration-evidence-required");
+    const evidence = d.evidenceSeqs as number[];
+    const events = [...live.log.readAfter(0)].filter(e => evidence.includes(e.seq));
+    if (events.length !== evidence.length || !events.every(e => e.source.taskId === task.taskId && e.seq >= attempt.startedSeq && e.seq <= (attempt.endedSeq ?? 0))) return fail("integration-evidence-invalid");
+    this.append(live, { kind: "task.integration", source: { taskId: caller.taskId, memberId: LEAD_MEMBER_ID }, data: { ...d, leadTaskId: caller.taskId, leadAttempt: caller.attempt, ...(caller.promptId ? { promptId: caller.promptId } : {}) } });
+    this.flush(live);
+    return ok({ taskId: task.taskId, attempt: attempt.attempt, integration: attempt.integration });
+  }
+
+  private waitTasks(live: Live, d: Record<string, unknown>, caller: Turn, signal?: AbortSignal): Promise<ExecuteOutcome> {
     if (!Array.isArray(d.taskIds) || !d.taskIds.length || d.taskIds.length > 100 || !d.taskIds.every((id) => typeof id === "string" && live.ledger.task(id)) || (d.timeoutSec !== undefined && (typeof d.timeoutSec !== "number" || !Number.isFinite(d.timeoutSec) || d.timeoutSec < 0 || d.timeoutSec > 50))) return Promise.resolve(fail("invalid-arguments"));
     const ids = [...new Set(d.taskIds as string[])];
     return new Promise((resolve) => {
       let finished = false; let timer: ReturnType<Clock["setTimeout"]> | undefined;
       let unsubscribe = () => {};
-      const finish = (aborted = false) => { if (finished) return; finished = true; unsubscribe(); if (timer !== undefined) this.clock.clearTimeout(timer); signal?.removeEventListener("abort", abort); resolve(aborted || signal?.aborted ? fail("aborted") : ok({ tasks: ids.map((id) => (this.leadResult(live, id) as { data: unknown }).data) })); };
+      const finish = (aborted = false) => {
+        if (finished) return;
+        finished = true; unsubscribe();
+        if (timer !== undefined) this.clock.clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+        // A terminal notification can occur inside appendMany. Persist retrieval only after
+        // the whole batch has reached the ledger, and always settle the tool on write failure.
+        queueMicrotask(() => {
+          if (aborted || signal?.aborted) return resolve(fail("aborted"));
+          if (live.broken) return resolve(fail("task-tool-failed", "The session log is not writable"));
+          try {
+            const results = ids.map(id => this.leadResult(live, id, caller));
+            const failed = results.find(result => !result.ok);
+            resolve(failed ?? ok({ tasks: results.map(result => result.ok ? result.data : undefined) }));
+          } catch (error) { resolve(fail("task-tool-failed", bounded((error as Error).message))); }
+        });
+      };
       const check = () => { if (ids.every((id) => TERMINAL_TASK_STATES.includes(live.ledger.latest(id)!.state))) finish(); };
       const abort = () => finish(true);
       unsubscribe = live.log.subscribe(check);
@@ -697,7 +818,7 @@ export class SessionManager implements SessionService {
       onDiagnostic: (d) => this.options.logger?.warn(`event-log.${d.code}`, { sessionId: meta.sessionId, file: d.file }),
     });
     const { ledger } = loadLedger(log, paths.ledgerSnapshotFile);
-    const live: Live = { sessionId: meta.sessionId, paths, meta, log, ledger, unsubscribe: () => {}, turns: new Map(), queue: [], notices: new Map(), acknowledgedAttempts: new Map(), stopping: false, broken: false };
+    const live: Live = { sessionId: meta.sessionId, paths, meta, log, ledger, unsubscribe: () => {}, turns: new Map(), queue: [], notices: new Map(), stopping: false, broken: false };
     live.unsubscribe = log.subscribe((event) => {
       try { ledger.apply(event); } catch (error) {
         live.broken = true;
@@ -760,25 +881,39 @@ export class SessionManager implements SessionService {
     if (turn.promptId && (!prompt || prompt.state !== "queued" && !turn.reseeded)) throw new Error("prompt-cancelled");
     turn.images = prompt?.attachments?.length ? this.attachmentStore(live).resolve(prompt.attachments) : undefined;
     const drafts: EventDraft[] = [];
+    let decisionReply: DecisionReply | undefined;
+    if (prompt?.decisionTarget) {
+      const decision = live.ledger.decision(prompt.decisionTarget.decisionId);
+      decisionReply = { ...prompt.decisionTarget, promptId: prompt.promptId, taskId: turn.taskId, attempt: turn.attempt, admittedSeq: live.log.lastSeq + 1, ...(prompt.targetQuestionRevision ? {questionRevision:prompt.targetQuestionRevision} : {}), stale: !decision || !["pending", "deferred"].includes(decision.state) || prompt.targetQuestionRevision !== decision.questionRevision };
+    }
     if (prompt) {
-      drafts.push({ kind: "prompt.dispatched", data: { promptId: prompt.promptId, taskId: turn.taskId, attempt: turn.attempt, ...(turn.reseeded ? { reseeded: true } : {}) } });
-      if (!prompt.dispatchedSeq) drafts.push({ kind: "message.completed", source: { taskId: turn.taskId, memberId: LEAD_MEMBER_ID }, data: { role: "user", text: turn.prompt, by: prompt.by, promptId: prompt.promptId, ...(prompt.attachments?.length ? {attachments:prompt.attachments} : {}) } });
+      drafts.push({ kind: "prompt.dispatched", data: { promptId: prompt.promptId, taskId: turn.taskId, attempt: turn.attempt, ...(turn.reseeded ? { reseeded: true } : {}), ...(decisionReply ? {decisionReply} : {}) } });
+      if (decisionReply) drafts.push({kind:"decision.reply",data:{...decisionReply}});
+      if (!prompt.dispatchedSeq) drafts.push({ kind: "message.completed", source: { taskId: turn.taskId, memberId: LEAD_MEMBER_ID }, data: { role: "user", text: turn.prompt, by: prompt.by, promptId: prompt.promptId, ...(decisionReply ? {decisionReply} : {}), ...(prompt.attachments?.length ? {attachments:prompt.attachments} : {}) } });
     }
-    const header = "Delegated task completion notice:\n", footer = "\nUse deck_task_result for details.";
-    let noticeChars = header.length + footer.length;
+    // Commit admission first: every retained JSONL prefix identifies the genuine block.
+    if (drafts.length) { this.append(live, drafts); this.flush(live); drafts.length = 0; }
+    this.refreshNotices(live);
+    const targetNotice = decisionReply ? `Decision reply target ${decisionReply.decisionId}, selected revision ${decisionReply.revision}: ${decisionReply.stale ? "STALE target/question; preserve the user text and do not apply it to the current question. Ask for clarification." : "Admitted reply; decision remains unresolved until explicit Lead resolution."}` : "";
+    const noticeBudget = 8192 - targetNotice.length - 4;
+    const header = "Delegated task completion notice:\n", footer = "\nUse deck_task_result {taskId, attempt} for original details. Reports are unverified until reviewed.";
+    let noticeChars = header.length + footer.length + 256;
     turn.noticeSnapshot = [];
-    for (const [taskId, text] of live.notices) {
-      if (noticeChars + text.length + 1 > 8192) break;
-      turn.noticeSnapshot.push({ taskId, text, attempt: live.ledger.latest(taskId)?.attempt ?? 0 }); noticeChars += text.length + 1;
+    for (const notice of live.notices.values()) {
+      if (noticeChars + notice.text.length + 1 > noticeBudget) break;
+      turn.noticeSnapshot.push(notice); noticeChars += notice.text.length + 1;
     }
-    if (turn.noticeSnapshot.length) {
-      const context = bounded(`${header}${turn.noticeSnapshot.map(notice => notice.text).join("\n")}${footer}`, 8192);
-      if (turn.promptId) turn.noticeContext = context; else { turn.prompt = context; turn.noticeContext = undefined; }
-      drafts.push({ kind: "diagnostic", data: { code: "lead.notices-delivered", notices: turn.noticeSnapshot.map(({ taskId, attempt }) => ({ taskId, attempt })), ...(turn.promptId ? { promptId: turn.promptId } : {}) } });
-    }
+    const omitted = live.notices.size - turn.noticeSnapshot.length;
+    const current = turn.noticeSnapshot.length ? `${header}${turn.noticeSnapshot.map(n => n.text).join("\n")}${footer}${omitted ? `\n${omitted} outcomes omitted; retained for next eligible delivery and queryable via task.result.` : ""}` : "";
+    const continuity = continuityContext(live.ledger, Math.min(4096, noticeBudget - current.length - 2));
+    const context = [targetNotice, current, continuity].filter(Boolean).join("\n\n");
+    if (turn.promptId) turn.noticeContext = context;
+    else { turn.prompt = context || turn.prompt; turn.noticeContext = undefined; }
+    for (const notice of turn.noticeSnapshot) drafts.push({ kind: "task.delivery", source: { taskId: turn.taskId, memberId: LEAD_MEMBER_ID }, data: { taskId: notice.taskId, attempt: notice.attempt, leadTaskId: turn.taskId, leadAttempt: turn.attempt, ...(turn.promptId ? { promptId: turn.promptId } : {}) } });
+    if (turn.noticeSnapshot.length) drafts.push({ kind: "diagnostic", source: { taskId: turn.taskId }, data: { code: "lead.notices-delivered", leadAttempt: turn.attempt, notices: turn.noticeSnapshot.map(({ taskId, attempt }) => ({ taskId, attempt })), ...(turn.promptId ? { promptId: turn.promptId } : {}) } });
     const events = drafts.length ? this.append(live, drafts) : [];
     this.flush(live); turn.admissionSeq = events.at(-1)?.seq ?? live.log.lastSeq;
-    for (const notice of turn.noticeSnapshot) if (live.notices.get(notice.taskId) === notice.text && live.ledger.latest(notice.taskId)?.attempt === notice.attempt) live.notices.delete(notice.taskId);
+    this.refreshNotices(live);
   }
 
   // ---- session.create --------------------------------------------------------------------
@@ -1135,7 +1270,7 @@ export class SessionManager implements SessionService {
   // ---- prompt.send and the turn lifecycle ---------------------------------------------------
 
   private receiptDraft(command: SessionCommand, outcome: { ok: true; data?: unknown }): EventDraft {
-    return { kind: "command.accepted", data: { commandId: command.commandId, type: command.type, outcome } };
+    return { kind: "command.accepted", data: { commandId: command.commandId, type: command.type, ...(command.type === "question.answer" ? {} : { fingerprint: decisionFingerprint(command.type, command as unknown as Record<string, unknown>) }), outcome } };
   }
 
   private waitingPrompts(live: Live): UserPrompt[] { return live.ledger.prompts().filter(prompt => prompt.state === "queued"); }
@@ -1144,7 +1279,11 @@ export class SessionManager implements SessionService {
     return {
       seq: live.log.lastSeq, paused: live.ledger.promptQueue.paused,
       ...(live.ledger.promptQueue.reason ? { pauseReason: live.ledger.promptQueue.reason } : {}),
-      queued: this.waitingPrompts(live).map((prompt, index) => ({ promptId: prompt.promptId, text: prompt.text ?? "", ...(prompt.attachments?.length ? {attachments:prompt.attachments} : {}), createdAt: prompt.createdAt, position: index + 1 })),
+      steeringAvailable: !!this.steeringTarget(live),
+      steeringRunnerId: this.steeringTarget(live)?.turn.assignment.runnerId,
+      omittedDeliveries: Math.max(0,live.ledger.prompts().filter(p=>p.steering && !(p.steering.state==="not-accepted"&&p.steering.queueFallback)).length-16),
+      deliveries: live.ledger.prompts().filter(p=>p.steering && !(p.steering.state==="not-accepted"&&p.steering.queueFallback)).slice(-16).map(p=>({promptId:p.promptId,text:p.text??p.steering!.text.slice(0,p.steering!.text.lastIndexOf("\n\n[Deck genuine user input reference:")),state:p.steering!.state=== "pending" ? "sending" : p.steering!.state,runnerId:p.steering!.runnerId??live.ledger.task(p.steering!.taskId)?.attempts.find(a=>a.attempt===p.steering!.attempt)?.runnerId??'codex', historical:!p.steering!.eligible})),
+      queued: this.waitingPrompts(live).map((prompt, index) => ({ promptId: prompt.promptId, text: prompt.text ?? "", ...(prompt.decisionTarget ? {decisionTarget:prompt.decisionTarget} : {}), ...(prompt.attachments?.length ? {attachments:prompt.attachments} : {}), createdAt: prompt.createdAt, position: index + 1 })),
       ...(active ? { active: { promptId: active.promptId, taskId: active.taskId, attempt: active.attempt, state: "dispatched" } } : {}),
       limits: { maxPending: MAX_PENDING_PROMPTS, maxBytes: MAX_PENDING_PROMPT_BYTES },
     };
@@ -1153,7 +1292,7 @@ export class SessionManager implements SessionService {
   private promptSend(live: Live, command: Extract<SessionCommand, { type: "prompt.send" }>, clientId: string): ExecuteOutcome {
     if (clientId === "daemon") return this.materializeLead(live, command, clientId);
     const previous = live.ledger.prompt(command.commandId);
-    const textHash = this.promptHash(command.text, command.attachmentIds);
+    const textHash = this.promptHash(command.text, command.attachmentIds, command.decisionTarget, command.delivery);
     if (previous) return previous.textHash !== textHash ? fail("command-id-reused") : { ...ok({ promptId: previous.promptId, state: "queued", position: previous.position }), duplicate: true };
     if (live.ledger.session.state === "ended") return fail("session-ended");
     if (live.stopping) return fail("session-stopping");
@@ -1167,18 +1306,88 @@ export class SessionManager implements SessionService {
       try { attachments = command.attachmentIds.map(id => this.attachmentStore(live).read(id).attachment); } catch (error) { return fail(this.attachmentError(error)); }
       if (attachments.reduce((total, image) => total + image.sizeBytes, 0) > IMAGE_ATTACHMENT_LIMITS.maxMessageBytes) return fail("attachment-too-large");
     }
+    if (command.decisionTarget !== undefined && !validDecisionTarget(command.decisionTarget)) return fail("invalid-arguments");
+    if (command.decisionTarget && !live.ledger.decision(command.decisionTarget.decisionId)) return fail("decision-unknown");
+    const targetQuestionRevision = command.decisionTarget ? live.ledger.questionVersion(command.decisionTarget.decisionId, command.decisionTarget.revision) : undefined;
     const queued = this.waitingPrompts(live);
     if (queued.length >= MAX_PENDING_PROMPTS || queued.reduce((bytes, prompt) => bytes + Buffer.byteLength(prompt.text ?? "", "utf8"), 0) + Buffer.byteLength(command.text, "utf8") > MAX_PENDING_PROMPT_BYTES) return fail("prompt-queue-full");
+    const requested=command.delivery && !attachments.length && !queued.length ? this.steeringTarget(live) : undefined;
+    const requestedSteering=requested ? {taskId:requested.turn.taskId,attempt:requested.turn.attempt,...requested.target} : undefined;
     const outcome = { ok: true as const, data: { promptId: command.commandId, state: "queued", position: queued.length + 1 } };
     // The first record is self-sufficient if recovery retains a JSONL batch prefix.
-    this.append(live, [{ kind: "prompt.queued", data: { ...outcome.data, text: command.text, textHash, ...(attachments.length ? {attachments} : {}), by: clientId, generation: live.ledger.session.generation ?? 0, createdAt: new Date(this.clock.now()).toISOString() } }, this.receiptDraft(command, outcome)]);
+    this.append(live, [{ kind: "prompt.queued", data: { ...outcome.data, text: command.text, textHash, ...(requestedSteering?{requestedSteering}:{}), ...(command.delivery ? {delivery:command.delivery} : {}), ...(command.decisionTarget ? {decisionTarget:command.decisionTarget, ...(targetQuestionRevision ? {targetQuestionRevision} : {})} : {}), ...(attachments.length ? {attachments} : {}), by: clientId, generation: live.ledger.session.generation ?? 0, createdAt: new Date(this.clock.now()).toISOString() } }, this.receiptDraft(command, outcome)]);
     this.flush(live);
-    this.pumpPrompts(live);
+    this.pumpSteering(live);this.pumpPrompts(live);
     return outcome;
   }
 
+  private steeringTarget(live: Live) {
+    const turn=live.turns.get(this.leadTaskId(live));
+    if(!turn?.steeringAllowed || !turn.handle?.steer || turn.nativeEnded || turn.kind || turn.controller.signal.aborted || live.steering || live.broken || live.stopping || live.ledger.session.released || live.ledger.promptQueue.paused || this.closing)return undefined;
+    const target=turn.handle.steeringTarget?.();
+    return target ? {turn,target} : undefined;
+  }
+  private publishSteering(live: Live): void {
+    const turn=live.turns.get(this.leadTaskId(live));if(!turn)return;
+    const available=!!this.steeringTarget(live);
+    if(turn.steeringPublished===available)return;turn.steeringPublished=available;
+    try{this.append(live,{kind:'diagnostic',data:{code:'prompt.steering-capability',available,runnerId:turn.assignment.runnerId}});}catch{}
+  }
+  private pumpSteering(live: Live): void {
+    const current=this.steeringTarget(live),prompt=this.waitingPrompts(live)[0];
+    if(!current || !prompt || prompt.delivery!=='current-turn' || prompt.attachments?.length || !prompt.requestedSteering)return;
+    const requested=prompt.requestedSteering;
+    if(requested.taskId!==current.turn.taskId || requested.attempt!==current.turn.attempt || requested.nativeThreadId!==current.target.nativeThreadId || requested.nativeTurnId!==current.target.nativeTurnId)return;
+    const {turn,target}=current,attempt=turn.attempt,decision=prompt.decisionTarget?live.ledger.decision(prompt.decisionTarget.decisionId):undefined;
+    const stale=!!prompt.decisionTarget && (!decision || !['pending','deferred'].includes(decision.state) || prompt.targetQuestionRevision!==decision.questionRevision);
+    const suffix=`\n\n[Deck genuine user input reference: promptId=${prompt.promptId}, taskId=${turn.taskId}, attempt=${attempt}${prompt.decisionTarget?`, decisionId=${prompt.decisionTarget.decisionId}, questionRevision=${prompt.targetQuestionRevision??'unknown'}`:''}.${stale?' STALE target/question: preserve this text for clarification; it is not authority for the changed question.':''}]`;
+    const fence:SteeringFence={promptId:prompt.promptId,taskId:turn.taskId,attempt,runnerId:turn.assignment.runnerId==='claude'?'claude':'codex',...target,clientUserMessageId:prompt.promptId,text:(prompt.text??'')+suffix,...(prompt.targetQuestionRevision?{targetQuestionRevision:prompt.targetQuestionRevision}:{})};
+    // No native write can precede this durable, self-sufficient fence.
+    const event=this.append(live,{kind:'prompt.steering',data:{...fence}})[0]!;this.flush(live);
+    let release!:()=>void;const barrier=new Promise<void>(r=>{release=r;});let expired=false,finished=false;
+    const settle=(outcome:SteeringOutcome,historical=false)=>{
+      if(live.broken)return;
+      const prior=live.ledger.prompt(prompt.promptId)?.steering;
+      if(!prior || prior.state==='accepted' || prior.state==='not-accepted')return;
+      if(outcome.state==='accepted'&&!matchesSteering(fence,outcome))outcome={state:'unknown',reason:'correlation-mismatch'};
+      if(outcome.state==='not-accepted'&&!['no-active-turn','turn-mismatch'].includes(outcome.reason))outcome={state:'unknown',reason:'unverified-native-refusal'};
+      const question=prompt.decisionTarget?live.ledger.decision(prompt.decisionTarget.decisionId):undefined;
+      const nowStale=!!prompt.decisionTarget && (!question || !['pending','deferred'].includes(question.state) || question.questionRevision!==fence.targetQuestionRevision);
+      const eligible=outcome.state==='accepted'&&!historical&&!nowStale&&!turn.nativeEnded&&!turn.kind&&!turn.controller.signal.aborted&&!this.closing&&!live.stopping&&!live.ledger.session.released&&live.turns.get(turn.taskId)===turn&&turn.attempt===attempt;
+      const queueFallback=outcome.state==='not-accepted'&&!historical&&!expired&&!finished&&live.steering?.seq===event.seq;
+      this.append(live,{kind:'prompt.steered',data:{promptId:prompt.promptId,steeringSeq:event.seq,state:outcome.state,eligible,stale:nowStale,...(outcome.state==='accepted'?{via:outcome.via}:{reason:outcome.reason}),...(outcome.state==='not-accepted'?{queueFallback}:{})}});this.flush(live);
+      if(outcome.state==='accepted'){this.append(live,{kind:'message.completed',source:{taskId:turn.taskId,memberId:LEAD_MEMBER_ID},data:{role:'user',text:prompt.text??'',promptId:prompt.promptId,steering:true,steeringSeq:event.seq,steeringRunnerId:fence.runnerId,historical:historical||!!turn.nativeEnded||!!turn.kind||turn.attempt!==attempt,...(nowStale?{decisionReply:{stale:true}}:{})}});this.flush(live);}
+    };
+    const complete=()=>{if(finished)return;finished=true;this.clock.clearTimeout(timer);if(live.steering?.seq===event.seq)live.steering=undefined;release();try{this.publishSteering(live);this.pumpPrompts(live);this.pumpSteering(live);}catch{}};
+    const timer=this.clock.setTimeout(()=>{expired=true;try{settle({state:'unknown',reason:'native-outcome-timeout'});}catch{}finally{complete();}},Math.max(10,Math.min(30000,this.options.steeringTimeoutMs??3000)));
+    live.steering={seq:event.seq,turn,barrier};this.publishSteering(live);
+    void (async()=>{
+      let result:SteeringOutcome;
+      try{
+        result=await turn.handle!.steer!(fence);
+        if(result.state==='unknown'&&!expired&&turn.handle?.reconcileSteering){const proof=await turn.handle.reconcileSteering(fence);if(proof.state==='accepted')result=proof;}
+      }catch{result={state:'unknown',reason:'native-transport-unconfirmed'};}
+      try{settle(result,expired);}catch{ /* append/flush own the persistence fault; never queue a guessed retry. */ }
+      finally{complete();}
+    })();
+  }
+  private reconcileHistoricalSteering(live:Live,turn:Turn):void{
+    const handle=turn.handle;if(!handle?.reconcileSteering)return;
+    // Bounded read-only reconciliation; never starts or resends a native turn.
+    for(const prompt of live.ledger.prompts().filter(p=>p.steering && ['pending','unknown'].includes(p.steering.state)).slice(0,16)){
+      const fence=prompt.steering!;if(live.steering?.seq===fence.seq)continue;
+      void handle.reconcileSteering(fence).then(result=>{
+        if(live.broken||result.state!=='accepted'||!matchesSteering(fence,result))return;
+        const prior=live.ledger.prompt(prompt.promptId)?.steering;if(!prior||!['pending','unknown'].includes(prior.state))return;
+        const question=prompt.decisionTarget?live.ledger.decision(prompt.decisionTarget.decisionId):undefined;
+        const stale=!!prompt.decisionTarget&&(!question||question.questionRevision!==fence.targetQuestionRevision||!['pending','deferred'].includes(question.state));
+        this.append(live,{kind:'prompt.steered',data:{promptId:prompt.promptId,steeringSeq:fence.seq,state:'accepted',eligible:false,stale,via:'history'}});this.flush(live);
+      }).catch(()=>{});
+    }
+  }
+
   private pumpPrompts(live: Live): void {
-    if (this.closing || live.stopping || live.ledger.session.released || live.broken || this.leadBusy(live) || live.ledger.promptQueue.paused || !this.options.config()?.enabled || [...this.preparationJobs.values()].some(owner => owner === live)) return;
+    if (live.steering || this.closing || live.stopping || live.ledger.session.released || live.broken || this.leadBusy(live) || live.ledger.promptQueue.paused || !this.options.config()?.enabled || [...this.preparationJobs.values()].some(owner => owner === live)) return;
     const prompt = this.waitingPrompts(live)[0];
     if (!prompt) return;
     const outcome = this.materializeLead(live, { v: 1, commandId: prompt.promptId, type: "prompt.send", text: prompt.text ?? "" }, prompt.by, prompt);
@@ -1203,7 +1412,7 @@ export class SessionManager implements SessionService {
     this.append(live, [{ kind: "prompt.state", data: outcome.data }, this.receiptDraft(command, outcome)]); this.flush(live);
     for (const turn of [...live.queue]) if (turn.promptId === prompt.promptId) this.cancelQueued(live, turn.taskId);
     for (const turn of live.turns.values()) if (turn.promptId === prompt.promptId) { turn.kind = "cancel"; turn.controller.abort(); }
-    this.pumpPrompts(live); this.scheduleWake(live);
+    this.pumpSteering(live);this.pumpPrompts(live); this.scheduleWake(live);
     return outcome;
   }
 
@@ -1214,7 +1423,7 @@ export class SessionManager implements SessionService {
     if (block?.code === "ownership-unsettled") return fail("ownership-unsettled");
     const outcome = { ok: true as const };
     this.append(live, [...(live.ledger.promptQueue.paused ? [{ kind: "prompt.queue" as const, data: { paused: false, commandId: command.commandId } }] : []), this.receiptDraft(command, outcome)]); this.flush(live);
-    this.pumpPrompts(live); this.schedule(live); this.scheduleWake(live);
+    this.pumpSteering(live);this.pumpPrompts(live); this.schedule(live); this.scheduleWake(live);
     return outcome;
   }
 
@@ -1261,7 +1470,7 @@ export class SessionManager implements SessionService {
 
     const turn = this.newTurn(taskId, LEAD_MEMBER_ID, assignment, attempt, command.text, nativeSessionId, resume);
     turn.promptId = queuedPrompt?.promptId;
-    turn.noticeSnapshot = [...live.notices].map(([taskId, text]) => ({ taskId, text, attempt: live.ledger.latest(taskId)?.attempt ?? 0 }));
+    turn.noticeSnapshot = [...live.notices.values()];
     live.queue.push(turn);
     this.schedule(live);
     return ok({ taskId, attempt });
@@ -1319,7 +1528,10 @@ export class SessionManager implements SessionService {
     try {
       if (realpathSync(live.meta.projectRoot) !== live.meta.projectRoot || !statSync(live.meta.projectRoot).isDirectory()) throw new Error("project-unavailable");
       preparation("checking-runner");
+      turn.nativeEnded=false;
       const probe = await driver.probe({ cwd: live.meta.projectRoot });
+      const steeringVersion=probe.status!=='ready'?undefined:assignment.runnerId==='claude'&&probe.version==='2.1.296'&&probe.capabilities.includes(CLAUDE_STEERING_CAPABILITY)?'2.1.296' as const:assignment.runnerId==='codex'&&probe.version==='0.162.1'&&probe.capabilities.includes(CODEX_STEERING_CAPABILITY)&&(!assignment.modelId.includes('/')||assignment.modelId.startsWith('openai-codex/'))?'0.162.1' as const:undefined;
+      turn.steeringAllowed=turn.memberId===LEAD_MEMBER_ID && steeringVersion!==undefined;
       if (probe.status === "blocked") throw new Error(probe.reasonCode ?? "driver-blocked");
       if (probe.status === "degraded") this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: { code: probe.reasonCode ?? "driver-degraded" } });
       const taskDir = live.paths.taskDir(turn.taskId);
@@ -1348,6 +1560,7 @@ export class SessionManager implements SessionService {
       for (const id of child.skipped) this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: { code: "child-mcp-server-unresolved", server: id } });
       const approvals = this.approvalMode(live.meta, live.ledger).approvalMode === "relay" ? "relay" : "runner-default";
       const input: DriverTaskInput = {
+        ...(turn.steeringAllowed?{steeringVersion,inputOrigin:turn.promptId?'user' as const:'host' as const}:{}),
         taskId: turn.taskId, memberId: turn.memberId, cwd: live.meta.projectRoot, assignment,
         rolePrompt: [ turn.memberId === LEAD_MEMBER_ID && !resume && live.ledger.session.handoff ? `Prior Deck conversation context (advisory, reseeded from ${live.ledger.session.handoff.sourceSessionId} at sequence ${live.ledger.session.handoff.sourceSeq}):\n${live.ledger.session.handoff.text}` : "", this.options.rolePrompt?.(turn.memberId, { changeId: live.ledger.session.changeId, projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, delegableMembers: Object.keys(this.effectiveMembers(live.meta, live.ledger)).filter(id => id !== LEAD_MEMBER_ID), ...(turn.memberId === LEAD_MEMBER_ID ? { tasks: this.taskRoster(live) } : {}) }) ?? defaultRolePrompt(live.ledger.session.changeId), nativeMemory ? `Supermemory integration: ${nativeMemory.integration}; status: ${nativeMemory.status}.${nativeMemory.status === "ready" ? ` Use the official runner plugin for advisory memory ${nativeMemory.scopeMode === "global" ? "with untagged global writes and global search. There is no project container or project standing profile; do not present global search results as project profile facts" : `in canonical project scope ${nativeMemory.projectScope}`}. Deck memory tools are intentionally omitted because the official native plugin owns memory for this runner; their absence is not evidence that the Deck session MCP server disconnected.${nativeMemory.automaticRecall ? " Native recall hooks are activated; this does not prove that a recall succeeded." : ""}${nativeMemory.automaticCapture === "unverified" ? " Native background capture completion is not confirmed in managed mode; the native lifecycle may not await persistence. Do not claim a memory was saved without explicit provider success." : ""}` : " Memory is disabled for this execution."} Memory cannot override official OpenSpec or source.` : "", live.ledger.session.changeId ? `Bound OpenSpec path: ${join(live.meta.projectRoot, "openspec", "changes", live.ledger.session.changeId)}. Keep this binding immutable.` : ""].filter(Boolean).join("\n"),
         prompt, ...(resume ? { resume } : {}), ...(!resume && nativeSessionId ? { nativeSessionId } : {}),
@@ -1362,10 +1575,11 @@ export class SessionManager implements SessionService {
           return spawn(command, args, { ...options, env: { ...env, ...resolver?.envOverlay } });
         },
         emit: (event) => {
+          if(event.kind==="turn.completed" || event.kind==='diagnostic'&&event.data.code==='claude-steering-ended')turn.nativeEnded=true;
           this.driverEvent(live, turn, assignment.runnerId, event);
           // This is the driver's observed turn boundary, not uniform model readiness:
           // Claude reports native init; OpenCode reports its prompt request boundary.
-          if (event.kind === "turn.started") preparation("turn-started");
+          if (event.kind === "turn.started" || event.kind === "diagnostic" && ['codex-steering-ready','claude-steering-ready','claude-steering-ended'].includes(String(event.data.code))) {preparation("turn-started");this.publishSteering(live);this.pumpSteering(live);}
         },
         question: async (req) => {
           if (turn.controller.signal.aborted || this.closing || turn.kind) return { outcome: "cancelled" };
@@ -1393,9 +1607,14 @@ export class SessionManager implements SessionService {
       }
       if (turn.memberId === LEAD_MEMBER_ID && !turn.promptId) input.prompt = turn.prompt;
       if (turn.memberId === LEAD_MEMBER_ID && !resume) input.rolePrompt += `\n${this.handoffImageReferences(live)}`;
+      if (turn.memberId === LEAD_MEMBER_ID) input.rolePrompt += `\n\n${CROSS_RUNNER_LEAD_CONTINUITY_GUIDANCE}\n${DECISION_GUIDANCE}\nCurrent admitted Lead input: taskId=${turn.taskId}, attempt=${turn.attempt}, promptId=${turn.promptId ?? "synthetic-outcome"}.`;
       if (turn.noticeContext) input.rolePrompt += `\n\n${turn.noticeContext}`;
+      if (turn.memberId !== LEAD_MEMBER_ID) {
+        const task = live.ledger.task(turn.taskId);
+        if (!this.decisions(live).dependencies(task?.dependsOn ?? [], task?.action)) throw new Error("decision-dependency-blocked");
+      }
       const handle = await driver.startTask(input, io);
-      turn.handle = handle;
+      turn.handle = handle;this.publishSteering(live);this.pumpSteering(live);
       if (turn.kind) void handle.interrupt().catch(() => {});
       if (this.closing) void this.closeTurnHandle(turn).catch(() => {});
       if (!driver.newNativeSessionId) {
@@ -1406,7 +1625,10 @@ export class SessionManager implements SessionService {
           }
         }, () => {});
       }
+      void handle.nativeSessionId.then(()=>{this.publishSteering(live);this.pumpSteering(live);this.reconcileHistoricalSteering(live,turn);},()=>{});
       outcome = await handle.done.catch((error: Error) => ({ status: "failed", error: bounded(error.message) }) as TurnOutcome);
+      turn.nativeEnded=true;this.publishSteering(live);
+      if(live.steering?.turn===turn)await live.steering.barrier;
     } catch (error) {
       outcome = turn.controller.signal.aborted ? { status: "interrupted" } : { status: "failed", error: `Unable to start the turn: ${bounded((error as Error).message)}`, ...((error as {reasonCode?: string}).reasonCode === "native-session-not-found" ? { reasonCode: "native-session-not-found" as const } : {}) };
     }
@@ -1497,6 +1719,7 @@ export class SessionManager implements SessionService {
       if (turn.lastText) drafts.push({ kind: "task.result", source, data: { taskId: turn.taskId, summary: turn.lastText } });
       drafts.push({ kind: "task.state", source, data: { taskId: turn.taskId, state: task.state, ...(task.reason ? { reason: task.reason } : {}) } });
       if (!live.stopping && live.turns.size === 1) drafts.push({ kind: "session.state", data: { state: "idle" } });
+      for(const input of live.ledger.prompts())if(input.promptId!==turn.promptId&&input.taskId===turn.taskId&&input.attempt===turn.attempt&&input.state==="accepted")drafts.push({kind:"prompt.state",data:{promptId:input.promptId,state:task.state,...(task.reason?{reason:task.reason}:{})}});
       if (turn.promptId && !(turn.kind==="release" && live.ledger.prompt(turn.promptId)?.state==="queued")) drafts.push({ kind: "prompt.state", data: { promptId: turn.promptId, state: task.state, ...(task.reason ? { reason: task.reason } : {}) } });
       if (turn.memberId === LEAD_MEMBER_ID && ["failed", "interrupted", "ownership-unsettled"].includes(task.state) && !(task.state === "interrupted" && (live.ledger.promptQueue.lastResumeSeq ?? 0) > (turn.admissionSeq ?? 0))) drafts.push({ kind: "prompt.queue", data: { paused: true, reason: task.reason ?? task.state } });
       this.append(live, drafts); this.flush(live);

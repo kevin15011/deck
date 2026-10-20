@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import type { SessionEvent } from "@deck/core/session/events";
 import { EventLog, type EventDraft } from "../event-log";
 import { Ledger, loadLedger, saveLedgerSnapshot, type RebuildReason } from "../ledger";
@@ -25,6 +26,26 @@ function replay(drafts: EventDraft[]): Ledger {
 }
 
 describe("Ledger command receipts and native confirmation (S1b)", () => {
+  test('refusal fallback requires durable live-barrier permission; prefixes and snapshots never restore expired input',()=>{
+    for(const unknownPrefix of [false,true])for(const permission of [undefined,false,true]){
+      const dir=tempDir(),log=openLog(dir),file=join(dir,'snapshot.json');
+      log.appendMany([
+        {kind:'prompt.queued',data:{promptId:'a',text:'Original text',textHash:'hash',by:'user',delivery:'current-turn'}},
+        {kind:'prompt.steering',data:{promptId:'a',taskId:'lead',attempt:1,nativeThreadId:'thread',nativeTurnId:'turn',clientUserMessageId:'a',text:'Original text'}},
+        ...(unknownPrefix?[{kind:'prompt.steered' as const,data:{promptId:'a',steeringSeq:2,state:'unknown',eligible:false,stale:false,reason:'native-outcome-timeout'}}]:[]),
+      ]);
+      // Recover each retained prefix, including a snapshot made before the refusal arrives.
+      const prefix=loadLedger(log,file).ledger;expect(prefix.prompt('a')?.state).not.toBe('queued');saveLedgerSnapshot(prefix,log,file);
+      log.append({kind:'prompt.steered',data:{promptId:'a',steeringSeq:2,state:'not-accepted',eligible:false,stale:false,reason:'no-active-turn',...(permission===undefined?{}:{queueFallback:permission})}});
+      const restored=loadLedger(log,file).ledger,wanted=permission===true&&!unknownPrefix?'queued':'failed';
+      expect(restored.prompt('a')?.state).toBe(wanted);expect(restored.prompt('a')?.firstAdmissionSeq).toBeUndefined();
+      const replayed=Ledger.empty('s-1');for(const e of log.readAfter(0))replayed.apply(e);expect(replayed.toState()).toEqual(restored.toState());
+      saveLedgerSnapshot(restored,log,file);const snapshot=loadLedger(log,file);expect(snapshot.source).toBe('snapshot');expect(snapshot.ledger.prompt('a')?.state).toBe(wanted);
+      // v9 could cache the unsafe queued projection. Upgrade must replay actual records.
+      const old=JSON.parse(readFileSync(file,'utf8'));old.v=9;old.state.prompts.a.state='queued';writeFileSync(file,JSON.stringify(old));
+      const upgrade=loadLedger(log,file);expect(upgrade.source).toBe('rebuilt');expect(upgrade.ledger.prompt('a')?.state).toBe(wanted);log.close();
+    }
+  });
   test("reply cursor tracks only public finalized actual Lead replies across generations", () => {
     const ledger = replay([
       created("lead", { memberId: "lead" }), created("child"), created("lead-g1", { memberId: "lead" }),
@@ -42,6 +63,23 @@ describe("Ledger command receipts and native confirmation (S1b)", () => {
     ledger.apply({ v: 1, sessionId: "s-1", seq: 13, ts: "2026-10-15T00:00:00Z", kind: "message.completed", source: { taskId: "lead-g1", memberId: "lead" }, data: { role: "assistant", text: "current generation" } });
     expect(ledger.lastLeadReplySeq).toBe(13);
     expect(ledger.lastEventTs).toBe("2026-10-15T00:00:00Z");
+  });
+
+  test("first genuine admission survives reseed, old snapshot rebuild and current snapshot replay",()=>{
+    const dir=tempDir(),log=openLog(dir),file=join(dir,"snapshot.json");
+    log.appendMany([
+      {kind:"prompt.queued",data:{promptId:"original",text:"Only one user message",textHash:"hash",by:"user"}},
+      {kind:"prompt.dispatched",data:{promptId:"original",taskId:"lead",attempt:2}},
+      {kind:"prompt.dispatched",data:{promptId:"original",taskId:"lead",attempt:3,reseeded:true}},
+      {kind:"prompt.queued",data:{promptId:"unknown-origin",text:"Missing first admission",textHash:"hash",by:"user"}},
+      {kind:"prompt.dispatched",data:{promptId:"unknown-origin",taskId:"lead",attempt:4,reseeded:true}},
+    ]);
+    const ledger=loadLedger(log,file).ledger;
+    expect(ledger.prompt("original")).toMatchObject({firstAdmissionSeq:2,dispatchedSeq:3,attempt:3});
+    expect(ledger.prompt("unknown-origin")?.firstAdmissionSeq).toBeUndefined();
+    saveLedgerSnapshot(ledger,log,file);const old=JSON.parse(readFileSync(file,"utf8"));old.v=7;delete old.state.prompts.original.firstAdmissionSeq;writeFileSync(file,JSON.stringify(old));
+    const rebuilt=loadLedger(log,file);expect(rebuilt.source).toBe("rebuilt");expect(rebuilt.ledger.prompt("original")?.firstAdmissionSeq).toBe(2);
+    saveLedgerSnapshot(rebuilt.ledger,log,file);const restored=loadLedger(log,file);expect(restored.source).toBe("snapshot");expect(restored.ledger.prompt("original")).toMatchObject({firstAdmissionSeq:2,dispatchedSeq:3,attempt:3});log.close();
   });
 
   test("old snapshot versions rebuild the reply cursor from the authoritative log", () => {
@@ -218,6 +256,21 @@ describe("Ledger projection (XR-3.3, D-12, D-15)", () => {
 });
 
 describe("snapshot checkpointing (D-15)", () => {
+  test("pre-integration v10 snapshots rebuild session approval evidence from the log", () => {
+    const dir = tempDir(), log = openLog(dir), file = join(dir, "snapshot.json");
+    try {
+      log.append({ kind: "session.created", data: { projectRoot: "/p", approvals: "yolo" } });
+      saveLedgerSnapshot(loadLedger(log, file).ledger, log, file);
+      const old = JSON.parse(readFileSync(file, "utf8"));
+      old.v = 10;
+      delete old.state.session.approvals;
+      old.digest = createHash("sha256").update(JSON.stringify({ seq: old.seq, eventHash: old.eventDigest, state: old.state })).digest("hex");
+      writeFileSync(file, JSON.stringify(old));
+      const loaded = loadLedger(log, file);
+      expect(loaded.source).toBe("rebuilt");
+      expect(loaded.ledger.session.approvals).toBe("yolo");
+    } finally { log.close(); }
+  });
   const script: EventDraft[] = [
     { kind: "session.created", data: { projectRoot: "/p" } },
     created("t1"), state("t1", "running"), state("t1", "completed"),
@@ -251,7 +304,7 @@ describe("snapshot checkpointing (D-15)", () => {
     ["garbage", (s: string) => "not json{{", "corrupt"],
     ["wrong shape", (s: string) => JSON.stringify({ v: 1 }), "corrupt"],
     ["tampered digest", (s: string) => s.replace(/"completed"/, '"failed"'), "corrupt"],
-    ["unknown version", (s: string) => s.replace('"v":4', '"v":99'), "corrupt"],
+    ["unknown version", (s: string) => JSON.stringify({ ...JSON.parse(s), v: 99 }), "corrupt"],
   ])("snapshot %s triggers a rebuild from the log", (_name, mutate, reason) => {
     const { log, snap } = setup();
     saveLedgerSnapshot(loadLedger(log, snap).ledger, log, snap);
@@ -302,4 +355,15 @@ describe("snapshot checkpointing (D-15)", () => {
     expect(loadLedger(log, join(dir, "s.json")).source).toBe("snapshot");
     log.close();
   });
+});
+
+test('push block occurrence seqs survive replay, snapshot and previous-version migration',()=>{
+ const dir=tempDir(),log=openLog(dir),file=join(dir,'snapshot.json');
+ log.appendMany([created('lead',{memberId:'lead'}),state('lead','running'),state('lead','ownership-unsettled'),{kind:'session.released',data:{epoch:1,phase:'released',reasonCode:'cleanup-failed'}}]);
+ const ledger=loadLedger(log,file).ledger;expect(ledger.latest('lead')?.unsettledSeq).toBe(3);expect(ledger.session.releaseFailureSeq).toBe(4);
+ saveLedgerSnapshot(ledger,log,file);expect(loadLedger(log,file).ledger.toState()).toEqual(ledger.toState());
+ const old=JSON.parse(readFileSync(file,'utf8'));old.v=11;delete old.state.tasks.lead.attempts[0].unsettledSeq;delete old.state.session.releaseFailureSeq;writeFileSync(file,JSON.stringify(old));
+ const restored=loadLedger(log,file);expect(restored.source).toBe('rebuilt');expect(restored.ledger.toState()).toEqual(ledger.toState());
+ log.appendMany([state('lead','interrupted'),{kind:'session.reopened',data:{epoch:1,prepared:true}}]);
+ const cleared=loadLedger(log,file).ledger;expect(cleared.latest('lead')?.unsettledSeq).toBeUndefined();expect(cleared.session.releaseFailureSeq).toBeUndefined();log.close();
 });

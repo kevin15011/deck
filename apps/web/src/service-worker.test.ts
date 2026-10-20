@@ -45,6 +45,7 @@ function fixture(
     setTimeout,
     clearTimeout,
     Uint8Array,
+    TextEncoder,
     atob,
     fetch: async (url: string, init: any) => {
       calls.push({ url, init });
@@ -217,4 +218,21 @@ test('suspended client with no response retains its draft and a new window opens
     notification: { data: { sessionId: 'exact-session' }, close: () => {} },
   });
   expect(f.opened).toEqual(['https://deck.test/?session=exact-session']);
+});
+
+test('new attention uses bounded plain text, stable decision tags and legacy-compatible kinds',async()=>{
+ const f=fixture();const data={sessionId:'s',seq:1,kind:'question',attention:'decision',summary:'Approve storage?',tagId:'abcdefghijklmnop'};
+ await f.run('push',{data:{json:()=>data}});await f.run('push',{data:{json:()=>({...data,seq:2,summary:'Approve retry?'})}});
+ expect(f.shown[0][0]).toBe('Decision needed');expect(f.shown[0][1].body).toBe('Approve storage?');expect(f.shown[0][1].tag).toBe(f.shown[1][1].tag);
+ for(const summary of ['界'.repeat(161),42]){await f.run('push',{data:{json:()=>({...data,summary})}});expect(f.shown.at(-1)[1].body).toBe('A decision is waiting for you.');}
+ await f.run('push',{data:{json:()=>({...data,kind:'finished',attention:'result',summary:'Fixed delivery.',othersActive:true})}});expect(f.shown.at(-1)[0]).toBe('Result reviewed · other work continues');
+});
+
+test('exact reply identity survives push, cold click, warm routing and legacy notification fallback',async()=>{
+ const f=fixture();await f.run('push',{data:{json:()=>({...payload,kind:'finished',replyId:'reply-20-18'})}});
+ expect(f.shown[0][1].data).toEqual({sessionId:'exact-session',replyId:'reply-20-18'});
+ await f.run('notificationclick',{notification:{data:f.shown[0][1].data,close:()=>{}}});expect(f.opened).toEqual(['https://deck.test/?session=exact-session&reply=reply-20-18']);
+ const messages:any[]=[];const warm=fixture({windows:[{url:'https://deck.test/?session=other',focus:async()=>{},postMessage:(data:any,ports:any[])=>{messages.push(data);ports[0].postMessage({opened:true});}}]});
+ await warm.run('notificationclick',{notification:{data:f.shown[0][1].data,close:()=>{}}});expect(messages[0].replyId).toBe('reply-20-18');expect(warm.opened).toEqual([]);
+ const legacy=fixture();await legacy.run('notificationclick',{notification:{data:{sessionId:'exact-session'},close:()=>{}}});expect(legacy.opened).toEqual(['https://deck.test/?session=exact-session']);
 });

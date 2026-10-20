@@ -21,7 +21,7 @@ function responder(child: FakeChild, index: number, m: Record<string, unknown>) 
   const params = m.params as Record<string, unknown>;
   if (m.method === "initialize") child.stdout({ id: m.id, result: {} });
   if (m.method === "config/read") child.stdout({ id: m.id, result: { config: config(index === 2) } });
-  if (m.method === "thread/start" || m.method === "thread/resume") child.stdout({ id: m.id, result: { thread: { id: params.threadId ?? "native-thread" } } });
+  if (m.method === "thread/start" || m.method === "thread/resume") child.stdout({ id: m.id, result: { thread: { id: params.threadId ?? "native-thread",historyMode:"legacy" } } });
   if (m.method === "mcpServerStatus/list") child.stdout({ id: m.id, result: { data: [{ name: "deck-session-task-deck", runtimeStatus: "connected" }], nextCursor: null } });
   if (m.method === "turn/start") child.stdout({ id: m.id, result: { turn: { id: "turn" } } });
   if (m.method === "turn/interrupt") { child.stdout({ id: m.id, result: {} }); child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "interrupted" } } }); }
@@ -661,4 +661,43 @@ describe("Codex bounded resume responses", () => {
       expect(JSON.stringify(h.events)).not.toContain("UNKNOWN_SECRET_SENTINEL");
     } finally { await task.close(); }
   });
+});
+
+describe('Codex text steering',()=>{
+ test('exact active turn and client correlation; receipt versus conservative refusal and history',async()=>{
+  let mode='accepted';const h=harness((child,index,m)=>{
+   responder(child,index,m);
+   if(m.method==='turn/steer')child.stdout(mode==='accepted'?{id:m.id,result:{turnId:'turn'}}:{id:m.id,error:{code:-32600,message:mode==='idle'?'no active turn to steer':'opaque failure'}});
+   if(m.method==='thread/read')child.stdout({id:m.id,result:{thread:{id:'native-thread',turns:[{id:'turn',items:[{type:'userMessage',id:'item-2',clientId:'client',content:[{type:'text',text:'Exact text'}]}]}]}}});
+  });
+  const handle=await createCodexSessionDriver().startTask({...input,steeringVersion:'0.162.1'} as any,h.io);await handle.nativeSessionId;await Promise.resolve();
+  const target=(handle as any).steeringTarget();expect(target).toEqual({nativeThreadId:'native-thread',nativeTurnId:'turn'});
+  const message={...target,clientUserMessageId:'client',text:'Exact text'};
+  expect(await (handle as any).steer(message)).toMatchObject({state:'accepted',...message,via:'receipt'});
+  mode='idle';expect(await (handle as any).steer(message)).toMatchObject({state:'not-accepted',reason:'no-active-turn'});
+  mode='opaque';expect(await (handle as any).steer(message)).toMatchObject({state:'unknown'});
+  expect(await (handle as any).reconcileSteering(message)).toMatchObject({state:'accepted',...message,via:'history'});
+  expect(await (handle as any).reconcileSteering({...message,text:'Different text'})).toMatchObject({state:'unknown'});
+  await handle.close();
+ });
+});
+
+test.each(['complete-first','close-first','lost-receipt'] as const)('steering remains conservative across native completion/transport ordering: %s',async(mode)=>{
+ let request:any;const h=harness((child,index,m)=>{responder(child,index,m);if(m.method==='turn/steer')request=m;});
+ const handle=await createCodexSessionDriver({rpcTimeoutMs:mode==='lost-receipt'?5:100}).startTask({...input,steeringVersion:'0.162.1'},h.io);await handle.nativeSessionId;await Promise.resolve();const child=h.children[1]!,target=handle.steeringTarget!()!;
+ const outcome=handle.steer!({...target,clientUserMessageId:'one-write',text:'Exact input'});
+ if(mode==='complete-first'){child.stdout({method:'turn/completed',params:{threadId:'native-thread',turn:{id:'turn',status:'completed'}}});child.stdout({id:request.id,result:{turnId:'turn'}});expect(await outcome).toMatchObject({state:'accepted'});}
+ else if(mode==='close-first'){await handle.close();expect(await outcome).toMatchObject({state:'unknown'});}
+ else expect(await outcome).toMatchObject({state:'unknown'});
+ expect(child.writes.filter(m=>m.method==='turn/steer')).toHaveLength(1);expect(child.writes.filter(m=>m.method==='turn/start')).toHaveLength(1);await handle.close();
+});
+test('steering requires a turn/start-confirmed identity and rejects stale turn-start notifications',async()=>{
+ let request:any;const h=harness((child,index,m)=>{if(m.method==='turn/start'){request=m;return;}responder(child,index,m);});
+ const handle=await createCodexSessionDriver().startTask({...input,steeringVersion:'0.162.1'},h.io);await handle.nativeSessionId;const child=h.children[1]!;
+ child.stdout({method:'turn/started',params:{threadId:'native-thread',turn:{id:'unconfirmed'}}});expect(handle.steeringTarget!()).toBeUndefined();
+ child.stdout({id:request.id,result:{turn:{id:'turn'}}});await Promise.resolve();expect(handle.steeringTarget!()).toMatchObject({nativeTurnId:'turn'});
+ child.stdout({method:'turn/started',params:{threadId:'native-thread',turn:{id:'stale'}}});expect(handle.steeringTarget!()).toMatchObject({nativeTurnId:'turn'});await handle.close();
+});
+test('unverified build suffixes do not advertise native steering even with the tested base version',async()=>{
+ const driver=createCodexSessionDriver({exec:async()=>({code:0,stdout:'codex-cli 0.162.1-custom\n'})});expect((await driver.probe({cwd:'/work'})).capabilities).not.toContain('turn-steer-text-0.162.1');
 });

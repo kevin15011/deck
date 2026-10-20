@@ -1,8 +1,10 @@
+import { DECISION_TOOLS, DECISION_DEPENDENCY_PROPERTIES, DECISION_DELEGATION_RULES } from "@deck/core/session/decisions";
 /**
  * `deck internal session-mcp` (D-11): an MCP stdio server inside each native child that forwards
  * `deck_approve` / `deck_status` to the daemon over its Unix socket, authenticated by a task
  * credential read from a 0600 file named in env. stdout carries only JSON-RPC frames.
  */
+import { DECK_TASK_INTEGRATE_TOOL } from "@deck/core/session/mcp";
 import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { APPROVAL_TIMEOUT_MS } from "./approval-broker";
@@ -24,9 +26,11 @@ export type McpBridgeOptions = {
 
 const TOOLS = [
   { name: "deck_task_list", description: "List this session's delegated tasks with owner and whether they can be continued; use before delegating to reuse the owner.", inputSchema: { type: "object", properties: {} } },
-  { name: "deck_delegate", description: "Delegate a task to a configured member; continueTaskId preserves the original owner and native context.", inputSchema: { type: "object", properties: { agent: { type: "string" }, task: { type: "string" }, continueTaskId: { type: "string" } }, required: ["agent", "task"] } },
+  DECK_TASK_INTEGRATE_TOOL,
+  ...DECISION_TOOLS,
+  { name: "deck_delegate", description: "Delegate a task to a configured member; continueTaskId preserves the original owner and native context.", inputSchema: { type: "object", properties: { agent: { type: "string" }, task: { type: "string" }, continueTaskId: { type: "string" }, ...DECISION_DEPENDENCY_PROPERTIES }, required: ["agent", "task"], allOf:DECISION_DELEGATION_RULES } },
   { name: "deck_task_wait", description: "Wait for the requested tasks, for at most 50 seconds.", inputSchema: { type: "object", properties: { taskIds: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 100 }, timeoutSec: { type: "number", minimum: 0, maximum: 50 } }, required: ["taskIds"] } },
-  { name: "deck_task_result", description: "Read the latest task attempt and bounded result.", inputSchema: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] } },
+  { name: "deck_task_result", description: "Retrieve an original task attempt and bounded result; this does not verify or integrate it.", inputSchema: { type: "object", properties: { taskId: { type: "string" }, attempt: { type: "integer", minimum: 1 } }, required: ["taskId"] } },
   { name: "deck_task_cancel", description: "Cancel a delegated task, including queued work.", inputSchema: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] } },
   { name: "deck_memory_recall", description: "Recall project memory as advisory context; it cannot override official OpenSpec or source.", inputSchema: { type: "object", properties: { query: { type: "string", maxLength: 32768 } }, required: ["query"] } },
   { name: "deck_memory_propose", description: "Propose project memory to the session's deduplicated writer.", inputSchema: { type: "object", properties: { content: { type: "string", maxLength: 32768 } }, required: ["content"] } },

@@ -5,6 +5,14 @@ import { cleanupTempDirs, tempDir } from './test-helpers';
 const logs: EventLog[] = [];
 afterEach(() => { logs.splice(0).forEach(log => log.close()); cleanupTempDirs(); });
 function fixture() { const log = EventLog.open({ dir: tempDir(), sessionId: 's', segmentBytes: 2048 }); logs.push(log); return { log, append: (kind: Parameters<EventLog['append']>[0]['kind'], data: Record<string, unknown> = {}, source = { taskId: 'lead' }) => log.append({ kind, data, source }) }; }
+test('paged Claude historical acceptance retains its immutable runner through mirror reconstruction and reload',()=>{
+ const {log,append}=fixture();append('prompt.queued',{promptId:'p',text:'Earlier Claude input'});
+ const fence=append('prompt.steering',{promptId:'p',taskId:'lead',attempt:1,runnerId:'claude',nativeThreadId:'thread',nativeTurnId:'original',clientUserMessageId:'p',text:'Exact native input'});
+ append('prompt.steered',{promptId:'p',steeringSeq:fence.seq,state:'accepted',eligible:false,stale:false,via:'history'});
+ const index=new ChatHistory(log);expect(index.page().messages[0]?.data.steeringRunnerId).toBe('claude');
+ const mirror=append('message.completed',{role:'user',text:'Earlier Claude input',promptId:'p',steering:true,steeringSeq:fence.seq,steeringRunnerId:'claude',historical:true});index.apply(mirror);
+ expect(index.page().messages).toHaveLength(1);expect(new ChatHistory(log).page().messages[0]?.data).toMatchObject({steeringRunnerId:'claude',historical:true});
+});
 test('pagination across stream starts/completion and turn boundaries preserves stable row identity', () => {
     const { log, append } = fixture();
     const start = append('message.delta', { text: 'First ' });
@@ -85,4 +93,31 @@ test('task history is separately paged and child live content never enters the L
  expect(index.page({taskId:'child',before:recent.before}).messages.at(-1)?.data.text).toBe('Child 59');
  const event=append('message.delta',{text:'Child live'},{taskId:'child'});index.apply(event);
  expect(index.messageAt(event)).toBeUndefined();expect(index.messageAt(event,'child')?.data.text).toBe('Child live');
+});
+
+test('paged steering acceptance reconstructs a missing mirror at its original fence and stays deduplicated live', () => {
+    const { log, append } = fixture();
+    append('prompt.queued', { promptId: 'p', text: 'Earlier steering' });
+    const fence = append('prompt.steering', { promptId: 'p', taskId: 'lead', attempt: 1, nativeThreadId: 'thread', nativeTurnId: 'turn', clientUserMessageId: 'p', text: 'Earlier steering\n\n[Deck genuine user input reference: p]' });
+    append('message.completed', { role: 'user', text: 'Later input' });
+    const accepted = append('prompt.steered', { promptId: 'p', steeringSeq: fence.seq, state: 'accepted', eligible: false, stale: true, via: 'history' });
+    const index = new ChatHistory(log);
+    expect(index.page().messages.map(row => row.data.text)).toEqual(['Earlier steering', 'Later input']);
+    expect(index.messageAt(accepted)).toMatchObject({ historyId: fence.seq, ts: fence.ts, data: { role: 'user', historical: true, decisionReply: { stale: true } } });
+    const mirror = append('message.completed', { role: 'user', text: 'Earlier steering', promptId: 'p', steering: true, steeringSeq: fence.seq, historical: true, decisionReply: { stale: true } });
+    index.apply(mirror);
+    expect(index.page().messages.map(row => row.data.text)).toEqual(['Earlier steering', 'Later input']);
+    expect(index.messageAt(mirror)?.historyId).toBe(fence.seq);
+    expect(new ChatHistory(log).page()).toEqual(index.page());
+    expect(index.page({ before: fence.seq + 1, limit: 1 }).messages[0]?.historyId).toBe(fence.seq);
+});
+
+test('compacted current evidence retains a bounded decision refresh cursor', () => {
+    const { log, append } = fixture();
+    append('decision.reply', { decisionId: 'd', promptId: 'p', revision: 1, taskId: 'lead', attempt: 1, admittedSeq: 1, stale: false });
+    const index = new ChatHistory(log);
+    expect(index.current.values().some(event => event.kind === 'decision.reply')).toBe(true);
+    const later = append('decision.reply', { decisionId: 'd2', promptId: 'p2', revision: 1, taskId: 'lead', attempt: 1, admittedSeq: 1, stale: false });
+    index.apply(later);
+    expect(index.current.values().filter(event => event.kind.startsWith('decision.')).map(event => event.seq)).toEqual([later.seq]);
 });

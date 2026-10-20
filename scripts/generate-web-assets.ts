@@ -3,22 +3,22 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 export type WebAssets = Readonly<Record<string, {
-    body: string;
+    body: string | Uint8Array;
     contentType: string;
 }>>;
-export function computeWebDigest(assets: WebAssets): string { return createHash('sha256').update(JSON.stringify(Object.keys(assets).sort().map(path => [path, assets[path]!.contentType, assets[path]!.body]))).digest('hex'); }
+export function computeWebDigest(assets: WebAssets): string { return createHash('sha256').update(JSON.stringify(Object.keys(assets).sort().map(path => [path, assets[path]!.contentType, typeof assets[path]!.body==='string'?assets[path]!.body:Array.from(assets[path]!.body as Uint8Array)]))).digest('hex'); }
 // The bundler's own png loaders emit empty strings for the browser target, so inline images explicitly.
 const pngDataUrl: Bun.BunPlugin = { name: 'png-data-url', setup(build) {
     build.onLoad({ filter: /\.png$/ }, async ({ path }) => ({ contents: `export default ${JSON.stringify(`data:image/png;base64,${Buffer.from(await Bun.file(path).arrayBuffer()).toString('base64')}`)};`, loader: 'js' }));
 } };
 // Inline favicon: the Deck Apertura mark from apps/web/src/deck-logo.tsx; the neutral ink follows the browser colour scheme. Percent-encoded so index.html stays free of absolute URLs.
-const FAVICON = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 464 464'><style>.i{fill:#302219}@media (prefers-color-scheme:dark){.i{fill:#fff3e3}}</style><defs><mask id='g' maskUnits='userSpaceOnUse' x='0' y='0' width='464' height='464'><path fill='white' d='M0 0H464V464H0Z'/><g fill='none' stroke='black' stroke-width='16'><path d='M276.789814 147.089032L336.509567 33.874408'/><path d='M328 232L456 232'/><path d='M276.789814 316.910968L336.509567 430.125592'/></g></mask></defs><path class='i' d='M24 24H120V440H24Z'/><g mask='url(#g)'><g fill='#ff703e'><path d='M136 24H232A208 208 0 0 1 329.044598 48.026236L284.254784 132.937204A112 112 0 0 0 232 120H136Z'/><path d='M329.044598 415.973764A208 208 0 0 1 232 440H136V344H232A112 112 0 0 0 284.254784 331.062796Z'/></g><g class='i'><path d='M329.044598 48.026236A208 208 0 0 1 440 232L344 232A112 112 0 0 0 284.254784 132.937204Z'/><path d='M440 232A208 208 0 0 1 329.044598 415.973764L284.254784 331.062796A112 112 0 0 0 344 232Z'/></g></g><circle fill='#ff703e' cx='152' cy='232' r='80'/></svg>`;
+export const FAVICON = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 464 464'><style>.i{fill:#302219}@media (prefers-color-scheme:dark){.i{fill:#fff3e3}}</style><defs><mask id='g' maskUnits='userSpaceOnUse' x='0' y='0' width='464' height='464'><path fill='white' d='M0 0H464V464H0Z'/><g fill='none' stroke='black' stroke-width='16'><path d='M276.789814 147.089032L336.509567 33.874408'/><path d='M328 232L456 232'/><path d='M276.789814 316.910968L336.509567 430.125592'/></g></mask></defs><path class='i' d='M24 24H120V440H24Z'/><g mask='url(#g)'><g fill='#ff703e'><path d='M136 24H232A208 208 0 0 1 329.044598 48.026236L284.254784 132.937204A112 112 0 0 0 232 120H136Z'/><path d='M329.044598 415.973764A208 208 0 0 1 232 440H136V344H232A112 112 0 0 0 284.254784 331.062796Z'/></g><g class='i'><path d='M329.044598 48.026236A208 208 0 0 1 440 232L344 232A112 112 0 0 0 284.254784 132.937204Z'/><path d='M440 232A208 208 0 0 1 329.044598 415.973764L284.254784 331.062796A112 112 0 0 0 344 232Z'/></g></g><circle fill='#ff703e' cx='152' cy='232' r='80'/></svg>`;
 export async function buildWebAssets(): Promise<WebAssets> {
     const result = await Bun.build({ entrypoints: [resolve(import.meta.dir, '../apps/web/src/main.tsx')], root: resolve(import.meta.dir, '../apps/web'), target: 'browser', minify: true, plugins: [pngDataUrl], define: { 'process.env.NODE_ENV': JSON.stringify('production') }, naming: 'app.[ext]' });
     if (!result.success)
         throw new Error(result.logs.map(String).join('\n'));
     const assets: Record<string, {
-        body: string;
+        body: string | Uint8Array;
         contentType: string;
     }> = {};
     for (const output of result.outputs) {
@@ -29,14 +29,16 @@ export async function buildWebAssets(): Promise<WebAssets> {
     if (!assets['/app.js'] || !assets['/app.css'])
         throw new Error('Web build did not emit JavaScript and CSS');
     assets['/service-worker.js'] = {body: await readFile(resolve(import.meta.dir, '../apps/web/src/service-worker.js'), 'utf8'), contentType: 'text/javascript; charset=utf-8'};
-    assets['/manifest.webmanifest'] = {body: JSON.stringify({id:'/',name:'Deck workspace',short_name:'Deck',start_url:'/',scope:'/',display:'standalone',icons:[{src:'/icon.svg',sizes:'any',type:'image/svg+xml',purpose:'any'}]}),contentType:'application/manifest+json'};
+    assets['/manifest.webmanifest'] = {body: JSON.stringify({id:'/',name:'Deck workspace',short_name:'Deck',start_url:'/',scope:'/',display:'standalone',icons:[{src:'/icon.svg',sizes:'any',type:'image/svg+xml',purpose:'any'},...[192,512].map(size=>({src:`/icon-${size}.png`,sizes:`${size}x${size}`,type:'image/png',purpose:'any'}))]}),contentType:'application/manifest+json'};
+    for(const size of [180,192,512])assets[size===180?'/apple-touch-icon.png':`/icon-${size}.png`]={body:new Uint8Array(await readFile(resolve(import.meta.dir,`../apps/web/src/assets/pwa/icon-${size}.png`))),contentType:'image/png'};
     assets['/icon.svg'] = {body:FAVICON,contentType:'image/svg+xml'};
-    assets['/index.html'] = { contentType: 'text/html; charset=utf-8', body: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icon.svg"><title>Deck workspace</title><link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(FAVICON)}"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>` };
+    assets['/index.html'] = { contentType: 'text/html; charset=utf-8', body: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>Deck workspace</title><link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(FAVICON)}"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>` };
     return assets;
 }
 export async function generateWebAssets(output = resolve(import.meta.dir, '../apps/cli/src/runtime/web-assets.generated.ts')): Promise<void> {
     const assets = await buildWebAssets();
-    const source = `// Generated by scripts/generate-web-assets.ts. Do not edit.\nexport const WEB_ASSETS: Readonly<Record<string, {body:string;contentType:string}>> = ${JSON.stringify(assets)};\nexport const WEB_ASSETS_DIGEST = ${JSON.stringify(computeWebDigest(assets))};\n`;
+    const serialized='{'+Object.entries(assets).map(([path,asset])=>JSON.stringify(path)+':{body:'+(typeof asset.body==='string'?JSON.stringify(asset.body):'new Uint8Array('+JSON.stringify(Array.from(asset.body))+')')+',contentType:'+JSON.stringify(asset.contentType)+'}').join(',')+'}';
+    const source = `// Generated by scripts/generate-web-assets.ts. Do not edit.\nexport const WEB_ASSETS: Readonly<Record<string, {body:string|Uint8Array;contentType:string}>> = ${serialized};\nexport const WEB_ASSETS_DIGEST = ${JSON.stringify(computeWebDigest(assets))};\n`;
     let current = '';
     try {
         current = await readFile(output, 'utf8');

@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { QuestionBroker } from "../question-broker";
+import { DECISION_TOOLS } from "@deck/core/session/decisions";
 import { ApprovalBroker } from "../approval-broker";
 import { sessionMcpServerSpec, DECK_APPROVE_TOOL, DECK_STATUS_TOOL, DEFAULT_ALLOWED_TOOLS } from "../bridge-config";
 import { BridgeService, type BridgeServiceOptions } from "../bridge-service";
@@ -171,6 +172,23 @@ describe("MCP stdio bridge (D-11, XR-4.7)", () => {
     } finally { s.end(); await s.done; }
   });
 
+  test("decision tools are advertised by canonical contract only when granted; member authority is still refused", async () => {
+    const names=DECISION_TOOLS.map(tool=>tool.name),h=await harness({grantTools:names});
+    const s=mcpSession({DECK_SESSION_CREDENTIAL_FILE:h.credFile});s.send({id:1,method:"tools/list"});
+    expect((await s.reply(1) as any).result.tools).toEqual(DECISION_TOOLS);s.end();await s.done;
+    const file=join(h.dir,"member-credential"),member=h.credentials.issue({...GRANT,taskId:"child",memberId:"quality",allowedTools:names},file);
+    for(const tool of names)expect(await h.bridge.call({token:member.token,tool,arguments:{}})).toMatchObject({ok:false,code:"tool-not-allowed"});
+  });
+  test("Lead MCP advertises attempt retrieval and the canonical explicit integration contract", async () => {
+    const h = await harness({ grantTools: ["deck_task_result", "deck_task_integrate"] });
+    const s = mcpSession({ DECK_SESSION_CREDENTIAL_FILE: h.credFile });
+    s.send({ id: 1, method: "tools/list" });
+    const tools = ((await s.reply(1)).result as any).tools;
+    expect(tools.map((t: any) => t.name).sort()).toEqual(["deck_task_integrate", "deck_task_result"]);
+    expect(tools.find((t: any) => t.name === "deck_task_integrate").inputSchema.required).toEqual(["commandId", "taskId", "attempt", "state", "note", "evidenceSeqs"]);
+    expect(tools.find((t: any) => t.name === "deck_task_result").inputSchema.properties.attempt).toEqual({ type: "integer", minimum: 1 });
+    s.end(); await s.done;
+  });
   test("role credential lists memory tools while hiding ungranted delegation tools", async () => {
     const h = await harness({ grantTools: ["deck_memory_recall", "deck_memory_propose", "deck_approve"] });
     const s = mcpSession({ DECK_SESSION_CREDENTIAL_FILE: h.credFile });

@@ -1,0 +1,81 @@
+{
+  "version": "codex-cli 0.162.1",
+  "source": "Isolated native fixture 2026-10-18; not a general delivery guarantee",
+  "threadId": "01a15039-4185-7c92-aaf9-886e2d77b01a",
+  "turnId": "01a15039-4195-7cd2-8576-2ed18b555d04",
+  "noActive": {
+    "code": -32600,
+    "message": "no active turn to steer"
+  },
+  "mismatch": {
+    "code": -32600,
+    "message": "expected active turn id `different-turn` but found `01a15039-4195-7cd2-8576-2ed18b555d04`"
+  },
+  "accepted": {
+    "turnId": "01a15039-4195-7cd2-8576-2ed18b555d04"
+  },
+  "liveUserItem": {
+    "type": "userMessage",
+    "id": "01a15039-4e60-7641-b286-5d0038b6fbe3",
+    "clientId": "steer-user-7c92",
+    "content": [
+      {
+        "type": "text",
+        "text": "The latest instruction replaces the initial answer. After fixture_gate returns, answer exactly STEER_ACCEPTED_7C92. Do not call tools again.",
+        "text_elements": []
+      }
+    ]
+  },
+  "history": {
+    "thread": {
+      "id": "01a15039-4185-7c92-aaf9-886e2d77b01a",
+      "turns": [
+        {
+          "id": "01a15039-4195-7cd2-8576-2ed18b555d04",
+          "rootTurnId": "01a15039-4195-7cd2-8576-2ed18b555d04",
+          "items": [
+            {
+              "type": "userMessage",
+              "id": "item-1",
+              "clientId": "initial-user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Call fixture_gate once, then answer INITIAL_ONLY. Use no other tools.",
+                  "text_elements": []
+                }
+              ]
+            },
+            {
+              "type": "userMessage",
+              "id": "item-2",
+              "clientId": "steer-user-7c92",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The latest instruction replaces the initial answer. After fixture_gate returns, answer exactly STEER_ACCEPTED_7C92. Do not call tools again.",
+                  "text_elements": []
+                }
+              ]
+            },
+            {
+              "type": "agentMessage",
+              "id": "item-3",
+              "text": "STEER_ACCEPTED_7C92",
+              "phase": "final_answer",
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            }
+          ],
+          "itemsView": "full",
+          "status": "completed",
+          "error": null,
+          "startedAt": 1792347292,
+          "completedAt": 1792347297,
+          "durationMs": 5908
+        }
+      ]
+    }
+  }
+}

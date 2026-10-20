@@ -126,3 +126,24 @@ test('a lagging inbox summary cannot resurrect dispatched or cancelled prompts a
  current.apply(event(7,'prompt.state',{promptId:'new',state:'cancelled'}));
  expect(reconcileInbox(current.values(),old).queued).toEqual([]);
 });
+
+test('compacted steering evidence keeps accepted delivery out of the pending queue and exposes live readiness', async () => {
+    const { reconcileInbox, emptyInbox } = await import('./prompt-queue');
+    const current = new CurrentEvents();
+    current.apply(event(1, 'prompt.queued', { promptId: 'p', text: 'Steer now' }));
+    current.apply(event(2, 'prompt.steering', { promptId: 'p', taskId: 'lead' }));
+    current.apply(event(3, 'prompt.steered', { promptId: 'p', steeringSeq: 2, state: 'accepted' }));
+    current.apply(event(4, 'prompt.queue', { paused: false }));
+    current.apply(event(5, 'diagnostic', { code: 'prompt.steering-capability', available: true }));
+    const inbox = reconcileInbox(current.values(), emptyInbox());
+    expect(inbox.queued).toEqual([]);
+    expect(inbox.deliveries).toEqual([{ promptId: 'p', text: 'Steer now', state: 'accepted' }]);
+    expect(inbox.steeringAvailable).toBe(true);
+    for (let i = 0; i < 100; i++) {
+        current.apply(event(6 + i * 3, 'prompt.queued', { promptId: `p${i}`, text: 'Bounded delivery' }));
+        current.apply(event(7 + i * 3, 'prompt.steering', { promptId: `p${i}` }));
+        current.apply(event(8 + i * 3, 'prompt.steered', { promptId: `p${i}`, state: 'accepted' }));
+    }
+    expect(reconcileInbox(current.values(), emptyInbox()).deliveries).toHaveLength(16);
+    expect(current.values().length).toBeLessThan(55);
+});

@@ -102,7 +102,7 @@ function validateInstallDir(input: string, homeDir: string): string {
 export function parseCanaryInstallArgs(argv: string[], deps: CanaryInstallDeps = {}): ParsedCanaryArgs {
   const env = deps.env ?? process.env;
   const homeDir = deps.homeDir ?? os.homedir();
-  const rawArgs = argv[0]?.includes("install-canary") || argv[0]?.endsWith("bun") ? argv.slice(2) : argv;
+  const rawArgs = argv[0]?.includes("install-canary") || /^bun(?:\.exe)?$/i.test(path.basename(argv[0] ?? "")) ? argv.slice(2) : argv;
   let help = false; let dryRun = false; let dirValue: string | undefined;
   for (let index = 0; index < rawArgs.length; index += 1) {
     const arg = rawArgs[index]!;

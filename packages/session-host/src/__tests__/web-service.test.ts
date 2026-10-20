@@ -9,6 +9,7 @@ import { WebService } from "../web-service";
 import type { SessionService } from "../service";
 import { waitFor } from "./test-helpers";
 import { listOpenSpecArtifacts, readOpenSpecArtifact } from "../openspec-artifacts";
+import { Database } from 'bun:sqlite';
 const NativeWebSocket = WebSocket as unknown as {
   new (url: string, options: Bun.WebSocketOptions): WebSocket;
 };
@@ -389,4 +390,72 @@ test('durable push opt-in retains HTTPS flags, Serve identity binding and immedi
  const paired=await fetch(`${f.base}/api/local-access`,{method:'POST',headers,body:'{}'});expect(paired.status).toBe(200);const cookie=paired.headers.get('set-cookie')!.split(';')[0]!;
  const enabled=await fetch(`${f.base}/api/push`,{method:'POST',headers:{...headers,Cookie:cookie},body:JSON.stringify({subscription:pushSubscription('secure')})});expect(enabled.status).toBe(200);expect(enabled.headers.get('set-cookie')).toContain('HttpOnly; SameSite=Strict; Secure; Max-Age=15552000');
  expect((await fetch(`${f.base}/api/push`,{headers:{...headers,Cookie:cookie,'Tailscale-User-Login':'bob@example.test'}})).status).toBe(401);f.host.revoke(f.host.devices()[0]!.id);expect((await fetch(`${f.base}/api/push`,{headers:{...headers,Cookie:cookie}})).status).toBe(401);
+});
+
+test('reply API authenticates exact device display, paged origins, and never executes a command',async()=>{
+  const f=fixture();const a=await pair(f),b=await pair(f);
+  const headers={Cookie:a.cookie,Origin:f.base,'Content-Type':'application/json'};
+  expect((await fetch(`${f.base}/api/replies`)).status).toBe(401);
+  await fetch(`${f.base}/api/sessions/s/replies`,{headers}); // enroll before reply
+  await fetch(`${f.base}/api/sessions/s/replies`,{headers:{Cookie:b.cookie}});
+  f.log.append({kind:'message.completed',source:{memberId:'lead',taskId:'lead'},data:{role:'user',text:'Earlier prompt'}});
+  f.log.append({kind:'turn.started',source:{memberId:'lead',taskId:'lead'}});
+  f.log.append({kind:'message.delta',source:{memberId:'lead',taskId:'lead'},data:{text:'Research ',role:'assistant'}});
+  const message=f.log.append({kind:'message.completed',source:{memberId:'lead',taskId:'lead'},data:{text:'Research answer while other work runs.',role:'assistant'}});
+  f.log.append({kind:'turn.completed',source:{memberId:'lead',taskId:'lead'},data:{status:'completed'}});
+  for(let i=0;i<80;i++)f.log.append({kind:'message.completed',source:{memberId:'lead',taskId:'lead'},data:{text:`Later ${i}`,role:'user'}});
+  const data=await(await fetch(`${f.base}/api/sessions/s/replies`,{headers})).json();expect(data.total).toBe(1);const reply=data.replies[0];
+  const route=`${f.base}/api/sessions/s/replies/${reply.replyId}`;
+  expect((await fetch(route,{method:'POST',headers:{...headers,Origin:'http://evil.test'},body:'{"displayed":true}'})).status).toBe(403);
+  const page=await(await fetch(`${f.base}/api/sessions/s/history?around=${message.seq}`,{headers})).json();
+  const exact=page.messages.find((row:any)=>row.seq===message.seq);expect(exact.historyId).toBe(message.seq-1);expect(page.after).toBeDefined();
+  const tail=await(await fetch(`${f.base}/api/sessions/s/history?around=${f.log.lastSeq}`,{headers})).json();expect(tail.messages.length).toBe(40);expect(tail.messages.at(-1).seq).toBe(f.log.lastSeq);expect(tail.messages[0].seq).toBeLessThan(f.log.lastSeq-20);
+  expect((await(await fetch(`${f.base}/api/sessions/s/replies`,{headers})).json()).total).toBe(1);
+  const mapping=await(await fetch(`${f.base}/api/sessions/s/replies?messageSeq=${message.seq}`,{headers})).json();expect(mapping.replies[0].replyId).toBe(reply.replyId);
+  expect((await fetch(route,{method:'POST',headers,body:'not-json'})).status).toBe(400);
+  expect((await fetch(`${f.base}/api/sessions/s/replies/reply-999-998`,{method:'POST',headers,body:'{"displayed":true}'})).status).toBe(404);
+  expect((await fetch(route,{method:'POST',headers,body:'{"displayed":true}'})).status).toBe(200);
+  expect((await(await fetch(`${f.base}/api/sessions/s/replies`,{headers})).json()).total).toBe(0);
+  expect((await(await fetch(`${f.base}/api/sessions/s/replies`,{headers:{Cookie:b.cookie}})).json()).total).toBe(1);
+  expect(f.executed).toHaveLength(0);
+  for(const suffix of ['?cursor=-1','?cursor=1&cursor=2','?messageSeq=NaN'])expect((await fetch(`${f.base}/api/sessions/s/replies${suffix}`,{headers})).status).toBe(400);
+});
+
+test('removal while an exact display body is pending returns unavailable identity without manufacturing a receipt',async()=>{
+ const f=fixture(),{cookie}=await pair(f),headers={Cookie:cookie,Origin:f.base,'Content-Type':'application/json',Host:new URL(f.base).host};
+ f.log.append({kind:'turn.started'});f.log.append({kind:'message.completed',data:{role:'assistant',text:'Visible reply before removal.'}});f.log.append({kind:'turn.completed',data:{status:'completed'}});
+ const reply=(await(await fetch(`${f.base}/api/sessions/s/replies`,{headers})).json()).replies[0];
+ const request=new Request(`${f.base}/api/sessions/s/replies/${reply.replyId}`,{method:'POST',headers,body:'{"displayed":true}'});
+ let entered=false,release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve),text=request.text.bind(request);request.text=async()=>{entered=true;await gate;return text();};
+ const response=(f.host as any).fetch(request,{port:Number(new URL(f.base).port),requestIP:()=>({address:'127.0.0.1'})}) as Promise<Response>;
+ try{await waitFor(()=>entered);f.log.append({kind:'session.removed',data:{phase:'removed'}});expect((await(await fetch(`${f.base}/api/sessions/s/replies`,{headers})).json()).total).toBe(0);}finally{release();}
+ expect((await response).status).toBe(404);expect(f.executed).toHaveLength(0);
+});
+
+test('receipt fails closed on source backlog with at most 4096 replayed events per request; current valid receipts stay idempotent',async()=>{
+ const f=fixture(),{cookie}=await pair(f),headers={Cookie:cookie,Origin:f.base,'Content-Type':'application/json'};
+ f.log.append({kind:'turn.started'});f.log.append({kind:'message.completed',data:{role:'assistant',text:'A valid retained reply.'}});f.log.append({kind:'turn.completed',data:{status:'completed'}});
+ const reply=(await(await fetch(`${f.base}/api/sessions/s/replies`,{headers})).json()).replies[0],db=new Database(join(f.paths.webDir,'lead-replies.sqlite'));
+ try{
+  let checkpoint=(db.query('SELECT seq FROM sessions WHERE sessionId=?').get('s') as any).seq;
+  for(let n=0;n<8193;n++)f.log.append({kind:'diagnostic',data:{code:'receipt-backlog-fixture'}});
+  const post=()=>fetch(`${f.base}/api/sessions/s/replies/${reply.replyId}`,{method:'POST',headers,body:'{"displayed":true}'});
+  for(let n=0;n<2;n++){
+   const response=await post();expect(response.status).toBe(503);expect((await response.json()).code).toBe('reply-history-syncing');
+   const next=(db.query('SELECT seq FROM sessions WHERE sessionId=?').get('s') as any).seq;expect(next-checkpoint).toBe(4096);checkpoint=next;expect((db.query('SELECT COUNT(*) AS n FROM displayed').get() as any).n).toBe(0);
+  }
+  expect((await post()).status).toBe(200);expect((await post()).status).toBe(200);expect((db.query('SELECT COUNT(*) AS n FROM displayed').get() as any).n).toBe(1);
+  expect((await(await fetch(`${f.base}/api/sessions/s/replies`,{headers})).json()).total).toBe(0);expect(f.executed).toHaveLength(0);
+ }finally{db.close();}
+});
+
+test('held receipt still rechecks device authorization before post-body replay or display',async()=>{
+ const f=fixture(),{cookie}=await pair(f),headers={Cookie:cookie,Origin:f.base,'Content-Type':'application/json',Host:new URL(f.base).host};
+ f.log.append({kind:'turn.started'});f.log.append({kind:'message.completed',data:{role:'assistant',text:'Visible before authorization changed.'}});f.log.append({kind:'turn.completed',data:{status:'completed'}});
+ const reply=(await(await fetch(`${f.base}/api/sessions/s/replies`,{headers})).json()).replies[0];
+ const request=new Request(`${f.base}/api/sessions/s/replies/${reply.replyId}`,{method:'POST',headers,body:'{"displayed":true}'});
+ let entered=false,release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve),text=request.text.bind(request);request.text=async()=>{entered=true;await gate;return text();};
+ const response=(f.host as any).fetch(request,{port:Number(new URL(f.base).port),requestIP:()=>({address:'127.0.0.1'})}) as Promise<Response>;
+ try{await waitFor(()=>entered);f.host.revoke(f.host.devices()[0]!.id);}finally{release();}
+ expect((await response).status).toBe(401);const db=new Database(join(f.paths.webDir,'lead-replies.sqlite'));try{expect((db.query('SELECT COUNT(*) AS n FROM displayed').get() as any).n).toBe(0);}finally{db.close();}
 });

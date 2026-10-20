@@ -352,13 +352,15 @@ export function PushNotifications({ api }: { api: Api }) {
 export function pushDeliveryText(
   status?: import('../../../packages/session-host/src/web-push').PushDeliveryStatus,
 ): string {
-  if (!status?.eligible)
+  if (!status?.eligible && status?.lastOutcome !== 'waiting-for-storage')
     return 'No eligible alerts recorded for this browser since the daemon started.';
   const last =
     status.lastOutcome === 'accepted'
       ? 'Push service accepted the last alert; device display is not confirmed.'
       : status.lastOutcome === 'viewed'
         ? 'Last alert was already received by your visible conversation.'
+        : status.lastOutcome === 'waiting-for-storage'
+          ? 'Notification storage is unavailable; pending attention will be checked again.'
         : status.lastOutcome === 'waiting-for-view'
           ? 'Waiting briefly for your visible conversation to receive the alert.'
           : status.lastOutcome === 'stale'

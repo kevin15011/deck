@@ -128,6 +128,8 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
         finally { admitted--; }
       },
       subscribeEvents: svc.subscribeEvents ? listener => svc.subscribeEvents!(listener) : undefined,
+      pushAttentionItems: svc.pushAttentionItems ? id => draining ? [] : svc.pushAttentionItems!(id) : undefined,
+      pushAttentionSessions: svc.pushAttentionSessions ? () => draining ? [] : svc.pushAttentionSessions!() : undefined,
       isPushAttentionCurrent: attention => !draining && (svc.isPushAttentionCurrent?.(attention) ?? false),
       readAttachment: (sessionId, attachmentId) => svc.readAttachment?.(sessionId, attachmentId),
     };

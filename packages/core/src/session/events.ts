@@ -1,10 +1,13 @@
 import { isApprovalScope, isApprovalRisk, isApprovalToolKey, isSessionGrantKind } from "./approval";
+import {validSteeringFence,validSteeringResult} from "./steering";
+import { validDecisionMutation, validDecisionReply, validDecisionCommand } from "./decisions";
 /**
  * deck-session-event-v1 — pure, provider-neutral event envelope and validators (XR-1.1–1.4).
  * No Node, network, or filesystem APIs.
  */
 import { isQuestionAnswers } from "./question";
 import { isApprovalMode } from "./commands";
+import { validTaskAccounting, validTaskIntegration } from "./mcp";
 import { redactText } from "./redaction";
 
 export const SESSION_EVENT_VERSION = 1 as const;
@@ -12,7 +15,7 @@ export const RAW_PAYLOAD_LIMIT_BYTES = 64 * 1024;
 
 export const SESSION_EVENT_KINDS = [
   "session.created", "session.bound", "session.state", "session.ended", "session.recovered", "session.assignment", "session.approvals", "session.grant", "session.successor", "session.released", "session.reopened", "session.renamed", "session.removed",
-  "task.created", "task.state", "task.continued", "task.result",
+  "task.created", "task.state", "task.continued", "task.result", "task.delivery", "task.retrieval", "task.integration",
   "turn.started", "turn.completed",
   "message.delta", "message.completed", "reasoning.delta", "tool.started", "tool.completed",
   "hook.started", "hook.completed",
@@ -21,7 +24,8 @@ export const SESSION_EVENT_KINDS = [
   "usage", "rate-limit", "diagnostic", "runner.unmapped", "client.attached", "client.detached",
   /** Durable idempotency receipt: a command was accepted and its outcome is recorded (XR-1.5, survives daemon restart). */
   "command.accepted",
-  "prompt.queued", "prompt.dispatched", "prompt.state", "prompt.queue",
+  "decision.command", "decision.opened", "decision.revised", "decision.state", "decision.reply",
+  "prompt.steering", "prompt.steered", "prompt.queued", "prompt.dispatched", "prompt.state", "prompt.queue",
 ] as const;
 export type SessionEventKind = (typeof SESSION_EVENT_KINDS)[number];
 
@@ -59,6 +63,16 @@ const hookData = (d: Record<string, unknown>): string | null => {
 const DATA_RULES: Partial<Record<SessionEventKind, (d: Record<string, unknown>) => string | null>> = {
   "session.created": (d) => d.approvals === undefined || isApprovalMode(d.approvals) ? null : "data.approvals invalid",
   "session.approvals": (d) => !isApprovalMode(d.mode) ? "data.mode invalid" : !isStr(d.by) ? "data.by required" : null,
+  "prompt.steering": d => validSteeringFence(d) ? null : "steering fence invalid",
+  "prompt.steered": d => validSteeringResult(d) ? null : "steering outcome invalid",
+  "decision.command": d => validDecisionCommand(d.command) ? null : "decision command invalid",
+  "decision.opened": d => validDecisionMutation(d) ? null : "decision mutation invalid",
+  "decision.revised": d => validDecisionMutation(d) ? null : "decision mutation invalid",
+  "decision.state": d => validDecisionMutation(d) ? null : "decision mutation invalid",
+  "decision.reply": d => validDecisionReply(d) ? null : "decision reply invalid",
+  "task.delivery": d => validTaskAccounting(d) ? null : "data task accounting invalid",
+  "task.retrieval": d => validTaskAccounting(d) ? null : "data task accounting invalid",
+  "task.integration": d => validTaskAccounting(d) && validTaskIntegration(d) ? null : "data task integration invalid",
   "hook.started": hookData,
   "hook.completed": hookData,
   "turn.completed": (d) => (TURN_COMPLETED_STATUSES as readonly string[]).includes(d.status as string) ? null : "data.status invalid",

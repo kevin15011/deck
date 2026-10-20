@@ -32,6 +32,7 @@ export class CurrentEvents {
         const put = (key: string) => this.entries.set(key, event);
         if (kind.startsWith('session.') && kind !== 'session.grant')
             put(kind);
+        if (kind.startsWith('decision.')) put('decision');
         if (kind === 'session.grant') {
             const key = `grant:${data.grantId}`;
             if (data.action === 'added')
@@ -73,13 +74,27 @@ export class CurrentEvents {
             this.entries.delete(`progress:${task}:tool:${data.toolUseId ?? data.toolCallId}`);
         if (['tool.started', 'tool.completed', 'message.delta', 'message.completed', 'reasoning.delta', 'approval.resolved', 'question.resolved'].includes(kind) && data.role !== 'user' && data.role!=='system' && !data.internal)
             put(`progress:${task}:phase`);
-        if (kind === 'diagnostic' && ['turn.preparation', 'session.preparation'].includes(String(data.code)))
+        if (kind === 'diagnostic' && ['turn.preparation', 'session.preparation', 'prompt.steering-capability'].includes(String(data.code)))
             put(`diagnostic:${data.code}:${task}`);
         // Keep current queued/failed receipts, so failure notices survive paging.
         // Dispatched and cancelled content is removed rather than becoming history.
         const promptKey = `queued:${data.promptId}`, failureKey = `failed:${data.promptId}`;
         if (kind === 'prompt.queued')
             put(promptKey);
+        if (kind === 'prompt.steering') {
+            const queued = this.entries.get(promptKey);
+            if (queued) this.entries.set(`steering-queued:${data.promptId}`, queued);
+            this.entries.delete(promptKey);
+            put(`steering-fence:${data.promptId}`);
+        }
+        if (kind === 'prompt.steered') {
+            put(`steering-result:${data.promptId}`);
+            const results = [...this.entries.keys()].filter(key => key.startsWith('steering-result:'));
+            for (const key of results.slice(0, -16)) {
+                const id = key.slice('steering-result:'.length);
+                for (const part of ['queued', 'fence', 'result']) this.entries.delete(`steering-${part}:${id}`);
+            }
+        }
         if (kind === 'prompt.dispatched') {
             put('prompt:active');
             this.entries.delete(promptKey);

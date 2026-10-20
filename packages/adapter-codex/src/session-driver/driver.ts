@@ -1,4 +1,6 @@
 import { validateQuestions, type Question } from "@deck/core/session/question";
+import { CODEX_STEERING_CAPABILITY, type SteeringInput, type SteeringOutcome } from "@deck/core/session/steering";
+import { steeringFailure, reconcileHistory } from "./steering";
 import { prepareImages, redactImagePayload } from "./images";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -26,7 +28,7 @@ function nativeModel(modelId: string): { model: string; modelProvider?: string }
   const slash = modelId.indexOf("/");
   return slash < 0 ? { model: modelId } : { model: modelId.slice(slash + 1), ...(modelId.slice(0, slash) === "openai-codex" ? {} : { modelProvider: modelId.slice(0, slash) }) };
 }
-type Turn = { id?: string; resolve(outcome: TurnOutcome): void; interrupted: boolean; escalation?: ReturnType<typeof setTimeout> };
+type Turn = { id?: string; confirmedId?: string; resolve(outcome: TurnOutcome): void; interrupted: boolean; escalation?: ReturnType<typeof setTimeout> };
 const isHookNotification = (message: RpcMessage) => message.method?.startsWith("hook/") === true;
 
 // Canonical action data is passed only to the in-memory approval broker, never emitted.
@@ -59,6 +61,7 @@ class CodexTask {
   private spawning?: Promise<SupervisedChild>;
   private rpc?: CodexRpc;
   private threadId?: string;
+  private steeringHistoryVerified=false;
   private turn?: Turn;
   private closed = false;
   private failed = false;
@@ -164,10 +167,10 @@ class CodexTask {
         approvalPolicy: this.input.approvals === "relay" ? "on-request" : "never",
         approvalsReviewer: "user", sandbox: this.input.approvals === "relay" ? "read-only" : "danger-full-access",
         // Only thread.id is consumed; full resume history can exceed the RPC frame bound.
-        ...(this.input.resume ? { threadId: this.input.resume.nativeSessionId, excludeTurns: true } : { ephemeral: false }),
+        ...(this.input.resume ? { threadId: this.input.resume.nativeSessionId, excludeTurns: true } : { ephemeral: false, historyMode: "legacy" }),
       })).thread);
       if (typeof thread.id !== "string" || !thread.id || this.input.resume && thread.id !== this.input.resume.nativeSessionId) throw new Error("codex-native-session-id-mismatch");
-      this.threadId = thread.id;
+      this.threadId = thread.id;this.steeringHistoryVerified=thread.historyMode === "legacy";
       await this.verifyRuntimeMcp(rpc, Date.now() + (this.options.rpcTimeoutMs ?? 30_000));
     } catch (error) { await this.fail(startupErrorCode(error)); throw error; }
   }
@@ -231,7 +234,10 @@ class CodexTask {
     if (p.threadId !== undefined && this.threadId !== undefined && p.threadId !== this.threadId) {
       this.emit({ kind: "runner.unmapped", data: { nativeType: isHookNotification(message) ? redactText(message.method!, 128) : message.method, reason: "foreign-thread" }, ...(isHookNotification(message) ? {} : { raw: message }) }); return;
     }
-    if (message.method === "turn/started" && this.turn) this.turn.id = typeof object(p.turn).id === "string" ? object(p.turn).id as string : this.turn.id;
+    if (message.method === "turn/started" && this.turn) {
+      if(this.turn.confirmedId && object(p.turn).id!==this.turn.confirmedId){this.emit({kind:"runner.unmapped",data:{nativeType:message.method,reason:"stale-turn"}});return;}
+      this.turn.id = typeof object(p.turn).id === "string" ? object(p.turn).id as string : this.turn.id;
+    }
     if (message.method === "turn/completed") {
       const id = object(p.turn).id;
       if (!this.turn || this.turn.id && id !== this.turn.id) { this.emit({ kind: "runner.unmapped", data: { nativeType: message.method, reason: "stale-turn" }, raw: message }); return; }
@@ -355,11 +361,30 @@ class CodexTask {
       try {
         const result = object(await this.rpc!.call("turn/start", { threadId: this.threadId, input: [...(prompt || !nativeImages.length ? [{ type: "text", text: prompt }] : []), ...nativeImages], ...(this.input.assignment.thinking ? { effort: this.input.assignment.thinking } : {}) }));
         if (typeof object(result.turn).id !== "string") throw new Error("codex-turn-id-missing");
-        state.id = object(result.turn).id as string;
+        state.id = object(result.turn).id as string;state.confirmedId=state.id;
+        if(this.input.steeringVersion)this.emit({kind:"diagnostic",data:{code:"codex-steering-ready"}});
         if (state.interrupted && this.turn === state) this.deliverInterrupt(state);
       } catch { await this.fail("codex-turn-start-failed"); }
     })();
     return done;
+  }
+  steeringTarget() {
+    if(!this.steeringHistoryVerified || this.input.steeringVersion !== "0.162.1" || nativeModel(this.input.assignment.modelId).modelProvider || this.closed || this.failed || this.turn?.interrupted || !this.turn?.confirmedId || this.turn.id!==this.turn.confirmedId || !this.threadId) return undefined;
+    return {nativeThreadId:this.threadId,nativeTurnId:this.turn.id};
+  }
+  async steer(input: SteeringInput): Promise<SteeringOutcome> {
+    const target=this.steeringTarget();
+    // Missing readiness is not a proven native refusal and cannot justify a duplicate route.
+    if(!target || target.nativeThreadId!==input.nativeThreadId || target.nativeTurnId!==input.nativeTurnId || !input.clientUserMessageId || !input.text)return {state:"unknown",reason:"native-target-unavailable"};
+    try {
+      const result=object(await this.rpc!.call("turn/steer",{threadId:input.nativeThreadId,expectedTurnId:input.nativeTurnId,clientUserMessageId:input.clientUserMessageId,input:[{type:"text",text:input.text}]}));
+      return result.turnId===input.nativeTurnId ? {state:"accepted",...input,via:"receipt"} : {state:"unknown",reason:"native-target-mismatch"};
+    }catch(error){return steeringFailure(error,input);}
+  }
+  async reconcileSteering(input: SteeringInput): Promise<SteeringOutcome> {
+    if(this.closed || !this.rpc || this.threadId!==input.nativeThreadId)return {state:"unknown",reason:"native-history-unavailable"};
+    try{return reconcileHistory(input,await this.rpc.call("thread/read",{threadId:input.nativeThreadId,includeTurns:true}));}
+    catch{return {state:"unknown",reason:"native-history-unavailable"};}
   }
   private deliverInterrupt(state: Turn): void {
     if (state.id) void this.rpc?.call("turn/interrupt", { threadId: this.threadId, turnId: state.id }).catch(() => {});
@@ -400,13 +425,13 @@ export function createCodexSessionDriver(options: CodexSessionDriverOptions = {}
         if (result.code !== 0 || !version) return { status: "blocked", reasonCode: "codex-version-unavailable", capabilities };
         if (compare(version, CODEX_TESTED_VERSIONS.min) < 0) return { version, status: "blocked", reasonCode: "codex-version-too-old", capabilities };
         if (compare(version, CODEX_TESTED_VERSIONS.maxTested) > 0) return { version, status: "degraded", reasonCode: "codex-version-untested", capabilities, mcpIsolationVerified: false };
-        return { version, status: "ready", capabilities, mcpIsolationVerified: true };
+        return { version, status: "ready", capabilities: [...capabilities, ...(result.stdout.trim() === "codex-cli 0.162.1" ? [CODEX_STEERING_CAPABILITY] : [])], mcpIsolationVerified: true };
       } catch { return { status: "blocked", reasonCode: "codex-executable-unavailable", capabilities }; }
     },
     async startTask(input, io): Promise<DriverTaskHandle> {
       const task = new CodexTask(input, io, options);
       const done = task.start();
-      return { nativeSessionId: task.nativeSessionId, done, send: (prompt, images) => task.send(prompt, images), interrupt: () => task.interrupt(), close: () => task.close() };
+      return { nativeSessionId: task.nativeSessionId, done, send: (prompt, images) => task.send(prompt, images), ...(input.steeringVersion === "0.162.1" ? {steeringTarget:()=>task.steeringTarget(),steer:(message:SteeringInput)=>task.steer(message),reconcileSteering:(message:SteeringInput)=>task.reconcileSteering(message)} : {}), interrupt: () => task.interrupt(), close: () => task.close() };
     },
   };
 }

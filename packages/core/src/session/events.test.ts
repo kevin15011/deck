@@ -61,7 +61,8 @@ describe("validateSessionEvent", () => {
     expect(SESSION_EVENT_KINDS).toContain("command.accepted");
     expect(SESSION_EVENT_KINDS).toContain("hook.started");
     expect(SESSION_EVENT_KINDS).toContain("hook.completed");
-    expect(SESSION_EVENT_KINDS.length).toBe(44);
+    for (const kind of ["task.delivery", "task.retrieval", "task.integration"] as const) expect(SESSION_EVENT_KINDS).toContain(kind);
+    expect(SESSION_EVENT_KINDS.length).toBe(54);
   });
 });
 

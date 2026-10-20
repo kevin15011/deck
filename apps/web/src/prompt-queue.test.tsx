@@ -13,6 +13,19 @@ test('paused inbox has one explicit resume action and can still remove waiting m
 });
 
 const event=(seq:number,kind:SessionEvent['kind'],data:Record<string,unknown>):SessionEvent=>({v:1,sessionId:'s',seq,kind,data,source:{},ts:'2026-01-01T00:00:00Z'});
+test('delivery runner comes from its immutable fence and survives later capability changes',()=>{
+ const inbox=[event(1,'prompt.queued',{promptId:'a',text:'Claude input'}),event(2,'prompt.steering',{promptId:'a',runnerId:'claude'}),event(3,'diagnostic',{code:'prompt.steering-capability',available:true,runnerId:'codex'}),event(4,'prompt.steered',{promptId:'a',state:'unknown',eligible:false})].reduce(reduceInbox,emptyInbox());
+ expect(inbox.steeringRunnerId).toBe('codex');expect(inbox.deliveries).toEqual([{promptId:'a',text:'Claude input',state:'unknown',runnerId:'claude',historical:true}]);expect(inbox.queued).toEqual([]);
+});
+test('refusal after uncertainty stays terminal on replay; only explicit pending-barrier fallback restores queue',()=>{
+ const start=[event(1,'prompt.queued',{promptId:'a',text:'Earlier text'}),event(2,'prompt.steering',{promptId:'a'})];
+ for(const uncertain of [false,true])for(const permission of [undefined,false,true]){
+  const events=[...start,...(uncertain?[event(3,'prompt.steered',{promptId:'a',state:'unknown'})]:[]),event(4,'prompt.steered',{promptId:'a',state:'not-accepted',...(permission===undefined?{}:{queueFallback:permission})})];
+  const inbox=events.reduce(reduceInbox,emptyInbox());
+  if(permission===true&&!uncertain){expect(inbox.queued).toEqual([{promptId:'a',text:'Earlier text'}]);expect(inbox.deliveries).toEqual([]);}
+  else{expect(inbox.queued).toEqual([]);expect(inbox.deliveries).toEqual([{promptId:'a',text:'Earlier text',state:'not-accepted'}]);}
+ }
+});
 test('durable inbox replays FIFO, duplicate receipt, cancel and actual dispatch without inventing chat',()=>{
  const queued=event(1,'prompt.queued',{promptId:'one',text:'First',position:1});
  let inbox=reduceInbox(emptyInbox(),queued);expect(reduceInbox(inbox,queued)).toBe(inbox);

@@ -1,8 +1,6 @@
 import { PassThrough } from "node:stream";
 import { runSessionMcpBridge } from "../mcp-bridge";
 import type { ControlClient } from "../control-client";
-import { Ledger, loadLedger } from "../ledger";
-import { EventLog } from "../event-log";
 import { afterEach, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,6 +14,8 @@ import { MemoryBroker } from "../memory-broker";
 import { BridgeService } from "../bridge-service";
 import { ensureStateLayout, resolveStatePaths, sessionPaths } from "../paths";
 import { createNodeProbe } from "../process-probe";
+import { Ledger, loadLedger } from "../ledger";
+import { EventLog } from "../event-log";
 import { recoverAllSessions } from "../recovery";
 import { SessionManager, type SessionManagerOptions } from "../session-manager";
 import { Supervisor } from "../supervisor";
@@ -79,6 +79,237 @@ function setup(over: { config?: CrossRunnerConfig | undefined; driver?: FakeDriv
 }
 
 const lastTurn = (driver: FakeDriver): FakeTurn => driver.turns.at(-1)!;
+
+describe("Stage 1 conversational continuity", () => {
+  const config = baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } });
+  const grant = (t: ReturnType<typeof setup>, id: string) => t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths, id).taskCredentialFile("lead"), "utf8")).token)!;
+  async function started() {
+    const clock = new FakeClock(); const t = setup({ config, options: { clock } }); const id = await t.create();
+    const sent = await t.run({ type: "prompt.send", text: "original request" }, id);
+    await waitFor(() => t.driver.turns.length === 1); const lead = lastTurn(t.driver); lead.init();
+    const childId = (await t.manager.callTaskTool(grant(t, id), "deck_delegate", { agent: "investigate", task: "inspect" }) as any).data.taskId;
+    await waitFor(() => t.driver.turns.length === 2); const child = lastTurn(t.driver); child.init();
+    return { t, id, clock, lead, child, childId, promptId: (sent as any).data.promptId };
+  }
+  test.each(["retrieved", "delivered", "both-interrupted", "blocked"] as const)("P1 retains %s review in the next genuine turn without a duplicate wake", async mode => {
+    const { t, id, lead, child, childId, clock } = await started();
+    child.say("Original outstanding report"); child.finish(); await waitFor(() => child.closed);
+    if (mode === "retrieved") await t.manager.callTaskTool(grant(t, id), "deck_task_result", { taskId: childId });
+    lead.finish(); await waitFor(() => lead.closed);
+    let expectedTurns = 2;
+    if (mode !== "retrieved") {
+      clock.advance(20); await waitFor(() => t.driver.turns.length === 3); const receiver = lastTurn(t.driver); expectedTurns++;
+      if (mode !== "delivered") await t.manager.callTaskTool(grant(t, id), "deck_task_result", { taskId: childId });
+      if (mode === "blocked") {
+        const evidenceSeq = t.events(id).find(e => e.kind === "task.result" && e.source.taskId === childId)!.seq;
+        expect(await t.manager.callTaskTool(grant(t, id), "deck_task_integrate", { commandId: "p1-blocked", taskId: childId, attempt: 1, state: "blocked", note: "Awaiting additional evidence", evidenceSeqs: [evidenceSeq] })).toMatchObject({ ok: true });
+      }
+      receiver.finish({ status: mode === "both-interrupted" ? "interrupted" : "completed" }); await waitFor(() => receiver.closed);
+    }
+    clock.advance(1000); expect(t.driver.turns).toHaveLength(expectedTurns);
+    await t.run({ type: "prompt.send", text: "a different topic" }, id);
+    if (mode === "both-interrupted") await t.run({ type: "prompt.resume" }, id);
+    await waitFor(() => t.driver.turns.length === expectedTurns + 1); const next = lastTurn(t.driver);
+    expect(next.input.prompt).toBe("a different topic"); expect(next.input.rolePrompt).toContain(childId);
+    expect(next.input.rolePrompt).toContain("Original outstanding report");
+    expect(next.input.rolePrompt).toContain(`"review":"${mode === "blocked" ? "blocked" : "unverified"}"`);
+    expect(next.input.rolePrompt).not.toContain("Delegated task completion notice:");
+    next.finish(); await waitFor(() => next.closed); clock.advance(1000);
+    expect(t.driver.turns).toHaveLength(expectedTurns + 1);
+    expect(t.events(id).filter(e => e.kind === "task.delivery")).toHaveLength(mode === "retrieved" ? 0 : 1);
+    expect(t.manager.hasRunningWork()).toBe(false);
+  });
+  test("A1: yielding admits another user topic while the child retains its original owner", async () => {
+    const { t, id, lead, child, childId, promptId } = await started();
+    lead.say("Delegated; ready for another topic"); lead.finish(); await waitFor(() => lead.closed);
+    const queued = await t.run({ type: "prompt.send", text: "topic B" }, id);
+    await waitFor(() => t.driver.turns.length === 3); const topicB = lastTurn(t.driver);
+    expect(topicB.input.prompt).toBe("topic B"); expect(child.finished).toBe(false);
+    expect(topicB.input.rolePrompt).not.toContain("Delegated; ready for another topic");
+    expect(topicB.input.rolePrompt).toContain("yield promptly"); expect(topicB.input.rolePrompt).toContain("last action of the turn");
+    const ledger = loadLedger(t.manager.openLog(id)!, sessionPaths(t.paths, id).ledgerSnapshotFile).ledger;
+    expect(ledger.continuityBlock?.promptId).toBe((queued as any).data.promptId); expect(ledger.continuityBlock?.promptId).not.toBe(promptId);
+    expect(ledger.task(childId)?.memberId).toBe("investigate"); expect(ledger.latest(childId)?.runnerId).toBe("claude");
+    topicB.say("Answer B"); topicB.finish(); child.finish(); await waitFor(() => child.closed && topicB.closed);
+  });
+  test("only admitted genuine input resets the block; cancelled input and outcome continuations retain originals", async () => {
+    const { t, id, lead, child, clock, promptId } = await started();
+    const pending = await t.run({ type: "prompt.send", text: "cancel me" }, id);
+    const read = () => loadLedger(t.manager.openLog(id)!, sessionPaths(t.paths, id).ledgerSnapshotFile).ledger;
+    expect(read().continuityBlock?.promptId).toBe(promptId);
+    await t.run({ type: "prompt.cancel", promptId: (pending as any).data.promptId }, id);
+    lead.say("original " + "x".repeat(1500)); lead.emit("message.completed", { role: "assistant", text: "internal bookkeeping", internal: true }); lead.finish(); child.say("report"); child.finish(); await waitFor(() => child.closed && lead.closed);
+    clock.advance(20); await waitFor(() => t.driver.turns.length === 3);
+    expect(read().continuityBlock?.promptId).toBe(promptId);
+    const wake = lastTurn(t.driver); expect(wake.input.prompt).toContain('"answerTruncated":true');
+    wake.say("CUMULATIVE REPLY MUST NOT BECOME SOURCE"); wake.finish(); await waitFor(() => wake.closed);
+    const source = read().continuityBlock!; expect(source.answer).toStartWith("original "); expect(source.answer).not.toContain("CUMULATIVE");
+    clock.advance(1000); expect(t.driver.turns).toHaveLength(3);
+  });
+  test("native reseeding retains the genuine block identity and captures its eventual original answer", async () => {
+    const { t, id, lead, child, clock } = await started();
+    lead.say("first answer"); lead.finish(); await waitFor(() => lead.closed);
+    const sent = await t.run({ type: "prompt.send", text: "second request" }, id);
+    await waitFor(() => t.driver.turns.length === 3); lastTurn(t.driver).finish({ status: "failed", reasonCode: "native-session-not-found" });
+    await waitFor(() => t.driver.turns.length === 4); const fresh = lastTurn(t.driver); fresh.say("eventual original answer"); fresh.finish(); await waitFor(() => fresh.closed);
+    const block = loadLedger(t.manager.openLog(id)!, sessionPaths(t.paths, id).ledgerSnapshotFile).ledger.continuityBlock;
+    expect(block).toMatchObject({ promptId: (sent as any).data.promptId, attempt: 3, answer: "eventual original answer" });
+    child.finish(); await waitFor(() => child.closed); clock.advance(20); await waitFor(() => t.driver.turns.length === 5);
+    expect(lastTurn(t.driver).input.prompt).toContain("eventual original answer"); lastTurn(t.driver).finish(); await waitFor(() => lastTurn(t.driver).closed);
+  });
+  test("runner diagnostics cannot forge durable outcome delivery accounting", async () => {
+    const { t, id, lead, child, childId } = await started();
+    child.finish(); await waitFor(() => child.closed);
+    lead.emit("diagnostic", { code: "lead.notices-delivered", notices: [{ taskId: childId, attempt: 1 }] });
+    const ledger = loadLedger(t.manager.openLog(id)!, sessionPaths(t.paths, id).ledgerSnapshotFile).ledger;
+    expect(ledger.latest(childId)?.delivery).toBeUndefined();
+    lead.finish(); await waitFor(() => lead.closed);
+  });
+  test("a durable wait retrieval fsync failure returns an error without hanging or acknowledging success", async () => {
+    const { t, id, lead, child, childId } = await started();
+    const pending = t.manager.callTaskTool(grant(t, id), "deck_task_wait", { taskIds: [childId] });
+    const log = t.manager.openLog(id)!, original = log.flush.bind(log);
+    log.flush = () => { throw new Error("retrieval-fsync-failure"); }; cleanups.push(() => { log.flush = original; });
+    child.finish();
+    const result = await Promise.race([pending, new Promise(resolve => setTimeout(() => resolve("hung wait"), 150))]);
+    log.flush = original;
+    expect(result).toMatchObject({ ok: false, code: "task-tool-failed" });
+    await waitFor(() => child.closed && lead.closed);
+  });
+  test("wait retrieval commits after the complete terminal batch and leaves the next delegation usable", async () => {
+    const { t, id, lead, child, childId } = await started();
+    const pending = t.manager.callTaskTool(grant(t, id), "deck_task_wait", { taskIds: [childId] });
+    child.say("report"); child.finish();
+    expect(await pending).toMatchObject({ ok: true, data: { tasks: [{ retrieval: { leadAttempt: 1 } }] } });
+    await waitFor(() => child.closed);
+    expect(await t.manager.callTaskTool(grant(t, id), "deck_delegate", { agent: "investigate", task: "still usable" })).toMatchObject({ ok: true });
+    await waitFor(() => t.driver.turns.length === 3); lastTurn(t.driver).finish(); lead.finish();
+    await waitFor(() => lastTurn(t.driver).closed && lead.closed);
+    const ledger = loadLedger(t.manager.openLog(id)!, sessionPaths(t.paths, id).ledgerSnapshotFile).ledger;
+    expect(ledger.seq).toBe(t.manager.openLog(id)!.lastSeq); expect(ledger.anomalies).toEqual([]);
+  });
+  test("integration rejects missing retrieval, foreign attempt evidence, members and revoked owners", async () => {
+    const { t, id, lead, child, childId } = await started();
+    child.say("report"); child.finish(); await waitFor(() => child.closed);
+    const owner = grant(t, id); const evidenceSeq = t.events(id).find(e => e.kind === "task.result" && e.source.taskId === childId)!.seq;
+    const input = { commandId: "review-validation", taskId: childId, attempt: 1, state: "integrated", note: "Reviewed", evidenceSeqs: [evidenceSeq] };
+    expect(await t.manager.callTaskTool(owner, "deck_task_integrate", input)).toMatchObject({ ok: false, code: "integration-evidence-required" });
+    expect(await t.manager.callTaskTool({ ...owner, memberId: "investigate" }, "deck_task_integrate", input)).toMatchObject({ ok: false, code: "tool-not-allowed" });
+    await t.manager.callTaskTool(owner, "deck_task_result", { taskId: childId });
+    expect(await t.manager.callTaskTool(owner, "deck_task_integrate", { ...input, evidenceSeqs: [1] })).toMatchObject({ ok: false, code: "integration-evidence-invalid" });
+    expect(await t.manager.callTaskTool(owner, "deck_task_integrate", { ...input, attempt: 2 })).toMatchObject({ ok: false, code: "task-unknown" });
+    expect(await t.manager.callTaskTool(owner, "deck_task_integrate", { ...input, note: "x".repeat(513) })).toMatchObject({ ok: false, code: "invalid-arguments" });
+    lead.finish(); await waitFor(() => lead.closed);
+    expect(await t.manager.callTaskTool(owner, "deck_task_integrate", input)).toMatchObject({ ok: false, code: "credential-revoked" });
+  });
+  test("every genuine admission prefix preserves accepted text and changes the block only at dispatch", async () => {
+    const { t, id, lead, child, childId, promptId } = await started();
+    lead.say("original source"); lead.finish(); child.finish(); await waitFor(() => child.closed && lead.closed);
+    const before = t.events(id).length;
+    const sent = await t.run({ type: "prompt.send", text: "accepted next user text" }, id);
+    await waitFor(() => t.driver.turns.length === 3);
+    const all = t.events(id), nextId = (sent as any).data.promptId;
+    const dispatched = all.find(e => e.kind === "prompt.dispatched" && e.data.promptId === nextId)!;
+    const delivered = all.find(e => e.kind === "task.delivery" && e.data.taskId === childId)!;
+    for (let count = before; count <= all.length; count++) {
+      const ledger = Ledger.empty(id); for (const event of all.slice(0, count)) ledger.apply(event);
+      expect(ledger.continuityBlock?.promptId).toBe(count >= dispatched.seq ? nextId : promptId);
+      const prompt = ledger.prompt(nextId); if (prompt) expect(prompt.text).toBe("accepted next user text");
+      expect(!!ledger.latest(childId)?.delivery).toBe(count >= delivered.seq);
+      expect(ledger.latest(childId)?.integration).toBeUndefined(); expect(ledger.anomalies).toEqual([]);
+    }
+    lastTurn(t.driver).finish(); await waitFor(() => lastTurn(t.driver).closed);
+  });
+  test("every committed outcome-admission prefix retains accounting without replaying uncertain native execution", async () => {
+    const { t, id, lead, child, clock, childId } = await started();
+    lead.say("Original source"); lead.finish(); child.say("outcome"); child.finish(); await waitFor(() => child.closed && lead.closed);
+    const before = t.events(id).length; clock.advance(20); await waitFor(() => t.driver.turns.length === 3);
+    const all = t.events(id); const delivery = all.find(e => e.kind === "task.delivery")!;
+    for (let count = before; count <= all.length; count++) {
+      const dir = tempDir(); const paths = resolveStatePaths({ env: { HOME: dir, XDG_STATE_HOME: join(dir, "state") }, tmpdir: dir }); ensureStateLayout(paths);
+      cpSync(t.paths.sessionsDir, paths.sessionsDir, { recursive: true });
+      const sp = sessionPaths(paths, id); const names = readdirSync(sp.eventsDir).filter(n => n.endsWith(".jsonl")); expect(names).toHaveLength(1);
+      writeFileSync(join(sp.eventsDir, names[0]!), all.slice(0, count).map(e => JSON.stringify(e)).join("\n") + "\n");
+      recoverAllSessions({ paths, probe: createNodeProbe() });
+      const log = EventLog.open({ dir: sp.eventsDir, sessionId: id }); const restored = loadLedger(log, sp.ledgerSnapshotFile).ledger;
+      expect(!!restored.latest(childId)?.delivery).toBe(count >= delivery.seq);
+      expect(restored.continuityBlock?.answer).toBe("Original source"); log.close();
+      const driver = new FakeDriver(); driver.autoComplete = true; const next = setup({ dir, driver, config });
+      await new Promise(resolve => setTimeout(resolve, 65));
+      const reserved = all.slice(before, count).some(e => e.kind === "task.state" && e.source.taskId === "lead" && e.data.state === "running");
+      expect(driver.turns.length).toBe(reserved ? 0 : 1); await next.manager.close();
+    }
+    lastTurn(t.driver).finish(); await waitFor(() => lastTurn(t.driver).closed);
+  });
+  test("explicit Resume after release and prepare recovers an undelivered actual outcome", async () => {
+    const { t, id, lead, child, childId, clock } = await started();
+    lead.finish(); child.finish(); await waitFor(() => lead.closed && child.closed);
+    await t.run({ type: "session.release" }, id);
+    await waitFor(async () => (await t.manager.query("session.readiness", { sessionId: id }) as any).data.status === "unprepared");
+    await t.run({ type: "session.prepare" }, id);
+    await waitFor(async () => (await t.manager.query("session.readiness", { sessionId: id }) as any).data.status === "ready");
+    expect(t.driver.turns).toHaveLength(2);
+    await t.run({ type: "prompt.resume" }, id); clock.advance(20);
+    await waitFor(() => t.driver.turns.length === 3, 1000, "resumed retained outcome");
+    expect(lastTurn(t.driver).input.prompt).toContain(childId); lastTurn(t.driver).finish(); await waitFor(() => lastTurn(t.driver).closed);
+  });
+  test("restart delivers both unretrieved attempts of the same task without losing history", async () => {
+    const { t, id, lead, child, childId } = await started(); child.finish(); await waitFor(() => child.closed);
+    await t.manager.callTaskTool(grant(t, id), "deck_delegate", { agent: "investigate", task: "retry", continueTaskId: childId });
+    await waitFor(() => t.driver.turns.length === 3); const retry = lastTurn(t.driver); retry.finish(); lead.finish(); await waitFor(() => retry.closed && lead.closed);
+    await t.manager.close();
+    const driver = new FakeDriver(); driver.autoComplete = true; const next = setup({ dir: t.dir, config, driver });
+    await waitFor(() => driver.turns.length === 1); await next.idle();
+    const delivered = next.events(id).filter(e => e.kind === "task.delivery");
+    expect(delivered.map(e => [e.data.taskId, e.data.attempt])).toEqual([[childId, 1], [childId, 2]]);
+    expect(driver.turns[0]!.input.prompt).toContain("attempt 1"); expect(driver.turns[0]!.input.prompt).toContain("attempt 2");
+  });
+  test("recovers an undelivered terminal outcome through the full restart and native admission path", async () => {
+    const { t, id, lead, child, childId } = await started();
+    lead.say("Original recommendation"); lead.finish(); child.say("child evidence"); child.finish();
+    await waitFor(() => child.closed && lead.closed); await t.manager.close();
+    recoverAllSessions({ paths: t.paths, probe: createNodeProbe() });
+    const driver = new FakeDriver(); driver.autoComplete = true; const next = setup({ dir: t.dir, config, driver });
+    await waitFor(() => driver.turns.length === 1, 1200, "recovered outcome wake"); await next.idle();
+    expect(driver.turns[0]!.input.prompt).toContain(childId);
+    expect(driver.turns[0]!.input.prompt).toContain("Original recommendation");
+    expect(next.events(id).filter(e => e.kind === "task.delivery")).toHaveLength(1);
+    await next.manager.close(); const again = setup({ dir: t.dir, config });
+    await new Promise(resolve => setTimeout(resolve, 60)); expect(again.driver.turns).toHaveLength(0);
+  });
+  test("observer reads are inert; retrieval and explicit integration persist separately across retry", async () => {
+    const { t, id, lead, child, childId, clock } = await started();
+    child.say("report"); child.finish(); await waitFor(() => child.closed);
+    const before = t.events(id).length; await t.manager.query("task.result", { sessionId: id, taskId: childId });
+    expect(t.events(id)).toHaveLength(before);
+    const retrieved = await t.manager.callTaskTool(grant(t, id), "deck_task_result", { taskId: childId, attempt: 1 });
+    expect(retrieved).toMatchObject({ ok: true, data: { retrieval: { leadAttempt: 1 } } });
+    expect((retrieved as any).data.integration).toBeUndefined();
+    const evidenceSeq = t.events(id).find(e => e.kind === "task.result" && e.source.taskId === childId)!.seq;
+    const input = { commandId: "review-1", taskId: childId, attempt: 1, state: "integrated", note: "Checked report against evidence", evidenceSeqs: [evidenceSeq] };
+    expect(await t.manager.callTaskTool(grant(t, id), "deck_task_integrate", input)).toMatchObject({ ok: true });
+    expect(await t.manager.callTaskTool(grant(t, id), "deck_task_integrate", input)).toMatchObject({ ok: true, duplicate: true });
+    expect(await t.manager.callTaskTool(grant(t, id), "deck_task_integrate", { ...input, note: "changed" })).toMatchObject({ ok: false, code: "command-id-reused" });
+    await t.manager.callTaskTool(grant(t, id), "deck_delegate", { agent: "investigate", task: "retry", continueTaskId: childId });
+    await waitFor(() => t.driver.turns.length === 3); lastTurn(t.driver).say("new unverified report"); lastTurn(t.driver).finish();
+    await waitFor(() => lastTurn(t.driver).closed);
+    const old = await t.manager.callTaskTool(grant(t, id), "deck_task_result", { taskId: childId, attempt: 1 });
+    expect(old).toMatchObject({ ok: true, data: { integration: { state: "integrated" } } });
+    lead.say("initial answer"); lead.finish(); await waitFor(() => lead.closed); clock.advance(20);
+    await waitFor(() => t.driver.turns.length === 4); const wake = lastTurn(t.driver);
+    expect(wake.input.prompt).toContain("unverified"); expect(wake.input.prompt).toContain("Checked report");
+    wake.finish(); await waitFor(() => wake.closed);
+    t.manager.openLog(id)!.appendMany(Array.from({ length: 1001 }, (_, i) => ({ kind: "command.accepted" as const, data: { commandId: `eviction-${i}`, type: "fixture", outcome: { ok: true } } })));
+    t.manager.openLog(id)!.flush(); await t.manager.close();
+    const next = setup({ dir: t.dir, config });
+    const result = await next.manager.query("task.result", { sessionId: id, taskId: childId });
+    expect(result).toMatchObject({ ok: true, data: { attempts: [{ integration: { state: "integrated" } }, { state: "completed" }] } });
+    await next.run({ type: "prompt.send", text: "new topic" }, id); await waitFor(() => next.driver.turns.length === 1);
+    expect(await next.manager.callTaskTool(grant(next, id), "deck_task_integrate", input)).toMatchObject({ ok: true, duplicate: true, data: { integration: { leadAttempt: 1 } } });
+    expect(await next.manager.callTaskTool(grant(next, id), "deck_task_integrate", { ...input, attempt: 2 })).toMatchObject({ ok: false, code: "command-id-reused" });
+    lastTurn(next.driver).finish(); await next.idle();
+  });
+});
 
 describe("persistent workspace sessions", () => {
   const grantFor = (t: ReturnType<typeof setup>, sessionId: string, taskId = "lead") => t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths, sessionId).taskCredentialFile(taskId), "utf8")).token)!;
@@ -1300,7 +1531,7 @@ describe("single-member Lead lifecycle (task 1.16)", () => {
     const input = turn.input;
     expect(input).toMatchObject({ taskId: "lead", memberId: "lead", cwd: t.project, approvals: "relay", disableNativeDelegation: true, assignment: { runnerId: "claude", modelId: "opus", thinking: "high" } });
     expect(input.mcp.servers).toEqual(["deck"]);
-    expect(input.mcp.sessionTools).toEqual(["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel", "deck_task_list", "deck_memory_recall", "deck_memory_propose", "deck_approve", "deck_status"]);
+    expect(input.mcp.sessionTools).toEqual(["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel", "deck_task_list", "deck_task_integrate", "deck_decision_open", "deck_decision_list", "deck_decision_revise", "deck_decision_resolve", "deck_memory_recall", "deck_memory_propose", "deck_approve", "deck_status"]);
     const spec = input.mcpServerSpecs.deck!;
     if (spec.transport === "http") throw new Error("Deck session bridge must use stdio");
     expect(spec.command).toBe("/bin/deck");
@@ -1852,7 +2083,7 @@ describe("managed user image attachments", () => {
     expect((snapshot as any).data).toMatchObject({paused:true,queued:[{promptId,text:"",attachments:[image]}]});
     expect((await next.runWithId(promptId,{type:"prompt.send",text:"",attachmentIds:[image.attachmentId]},id)).duplicate).toBe(true);
     expect(await next.runWithId(promptId,{type:"prompt.send",text:"changed",attachmentIds:[image.attachmentId]},id)).toMatchObject({ok:false,code:"command-id-reused"});
-    expect(next.driver.turns).toHaveLength(0);await next.run({type:"prompt.resume"},id);await waitFor(()=>next.driver.turns.length===1);
+    expect(next.driver.turns).toHaveLength(0);await next.runWithId("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",{type:"prompt.resume"},id);await waitFor(()=>next.driver.turns.length===1);
     expect(readFileSync(lastTurn(next.driver).input.images![0]!.path)).toEqual(png);lastTurn(next.driver).finish();await next.idle();
   });
   test("message image bytes allow the exact20MiB boundary and reject larger aggregates", async () => {
@@ -2327,4 +2558,479 @@ test.each([
   const eventsDir = sessionPaths(t.paths, id).eventsDir;
   const disk = readdirSync(eventsDir).map(file => readFileSync(join(eventsDir, file), "utf8")).join("\n");
   expect(disk).not.toContain(secret!);
+});
+
+
+describe("Stage 2 durable decisions", () => {
+  async function decisionSession() {
+    const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }), options: { clock: new FakeClock() } });
+    const id = await t.create(); const sent = await t.run({ type: "prompt.send", text: "Plan the change" }, id); await waitFor(() => t.driver.turns.length === 1); lastTurn(t.driver).init();
+    const call = (name: string, args: Record<string, unknown>) => t.manager.callTaskTool(t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths, id).taskCredentialFile("lead"), "utf8")).token)!, name, args);
+    const open = () => call("deck_decision_open", { commandId: "open-1", key: "scope", question: "May the change proceed?", source: { promptId: (sent as any).data.promptId } });
+    return { t, id, call, open, promptId: (sent as any).data.promptId };
+  }
+  test("all mutation kinds share durable command identity in both directions and after eviction/replay", async () => {
+    const {t,id,call,open,promptId}=await decisionSession();await open();
+    const taskId=(await call("deck_delegate",{agent:"investigate",task:"Evidence"}) as any).data.taskId;await waitFor(()=>t.driver.turns.length===2);
+    lastTurn(t.driver).say("report");lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);await call("deck_task_result",{taskId});
+    const evidenceSeqs=[t.events(id).find(e=>e.kind==="task.result"&&e.source.taskId===taskId)!.seq];
+    const input={commandId:"open-1",taskId,attempt:1,state:"integrated",note:"Reviewed",evidenceSeqs};
+    expect(await call("deck_task_integrate",input)).toMatchObject({ok:false,code:"command-id-reused"});
+    expect(await call("deck_task_integrate",{...input,commandId:"bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb"})).toMatchObject({ok:true});
+    expect(await call("deck_decision_open",{commandId:"bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb",key:"collision",question:"Collision?",source:{promptId}})).toMatchObject({ok:false,code:"command-id-reused"});
+    const generic="aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+    await t.runWithId(generic,{type:"session.bindChange",changeId:"cross-runner-session-core"},id);
+    t.manager.openLog(id)!.appendMany(Array.from({length:1001},(_,i)=>({kind:"command.accepted" as const,data:{commandId:`identity-evict-${i}`,type:"fixture",outcome:{ok:true}}})));
+    t.driver.turns[0]!.finish();await waitFor(()=>t.driver.turns[0]!.closed);await t.manager.close();
+    const next=setup({dir:t.dir});await next.run({type:"prompt.send",text:"Continue identity checks"},id);await waitFor(()=>next.driver.turns.length===1);
+    const grant=next.credentials.lookup(JSON.parse(readFileSync(sessionPaths(next.paths,id).taskCredentialFile("lead"),"utf8")).token)!;
+    const invoke=(name:string,d:Record<string,unknown>)=>next.manager.callTaskTool(grant,name,d);
+    expect(await invoke("deck_task_integrate",{...input,commandId:generic})).toMatchObject({ok:false,code:"command-id-reused"});
+    expect(await invoke("deck_decision_open",{commandId:"bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb",key:"collision",question:"Collision?",source:{promptId}})).toMatchObject({ok:false,code:"command-id-reused"});
+    expect(await invoke("deck_task_integrate",input)).toMatchObject({ok:false,code:"command-id-reused"});
+    expect(await invoke("deck_task_integrate",{...input,commandId:"bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb"})).toMatchObject({ok:true,duplicate:true});
+    expect(await next.runWithId("bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb",{type:"prompt.resume"},id)).toMatchObject({ok:false,code:"command-id-reused"});
+    expect(await next.runWithId(generic,{type:"session.bindChange",changeId:"changed"},id)).toMatchObject({ok:false,code:"command-id-reused"});
+    lastTurn(next.driver).finish();await waitFor(()=>lastTurn(next.driver).closed);
+  });
+  test("a stale targeted admitted reply cannot remove dependencies through production delegate", async () => {
+    const {t,id,call,open}=await decisionSession();const decisionId=(await open() as any).data.decisionId;
+    const taskId=(await call("deck_delegate",{agent:"investigate",task:"Independent preparation"}) as any).data.taskId;await waitFor(()=>t.driver.turns.length===2);
+    const linked=(await call("deck_decision_open",{commandId:"held",key:"held",question:"May preparation continue?",source:{taskId,attempt:1}}) as any);
+    // Link a terminal source only after it has actually completed.
+    expect(linked.ok).toBe(false);lastTurn(t.driver).say("prepared");lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);await call("deck_task_result",{taskId});
+    await call("deck_decision_open",{commandId:"held-valid",key:"held",question:"May preparation continue?",source:{taskId,attempt:1},relatedTaskIds:[taskId]});
+    const sourceOnly=(await call("deck_decision_open",{commandId:"source-only",key:"source-only",question:"Question about a report, no task link",source:{taskId,attempt:1}}) as any).data.decisionId;
+    expect((await t.manager.query("task.result",{sessionId:id,taskId}) as any).data.dependsOn).not.toContain(sourceOnly);
+    const reply=await t.run({type:"prompt.send",text:"Yes to the old question",decisionTarget:{decisionId,revision:1}} as any,id);
+    await call("deck_decision_revise",{commandId:"change-question",decisionId,expectedRevision:1,question:"A different question?",note:"Changed scope"});
+    t.driver.turns[0]!.finish();await waitFor(()=>t.driver.turns.length===3);
+    expect(await call("deck_delegate",{commandId:"stale-replan",agent:"investigate",task:"Must not launch",continueTaskId:taskId,dependsOn:[],replan:{promptId:(reply as any).data.promptId,note:"Invalid stale authority"}})).toMatchObject({ok:false,code:"decision-evidence-invalid"});
+    expect(t.driver.turns).toHaveLength(3);expect(t.events(id).filter(e=>e.kind==="task.continued"&&e.source.taskId===taskId)).toHaveLength(0);
+    lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);
+  });
+  for (const effect of ["decision", "replan"] as const) for (const fault of ["append", "flush"] as const) test(`${effect} ${fault} failure never acknowledges or launches, retained prefixes replay idempotently`, async () => {
+    const {t,id,call,open}=await decisionSession();const decisionId=(await open() as any).data.decisionId;
+    let taskId:string|undefined;
+    if(effect==="replan"){
+      taskId=(await call("deck_delegate",{agent:"investigate",task:"Prepare independent work"}) as any).data.taskId;await waitFor(()=>t.driver.turns.length===2);
+      lastTurn(t.driver).say("Prepared");lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);await call("deck_task_result",{taskId});
+      expect(await call("deck_decision_open",{commandId:"failure-gate",key:"failure-gate",question:"May this task continue?",source:{taskId,attempt:1},relatedTaskIds:[taskId]})).toMatchObject({ok:true});
+      expect(await call("deck_delegate",{agent:"investigate",task:"Held continuation",continueTaskId:taskId})).toMatchObject({ok:false,code:"decision-dependency-blocked"});
+    }
+    t.driver.turns[0]!.finish();await waitFor(()=>t.driver.turns[0]!.closed);
+    const reply=await t.run({type:"prompt.send",text:"Continue as independent work"},id);await waitFor(()=>t.driver.turns.length===(effect==="replan"?3:2));
+    const input=effect==="decision" ? {commandId:"failed-answer",decisionId,expectedRevision:1,promptId:(reply as any).data.promptId,note:"Explicit informational answer",disposition:"informational"} : {commandId:"failed-replan",agent:"investigate",task:"Explicit independent continuation",continueTaskId:taskId,dependsOn:[],replan:{promptId:(reply as any).data.promptId,note:"User asked for independent continuation"}};
+    const name=effect==="decision"?"deck_decision_resolve":"deck_delegate",log=t.manager.openLog(id)!,append=log.appendMany.bind(log),flush=log.flush.bind(log),before=t.driver.turns.length;
+    // Simulate a retained committed first JSONL record followed by an append/flush error.
+    if(fault==="append")log.appendMany=drafts=>{append(drafts.slice(0,1));throw Error("injected-prefix-append-failure");};
+    else log.flush=()=>{throw Error("injected-flush-failure");};
+    expect(await call(name,input)).toMatchObject({ok:false,code:"task-tool-failed"});
+    log.appendMany=append;log.flush=flush;expect(t.driver.turns).toHaveLength(before);
+    const events=t.events(id),mutation=events.find(e=>effect==="decision" ? e.kind==="decision.state" : e.kind==="task.continued" && e.source.taskId===taskId)!;
+    expect(mutation).toBeDefined();
+    for(let length=mutation.seq-1;length<=events.length;length++){
+      const ledger=Ledger.empty(id);for(const event of events.slice(0,length))ledger.apply(event);
+      expect(!!ledger.decisionCommand(input.commandId)).toBe(length>=mutation.seq);
+      if(effect==="decision")expect(ledger.decision(decisionId)?.state).toBe(length>=mutation.seq?"answered":"pending");
+    }
+    lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);await t.manager.close();
+    recoverAllSessions({paths:t.paths,probe:createNodeProbe()});
+    const next=setup({dir:t.dir});await next.run({type:"prompt.send",text:"Inspect retained mutation"},id);expect(await next.runWithId("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",{type:"prompt.resume"},id)).toMatchObject({ok:true});await waitFor(()=>next.driver.turns.length===1);
+    const grant=next.credentials.lookup(JSON.parse(readFileSync(sessionPaths(next.paths,id).taskCredentialFile("lead"),"utf8")).token)!;
+    expect(await next.manager.callTaskTool(grant,name,input)).toMatchObject({ok:true,duplicate:true});
+    expect(next.driver.turns).toHaveLength(1);
+    expect(await next.manager.callTaskTool(grant,name,{...input,...(effect==="decision"?{note:"Changed answer"}:{task:"Changed work"})})).toMatchObject({ok:false,code:"command-id-reused"});
+    lastTurn(next.driver).finish();await waitFor(()=>lastTurn(next.driver).closed);
+  });
+  for(const action of ["resolve","replan"] as const) test(`same-prompt native reseed cannot refresh ${action} authority`,async()=>{
+    const {t,id,call}=await decisionSession();
+    const childId=(await call("deck_delegate",{agent:"investigate",task:"Prepare independent evidence"}) as any).data.taskId;
+    await waitFor(()=>t.driver.turns.length===2);lastTurn(t.driver).say("Prepared report");lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);await call("deck_task_result",{taskId:childId});
+    t.driver.turns[0]!.finish();await waitFor(()=>t.driver.turns[0]!.closed);
+    const sent=await t.run({type:"prompt.send",text:"Only one genuine scope message"},id),promptId=(sent as any).data.promptId;await waitFor(()=>t.driver.turns.length===3);
+    const resumed=lastTurn(t.driver);expect(resumed.input.resume).toBeDefined();
+    // Authenticated host tools can be called before native init; that cannot change evidence age.
+    const decisionId=(await call("deck_decision_open",{commandId:"reseed-question",key:"reseed-question",question:"May the prepared task proceed?",source:{promptId},relatedTaskIds:[childId]}) as any).data.decisionId;
+    const name=action==="resolve"?"deck_decision_resolve":"deck_delegate";
+    const input=action==="resolve"?{commandId:"same-authority",decisionId,expectedRevision:1,promptId,note:"The input predates this question",disposition:"allow",action:"execute"}:{commandId:"same-authority",agent:"investigate",task:"Must remain held",continueTaskId:childId,dependsOn:[],replan:{promptId,note:"The input predates the dependency"}};
+    expect(await call(name,input)).toMatchObject({ok:false,code:"decision-evidence-invalid"});
+    const first=t.events(id).find(e=>e.kind==="prompt.dispatched"&&e.data.promptId===promptId)!.seq;
+    resumed.finish({status:"failed",reasonCode:"native-session-not-found"});await waitFor(()=>t.driver.turns.length===4);
+    const dispatches=t.events(id).filter(e=>e.kind==="prompt.dispatched"&&e.data.promptId===promptId);expect(dispatches).toHaveLength(2);expect(dispatches[1]!.seq).toBeGreaterThan(first);
+    expect(await call(name,input)).toMatchObject({ok:false,code:"decision-evidence-invalid"});
+    const ledger=loadLedger(t.manager.openLog(id)!,sessionPaths(t.paths,id).ledgerSnapshotFile).ledger;
+    expect(ledger.prompt(promptId)).toMatchObject({firstAdmissionSeq:first,dispatchedSeq:dispatches[1]!.seq,attempt:3});expect(ledger.continuityBlock?.startedSeq).toBe(first);
+    expect(t.events(id).filter(e=>e.kind==="message.completed"&&e.data.role==="user"&&e.data.promptId===promptId)).toHaveLength(1);
+    expect(ledger.decision(decisionId)?.state).toBe("pending");expect(ledger.task(childId)?.dependsOn).toEqual([decisionId]);expect(t.driver.turns).toHaveLength(4);
+    lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);
+  });
+  test("same-command retries with reordered fields preserve the original outcome across state changes", async () => {
+    const {t,id,open}=await decisionSession();const decisionId=(await open() as any).data.decisionId,commandId="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const results=await Promise.all([t.runWithId(commandId,{type:"decision.defer",decisionId,expectedRevision:1,note:"Later"} as any,id),t.runWithId(commandId,{note:"Later",expectedRevision:1,decisionId,type:"decision.defer"} as any,id)]);
+    expect(results).toMatchObject([{ok:true,data:{revision:2,state:"deferred"}},{ok:true,duplicate:true,data:{revision:2,state:"deferred"}}]);
+    expect(await t.runWithId(commandId,{type:"decision.defer",decisionId,expectedRevision:1,note:"Changed content"} as any,id)).toMatchObject({ok:false,code:"command-id-reused"});
+    lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);
+  });
+  test("decision writes do not acknowledge success after flush failure or permit a revoked owner", async () => {
+    const {t,id,call,open,promptId}=await decisionSession();const log=t.manager.openLog(id)!,flush=log.flush.bind(log);
+    log.flush=()=>{throw new Error("decision-fsync-failure");};cleanups.push(()=>{log.flush=flush;});
+    expect(await open()).toMatchObject({ok:false,code:"task-tool-failed"});log.flush=flush;await waitFor(()=>lastTurn(t.driver).closed);
+    const fakeGrant={sessionId:id,taskId:"lead",memberId:"lead",runnerId:"claude",allowedTools:["deck_decision_resolve"]};
+    expect(await t.manager.callTaskTool(fakeGrant as any,"deck_decision_resolve",{commandId:"revoked",decisionId:"not-authorized",expectedRevision:1,promptId,note:"No owner",disposition:"informational"})).toMatchObject({ok:false,code:"credential-revoked"});
+  });
+  test("defer/reopen preserve question version; substantive revision flags accepted stale text and never applies it", async () => {
+    const { t, id, call, open } = await decisionSession(); const decisionId = (await open() as any).data.decisionId;
+    const reply = await t.run({ type: "prompt.send", text: "Accepted original answer", decisionTarget: { decisionId, revision: 1 } } as any, id);
+    expect(await t.run({type:"decision.defer",decisionId,expectedRevision:1,note:"Later"} as any,id)).toMatchObject({ok:true,data:{revision:2,state:"deferred"}});
+    expect(await t.run({type:"decision.reopen",decisionId,expectedRevision:2,note:"Now"} as any,id)).toMatchObject({ok:true,data:{revision:3,state:"pending"}});
+    expect(await call("deck_decision_revise",{commandId:"revise",decisionId,expectedRevision:3,question:"Changed question?",note:"Substantive change"})).toMatchObject({ok:true,data:{revision:4}});
+    const original=t.driver.turns[0]!;original.finish();await waitFor(()=>original.closed);
+    await waitFor(()=>t.driver.turns.length===2); expect(lastTurn(t.driver).input.prompt).toBe("Accepted original answer"); expect(lastTurn(t.driver).input.rolePrompt).toContain("STALE target/question");
+    expect((await call("deck_decision_list",{}) as any).data.decisions[0]).toMatchObject({state:"pending",questionRevision:4,replies:[{stale:true,revision:1}]});
+    expect(await call("deck_decision_resolve",{commandId:"stale-answer",decisionId,expectedRevision:4,promptId:(reply as any).data.promptId,note:"Do not apply",disposition:"informational"})).toMatchObject({ok:false,code:"decision-reply-stale"});
+    lastTurn(t.driver).finish(); await waitFor(()=>lastTurn(t.driver).closed);
+  });
+  test("a defer alone does not make an already queued targeted answer stale", async () => {
+    const {t,id,call,open}=await decisionSession();const decisionId=(await open() as any).data.decisionId;
+    await t.run({type:"prompt.send",text:"Clarification",decisionTarget:{decisionId,revision:1}} as any,id);
+    await t.run({type:"decision.defer",decisionId,expectedRevision:1,note:"Hold"} as any,id);
+    lastTurn(t.driver).finish(); await waitFor(()=>t.driver.turns.length===2);
+    expect((await call("deck_decision_list",{}) as any).data.decisions[0]).toMatchObject({revision:2,questionRevision:1,state:"deferred",replies:[{stale:false}]});
+    lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);
+  });
+  test("capacity, source ownership, question bounds, optimistic races and durable identities are enforced", async () => {
+    const {t,id,call,open,promptId}=await decisionSession();const opened=await open() as any,decisionId=opened.data.decisionId;
+    expect(await call("deck_decision_open",{commandId:"foreign",key:"foreign",question:"Question",source:{promptId:"foreign-prompt"}})).toMatchObject({ok:false,code:"decision-source-invalid"});
+    expect(await call("deck_decision_open",{commandId:"long",key:"long",question:"q".repeat(2001),source:{promptId}})).toMatchObject({ok:false,code:"invalid-arguments"});
+    for(let i=1;i<16;i++)expect(await call("deck_decision_open",{commandId:`open-${i+1}`,key:`key-${i}`,question:`Question ${i}?`,source:{promptId}})).toMatchObject({ok:true});
+    expect(await call("deck_decision_open",{commandId:"overflow",key:"overflow",question:"Overflow?",source:{promptId}})).toMatchObject({ok:false,code:"decision-capacity"});
+    const results=await Promise.all([t.run({type:"decision.defer",decisionId,expectedRevision:1,note:"First"} as any,id),t.run({type:"decision.cancel",decisionId,expectedRevision:1,note:"Second"} as any,id)]);
+    expect(results.filter(r=>r.ok)).toHaveLength(1);expect(results.filter(r=>!r.ok)).toMatchObject([{code:"decision-revision-conflict"}]);
+    t.manager.openLog(id)!.appendMany(Array.from({length:1001},(_,i)=>({kind:"command.accepted" as const,data:{commandId:`evicted-${i}`,type:"fixture",outcome:{ok:true}}})));
+    expect(await open()).toMatchObject({ok:true,duplicate:true,data:{revision:1,state:"pending"}});
+    expect(await call("deck_decision_open",{commandId:"open-1",key:"changed",question:"Changed?",source:{promptId}})).toMatchObject({ok:false,code:"command-id-reused"});
+    expect(await call("deck_decision_open",{commandId:"alias",key:"scope",question:"May the change proceed?",source:{promptId}})).toMatchObject({ok:true,duplicate:true});
+    expect(await call("deck_decision_open",{commandId:"alias",key:"new-key",question:"May the change proceed?",source:{promptId}})).toMatchObject({ok:false,code:"command-id-reused"});
+    const context=lastTurn(t.driver);context.finish();await waitFor(()=>context.closed);await t.manager.close();
+    const next=setup({dir:t.dir});const snapshot=await next.manager.query("decisions.list",{sessionId:id}) as any;expect(snapshot.data.decisions).toHaveLength(16);expect(snapshot.data.decisions[0].state).toBe("deferred");
+  });
+  test("only the current genuine admitted user prompt can answer; synthetic, queued, foreign and old evidence are rejected", async () => {
+    const {t,id,call,open,promptId}=await decisionSession();const decisionId=(await open() as any).data.decisionId;
+    for(const source of [promptId,"foreign"])expect(await call("deck_decision_resolve",{commandId:`bad-${source}`,decisionId,expectedRevision:1,promptId:source,note:"Invalid evidence",disposition:"allow",action:"execute"})).toMatchObject({ok:false,code:"decision-evidence-invalid"});
+    expect(await call("deck_delegate",{agent:"investigate",task:"Held",dependsOn:[decisionId],action:"execute"})).toMatchObject({ok:false,code:"decision-dependency-blocked"});
+    expect(await call("deck_delegate",{agent:"investigate",task:"Independent"})).toMatchObject({ok:true});
+    await waitFor(()=>t.driver.turns.length===2);lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);
+    const original=t.driver.turns[0]!;original.finish();await waitFor(()=>original.closed);
+    const clock=(t.manager as any).options.clock as FakeClock;clock.advance(20);await waitFor(()=>t.driver.turns.length===3);
+    expect(await call("deck_decision_resolve",{commandId:"synthetic",decisionId,expectedRevision:1,promptId,note:"Not user input",disposition:"allow",action:"execute"})).toMatchObject({ok:false,code:"decision-evidence-invalid"});
+    const childId=t.driver.turns[1]!.input.taskId;
+    const replacement=(await call("deck_decision_open",{commandId:"outcome-question",key:"outcome-question",question:"Outcome replacement?",source:{taskId:childId,attempt:1}}) as any).data.decisionId;
+    expect(await call("deck_decision_revise",{commandId:"outcome-only-supersede",decisionId,expectedRevision:1,state:"superseded",replacementDecisionId:replacement,note:"Outcome alone has no scope-change authority"})).toMatchObject({ok:false,code:"decision-evidence-invalid"});
+    const snapshot=await call("deck_decision_list",{}) as any;expect(snapshot.data.decisions[0].state).toBe("pending");lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);
+  });
+  test("negative answers do not authorize declared actions; continuations retain dependencies until an explicit user-backed replan", async () => {
+    const {t,id,call,open}=await decisionSession();const decisionId=(await open() as any).data.decisionId;
+    const independent=await call("deck_delegate",{agent:"investigate",task:"Independent setup"}) as any;await waitFor(()=>t.driver.turns.length===2);lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);await call("deck_task_result",{taskId:independent.data.taskId});
+    t.driver.turns[0]!.finish();await waitFor(()=>t.driver.turns[0]!.closed);
+    const reply=await t.run({type:"prompt.send",text:"Do not execute"},id);await waitFor(()=>t.driver.turns.length===3);
+    await call("deck_decision_resolve",{commandId:"negative",decisionId,expectedRevision:1,promptId:(reply as any).data.promptId,note:"User declined",disposition:"deny"});
+    expect(await call("deck_delegate",{agent:"investigate",task:"Must remain held",dependsOn:[decisionId],action:"execute"})).toMatchObject({ok:false,code:"decision-dependency-blocked"});
+    lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);
+  });
+  test("opening-key retries remain idempotent when the related task reaches dependency capacity", async () => {
+    const {t,id,call,promptId}=await decisionSession();const taskId=(await call("deck_delegate",{agent:"investigate",task:"Running linked work"}) as any).data.taskId;await waitFor(()=>t.driver.turns.length===2);
+    const input={commandId:"link-0",key:"link-0",question:"Linked question 0?",source:{promptId},relatedTaskIds:[taskId]};
+    const original=await call("deck_decision_open",input) as any;expect(original.ok).toBe(true);
+    for(let i=1;i<16;i++)expect(await call("deck_decision_open",{...input,commandId:`link-${i}`,key:`link-${i}`,question:`Linked question ${i}?`})).toMatchObject({ok:true});
+    expect(await call("deck_decision_open",{...input,commandId:"link-alias"})).toMatchObject({ok:true,duplicate:true,data:original.data});
+    expect((await t.manager.query("task.result",{sessionId:id,taskId}) as any).data.dependsOn).toHaveLength(16);
+    const child=lastTurn(t.driver);expect(child.interrupts).toEqual([]);child.finish();await waitFor(()=>child.closed);await call("deck_task_result",{taskId});t.driver.turns[0]!.finish();await waitFor(()=>t.driver.turns[0]!.closed);
+  });
+  test("opening a decision linked to running delegated work holds its continuation without interrupting it", async () => {
+    const {t,id,call,promptId}=await decisionSession();const taskId=(await call("deck_delegate",{agent:"investigate",task:"Current work"}) as any).data.taskId;
+    await waitFor(()=>t.driver.turns.length===2);const child=lastTurn(t.driver);
+    const decisionId=(await call("deck_decision_open",{commandId:"linked-open",key:"linked",question:"May this task continue?",source:{promptId},relatedTaskIds:[taskId]}) as any).data.decisionId;
+    expect((await t.manager.query("task.result",{sessionId:id,taskId}) as any).data.dependsOn).toEqual([decisionId]);expect(child.interrupts).toEqual([]);expect(child.finished).toBe(false);
+    child.finish();await waitFor(()=>child.closed);await call("deck_task_result",{taskId});
+    expect(await call("deck_delegate",{agent:"investigate",task:"Held continuation",continueTaskId:taskId})).toMatchObject({ok:false,code:"decision-dependency-blocked"});
+    const lead=t.driver.turns[0]!;lead.finish();await waitFor(()=>lead.closed);
+    const reply=await t.run({type:"prompt.send",text:"Allow execute for this task"},id);await waitFor(()=>t.driver.turns.length===3);
+    await call("deck_decision_resolve",{commandId:"linked-allow",decisionId,expectedRevision:1,promptId:(reply as any).data.promptId,note:"User allowed execution",disposition:"allow",action:"execute"});
+    expect(await call("deck_delegate",{agent:"investigate",task:"Compatible continuation",continueTaskId:taskId,action:"execute"})).toMatchObject({ok:true});
+    await waitFor(()=>t.driver.turns.length===4);lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);await call("deck_task_result",{taskId});t.driver.turns[2]!.finish();await waitFor(()=>t.driver.turns[2]!.closed);
+  });
+  test("compatible dependencies persist through continuation; removal needs a newer user-backed durable replan", async () => {
+    const {t,id,call,open}=await decisionSession();const decisionId=(await open() as any).data.decisionId;
+    const first=t.driver.turns[0]!;first.finish();await waitFor(()=>first.closed);
+    const approval=await t.run({type:"prompt.send",text:"Allow the execute action"},id);await waitFor(()=>t.driver.turns.length===2);
+    await call("deck_decision_resolve",{commandId:"allow",decisionId,expectedRevision:1,promptId:(approval as any).data.promptId,note:"User approved execute",disposition:"allow",action:"execute"});
+    expect(await call("deck_delegate",{agent:"investigate",task:"Wrong action",dependsOn:[decisionId],action:"publish"})).toMatchObject({ok:false,code:"decision-dependency-blocked"});
+    const taskId=(await call("deck_delegate",{agent:"investigate",task:"Allowed action",dependsOn:[decisionId],action:"execute"}) as any).data.taskId;
+    await waitFor(()=>t.driver.turns.length===3);const child=lastTurn(t.driver);child.finish();await waitFor(()=>child.closed);await call("deck_task_result",{taskId});
+    expect((await t.manager.query("task.result",{sessionId:id,taskId}) as any).data).toMatchObject({dependsOn:[decisionId],action:"execute"});
+    expect(await call("deck_delegate",{agent:"investigate",task:"Unchanged continuation",continueTaskId:taskId})).toMatchObject({ok:true});
+    await waitFor(()=>t.driver.turns.length===4);lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);await call("deck_task_result",{taskId});
+    expect((await t.manager.query("task.result",{sessionId:id,taskId}) as any).data).toMatchObject({dependsOn:[decisionId],action:"execute",attempts:[{attempt:1},{attempt:2}]});
+    expect(await call("deck_delegate",{agent:"investigate",task:"Implicit removal",continueTaskId:taskId,dependsOn:[]})).toMatchObject({ok:false,code:"dependency-replan-required"});
+    expect(await call("deck_delegate",{commandId:"too-old-replan",agent:"investigate",task:"Old evidence",continueTaskId:taskId,dependsOn:[],replan:{promptId:(approval as any).data.promptId,note:"Earlier than permission record"}})).toMatchObject({ok:false,code:"decision-evidence-invalid"});
+    const current=t.driver.turns[1]!;current.finish();await waitFor(()=>current.closed);
+    const prompt=await t.run({type:"prompt.send",text:"Replan this task as independent work"},id);await waitFor(()=>t.driver.turns.length===5);
+    const replan={commandId:"cccccccc-1111-4111-8111-cccccccccccc",agent:"investigate",task:"Explicit independent continuation",continueTaskId:taskId,dependsOn:[],replan:{promptId:(prompt as any).data.promptId,note:"User requested independent continuation"}};
+    expect(await call("deck_delegate",{...replan,commandId:"open-1"})).toMatchObject({ok:false,code:"command-id-reused"});
+    expect(await call("deck_delegate",replan)).toMatchObject({ok:true,data:{taskId}});
+    expect(await call("deck_delegate",replan)).toMatchObject({ok:true,duplicate:true,data:{taskId}});
+    expect(await call("deck_decision_open",{commandId:replan.commandId,key:"replan-collision",question:"Collision?",source:{promptId:(prompt as any).data.promptId}})).toMatchObject({ok:false,code:"command-id-reused"});
+    expect(await t.runWithId(replan.commandId,{type:"prompt.resume"},id)).toMatchObject({ok:false,code:"command-id-reused"});
+    const evidence=t.events(id).find(e=>e.source.taskId===taskId)!.seq;
+    expect(await call("deck_task_integrate",{commandId:replan.commandId,taskId,attempt:1,state:"integrated",note:"Collision",evidenceSeqs:[evidence]})).toMatchObject({ok:false,code:"command-id-reused"});
+
+    await waitFor(()=>t.driver.turns.length===6);const continued=lastTurn(t.driver);continued.finish();await waitFor(()=>continued.closed);await call("deck_task_result",{taskId});
+    expect((await t.manager.query("task.result",{sessionId:id,taskId}) as any).data).toMatchObject({dependsOn:[],replan:{promptId:(prompt as any).data.promptId},attempts:[{attempt:1},{attempt:2},{attempt:3}]});
+    t.driver.turns[4]!.finish();await waitFor(()=>t.driver.turns[4]!.closed);
+  });
+  test("deferred, cancelled and superseded decisions hold declared work while independent work remains available", async () => {
+    const {t,id,call,open,promptId}=await decisionSession();const decisionId=(await open() as any).data.decisionId;
+    await t.run({type:"decision.defer",decisionId,expectedRevision:1,note:"Later"} as any,id);
+    expect(await call("deck_delegate",{agent:"investigate",task:"Held by deferral",dependsOn:[decisionId],action:"execute"})).toMatchObject({ok:false,code:"decision-dependency-blocked"});
+    await t.run({type:"decision.cancel",decisionId,expectedRevision:2,note:"Abandoned"} as any,id);
+    expect(await call("deck_delegate",{agent:"investigate",task:"Held by cancellation",dependsOn:[decisionId],action:"execute"})).toMatchObject({ok:false,code:"decision-dependency-blocked"});
+    const replacement=(await call("deck_decision_open",{commandId:"replacement",key:"replacement",question:"Replacement?",source:{promptId}}) as any).data.decisionId;
+    const obsolete=(await call("deck_decision_open",{commandId:"obsolete",key:"obsolete",question:"Obsolete?",source:{promptId}}) as any).data.decisionId;
+    expect(await call("deck_decision_revise",{commandId:"old-supersede",decisionId:obsolete,expectedRevision:1,state:"superseded",replacementDecisionId:replacement,note:"Old input"})).toMatchObject({ok:false,code:"decision-evidence-invalid"});
+    expect(await call("deck_decision_revise",{commandId:"old-scope",decisionId:obsolete,expectedRevision:1,state:"superseded",scopePromptId:promptId,note:"Old scope input"})).toMatchObject({ok:false,code:"decision-evidence-invalid"});
+    t.driver.turns[0]!.finish();await waitFor(()=>t.driver.turns[0]!.closed);
+    const scope=await t.run({type:"prompt.send",text:"Replace the obsolete question with the replacement"},id);await waitFor(()=>t.driver.turns.length===2);
+    expect(await call("deck_decision_revise",{commandId:"supersede",decisionId:obsolete,expectedRevision:1,state:"superseded",replacementDecisionId:replacement,note:"Explicit replacement"})).toMatchObject({ok:true,data:{state:"superseded"}});
+    expect((await call("deck_decision_list",{}) as any).data.decisions.find((d:any)=>d.decisionId===obsolete)).toMatchObject({replacementDecisionId:replacement,scopePromptId:(scope as any).data.promptId});
+    expect(await call("deck_decision_revise",{commandId:"new-scope",decisionId:replacement,expectedRevision:1,state:"superseded",scopePromptId:(scope as any).data.promptId,note:"New admitted scope change"})).toMatchObject({ok:true});
+    expect(await call("deck_delegate",{agent:"investigate",task:"Held by supersession",dependsOn:[obsolete],action:"execute"})).toMatchObject({ok:false,code:"decision-dependency-blocked"});
+    expect(await call("deck_delegate",{agent:"investigate",task:"Independent work"})).toMatchObject({ok:true});await waitFor(()=>t.driver.turns.length===3);lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);await call("deck_task_result",{taskId:lastTurn(t.driver).input.taskId});
+    t.driver.turns[1]!.finish();await waitFor(()=>t.driver.turns[1]!.closed);
+  });
+  test("decision references survive Lead reassignment and legacy stop without implicit resolution", async () => {
+    const {t,id,open}=await decisionSession();const decisionId=(await open() as any).data.decisionId;const initial=lastTurn(t.driver);initial.finish();await waitFor(()=>initial.closed);
+    expect(await t.run({type:"session.assignMember",memberId:"lead",expectedRevision:0,assignment:{runnerId:"claude",modelId:"new-lead"}},id)).toMatchObject({ok:true,data:{generation:1}});
+    await t.run({type:"prompt.send",text:"Continue after reassignment"},id);await waitFor(()=>t.driver.turns.length===2);
+    expect(lastTurn(t.driver).input.rolePrompt).toContain(decisionId);expect(lastTurn(t.driver).input.taskId).toBe("lead-g1");
+    const next=lastTurn(t.driver);next.finish();await waitFor(()=>next.closed);await t.run({type:"session.stop"},id);
+    expect((await t.manager.query("decisions.list",{sessionId:id}) as any).data.decisions[0]).toMatchObject({decisionId,state:"pending"});
+    expect(await t.run({type:"decision.defer",decisionId,expectedRevision:1,note:"No mutations on stopped session"} as any,id)).toMatchObject({ok:false,code:"session-ended"});
+  });
+  test("committed queue/dispatch/reply/resolution prefixes never fabricate resolution or lose accepted text", async () => {
+    const {t,id,call,open}=await decisionSession();const decisionId=(await open() as any).data.decisionId;
+    const reply=await t.run({type:"prompt.send",text:"An admitted user reply",decisionTarget:{decisionId,revision:1}} as any,id);const first=t.driver.turns[0]!;first.finish();await waitFor(()=>t.driver.turns.length===2);
+    const answer={commandId:"prefix-answer",decisionId,expectedRevision:1,promptId:(reply as any).data.promptId,note:"Explicit answer",disposition:"informational"};
+    expect(await call("deck_decision_resolve",answer)).toMatchObject({ok:true});
+    const events=t.events(id),opened=events.find(e=>e.kind==="decision.opened")!,dispatch=events.find(e=>e.kind==="prompt.dispatched"&&e.data.promptId===(reply as any).data.promptId)!,resolved=events.find(e=>e.kind==="decision.state")!;
+    for(let length=opened.seq;length<=events.length;length++){
+      const ledger=Ledger.empty(id);for(const event of events.slice(0,length))ledger.apply(event);
+      const decision=ledger.decision(decisionId)!;expect(decision.state).toBe(length>=resolved.seq?"answered":"pending");
+      expect(decision.replies.length).toBe(length>=dispatch.seq?1:0);expect(!!ledger.decisionCommand("prefix-answer")).toBe(length>=resolved.seq);
+      const prompt=ledger.prompt((reply as any).data.promptId);if(prompt?.state==="queued"||prompt?.state==="dispatched")expect(prompt.text).toBe("An admitted user reply");
+      expect(ledger.anomalies).toEqual([]);
+    }
+    lastTurn(t.driver).finish();await waitFor(()=>lastTurn(t.driver).closed);await t.manager.close();const next=setup({dir:t.dir});
+    expect((await next.manager.query("decisions.list",{sessionId:id}) as any).data.decisions[0]).toMatchObject({state:"answered",resolution:{promptId:(reply as any).data.promptId}});
+  });
+  test("release/reprepare and tombstones preserve same-ID decision history without admitting queued replies", async () => {
+    const {t,id,call,open}=await decisionSession();const decisionId=(await open() as any).data.decisionId;
+    const queued=await t.run({type:"prompt.send",text:"Kept reply",decisionTarget:{decisionId,revision:1}} as any,id);
+    await t.run({type:"session.release"},id);await waitFor(async()=>(await t.manager.query("session.readiness",{sessionId:id}) as any).data.status==="unprepared");
+    await t.run({type:"session.prepare"},id);await waitFor(async()=>(await t.manager.query("session.readiness",{sessionId:id}) as any).data.status==="ready");
+    expect((await t.manager.query("decisions.list",{sessionId:id}) as any).data.decisions[0]).toMatchObject({state:"pending",replies:[],queuedReplies:[{promptId:(queued as any).data.promptId}]});
+    await t.run({type:"prompt.resume"},id);await waitFor(()=>t.driver.turns.length===2);expect((await call("deck_decision_list",{}) as any).data.decisions[0].replies).toHaveLength(1);
+    await t.run({type:"session.remove"},id);await waitFor(async()=>(await t.manager.query("sessions.list",{}) as any).data.sessions.length===0);
+    expect((await t.manager.query("decisions.list",{sessionId:id}) as any).data.decisions[0].state).toBe("pending");
+    expect(await t.run({type:"decision.cancel",decisionId,expectedRevision:1,note:"No mutation after remove"} as any,id)).toMatchObject({ok:false,code:"session-removed"});
+  });
+  test("open is durable, observer reads inert, and a new topic retains a pending decision", async () => {
+    const { t, id, call, open } = await decisionSession();
+    const opened = await open(); expect(opened).toMatchObject({ ok: true, data: { revision: 1, state: "pending" } }); const decisionId = (opened as any).data.decisionId;
+    expect(await open()).toMatchObject({ ok: true, duplicate: true });
+    const seq = t.manager.openLog(id)!.lastSeq;
+    expect(await t.manager.query("decisions.list", { sessionId: id })).toMatchObject({ ok: true, data: { decisions: [{ decisionId, state: "pending" }] } });
+    expect(t.manager.openLog(id)!.lastSeq).toBe(seq);
+    lastTurn(t.driver).finish(); await waitFor(() => lastTurn(t.driver).closed);
+    await t.run({ type: "prompt.send", text: "An unrelated topic" }, id); await waitFor(() => t.driver.turns.length === 2);
+    expect(lastTurn(t.driver).input.rolePrompt).toContain(decisionId);
+    expect(await call("deck_decision_list", {})).toMatchObject({ ok: true, data: { decisions: [{ state: "pending" }] } });
+    lastTurn(t.driver).finish(); await t.idle();
+  });
+  test("targeted queued cancellation does not reply or resolve; admitted reply requires explicit current-user resolution", async () => {
+    const { t, id, call, open } = await decisionSession(); const opened = await open(); expect(opened.ok).toBe(true); const decisionId = (opened as any).data.decisionId;
+    const cancelled = await t.run({ type: "prompt.send", text: "Do not deliver this", decisionTarget: { decisionId, revision: 1 } } as any, id);
+    await t.run({ type: "prompt.cancel", promptId: (cancelled as any).data.promptId }, id);
+    expect((await t.manager.query("decisions.list", { sessionId: id }) as any).data.decisions[0].replies).toEqual([]);
+    expect(await call("deck_decision_resolve", { commandId: "too-early", decisionId, expectedRevision: 1, promptId: (cancelled as any).data.promptId, note: "Yes", disposition: "allow", action: "implement" })).toMatchObject({ ok: false });
+    lastTurn(t.driver).finish(); await waitFor(() => lastTurn(t.driver).closed);
+    const reply = await t.run({ type: "prompt.send", text: "Yes, implement", decisionTarget: { decisionId, revision: 1 } } as any, id); await waitFor(() => t.driver.turns.length === 2);
+    expect((await t.manager.query("decisions.list", { sessionId: id }) as any).data.decisions[0]).toMatchObject({ state: "pending", replies: [{ promptId: (reply as any).data.promptId, stale: false }] });
+    expect(await call("deck_decision_resolve", { commandId: "answer-1", decisionId, expectedRevision: 1, promptId: (reply as any).data.promptId, note: "Implement as requested", disposition: "allow", action: "implement" })).toMatchObject({ ok: true, data: { state: "answered" } });
+    expect(await call("deck_delegate", { agent: "investigate", task: "Execute compatible work", dependsOn: [decisionId], action: "implement" })).toMatchObject({ ok: true });
+    await waitFor(() => t.driver.turns.length === 3); lastTurn(t.driver).finish(); t.driver.turns[1]!.finish(); await waitFor(() => t.driver.turns.every(turn => turn.closed));
+  });
+});
+
+describe('Stage 3 exact-turn steering',()=>{
+ async function steeringSession(options:Partial<SessionManagerOptions>={},version="0.162.1"){
+  const driver=new FakeDriver('codex');driver.probeResult={status:'ready',version,capabilities:['turn-steer-text-0.162.1'],mcpIsolationVerified:true};
+  let reconcile:(m:any)=>Promise<any>=async()=>({state:'unknown',reason:'absent-history'});let targetAvailable=true;const resolves:Array<(v:any)=>void>=[],writes:any[]=[];const resolve=(v:any,index=0)=>resolves[index]!(v);const start=driver.startTask.bind(driver);
+  driver.startTask=async(input,io)=>{const handle=await start(input,io);const nativeThreadId=await handle.nativeSessionId,nativeTurnId=`native-turn-${driver.turns.length}`;return {...handle,steeringTarget:()=>targetAvailable?{nativeThreadId,nativeTurnId}:undefined,steer:async(message:any)=>{writes.push(message);return new Promise<any>(r=>resolves.push(r));},reconcileSteering:(m:any)=>reconcile(m)};};
+  const t=setup({driver,options,config:baseConfig({members:{lead:{runnerId:'codex',modelId:'gpt-6.1-sol'},investigate:{runnerId:'codex',modelId:'gpt-6.1-sol'}}})});const id=await t.create();await t.run({type:'prompt.send',text:'Original user instruction'},id);await waitFor(()=>driver.turns.length===1);lastTurn(driver).init();
+  const grant=t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths,id).taskCredentialFile('lead'),'utf8')).token)!;
+  const call=(name:string,args:Record<string,unknown>)=>t.manager.callTaskTool(grant,name,args);
+  return {t,id,driver,writes,resolve,call,setTargetAvailable:(v:boolean)=>{targetAvailable=v;},setReconcile:(fn:(m:any)=>Promise<any>)=>{reconcile=fn;},accept:(index=0)=>resolve({state:'accepted',...writes[index],via:'receipt'},index)};
+ }
+ test('pre-write fence retains authority age; late question revision cannot be authorized by delayed acceptance',async()=>{
+  const {t,id,driver,writes,resolve,call}=await steeringSession();expect(driver.turns[0]!.input.steeringVersion).toBe('0.162.1');
+  const source=t.events(id).find(e=>e.kind==='prompt.dispatched')!.data.promptId;
+  const decisionId=(await call('deck_decision_open',{commandId:'open-before-steer',key:'scope',question:'Proceed?',source:{promptId:source}}) as any).data.decisionId;
+  const sent=await t.run({type:'prompt.send',text:'Yes to the original question',delivery:'current-turn',decisionTarget:{decisionId,revision:1}} as any,id);await waitFor(()=>writes.length===1);
+  const fence=t.events(id).find(e=>e.kind==='prompt.steering')!;expect(fence).toBeDefined();
+  expect(await call('deck_decision_resolve',{commandId:'premature',decisionId,expectedRevision:1,promptId:(sent as any).data.promptId,note:'Not yet accepted',disposition:'allow',action:'execute'})).toMatchObject({ok:false,code:'decision-evidence-invalid'});
+  await call('deck_decision_revise',{commandId:'revision-after-write',decisionId,expectedRevision:1,question:'Changed scope?',note:'New question after the write'});
+  resolve({state:'accepted',...writes[0],via:'receipt'});await waitFor(()=>t.events(id).some(e=>e.kind==='prompt.steered'));
+  const ledger=loadLedger(t.manager.openLog(id)!,sessionPaths(t.paths,id).ledgerSnapshotFile).ledger;
+  expect(ledger.prompt((sent as any).data.promptId)).toMatchObject({firstAdmissionSeq:fence.seq,steering:{state:'accepted',stale:true,eligible:false}});
+  expect(await call('deck_decision_resolve',{commandId:'stale-steer',decisionId,expectedRevision:2,promptId:(sent as any).data.promptId,note:'Must not gain freshness',disposition:'allow',action:'execute'})).toMatchObject({ok:false});
+  expect(lastTurn(driver).input.prompt).toBe('Original user instruction');lastTurn(driver).finish();await t.idle();
+ });
+ test('multiple genuine steered inputs retain independent immutable membership; bookkeeping and free-text resolution work',async()=>{
+  const {t,id,driver,writes,accept,call}=await steeringSession();const read=()=>loadLedger(t.manager.openLog(id)!,sessionPaths(t.paths,id).ledgerSnapshotFile).ledger;
+  const original=read().prompts()[0]!,originalSeq=original.firstAdmissionSeq;
+  const decisionId=(await call('deck_decision_open',{commandId:'open-free',key:'free',question:'May we execute?',source:{promptId:original.promptId}}) as any).data.decisionId;
+  const a=await t.run({type:'prompt.send',text:'Yes, execute',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);accept();await waitFor(()=>read().prompt((a as any).data.promptId)?.state==='accepted');
+  const b=await t.run({type:'prompt.send',text:'Also retain this answer',delivery:'current-turn',decisionTarget:{decisionId,revision:1}} as any,id);await waitFor(()=>writes.length===2);
+  await t.run({type:'decision.defer',decisionId,expectedRevision:1,note:'Later'} as any,id);await t.run({type:'decision.reopen',decisionId,expectedRevision:2,note:'Now'} as any,id);accept(1);await waitFor(()=>read().prompt((b as any).data.promptId)?.state==='accepted');
+  expect(read().prompt(original.promptId)?.firstAdmissionSeq).toBe(originalSeq);expect(read().prompt((b as any).data.promptId)?.steering?.eligible).toBe(true);
+  expect(await call('deck_decision_resolve',{commandId:'free-answer',decisionId,expectedRevision:3,promptId:(a as any).data.promptId,note:'Explicit applicable free text',disposition:'allow',action:'execute'})).toMatchObject({ok:true});
+  const count=t.events(id).filter(e=>e.kind==='prompt.steering').length;expect(await t.runWithId((a as any).data.promptId,{type:'prompt.send',text:'Yes, execute',delivery:'current-turn'} as any,id)).toMatchObject({ok:true,duplicate:true});expect(t.events(id).filter(e=>e.kind==='prompt.steering')).toHaveLength(count);
+  expect(await t.runWithId((a as any).data.promptId,{type:'prompt.send',text:'Changed',delivery:'current-turn'} as any,id)).toMatchObject({ok:false,code:'command-id-reused'});
+  lastTurn(driver).finish();await t.idle();expect(read().prompt((a as any).data.promptId)?.state).toBe('completed');expect(read().prompt((b as any).data.promptId)?.state).toBe('completed');
+ });
+ test('FIFO-ineligible current-turn requests remain ordinary queued input and cannot target a later turn',async()=>{
+  const {t,id,driver,writes}=await steeringSession();const older=await t.run({type:'prompt.send',text:'Older queue message'},id);await t.run({type:'prompt.send',text:'Current intent behind older queue',delivery:'current-turn'} as any,id);
+  expect(writes).toHaveLength(0);await t.run({type:'prompt.cancel',promptId:(older as any).data.promptId},id);expect(writes).toHaveLength(0);
+  driver.turns[0]!.finish();await waitFor(()=>driver.turns.length===2);expect(lastTurn(driver).input.prompt).toBe('Current intent behind older queue');expect(writes).toHaveLength(0);lastTurn(driver).finish();await t.idle();
+ });
+ test('cancellation after the steering fence is refused; accepted input uses only its original route',async()=>{
+  const {t,id,driver,writes,accept}=await steeringSession();const sent=await t.run({type:'prompt.send',text:'One current route',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);
+  expect(await t.run({type:'prompt.cancel',promptId:(sent as any).data.promptId},id)).toMatchObject({ok:false,code:'prompt-already-started'});accept();await waitFor(()=>t.events(id).some(e=>e.kind==='prompt.steered'));lastTurn(driver).finish();await t.idle();expect(driver.turns).toHaveLength(1);
+ });
+ test('only verified refusal restores the same FIFO record to queued delivery',async()=>{
+  const {t,id,driver,writes,resolve}=await steeringSession();const sent=await t.run({type:'prompt.send',text:'One route only',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);resolve({state:'not-accepted',reason:'no-active-turn'});await waitFor(()=>t.events(id).some(e=>e.kind==='prompt.steered'));
+  const snapshot=await t.manager.query('prompts.list',{sessionId:id}) as any;expect(snapshot.data.queued).toMatchObject([{promptId:(sent as any).data.promptId}]);expect(writes).toHaveLength(1);
+  expect(t.events(id).find(e=>e.kind==='prompt.steered')!.data.queueFallback).toBe(true);
+  lastTurn(driver).finish();await waitFor(()=>driver.turns.length===2);expect(lastTurn(driver).input.prompt).toBe('One route only');
+  const p=loadLedger(t.manager.openLog(id)!,sessionPaths(t.paths,id).ledgerSnapshotFile).ledger.prompt((sent as any).data.promptId)!;expect(p.firstAdmissionSeq).toBe(t.events(id).find(e=>e.kind==='prompt.steering')!.seq);lastTurn(driver).finish();await t.idle();
+ });
+ test('unknown outcomes never resend; timeout releases completion barrier and late acceptance is historical',async()=>{
+  const {t,id,driver,writes,accept}=await steeringSession({steeringTimeoutMs:40});const sent=await t.run({type:'prompt.send',text:'May already arrive',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);await t.run({type:'prompt.send',text:'Next queued genuine turn'},id);driver.turns[0]!.finish();
+  await waitFor(()=>driver.turns.length===2);const read=()=>loadLedger(t.manager.openLog(id)!,sessionPaths(t.paths,id).ledgerSnapshotFile).ledger;
+  expect(read().prompt((sent as any).data.promptId)?.state).toBe('unknown');expect(writes).toHaveLength(1);const fence=t.events(id).find(e=>e.kind==='prompt.steering')!.seq;
+  accept();await waitFor(()=>read().prompt((sent as any).data.promptId)?.steering?.state==='accepted');expect(read().prompt((sent as any).data.promptId)).toMatchObject({firstAdmissionSeq:fence,steering:{eligible:false}});
+  expect(lastTurn(driver).input.prompt).toBe('Next queued genuine turn');lastTurn(driver).finish();await t.idle();expect(writes).toHaveLength(1);
+ });
+ test('completion before acknowledgement settles history on the original attempt, never grants replacement authority',async()=>{
+  const {t,id,driver,writes,accept,call}=await steeringSession();const sent=await t.run({type:'prompt.send',text:'Late receipt',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);driver.turns[0]!.finish();await Bun.sleep(5);
+  accept();await waitFor(()=>driver.turns[0]!.closed);const prompt=loadLedger(t.manager.openLog(id)!,sessionPaths(t.paths,id).ledgerSnapshotFile).ledger.prompt((sent as any).data.promptId)!;
+  expect(prompt.steering).toMatchObject({state:'accepted',eligible:false});expect(prompt.state).toBe('completed');expect(await call('deck_decision_list',{})).toMatchObject({ok:false,code:'credential-revoked'});
+ });
+ test('release with in-flight delivery preserves uncertainty and queued pause, without a second route',async()=>{
+  const {t,id,driver,writes,accept}=await steeringSession({steeringTimeoutMs:30});const sent=await t.run({type:'prompt.send',text:'Pending when closed',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);await t.run({type:'session.release'},id);await t.idle();accept();await Bun.sleep(10);
+  const prompt=loadLedger(t.manager.openLog(id)!,sessionPaths(t.paths,id).ledgerSnapshotFile).ledger.prompt((sent as any).data.promptId)!;expect(prompt.steering?.eligible).toBe(false);expect(writes).toHaveLength(1);expect(driver.turns).toHaveLength(1);expect((await t.manager.query('prompts.list',{sessionId:id}) as any).data.paused).toBe(true);
+ });
+ test('unsupported versions keep explicit-current intent in the ordinary queue',async()=>{
+  const {t,id,driver,writes}=await steeringSession({},'0.162.2');expect(driver.turns[0]!.input.steeringVersion).toBeUndefined();await t.run({type:'prompt.send',text:'Queue on unverified version',delivery:'current-turn'} as any,id);expect(writes).toHaveLength(0);expect((await t.manager.query('prompts.list',{sessionId:id}) as any).data.steeringAvailable).toBe(false);driver.turns[0]!.finish();await waitFor(()=>driver.turns.length===2);lastTurn(driver).finish();await t.idle();
+ });
+ test('every committed steering prefix retains original input without false admission',async()=>{
+  const {t,id,driver,writes,accept}=await steeringSession();const sent=await t.run({type:'prompt.send',text:'Durable native input',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);accept();await waitFor(()=>t.events(id).some(e=>e.kind==='prompt.steered'));
+  const events=t.events(id),fence=events.find(e=>e.kind==='prompt.steering')!,accepted=events.find(e=>e.kind==='prompt.steered')!;
+  for(let length=fence.seq;length<=events.length;length++){const l=Ledger.empty(id);for(const e of events.slice(0,length))l.apply(e);const p=l.prompt((sent as any).data.promptId)!;expect(p.text).toBe('Durable native input');expect(p.firstAdmissionSeq).toBe(length>=accepted.seq?fence.seq:undefined);expect(p.state).not.toBe('queued');}
+  driver.turns[0]!.finish();await t.idle();
+ });
+
+ test('free-text authority age is the fence even when the decision is opened only after native write',async()=>{
+  const {t,id,driver,writes,accept,call}=await steeringSession();const sent=await t.run({type:'prompt.send',text:'An earlier statement',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);
+  const source=t.events(id).find(e=>e.kind==='prompt.dispatched')!.data.promptId;const decisionId=(await call('deck_decision_open',{commandId:'new-after-write',key:'after-write',question:'A new question?',source:{promptId:source}}) as any).data.decisionId;
+  accept();await waitFor(()=>t.events(id).some(e=>e.kind==='prompt.steered'));expect(await call('deck_decision_resolve',{commandId:'cannot-refresh-free',decisionId,expectedRevision:1,promptId:(sent as any).data.promptId,note:'Earlier than the question',disposition:'informational'})).toMatchObject({ok:false,code:'decision-evidence-invalid'});lastTurn(driver).finish();await t.idle();
+ });
+ test('history reconciliation after substantive revision retains original sequence and stale targeting',async()=>{
+  const {t,id,driver,writes,resolve,call,setReconcile}=await steeringSession();let confirm!:(m:any)=>void;setReconcile(()=>new Promise(r=>{confirm=r;}));
+  const source=t.events(id).find(e=>e.kind==='prompt.dispatched')!.data.promptId,decisionId=(await call('deck_decision_open',{commandId:'history-question',key:'history-question',question:'Original?',source:{promptId:source}}) as any).data.decisionId;
+  const sent=await t.run({type:'prompt.send',text:'Original answer',delivery:'current-turn',decisionTarget:{decisionId,revision:1}} as any,id);await waitFor(()=>writes.length===1);resolve({state:'unknown',reason:'lost-receipt'});await waitFor(()=>!!confirm);
+  await call('deck_decision_revise',{commandId:'changed-before-history',decisionId,expectedRevision:1,question:'Different?',note:'Changed'});confirm({state:'accepted',...writes[0],via:'history'});await waitFor(()=>t.events(id).some(e=>e.kind==='prompt.steered'));
+  const fence=t.events(id).find(e=>e.kind==='prompt.steering')!,p=loadLedger(t.manager.openLog(id)!,sessionPaths(t.paths,id).ledgerSnapshotFile).ledger.prompt((sent as any).data.promptId)!;expect(p.firstAdmissionSeq).toBe(fence.seq);expect(p.steering).toMatchObject({eligible:false,stale:true});expect(writes).toHaveLength(1);lastTurn(driver).finish();await t.idle();
+ });
+ test('opaque or mismatched acceptance is uncertain and native events cannot forge host admission',async()=>{
+  const {t,id,driver,writes,resolve}=await steeringSession();const sent=await t.run({type:'prompt.send',text:'Cannot mis-correlate',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);
+  lastTurn(driver).emit('prompt.steered',{promptId:(sent as any).data.promptId,state:'accepted',eligible:true});expect(t.events(id).filter(e=>e.kind==='prompt.steered')).toHaveLength(0);
+  resolve({state:'accepted',...writes[0],nativeTurnId:'foreign',via:'receipt'});await waitFor(()=>t.events(id).some(e=>e.kind==='prompt.steered'));expect((await t.manager.query('prompts.list',{sessionId:id}) as any).data.deliveries).toMatchObject([{state:'unknown'}]);expect(writes).toHaveLength(1);lastTurn(driver).finish();await t.idle();
+ });
+ for(const fault of ['append','flush'] as const)test(`${fault} failure at the steering fence prevents native write; retained fence recovers uncertain without replay`,async()=>{
+  const {t,id,driver,writes}=await steeringSession();const log=t.manager.openLog(id)!,append=log.appendMany.bind(log),flush=log.flush.bind(log);let promptId='';
+  if(fault==='append')log.appendMany=drafts=>{const value=append(drafts);if(drafts.some(d=>d.kind==='prompt.steering'))throw Error('retained-fence-append-failure');return value;};
+  else log.flush=()=>{if(t.events(id).some(e=>e.kind==='prompt.steering'))throw Error('fence-flush-failure');flush();};
+  await expect(t.run({type:'prompt.send',text:'Durable uncertain prefix',delivery:'current-turn'} as any,id)).rejects.toThrow();log.appendMany=append;log.flush=flush;expect(writes).toHaveLength(0);promptId=String(t.events(id).find(e=>e.kind==='prompt.steering')!.data.promptId);
+  lastTurn(driver).finish();await t.idle();await t.manager.close();const next=setup({dir:t.dir,driver:new FakeDriver('codex')});await waitFor(()=>next.events(id).some(e=>e.kind==='prompt.steered'&&e.data.state==='unknown'));
+  const snapshot=await next.manager.query('prompts.list',{sessionId:id}) as any;expect(snapshot.data.queued).toHaveLength(0);expect(snapshot.data.deliveries).toMatchObject([{promptId,state:'unknown'}]);expect(next.driver.turns).toHaveLength(0);
+  expect(await next.runWithId(promptId,{type:'prompt.send',text:'Durable uncertain prefix',delivery:'current-turn'} as any,id)).toMatchObject({ok:true,duplicate:true});expect(next.driver.turns).toHaveLength(0);
+  const before=next.events(id).length;await next.manager.query('prompts.list',{sessionId:id});expect(next.events(id)).toHaveLength(before);
+ });
+ test('paused input and attachments stay queued; typed identity survives receipt eviction',async()=>{
+  const {t,id,driver,writes}=await steeringSession();t.manager.openLog(id)!.append({kind:'prompt.queue',data:{paused:true,reason:'fixture-pause'}});
+  const sent=await t.run({type:'prompt.send',text:'Paused current-turn intent',delivery:'current-turn'} as any,id);expect(writes).toHaveLength(0);await t.run({type:'prompt.cancel',promptId:(sent as any).data.promptId},id);await t.run({type:'prompt.resume'},id);
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==','base64'),image=(t.manager.uploadAttachment({sessionId:id,bytes:png,mimeType:'image/png',name:'fixture.png'}) as any).data.attachment;
+  const uploaded=await t.run({type:'prompt.send',text:'Image stays queued',attachmentIds:[image.attachmentId],delivery:'current-turn'} as any,id);expect(writes).toHaveLength(0);
+  t.manager.openLog(id)!.appendMany(Array.from({length:1001},(_,i)=>({kind:'command.accepted' as const,data:{commandId:`steer-eviction-${i}`,type:'fixture',outcome:{ok:true}}})));
+  expect(await t.runWithId((uploaded as any).data.promptId,{type:'prompt.resume'},id)).toMatchObject({ok:false,code:'command-id-reused'});
+  lastTurn(driver).finish();await waitFor(()=>driver.turns.length===2);expect(lastTurn(driver).input.images).toHaveLength(1);lastTurn(driver).finish();await t.idle();
+ });
+
+ test('a genuine input added to a synthetic continuation independently qualifies without promoting its original context',async()=>{
+  const {t,id,driver,writes,accept,call}=await steeringSession();const original=t.events(id).find(e=>e.kind==='prompt.dispatched')!.data.promptId;
+  const decisionId=(await call('deck_decision_open',{commandId:'wake-question',key:'wake-question',question:'Proceed after review?',source:{promptId:original}}) as any).data.decisionId;
+  driver.turns[0]!.finish();await t.idle();await t.manager.execute({sessionId:id,clientId:'daemon',command:{v:1,commandId:'90909090-9090-4090-8090-909090909090',type:'prompt.send',text:'Synthetic outcome context'}});await waitFor(()=>driver.turns.length===2);lastTurn(driver).init();
+  const grant=t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths,id).taskCredentialFile('lead'),'utf8')).token)!;
+  const invoke=(promptId:string,commandId:string)=>t.manager.callTaskTool(grant,'deck_decision_resolve',{commandId,decisionId,expectedRevision:1,promptId,note:'Explicit current input',disposition:'informational'});
+  expect(await invoke(String(original),'cannot-use-earlier')).toMatchObject({ok:false});
+  const sent=await t.run({type:'prompt.send',text:'My genuine answer during review',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);accept();await waitFor(()=>t.events(id).some(e=>e.kind==='prompt.steered'));
+  expect(await invoke((sent as any).data.promptId,'genuine-added-answer')).toMatchObject({ok:true});lastTurn(driver).finish();await t.idle();
+ });
+ test('an accepted current-attempt user input can explicitly replan linked continuation without replacing original prompt',async()=>{
+  const {t,id,driver,writes,accept,call}=await steeringSession();const taskId=(await call('deck_delegate',{agent:'investigate',task:'Prepare independent evidence'}) as any).data.taskId;await waitFor(()=>driver.turns.length===2);lastTurn(driver).say('Evidence');lastTurn(driver).finish();await waitFor(()=>lastTurn(driver).closed);await call('deck_task_result',{taskId});
+  const source=t.events(id).find(e=>e.kind==='prompt.dispatched')!.data.promptId;await call('deck_decision_open',{commandId:'replan-link',key:'replan-link',question:'May this task continue?',source:{promptId:source},relatedTaskIds:[taskId]});
+  const sent=await t.run({type:'prompt.send',text:'Replan this task as independent work',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);accept();await waitFor(()=>t.events(id).some(e=>e.kind==='prompt.steered'));
+  expect(await call('deck_delegate',{commandId:'12121212-1212-4212-8212-121212121212',agent:'investigate',task:'Independent continuation',continueTaskId:taskId,dependsOn:[],replan:{promptId:(sent as any).data.promptId,note:'User explicitly requested independent work'}})).toMatchObject({ok:true});
+  await waitFor(()=>driver.turns.length===3);lastTurn(driver).say('Continued');lastTurn(driver).finish();await waitFor(()=>lastTurn(driver).closed);await call('deck_task_result',{taskId});expect(driver.turns[0]!.input.prompt).toBe('Original user instruction');driver.turns[0]!.finish();await t.idle();
+ });
+
+ test('a verified refusal after barrier expiry is historical non-delivery and never queues a third turn',async()=>{
+  const {t,id,driver,writes,resolve}=await steeringSession({steeringTimeoutMs:30});const sent=await t.run({type:'prompt.send',text:'Expired old input',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);
+  await t.run({type:'prompt.send',text:'Later turn admitted after barrier'},id);driver.turns[0]!.finish();await waitFor(()=>driver.turns.length===2);
+  resolve({state:'not-accepted',reason:'no-active-turn'});await waitFor(()=>(t.events(id).filter(e=>e.kind==='prompt.steered').at(-1)?.data.state)==='not-accepted');
+  const snapshot=await t.manager.query('prompts.list',{sessionId:id}) as any;expect(snapshot.data.queued).toHaveLength(0);expect(snapshot.data.deliveries).toMatchObject([{promptId:(sent as any).data.promptId,state:'not-accepted'}]);
+  lastTurn(driver).finish();await t.idle();expect(driver.turns).toHaveLength(2);expect(writes).toHaveLength(1);
+  const p=loadLedger(t.manager.openLog(id)!,sessionPaths(t.paths,id).ledgerSnapshotFile).ledger.prompt((sent as any).data.promptId)!;expect(p.state).toBe('failed');expect(p.firstAdmissionSeq).toBeUndefined();expect(p.dispatchedSeq).toBeUndefined();expect(p.steering).toMatchObject({state:'not-accepted',queueFallback:false});
+ });
+ for(const fault of ['append','flush'] as const)test(`late refusal ${fault} failure retains historical non-delivery on restart without replay`,async()=>{
+  const {t,id,driver,writes,resolve}=await steeringSession({steeringTimeoutMs:30});const sent=await t.run({type:'prompt.send',text:'Do not replay after refusal',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);driver.turns[0]!.finish();await waitFor(()=>driver.turns[0]!.closed);
+  const log=t.manager.openLog(id)!,append=log.appendMany.bind(log),flush=log.flush.bind(log);let failed=false;
+  if(fault==='append')log.appendMany=drafts=>{const result=append(drafts);if(drafts.some(d=>d.kind==='prompt.steered'&&d.data?.state==='not-accepted')){failed=true;throw Error('retained-refusal-append-failure');}return result;};
+  else log.flush=()=>{if(t.events(id).some(e=>e.kind==='prompt.steered'&&e.data.state==='not-accepted')){failed=true;throw Error('retained-refusal-flush-failure');}flush();};
+  resolve({state:'not-accepted',reason:'no-active-turn'});await waitFor(()=>failed);log.appendMany=append;log.flush=flush;await t.manager.close();
+  const next=setup({dir:t.dir,driver:new FakeDriver('codex')});const snapshot=await next.manager.query('prompts.list',{sessionId:id}) as any;expect(snapshot.data.queued).toHaveLength(0);expect(snapshot.data.deliveries).toMatchObject([{promptId:(sent as any).data.promptId,state:'not-accepted'}]);expect(next.driver.turns).toHaveLength(0);
+  expect(await next.runWithId((sent as any).data.promptId,{type:'prompt.send',text:'Do not replay after refusal',delivery:'current-turn'} as any,id)).toMatchObject({ok:true,duplicate:true});expect(next.driver.turns).toHaveLength(0);expect(driver.turns).toHaveLength(1);
+ });
+ test('history absence or an unverified history refusal cannot justify a fallback route',async()=>{
+  const {t,id,driver,writes,resolve,setReconcile}=await steeringSession();setReconcile(async()=>({state:'not-accepted',reason:'no-active-turn'}));await t.run({type:'prompt.send',text:'No proof of refusal',delivery:'current-turn'} as any,id);await waitFor(()=>writes.length===1);resolve({state:'unknown',reason:'opaque'});await waitFor(()=>t.events(id).some(e=>e.kind==='prompt.steered'));
+  expect((await t.manager.query('prompts.list',{sessionId:id}) as any).data.queued).toHaveLength(0);expect(t.events(id).filter(e=>e.kind==='prompt.steered').at(-1)?.data.state).toBe('unknown');lastTurn(driver).finish();await t.idle();
+ });
+
+ test('pre-ID submission remains queued after readiness appears rather than retargeting a native turn',async()=>{
+  const {t,id,driver,writes,setTargetAvailable}=await steeringSession();setTargetAvailable(false);await t.run({type:'prompt.send',text:'Sent before native identity was ready',delivery:'current-turn'} as any,id);setTargetAvailable(true);lastTurn(driver).emit('diagnostic',{code:'codex-steering-ready'});
+  expect(writes).toHaveLength(0);expect((await t.manager.query('prompts.list',{sessionId:id}) as any).data.queued).toHaveLength(1);driver.turns[0]!.finish();await waitFor(()=>driver.turns.length===2);expect(lastTurn(driver).input.prompt).toBe('Sent before native identity was ready');expect(writes).toHaveLength(0);lastTurn(driver).finish();await t.idle();
+ });
+
 });

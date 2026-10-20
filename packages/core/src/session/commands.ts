@@ -1,6 +1,7 @@
 import { isApprovalScope, isSessionGrantKind, type ApprovalResponse } from "./approval";
 import { isQuestionAnswers } from "./question";
 /** deck-session-command-v1 — pure command types and validator (XR-1.5). */
+import { validDecisionTarget, revision, text, type DecisionTarget } from "./decisions";
 import type { CrossTeamAssignments, RunnerQualifiedAssignment } from "./assignments";
 export type ImageAttachment = { attachmentId: string; mimeType: "image/png" | "image/jpeg" | "image/webp"; name: string; sizeBytes: number; width: number; height: number };
 export const IMAGE_ATTACHMENT_LIMITS = { maxImages: 8, maxFileBytes: 5 * 1024 * 1024, maxMessageBytes: 20 * 1024 * 1024, maxDimension: 16384, maxPixels: 40_000_000 } as const;
@@ -21,7 +22,8 @@ export type SessionCommandBody =
   | { type: "session.assignMember"; memberId: string; assignment: RunnerQualifiedAssignment; expectedRevision: number }
   | { type: "session.attach"; after: number }
   | { type: "session.bindChange"; changeId: string }
-  | { type: "prompt.send"; text: string; attachmentIds?: string[]; target?: "lead" }
+  | { type: "prompt.send"; text: string; attachmentIds?: string[]; target?: "lead"; delivery?: "current-turn"; decisionTarget?: DecisionTarget }
+  | { type: "decision.defer" | "decision.cancel" | "decision.reopen"; decisionId: string; expectedRevision: number; note: string }
   | { type: "prompt.cancel"; promptId: string }
   | { type: "prompt.resume" }
   | { type: "turn.interrupt"; taskId: string }
@@ -57,7 +59,8 @@ const FIELD_RULES: Record<string, (c: Record<string, unknown>) => string | null>
   "session.assignMember": (c) => !boundedString(c.memberId, 80) ? "memberId invalid" : !assignment(c.assignment) ? "assignment invalid" : !Number.isSafeInteger(c.expectedRevision) || (c.expectedRevision as number) < 0 ? "expectedRevision invalid" : null,
   "session.attach": (c) => Number.isInteger(c.after) && (c.after as number) >= 0 ? null : "after must be an integer >= 0",
   "session.bindChange": (c) => str(c.changeId) ? null : "changeId required",
-  "prompt.send": (c) => typeof c.text !== "string" || !c.text.length && !(Array.isArray(c.attachmentIds) && c.attachmentIds.length) ? "text or images required" : c.attachmentIds !== undefined && (!Array.isArray(c.attachmentIds) || c.attachmentIds.length > IMAGE_ATTACHMENT_LIMITS.maxImages || !c.attachmentIds.every(id => typeof id === "string" && UUID.test(id)) || new Set(c.attachmentIds).size !== c.attachmentIds.length) ? "attachmentIds invalid" : c.target !== undefined && c.target !== "lead" ? "target invalid" : null,
+  "prompt.send": (c) => typeof c.text !== "string" || !c.text.length && !(Array.isArray(c.attachmentIds) && c.attachmentIds.length) ? "text or images required" : c.attachmentIds !== undefined && (!Array.isArray(c.attachmentIds) || c.attachmentIds.length > IMAGE_ATTACHMENT_LIMITS.maxImages || !c.attachmentIds.every(id => typeof id === "string" && UUID.test(id)) || new Set(c.attachmentIds).size !== c.attachmentIds.length) ? "attachmentIds invalid" : c.target !== undefined && c.target !== "lead" ? "target invalid" : c.delivery !== undefined && c.delivery !== "current-turn" ? "delivery invalid" : c.decisionTarget !== undefined && !validDecisionTarget(c.decisionTarget) ? "decisionTarget invalid" : null,
+  ...Object.fromEntries(["decision.defer", "decision.cancel", "decision.reopen"].map(type => [type, (c: Record<string, unknown>) => text(c.decisionId) && revision(c.expectedRevision) && text(c.note, 512) ? null : "decision mutation invalid"])),
   "prompt.cancel": (c) => str(c.promptId) ? null : "promptId required",
   "prompt.resume": () => null,
   "turn.interrupt": (c) => str(c.taskId) ? null : "taskId required",

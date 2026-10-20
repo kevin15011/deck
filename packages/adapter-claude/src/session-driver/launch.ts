@@ -45,12 +45,12 @@ const safeScalar = (value: string): boolean =>
   value.length > 0 && value.trim() === value && !value.startsWith("-") && !/[\0\r\n]/.test(value) && Buffer.byteLength(value, "utf8") <= MAX_SCALAR_BYTES;
 
 /** One stream-json user message (newline terminated). */
-export function encodeUserMessage(text: string, images: readonly { mimeType: string; data: string }[] = []): string {
+export function encodeUserMessage(text: string, images: readonly { mimeType: string; data: string }[] = [], identity?: {uuid:string;session_id:string;origin:{kind:'human'|'coordinator'}}): string {
   const content = images.length ? [
     ...(text ? [{ type: "text", text }] : []),
     ...images.map(image => ({ type: "image", source: { type: "base64", media_type: image.mimeType, data: image.data } })),
   ] : text;
-  return `${JSON.stringify({ type: "user", message: { role: "user", content } })}\n`;
+  return `${JSON.stringify({ type: "user", ...(identity??{}), message: { role: "user", content } })}\n`;
 }
 
 export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunchFiles, options: ClaudeLaunchOptions = {}): ClaudeTurnLaunch {
@@ -95,6 +95,7 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   }
   args.push(...(input.resume ? ["--resume", sessionId] : ["--session-id", sessionId]));
   args.push("--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages");
+  if(input.steeringVersion==='2.1.296')args.push('--replay-user-messages');
   args.push("--strict-mcp-config", "--mcp-config", mcpConfigFile);
   args.push("--setting-sources", "");
   args.push("--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, disableAllHooks: !nativePlugin }));

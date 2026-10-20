@@ -27,7 +27,9 @@ export function reduceCurrentEvent(state: ViewState, event: SessionEvent, eviden
         delete next.approvals[String(event.data.approvalId)];
     if (event.kind === 'question.requested') next.questions[String(event.data.questionId)] = event;
     if (event.kind === 'question.resolved') delete next.questions[String(event.data.questionId)];
-    if (event.kind.startsWith('task.'))
+    // Outcome accounting may refer to an older attempt; only lifecycle records
+    // own the current execution state, attempt and assignment shown by the UI.
+    if (event.kind === 'task.created' || event.kind === 'task.continued' || event.kind === 'task.state')
         next.tasks[id] = { ...next.tasks[id], ...event.source, ...event.data };
     const mode=event.kind==='session.created'?event.data.approvals:event.kind==='session.approvals'?event.data.mode:undefined;
     if(event.kind==='session.created'&&mode===undefined){next.approvalMode='relay';next.approvalModeSource='default';}
@@ -59,8 +61,10 @@ export function pairingToken(location: {
     replaceState: (data: unknown, unused: string, url: string) => void;
 }): string {
     const token = new URLSearchParams(location.hash.slice(1)).get('pair') ?? new URLSearchParams(location.hash.slice(1)).get('token') ?? '';
-    if (location.hash)
-        history.replaceState(null, '', location.pathname + location.search);
+    if (location.hash) {
+        // Bootstrap canonicalizes the URL after authorization if History is blocked.
+        try { history.replaceState(null, '', location.pathname + location.search); } catch {}
+    }
     return token;
 }
 export type QuestionAnswerRow = { id:string; header?:string; prompt?:string; secret:boolean; values:string[] };
@@ -114,6 +118,21 @@ export function conversationEvents(events: SessionEvent[], taskId = 'lead'): Con
         else if (e.kind === 'turn.completed' && e.data.status === 'failed')
             messages.push(e);
     }
+    // A durable acceptance can survive a JSONL prefix without its optional chat mirror.
+    // Reconstruct from original records and sort by the immutable pre-write fence, not receipt time.
+    const fences=new Map(events.filter(e=>e.kind==='prompt.steering').map(e=>[e.seq,e]));
+    const queued=new Map(events.filter(e=>e.kind==='prompt.queued').map(e=>[String(e.data.promptId),e]));
+    const seen=new Set(messages.filter(e=>e.data.role==='user').map(e=>e.data.promptId));
+    for(const accepted of events){
+        if(accepted.kind!=='prompt.steered'||accepted.data.state!=='accepted')continue;
+        const fence=fences.get(Number(accepted.data.steeringSeq)),promptId=accepted.data.promptId,original=queued.get(String(promptId));
+        if(!fence||fence.data.promptId!==promptId||!original||typeof original.data.text!=='string'||seen.has(promptId)||(taskId!=='lead'&&fence.data.taskId!==taskId))continue;
+        seen.add(promptId);messages.push({...accepted,kind:'message.completed',source:{taskId:String(fence.data.taskId),memberId:'lead'},ts:fence.ts,data:{role:'user',text:original.data.text,promptId,steering:true,steeringSeq:fence.seq,steeringRunnerId:fence.data.runnerId,historical:accepted.data.eligible!==true,...(accepted.data.stale?{decisionReply:{stale:true}}:{})}});
+    }
+    const order=(event:SessionEvent)=>event.data.role==='user'&&event.data.steering===true&&!event.source.runnerId&&Number.isSafeInteger(event.data.steeringSeq)&&Number(event.data.steeringSeq)>0&&Number(event.data.steeringSeq)<=event.seq?Number(event.data.steeringSeq):event.seq;
+    if(messages.some(e=>e.data.steering===true&&!e.source.runnerId))return messages.map(e=>{
+        const fence=fences.get(order(e));return e.data.role==='user'&&e.data.steering===true&&!e.source.runnerId&&fence&&fence.data.promptId===e.data.promptId?{...e,ts:fence.ts}:e;
+    }).sort((a,b)=>order(a)-order(b));
     return messages;
 }
 

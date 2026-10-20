@@ -57,6 +57,7 @@ test('delivery status distinguishes provider acceptance, read suppression and sa
     failed: 0,
     expired: 0,
     queueFull: 0,
+    retried: 0,
   };
   expect(pushDeliveryText()).toContain('No eligible alerts');
   expect(
@@ -76,4 +77,14 @@ test('delivery status distinguishes provider acceptance, read suppression and sa
   expect(
     pushDeliveryText({ ...base, failed: 1, lastOutcome: 'transport-error' }),
   ).toContain('Could not reach');
+});
+
+test('storage failure is visible without implying delivery or covering other attention',async()=>{
+ const {pushDeliveryText}=await import('./push-notifications');
+ expect(pushDeliveryText({eligible:1,sent:0,suppressed:0,deferred:1,stale:0,failed:0,expired:0,queueFull:0,retried:0,lastOutcome:'waiting-for-storage' as any})).toContain('Notification storage is unavailable');
+});
+
+test('storage failure is truthful even before any alert was eligible',async()=>{
+ const {pushDeliveryText}=await import('./push-notifications');
+ expect(pushDeliveryText({eligible:0,sent:0,suppressed:0,deferred:1,stale:0,failed:0,expired:0,queueFull:0,retried:0,lastOutcome:'waiting-for-storage'})).toContain('Notification storage is unavailable');
 });

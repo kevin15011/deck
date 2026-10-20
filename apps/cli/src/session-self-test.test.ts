@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { SESSION_COMMAND_SCHEMA, SESSION_EVENT_SCHEMA, SESSION_SCHEMA_DIGEST } from "@deck/core/session/schema.generated";
 import { computeSchemaDigest, formatSelfTest, runSessionSelfTest } from "./session-self-test";
+import { createHash } from 'node:crypto';
 
 describe("deck session self-test (XR-10.3)", () => {
   test("passes on the embedded schemas and reports the build version", () => {
@@ -39,6 +40,14 @@ describe("deck session self-test (XR-10.3)", () => {
     expect(text).toContain("schema-digest-manifest");
     expect(text.trim().split("\n").at(-1)).toMatch(/self-test passed/i);
   });
+});
+
+test('binary web assets use canonical byte-array digest normalization and still detect tampering',()=>{
+ const assets={'/index.html':{body:'<html></html>',contentType:'text/html'},'/app.js':{body:'export{}',contentType:'text/javascript'},'/app.css':{body:'body{}',contentType:'text/css'},'/icon.png':{body:new Uint8Array([137,80,78,71]),contentType:'image/png'}};
+ const digest=createHash('sha256').update(JSON.stringify(Object.keys(assets).sort().map(path=>{const a=assets[path as keyof typeof assets];return[path,a.contentType,typeof a.body==='string'?a.body:Array.from(a.body)];}))).digest('hex');
+ expect(runSessionSelfTest({web:{assets,digest},env:{HOME:'/h'}}).ok).toBe(true);
+ assets['/icon.png'].body[3]=0;
+ expect(runSessionSelfTest({web:{assets,digest},env:{HOME:'/h'}}).checks.find(c=>c.id==='web-assets-digest')?.ok).toBe(false);
 });
 
  test("tampered web assets fail self-test", () => {

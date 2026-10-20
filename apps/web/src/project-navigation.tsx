@@ -30,7 +30,8 @@ function NavigationActions({ label, menuName, busy, renameDisabled = false, rena
     function open(last = false) {
         const bounds = trigger.current?.getBoundingClientRect(); if (!bounds) return;
         initialItem.current = last ? 1 : 0;
-        setPosition({top:Math.max(8, bounds.bottom + 4 + 88 < innerHeight ? bounds.bottom + 4 : bounds.top - 92),left:Math.max(8, Math.min(bounds.right - 164, innerWidth - 172))});
+        const menuHeight = matchMedia('(max-width: 1000px)').matches ? 98 : 88;
+        setPosition({top:Math.max(8, bounds.bottom + 4 + menuHeight < innerHeight ? bounds.bottom + 4 : bounds.top - menuHeight - 4),left:Math.max(8, Math.min(bounds.right - 164, innerWidth - 172))});
     }
     useLayoutEffect(() => { if(position) {const items=menu.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');items?.[initialItem.current ? items.length-1 : 0]?.focus({preventScroll:true});} }, [position]);
     useEffect(() => {

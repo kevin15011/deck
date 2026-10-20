@@ -2,7 +2,7 @@ import { ProgressiveTranscript } from './progressive-transcript';
 import { AutoApprovalMessage } from './approvals';
 import { QuestionAnswerMessage } from './question-answer';
 import { StatusIndicator, VisibleReply, indicatorState, replyForTask, type ReadMarkers } from './status-indicator';
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SessionEvent } from '../../../packages/core/src/session/events';
 import { activityEvents, conversationEvents, type ViewState } from './state';
 import { Markdown } from './markdown';
@@ -13,14 +13,21 @@ import { Avatar, agentProfile, FollowTranscript } from './subagent-parts';
 export type WorkspaceTab = 'chat' | 'activity' | 'subagents' | 'openspec';
 export type Api = (path: string, init?: RequestInit) => Promise<any>;
 const tabNames: Record<WorkspaceTab, string> = { chat: 'Chat', activity: 'Activity', subagents: 'Subagents', openspec: 'OpenSpec' };
-export function Tabs({ active, onChange }: { active: WorkspaceTab; onChange: (tab: WorkspaceTab) => void }) {
+/** Current projection only: replies/history and read markers never imply execution. */
+export function hasWorkingSubagent(view: Pick<ViewState,'tasks'|'approvals'|'questions'>): boolean {
+    const owners=(events: ViewState['approvals'])=>new Set(Object.values(events).map(event=>String(event.source.taskId??event.data.taskId??'')));
+    const approvals=owners(view.approvals),questions=owners(view.questions);
+    return Object.entries(view.tasks).some(([id,task])=>task.memberId!=='lead' && !/^lead(?:-g[1-9]\d*)?$/.test(id) && indicatorState(String(task.state??'created'),approvals.has(id)?1:0,questions.has(id)?1:0)==='working');
+}
+export function Tabs({ active, onChange, subagentsWorking = false }: { active: WorkspaceTab; onChange: (tab: WorkspaceTab) => void; subagentsWorking?: boolean }) {
+    const statusId=useId();
     return <div className="workspace-tabs" role="tablist" aria-label="Workspace views" onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
         const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button')).filter(button => button.offsetParent !== null);
         const at = buttons.indexOf(event.target as HTMLButtonElement);
         const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (at + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
         event.preventDefault(); buttons[next]?.click(); buttons[next]?.focus();
-    }}>{(Object.keys(tabNames) as WorkspaceTab[]).map(tab => <button className={tab === 'chat' ? 'chat-tab' : undefined} key={tab} type="button" role="tab" id={`tab-${tab}`} aria-selected={active === tab} aria-controls={`panel-${tab}`} tabIndex={active === tab ? 0 : -1} onClick={() => onChange(tab)}>{tabNames[tab]}</button>)}</div>;
+    }}>{(Object.keys(tabNames) as WorkspaceTab[]).map(tab => <button className={tab === 'chat' ? 'chat-tab' : undefined} key={tab} type="button" role="tab" id={`tab-${tab}`} aria-label={tab==='subagents'?'Subagents':undefined} aria-describedby={tab==='subagents'?statusId:undefined} aria-selected={active === tab} aria-controls={`panel-${tab}`} tabIndex={active === tab ? 0 : -1} onClick={() => onChange(tab)}>{tab==='subagents'?<><span className="subagents-tab-title">Subagents<span className="tab-working" aria-hidden="true">{subagentsWorking && <StatusIndicator state="running"/>}</span></span><span id={statusId} className="sr-only" role="status">{subagentsWorking?'Subagents working':'No subagents working'}</span></>:tabNames[tab]}</button>)}</div>;
 }
 function displayValue(value: unknown): string {
     return typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value, null, 2);

@@ -1,8 +1,12 @@
+import {STEERING_FENCE_SCHEMA,STEERING_RESULT_SCHEMA} from "./steering";
+import { DECISION_TARGET_SCHEMA, DECISION_MUTATION_SCHEMA, DECISION_REPLY_SCHEMA, DECISION_USER_COMMAND_PROPERTIES } from "./decisions";
 /**
  * JSON Schema (draft 2020-12) for deck-session-event-v1 and deck-session-command-v1 (D-20).
  * Derived from the same constant tables the validators use; pure, no I/O.
  */
 import { HOOK_STATUSES, SESSION_EVENT_KINDS, TURN_COMPLETED_STATUSES } from "./events";
+
+import { TASK_ACCOUNTING_SCHEMA, TASK_INTEGRATION_EVENT_SCHEMA } from "./mcp";
 
 type Json = Record<string, unknown>;
 const nonEmptyString = { type: "string", minLength: 1 };
@@ -60,6 +64,14 @@ export function buildSessionEventSchema(): Json {
     allOf: [
       dataRule("session.created", { type: "object", properties: { approvals: { enum: ["relay", "yolo"] } } }),
       dataRule("session.approvals", { type: "object", required: ["mode", "by"], properties: { mode: { enum: ["relay", "yolo"] }, by: nonEmptyString } }),
+      dataRule("decision.command", {type:"object",required:["command"],properties:{command:DECISION_MUTATION_SCHEMA.properties.command}}),
+      ...["decision.opened", "decision.revised", "decision.state"].map(kind => dataRule(kind, DECISION_MUTATION_SCHEMA)),
+      dataRule("decision.reply", DECISION_REPLY_SCHEMA),
+      dataRule("prompt.steering", STEERING_FENCE_SCHEMA),
+      dataRule("prompt.steered", STEERING_RESULT_SCHEMA),
+      dataRule("task.delivery", TASK_ACCOUNTING_SCHEMA),
+      dataRule("task.retrieval", TASK_ACCOUNTING_SCHEMA),
+      dataRule("task.integration", TASK_INTEGRATION_EVENT_SCHEMA),
       dataRule("hook.started", hookData),
       dataRule("hook.completed", hookData),
       dataRule("turn.completed", { type: "object", required: ["status"], properties: { status: { enum: [...TURN_COMPLETED_STATUSES] } } }),
@@ -91,7 +103,8 @@ const COMMAND_VARIANTS: ReadonlyArray<[string, Json, string[]]> = [
   ["session.assignMember", { memberId: nonEmptyString, expectedRevision: { type: "integer", minimum: 0 }, assignment: { type: "object", required: ["runnerId", "modelId"], properties: { runnerId: nonEmptyString, modelId: nonEmptyString, thinking: nonEmptyString } } }, ["memberId", "expectedRevision", "assignment"]],
   ["session.attach", { after: { type: "integer", minimum: 0 } }, ["after"]],
   ["session.bindChange", { changeId: nonEmptyString }, ["changeId"]],
-  ["prompt.send", { text: { type: "string" }, attachmentIds: { type: "array", maxItems: 8, uniqueItems: true, items: { type: "string", pattern: UUID_PATTERN } }, target: { const: "lead" } }, ["text"]],
+  ["prompt.send", { text: { type: "string" }, attachmentIds: { type: "array", maxItems: 8, uniqueItems: true, items: { type: "string", pattern: UUID_PATTERN } }, target: { const: "lead" }, delivery: { const: "current-turn" }, decisionTarget: DECISION_TARGET_SCHEMA }, ["text"]],
+  ...["decision.defer", "decision.cancel", "decision.reopen"].map(type => [type, DECISION_USER_COMMAND_PROPERTIES, ["decisionId", "expectedRevision", "note"]] as [string, Json, string[]]),
   ["prompt.cancel", { promptId: nonEmptyString }, ["promptId"]],
   ["prompt.resume", {}, []],
   ["turn.interrupt", { taskId: nonEmptyString }, ["taskId"]],

@@ -91,6 +91,12 @@ describe("install-canary argument planning", () => {
       .toBe(join(home, "canary-bin", "deck-canary"));
   });
 
+  test("recognizes the pinned npm Bun executable name in a full process argv", () => {
+    const home = tempRoot("deck-canary-pinned-args-");
+    expect(parseCanaryInstallArgs(["/cached/bun/bin/bun.exe", "/checkout/scripts/install-canary.ts", "--dir", join(home, "isolated-bin")], { homeDir: home }).targetPath)
+      .toBe(join(home, "isolated-bin", "deck-canary"));
+  });
+
   test("rejects missing, NUL, relative, ambiguous, and unknown arguments", () => {
     const home = tempRoot("deck-canary-args-");
     expect(() => parseCanaryInstallArgs(["--dir"], { homeDir: home })).toThrow("--dir requires");

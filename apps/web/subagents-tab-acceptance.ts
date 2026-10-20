@@ -1,0 +1,60 @@
+/** Opt-in composed tab acceptance. Isolated HTTP/WebSocket fixture, no installed daemon/providers. */
+import {chromium} from '@playwright/test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,writeFileSync} from 'node:fs';
+import {homedir,tmpdir} from 'node:os';
+import {join} from 'node:path';
+import type {CrossRunnerConfig} from '../../packages/core/src/config/deck-config';
+import type {SessionCommandBody} from '../../packages/core/src/session/commands';
+import {SessionManager} from '../../packages/session-host/src/session-manager';
+import {ApprovalBroker} from '../../packages/session-host/src/approval-broker';
+import {CredentialRegistry} from '../../packages/session-host/src/credentials';
+import {Supervisor} from '../../packages/session-host/src/supervisor';
+import {FakeDriver} from '../../packages/session-host/src/testing/fake-driver';
+import {WebService} from '../../packages/session-host/src/web-service';
+import {ensureStateLayout,resolveStatePaths,sessionPaths} from '../../packages/session-host/src/paths';
+import {WEB_ASSETS} from '../cli/src/runtime/web-assets.generated';
+const evidence='/tmp/deck-subagents-tab-evidence';mkdirSync(evidence,{recursive:true});
+const root=realpathSync(mkdtempSync(join(tmpdir(),'deck-tab-browser-'))),home=join(root,'home'),project=join(home,'project');mkdirSync(project,{recursive:true});
+const paths=resolveStatePaths({env:{XDG_STATE_HOME:join(root,'state')}});ensureStateLayout(paths);
+const driver=new FakeDriver();driver.onStart=turn=>{turn.init();turn.say('Fixture reply retained while native work continues');};
+const credentials=new CredentialRegistry({socketPath:paths.socket.path});let manager!:SessionManager;
+const config:CrossRunnerConfig={enabled:true,members:{lead:{runnerId:'claude',modelId:'fixture'},investigate:{runnerId:'claude',modelId:'fixture'},quality:{runnerId:'claude',modelId:'fixture'}},executionBudget:{lead:2,delegated:1},approvals:{claude:'relay',codex:'runner-default',opencode:'relay'},maxConcurrentTasks:4,claudeTosAcknowledgedAt:null,web:{port:0,trustedProxy:null,allowedOrigins:[],allowFunnel:false}};
+manager=new SessionManager({paths,credentials,broker:new ApprovalBroker({sink:{emit:(id,draft)=>{manager.openLog(id)?.append(draft);}}}),supervisor:new Supervisor({anchorCommand:['unused']}),drivers:{get:id=>id==='claude'?driver:undefined,list:()=>[driver]},config:()=>config,sessionMcpCommand:['/not-launched/deck'],homeDir:home});
+const host=new WebService({paths,assets:WEB_ASSETS,config:config.web,service:manager});host.enable();
+const browser=await chromium.launch({executablePath:process.env.DECK_TEST_CHROME??join(homedir(),'Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'),headless:true});
+const page=await browser.newPage({viewport:{width:1440,height:1000},reducedMotion:'reduce'});page.setDefaultTimeout(6000);
+const errors:string[]=[],checks:string[]=[],dimensions:Record<string,unknown>={};page.on('pageerror',error=>errors.push(error.message));
+const wait=async(condition:()=>boolean|Promise<boolean>,label:string)=>{for(let i=0;i<160;i++){if(await condition())return;await Bun.sleep(25);}throw Error(`Timed out: ${label}`);};
+const command=async(body:SessionCommandBody,sessionId?:string)=>{const result=await manager.execute({sessionId,clientId:'tab-browser-fixture',command:{v:1,commandId:randomUUID(),...body} as never});assert.equal(result.ok,true,JSON.stringify(result));return (result as any).data;};
+try{
+ const registered=await command({type:'project.register',path:project,name:'Tab activity workspace'});
+ const id=(await command({type:'session.create',projectId:registered.project.projectId,title:'Active conversation'})).sessionId;
+ await command({type:'session.create',projectId:registered.project.projectId,title:'Other conversation'});
+ const select=async(name:string)=>{if(await page.getByRole('button',{name:'Open sessions',exact:true}).isVisible())await page.getByRole('button',{name:'Open sessions',exact:true}).click();const nav=page.getByRole('navigation',{name:await page.getByRole('navigation',{name:'Mobile sessions',exact:true}).isVisible()?'Mobile sessions':'Sessions',exact:true});await nav.getByRole('button',{name,exact:true}).click();await wait(async()=>await page.locator('.app-header h1').innerText()===name,'session selected');};
+ const input=page.getByLabel('Message the lead'),tab=page.getByRole('tab',{name:'Subagents',exact:true}),indicator=tab.locator('.agent-indicator[data-state="working"]');
+ const working=async(expected:boolean)=>{await wait(async()=>await indicator.count()===(expected?1:0),'current child indicator');assert.equal(await tab.getByRole('status').innerText(),expected?'Subagents working':'No subagents working');};
+ const bounds=async()=>{assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1||document.documentElement.scrollHeight>innerHeight+1),false,'no outer overflow');assert.equal(await tab.evaluate(el=>el.scrollWidth>el.clientWidth+1),false,'tab label fits');assert.equal(await page.locator('.workspace-tabs').evaluate(el=>el.scrollWidth>el.clientWidth+1),false,'tab strip fits');};
+ await page.goto(host.status().url!);await select('Active conversation');await page.locator('.composer-gate').getByRole('button',{name:'Prepare session',exact:true}).click();await input.fill('Delegate independent work while I remain in Chat');await input.press('Enter');await wait(()=>driver.turns.length===1,'Lead started');await page.evaluate(()=>document.fonts.ready);await working(false);assert.equal(await page.locator('.decisions-panel').count(),0);
+ dimensions.desktopIdle=await tab.boundingBox();await page.setViewportSize({width:390,height:844});dimensions.mobileIdle=await tab.boundingBox();await bounds();
+ const call=async(name:string,args:Record<string,unknown>)=>{const grant=credentials.lookup(JSON.parse(readFileSync(sessionPaths(paths,id).taskCredentialFile('lead'),'utf8')).token)!;const result=await manager.callTaskTool(grant,name,args);assert.equal(result.ok,true,JSON.stringify(result));return (result as any).data;};
+ const first=(await call('deck_delegate',{agent:'investigate',task:'Run isolated investigation fixture'})).taskId;await wait(()=>driver.turns.length===2,'child started');await working(true);assert.equal(await page.getByRole('tab',{name:'Chat',exact:true}).getAttribute('aria-selected'),'true');assert.equal(await input.isVisible(),true);dimensions.mobileWorking=await tab.boundingBox();assert.equal((dimensions.mobileIdle as any).width,(dimensions.mobileWorking as any).width);assert.equal((dimensions.mobileIdle as any).height,(dimensions.mobileWorking as any).height);checks.push('working-visible-beside-subagents-while-chat-selected-no-layout-jump');
+ const second=(await call('deck_delegate',{agent:'quality',task:'Queue isolated review fixture'})).taskId;await wait(()=>[...manager.openLog(id)!.readAfter(0)].some(e=>e.kind==='task.state'&&e.data.taskId===second&&e.data.state==='queued'),'second child queued');assert.equal(driver.turns.length,2);await working(true);await call('deck_task_cancel',{taskId:second});checks.push('queued-child-remains-queued-without-additional-native-execution');
+ for(const theme of ['dark','light','cyberpunk']){await page.getByRole('combobox',{name:'Theme',exact:true}).selectOption(theme);await bounds();await page.screenshot({path:join(evidence,`mobile-${theme}.png`),fullPage:true});}
+ await page.setViewportSize({width:320,height:740});await bounds();await page.screenshot({path:join(evidence,'mobile-320-cyberpunk.png'),fullPage:true});
+ await page.setViewportSize({width:1440,height:1000});await working(true);await input.focus();assert.equal(await input.isVisible(),true);dimensions.desktopWorking=await tab.boundingBox();assert.equal((dimensions.desktopIdle as any).width,(dimensions.desktopWorking as any).width);await bounds();await page.screenshot({path:join(evidence,'desktop-cyberpunk.png'),fullPage:true});
+ for(const width of [768,1024]){await page.setViewportSize({width,height:900});await bounds();}checks.push('desktop-mobile-320-390-768-1024-themes-and-reduced-motion');
+ const transform=await indicator.locator('.work-orbit').evaluate(el=>getComputedStyle(el).transform);assert.equal(transform,'none');
+ await page.setViewportSize({width:390,height:844});await input.fill('Keep this draft');await select('Other conversation');await working(false);await select('Active conversation');await working(true);assert.equal(await input.inputValue(),'Keep this draft');assert.equal(driver.turns.length,2);checks.push('selected-session-isolation-and-draft-preserved');
+ await input.fill('');await page.reload();await select('Active conversation');await working(true);assert.equal(await page.getByRole('tab',{name:'Chat',exact:true}).getAttribute('aria-selected'),'true');assert.equal(driver.turns.length,2);checks.push('reload-hydrates-current-working-attempt-without-reexecution');
+ driver.turns[1]!.finish();await wait(()=>driver.turns[1]!.closed,'first child finished');await working(false);await call('deck_task_result',{taskId:first});assert.equal(await tab.locator('[data-unread]').count(),0);checks.push('last-running-child-finish-clears-icon-despite-retained-unread-report');
+ await call('deck_delegate',{agent:'investigate',task:'Continue the same task with a new attempt',continueTaskId:first});await wait(()=>driver.turns.length===3,'new child attempt started');await working(true);
+ const ended=[...manager.openLog(id)!.readAfter(0)].find(e=>e.kind==='task.state'&&e.source.taskId===first&&e.data.state==='completed')!;
+ await call('deck_task_integrate',{commandId:'tab-review-old-attempt',taskId:first,attempt:1,state:'integrated',note:'Reviewed only the original report',evidenceSeqs:[ended.seq]});
+ await page.reload();await select('Active conversation');await working(true);assert.equal(driver.turns.length,3);checks.push('older-attempt-review-cannot-replace-current-execution-after-reload');
+ driver.turns[2]!.finish();await wait(()=>driver.turns[2]!.closed,'new child attempt finished');await working(false);checks.push('same-task-latest-attempt-restarts-and-clears');
+ assert.equal(await page.locator('.decisions-panel').count(),0);await bounds();assert.deepEqual(errors,[]);
+ writeFileSync(join(evidence,'browser.json'),JSON.stringify({ok:true,checks,dimensions},null,2));console.log(JSON.stringify({ok:true,checks,dimensions}));
+}catch(error){writeFileSync(join(evidence,'browser-failure.txt'),await page.locator('body').innerText());await page.screenshot({path:join(evidence,'browser-failure.png'),fullPage:true});throw error;}
+finally{await browser.close();await host.close();await manager.close();rmSync(root,{recursive:true,force:true});}

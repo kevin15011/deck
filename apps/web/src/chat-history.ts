@@ -256,16 +256,17 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
     }, [api, sessionId, taskId, enabled, revision]);
     const boundsRef = useRef(bounds);
     boundsRef.current = bounds;
-    async function page(direction: 'older' | 'newer' | 'latest') {
+    async function page(direction: 'older' | 'newer' | 'latest' | 'around', target?:number, valid?:()=>boolean) {
         const run = owner.current;
         if (!run)
             return;
+        if(direction==='around'){run.pageRequest?.abort();run.pageRequest=undefined;run.loading=false;run.latestRequested=false;}
         if (run.loading) {
             if (direction === 'latest')
                 run.latestRequested = true;
             return;
         }
-        const cursor = direction === 'older' ? boundsRef.current.before : boundsRef.current.after;
+        const cursor = direction==='around'?target:direction === 'older' ? boundsRef.current.before : boundsRef.current.after;
         if (direction !== 'latest' && !cursor)
             return;
         const controller = new AbortController();
@@ -276,15 +277,16 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
         setLoading(true);
         setHistoryError('');
         try {
-            const query = direction === 'latest' ? '' : `?${direction === 'older' ? 'before' : 'after'}=${cursor}`;
+            const query = direction === 'latest' ? '' : `?${direction === 'around' ? 'around' : direction === 'older' ? 'before' : 'after'}=${cursor}`;
             const result: HistoryPage = await api(`/api/sessions/${encodeURIComponent(run.id)}/history${query}${taskId ? `${query ? '&' : '?'}taskId=${encodeURIComponent(taskId)}` : ''}`, { signal: controller.signal });
             if (owner.current !== run || selectedSession.current !== run.scope || run.controller.signal.aborted || controller.signal.aborted)
                 return;
+            if(valid&&!valid())return;
             callbacks.current.beforeChange();
             if ((direction === 'latest' || direction === 'newer' && !result.after) && result.seq < run.floor)
                 throw new Error('History changed too quickly. Try again.');
             const previous = rows.current;
-            let next = direction === 'latest' ? result.messages : mergeHistory(previous, result.messages, direction);
+            let next = direction === 'latest'||direction==='around' ? result.messages : mergeHistory(previous, result.messages, direction);
             if (direction === 'latest' || direction === 'newer' && !result.after) {
                 for (const row of run.live) {
                     if (row.seq > result.seq && (!next.length || row.historyId >= next[0]!.historyId))
@@ -293,9 +295,10 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
             }
             setMessages(next);
             rows.current = next;
-            const nextBounds = direction === 'latest' ? { before: result.before, after: result.after } : direction === 'older' ? { before: result.before, after: next.at(-1)?.historyId !== previous.at(-1)?.historyId ? next.at(-1)?.historyId : boundsRef.current.after } : { before: next[0]?.historyId !== previous[0]?.historyId ? next[0]?.historyId : boundsRef.current.before, after: result.after };
+            const nextBounds = direction === 'latest'||direction==='around' ? { before: result.before, after: result.after } : direction === 'older' ? { before: result.before, after: next.at(-1)?.historyId !== previous.at(-1)?.historyId ? next.at(-1)?.historyId : boundsRef.current.after } : { before: next[0]?.historyId !== previous[0]?.historyId ? next[0]?.historyId : boundsRef.current.before, after: result.after };
             boundsRef.current = nextBounds;
             setBounds(nextBounds);
+            return true;
         }
         catch (error) {
             if (owner.current === run && run.pageRequest === controller && selectedSession.current === run.scope && !run.controller.signal.aborted && (!controller.signal.aborted || timedOut))
@@ -314,5 +317,5 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
             }
         }
     }
-    return { messages: historySession.current === scope ? messages : [], loading, error: historyError, ...(historySession.current === scope ? bounds : {}), older: () => page('older'), newer: () => page('newer'), latest: () => page('latest') };
+    return { messages: historySession.current === scope ? messages : [], loading, error: historyError, ...(historySession.current === scope ? bounds : {}), older: () => page('older'), newer: () => page('newer'), latest: () => page('latest'), around:(seq:number,valid?:()=>boolean)=>page('around',seq,valid),cancel:()=>{const run=owner.current;if(run){run.pageRequest?.abort();run.pageRequest=undefined;run.loading=false;run.latestRequested=false;setLoading(false);}} };
 }
