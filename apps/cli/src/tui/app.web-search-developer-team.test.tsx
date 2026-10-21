@@ -1,4 +1,7 @@
 import React from "react";
+import { createHash } from "node:crypto";
+import { createOpenCodeCodebaseTools } from "../../../../packages/adapter-opencode/src/codebase-tools";
+import { createOpenCodeEvidenceContext } from "../../../../packages/adapter-opencode/src/required-tools";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -116,7 +119,16 @@ describe("DeckApp Web Search Developer Team materialization", () => {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, "opencode.json"), "{}\n", { encoding: "utf8", mode: 0o600 });
 
+    const reviewedBinary = join(root, "home", "codebase-memory-mcp");
+    const reviewedBytes = "#!/bin/sh\nprintf 'codebase-memory-mcp 0.11.0\\n'\n";
+    writeFileSync(reviewedBinary, reviewedBytes, { mode: 0o700 });
+    const codebaseTools = createOpenCodeCodebaseTools({
+      homeDirectory: join(root, "home"), dataRoot: join(root, "home", "data", "deck"), resolveCommand: () => reviewedBinary,
+      release: { asset: "fixture", archiveBytes: 1, archiveSha256: "0".repeat(64), binaryBytes: Buffer.byteLength(reviewedBytes), binarySha256: createHash("sha256").update(reviewedBytes).digest("hex") },
+      artifactEffects: { fetchArchive: async () => { throw new Error("Unexpected download in dashboard fixture"); } },
+    });
     const adapter = createOpenCodeRunnerAdapter({
+      evidenceContext: () => ({ ...createOpenCodeEvidenceContext({ projectRoot, homeDirectory: join(root, "home"), environment: { HOME: join(root, "home"), PATH: "" } }), codebaseTools }),
       developerTeamConfigDir: configDir,
       webSearchProviderResolver: getWebSearchProviderDescriptor,
       toolsReview: {
@@ -207,8 +219,8 @@ describe("DeckApp Web Search Developer Team materialization", () => {
         () => `plan=${summarizePlan()}; applyCalls=${developerTeamApplyCalls}; mcpWrites=${JSON.stringify(mcpWrites)}; output=${JSON.stringify(harness.output().slice(-8_000))}`,
       );
       expect(developerTeamApplyCalls).toBe(1);
-      expect(mcpWrites).toHaveLength(1);
-      expect(mcpWrites[0]).toMatch(new RegExp(`^${webSearchProvider.semanticServerId}:ok:`));
+      expect(mcpWrites).toEqual([`codebase-memory:ok:MCP server 'codebase-memory' configured in OpenCode at ${join(configDir, "opencode.json")}.`, `${webSearchProvider.semanticServerId}:ok:`]);
+      expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf8")).mcp["codebase-memory"].command).toEqual([reviewedBinary]);
 
       const canonicalSkillIds = new Set(DEVELOPER_TEAM_AGENTS.map((agent) => agent.skillId));
       const allRolePolicies = Object.values(WEB_SEARCH_ROLE_POLICY_V1);

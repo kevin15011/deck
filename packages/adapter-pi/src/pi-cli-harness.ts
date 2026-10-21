@@ -29,8 +29,8 @@ export type PiHarness = {
   run(args: string[], env: Record<string, string>, options?: { timeoutMs?: number; persistSession?: boolean }): Promise<{ events: Array<Record<string, any>>; stderr: string; code: number }>;
 };
 
-export function createPiHarness(materialization: Omit<PiGlobalMaterializationInput, "agentDir" | "projectRoot" | "legacyDeckEvidence"> = {}): PiHarness {
-  const pi = findRealPi();
+export function createPiHarness(materialization: Omit<PiGlobalMaterializationInput, "agentDir" | "projectRoot" | "legacyDeckEvidence"> = {}, fixtureOptions: { command?: readonly string[] } = {}): PiHarness {
+  const pi = fixtureOptions.command?.[0] ?? findRealPi();
   if (!pi) throw new Error("pi binary not found");
   const root = mkdtempSync(join(tmpdir(), "deck-pi-cli-"));
   const agentDir = join(root, "agent");
@@ -47,7 +47,7 @@ export function createPiHarness(materialization: Omit<PiGlobalMaterializationInp
     cleanup: () => rmSync(root, { recursive: true, force: true }),
     async run(args, env, options = {}) {
       const sessionArgs = options.persistSession ? ["--session-dir", join(root, "sessions")] : ["--no-session"];
-      const child = Bun.spawn([pi, "--mode", "json", "-p", ...sessionArgs, "--model", "faux/faux-1", ...args], {
+      const child = Bun.spawn([...(fixtureOptions.command ?? [pi]), "--mode", "json", "-p", ...sessionArgs, "--model", "faux/faux-1", ...args], {
         cwd: project,
         stdin: "ignore",
         stdout: "pipe",

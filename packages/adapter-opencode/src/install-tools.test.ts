@@ -319,12 +319,12 @@ describe("installOpenCodeTools", () => {
     let effects = 0;
     const [result] = await installOpenCodeTools(
       "opencode",
-      [{ id: "codebase-memory", name: "codebase-memory", module: "DeusData/codebase-memory-mcp", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" }],
+      [{ id: "rtk", name: "rtk", module: "rtk-ai/rtk", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" }],
       () => {},
       async () => { effects++; return successfulCommand(); },
       {
         evidenceContext: evidenceContext(),
-        resolveEvidence: () => state("codebase-memory", "usable"),
+        resolveEvidence: () => state("rtk", "usable"),
         downloadScript: async () => { effects++; return "#!/bin/sh\n"; },
         runShellScript: async () => { effects++; return successfulCommand(); },
       },
@@ -342,12 +342,12 @@ describe("installOpenCodeTools", () => {
     let shellRuns = 0;
     const [result] = await installOpenCodeTools(
       "opencode",
-      [{ id: "codebase-memory", name: "codebase-memory", module: "DeusData/codebase-memory-mcp", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" }],
+      [{ id: "rtk", name: "rtk", module: "rtk-ai/rtk", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" }],
       () => {},
       successfulCommand,
       {
         evidenceContext: evidenceContext(),
-        resolveEvidence: () => state("codebase-memory", ++checks < 2 ? "absent" : "usable"),
+        resolveEvidence: () => state("rtk", ++checks < 2 ? "absent" : "usable"),
         downloadScript: async () => { downloads++; return "#!/bin/sh\n"; },
         runShellScript: async () => { shellRuns++; return successfulCommand(); },
       },
@@ -362,12 +362,12 @@ describe("installOpenCodeTools", () => {
     const rawStderr = "pgrep: pattern that searches for process name longer than 15 characters will result in zero matches\nerror: failed to copy binary to /home/tester/.local/bin/codebase-memory-mcp (ETXTBSY) token=super-secret\n";
     const [result] = await installOpenCodeTools(
       "opencode",
-      [{ id: "codebase-memory", name: "codebase-memory", module: "DeusData/codebase-memory-mcp", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" }],
+      [{ id: "rtk", name: "rtk", module: "rtk-ai/rtk", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" }],
       () => {},
       successfulCommand,
       {
         evidenceContext: evidenceContext(),
-        resolveEvidence: () => state("codebase-memory", "absent"),
+        resolveEvidence: () => state("rtk", "absent"),
         downloadScript: async () => "#!/bin/sh\n",
         runShellScript: async () => ({ exitCode: 1, stdout: "", stderr: rawStderr }),
       },
@@ -421,7 +421,7 @@ describe("installOpenCodeTools", () => {
       [
         { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp" },
         { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp" },
-        { id: "codebase-memory", name: "codebase-memory", module: "DeusData/codebase-memory-mcp", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" },
+        { id: "rtk", name: "rtk", module: "rtk-ai/rtk", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" },
       ],
       () => {},
       async () => { effects++; return { exitCode: 1, stdout: "", stderr: "failed" }; },
@@ -482,12 +482,12 @@ describe("installOpenCodeTools", () => {
     const stderr = `${"progress ".repeat(10_000)}\n${ansi}ERROR token=secret-value /home/tester/private.txt https://example.test/?token=url-secret\n`;
     const [result] = await installOpenCodeTools(
       "opencode",
-      [{ id: "codebase-memory", name: "codebase-memory", module: "DeusData/codebase-memory-mcp", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" }],
+      [{ id: "rtk", name: "rtk", module: "rtk-ai/rtk", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" }],
       () => {},
       successfulCommand,
       {
         evidenceContext: evidenceContext(),
-        resolveEvidence: () => state("codebase-memory", "absent"),
+        resolveEvidence: () => state("rtk", "absent"),
         downloadScript: async () => "#!/bin/sh\n",
         runShellScript: async () => ({ exitCode: 1, stdout: "", stderr }),
       },
@@ -509,12 +509,12 @@ describe("installOpenCodeTools", () => {
     let shellRuns = 0;
     const [result] = await installOpenCodeTools(
       "opencode",
-      [{ id: "codebase-memory", name: "codebase-memory", module: "DeusData/codebase-memory-mcp", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" }],
+      [{ id: "rtk", name: "rtk", module: "rtk-ai/rtk", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" }],
       () => {},
       successfulCommand,
       {
         evidenceContext: evidenceContext(),
-        resolveEvidence: () => state("codebase-memory", "absent"),
+        resolveEvidence: () => state("rtk", "absent"),
         downloadScript: async () => "x".repeat(1024 * 1024 + 1),
         runShellScript: async () => { shellRuns++; return successfulCommand(); },
       },
@@ -533,13 +533,13 @@ describe("installOpenCodeTools", () => {
     const download = new Promise<string>((resolve) => { finishDownload = resolve; });
     const pending = installOpenCodeTools(
       "opencode",
-      [{ id: "codebase-memory", name: "codebase-memory", module: "DeusData/codebase-memory-mcp", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" }],
+      [{ id: "rtk", name: "rtk", module: "rtk-ai/rtk", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" }],
       () => {},
       successfulCommand,
       {
         signal: controller.signal,
         evidenceContext: evidenceContext(),
-        resolveEvidence: () => state("codebase-memory", "absent"),
+        resolveEvidence: () => state("rtk", "absent"),
         downloadScript: async () => download,
         runShellScript: async () => { shellRuns++; return successfulCommand(); },
       },

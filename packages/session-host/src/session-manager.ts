@@ -1,3 +1,4 @@
+import { PersonalMcpPreparationError, validatePersonalMcpAvailability, type PersonalMcpAvailability, type PersonalMcpByMember } from "@deck/core/session/personal-mcp";
 import type { SessionGrant } from "@deck/core/session/approval";
 import { isApprovalMode, type ApprovalMode } from "@deck/core/session/commands";
 import { QuestionBroker } from "./question-broker";
@@ -30,7 +31,7 @@ import type {
 } from "@deck/core/session/driver";
 import { boundRaw, SESSION_EVENT_KINDS, type SessionEvent, type SessionEventKind } from "@deck/core/session/events";
 import { continuityContext } from "./continuity";
-import { CROSS_RUNNER_LEAD_CONTINUITY_GUIDANCE, validTaskIntegration, computeChildMcpSet } from "@deck/core/session/mcp";
+import { CROSS_RUNNER_LEAD_CONTINUITY_GUIDANCE, validTaskIntegration, computeChildMcpSet, validateCapabilityAvailability, CODEBASE_DISCOVERY_FALLBACK, type CapabilityAvailability } from "@deck/core/session/mcp";
 import { redactText } from "@deck/core/session/redaction";
 import type { ApprovalBroker } from "./approval-broker";
 import { SESSION_MCP_SERVER_ID, sessionMcpServerSpec } from "./bridge-config";
@@ -73,6 +74,9 @@ const ALL_KINDS = new Set<string>(SESSION_EVENT_KINDS);
 export type DriverLookup = { get(runnerId: string): RunnerSessionDriver | undefined; list(): readonly RunnerSessionDriver[] };
 
 export type ChildMcpResolver = {
+  suppressedMcpServers?: readonly string[];
+  personalMcpAvailability?: readonly PersonalMcpAvailability[];
+  capabilityAvailability?: readonly CapabilityAvailability[];
   nativeMemory?: NativeMemoryDescriptor;
   /** Server ids Deck configured for the runner, before the memory/web/session adjustments of `computeChildMcpSet`. */
   runnerPackages(runnerId: string): readonly string[];
@@ -89,6 +93,7 @@ export type ChildMcpContext = { projectRoot: string; sessionId: string; taskId: 
 
 /** Structural counterpart of the CLI prompt context; session-host never imports the composition root. */
 export type SessionRolePromptContext = {
+  capabilityAvailability?: readonly CapabilityAvailability[];
   changeId?: string;
   projectRoot: string;
   runnerId: string;
@@ -117,11 +122,11 @@ export type SessionManagerOptions = {
   logger?: DaemonLogger;
   newSessionId?: () => string;
   homeDir?: string;
-  modelCatalog?: (projectRoot: string) => Promise<SessionModelCatalog>;
+  modelCatalog?: (projectRoot: string, projectConfigTrusted?: boolean, signal?: AbortSignal) => Promise<SessionModelCatalog>;
 };
 
 export type SessionModelCatalog = { runners: Array<{ runnerId: string; label: string; available: boolean; reasonCode?: string; models: Array<{ modelId: string; label: string; thinkingLevels: readonly string[] }> }> };
-export type SessionPreparation = { preparationId?: string; status: "unprepared" | "releasing" | "preparing" | "ready" | "failed" | "cancelled"; generation: number; phase?: "checking-runner" | "preparing-tools"; reasonCode?: string; checkedAt?: string };
+export type SessionPreparation = { projectTrust?: import("./project-store").ProjectTrust; personalMcpRunnerId?: string; memberMcpAvailability?: PersonalMcpByMember; personalMcpAvailability?: readonly PersonalMcpAvailability[]; capabilityAvailability?: readonly CapabilityAvailability[]; preparationId?: string; status: "unprepared" | "releasing" | "preparing" | "ready" | "failed" | "cancelled"; generation: number; phase?: "checking-runner" | "preparing-tools"; reasonCode?: string; checkedAt?: string };
 type PreparationJob = { epoch: number; reopening: boolean; state: SessionPreparation; controller: AbortController; done: Promise<void> };
 
 type SessionMeta = {
@@ -137,6 +142,7 @@ type SessionMeta = {
 type Turn = {
   taskId: string; memberId: string; assignment: RunnerQualifiedAssignment; prompt: string; resume?: { nativeSessionId: string }; reseeded?: boolean;
   attempt: number;
+  projectTrustRevision?: number;
   nativeSessionId?: string;
   handle?: DriverTaskHandle;
   closeHandle?: Promise<void>;
@@ -171,6 +177,7 @@ type Live = {
   stopping: boolean;
   broken: boolean;
   preparation?: PreparationJob;
+  nativeMcpAvailability?: Pick<SessionPreparation, "generation" | "personalMcpRunnerId" | "personalMcpAvailability" | "memberMcpAvailability">;
   releaseDrain?: Promise<void>;
   cleanupFailures?: Array<() => Promise<void> | void>;
 };
@@ -200,12 +207,14 @@ export class SessionManager implements SessionService {
   private readonly executing = new Map<string, { fingerprint: string; result: Promise<ExecuteOutcome> }>();
   private readonly clock: Clock;
   private closing = false;
+  private shutdownReason="daemon-stopped";
   private closePromise?: Promise<void>;
   private projects?: ProjectStore;
   private lastAdmitted: { lead?: string; delegated?: string } = {};
   private scheduling = false;
   private schedulerRestored = false;
   private readonly preparationJobs = new Map<PreparationJob, Live>();
+  private readonly modelQueries = new Map<AbortController, string>();
 
   readonly questionBroker: QuestionBroker;
 
@@ -266,6 +275,24 @@ export class SessionManager implements SessionService {
   private async performExecute(input: { sessionId?: string; command: SessionCommand; clientId: string }): Promise<ExecuteOutcome> {
     const { command, clientId } = input;
     if (this.closing) return fail("daemon-stopping");
+    if (command.type === "project.trust") {
+      // MCP/control connections cannot consent on the user's behalf. WebService assigns
+      // this identity only after device authentication and same-origin validation.
+      if (!clientId.startsWith("web:")) return fail("project-trust-user-required");
+      try {
+        const before = this.projectStore().projectTrust(command.projectId);
+        const result = this.projectStore().executeCommand(command);
+        const trust = this.projectStore().projectTrust(command.projectId);
+        if (trust.revision !== before.revision) for (const [controller, root] of this.modelQueries) if (root === trust.projectRoot) controller.abort();
+        if (trust.revision !== before.revision) for (const live of this.sessions.values()) {
+          if (live.meta.projectRoot !== trust.projectRoot) continue;
+          live.preparation?.controller.abort(); live.preparation = undefined;
+          live.nativeMcpAvailability = undefined;
+          this.append(live, {kind:"diagnostic",data:{code:"session.preparation",...this.readiness(live)}}); this.flush(live);
+        }
+        return {...ok({...result.data, trust}), ...(result.duplicate ? {duplicate:true} : {})};
+      } catch (error) { const code = (error as Error).message; return fail(["command-id-reused","project-unknown","project-unavailable","project-trust-invalid","project-trust-conflict"].includes(code) ? code : "project-invalid"); }
+    }
     if (command.type === "project.register" || command.type === "project.rename" || command.type === "project.remove") {
       try { const result = this.projectStore().executeCommand(command); return { ...ok(result.data), ...(result.duplicate ? { duplicate: true } : {}) }; }
       catch (error) { const code = (error as Error).message; return fail(["command-id-reused", "project-unknown", "project-name-invalid"].includes(code) ? code : "project-invalid"); }
@@ -440,6 +467,10 @@ export class SessionManager implements SessionService {
         const live = typeof id === "string" ? this.load(id) : undefined;
         return live ? ok(this.promptSnapshot(live)) : fail("unknown-session");
       }
+      case "project.trust": {
+        try { const id = (args as {projectId?:unknown})?.projectId; return typeof id === "string" ? ok(this.projectStore().projectTrust(id)) : fail("project-unknown"); }
+        catch { return fail("project-unknown"); }
+      }
       case "session.readiness": {
         const live = typeof (args as any)?.sessionId === "string" ? this.load((args as any).sessionId) : undefined;
         return live ? ok(this.readiness(live)) : fail("unknown-session");
@@ -447,7 +478,12 @@ export class SessionManager implements SessionService {
       case "runners.models": {
         const project = typeof (args as any)?.projectId === "string" ? this.projectStore().get((args as any).projectId, true) : undefined;
         if (!project || !project.available) return fail("project-unavailable");
-        try { return ok(await this.options.modelCatalog?.(project.path) ?? { runners: [] }); } catch { return fail("models-unavailable"); }
+        const controller = new AbortController(); this.modelQueries.set(controller,project.path);
+        try {
+          const result = await this.options.modelCatalog?.(project.path,this.projectStore().projectTrust(project.projectId).trusted,controller.signal) ?? {runners:[]};
+          return controller.signal.aborted ? fail("project-trust-changed") : ok(result);
+        } catch { return fail("models-unavailable"); }
+        finally { this.modelQueries.delete(controller); }
       }
       case "sessions.prune": return { ok: true, data: this.prune((args ?? {}) as { maxAgeDays?: number; keep?: number; dryRun?: boolean }) };
       case "drivers.status": return { ok: true, data: await this.driversStatus() };
@@ -464,21 +500,32 @@ export class SessionManager implements SessionService {
     }
   }
 
+  restartSnapshot():{fingerprint:string;tasks:number}{
+    const rows=[...this.sessions.values()].map(live=>[live.sessionId,live.preparation?.state.status,live.ledger.tasks().map(task=>[task.taskId,live.ledger.latest(task.taskId)?.attempt,live.ledger.latest(task.taskId)?.state]),live.ledger.prompts().filter(p=>['queued','dispatched'].includes(p.state)).map(p=>[p.promptId,p.state]),live.ledger.promptQueue.paused]);
+    return{fingerprint:JSON.stringify(rows),tasks:[...this.sessions.values()].reduce((n,l)=>n+l.turns.size+l.queue.length,0)};
+  }
+
   /** Daemon shutdown: finish running turns (their processes are ended by the supervisor first), checkpoint, close logs. */
-  close(): Promise<void> {
+  close(reason="daemon-stopped"): Promise<void> {
     if (this.closePromise) return this.closePromise;
     this.closing = true;
+    this.shutdownReason=reason;
     this.closePromise = this.closeSessions();
     return this.closePromise;
   }
 
   private async closeSessions(): Promise<void> {
-    this.questionBroker.dispose("shutdown");
+    this.questionBroker.dispose(this.shutdownReason.startsWith("web-restart-forced:")?this.shutdownReason:"shutdown");
     for (const live of this.sessions.values()) {
+      if(this.shutdownReason.startsWith("web-restart-forced:")){
+        const cancelled=live.ledger.prompts().filter(p=>p.state==="queued").map(p=>({kind:"prompt.state" as const,data:{promptId:p.promptId,state:"cancelled",reason:this.shutdownReason}}));
+        this.append(live,[...cancelled,{kind:"prompt.queue",data:{paused:true,reason:this.shutdownReason}}]);this.flush(live);
+      }
       if (live.wakeTimer !== undefined) this.clock.clearTimeout(live.wakeTimer);
       live.wakeTimer = undefined; live.notices.clear(); this.cancelQueued(live);
       live.preparation?.controller.abort();
     }
+    for (const controller of this.modelQueries.keys()) controller.abort();
     for (const job of this.preparationJobs.keys()) job.controller.abort();
     await Promise.all([...this.preparationJobs.keys()].map(job => job.done));
     const turns = [...this.sessions.values()].flatMap((l) => [...l.turns.values()]);
@@ -663,7 +710,7 @@ export class SessionManager implements SessionService {
       if (taskId && turn.taskId !== taskId) continue;
       live.queue.splice(live.queue.indexOf(turn), 1);
       turn.controller.abort();
-      this.append(live, { kind: "task.state", source: { taskId: turn.taskId }, data: { taskId: turn.taskId, state: "cancelled" } });
+      this.append(live, { kind: "task.state", source: { taskId: turn.taskId }, data: { taskId: turn.taskId, state: "cancelled",...(this.closing&&this.shutdownReason.startsWith("web-restart-forced:")?{reason:this.shutdownReason}:{}) } });
       this.queueNotice(live, turn, "cancelled");
       turn.resolveDone();
     }
@@ -1079,9 +1126,11 @@ export class SessionManager implements SessionService {
 
   private readiness(live: Live): SessionPreparation {
     const generation=live.ledger.session.generation??0;
+    const projectTrust = this.projectStore().projectTrust(live.meta.projectId ?? projectIdentity(live.meta.projectRoot));
     if(live.ledger.session.releasePending) return {status:live.ledger.session.releaseFailure ? "failed" : "releasing",generation,...(live.ledger.session.releaseFailure ? {reasonCode:live.ledger.session.releaseFailure} : {})};
     if(live.stopping || live.ledger.session.state==="ended") return {status:"unprepared",generation};
-    return live.preparation?.state.generation===generation ? {...live.preparation.state} : {status:"unprepared",generation};
+    const state: SessionPreparation = live.preparation?.state.generation===generation ? {...live.preparation.state} : {status:"unprepared",generation};
+    return {...(live.nativeMcpAvailability?.generation===generation ? {...state,...live.nativeMcpAvailability} : state), projectTrust};
   }
   private ownershipBlocked(live: Live): boolean {
     return live.ledger.tasks().some(task=>!TERMINAL_TASK_STATES.includes(task.attempts.at(-1)!.state));
@@ -1092,13 +1141,15 @@ export class SessionManager implements SessionService {
     if(this.ownershipBlocked(live)) return fail("ownership-unsettled");
     const reopening=!!live.ledger.session.released || live.ledger.session.state==="ended" || !!live.ledger.session.stopRequested;
     const epoch=live.ledger.session.releaseEpoch??0;
-    if (live.preparation?.state.generation === (live.ledger.session.generation ?? 0) && (live.preparation.state.status === "preparing" || live.preparation.state.status === "ready" && !reopening)) {
+    if (live.preparation?.state.generation === (live.ledger.session.generation ?? 0) && (live.preparation.state.status === "preparing" || live.preparation.state.status === "ready" && !live.preparation.state.capabilityAvailability?.some(item => item.status === "unavailable") && !reopening)) {
       const result = { ok: true as const, data: { preparation: this.readiness(live) } };
       this.append(live, [{kind:"diagnostic",data:{code:"session.preparation",...this.readiness(live),commandId:command.commandId,outcome:result}},this.receiptDraft(command, result)]); this.flush(live); return result;
     }
     if(reopening) { this.append(live,{kind:"session.reopened",data:{state:"idle",epoch,prepared:false}}); live.stopping=false; }
+    if ([...this.preparationJobs.values()].some(owner => owner === live)) return fail("session-preparing");
     const job: PreparationJob = {epoch,reopening,state: { preparationId: randomUUID(), status: "preparing", phase: "checking-runner", generation: live.ledger.session.generation ?? 0 }, controller: new AbortController(), done: Promise.resolve() };
     live.preparation = job;
+    live.nativeMcpAvailability = undefined;
     const result = { ok: true as const, data: { preparation: this.readiness(live) } };
     this.append(live, [{ kind: "diagnostic", data: { code: "session.preparation", ...job.state,commandId:command.commandId,outcome:result } },this.receiptDraft(command,result)]); this.flush(live);
     this.preparationJobs.set(job, live);
@@ -1141,14 +1192,16 @@ export class SessionManager implements SessionService {
         failureCode = reason && ["native-memory-scope-unavailable", "native-memory-profile-unavailable", "native-memory-plugin-unavailable"].includes(reason) ? reason : "native-memory-unavailable";
         throw new Error(failureCode);
       }
-      completion = { status: "ready", checkedAt: new Date(this.clock.now()).toISOString() };
+      const capabilityAvailability = reviewedCapabilityAvailability(resolver, assignment.runnerId);
+      completion = { status: "ready", personalMcpRunnerId: assignment.runnerId, personalMcpAvailability: validatePersonalMcpAvailability(resolver?.personalMcpAvailability), capabilityAvailability, reasonCode: capabilityAvailability.find(item => item.status === "unavailable")?.reasonCode, checkedAt: new Date(this.clock.now()).toISOString() };
     } catch (error) {
+      if (error instanceof PersonalMcpPreparationError) failureCode = error.reasonCode;
       if (failureCode === "preparation-tools-failed" && error instanceof Error) {
         // Publish only reviewed codes, never backend details or credentials.
-        const reason = /^(codebase-memory-(?:unavailable|unsupported|cancelled)|web-search-(?:credential-missing|provider-unconfigured))(?=:|$)/.exec(error.message)?.[1];
+        const reason = /^(codebase-memory-(?:unavailable|unsupported|cancelled)|web-search-(?:credential-missing|provider-unconfigured)|personal-mcp-(?:managed-exclusive|remote-config-isolation-unavailable|auth-config-unavailable))(?=:|$)/.exec(error.message)?.[1];
         if (reason) failureCode = reason;
       }
-      completion = { status: signal.aborted && !timedOut ? "cancelled" : "failed", reasonCode: signal.aborted ? timedOut ? "preparation-timeout" : "preparation-cancelled" : failureCode };
+      completion = { ...(error instanceof PersonalMcpPreparationError ? {personalMcpAvailability:validatePersonalMcpAvailability(error.availability)} : {}), status: signal.aborted && !timedOut ? "cancelled" : "failed", reasonCode: signal.aborted ? timedOut ? "preparation-timeout" : "preparation-cancelled" : failureCode };
     } finally {
       try { await resolver?.release?.(); } catch { if(resolver?.release) (live.cleanupFailures??=[]).push(()=>resolver!.release!()); completion = { status: "failed", reasonCode: "preparation-release-failed" }; }
       this.clock.clearTimeout(timeout);
@@ -1543,6 +1596,9 @@ export class SessionManager implements SessionService {
       preparation("preparing-tools");
       resolver = typeof this.options.childMcp === "function" ? await this.options.childMcp(assignment.runnerId, { projectRoot: live.meta.projectRoot, sessionId: live.sessionId, taskId: turn.taskId, signal: turn.controller.signal }) : this.options.childMcp;
       if (turn.controller.signal.aborted) throw new Error("turn-cancelled");
+      const capabilityAvailability = reviewedCapabilityAvailability(resolver, assignment.runnerId);
+      const personalMcpAvailability = validatePersonalMcpAvailability(resolver?.personalMcpAvailability);
+      this.publishMcpAvailability(live, turn.memberId, assignment.runnerId, personalMcpAvailability);
       const nativeMemory = resolver?.nativeMemory;
       turn.nativeMemory = nativeMemory;
       if (nativeMemory) {
@@ -1555,21 +1611,36 @@ export class SessionManager implements SessionService {
         } });
         if (nativeMemory.status === "unavailable") throw new Error(nativeMemory.reasonCode ?? "native-memory-unavailable");
       }
+      if (capabilityAvailability.length) {
+        this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: { code: "capability.availability", availability: capabilityAvailability } });
+        const state = live.preparation?.state;
+        if (turn.memberId === LEAD_MEMBER_ID && state?.status === "ready" && JSON.stringify(state.capabilityAvailability) !== JSON.stringify(capabilityAvailability)) {
+          Object.assign(state, { capabilityAvailability, reasonCode: capabilityAvailability.find(item => item.status === "unavailable")?.reasonCode });
+          this.append(live, { kind: "diagnostic", data: { code: "session.preparation", ...state } });
+        }
+      }
       const child = this.childMcp(assignment.runnerId, credentialFile, resolver, turn.memberId === LEAD_MEMBER_ID ? "lead" : "member");
       this.options.credentials.issue({ sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId, allowedTools: child.mcp.sessionTools }, credentialFile);
       for (const id of child.skipped) this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: { code: "child-mcp-server-unresolved", server: id } });
       const approvals = this.approvalMode(live.meta, live.ledger).approvalMode === "relay" ? "relay" : "runner-default";
+      const projectTrust = this.projectStore().projectTrust(live.meta.projectId ?? projectIdentity(live.meta.projectRoot));
+      turn.projectTrustRevision = projectTrust.revision;
       const input: DriverTaskInput = {
+        ...(assignment.runnerId === "opencode" ? {projectConfigTrusted:projectTrust.trusted} : {}),
         ...(turn.steeringAllowed?{steeringVersion,inputOrigin:turn.promptId?'user' as const:'host' as const}:{}),
         taskId: turn.taskId, memberId: turn.memberId, cwd: live.meta.projectRoot, assignment,
-        rolePrompt: [ turn.memberId === LEAD_MEMBER_ID && !resume && live.ledger.session.handoff ? `Prior Deck conversation context (advisory, reseeded from ${live.ledger.session.handoff.sourceSessionId} at sequence ${live.ledger.session.handoff.sourceSeq}):\n${live.ledger.session.handoff.text}` : "", this.options.rolePrompt?.(turn.memberId, { changeId: live.ledger.session.changeId, projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, delegableMembers: Object.keys(this.effectiveMembers(live.meta, live.ledger)).filter(id => id !== LEAD_MEMBER_ID), ...(turn.memberId === LEAD_MEMBER_ID ? { tasks: this.taskRoster(live) } : {}) }) ?? defaultRolePrompt(live.ledger.session.changeId), nativeMemory ? `Supermemory integration: ${nativeMemory.integration}; status: ${nativeMemory.status}.${nativeMemory.status === "ready" ? ` Use the official runner plugin for advisory memory ${nativeMemory.scopeMode === "global" ? "with untagged global writes and global search. There is no project container or project standing profile; do not present global search results as project profile facts" : `in canonical project scope ${nativeMemory.projectScope}`}. Deck memory tools are intentionally omitted because the official native plugin owns memory for this runner; their absence is not evidence that the Deck session MCP server disconnected.${nativeMemory.automaticRecall ? " Native recall hooks are activated; this does not prove that a recall succeeded." : ""}${nativeMemory.automaticCapture === "unverified" ? " Native background capture completion is not confirmed in managed mode; the native lifecycle may not await persistence. Do not claim a memory was saved without explicit provider success." : ""}` : " Memory is disabled for this execution."} Memory cannot override official OpenSpec or source.` : "", live.ledger.session.changeId ? `Bound OpenSpec path: ${join(live.meta.projectRoot, "openspec", "changes", live.ledger.session.changeId)}. Keep this binding immutable.` : ""].filter(Boolean).join("\n"),
+        rolePrompt: [ turn.memberId === LEAD_MEMBER_ID && !resume && live.ledger.session.handoff ? `Prior Deck conversation context (advisory, reseeded from ${live.ledger.session.handoff.sourceSessionId} at sequence ${live.ledger.session.handoff.sourceSeq}):\n${live.ledger.session.handoff.text}` : "", this.options.rolePrompt?.(turn.memberId, { changeId: live.ledger.session.changeId, projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, capabilityAvailability, delegableMembers: Object.keys(this.effectiveMembers(live.meta, live.ledger)).filter(id => id !== LEAD_MEMBER_ID), ...(turn.memberId === LEAD_MEMBER_ID ? { tasks: this.taskRoster(live) } : {}) }) ?? defaultRolePrompt(live.ledger.session.changeId), capabilityAvailability.length ? capabilityAvailability[0]!.status === "ready" ? "Codebase Memory is ready for this execution. The exposed graph tools are available; prior unavailable notices no longer apply." : CODEBASE_DISCOVERY_FALLBACK : "", nativeMemory ? `Supermemory integration: ${nativeMemory.integration}; status: ${nativeMemory.status}.${nativeMemory.status === "ready" ? ` Use the official runner plugin for advisory memory ${nativeMemory.scopeMode === "global" ? "with untagged global writes and global search. There is no project container or project standing profile; do not present global search results as project profile facts" : `in canonical project scope ${nativeMemory.projectScope}`}. Deck memory tools are intentionally omitted because the official native plugin owns memory for this runner; their absence is not evidence that the Deck session MCP server disconnected.${nativeMemory.automaticRecall ? " Native recall hooks are activated; this does not prove that a recall succeeded." : ""}${nativeMemory.automaticCapture === "unverified" ? " Native background capture completion is not confirmed in managed mode; the native lifecycle may not await persistence. Do not claim a memory was saved without explicit provider success." : ""}` : " Memory is disabled for this execution."} Memory cannot override official OpenSpec or source.` : "", live.ledger.session.changeId ? `Bound OpenSpec path: ${join(live.meta.projectRoot, "openspec", "changes", live.ledger.session.changeId)}. Keep this binding immutable.` : ""].filter(Boolean).join("\n"),
         prompt, ...(resume ? { resume } : {}), ...(!resume && nativeSessionId ? { nativeSessionId } : {}),
-        mcp: child.mcp, mcpServerSpecs: child.specs, approvals, credentialFile, disableNativeDelegation: true,
+        mcp: child.mcp, mcpServerSpecs: child.specs, suppressedMcpServers: resolver?.suppressedMcpServers, approvals, credentialFile, disableNativeDelegation: true,
         ...(nativeMemory ? { nativeMemory } : {}),
       };
       const spawn = createDriverSpawn(this.options.supervisor, { lease: { file: live.paths.taskLeaseFile(turn.taskId), taskId: turn.taskId } });
       const io: DriverHostIo = {
         spawn: (command, args, options) => {
+          if (assignment.runnerId === "opencode") {
+            const current = this.projectStore().projectTrust(projectTrust.projectId);
+            if (current.revision !== projectTrust.revision || current.trusted !== projectTrust.trusted) return Promise.reject(new Error("project-trust-changed"));
+          }
           const env = { ...options?.env };
           if (nativeMemory) for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
           return spawn(command, args, { ...options, env: { ...env, ...resolver?.envOverlay } });
@@ -1630,6 +1701,7 @@ export class SessionManager implements SessionService {
       turn.nativeEnded=true;this.publishSteering(live);
       if(live.steering?.turn===turn)await live.steering.barrier;
     } catch (error) {
+      if (!turn.controller.signal.aborted && error instanceof PersonalMcpPreparationError) this.publishMcpAvailability(live, turn.memberId, assignment.runnerId, validatePersonalMcpAvailability(error.availability));
       outcome = turn.controller.signal.aborted ? { status: "interrupted" } : { status: "failed", error: `Unable to start the turn: ${bounded((error as Error).message)}`, ...((error as {reasonCode?: string}).reasonCode === "native-session-not-found" ? { reasonCode: "native-session-not-found" as const } : {}) };
     }
     let drained = true;
@@ -1675,7 +1747,54 @@ export class SessionManager implements SessionService {
     return text;
   }
 
+  private boundedMcpAvailability(servers: readonly PersonalMcpAvailability[]): PersonalMcpAvailability[] {
+    return servers.length <= 240 ? [...servers] : [...servers.slice(0, 239), {id:"additional-servers",source:"native",status:"configured",reason:"limit-exceeded"}];
+  }
+
+  private publishMcpAvailability(live: Live, memberId: string, runnerId: string, servers: readonly PersonalMcpAvailability[]): void {
+    const state = this.readiness(live);
+    if (live.stopping || live.ledger.session.releasePending || live.ledger.session.state === "ended") return;
+    if (memberId === LEAD_MEMBER_ID) {
+      if (state.personalMcpRunnerId === runnerId && JSON.stringify(state.personalMcpAvailability) === JSON.stringify(servers)) return;
+      state.personalMcpRunnerId = runnerId; state.personalMcpAvailability = servers;
+    } else {
+      const snapshot = { runnerId, servers };
+      if (JSON.stringify(state.memberMcpAvailability?.[memberId]) === JSON.stringify(snapshot)) return;
+      state.memberMcpAvailability = { ...state.memberMcpAvailability, [memberId]: snapshot };
+    }
+    live.nativeMcpAvailability = {generation:state.generation, personalMcpRunnerId:state.personalMcpRunnerId, personalMcpAvailability:state.personalMcpAvailability, memberMcpAvailability:state.memberMcpAvailability};
+    this.append(live, { kind: "diagnostic", data: { code: "session.preparation", ...state } });
+  }
+
   private driverEvent(live: Live, turn: Turn, runnerId: string, event: DriverEvent): void {
+    if (runnerId === "opencode" && event.kind === "diagnostic" && ["personal-mcp.sources","personal-mcp.runtime"].includes(String(event.data.code))
+      && turn.projectTrustRevision !== this.projectStore().projectTrust(live.meta.projectId ?? projectIdentity(live.meta.projectRoot)).revision) return;
+    if (event.kind === "diagnostic" && event.data.code === "personal-mcp.sources") {
+      const state = this.readiness(live);
+      const current = turn.memberId === LEAD_MEMBER_ID ? state?.personalMcpAvailability : state?.memberMcpAvailability?.[turn.memberId]?.servers;
+      try {
+        const merged = new Map((current ?? []).map(server => [server.id, server]));
+        const input = event.data.servers;
+        for (const server of validatePersonalMcpAvailability(Array.isArray(input) ? input.slice(0, 240) : input)) merged.set(server.id, server);
+        if (Array.isArray(input) && input.length > 240) merged.set("additional-servers", {id:"additional-servers",source:"native",status:"configured",reason:"limit-exceeded"});
+        this.publishMcpAvailability(live, turn.memberId, runnerId, this.boundedMcpAvailability([...merged.values()]));
+      } catch { /* no raw native config enters preparation */ }
+      return;
+    }
+    if (event.kind === "diagnostic" && event.data.code === "personal-mcp.runtime") {
+      const state = this.readiness(live);
+      const active = Array.isArray(event.data.active) ? event.data.active : [];
+      const unavailable = Array.isArray(event.data.unavailable) ? event.data.unavailable : [];
+      const current = turn.memberId === LEAD_MEMBER_ID ? state?.personalMcpAvailability : state?.memberMcpAvailability?.[turn.memberId]?.servers;
+      const conflicts = Array.isArray(event.data.conflicting) ? event.data.conflicting : [];
+      const entries = new Map((current ?? []).map(item => [item.id, item]));
+      for (const [ids, status, reason] of [[active, "active", undefined], [unavailable, "unavailable", "not-connected"], [conflicts, "conflicting", "managed-name-conflict"]] as const) {
+        for (const id of ids.slice(0, 240)) if (typeof id === "string") entries.set(id, { id, source: entries.get(id)?.source ?? "native", status, ...(reason ? { reason } : {}) });
+      }
+      if (active.length + unavailable.length + conflicts.length > 240) entries.set("additional-servers", {id:"additional-servers",source:"native",status:"configured",reason:"limit-exceeded"});
+      try { this.publishMcpAvailability(live, turn.memberId, runnerId, validatePersonalMcpAvailability(this.boundedMcpAvailability([...entries.values()]))); } catch { /* malformed native names never enter public state */ }
+      return; // Public metadata lives only on preparation, never as a chat diagnostic.
+    }
     const scrub = (value: unknown): unknown => typeof value === "string" ? this.redactImagePaths(value) : Array.isArray(value) ? value.map(scrub) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, scrub(item)])) : value;
     event = {...event, data:scrub(event.data) as Record<string,unknown>, ...(event.raw !== undefined ? {raw:scrub(event.raw)} : {})};
     const driver = this.options.drivers.get(runnerId);
@@ -1700,7 +1819,7 @@ export class SessionManager implements SessionService {
     try {
       let status = outcome.status;
       let reason: string | undefined;
-      if (this.closing && status !== "completed") { status = "interrupted"; reason = "daemon-stopped"; }
+      if (this.closing && status !== "completed") { status = "interrupted"; reason = this.shutdownReason; }
       const stateFor = (): { state: "completed" | "failed" | "interrupted" | "cancelled" | "ownership-unsettled"; reason?: string } => {
         if (turn.ownershipUnsettled) return { state: "ownership-unsettled", reason: "native-close-failed" };
         if (status === "completed") return { state: "completed" };
@@ -2007,3 +2126,12 @@ function defaultRolePrompt(changeId: string | undefined): string {
   ].filter(Boolean).join("\n");
 }
 
+
+/** No free-form external diagnostics or inconsistent advertisements enter preparation/prompt state. */
+function reviewedCapabilityAvailability(resolver: ChildMcpResolver | undefined, runnerId: string): CapabilityAvailability[] {
+  const availability = validateCapabilityAvailability(resolver?.capabilityAvailability);
+  const advertised = resolver?.runnerPackages(runnerId).includes("codebase-memory") ?? false;
+  const resolved = resolver?.resolveServer("codebase-memory") !== undefined;
+  if (availability.some(item => (item.status === "ready") !== advertised || (item.status === "ready") !== resolved)) throw new Error("capability-availability-advertisement-invalid");
+  return availability;
+}

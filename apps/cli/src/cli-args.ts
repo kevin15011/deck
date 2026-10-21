@@ -1,3 +1,4 @@
+import { parseCodebaseGuardArgs, type CodebaseGuardArgs } from "@deck/adapter-pi";
 /**
  * CLI argument parser for `deck` commands.
  *
@@ -43,11 +44,13 @@ export type ParsedArgs =
       };
     }
   | { command: "version" }
+  | { command: "internal-codebase-mcp-guard-v1"; guard: CodebaseGuardArgs }
   | { command: "internal-serena-mcp"; probe: boolean }
   | { command: "internal-supermemory-runtime-smoke" }
   | { command: "internal-codex-memory-hook" }
   | { command: "internal-memory-mcp" }
   | { command: "internal-session-daemon" }
+  | { command: "internal-daemon-restart-helper"; intentPath:string }
   | { command: "internal-session-mcp" }
   | { command: "internal-child-anchor"; argv: string[] }
   | { command: "cross-launch"; flags: { changeId?: string } }
@@ -320,11 +323,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const [first, ...rest] = args;
 
   if (first === "internal") {
+    if (rest[0] === "codebase-mcp-guard-v1") {
+      const guard = parseCodebaseGuardArgs(rest.slice(1));
+      return guard ? { command: "internal-codebase-mcp-guard-v1", guard } : { command: "error", message: "Invalid Codebase guard invocation." };
+    }
     if (rest.length === 2 && rest[0] === "serena-mcp" && rest[1] === "--probe") return { command: "internal-serena-mcp", probe: true };
     if (rest.length === 1 && rest[0] === "serena-mcp") return { command: "internal-serena-mcp", probe: false };
     if (rest.length === 1 && rest[0] === "supermemory-runtime-smoke") return { command: "internal-supermemory-runtime-smoke" };
     if (rest.length === 1 && rest[0] === "codex-memory-hook") return { command: "internal-codex-memory-hook" };
     if (rest.length === 1 && rest[0] === "memory-mcp") return { command: "internal-memory-mcp" };
+    if (rest.length === 2 && rest[0] === "daemon-restart-helper" && rest[1]!.startsWith("/")) return {command:"internal-daemon-restart-helper",intentPath:rest[1]!};
     if (rest.length === 1 && rest[0] === "session-daemon") return { command: "internal-session-daemon" };
     if (rest.length === 1 && rest[0] === "session-mcp") return { command: "internal-session-mcp" };
     if (rest[0] === "child-anchor") {

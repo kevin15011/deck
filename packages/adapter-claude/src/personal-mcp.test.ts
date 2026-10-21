@@ -1,0 +1,9 @@
+import { test, expect, afterEach } from 'bun:test';
+import { mkdtempSync,mkdirSync,writeFileSync,rmSync } from 'node:fs';
+import {join} from 'node:path';
+import {claudeNativePolicy} from './personal-mcp';
+const dirs:string[]=[];afterEach(()=>dirs.splice(0).forEach(d=>rmSync(d,{recursive:true,force:true})));
+function setup(trusted=false){const home=mkdtempSync('/tmp/deck-claude-policy-');dirs.push(home);const cwd=join(home,'work');mkdirSync(cwd);mkdirSync(join(home,'.claude'));writeFileSync(join(home,'.claude.json'),JSON.stringify({projects:{[cwd]:{hasTrustDialogAccepted:trusted,enabledMcpjsonServers:['approved']}}}));writeFileSync(join(cwd,'.mcp.json'),JSON.stringify({mcpServers:{approved:{command:'fake'},unapproved:{command:'fake'}}}));return{home,cwd};}
+ test('headless project sources require trust and individual MCP approval',()=>{const a=setup(),b=setup(true);expect(claudeNativePolicy(a.home,a.cwd,{})).toMatchObject({sources:'user',denied:[]});expect(claudeNativePolicy(b.home,b.cwd,{})).toMatchObject({sources:'user,project,local',denied:['unapproved']});});
+ test('protected control name is a visible conflict; other native transport and plugin declarations are not relocated',()=>{const a=setup();writeFileSync(join(a.home,'.claude.json'),JSON.stringify({mcpServers:{deck:{command:'fake'}}}));expect(()=>claudeNativePolicy(a.home,a.cwd,{})).toThrow('claude-native-mcp-conflict');});
+test('malformed native JSON never exposes its credential-bearing parser snippet',()=>{const a=setup();writeFileSync(join(a.home,'.claude.json'),'{"token":"FAKE_PRIVATE_PARSER_SENTINEL", broken');let message='';try{claudeNativePolicy(a.home,a.cwd,{});}catch(error){message=(error as Error).message;}expect(message).toBe('claude-native-configuration-invalid');expect(message).not.toContain('FAKE_PRIVATE_PARSER_SENTINEL');});

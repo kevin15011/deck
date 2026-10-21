@@ -1,3 +1,5 @@
+import { isCompatibleCodebaseExecutable } from "@deck/core";
+import { createOpenCodeCodebaseTools, type OpenCodeCodebaseTools } from "./codebase-tools";
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, win32 } from "node:path";
@@ -62,6 +64,8 @@ export type OpenCodeEvidenceStat = {
 };
 
 export type OpenCodeEvidenceContext = {
+  codebaseTools?: OpenCodeCodebaseTools;
+  verifyCodebaseExecutable?: (path: string) => boolean;
   projectRoot: string;
   workspaceRoot: string;
   homeDirectory: string;
@@ -222,7 +226,7 @@ export function reviewOpenCodeTools(options: ReviewOpenCodeToolsOptions = {}): O
     }
     // Preserve the legacy injected command seam as executable evidence, but never treat
     // package/config declarations as proof. Production uses the filesystem resolver above.
-    if (current.state !== "usable" && commandExists && commandForTool(tool.id) && commandExists(commandForTool(tool.id)!)) {
+    if (tool.id !== "codebase-memory" && current.state !== "usable" && commandExists && commandForTool(tool.id) && commandExists(commandForTool(tool.id)!)) {
       evidence[tool.id] = makeEvidence(tool.id, "usable", "PATH", uniqueReasons([...current.reasonCodes, "PATH-usable"]));
     }
   }
@@ -390,7 +394,7 @@ function assessConfiguredEvidence(
 function assessPathEvidence(toolId: InstallableOpenCodeToolId, tool: InstallableOpenCodeTool | undefined, context: OpenCodeEvidenceContext): ExecutableAssessment {
   const command = commandForTool(toolId, tool);
   if (!command) return { kind: "missing", reason: "missing" };
-  if (context.commandExists?.(command)) return { kind: "usable", reason: "usable" };
+  if (toolId !== "codebase-memory" && context.commandExists?.(command)) return { kind: "usable", reason: "usable" };
   const pathValue = context.env.PATH ?? "";
   if (!pathValue) return { kind: "missing", reason: "missing" };
   let best: ExecutableAssessment = { kind: "missing", reason: "missing" };
@@ -408,6 +412,12 @@ function assessPathEvidence(toolId: InstallableOpenCodeToolId, tool: Installable
 }
 
 function assessCanonicalEvidence(toolId: InstallableOpenCodeToolId, tool: InstallableOpenCodeTool | undefined, context: OpenCodeEvidenceContext): ExecutableAssessment {
+  if (toolId === "codebase-memory") {
+    try {
+      const tools = context.codebaseTools ?? createOpenCodeCodebaseTools({ homeDirectory: context.homeDirectory, environment: context.env });
+      if (tools.command()) return { kind: "usable", reason: "usable" };
+    } catch { /* No usable owned evidence; continue with the read-only shared inspection. */ }
+  }
   const command = commandForTool(toolId, tool);
   if (!command) return { kind: "missing", reason: "missing" };
   return inspectExecutable(join(context.homeDirectory, ".local", "bin", command), context);
@@ -427,7 +437,7 @@ function inspectConfiguredToken(token: string, directory: string, context: OpenC
 
 function assessPathEvidenceByToken(token: string, context: OpenCodeEvidenceContext): ExecutableAssessment {
   const pathValue = context.env.PATH ?? "";
-  if (context.commandExists?.(token)) return { kind: "usable", reason: "usable" };
+  if (token !== "codebase-memory-mcp" && context.commandExists?.(token)) return { kind: "usable", reason: "usable" };
   if (!pathValue) return { kind: "missing", reason: "missing" };
   const pathDelimiter = context.pathDelimiter ?? (context.platform === "win32" ? ";" : delimiter);
   let best: ExecutableAssessment = { kind: "missing", reason: "missing" };
@@ -467,6 +477,8 @@ function inspectExecutable(path: string, context: OpenCodeEvidenceContext): Exec
   }
   if (resolved.isDirectory?.() || resolved.isFile?.() === false) return { kind: "non-file", reason: "non-file" };
   if (resolved.size <= 0) return { kind: "empty", reason: "empty" };
+  if (basename(path) === "codebase-memory-mcp" && !(context.verifyCodebaseExecutable ?? isCompatibleCodebaseExecutable)(path)) return { kind: "non-executable", reason: "non-executable" };
+
   if (context.platform === "win32") {
     const extensions = (context.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean).map((value) => value.toLowerCase());
     if (!extensions.includes(win32.extname(resolvedPath).toLowerCase())) return { kind: "non-executable", reason: "non-executable" };

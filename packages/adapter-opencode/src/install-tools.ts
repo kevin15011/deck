@@ -1,3 +1,4 @@
+import { createOpenCodeCodebaseTools, type OpenCodeCodebaseTools } from "./codebase-tools";
 import { spawn as nodeSpawn } from "node:child_process";
 import { accessSync, constants, existsSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
@@ -83,7 +84,7 @@ export type OpenCodeToolInstallResultExact =
   | (OpenCodeToolInstallResultBase & { outcome: "already-present"; success: true; installerInvoked: false })
   | (OpenCodeToolInstallResultBase & { outcome: "executed"; success: true; installerInvoked: true })
   | (OpenCodeToolInstallResultBase & { outcome: "failed"; success: false; installerInvoked: boolean })
-  | (OpenCodeToolInstallResultBase & { outcome: "skipped"; success: false; installerInvoked: false });
+  | (OpenCodeToolInstallResultBase & { outcome: "skipped"; success: false; installerInvoked: boolean });
 
 /**
  * Legacy callback/state compatibility. The installer never emits this shape;
@@ -106,6 +107,7 @@ export type SerenaBootstrapRunner = (
 ) => Promise<SerenaBootstrapResult>;
 
 export type InstallOpenCodeToolsOptions = {
+  codebaseTools?: OpenCodeCodebaseTools;
   commandExists?: (command: string) => boolean;
   evidenceContext?: OpenCodeEvidenceContext;
   resolveEvidence?: ResolveOpenCodeInstalledEvidence;
@@ -226,6 +228,26 @@ async function executeTool(
   context: OpenCodeEvidenceContext | undefined,
   options: InstallOpenCodeToolsOptions,
 ): Promise<OpenCodeToolInstallResultExact> {
+  if (tool.id === "codebase-memory") {
+    let invoked = false;
+    try {
+      const tools = options.codebaseTools ?? context?.codebaseTools ?? createOpenCodeCodebaseTools({ homeDirectory: options.homeDirectory ?? context?.homeDirectory, environment: context?.env });
+      if (tools.command()) return createInstallResult(tool, "already-present", false, "Codebase Memory reviewed native executable is already present.");
+      if (tools.state() !== "absent") return evidenceFailure(tool, "evidence", "codebase-native-conflict");
+      if (options.signal?.aborted) return createInstallResult(tool, "skipped", false, "Codebase Memory installation cancelled.");
+      invoked = true;
+      await tools.install(options.signal);
+      options.signal?.throwIfAborted();
+      if (!tools.command()) return evidenceFailure(tool, "post-install", "codebase-native-verification-failed", true);
+      return createInstallResult(tool, "executed", true, "Codebase Memory reviewed native executable installed and verified.");
+    } catch (error) {
+      if (options.signal?.aborted && (error === options.signal.reason || error instanceof Error && error.name === "AbortError")) return {
+        ...createInstallResult(tool, "skipped", invoked, "Codebase Memory installation cancelled."),
+        diagnostic: { stage: "install", code: "cancelled", lines: ["Codebase Memory installation cancelled."] },
+      } as OpenCodeToolInstallResultExact;
+      return evidenceFailure(tool, invoked ? "post-install" : "evidence", "codebase-native-install-failed", invoked);
+    }
+  }
   if (tool.id === "opencode-supermemory" || tool.installKind === "deck-owned-opencode-plugin") {
     return executeOwnedSupermemoryTool(tool, runInstallCommand, context, options);
   }

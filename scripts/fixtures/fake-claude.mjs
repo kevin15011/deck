@@ -117,7 +117,7 @@ process.stdin.on("data", async (chunk) => {
     bridge.stdin.end();
   }
   out({ type: "assistant", message: { id: "msg_fake", type: "message", role: "assistant", content: [{ type: "text", text: `echo: ${text}` }], usage: { input_tokens: 1, output_tokens: 1 } }, parent_tool_use_id: null });
-  out({ type: "result", subtype: "success", is_error: false, duration_ms: 5, num_turns: 1, result: `echo: ${text}`, total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 }, permission_denials: [], terminal_reason: "completed" });
+  out({ type: "result", subtype: "success", is_error: false, duration_ms: 5, num_turns: 1, result: `echo: ${text}`, total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 }, permission_denials: [], terminal_reason: "completed", ...(typeof request?.uuid === "string" ? { user_message_uuid: request.uuid, user_message_uuids: [request.uuid] } : {}) });
   // flush before exiting: pipe writes are asynchronous
   process.stdout.write("", () => process.exit(0));
 });

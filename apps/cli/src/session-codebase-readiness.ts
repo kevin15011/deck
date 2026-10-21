@@ -1,14 +1,14 @@
 /** Live MCP readiness for the one native backend whose shared rendezvous Deck manages. */
 import { createHash } from "node:crypto";
-import { createReadStream, mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
-import { join } from "node:path";
-import { OWNED_CODEBASE_VERSION, pinnedOwnedCodebaseRelease } from "@deck/core";
+import { mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { OWNED_CODEBASE_VERSION, verifyCodebaseExecutable } from "@deck/core";
 import type { ChildMcpServerSpec } from "@deck/core/session/driver";
 import type { ChildMcpContext, Supervisor, SupervisedProcess } from "@deck/session-host";
 
 type StdioSpec = Exclude<ChildMcpServerSpec, { transport: "http" }>;
 type Pending = { resolve(value: Record<string, unknown>): void; reject(error: Error): void };
-type Connection = { process: SupervisedProcess; runtime: string; pending: Map<number, Pending>; nextId: number; closed: boolean; consumers: number; retired: boolean; dispose?: Promise<void> };
+type Connection = { process: SupervisedProcess; runtime: string; pending: Map<number, Pending>; nextId: number; closed: boolean; consumers: number; retired: boolean; failure?: Error; dispose?: Promise<void> };
 type Entry = { projectRoot: string; obsolete?: boolean; connection?: Connection; operation?: { result: Promise<StdioSpec>; controller: AbortController; waiters: number }; negative?: { until: number; error: Error } };
 type Options = {
   supervisor: Pick<Supervisor, "spawn">;
@@ -22,7 +22,13 @@ type Options = {
   verifyExecutable?: (path: string, signal: AbortSignal) => Promise<boolean>;
 };
 
-const failure = (kind: "unavailable" | "unsupported" | "cancelled") => new Error(`codebase-memory-${kind}: ${kind === "cancelled" ? "turn cancelled" : kind === "unsupported" ? "the selected executable or MCP protocol is not a supported Deck release" : "the selected backend did not become ready; retry after 30 seconds"}`);
+export class SessionCodebaseReadinessError extends Error {
+  constructor(readonly kind: "unavailable" | "unsupported" | "cancelled") {
+    super(`codebase-memory-${kind}: ${kind === "cancelled" ? "turn cancelled" : kind === "unsupported" ? "the selected executable or MCP protocol is not a supported Deck release" : "the selected backend did not become ready; retry after 30 seconds"}`);
+  }
+}
+const failure = (kind: "unavailable" | "unsupported" | "cancelled") => new SessionCodebaseReadinessError(kind);
+const ownedCodebasePath = (path: string) => basename(dirname(dirname(path))) === `codebase-native-v${OWNED_CODEBASE_VERSION}`;
 const aborted = (signal: AbortSignal) => { if (signal.aborted) throw failure("cancelled"); };
 const stable = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
 
@@ -41,14 +47,18 @@ export class SessionCodebaseReadiness {
     if (this.closed) throw failure("cancelled");
     let binary: string, identity: string, projectRoot: string;
     const environment = Object.fromEntries(Object.entries({ ...(this.options.environment ?? process.env), ...spec.env, ...overlay }).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+    projectRoot = realpathSync(context.projectRoot);
     try {
       const resolved = Bun.which(spec.command, { PATH: environment.PATH, cwd: context.projectRoot });
       binary = realpathSync(resolved ?? spec.command);
       const stat = statSync(binary, { bigint: true });
-      if (!stat.isFile()) throw failure("unsupported");
+      if (!stat.isFile()) { if ([spec.command, binary].some(ownedCodebasePath)) throw new Error("codebase-memory-integrity-failed"); throw failure("unsupported"); }
       identity = stable([binary, stat.dev, stat.ino, stat.size, stat.mode, stat.uid, stat.gid, stat.mtimeNs, stat.ctimeNs].map(String));
-      projectRoot = realpathSync(context.projectRoot);
-    } catch { throw failure("unsupported"); }
+    } catch (error) {
+      if (ownedCodebasePath(spec.command) && ["ENOTDIR", "ELOOP"].includes((error as NodeJS.ErrnoException).code ?? "")) throw new Error("codebase-memory-integrity-failed");
+      if (["ENOENT", "ENOTDIR", "ELOOP"].includes((error as NodeJS.ErrnoException).code ?? "")) throw failure("unsupported");
+      throw error;
+    }
     // Credentials and all effective launch inputs are hashed in memory; none enter diagnostics or paths.
     const key = createHash("sha256").update(stable([identity, spec, projectRoot, environment])).digest("hex");
     let entry = this.entries.get(key);
@@ -111,9 +121,10 @@ export class SessionCodebaseReadiness {
       try {
         await this.deadline(signal, this.options.warmTimeoutMs ?? 2000, (boundedSignal) => this.tools(entry.connection!, boundedSignal));
         return { ...spec, env: { ...spec.env, CBM_RUNTIME_DIR: entry.connection.runtime } };
-      } catch {
+      } catch (error) {
         await this.retire(entry.connection); entry.connection = undefined;
         aborted(signal);
+        if (!(error instanceof SessionCodebaseReadinessError)) throw error;
       }
     }
     try {
@@ -122,11 +133,19 @@ export class SessionCodebaseReadiness {
         if (!verified) {
           // Verification is read-only and may serve several project/spec admissions. Give it
           // its own finite lifetime so one cancelled turn cannot poison another caller.
-          verified = (this.options.verifyExecutable ?? this.verifyExecutable)(binary, AbortSignal.timeout(this.options.coldTimeoutMs ?? 15_000));
+          const verificationSignal = AbortSignal.timeout(this.options.coldTimeoutMs ?? 15_000);
+          verified = (this.options.verifyExecutable ?? this.verifyExecutable)(binary, verificationSignal).catch(error => {
+            if (verificationSignal.aborted && error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) throw failure("unavailable");
+            throw error;
+          });
           this.verified.set(identity, verified);
-          void verified.then((ok) => { if (!ok) this.verified.delete(identity); }, () => this.verified.delete(identity));
+          while (this.verified.size > 64) this.verified.delete(this.verified.keys().next().value!);
+          void verified.catch(() => { if (this.verified.get(identity) === verified) this.verified.delete(identity); });
         }
-        if (!await verified) throw failure("unsupported");
+        if (!await verified) {
+          if ([binary, spec.command].some(ownedCodebasePath)) throw new Error("codebase-memory-integrity-failed");
+          throw failure("unsupported");
+        }
         aborted(boundedSignal);
         // Upstream appends a uid directory and Unix socket name. Keep even long XDG roots out
         // of sun_path; mkdtemp gives this Deck instance exclusive 0700 ownership and a new epoch.
@@ -148,16 +167,15 @@ export class SessionCodebaseReadiness {
       aborted(signal);
       // Warm failure permits exactly this one fresh managed generation. Never touch a PID
       // printed by a backend or retry native account rendezvous indefinitely.
-      throw error instanceof Error && error.message.startsWith("codebase-memory-unsupported:") ? error : failure("unavailable");
+      throw error;
     }
   }
 
   private readonly verifyExecutable = async (path: string, signal: AbortSignal): Promise<boolean> => {
-    const release = pinnedOwnedCodebaseRelease();
-    if (!release || statSync(path).size !== release.binaryBytes) return false;
-    const digest = createHash("sha256"), stream = createReadStream(path, { signal });
-    for await (const chunk of stream) digest.update(chunk);
-    return digest.digest("hex") === release.binarySha256;
+    aborted(signal);
+    const compatible = await verifyCodebaseExecutable(path, signal);
+    aborted(signal);
+    return compatible;
   };
 
   private connect(binary: string, args: readonly string[], cwd: string, env: Record<string, string>, runtime: string): Connection {
@@ -165,7 +183,7 @@ export class SessionCodebaseReadiness {
     const connection: Connection = { process: child, runtime, pending: new Map(), nextId: 1, closed: false, consumers: 0, retired: false };
     this.bindings.set(runtime, connection);
     let buffer = "";
-    const fail = () => { connection.closed = true; buffer = ""; for (const pending of connection.pending.values()) pending.reject(failure("unavailable")); connection.pending.clear(); };
+    const fail = (error?: unknown) => { connection.closed = true; connection.failure = error instanceof Error ? error : failure("unavailable"); buffer = ""; for (const pending of connection.pending.values()) pending.reject(connection.failure); connection.pending.clear(); };
     child.stderr.on("data", () => {}); // Never surface raw external diagnostics, paths, credentials or PID suggestions.
     child.stdout.on("data", (chunk) => {
       if (connection.closed) return;
@@ -183,7 +201,7 @@ export class SessionCodebaseReadiness {
         else pending.resolve(message.result);
       }
     });
-    void child.exited.then(fail, fail);
+    void child.exited.then(() => fail(), error => fail(error));
     return connection;
   }
 
@@ -193,12 +211,12 @@ export class SessionCodebaseReadiness {
   }
 
   private request(connection: Connection, method: string, params: unknown, signal: AbortSignal): Promise<Record<string, unknown>> {
-    if (connection.closed) return Promise.reject(failure("unavailable"));
+    if (connection.closed) return Promise.reject(connection.failure ?? failure("unavailable"));
     const id = connection.nextId++;
     const result = new Promise<Record<string, unknown>>((resolve, reject) => {
       connection.pending.set(id, { resolve, reject });
       try { connection.process.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n"); }
-      catch { connection.pending.delete(id); reject(failure("unavailable")); }
+      catch (error) { connection.pending.delete(id); reject(error instanceof Error ? error : new Error("codebase-control-failed")); }
     });
     return this.abortable(result, signal).finally(() => connection.pending.delete(id));
   }
@@ -217,6 +235,10 @@ export class SessionCodebaseReadiness {
     const abort = () => bounded.abort(); signal.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(abort, ms);
     try { aborted(signal); return await this.abortable(operation(bounded.signal), bounded.signal); }
+    catch (error) {
+      if (!signal.aborted && bounded.signal.aborted && error instanceof SessionCodebaseReadinessError && error.kind === "cancelled") throw failure("unavailable");
+      throw error;
+    }
     finally { clearTimeout(timer); signal.removeEventListener("abort", abort); }
   }
 

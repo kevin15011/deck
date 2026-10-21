@@ -3,7 +3,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { render } from "ink";
-import { createAdapterRegistry } from "@deck/core";
+import { createAdapterRegistry, getDefaultDeckConfig } from "@deck/core";
 import type { ReleaseJson } from "../upgrade-command/release-descriptor";
 import { DeckApp } from "./app";
 
@@ -116,4 +116,38 @@ describe("DeckApp update recovery", () => {
       harness.close();
     }
   });
+});
+
+
+test("DeckApp unmount cancels the active release check through its injected seam", async () => {
+  let signal: AbortSignal | undefined;
+  let cancelled = false;
+  const harness = createInkHarness();
+  const instance = render(
+    <DeckApp
+      adapterRegistry={createAdapterRegistry()}
+      configStore={{ readRequired: () => getDefaultDeckConfig(), write() {} } as any}
+      resolveProjectRoot={() => null}
+      runReleaseCheck={async (_deadline, deps) => {
+        signal = deps?.signal;
+        return await new Promise((resolve) => {
+          signal?.addEventListener("abort", () => {
+            cancelled = true;
+            resolve({ kind: "none" });
+          }, { once: true });
+        });
+      }}
+    />,
+    { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
+  );
+  try {
+    await waitForCondition(instance, () => signal !== undefined, "release check started");
+    expect(signal?.aborted).toBe(false);
+  } finally {
+    instance.unmount();
+    await instance.waitUntilExit();
+    harness.close();
+  }
+  expect(signal?.aborted).toBe(true);
+  expect(cancelled).toBe(true);
 });

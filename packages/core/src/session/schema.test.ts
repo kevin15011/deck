@@ -115,6 +115,8 @@ const commandFixtures: unknown[] = [
   cm({ type: "project.register", path: "/p", name: "Deck" }), cm({ type: "project.register" }),
   cm({ type: "project.rename", projectId: "p", name: "New name" }), cm({ type: "project.rename", projectId: "p" }),
   cm({ type: "project.remove", projectId: "p" }), cm({ type: "project.remove" }),
+  ...[{projectId:"p",runnerId:"opencode",trusted:true,expectedRevision:0},{projectId:"p",runnerId:"opencode",trusted:false,expectedRevision:0},{projectId:"p",runnerId:"opencode",trusted:"true",expectedRevision:0},{projectId:"p",runnerId:"codex",trusted:true,expectedRevision:0},{projectId:"",runnerId:"opencode",trusted:false,expectedRevision:0}].map(value=>cm({type:"project.trust",...value})),
+  ...[{}, ...[-1,0.5,"0",null,Number.MAX_SAFE_INTEGER,Number.MAX_SAFE_INTEGER+1].map(expectedRevision=>({expectedRevision}))].map(fields=>cm({type:"project.trust",projectId:"p",runnerId:"opencode",trusted:true,...fields})),
   cm({type:"session.release"}),cm({type:"session.remove"}),cm({type:"session.rename",title:"Renamed"}),cm({type:"session.rename",title:" "}),cm({type:"session.rename",title:"x".repeat(161)}),
   cm({ type: "session.prepare" }), cm({ type: "session.prepare.cancel", preparationId: "p" }), cm({ type: "session.prepare.cancel" }),
   cm({ type: "session.continue", title: "Follow up" }), cm({ type: "session.continue", title: "x".repeat(161) }),

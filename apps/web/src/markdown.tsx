@@ -1,5 +1,5 @@
-import React, { memo, useState, type ReactNode } from 'react';
-import ReactMarkdown from 'react-markdown';
+import React, { memo, useMemo, useState, type ReactNode } from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 /** Links never navigate local files or application endpoints from untrusted prose. */
@@ -29,10 +29,13 @@ export function resolveArtifactLink(href: string, basePath: string, paths: strin
     const path = parts.join('/'); return paths.includes(path) ? path : undefined;
 }
 export const Markdown = memo(function Markdown({ text, onArtifactLink, artifactPaths = [], basePath = '' }: { text: string; onArtifactLink?: (path: string) => void; artifactPaths?: string[]; basePath?: string }) {
-    return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={url => safeMarkdownUrl(url) || (onArtifactLink && resolveArtifactLink(url, basePath, artifactPaths) ? url : '')} components={{
+    // Component types must outlive streamed text updates, preserving selection and local state.
+    const artifactKey = artifactPaths.join('\n');
+    const components = useMemo<Components>(() => ({
         pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
         table: ({ children }) => <div className="table-scroll" tabIndex={0} role="region" aria-label="Markdown table"><table>{children}</table></div>,
         img: ({ alt }) => <span className="image-placeholder">[Image: {alt || 'image'}]</span>,
         a: ({ href, children }) => safeMarkdownUrl(href ?? '') ? <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> : onArtifactLink && href ? <button className="text-link" type="button" onClick={() => { const path = resolveArtifactLink(href, basePath, artifactPaths); if (path) onArtifactLink(path); }}>{children}</button> : <span>{children}</span>,
-    }}>{text}</ReactMarkdown></div>;
+    }), [onArtifactLink, basePath, artifactKey]);
+    return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={url => safeMarkdownUrl(url) || (onArtifactLink && resolveArtifactLink(url, basePath, artifactPaths) ? url : '')} components={components}>{text}</ReactMarkdown></div>;
 }, (previous, next) => previous.text === next.text && previous.basePath === next.basePath && previous.onArtifactLink === next.onArtifactLink && (previous.artifactPaths ?? []).join('\n') === (next.artifactPaths ?? []).join('\n'));

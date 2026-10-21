@@ -100,7 +100,7 @@ describe("resolveDeckPiMcpServers", () => {
   test("a server whose executable cannot be resolved is omitted with a warning", () => {
     const { servers, diagnostics } = resolveDeckPiMcpServers({ ...base, selected: ["context-mode", "codebase-memory"], tools: { resolveExecutable: () => undefined, codebase: { command: () => undefined } } });
     expect(servers).toEqual({});
-    expect(diagnostics.map((d) => d.code).sort()).toEqual(["PI_MCP_SERVER_UNAVAILABLE", "PI_MCP_SERVER_UNAVAILABLE"]);
+    expect(diagnostics.map((d) => d.code).sort()).toEqual(["PI_MCP_SERVER_UNAVAILABLE", "codebase-memory-unavailable"]);
     expect(diagnostics.every((d) => d.severity === "warning")).toBe(true);
   });
 
@@ -134,3 +134,16 @@ describe("resolveDeckPiMcpServers", () => {
     expect(diagnostics[0]!.severity).toBe("warning");
   });
 });
+
+ test("unavailable owned Codebase is omitted and restored without touching source entries", () => {
+   const existing = buildDeckPiMcpEntry({ command: "/missing/codebase-memory-mcp", args: [] });
+   const entries = { "codebase-memory": existing, personal: { command: "/custom" } };
+   let command: string | undefined;
+   const input = { selected: ["codebase-memory"] as const, tools: { resolveExecutable: () => undefined, codebase: { command: () => command } }, existingServers: entries, ownedServerNames: ["codebase-memory"], webSearchProvider: undefined };
+   expect(resolveDeckPiMcpServers(input).servers).toEqual({});
+   expect(resolveDeckPiMcpServers(input).diagnostics[0]?.code).toBe("codebase-memory-unavailable");
+   expect(entries["codebase-memory"]).toBe(existing);
+   command = "/verified/codebase-memory-mcp";
+   expect(resolveDeckPiMcpServers(input).servers["codebase-memory"]?.command).toBe(command);
+   expect(entries.personal.command).toBe("/custom");
+ });

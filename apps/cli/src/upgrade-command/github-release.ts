@@ -24,6 +24,8 @@
  */
 
 import { platform, arch } from "node:process";
+import { spawn } from "node:child_process";
+import { sanitizeRunnerEnv } from "@deck/core";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -183,6 +185,10 @@ export function curlReleasesApi(extraArgs: readonly string[] = []): { exitCode: 
     ...extraArgs,
     `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
   ]);
+  return parseReleasesApiResponse(result);
+}
+
+function parseReleasesApiResponse(result: CurlResult): CurlResult {
   const output = (result.stdout ?? "") as string;
   
   // Extract HTTP status code from the last line (curl -w outputs it after the body)
@@ -399,41 +405,92 @@ export function fetchReleaseDescriptor(
   const apiResult = curlReleasesApi(
     options.etag ? ["-H", `If-None-Match: ${options.etag}`] : [],
   );
+  const release = prepareDescriptorFetch(apiResult);
+  if (release.kind !== "asset") return release;
+  return finishDescriptorFetch(release.data, curlReleaseJsonAsset(release.tag), cachePath);
+}
+
+type CurlResult = { exitCode: number; stdout: string; stderr: string };
+type ReleaseData = Parameters<typeof buildLegacyReleaseInfo>[0];
+
+/** Async counterpart for background checks; the caller owns the overall deadline. */
+export async function fetchReleaseDescriptorAsync(
+  options: FetchDescriptorOptions & { signal: AbortSignal },
+): Promise<ReleaseFetchResult> {
+  const { signal } = options;
+  signal.throwIfAborted();
+  const fixturePath = process.env.DECK_RELEASE_CHECK_FIXTURE;
+  if (fixturePath) return loadFixtureDescriptor(fixturePath);
+  const cachePath = options.cachePath ?? getDefaultReleaseCachePath();
+  const apiResult = parseReleasesApiResponse(await curlAsync([
+    "-s", "-L", "-w", "%{http_code}",
+    ...(options.etag ? ["-H", `If-None-Match: ${options.etag}`] : []),
+    `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
+  ], signal));
+  signal.throwIfAborted();
+  const release = prepareDescriptorFetch(apiResult);
+  if (release.kind !== "asset") return release;
+  const asset = await curlAsync([
+    "-s", "-L", `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${release.tag}/release.json`,
+  ], signal);
+  // Cancellation must not start another request, fall back to availability, or write the cache.
+  signal.throwIfAborted();
+  return finishDescriptorFetch(release.data, asset, cachePath);
+}
+
+/** Own one curl process through close, including abort/error paths; no shell or detached work. */
+function curlAsync(args: string[], signal: AbortSignal): Promise<CurlResult> {
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const child = spawn("curl", args, { env: sanitizeRunnerEnv(process.env), stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let bytes = 0;
+    let failure: Error | undefined;
+    const abort = () => { child.kill("SIGKILL"); };
+    signal.addEventListener("abort", abort, { once: true });
+    const collect = (chunks: Buffer[]) => (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > 4 * 1024 * 1024) {
+        failure = new Error("Release response exceeds 4 MiB");
+        child.kill("SIGKILL");
+      } else chunks.push(chunk);
+    };
+    child.stdout.on("data", collect(stdout));
+    child.stderr.on("data", collect(stderr));
+    child.on("error", (error) => { failure = error; });
+    child.once("close", (code) => {
+      signal.removeEventListener("abort", abort);
+      if (signal.aborted) reject(signal.reason);
+      else if (failure) reject(failure);
+      else resolve({ exitCode: code ?? 1, stdout: Buffer.concat(stdout).toString(), stderr: Buffer.concat(stderr).toString() });
+    });
+    if (signal.aborted) abort();
+  });
+}
+
+function prepareDescriptorFetch(apiResult: CurlResult): ReleaseFetchResult | { kind: "asset"; tag: string; data: ReleaseData } {
   if (apiResult.exitCode !== 0 || !apiResult.stdout) {
     return { kind: "network-error", error: apiResult.stderr || "curl failed" };
   }
-
-  let releaseData: { tag_name?: string; published_at?: string; body?: string; assets?: { name: string; browser_download_url: string }[]; target_commitish?: string };
+  let releaseData: ReleaseData;
   try {
     releaseData = JSON.parse(apiResult.stdout);
   } catch (err) {
     return { kind: "network-error", error: `JSON.parse failed: ${(err as Error).message}` };
   }
-
   const tagName = releaseData.tag_name ?? "v0.0.0";
-  const assets = releaseData.assets ?? [];
-  const releaseJsonAsset = assets.find((a) => a.name === "release.json");
-
-  if (!releaseJsonAsset) {
-    return {
-      kind: "legacy",
-      reason: "missing",
-      info: buildLegacyReleaseInfo(releaseData),
-    };
+  if (!(releaseData.assets ?? []).some((asset) => asset.name === "release.json")) {
+    return { kind: "legacy", reason: "missing", info: buildLegacyReleaseInfo(releaseData) };
   }
+  return { kind: "asset", tag: tagName, data: releaseData };
+}
 
-  // Extract commit from target_commitish for use in descriptor and legacy paths
+function finishDescriptorFetch(releaseData: ReleaseData, assetResult: CurlResult, cachePath: string): ReleaseFetchResult {
+  const tagName = releaseData.tag_name ?? "v0.0.0";
   const remoteCommit = normalizeCommit(releaseData.target_commitish);
-
-  // Step 2: fetch the release.json asset.
-  const assetResult = curlReleaseJsonAsset(tagName);
   if (assetResult.exitCode !== 0 || !assetResult.stdout) {
-    return {
-      kind: "legacy",
-      reason: "missing",
-      info: buildLegacyReleaseInfo(releaseData),
-      error: assetResult.stderr || "curl release.json failed",
-    };
+    return { kind: "legacy", reason: "missing", info: buildLegacyReleaseInfo(releaseData), error: assetResult.stderr || "curl release.json failed" };
   }
 
   let raw: unknown;

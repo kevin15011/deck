@@ -3,11 +3,16 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, truncateSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DriverEvent, DriverHostIo, DriverTaskInput, SupervisedChildExit, DriverDecision } from "@deck/core/session/driver";
-import { createOpenCodeSessionDriver } from "./driver";
-import { buildOpenCodeLaunch } from "./launch";
+import { createOpenCodeSessionDriver as productionDriver } from "./driver";
+import { buildOpenCodeLaunch as productionLaunch } from "./launch";
 import { OpenCodeSseParser, mapOpenCodeEvent } from "./mapper";
 
 const dirs: string[] = [];
+// Fake-server contracts must never read the invoking shell's HOME/XDG configuration.
+function fixtureEnv() { const home=mkdtempSync(join(tmpdir(),"deck-oc-env-"));dirs.push(home);return {HOME:home,XDG_CONFIG_HOME:join(home,"config"),XDG_DATA_HOME:join(home,"data"),XDG_CACHE_HOME:join(home,"cache")}; }
+function createOpenCodeSessionDriver(options: Parameters<typeof productionDriver>[0] = {}) { return productionDriver({...options,baseEnv:{...fixtureEnv(),...options.baseEnv}}); }
+function buildOpenCodeLaunch(...args: Parameters<typeof productionLaunch>) { return productionLaunch(args[0],args[1],{...args[2],baseEnv:{...fixtureEnv(),...args[2]?.baseEnv}}); }
+
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 const input = (): DriverTaskInput => ({ taskId: "t", memberId: "lead", cwd: "/project", assignment: { runnerId: "opencode", modelId: "opencode/big-pickle", thinking: "high" }, rolePrompt: "role", prompt: "hello", mcp: { servers: ["deck"], sessionTools: [] }, mcpServerSpecs: { deck: { command: "deck", args: ["internal", "session-mcp"], env: { DECK_SESSION_CREDENTIAL_FILE: "/private/credential" } } }, approvals: "relay", credentialFile: "/private/credential", disableNativeDelegation: true });
 function privateIo() {
@@ -18,19 +23,12 @@ function privateIo() {
 }
 
 describe("OpenCode isolated launch", () => {
-  test("isolates configuration, keeps data/auth home and protects its loopback server", () => {
+  test("preserves native user configuration and protects only the task listener and pending project boundary", () => {
     const h = privateIo();
-    const launch = buildOpenCodeLaunch(input(), h.io, { baseEnv: { HOME: "/user", XDG_DATA_HOME: "/user/data", XDG_CONFIG_HOME: "/user/config", OPENCODE_CONFIG: "/user/leak.json", OPENCODE_CONFIG_CONTENT: "leak", OPENCODE_SERVER_PASSWORD: "old" } });
-    expect(launch.args).toEqual(["serve", "--pure", "--hostname", "127.0.0.1", "--port", "0"]);
-    expect(launch.env.HOME).toBe("/user"); expect(launch.env.XDG_DATA_HOME).toBe("/user/data");
-    expect(launch.env.XDG_CONFIG_HOME).toBe(h.dir); expect(launch.env.OPENCODE_CONFIG_DIR).toBe(h.dir);
-    expect(launch.env.OPENCODE_DISABLE_PROJECT_CONFIG).toBe("true");
-    expect(launch.env.OPENCODE_CONFIG).not.toBe("/user/leak.json");
-    expect(launch.env.OPENCODE_SERVER_PASSWORD).not.toBe("old");
-    expect(launch.args.join(" ")).not.toContain(launch.env.OPENCODE_SERVER_PASSWORD!);
-    const cfg = JSON.parse(readFileSync(launch.env.OPENCODE_CONFIG!, "utf8"));
-    expect(cfg.mcp).toEqual({ deck: { type: "local", command: ["deck", "internal", "session-mcp"], environment: { DECK_SESSION_CREDENTIAL_FILE: "/private/credential" }, enabled: true } });
-    expect(cfg.permission).toEqual({ "*": "ask", task: "deny" }); expect(cfg.plugin).toEqual([]);
+    const launch = buildOpenCodeLaunch(input(), h.io, { baseEnv: { HOME: "/user", XDG_DATA_HOME: "/user/data", XDG_CONFIG_HOME: "/user/config", OPENCODE_CONFIG: "/user/custom.json", OPENCODE_CONFIG_CONTENT: '{"plugin":["file:///user/plugin.mjs"]}', OPENCODE_SERVER_PASSWORD: "old" } });
+    expect(launch.args).toEqual(["serve", "--hostname", "127.0.0.1", "--port", "0"]);
+    expect(launch.env.HOME).toBe("/user"); expect(launch.env.XDG_DATA_HOME).toBe("/user/data");expect(launch.env.XDG_CONFIG_HOME).toBe("/user/config");expect(launch.env.OPENCODE_CONFIG).toBe("/user/custom.json");expect(launch.env.OPENCODE_DISABLE_PROJECT_CONFIG).toBe("true");expect(launch.env.OPENCODE_SERVER_PASSWORD).not.toBe("old");
+    const cfg=JSON.parse(launch.env.OPENCODE_CONFIG_CONTENT!);expect(cfg.plugin).toEqual(["file:///user/plugin.mjs"]);expect(cfg.mcp.deck.command).toEqual(["deck","internal","session-mcp"]);
   });
   test("refuses missing explicit MCP specs", () => { const h = privateIo(); expect(() => buildOpenCodeLaunch({ ...input(), mcpServerSpecs: {} }, h.io)).toThrow("deck"); });
 });
@@ -49,7 +47,7 @@ describe("OpenCode SSE", () => {
   });
 });
 
-function fakeServer(options: { extraMcp?: boolean; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number; pendingPermissions?: unknown[]; permissionReplyStatus?: number } = {}) {
+function fakeServer(options: { personal?: boolean; extraMcp?: boolean; mutatedMcp?: boolean; nativePermissions?: Array<{permission:string;pattern:string;action:string}>; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number; pendingPermissions?: unknown[]; permissionReplyStatus?: number } = {}) {
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const requests: Array<{ path: string; body: any; auth: string | null }> = [];
   let messages = 0;
@@ -60,8 +58,9 @@ function fakeServer(options: { extraMcp?: boolean; hang?: boolean; pending?: boo
     requests.push({ path, body, auth: req.headers.get("authorization") });
     if (path === "/event" && options.hangEvent) return new Promise<Response>(resolve => { blocked.push(resolve); });
     if (path === "/event") return new Response(new ReadableStream({ start(c) { stream = c; c.enqueue(new TextEncoder().encode('data: {"type":"server.connected","properties":{}}\n\n')); }, cancel() {} }), { headers: { "content-type": "text/event-stream" } });
-    if (path === "/mcp") return Response.json({ deck: { status: "connected" }, ...(options.extraMcp ? { unwanted: { status: "connected" } } : {}) });
-    if (path === "/config") return Response.json({ plugin: options.plugins ?? [] });
+    if (path === "/mcp") return Response.json({ deck: { status: "connected" }, ...(options.personal ? {personal:{status:"failed",error:"PRIVATE_FAILURE_SENTINEL"}} : {}), ...(options.extraMcp ? { unwanted: { status: "connected" } } : {}) });
+    if (path === "/config") return Response.json({ mcp:{deck:{type:"local",command:[options.mutatedMcp ? "foreign" : "deck","internal","session-mcp"],environment:{DECK_SESSION_CREDENTIAL_FILE:"/private/credential"},enabled:true}}, plugin: options.plugins ?? [] });
+    if (path === "/agent") return Response.json([{name:"build",permission:options.nativePermissions ?? [{permission:"*",pattern:"*",action:"allow"}]}]);
     if (path === "/experimental/tool/ids") return Response.json(options.memoryTool ? ["bash", "supermemory"] : ["bash"]);
     if (path === "/session") return Response.json({ id: "ses_native" });
     if (path === "/session/ses_native") return Response.json({ id: "ses_native" }, { status: options.resumeStatus ?? 200 });
@@ -154,7 +153,7 @@ describe("OpenCode driver production HTTP contract", () => {
     const s = fakeServer({ pending: true }); const h = privateIo();
     try {
       const approvals: string[] = [];
-      const io: DriverHostIo = { ...h.io, approval: async r => { approvals.push(r.approvalId); return { decision: "deny" }; }, spawn: async (_cmd, args) => { expect(args).toContain("--pure"); return s.child; } };
+      const io: DriverHostIo = { ...h.io, approval: async r => { approvals.push(r.approvalId); return { decision: "deny" }; }, spawn: async (_cmd, args) => { expect(args).not.toContain("--pure"); return s.child; } };
       const task = await createOpenCodeSessionDriver({ baseEnv: {} }).startTask(input(), io);
       expect(await task.nativeSessionId).toBe("ses_native"); expect(await task.done).toEqual({ status: "completed" });
       expect(await task.send("again")).toEqual({ status: "completed" });
@@ -167,9 +166,9 @@ describe("OpenCode driver production HTTP contract", () => {
       await task.close(); expect(s.terminated).toBe(1);
     } finally { await s.stop(); }
   });
-  test("fails closed when an inherited MCP appears", async () => {
-    const s = fakeServer({ extraMcp: true }); const h = privateIo();
-    try { await expect(createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child })).rejects.toThrow("isolation"); expect(s.terminated).toBe(1); expect(s.requests.some(r => r.path.endsWith("/message"))).toBe(false); } finally { await s.stop(); }
+  test("retains native MCPs but blocks a plugin mutation of the protected Deck spec before a prompt", async () => {
+    const s = fakeServer({ mutatedMcp: true, extraMcp: true }); const h = privateIo();
+    try { await expect(createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child })).rejects.toThrow("opencode-mcp-spec-conflict"); expect(s.terminated).toBe(1); expect(s.requests.some(r => r.path.endsWith("/message") || r.path === "/session")).toBe(false); } finally { await s.stop(); }
   });
   test("resumes native session without creating another", async () => {
     const s = fakeServer(); const h = privateIo();
@@ -220,20 +219,20 @@ test("adapter registration and ordinary read-only MCP composition exclude memory
   writeFileSync(join(h.dir, "opencode.json"), JSON.stringify({ plugin: ["untrusted-plugin"], mcp: { "context-mode": { type: "local", command: ["context-mode", "--mcp"] }, supermemory: { type: "remote", url: "https://memory.invalid" }, "web-search": { type: "local", command: ["web"] }, arbitrary: { type: "local", command: ["other"] } } }));
   const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: h.dir, sessionDriver: { exec: async () => ({ code: 0, stdout: "1.18.31" }) } });
   expect(adapter.getSessionDriver?.()?.runnerId).toBe("opencode");
-  expect(await adapter.readSessionMcpServers?.()).toEqual({ "context-mode": { command: "context-mode", args: ["--mcp"], env: {} } });
+  expect(await adapter.readSessionMcpServers?.()).toEqual({});
 });
 
-test("HTTP Context7 uses the native remote transport and configured authentication is refused", async () => {
+test("personal HTTP configuration and credentials remain in the native source", async () => {
   const { createOpenCodeRunnerAdapter } = await import("../runner-adapter");
   const h = privateIo();
   writeFileSync(join(h.dir, "opencode.json"), JSON.stringify({ mcp: { context7: { type: "remote", url: "https://mcp.context7.com/mcp", enabled: true } } }));
   const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: h.dir });
   const servers = await adapter.readSessionMcpServers?.();
-  expect(servers).toEqual({ context7: { transport: "http", url: "https://mcp.context7.com/mcp" } });
-  const launch = buildOpenCodeLaunch({ ...input(), mcp: { servers: ["context7"], sessionTools: [] }, mcpServerSpecs: servers! }, h.io);
-  expect(JSON.parse(readFileSync(launch.env.OPENCODE_CONFIG!, "utf8")).mcp).toEqual({ context7: { type: "remote", url: "https://mcp.context7.com/mcp", enabled: true } });
+  expect(servers).toEqual({});
+  const launch = buildOpenCodeLaunch(input(), h.io, {baseEnv:{HOME:h.dir,OPENCODE_CONFIG:join(h.dir,"opencode.json")}});
+  expect(JSON.parse(launch.env.OPENCODE_CONFIG_CONTENT!).mcp.context7).toBeUndefined();expect(launch.env.OPENCODE_CONFIG).toBe(join(h.dir,"opencode.json"));
   writeFileSync(join(h.dir, "opencode.json"), JSON.stringify({ mcp: { context7: { type: "remote", url: "https://mcp.context7.com/mcp", headers: { Authorization: "Bearer sensitive" } } } }));
-  await expect(adapter.readSessionMcpServers?.()).rejects.toThrow("authentication");
+  expect(await adapter.readSessionMcpServers?.()).toEqual({});
 });
 
 test("HTTP header auth uses native environment references, never resolved values", () => {
@@ -241,7 +240,7 @@ test("HTTP header auth uses native environment references, never resolved values
   const original = input();
   const launch = buildOpenCodeLaunch({ ...original, mcp: { ...original.mcp, servers: [...original.mcp.servers, "context7"] },
     mcpServerSpecs: { ...original.mcpServerSpecs, context7: { transport: "http", url: "https://mcp.context7.com/mcp", envHttpHeaders: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } } } }, h.io, { baseEnv: {} });
-  expect(JSON.parse(readFileSync(launch.env.OPENCODE_CONFIG!, "utf8")).mcp.context7).toEqual({ type: "remote", url: "https://mcp.context7.com/mcp", enabled: true, oauth: false, headers: { "X-Context7-API-Key": "{env:CONTEXT7_API_KEY}" } });
+  expect(JSON.parse(launch.env.OPENCODE_CONFIG_CONTENT!).mcp.context7).toEqual({ type: "remote", url: "https://mcp.context7.com/mcp", enabled: true, oauth: false, headers: { "X-Context7-API-Key": "{env:CONTEXT7_API_KEY}" } });
   expect(launch.args.join(" ")).not.toContain("CONTEXT7_API_KEY");
 });
 
@@ -294,8 +293,8 @@ test("admits the verified native memory loader while suppressing project and def
   const nativeMemory: NonNullable<DriverTaskInput["nativeMemory"]> = { provider: "supermemory", integration: "runner-plugin", status: "ready", projectScope: "sm_project_v1_owner_repo", plugin: { root: "/owned/supermemory", loaderPath: "/owned/supermemory/opencode-supermemory-loader.mjs" } };
   const launch = buildOpenCodeLaunch({ ...input(), nativeMemory }, h.io, { baseEnv: {} });
   expect(launch.args).not.toContain("--pure");
-  expect(launch.env.OPENCODE_DISABLE_DEFAULT_PLUGINS).toBe("true");
-  expect(JSON.parse(readFileSync(launch.env.OPENCODE_CONFIG!, "utf8")).plugin).toEqual(["file:///owned/supermemory/opencode-supermemory-loader.mjs"]);
+  expect(launch.env.OPENCODE_DISABLE_DEFAULT_PLUGINS).toBeUndefined();
+  expect(JSON.parse(launch.env.OPENCODE_CONFIG_CONTENT!).plugin).toEqual(["file:///owned/supermemory/opencode-supermemory-loader.mjs"]);
   expect(() => buildOpenCodeLaunch({ ...input(), nativeMemory: { ...nativeMemory, status: "unavailable" } }, h.io)).toThrow("opencode-native-memory-unavailable");
 });
 
@@ -570,4 +569,39 @@ test.each([
     else expect(calls[0]?.exactKey).toBeUndefined();
     await task.close();
   } finally { await s.stop(); }
+});
+
+ test('native personal connection failures do not expose credential-bearing diagnostics',async()=>{
+  const s=fakeServer({personal:true}),h=privateIo();try{const task=await createOpenCodeSessionDriver().startTask(input(),{...h.io,spawn:async()=>s.child});expect((await task.done).status).toBe('completed');expect(h.events).toContainEqual({kind:'diagnostic',data:{code:'personal-mcp.runtime',active:[],unavailable:['personal']}});expect(JSON.stringify(h.events)).not.toContain('PRIVATE_FAILURE_SENTINEL');await task.close();}finally{await s.stop();}
+ });
+
+
+test('native compiled permission order and expanded paths survive relay constraints without widening denies',async()=>{
+ const nativePermissions=[{permission:'*',pattern:'*',action:'deny'},{permission:'read',pattern:'*',action:'allow'},{permission:'bash',pattern:'/native/home/private/*',action:'deny'},{permission:'bash',pattern:'ls *',action:'allow'}];
+ const s=fakeServer({nativePermissions}),h=privateIo();try{const task=await createOpenCodeSessionDriver().startTask(input(),{...h.io,spawn:async()=>s.child});await task.done;const rules=s.requests.find(r=>r.path==='/session')!.body.permission;expect(rules).toEqual([{permission:'*',pattern:'*',action:'ask'},...nativePermissions.map(rule=>({...rule,action:rule.action==='allow'?'ask':rule.action})),{permission:'task',pattern:'*',action:'deny'}]);await task.close();}finally{await s.stop();}
+});
+
+test.each(['lead','architect','investigate','quality','setup','apply-fast','apply-deep'])('explicit project trust admits native sources for %s without changing HOME',memberId=>{
+ const h=privateIo(),env={HOME:'/user',XDG_CONFIG_HOME:'/user/config'};
+ const untrusted=buildOpenCodeLaunch({...input(),memberId,projectConfigTrusted:false},h.io,{baseEnv:env});
+ const trusted=buildOpenCodeLaunch({...input(),memberId,projectConfigTrusted:true},h.io,{baseEnv:env});
+ expect(untrusted.env.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('true');expect(trusted.env.OPENCODE_DISABLE_PROJECT_CONFIG).toBeUndefined();expect(trusted.env.HOME).toBe('/user');
+ expect(buildOpenCodeLaunch({...input(),projectConfigTrusted:true},h.io,{baseEnv:{...env,OPENCODE_DISABLE_PROJECT_CONFIG:'true'}}).env.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('true');
+});
+
+test('project-bound explicit config paths cannot bypass consent, while global custom paths remain native',()=>{
+ const h=privateIo(),cwd=h.dir,base={HOME:'/user',OPENCODE_CONFIG:'opencode.json'};
+ expect(()=>buildOpenCodeLaunch({...input(),cwd},h.io,{baseEnv:base})).toThrow('opencode-project-trust-required');
+ expect(()=>buildOpenCodeLaunch({...input(),cwd},h.io,{baseEnv:{HOME:'/user',OPENCODE_CONFIG_DIR:cwd}})).toThrow('opencode-project-trust-required');
+ expect(buildOpenCodeLaunch({...input(),cwd,projectConfigTrusted:true},h.io,{baseEnv:base}).env.OPENCODE_CONFIG).toBe('opencode.json');
+ expect(buildOpenCodeLaunch({...input(),cwd},h.io,{baseEnv:{HOME:'/user',OPENCODE_CONFIG:'/user/custom.json'}}).env.OPENCODE_CONFIG).toBe('/user/custom.json');
+});
+
+test('the untrusted external-skill gate re-admits global roots additively and respects native disable choices',async()=>{
+ const {mkdirSync}=await import('node:fs');const {pathToFileURL}=await import('node:url');const h=privateIo(),home=join(h.dir,'home');mkdirSync(join(h.dir,'project','.git'),{recursive:true});for(const name of ['.claude','.agents'])mkdirSync(join(home,name,'skills'),{recursive:true});
+ const launch=buildOpenCodeLaunch({...input(),cwd:join(h.dir,'project')},h.io,{baseEnv:{HOME:home}});expect(launch.env.OPENCODE_DISABLE_EXTERNAL_SKILLS).toBe('true');expect(launch.expectedGlobalSkillPaths).toEqual([join(home,'.claude','skills'),join(home,'.agents','skills')]);
+ const plugin=await import(pathToFileURL(join(h.dir,'opencode-global-skills.mjs')).href);const config:any={skills:{paths:['/custom'],urls:['https://example.invalid/skills']},permission:{edit:'deny'}};await(await plugin.default()).config(config);expect(config.skills.paths).toEqual([...launch.expectedGlobalSkillPaths,'/custom']);expect(config.skills.urls).toEqual(['https://example.invalid/skills']);expect(config.permission.edit).toBe('deny');
+ const disabled=buildOpenCodeLaunch({...input(),cwd:join(h.dir,'project')},h.io,{baseEnv:{HOME:home,OPENCODE_DISABLE_EXTERNAL_SKILLS:'true'}});expect(disabled.expectedGlobalSkillPaths).toEqual([]);expect(disabled.expectedPlugins).toEqual([]);
+ const claudeDisabled=buildOpenCodeLaunch({...input(),cwd:join(h.dir,'project')},h.io,{baseEnv:{HOME:home,OPENCODE_DISABLE_CLAUDE_CODE_SKILLS:'1'}});expect(claudeDisabled.expectedGlobalSkillPaths).toEqual([join(home,'.agents','skills')]);
+ const trusted=buildOpenCodeLaunch({...input(),cwd:join(h.dir,'project'),projectConfigTrusted:true},h.io,{baseEnv:{HOME:home}});expect(trusted.env.OPENCODE_DISABLE_EXTERNAL_SKILLS).toBeUndefined();expect(trusted.expectedGlobalSkillPaths).toEqual([]);
 });

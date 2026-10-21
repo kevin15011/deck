@@ -14,6 +14,19 @@ import termios
 import time
 
 binary, root, agent_dir, project, mode = sys.argv[1:]
+
+def diagnostic(stage, **data):
+    directory = os.environ.get("DECK_TIMEOUT_PROBE_DIR")
+    if directory:
+        record = {"stage": stage, "pid": os.getpid(), "ppid": os.getppid(), "time_ns": time.monotonic_ns(), "mode": mode, **data}
+        try:
+            with open(os.path.join(directory, "pty-" + str(os.getpid()) + ".jsonl"), "a", encoding="utf-8") as stream:
+                stream.write(json.dumps(record) + "\n")
+        except OSError:
+            pass  # An unavailable diagnostic sink must not affect the fixture.
+
+diagnostic("python.begin")
+
 master, slave = pty.openpty()
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 110, 0, 0))
 output = ""
@@ -23,8 +36,10 @@ def child_setup():
     os.setsid()
     fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
+diagnostic("pty.spawn.before")
 process = subprocess.Popen([binary, "--model", "faux/faux-1", "--session-dir", os.path.join(root, "sessions")],
                            stdin=slave, stdout=slave, stderr=slave, cwd=project, env=dict(os.environ), preexec_fn=child_setup)
+diagnostic("pty.spawn.after", child_pid=process.pid)
 os.close(slave)
 
 def read_output(delay=0.05):
@@ -40,11 +55,14 @@ def read_output(delay=0.05):
                 raise
 
 def wait_for(predicate, description, seconds=12):
+    diagnostic("pty.wait.before", description=description)
     deadline = min(time.monotonic() + seconds, overall_deadline)
     while not predicate():
         if process.poll() is not None or time.monotonic() >= deadline:
+            diagnostic("pty.wait.failed", description=description, child_code=process.poll(), output_bytes=len(output))
             raise AssertionError(description + "; terminal tail: " + repr(output[-1200:]))
         read_output()
+    diagnostic("pty.wait.after", description=description, child_code=process.poll(), output_bytes=len(output))
 
 def entries():
     result = []
@@ -88,8 +106,10 @@ try:
     wait_for(lambda: "minimized" in output, "panel minimization did not update")
     if mode == "regular":
         assert "SUBAGENTS" not in output, "floating overlay leaked into regular mode"
+    diagnostic("pty.result.ready")
     print(json.dumps({"mode": mode, "integratedWithoutPrompt": True, "editorPreserved": True, "minimized": True}))
 finally:
+    diagnostic("pty.cleanup.before", child_code=process.poll())
     if process.poll() is None:
         try:
             os.write(master, b"\x03")
@@ -102,5 +122,8 @@ finally:
                 os.killpg(process.pid, signal.SIGKILL)
         except (ProcessLookupError, OSError):
             pass
+    diagnostic("pty.wait-exit.before", child_code=process.poll())
     process.wait(timeout=3)
+    diagnostic("pty.wait-exit.after", child_code=process.poll())
     os.close(master)
+    diagnostic("pty.cleanup.after")

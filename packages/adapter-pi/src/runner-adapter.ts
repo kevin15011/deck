@@ -1,3 +1,5 @@
+import { buildCodebaseGuardEntry, parseCodebaseGuardEntry, type CodebaseGuardInvocation } from "./pi-codebase-guard-command";
+import { hashJsonValue } from "./pi-manifest";
 /**
  * Pi RunnerAdapter — implements the RunnerAdapter interface for the Pi runner.
  *
@@ -145,6 +147,8 @@ const PI_DISPLAY_NAME = "Pi Runner";
 const PI_ENVIRONMENT_IDS = ["pi-development"] as const;
 
 export type PiRunnerAdapterOptions = {
+  /** CLI-owned stable/canary/dev self invocation; evaluated only when a Codebase selection needs materialization. */
+  readonly codebaseGuardInvocation?: () => CodebaseGuardInvocation;
   /** Runtime-only home override used by hermetic callers and tests. */
   readonly homeDirectory?: string;
   /** Environment used to resolve PI_CODING_AGENT_DIR (defaults to process.env). */
@@ -618,8 +622,10 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   #piTools?: PiToolResolution;
   #webSearchCredential?: () => string | undefined;
   #legacyBackupRoot?: () => string;
+  #codebaseGuardInvocation?: () => CodebaseGuardInvocation;
   constructor(options: PiRunnerAdapterOptions = {}) {
     this.#legacyBackupRoot = options.legacyBackupRoot;
+    this.#codebaseGuardInvocation = options.codebaseGuardInvocation;
     this.#homeDirectory = options.homeDirectory ?? process.env.HOME ?? homedir();
     this.#env = options.env ?? process.env;
     this.#agentDirResolution = resolvePiAgentDir(this.#env, this.#homeDirectory);
@@ -1188,6 +1194,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     const diagnostics: { code: string; severity: "info" | "warning" | "error"; message: string }[] = version.reason === "unavailable" && version.diagnostic
       ? [{ code: "pi-version-unavailable", severity: "warning", message: version.diagnostic }]
       : [];
+    if (!this.#tools().codebase.command()) diagnostics.push({ code: "codebase-memory-unavailable", severity: "warning", message: "Codebase Memory is unavailable for this execution. Use file listing, rg searches, and focused file reads. Review & Install can restore the reviewed executable; preparation never downloads it." });
     const sensitiveKeys: string[] = [];
     const webSearch = this.#webSearchLaunchCredential(input);
     if (webSearch.kind === "ready") {
@@ -1415,7 +1422,8 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     const deckConfig = requireDeckConfig(input.deckConfig, "developer team install");
     const ownedMcp = Object.keys(readPiManifest(this.#fileIO, agentDir)?.mcp.servers ?? {});
     let mcpServers: Record<string, Record<string, unknown>> = {};
-    try {
+    let availableMcpServers: Record<string, Record<string, unknown>> = {};
+    {
       const resolved = resolveDeckPiMcpServers({
         selected: selectDeckPiMcpServerIds({
           capabilityIds: input.capabilityIds,
@@ -1428,16 +1436,32 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         ownedServerNames: ownedMcp,
         webSearchProvider: this.resolveWebSearchProvider(deckConfig.webSearch.provider),
       });
-      mcpServers = resolved.servers;
+      availableMcpServers = resolved.servers;
+      mcpServers = { ...resolved.servers };
+      // Preserve the owned selection on disk so restoration needs no manual reconfiguration.
+      // The reviewed native connector filters this selection before connection; persistence is not an execution grant.
+      const existing = readPiMcpServers(this.#fileIO, agentDir)["codebase-memory"];
+      if (!resolved.servers["codebase-memory"] && ownedMcp.includes("codebase-memory") && existing &&
+          hashJsonValue(existing) === readPiManifest(this.#fileIO, agentDir)?.mcp.servers["codebase-memory"] &&
+          (input.capabilityIds === undefined || input.capabilityIds.some(id => id === "codebase-memory" || id === "codebase-memory-mcp"))) {
+        mcpServers["codebase-memory"] = existing as Record<string, unknown>;
+      }
+      if (this.#codebaseGuardInvocation && mcpServers["codebase-memory"]) {
+        const current = mcpServers["codebase-memory"]!;
+        const binary = parseCodebaseGuardEntry(current, agentDir)?.binary ?? current.command;
+        if (typeof binary !== "string") throw new Error("pi-codebase-guard-invalid");
+        const guarded = buildCodebaseGuardEntry(this.#codebaseGuardInvocation(), agentDir, binary);
+        mcpServers["codebase-memory"] = guarded;
+        if (availableMcpServers["codebase-memory"]) availableMcpServers = { ...availableMcpServers, "codebase-memory": guarded };
+      }
       for (const diagnostic of resolved.diagnostics) diagnosticEntries.push(diagnostic);
-    } catch (error) {
-      diagnosticEntries.push({ code: "PI_MCP_RESOLUTION_FAILED", severity: "warning", message: `Deck MCP servers could not be resolved: ${error instanceof Error ? error.message : String(error)}` });
     }
 
     const materialization = buildPiGlobalMaterialization({
       agentDir,
       projectRoot: input.projectRoot,
       mcpServers,
+      availableMcpServers,
       legacyDeckEvidence: hasLegacyDeckInstallEvidence(this.#fileIO, agentDir),
       // RTK rewrite is pinned to the Deck-owned binary: an explicit selection must include RTK; a launch-time plan
       // (no explicit selection) keeps using the owned binary when it is usable.

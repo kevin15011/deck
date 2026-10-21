@@ -1,3 +1,5 @@
+import {WebRestart,type RestartIdentity,type RestartLauncher} from "./web-restart";
+import {createHash} from "node:crypto";
 import { QuestionBroker } from "./question-broker";
 /**
  * Session daemon assembly (XR-3.1, design 6.3): lock -> recovery -> services -> control socket ->
@@ -37,6 +39,8 @@ export type DaemonServices = {
 export type DaemonOptions = {
   paths: StatePaths;
   version: string;
+  restart?:{identity:Omit<RestartIdentity,"pid"|"nonce">;launcher:RestartLauncher};
+  restartChannel?:"stable"|"canary";
   /** Command prefix that starts a child anchor, e.g. [deck, "internal", "child-anchor"]. */
   anchorCommand: readonly string[];
   /** Builds the session manager. Defaults to a service that refuses every command (pre-SessionManager builds). */
@@ -133,10 +137,6 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       isPushAttentionCurrent: attention => !draining && (svc.isPushAttentionCurrent?.(attention) ?? false),
       readAttachment: (sessionId, attachmentId) => svc.readAttachment?.(sessionId, attachmentId),
     };
-    if (options.web) {
-      web = new WebService({ paths, service: guardedService, ...options.web });
-      if (options.web.autoStart !== false) try { web.start(); } catch { logger.warn("web.listen-failed"); }
-    }
     const transportService: SessionService = {
       execute: (input) => guardedService.execute(input), openLog: (id) => svc.openLog(id), hasRunningWork: () => svc.hasRunningWork(),
       query: (name, args) => name.startsWith("web.") ? admit(() => web?.query(name, args) ?? { ok: false, code: "web-unavailable" }) : guardedService.query!(name, args),
@@ -152,6 +152,13 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       callTaskTool: (grant, name, args, context) => svc.callTaskTool?.(grant, name, args, context) ?? Promise.resolve({ ok: false, code: "tool-unknown" }),
     });
 
+    const restart=new WebRestart({paths,current:{...(options.restart?.identity??{version:options.version,channel:options.restartChannel??"stable",digest:"0".repeat(64)}),pid,nonce},launcher:options.restart?.launcher??{inspect:async()=>{throw Error("restart-unavailable");},prepare:async()=>{throw Error("restart-unavailable");}},
+      snapshot:()=>{const work=svc.restartSnapshot?.(),approvals=broker.pending(),questions=questionBroker.pending();return{fingerprint:createHash('sha256').update(JSON.stringify([work?.fingerprint??svc.hasRunningWork(),approvals,questions,admitted,draining,web?.status().port])).digest('hex'),tasks:work?.tasks??Number(svc.hasRunningWork()),approvals:approvals.length,questions:questions.length,busy:isBusy()||draining};},
+      webPort:()=>web?.status().port,
+      drain:value=>{if(value&&draining)throw Error('restart-in-progress');draining=value;},stop:reason=>{void stopRequested?.(reason);},
+    });
+    if(options.web){web=new WebService({paths,service:guardedService,...options.web,restart});if(options.web.autoStart!==false)try{web.start();}catch{logger.warn('web.listen-failed');}}
+
     server = new ControlServer({
       socketPath: paths.socket.path,
       service: transportService,
@@ -162,7 +169,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
         version: options.version, pid, nonce,
         status: () => ({
           pid, nonce, version: options.version, startedAt: new Date(startedAt).toISOString(), uptimeMs: clock.now() - startedAt,
-          clients: server!.clientCount + (web?.clientCount ?? 0), web: web?.status(), runningWork: svc.hasRunningWork(), pendingApprovals: broker.pending().length, pendingQuestions: questionBroker.pending().length, socketPath: paths.socket.path, stopping: draining,
+          clients: server!.clientCount + (web?.clientCount ?? 0), web: web?.status(), runningWork: svc.hasRunningWork(), pendingApprovals: broker.pending().length, pendingQuestions: questionBroker.pending().length, socketPath: paths.socket.path, stopping: draining, ...(options.restart?{executable:options.restart.identity}:{}),
         }),
         requestRestart: () => {
           if (draining) return { ok: true as const };
@@ -192,11 +199,11 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       stopPromise ??= (async () => {
         logger.info("daemon.stopping", { reason });
         idle.stop();
-        broker.dispose("shutdown");
-        questionBroker.dispose("shutdown");
+        broker.dispose(reason.startsWith("web-restart-forced:")?reason:"shutdown");
+        questionBroker.dispose(reason.startsWith("web-restart-forced:")?reason:"shutdown");
         // Let the manager abort readiness, drain native handles and release shared backend
         // leases before group containment. A stuck adapter still has a bounded grace period.
-        const serviceClosing = Promise.resolve().then(() => svc.close?.()).catch((error) => { logger.warn("daemon.service-close-failed", { error: (error as Error).message }); });
+        const serviceClosing = Promise.resolve().then(() => svc.close?.(reason.startsWith("web-restart-forced:")?reason:undefined)).catch((error) => { logger.warn("daemon.service-close-failed", { error: (error as Error).message }); });
         let closeTimer: ReturnType<Clock["setTimeout"]> | undefined;
         try {
           await Promise.race([serviceClosing, new Promise<void>((resolve) => { closeTimer = clock.setTimeout(() => { logger.warn("daemon.service-close-timeout"); resolve(); }, 7500); })]);

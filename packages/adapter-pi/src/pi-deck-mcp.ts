@@ -8,11 +8,8 @@ import type { PiPlanDiagnostic } from "./pi-global-install";
  * MCP stdio children inherit the Pi environment (verified against Pi 1.0.0). Deck blanks every memory variable in
  * each Deck entry's `env`, which Pi applies on top of the inherited environment (the child sees an empty value).
  */
-export const DECK_PI_MEMORY_ENV_BLANKS: Readonly<Record<string, string>> = Object.freeze({
-  DECK_RUNNER_MEMORY_ENDPOINT: "",
-  DECK_RUNNER_MEMORY_TOKEN: "",
-  DECK_RUNNER_MEMORY_TOKEN_FILE: "",
-});
+export { DECK_PI_MEMORY_ENV_BLANKS } from "./pi-mcp-env";
+import { DECK_PI_MEMORY_ENV_BLANKS } from "./pi-mcp-env";
 
 export type DeckPiMcpEntry = {
   command: string;
@@ -126,7 +123,7 @@ export function resolveDeckPiMcpServers(input: ResolveDeckPiMcpInput): ResolvedD
       else servers[id] = buildDeckPiMcpEntry({ command, args: [] });
     } else if (id === "codebase-memory") {
       const command = input.tools.codebase.command();
-      if (!command) unavailable(id, "No usable Codebase Memory binary is installed (shared or Deck-owned).");
+      if (!command) diagnostics.push({ code: "codebase-memory-unavailable", severity: "warning", message: "Codebase Memory is unavailable for this execution. Use file listing, rg searches, and focused file reads. Review & Install can restore the reviewed executable; preparation never downloads it." });
       else servers[id] = buildDeckPiMcpEntry({ command, args: [] });
     } else if (id === "web-search") {
       const provider = input.webSearchProvider;

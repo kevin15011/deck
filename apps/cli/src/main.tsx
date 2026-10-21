@@ -44,6 +44,18 @@ if (process.env.DECK_STANDALONE_WEB_SEARCH_SMOKE === "1") {
   process.exit(isStandaloneWebSearchSmokeSuccessful(report) ? 0 : 1);
 }
 
+if (parsed.command === "internal-codebase-mcp-guard-v1") {
+  const { runPiCodebaseGuard } = await import("@deck/adapter-pi");
+  const code = await runPiCodebaseGuard(parsed.guard);
+  // Successful supervision already flushed both streams. Bound final diagnostic delivery when
+  // a consumer is stalled; forced cleanup must not hang again on the same destination.
+  if (code !== 0) await Promise.race([
+    Promise.all([process.stdout, process.stderr].map(stream => new Promise<void>(resolve => stream.write("", () => resolve())))),
+    new Promise<void>(resolve => setTimeout(resolve, 500)),
+  ]);
+  process.exit(code);
+}
+
 if (parsed.command === "internal-serena-mcp") {
   if (parsed.probe) {
     console.log(INTERNAL_SERENA_MCP_PROBE_TOKEN);
@@ -91,17 +103,27 @@ if (parsed.command === "internal-session-mcp") {
   process.exit(0);
 }
 
+if (parsed.command === "internal-daemon-restart-helper") {
+  const {runWebRestartHelper}=await import("./web-daemon-restart");
+  process.exit(await runWebRestartHelper(parsed.intentPath));
+}
+
 if (parsed.command === "internal-session-daemon") {
   const { runSessionDaemon } = await import("@deck/session-host");
   const { createCrossSessionService } = await import("./session-service");
   const { WEB_ASSETS } = await import("./runtime/web-assets.generated");
+  const {captureRestartLauncher}=await import("./web-daemon-restart");
+  const {resolveStatePaths}=await import("@deck/session-host");
+  const restart=captureRestartLauncher(resolveStatePaths());
   const crossRunner = configStore.read().crossRunner;
   const { validateDeckConfig } = await import("@deck/core/config/deck-config");
   const webConfig = crossRunner?.web ?? validateDeckConfig({crossRunner:{}}).crossRunner!.web;
   process.exit(await runSessionDaemon({
     version: getBuildInfo().version,
+    restart,
+    restartChannel:getBuildInfo().channel==="dev"?"canary":"stable",
     anchorCommand: deckInternalCommand("child-anchor"),
-    web: { autoStart: Boolean(crossRunner?.enabled), config: webConfig, assets: WEB_ASSETS },
+    web: { autoStart: Boolean(crossRunner?.enabled), config: {...webConfig,...(restart?.webPort?{port:restart.webPort}:{})}, assets: WEB_ASSETS },
     createService: (services) => createCrossSessionService(services, { configStore }),
   }));
 }

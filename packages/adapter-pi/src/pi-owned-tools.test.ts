@@ -157,3 +157,18 @@ describe("shared command resolution", () => {
     expect(tools.resolveExecutable("evil")).toBeUndefined();
   });
 });
+
+test("native command resolution preserves cancellation and authorization errors from shared verification", () => {
+  const shared = join(home, "shared", "codebase-memory-mcp");
+  put(dirname(shared), "codebase-memory-mcp", "fixture");
+  for (const error of [new DOMException("cancelled", "AbortError"), Object.assign(new Error("denied"), { code: "EACCES" })]) {
+    const tools = createPiTools(options({ resolveCommand: () => shared, verifyExistingCodebase: () => { throw error; } }));
+    expect(() => tools.codebase.command()).toThrow(error);
+  }
+});
+
+test("native command resolution never degrades protected owned corruption into optional absence", () => {
+  const tools = createPiTools(options());
+  put(tools.codebase.root, "codebase-memory-mcp", "wrongbytes");
+  expect(() => tools.codebase.command()).toThrow("codebase-memory-integrity-failed");
+});

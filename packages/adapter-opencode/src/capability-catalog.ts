@@ -14,6 +14,7 @@ export type OpenCodeRunnerScope = "opencode" | "all";
 export type OpenCodeCapabilityStatus = "ready" | "missing" | "manual" | "pending" | "blocked" | "disabled" | "unsupported" | "enabled-unconfigured" | "configured-but-not-materialized";
 
 export type OpenCodeCapabilityInstallKind =
+  | "deck-owned-native"
   | "opencode-plugin" // OpenCode plugin (in-process) added to plugin array in opencode.json
   | "external" // Manual install required from external source
   | "pending" // Install pending / not yet determined
@@ -83,12 +84,12 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
     capabilityId: "codebase-memory",
     canonicalCapabilityId: "codebase-memory",
     label: "codebase-memory",
-    description: "Codebase memory MCP capability for code intelligence. Binary MCP server installed via shell script.",
+    description: "Codebase memory MCP capability using the reviewed Deck-owned native release.",
     runnerScope: "all",
     requirementLevel: "configurable",
     toolId: "codebase-memory",
     source: "DeusData/codebase-memory-mcp",
-    installKind: "shell-script",
+    installKind: "deck-owned-native",
     detector: { commands: ["codebase-memory-mcp"] },
   },
   rtk: {

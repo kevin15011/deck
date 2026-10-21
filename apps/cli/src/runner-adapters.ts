@@ -11,14 +11,15 @@
  */
 
 import { createAdapterRegistry, type AdapterRegistry } from "@deck/core";
-import { createPiRunnerAdapter } from "@deck/adapter-pi";
+import { createPiRunnerAdapter, createCodebaseGuardInvocation } from "@deck/adapter-pi";
 import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
 import { createCodexRunnerAdapter } from "@deck/adapter-codex";
 import { createClaudeRunnerAdapter } from "../../../packages/adapter-claude/src/index";
 import { getWebSearchProviderDescriptor } from "./web-search-provider";
 import { readOwnedTavilyCredential } from "./web-search-shell-profile";
 import { resolveClaudeSupermemoryLaunchCredential } from "./claude-supermemory-launch";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
 import { getDeckStateDir } from "./runtime/paths";
 
 /**
@@ -51,9 +52,22 @@ export function deckInternalCommand(name: string): string[] {
   return [process.execPath, ...(process.argv[1] && /(?:^|[/\\])main\.[cm]?[jt]sx?$/.test(process.argv[1]) ? [resolve(process.argv[1])] : []), "internal", name];
 }
 
+/** Canonical payload for compiled stable/canary; runtime plus real main script for development. */
+export function deckCodebaseGuardInvocation() {
+  const invocation = deckInternalCommand("codebase-mcp-guard-v1");
+  const executable = realpathSync(invocation[0]!);
+  const candidate = invocation.length === 4 ? invocation[1] : undefined;
+  // Same Bun virtual-entry boundary used by Pi's self-invocation helper: virtual scripts are not OS files.
+  const virtual = candidate?.startsWith("/$bunfs/") || candidate?.startsWith("B:/$bunfs/");
+  const script = candidate && !virtual && existsSync(candidate) && realpathSync(candidate) !== executable ? candidate : undefined;
+  if (/^(bun|node)(\.exe)?$/i.test(basename(executable)) && !script) throw new Error("pi-codebase-guard-invalid");
+  return createCodebaseGuardInvocation(executable, script);
+}
+
 export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOptions = {}): AdapterRegistry {
   const registry = createAdapterRegistry();
   registry.register("pi", createPiRunnerAdapter({
+    codebaseGuardInvocation: deckCodebaseGuardInvocation,
     legacyBackupRoot: () => join(getDeckStateDir(), "backups", "pi-legacy"),
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),

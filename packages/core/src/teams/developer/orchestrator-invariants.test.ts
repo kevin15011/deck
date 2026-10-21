@@ -358,10 +358,10 @@ describe("INV-004 SDD Triage Gate: strengthened condition and requiredAction", (
     expect(inv_004.condition).toContain("conversational deltas reuse");
   });
 
-  it("requiredAction keeps triage but removes routine restatement and revision limits", () => {
+  it("requiredAction keeps calibrated intake without redundant approval or revision limits", () => {
     expect(inv_004.requiredAction).toContain("Direct, Specialist(s), Recommend SDD, or Run SDD");
-    expect(inv_004.requiredAction).toContain("bounded read-only discovery");
-    expect(inv_004.requiredAction).toContain("without a separate restatement-confirmation ceremony");
+    expect(inv_004.requiredAction).toContain("Bounded read-only clarification discovery");
+    expect(inv_004.requiredAction).toContain("proceed without redundant approval");
     expect(inv_004.requiredAction).toContain("\"move this up\"");
     expect(inv_004.requiredAction).toContain("There is no arbitrary revision-cycle limit");
     expect(inv_004.requiredAction).toContain("rerun only evidence invalidated by that delta");
@@ -372,7 +372,7 @@ describe("INV-004 SDD Triage Gate: strengthened condition and requiredAction", (
     expect(ORCHESTRATOR_INVARIANTS).toHaveLength(6);
     const compact = COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1.find((e) => e.id === "INV-004");
     expect(compact?.summary).toBe(
-      "Classify each new outcome, start clear reversible work without a separate confirmation ceremony, and treat in-scope feedback as a delta on the same candidate. Ask again only for material ambiguity, scope expansion, protected risk, irreversible action, or an actual conflict.",
+      "Classify each new outcome. For new substantive work, briefly state objective and scope. For missing required input or material ambiguity, ask ONE concise question and wait before dependent action; bounded read-only clarification discovery is allowed. Proceed without redundant approval when clear and authorized. For follow-ups, confirm only changed scope; do not restart intake. Preserve authority and security gates, including scope expansion, protected risk, irreversible action, or an actual conflict.",
     );
   });
 });

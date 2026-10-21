@@ -78,6 +78,7 @@ describe("Pi active-runner skill discovery provider", () => {
       execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
       execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
       // Hermetic: isolated HOME and agent dir; the version probe never spawns the real pi.
+      mkdirSync(join(projectRoot, "home"), { recursive: true, mode: 0o700 });
       const adapter = createPiRunnerAdapter({ homeDirectory: join(projectRoot, "home"), env: {}, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0" }) });
 
       const plan = adapter.buildDeveloperTeamInstallPlan({

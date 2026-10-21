@@ -21,7 +21,7 @@
 import {
   compareVersions,
   decideReleaseAvailability,
-  fetchReleaseDescriptor,
+  fetchReleaseDescriptorAsync,
   type AvailabilityDecision,
   type ReleaseFetchResult,
   type ReleaseInfo,
@@ -82,10 +82,12 @@ export type ReleaseCheckState =
  * Minimal dependency surface for the release check.
  *
  * Tests inject a fake `fetchImpl` so no real network happens.
- * The default uses the backend `fetchReleaseDescriptor` from G2.
+ * The default uses the backend `fetchReleaseDescriptorAsync` from G2.
  */
 export type ReleaseCheckDeps = {
-  fetchImpl?: () => ReleaseFetchResult;
+  fetchImpl?: (signal: AbortSignal) => ReleaseFetchResult | Promise<ReleaseFetchResult>;
+  /** Cancels transport on unmount or caller cancellation. */
+  signal?: AbortSignal;
   /** Returns the running Deck version; defaults to `getBuildInfo().version`. */
   currentVersion?: () => string;
   /** Returns the running Deck commit; defaults to `getBuildInfo().commit`. */
@@ -109,32 +111,41 @@ export async function runReleaseCheckWithTimeout(
   const currentVersion = deps.currentVersion?.() ?? safeGetCurrentVersion();
   const currentCommit = deps.currentCommit?.() ?? safeGetCurrentCommit();
 
-  const work = Promise.resolve().then(async () => {
-    if (deps.delayMs && deps.delayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, deps.delayMs));
-    }
-    return fetchImpl();
-  });
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<ReleaseFetchResult>((resolve) => {
-    timer = setTimeout(() => {
-      resolve({ kind: "network-error", error: `Release check timed out after ${timeoutMs}ms` });
-    }, timeoutMs);
-  });
-
+  const controller = new AbortController();
+  const cancel = () => controller.abort(new Error("Release check cancelled"));
+  deps.signal?.addEventListener("abort", cancel, { once: true });
+  if (deps.signal?.aborted) cancel();
+  const timer = setTimeout(() => controller.abort(new Error(`Release check timed out after ${timeoutMs}ms`)), timeoutMs);
+  let delayTimer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
   try {
-    const result = await Promise.race([work, timeout]);
+    const cancelled = new Promise<never>((_, reject) => {
+      onAbort = () => reject(controller.signal.reason);
+      controller.signal.addEventListener("abort", onAbort, { once: true });
+      if (controller.signal.aborted) onAbort();
+    });
+    const work = Promise.resolve().then(async () => {
+      controller.signal.throwIfAborted();
+      if (deps.delayMs && deps.delayMs > 0) {
+        await new Promise<void>((resolve) => { delayTimer = setTimeout(resolve, deps.delayMs); });
+      }
+      controller.signal.throwIfAborted();
+      return fetchImpl(controller.signal);
+    });
+    const result = await Promise.race([work, cancelled]);
     return toReleaseCheckState(result, currentVersion, currentCommit);
   } catch (err) {
     return { kind: "network-error", error: err instanceof Error ? err.message : String(err) };
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
+    clearTimeout(timer);
+    if (delayTimer !== undefined) clearTimeout(delayTimer);
+    if (onAbort) controller.signal.removeEventListener("abort", onAbort);
+    deps.signal?.removeEventListener("abort", cancel);
   }
 }
 
-function defaultFetchImpl(): ReleaseFetchResult {
-  return fetchReleaseDescriptor();
+function defaultFetchImpl(signal: AbortSignal): Promise<ReleaseFetchResult> {
+  return fetchReleaseDescriptorAsync({ signal });
 }
 
 function safeGetCurrentVersion(): string {

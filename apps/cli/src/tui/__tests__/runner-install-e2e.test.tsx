@@ -390,8 +390,16 @@ describe("E2E-ish Pi install flow (Task 8)", () => {
   });
 });
 
+function timeoutProbe(stage: string, data: Record<string, unknown> = {}) {
+  const observer = Reflect.get(globalThis, "__deckTimeoutProbe");
+  if (typeof observer === "function") {
+    try { observer(stage, data); } catch { /* Diagnostics must not alter test control flow. */ }
+  }
+}
+
 describe("Codex adapter-driven render-only states", () => {
   test("renders real Codex protected parity gaps and safe review actions in the generic dashboard", async () => {
+    timeoutProbe("dashboard.begin");
     const adapter = createCodexRunnerAdapter({
       preflight: {
         probe: async () => ({ found: true, version: "0.145.0", help: "Usage: codex\nexec\nresume", execHelp: "Usage: codex exec", resumeHelp: "Usage: codex resume [SESSION_ID]" }),
@@ -400,13 +408,17 @@ describe("Codex adapter-driven render-only states", () => {
       tools: readyTestTools(),
       codebaseIndexReadiness: () => true,
     });
+    timeoutProbe("dashboard.inventory.before");
     const inventory = await adapter.getCapabilityInventory({ projectRoot: "/tmp/deck-codex-tui-parity", environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
+    timeoutProbe("dashboard.inventory.after");
     const plan = adapter.buildReviewPlan({ runnerId: "codex", environmentId: "codex-development", selectedCapabilities: {}, packageInstructions: {}, adaptiveMemory: { provider: "none" } }, inventory);
     const capabilityStatuses = Object.fromEntries(inventory.capabilities.map((capability) => [capability.capabilityId, capability.isBlocked ? "blocked" as const : capability.isInstalled ? "ready" as const : "missing" as const]));
     const resolver = {
       getSupportedPackageInstructionIds: () => ["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"] as const,
     };
+    timeoutProbe("dashboard.render.before");
     const packages = renderToString(<RunnerDashboardScreens state={createDefaultRunnerDashboardState({ runnerScope: "codex", runnerDisplayName: adapter.displayName, runnerUi: adapter.ui, screen: "packages-detail", capabilityStatuses })} capabilityResolver={resolver} />);
+    timeoutProbe("dashboard.render.after");
     for (const label of ["Trusted Runner Host Bridge", "Invocation Authorization", "Execution Dossier", "Controlled Effects", "Registry Coordination", "Bound Verification", "Context7", "Pi HUD"]) {
       expect(packages).not.toContain(label);
     }

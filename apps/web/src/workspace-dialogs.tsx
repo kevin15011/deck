@@ -1,3 +1,4 @@
+import {ProjectTrustSettings} from './project-trust-settings';
 import React, { useEffect, useId, useRef, useState } from 'react';
 import type { Api } from './workspace';
 import { SessionCreateButton, YoloFields } from './session-approvals';
@@ -17,8 +18,9 @@ export function AssignmentFields({ runners, value, onChange }: { runners: Runner
     </div>;
 }
 
-export function WorkspaceDialog({ kind, project, session, api, mutate, returnFocus, onClose, onProject, onCreated, onAssigned, onRenamed }: {
+export function WorkspaceDialog({ kind, project, session, api, mutate, returnFocus, onClose, onProject, onCreated, onAssigned, onRenamed, onTrustChanged }: {
     kind?: WorkspaceDialogKind; project?: Project; session?: WorkspaceSession; api: Api; mutate: WorkspaceMutation;
+    onTrustChanged?: () => void;
     returnFocus?: React.RefObject<HTMLElement | null>;
     onClose: () => void; onProject: (project: Project) => void; onCreated: (id: string) => void; onAssigned: () => void; onRenamed?: (id: string, title: string) => void;
 }) {
@@ -26,7 +28,7 @@ export function WorkspaceDialog({ kind, project, session, api, mutate, returnFoc
     const [path, setPath] = useState(''), [name, setName] = useState(''), [title, setTitle] = useState(''), [member, setMember] = useState('lead');
     const [assignment, setAssignment] = useState<Assignment>({ runnerId: '', modelId: '' }), [runners, setRunners] = useState<RunnerOption[]>([]);
     const [yolo,setYolo]=useState(false), [acknowledged,setAcknowledged]=useState(false);
-    const [pending, setPending] = useState(false), [loading, setLoading] = useState(false), [error, setError] = useState(''), [revision, setRevision] = useState(0);
+    const [pending, setPending] = useState(false), [loading, setLoading] = useState(false), [error, setError] = useState(''), [revision, setRevision] = useState(0), [trustRevision,setTrustRevision] = useState(0);
     useEffect(() => {
         if (!kind) { dialog.current?.close(); if (returnFocus?.current?.isConnected) returnFocus.current.focus(); return; }
         setError(''); setLoading(false); setYolo(false); setAcknowledged(false); setName(kind === 'rename-project' ? project?.name ?? '' : kind === 'rename-session' && session ? sessionName(session) : ''); setTitle(''); setMember('lead'); setPath(''); setRunners([]);
@@ -49,7 +51,7 @@ export function WorkspaceDialog({ kind, project, session, api, mutate, returnFoc
             });
         }).catch(cause => { if (!controller.signal.aborted) setError((cause as Error).message); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
         return () => controller.abort();
-    }, [kind, project?.projectId]);
+    }, [kind, project?.projectId, trustRevision]);
     useEffect(() => { if (kind === 'assignments') setAssignment(session?.members?.[member] ?? { runnerId: '', modelId: '' }); }, [kind, member]);
     const selectedRunner = runners.find(item => item.runnerId === assignment.runnerId), validAssignment = !!selectedRunner?.available && !!selectedRunner.models.find(model => model.modelId === assignment.modelId);
     return <dialog ref={dialog} className="workspace-dialog" aria-labelledby={`${id}-title`} onCancel={event => { event.preventDefault(); if (!pending) onClose(); }}><form onSubmit={async event => {
@@ -64,6 +66,7 @@ export function WorkspaceDialog({ kind, project, session, api, mutate, returnFoc
         } catch (cause) { setError((cause as Error).message); }
         finally { setPending(false); }
     }}><div className="dialog-heading"><h2 id={`${id}-title`}>{kind === 'project' ? 'Add project' : kind === 'rename-project' ? 'Rename project' : kind === 'rename-session' ? 'Rename session' : kind === 'session' ? 'New session' : 'Session assignments'}</h2><button type="button" className="quiet" aria-label="Close dialog" disabled={pending} onClick={onClose}>✕</button></div>
+        {(kind === 'session' || kind === 'assignments') && project && <ProjectTrustSettings key={`${kind}:${project.projectId}`} project={project} api={api} mutate={mutate} pending={pending} onPending={setPending} onChanged={()=>{setTrustRevision(value=>value+1);onTrustChanged?.();}}/>}
         {kind === 'rename-project' || kind === 'rename-session' ? <>{kind === 'rename-project' && <p className="muted">{project?.path}</p>}<label>{kind === 'rename-session' ? 'Session name' : 'Project name'}<input ref={projectName} required value={name} onChange={event => setName(event.target.value)} maxLength={160} aria-invalid={!!error} aria-describedby={error ? `${id}-error` : undefined}/></label></> : kind === 'project' ? <><DirectoryInput value={path} onChange={setPath} api={api} disabled={pending}/><label>Project name (optional)<input value={name} onChange={event => setName(event.target.value)} maxLength={160}/></label></> : <>
             {kind === 'session' ? <><p className="muted">{project?.name}<small className="dialog-project-path">{project?.path}</small></p><label>Session name<input required value={title} onChange={event => setTitle(event.target.value)} maxLength={160} autoFocus/></label><h3>Lead</h3></> : <><label>Member<select aria-label="Member" value={member} onChange={event => setMember(event.target.value)}>{Object.keys(session?.members ?? { lead: assignment }).map(item => <option key={item} value={item}>{item === 'lead' ? 'Lead' : item}</option>)}</select></label><p className="muted">Changes apply to future work. Existing delegated tasks keep their recorded assignments.</p>{member === 'lead' && <p className="muted">Changing the Lead starts a new native context with a limited handoff. Your conversation stays here.</p>}</>}
             {loading ? <p role="status">Loading available models…</p> : <AssignmentFields runners={runners} value={assignment} onChange={setAssignment}/>}

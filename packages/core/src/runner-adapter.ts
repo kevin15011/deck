@@ -435,6 +435,8 @@ export type RunnerModelDiscoveryError = {
 
 export type RunnerModelDiscoveryRequest = {
   projectRoot: string;
+  /** Managed host project admission; false requires global-only OpenCode discovery. */
+  projectConfigTrusted?: boolean;
   signal?: AbortSignal;
   /** Rescan bypasses Deck caches; it never authorizes a runner network refresh. */
   mode?: "prefer-cache" | "rescan";
@@ -829,7 +831,7 @@ export interface RunnerAdapter {
    */
   getSessionDriver?(): RunnerSessionDriver;
 
-  /** Resolve ordinary selected MCP packages read-only for an isolated session turn. */
+  /** Resolve the selected managed Codebase identity for task-scoped readiness. Ordinary customizations stay native. */
   readSessionMcpServers?(): Promise<Record<string, ChildMcpServerSpec>>;
 
   /**

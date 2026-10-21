@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDeckSubagentsExtension } from "./extension";
+import { captureResumeRejection } from "./resume-diagnostics.test-support";
 
 const FAKE_PI = fileURLToPath(new URL("../../__fixtures__/fake-pi-child.mjs", import.meta.url));
 let dir: string, log: string, agentsDir: string;
@@ -159,7 +160,14 @@ test("native contexts replace obsolete and foreign wake messages with only curre
   const accepted = await i.call({ agent: "deck-quality", task: "FAIL" }), id = accepted.details.taskIds[0];
   const terminal = await completed(i, id), oldOutcome = terminal.outcomeId;
   const oldWake = { role: "custom", ...i.messages[0], content: "STALE_FAILED_ATTEMPT" };
-  expect((await i.call({ action: "resume", taskId: id })).isError).toBeUndefined();
+  const resumed = await i.call({ action: "resume", taskId: id });
+  // Preserve the rejected response and lease before afterEach settles/removes the fixture.
+  let diagnostic: string | undefined;
+  if (resumed.isError) {
+    try { diagnostic = captureResumeRejection(join(dir, "parent-a.jsonl"), terminal, resumed); }
+    catch (error) { diagnostic = `Diagnostic capture failed: ${String(error).slice(0, 512)}`; }
+  }
+  expect(resumed.isError, JSON.stringify({ response: resumed, diagnostic })).toBeUndefined();
   const current = JSON.stringify(await i.modelContext([oldWake, oldWake, { role: "custom", customType: "deck-subagent-report", content: "OLD_PROGRESS" }]));
   expect(current).not.toContain("STALE_FAILED_ATTEMPT"); expect(current).not.toContain("OLD_PROGRESS"); expect(current).not.toContain(oldOutcome);
   expect(current).toContain("DECK_PI_TASK_BOARD");

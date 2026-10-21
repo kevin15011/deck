@@ -33,7 +33,7 @@ async function pair(f: ReturnType<typeof fixture>) { const p = f.host.pair(); co
 
 test("project actions require the authenticated same-origin workspace command boundary", async () => {
   const f = fixture();
-  const commands = [{ type: "project.rename", projectId: "p", name: "Renamed" }, { type: "project.remove", projectId: "p" }];
+  const commands = [{ type:"project.trust",projectId:"p",runnerId:"opencode",trusted:true,expectedRevision:0 }, { type: "project.rename", projectId: "p", name: "Renamed" }, { type: "project.remove", projectId: "p" }];
   const send = (command: unknown, headers: Record<string, string>) => fetch(`${f.base}/api/commands`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ command: { v: 1, commandId: randomUUID(), ...(command as object) } }) });
   for (const command of commands) expect((await send(command, { Origin: f.base })).status).toBe(401);
   expect(f.executed).toHaveLength(0);
@@ -41,7 +41,7 @@ test("project actions require the authenticated same-origin workspace command bo
   for (const command of commands) expect((await send(command, { Origin: "http://evil.example", Cookie: cookie })).status).toBe(403);
   expect(f.executed).toHaveLength(0);
   for (const command of commands) expect((await send(command, { Origin: f.base, Cookie: cookie })).status).toBe(200);
-  expect(f.executed).toHaveLength(2);
+  expect(f.executed).toHaveLength(commands.length);
 });
 
 test("sidebar status polling authenticates and bounds session IDs before dispatch", async () => {

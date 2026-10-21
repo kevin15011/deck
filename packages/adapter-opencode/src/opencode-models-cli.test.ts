@@ -265,3 +265,8 @@ describe("OpenCode process boundary", () => {
     expect(child.kills).toEqual(["SIGTERM", "SIGKILL"]);
   });
 });
+
+test('revoked discovery cannot spawn a native process after its signal is aborted',async()=>{
+ let spawns=0;const runner=createNodeOpenCodeCommandRunner({spawn:()=>{spawns++;throw Error('must not spawn');},setTimeout,clearTimeout});const controller=new AbortController();controller.abort();
+ const result=await runner.run({file:'opencode',args:['models','--verbose'],cwd:'/fixture',timeoutMs:1000,maxStdoutBytes:1000,maxStderrBytes:1000,signal:controller.signal});expect(spawns).toBe(0);expect(result.terminationReason).toBe('timeout');
+});

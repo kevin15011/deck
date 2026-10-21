@@ -10,6 +10,8 @@
  */
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { dirname, join, resolve } from "node:path";
 
 export type SmokeCheck = { name: string; ok: boolean; detail?: unknown };
@@ -36,9 +38,13 @@ export async function runSessionSmoke(options: { deck: string[]; keep?: boolean;
   writeFileSync(join(bin, runner), `#!/bin/sh\nexec "${process.execPath}" "${replayer}" "$@"\n`);
   chmodSync(join(bin, runner), 0o755);
   const env: Record<string, string> = {
-    HOME: home, XDG_CONFIG_HOME: join(home, ".config"), XDG_STATE_HOME: join(home, ".local", "state"), XDG_DATA_HOME: join(home, ".local", "share"),
+    HOME: home, XDG_CONFIG_HOME: join(home, ".config"), XDG_STATE_HOME: join(home, ".local", "state"), XDG_DATA_HOME: join(home, ".local", "share"), XDG_CACHE_HOME: join(home, ".cache"),
     TMPDIR: base, PATH: `${bin}:/usr/bin:/bin`, FAKE_CLAUDE_LOG: log, FAKE_CODEX_LOG: log, FAKE_OPENCODE_LOG: log, DECK_SESSION_DAEMON_IDLE_MS: "600000",
   };
+  // A native addition and deny exercise additive config and permission preservation.
+  // The fake reports these declarations without starting an MCP or calling a provider.
+  const personalMcp = { type: "remote", url: "https://smoke-personal.invalid/mcp", enabled: true };
+  if (runner === "opencode") env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ mcp: { personal: personalMcp }, permission: { read: "deny" } });
   const stateRoot = join(env.XDG_STATE_HOME!, "deck");
   const timeoutMs = options.timeoutMs ?? 60_000;
   const children = new Set<Bun.Subprocess>();
@@ -131,24 +137,45 @@ export async function runSessionSmoke(options: { deck: string[]; keep?: boolean;
     const modeOk = (path: string, mode: number) => (statSync(path).mode & 0o777) === mode;
     check("session state is private (0700 dirs, 0600 files)", !!events && modeOk(dirname(join(stateRoot, events)), 0o700) && modeOk(join(stateRoot, events), 0o600), events);
 
-    const calls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv: string[]; configDir?: string; disableProjectConfig?: string; disableClaudeCode?: string; config?: { permission?: { task?: string }; mcp?: Record<string, unknown> }; passwordConfigured?: boolean });
-    const turn = [...calls].reverse().find((c) => c.argv.includes(runner === "claude" ? "-p" : runner === "codex" ? "app-server" : "serve"));
+    type NativeCall = { argv?: string[]; home?: string; configDir?: string; disableProjectConfig?: string; disableClaudeCode?: string;
+      config?: { mcp?: Record<string, unknown> }; passwordConfigured?: boolean; event?: string; method?: string;
+      permission?: { permission: string; pattern: string; action: string }[]; mcpServerDigests?: Record<string, string>;
+      approvalPolicy?: string; approvalsReviewer?: string; sandbox?: string };
+    const calls = readFileSync(log, "utf8").trim().split("\n").map(l => JSON.parse(l) as NativeCall);
+    const turn = [...calls].reverse().find(c => c.argv?.includes(runner === "claude" ? "-p" : runner === "codex" ? "app-server" : "serve"));
+    const argv = turn?.argv ?? [];
+    const flag = (name: string) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
+    const bridge = { command: realpathSync(options.deck[0]!), args: [...options.deck.slice(1), "internal", "session-mcp"], env: { DECK_SESSION_CREDENTIAL_FILE: join(stateRoot, "sessions", sessionId, "tasks", "lead", "credential") } };
     if (runner === "claude") {
-    check("claude was started with isolated MCP/hooks and relayed approvals", !!turn && !turn.argv.includes("--bare") && turn.argv.includes("--strict-mcp-config") && turn.argv.includes("--session-id")
-      && !turn.argv.includes("--dangerously-skip-permissions") && turn.argv.includes("--permission-prompt-tool") && turn.argv[turn.argv.indexOf("--permission-prompt-tool") + 1] === "mcp__deck__deck_approve" && JSON.parse(turn.argv[turn.argv.indexOf("--settings") + 1]!).disableAllHooks === true, turn?.argv);
+      const settings = JSON.parse(flag("--settings") ?? "{}");
+      check("claude retains native user loading with relayed approvals and no native delegation", !!turn && !argv.includes("--bare") && !argv.includes("--strict-mcp-config")
+        && argv.includes("--session-id") && flag("--setting-sources") === "user" && settings.disableAllHooks !== true
+        && !argv.includes("--dangerously-skip-permissions") && flag("--permission-prompt-tool") === "mcp__deck__deck_approve"
+        && ["Task", "Agent"].every(tool => (flag("--disallowedTools") ?? "").split(",").includes(tool)), argv);
+      const mcpFile = flag("--mcp-config"), explicit = mcpFile ? JSON.parse(readFileSync(mcpFile, "utf8")) : {};
+      check("claude protects the exact Deck declaration in a private additive MCP file", !!mcpFile && mcpFile.startsWith(stateRoot + "/") && modeOk(mcpFile, 0o600)
+        && isDeepStrictEqual(explicit.mcpServers?.deck, { ...bridge, alwaysLoad: true }), mcpFile);
     } else if (runner === "opencode") {
-      check("opencode serves loopback with a private isolated config", !!turn && turn.argv.includes("--pure") && turn.argv.includes("127.0.0.1")
-        && turn.disableProjectConfig === "true" && turn.disableClaudeCode === "true" && turn.passwordConfigured === true
-        && turn.configDir?.startsWith(stateRoot) === true && turn.config?.permission?.task === "deny"
-        && JSON.stringify(Object.keys(turn.config?.mcp ?? {})) === JSON.stringify(["deck"]), turn);
+      check("opencode retains native HOME and global loading on authenticated loopback", !!turn && !argv.includes("--pure") && argv.includes("127.0.0.1")
+        && turn.home === home && turn.configDir === undefined && turn.disableProjectConfig === "true"
+        && !["true", "1"].includes(turn.disableClaudeCode ?? "") && turn.passwordConfigured === true, { argv, home: turn?.home, configDir: turn?.configDir });
+      check("opencode protects the exact Deck declaration alongside native additions", isDeepStrictEqual(turn?.config?.mcp?.deck, { type: "local", command: [bridge.command, ...bridge.args], environment: bridge.env, enabled: true })
+        && isDeepStrictEqual(turn?.config?.mcp?.personal, personalMcp));
+      const permission = calls.find(c => c.event === "session-permission")?.permission ?? [];
+      check("opencode relays approvals, preserves native deny and disables native delegation", isDeepStrictEqual(permission[0], { permission: "*", pattern: "*", action: "ask" })
+        && permission.some(rule => rule.permission === "read" && rule.pattern === "*" && rule.action === "deny")
+        && isDeepStrictEqual(permission.at(-1), { permission: "task", pattern: "*", action: "deny" }), permission);
     } else {
-      check("codex uses the native app-server", !!turn && turn.argv.includes("app-server") && turn.argv.includes("features.hooks=false")
-        && turn.argv.includes("features.multi_agent=false") && turn.argv.some(a => /^mcp_servers=.*"deck-session-[^"=]+-deck"=/.test(a)), turn);
+      check("codex preserves native loading and disables native delegation", !!turn && turn.home === home && argv.includes("app-server")
+        && argv.includes("features.multi_agent=false") && argv.includes("features.multi_agent_v2=false")
+        && !argv.includes("features.hooks=false") && !argv.includes("--ignore-user-config") && !argv.some(a => /^mcp_servers(?:=|\.)/.test(a)), argv);
+      const thread = calls.find(c => c.event === "thread-config");
+      const expected = { enabled: true, ...bridge };
+      const digest = createHash("sha256").update(JSON.stringify(expected, (_key, item) => item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)).digest("hex");
+      check("codex receives the exact protected Deck declaration through thread stdin", thread?.method === "thread/start" && thread.mcpServerDigests?.["deck-session-lead-deck"] === digest);
+      check("codex relays approvals to the user in the read-only sandbox", thread?.approvalPolicy === "on-request" && thread.approvalsReviewer === "user" && thread.sandbox === "read-only");
     }
-    const credFileMention = turn?.argv.some((a) => a.includes("credential")) ?? false;
-    check(`no inline credential in ${runner} argv`, runner === "codex"
-      ? !!turn && turn.argv.filter(a => a.includes("credential")).every(a => a.includes("DECK_SESSION_CREDENTIAL_FILE") && !/Bearer |Basic |"token"=|"api_key"=/.test(a))
-      : !credFileMention, turn?.argv);
+    check(`no inline credential in ${runner} argv`, !!turn && !argv.some(a => /credential|Bearer |Basic |"token"\s*[:=]|"api_key"\s*[:=]/.test(a)), argv);
 
     if (sessionId) {
       const stop = await run(["session", "stop", sessionId]);

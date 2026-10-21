@@ -88,7 +88,7 @@ export function enumerateOpenCodeConfigCandidates(
     );
   }
 
-  if (!input.env.OPENCODE_DISABLE_PROJECT_CONFIG) {
+  if (!["true","1"].includes(input.env.OPENCODE_DISABLE_PROJECT_CONFIG?.toLowerCase() ?? "")) {
     const projectDirectories: string[] = [];
     for (let cursor = input.projectRoot; ; cursor = dirname(cursor)) {
       projectDirectories.push(cursor);
@@ -97,7 +97,7 @@ export function enumerateOpenCodeConfigCandidates(
     for (const directory of projectDirectories.reverse()) addPair(directory, "project");
   }
 
-  if (!input.env.OPENCODE_DISABLE_PROJECT_CONFIG) {
+  if (!["true","1"].includes(input.env.OPENCODE_DISABLE_PROJECT_CONFIG?.toLowerCase() ?? "")) {
     addPair(join(input.projectRoot, ".opencode"), "project-opencode");
   }
 
@@ -338,7 +338,7 @@ export async function collectOpenCodeDiscoveryContext(input: CollectOpenCodeDisc
   const configHome = input.env.XDG_CONFIG_HOME || input.xdgConfigHome || join(input.homeDir, ".config");
   const configRoots = [
     join(configHome, "opencode"),
-    !input.env.OPENCODE_DISABLE_PROJECT_CONFIG ? join(projectRoot, ".opencode") : undefined,
+    !["true","1"].includes(input.env.OPENCODE_DISABLE_PROJECT_CONFIG?.toLowerCase() ?? "") ? join(projectRoot, ".opencode") : undefined,
     input.env.OPENCODE_CONFIG_DIR,
   ].filter((path): path is string => Boolean(path));
   const candidateDefinitions = enumerateOpenCodeConfigCandidates({

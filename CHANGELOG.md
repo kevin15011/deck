@@ -9,6 +9,54 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-20
+
+### Added
+
+- Durable cross-runner continuity for delegated attempts, explicit Lead review/integration records, and session-owned decisions with revisions, reply targeting and evidence-backed resolution.
+- Text-only current-turn messaging for verified Codex 0.162.1 sessions and guarded Claude Code 2.1.296 executions, with exact native identity, durable admission and conservative reconciliation.
+- Native personal skills, MCP servers and plugins remain available to Lead and all delegated roles across Claude Code, Codex, OpenCode and Pi, under their existing native permissions. Deck configuration is additive and preserves native HOME and authentication identity.
+- Explicit, persistent and revocable OpenCode project trust in New session and Assignments: user/global sources remain available automatically; executable project configuration, plugins and compatibility skills require consent for the canonical project. Stale or replayed grants cannot undo revocation.
+- Persistent per-device unread Lead replies with exact links into paginated conversations, independently tracked display receipts and retained attention while other tasks continue.
+- Browser Back/Forward navigation for sessions, tabs and supported details, preserving drafts and message anchors across exact reply links and warm notification navigation.
+- Menu-only daemon restart for validated stable/custom-prefix and canonical canary installations, with same-channel build selection, durable handoff and exact startup verification. Normal restart refuses busy work; explicit force records interruption, denied approvals and cancelled questions/queued input without rolling back prior effects.
+- Menu-only Install Deck action with browser capability detection, manual installation guidance and standalone-aware visibility; canonical manifest and raster app icons.
+
+### Changed
+
+- Lead guidance yields after justified delegation, keeps reports unverified until reviewed, and makes the substantive answer the last action of the turn. Genuine user evidence remains separate from synthetic continuations and delivery bookkeeping.
+- Notifications include bounded, sanitized, response-language summaries of eligible decisions and Lead replies/results by default, without extra model calls or a preview setting. Summaries may appear on the lock screen.
+- Push attention and delivery receipts survive restart with bounded recovery, subscription renewal and independent delivery while other work runs. Opted-in device authorization renews for a finite 180 days.
+- Lead briefly states the objective and scope of new substantive work, asks one focused question and waits when required input is missing or material ambiguity remains, and proceeds on clear authorized requests. Follow-ups preserve the ongoing work without restarting intake; equivalent guidance is materialized across runners.
+- Mobile navigation uses a full-width scrolling project/session list, comfortable touch rows and a separate Install Deck footer. Decisions stay compact, and the Subagents tab shows current child work.
+- Codebase Memory selection consistently reuses reviewed shared or Deck-owned executables across runners, preserving shared binaries and custom configuration. Preparation never downloads a replacement.
+- Managed Claude, Codex and OpenCode sessions can continue when optional Codebase Memory is unsupported or unavailable, with a visible warning and alternate repository-discovery guidance; verified restoration clears the warning.
+- Updated product/contributor documentation, Apertura branding and favicon, and added the MIT license.
+
+### Fixed
+
+- Keep background release checks responsive with a cancellable asynchronous transport and the existing five-second deadline; timed-out or unmounted checks cannot start a delayed request.
+- Streaming chat retains message and Markdown component identity, avoiding repeated entrance fades, lost text selection and reset code-copy controls on each chunk.
+- Keep outstanding task outcomes and blocked reviews visible across user topics, retries and interrupted Lead turns without recap-only wakes or duplicate delivery.
+- Preserve immutable genuine admission evidence across native reseeding and steering acknowledgments; reject stale decision authority and durable command-ID collisions.
+- Treat uncertain native delivery conservatively: never resend automatically, and never requeue a definitive refusal that arrives after its admission barrier expires.
+- Unconditionally tear down revoked devices' streams and in-flight pushes even when storage cleanup fails; revalidate exact reply receipts after held request bodies and retire removed-session attention durably.
+- Guard Deck-owned Pi Codebase MCP launches, including native reconnect, lazy connection and retry, against rejected executable bytes. Preserve ownership checks, output backpressure and bounded cleanup; cancellation and protected integrity failures remain failures.
+- Keep pinned Bun executable argument handling and binary web-asset digest normalization consistent with canonical build generation.
+
+### Compatibility and limits
+
+- OpenCode and unsupported runner/version combinations retain FIFO queue delivery. Current-turn messaging requires verified native capability and supports text only; images use the queue. Acceptance is not proof of model consumption.
+- Claude input not confirmed as folded into the selected execution remains uncertain and may be retained in native future context; Deck does not silently retry it. Decisions and approvals never resolve merely from a reply, read, push or navigation.
+- Unread visibility is per device and records display, not comprehension. Native final-phase evidence is conservative; bounded extraction may omit an outcome rather than invent finality.
+- Reply storage migrates to schema 2 while preserving enrollment floors and genuine receipts. Older-binary downgrade compatibility has not been certified.
+- Native Pi Codebase launch, reload and tool-policy coverage is verified with Pi 1.0.0 only. Protected failures are checked before Deck launch and supported native factory startup; after startup, an existing model turn may continue while Codebase tool calls remain blocked and diagnostics persist.
+- Pi guarded launches detect later executable/configuration drift but cannot eliminate a same-user verification-to-execution race. Successful cleanup waits for both output streams; permanently stalled stderr can prevent diagnostic delivery, so bounded cleanup reports failure.
+- Web restart requires one CLI bootstrap for older daemons; unsupported development, Homebrew and untrusted installation shapes use the channel-correct CLI recovery command. Paired devices share the existing authorization/proxy boundary; same-user processes are not isolated.
+- OpenCode project trust governs future discovery and launches, not already-running native configuration, and is not a plugin sandbox. Native settings that disable project loading still apply; conflicts with required Deck hooks or protected MCP declarations fail visibly.
+- Native customization was exercised with Claude Code 2.1.296, Codex 0.162.1, OpenCode 1.18.31 and the Pi 1.0.0 SDK. Arbitrary third-party plugin combinations, real OAuth refresh and completion of automatic native memory capture are not certified.
+- PWA installation and notifications depend on browser support and secure context; iOS uses the supported Home Screen flow. Voice notes and human-operated Web terminals remain feasibility research only.
+
 ## [0.12.0] - 2026-10-17
 
 ### Added

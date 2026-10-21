@@ -1,9 +1,10 @@
+import { openCodeProjectConfigDisabled, pendingOpenCodeProjectSources } from "../personal-mcp";
 import { prepareImages, redactImagePayload } from "./images";
 import { execFile } from "node:child_process";
 import type { DriverDecision, DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
 import { validateQuestions, validateQuestionAnswers, type DriverQuestionAnswer, type Question } from "@deck/core/session/question";
 import { redactText } from "@deck/core/session/redaction";
-import { buildOpenCodeLaunch, type OpenCodeLaunchOptions } from "./launch";
+import { conflictingOpenCodeMcp, buildOpenCodeLaunch, type OpenCodeLaunchOptions } from "./launch";
 import { OpenCodeEventMapper, OpenCodeSseParser, OPENCODE_PROTOCOL, record } from "./mapper";
 
 export const OPENCODE_TESTED_VERSIONS = { min: "1.18.31", maxTested: "1.18.31" } as const;
@@ -65,25 +66,48 @@ class OpenCodeTask {
       const [url] = await Promise.all([endpoint, this.child.ready]);
       startupSignal.throwIfAborted();
       this.base = url;
-      const actual = await this.request("/mcp", undefined, startupSignal);
-      if (!record(actual) || Object.keys(actual).some(id => !launch.expectedMcpServers.includes(id)) || launch.expectedMcpServers.some(id => !record(actual[id]) || actual[id].status !== "connected")) {
-        throw new Error("opencode-isolation-violation: native MCP set differs from the explicit child set");
+      const config = await this.request("/config", undefined, startupSignal);
+      if (!record(config) || !record(config.mcp)) throw new Error("opencode-native-config-unavailable");
+      const conflicts = conflictingOpenCodeMcp(config, launch, this.input.suppressedMcpServers);
+      if (conflicts.length) {
+        this.emit({ kind: "diagnostic", data: { code: "personal-mcp.runtime", conflicting: conflicts } });
+        throw new Error("opencode-mcp-spec-conflict");
       }
-      if (launch.expectedPlugins.length) {
-        const config = await this.request("/config", undefined, startupSignal);
-        if (!record(config) || !Array.isArray(config.plugin) || JSON.stringify(config.plugin) !== JSON.stringify(launch.expectedPlugins)) throw new Error("opencode-plugin-isolation-violation");
+      const nativeDeclarations = Object.entries(config.mcp).filter(([id]) => !launch.expectedMcpServers.includes(id) && !(this.input.suppressedMcpServers ?? []).includes(id)).map(([id, value]) => ({id,source:"native",status:record(value) && value.enabled === false ? "unavailable" : "configured",...(record(value) && value.enabled === false ? {reason:"disabled"} : {})}));
+      if (nativeDeclarations.length) this.emit({kind:"diagnostic",data:{code:"personal-mcp.sources",servers:nativeDeclarations}});
+      const actual = await this.request("/mcp", undefined, startupSignal);
+      if (!record(actual) || launch.expectedMcpServers.some(id => !record(actual[id]) || actual[id].status !== "connected")) throw new Error("opencode-managed-mcp-unavailable");
+      const personal = Object.keys(actual).filter(id => !launch.expectedMcpServers.includes(id) && !(this.input.suppressedMcpServers ?? []).includes(id) && config.mcp[id]?.enabled !== false);
+      this.emit({ kind: "diagnostic", data: { code: "personal-mcp.runtime", active: personal.filter(id => record(actual[id]) && actual[id].status === "connected"), unavailable: personal.filter(id => !record(actual[id]) || actual[id].status !== "connected") } });
+      const pendingProject = openCodeProjectConfigDisabled(launch.env) ? pendingOpenCodeProjectSources(this.input.cwd,this.input.projectConfigTrusted ? "disabled" : "project-untrusted") : [];
+      if (pendingProject.length) this.emit({ kind: "diagnostic", data: { code: "personal-mcp.sources", servers: pendingProject } });
+      if (launch.expectedPlugins.length && (!Array.isArray(config.plugin) || launch.expectedPlugins.some(plugin => !config.plugin.includes(plugin)))) throw new Error("opencode-plugin-isolation-violation");
+      if (launch.expectedGlobalSkillPaths.some(path => !Array.isArray(config.skills?.paths) || !config.skills.paths.includes(path))) throw new Error("opencode-global-skills-unavailable");
+      if (this.input.nativeMemory?.status === "ready") {
         const tools = await this.request("/experimental/tool/ids", undefined, startupSignal);
         if (!Array.isArray(tools) || !tools.includes("supermemory")) throw new Error("opencode-native-memory-tool-unavailable");
         this.emit({ kind: "diagnostic", data: { code: "native-memory-capture-unverified", provider: "supermemory", runnerId: "opencode", message: "Native Supermemory recall and explicit tools are enabled. Automatic capture completion is not acknowledged by this managed server lifecycle." } });
       }
+      const agents = await this.request("/agent", undefined, startupSignal);
+      const nativeAgent = Array.isArray(agents) ? agents.find(agent => record(agent) && agent.name === (config.default_agent ?? "build")) : undefined;
+      if (!record(nativeAgent) || !Array.isArray(nativeAgent.permission)) throw new Error("opencode-native-permission-policy-unavailable");
+      const permission = [{permission:"*",pattern:"*",action:this.input.approvals === "relay" ? "ask" : "allow"}];
+      // Native compilation owns defaults, precedence, agent overrides and ~/ expansion.
+      // The relay may require approval for an allow; it never promotes a native deny.
+      for (const rule of nativeAgent.permission) {
+        if (!record(rule) || typeof rule.permission !== "string" || typeof rule.pattern !== "string" || !["ask","allow","deny"].includes(rule.action)) throw new Error("opencode-native-permission-policy-invalid");
+        permission.push({permission:rule.permission,pattern:rule.pattern,action:rule.action === "allow" && this.input.approvals === "relay" ? "ask" : rule.action});
+      }
+      if (this.input.disableNativeDelegation) permission.push({permission:"task",pattern:"*",action:"deny"});
       if (!this.input.disableNativeDelegation) this.emit({ kind: "diagnostic", data: { code: "native-delegation-not-disabled" } });
       const resumePath = this.input.resume ? `/session/${encodeURIComponent(this.input.resume.nativeSessionId)}` : undefined;
       const session = resumePath ? await this.request(resumePath, undefined, startupSignal).catch((error: unknown) => {
         // Scope this classification to the resume lookup, never an MCP/SSE/auth failure.
         if (error instanceof Error && error.message === `OpenCode HTTP 404 for ${resumePath}`) Object.assign(error, { reasonCode: "native-session-not-found" });
         throw error;
-      }) : await this.request("/session", { title: `Deck ${this.input.memberId}` }, startupSignal);
+      }) : await this.request("/session", { title: `Deck ${this.input.memberId}`, permission }, startupSignal);
       if (!record(session) || typeof session.id !== "string" || !session.id || (this.input.resume && session.id !== this.input.resume.nativeSessionId)) throw new Error("opencode-native-session-unavailable");
+      if (resumePath) await this.request(resumePath, { permission }, startupSignal, "PATCH");
       this.nativeId = session.id;
       const response = await fetch(this.base + "/event", { headers: { authorization: this.authorization }, signal: startupSignal });
       if (!response.ok || !response.body) throw new Error("OpenCode SSE unavailable");
@@ -97,9 +121,9 @@ class OpenCodeTask {
     } catch (error) { await this.close(); throw error; } finally { clearTimeout(timeout); }
   }
 
-  private async request(path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
+  private async request(path: string, body?: unknown, signal?: AbortSignal, method?: "PATCH"): Promise<unknown> {
     const response = await fetch(this.base + path, {
-      method: body === undefined ? "GET" : "POST", headers: { authorization: this.authorization, "content-type": "application/json" },
+      method: method ?? (body === undefined ? "GET" : "POST"), headers: { authorization: this.authorization, "content-type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: signal ?? AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(5000)]),
     });
     if (!response.ok) throw new Error(`OpenCode HTTP ${response.status} for ${path}`);
@@ -262,7 +286,7 @@ export function createOpenCodeSessionDriver(options: OpenCodeSessionDriverOption
       if (!version) return { status: "blocked", reasonCode: "opencode-version-unparsable", capabilities: [] };
       if (compare(version, OPENCODE_TESTED_VERSIONS.min) < 0) return { version, status: "blocked", reasonCode: "opencode-version-unsupported", capabilities: [] };
       const untested = compare(version, OPENCODE_TESTED_VERSIONS.maxTested) > 0;
-      return { version, status: untested ? "degraded" : "ready", ...(untested ? { reasonCode: "opencode-version-untested" } : {}), capabilities: ["native-session-resume", "approval-relay", "interrupt-abort", "isolated-config-home", "server-basic-auth"], mcpIsolationVerified: false };
+      return { version, status: untested ? "degraded" : "ready", ...(untested ? { reasonCode: "opencode-version-untested" } : {}), capabilities: ["native-session-resume", "approval-relay", "interrupt-abort", "native-config-inheritance", "server-basic-auth"], mcpIsolationVerified: false };
     },
     async startTask(input, io): Promise<DriverTaskHandle> {
       const task = new OpenCodeTask(input, io, options); await task.initialize();

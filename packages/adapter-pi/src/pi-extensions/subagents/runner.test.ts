@@ -161,3 +161,8 @@ describe("failure and abort handling", () => {
     expect(result.errorMessage).toContain("timed out");
   });
 });
+
+test('personal native MCP declarations reach read-only member --tools without expanding built-in authority',async()=>{
+ const result=await runner({personalToolNames:()=>['mcp__docs__lookup','mcp__docs__lookup']}).run({agent:INVESTIGATE,task:'inspect',cwd:dir});
+ expect(result.failed).toBe(false);const argv=records()[0].argv;expect(argv[argv.indexOf('--tools')+1]).toBe('read,grep,find,ls,mcp__codebase_memory__search_graph,mcp__docs__lookup');expect(argv[argv.indexOf('--tools')+1]).not.toContain('bash');
+});

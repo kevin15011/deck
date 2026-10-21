@@ -1,3 +1,4 @@
+import { isCompatibleCodebaseExecutable } from "@deck/core";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { CLAUDE_ATTRIBUTION_SETTINGS_ARGS } from "./launch-settings";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
@@ -40,7 +41,7 @@ type Options = ClaudeCapabilityOptions & {
   codebaseReleaseOverride?: CodebaseNativeRelease;
   codebaseArtifactEffects?: { fetchArchive?: (asset: string) => Promise<Uint8Array> };
   verifyCodebaseNative?: (executable: string) => boolean;
-  /** Verifies an already-installed (shared) codebase-memory-mcp; defaults to a real `--version` probe. */
+  /** Verifies an already-installed (shared) codebase-memory-mcp; defaults to the reviewed size and hash. */
   verifyExistingCodebase?: (executable: string) => boolean;
   serenaEffects?: SerenaBootstrapEffects;
   serenaBootstrap?: (request: SerenaBootstrapRequest) => Promise<SerenaBootstrapResult>;
@@ -238,19 +239,14 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
     const result = Bun.spawnSync([executable, "--version"], { timeout: 3_000, stdout: "pipe", stderr: "ignore", env: { HOME: home, PATH: process.env.PATH ?? "" } });
     return result.exitCode === 0;
   });
-  // Reuse a codebase-memory-mcp already installed for another runner (PATH or ~/.local/bin). The tool talks to a
-  // shared per-user daemon and a client of a different version hangs, so an existing install wins over the pin.
-  const verifyExistingCodebase = options.verifyExistingCodebase ?? ((executable: string) => {
-    const result = Bun.spawnSync([executable, "--version"], { timeout: 3_000, stdout: "pipe", stderr: "ignore", env: { HOME: home, PATH: process.env.PATH ?? "" } });
-    const match = result.stdout.toString().trim().match(/^codebase-memory-mcp\s+(\d+)\.(\d+)\.(\d+)/i);
-    if (result.exitCode !== 0 || !match) return false;
-    const [major, minor, patch] = [Number(match[1]), Number(match[2]), Number(match[3])];
-    return major > 0 || minor > 10 || minor === 10 && patch >= 8;
-  });
+  // Shared user installations remain untouched; reuse only the exact reviewed build.
+  const verifyExistingCodebase = options.verifyExistingCodebase ?? ((executable: string) => isCompatibleCodebaseExecutable(executable, codebaseRelease));
   const existingCodebase = (): string | undefined => {
-    if (options.resolveCommand) return options.resolveCommand("codebase-memory-mcp"); // privileged test seam
-    for (const candidate of [Bun.which("codebase-memory-mcp"), join(home, ".local", "bin", "codebase-memory-mcp")]) {
-      try { if (candidate && isAbsolute(candidate) && existsSync(candidate) && verifyExistingCodebase(candidate)) return candidate; } catch { /* try next */ }
+    const candidates = options.resolveCommand
+      ? [options.resolveCommand("codebase-memory-mcp")]
+      : [Bun.which("codebase-memory-mcp"), join(home, ".local", "bin", "codebase-memory-mcp")];
+    for (const candidate of candidates) {
+      try { if (candidate && isAbsolute(candidate) && verifyExistingCodebase(candidate)) return candidate; } catch (error) { if (!["ENOENT", "ENOTDIR", "ELOOP"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; }
     }
     return undefined;
   };
@@ -680,8 +676,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       const selection = readSelection(); // Reject corrupt metadata, even when no ordinary package is selected.
       if (!existsSync(metadataPath)) return {};
       if (adapter.readSelectedCapabilityIds?.() === undefined) throw new Error("Claude session MCP selection is untrusted.");
-      const ids = selection.capabilities.filter((id) => id === "context-mode" || id === "codebase-memory" || id === "context7" || id === "serena");
-      if (ids.includes("serena") && !await probeSerena()) throw new Error("Claude session Serena readiness is stale; review the existing Deck-owned installation.");
+      const ids = selection.capabilities.filter((id) => id === "codebase-memory");
       // Cross sessions verify the reviewed native pin during managed readiness.
       // Static plugin installs retain their shared-daemon command preference.
       const sessionEffects: ClaudeCapabilityOptions = {
@@ -690,8 +685,12 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
           ? join(ownedCodebaseRoot, "codebase-memory-mcp")
           : toolEffects.resolveCommand?.(name),
       };
-      const file = claudeCapabilityFiles(parent, ids, sessionEffects).find((file) => file.path.endsWith("/.mcp.json"));
+      const codebaseCommand = ids.includes("codebase-memory") ? sessionEffects.resolveCommand?.("codebase-memory-mcp") : undefined;
+      if (ids.includes("codebase-memory") && !codebaseCommand && ["conflict", "unusable"].includes(ownedCodebaseState())) throw new Error("codebase-memory-integrity-failed");
+      // Missing optional tooling reaches managed readiness without weakening metadata or other packages.
+      const file = claudeCapabilityFiles(parent, ids.filter(id => id !== "codebase-memory"), sessionEffects).find((file) => file.path.endsWith("/.mcp.json"));
       const servers = file ? (JSON.parse(file.content) as { mcpServers: Record<string, { command: string; args?: string[] }> }).mcpServers : {};
+      if (ids.includes("codebase-memory")) servers["codebase-memory"] = { command: codebaseCommand ?? join(home, ".local", "bin", "codebase-memory-mcp") };
       return Object.fromEntries(Object.entries(servers).map(([id, server]) => [id, { command: server.command, args: server.args ?? [], env: {} }]));
     },
     getThinkingLevels(modelId) { return modelSnapshot?.inventory.modelsByProvider.claude?.find((model) => model.id === modelId)?.variants ?? []; }, supportsThinking(modelId) { return adapter.getThinkingLevels(modelId).length > 0; },

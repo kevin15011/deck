@@ -197,3 +197,31 @@ describe("managed Codebase Memory readiness", () => {
     expect(existsSync(prepared.env.CBM_RUNTIME_DIR!)).toBe(false);
   });
 });
+
+test("warm unsupported hash remains cached after retry TTL, invalidates on file replacement, and never spawns", async () => {
+  const t = fixture(); let checks = 0, now = 0;
+  const service = track(new SessionCodebaseReadiness({ supervisor: t.supervisor, runtimeParent: t.root, now: () => now, verifyExecutable: async () => { checks++; return false; } }));
+  await expect(service.ensure(t.spec, t.context())).rejects.toThrow("codebase-memory-unsupported");
+  now = 31_000;
+  await expect(service.ensure(t.spec, t.context())).rejects.toThrow("codebase-memory-unsupported");
+  expect(checks).toBe(1); expect(t.counts().spawns).toBe(0);
+  writeFileSync(t.binary, "replaced fixture bytes");
+  await expect(service.ensure(t.spec, t.context())).rejects.toThrow("codebase-memory-unsupported");
+  expect(checks).toBe(2);
+  const cancelled = new AbortController(); cancelled.abort();
+  await expect(service.ensure(t.spec, t.context(cancelled.signal))).rejects.toThrow("codebase-memory-cancelled");
+  expect(checks).toBe(2); expect(t.counts().spawns).toBe(0);
+});
+
+test("an owned artifact mismatch is fatal integrity failure, not optional unsupported", async () => {
+  const t=fixture(), directory=join(t.root,"codebase-native-v0.11.0","fixture-platform"); mkdirSync(directory,{recursive:true});
+  const binary=join(directory,"codebase-memory-mcp"); writeFileSync(binary,"tampered owned bytes");
+  const service=track(new SessionCodebaseReadiness({supervisor:t.supervisor,verifyExecutable:async()=>false}));
+  await expect(service.ensure({...t.spec,command:binary},t.context())).rejects.toThrow("codebase-memory-integrity-failed"); expect(t.counts().spawns).toBe(0);
+});
+
+test("native supervisor authorization/control failures retain their identity", async () => {
+  const t=fixture(), error=Object.assign(new Error("protected supervisor failure"),{code:"EACCES"});
+  const service=track(new SessionCodebaseReadiness({supervisor:{spawn(){throw error;}},verifyExecutable:async()=>true}));
+  await expect(service.ensure(t.spec,t.context())).rejects.toBe(error);
+});

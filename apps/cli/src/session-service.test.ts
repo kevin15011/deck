@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerAdapter } from "@deck/core";
@@ -218,6 +218,9 @@ describe("createCrossSessionService (production composition)", () => {
       }
       expect(inputs).toHaveLength(2);
       for (const input of inputs) {
+        expect(input.rolePrompt).toContain("For new substantive work, briefly state the understood objective and scope");
+        expect(input.rolePrompt).toContain("ask ONE concise question and wait for the reply before dependent action");
+        expect(input.rolePrompt).toContain("confirm only changed scope and do not restart intake");
         expect(input.rolePrompt).toContain("yield promptly");
         expect(input.rolePrompt).toContain("last action of the turn");
         expect(input.rolePrompt).toContain("Reports remain unverified until you review evidence");
@@ -307,9 +310,9 @@ describe("createCrossSessionService (production composition)", () => {
     const sessionId = (created as { data: { sessionId: string } }).data.sessionId;
     await service.execute({ sessionId, clientId: "c", command: { v: 1, commandId: crypto.randomUUID(), type: "prompt.send", text: "go" } });
     for (let i = 0; i < 100 && service.hasRunningWork(); i++) await new Promise((r) => setTimeout(r, 1));
-    expect(input?.mcp.servers).toEqual(["context-mode", "context7", "deck"]);
-    expect(input?.mcpServerSpecs.context7).toEqual({ transport: "http", url: "https://mcp.context7.com/mcp", envHttpHeaders: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } });
-    expect(input?.mcpServerSpecs["context-mode"]).toEqual({ command: process.execPath, args: ["--fixture"], env: {} });
+    expect(input?.mcp.servers).toEqual(["deck"]);
+    expect(input?.mcpServerSpecs.context7).toBeUndefined();
+    expect(input?.mcpServerSpecs["context-mode"]).toBeUndefined();
     await service.close();
   });
 
@@ -331,11 +334,15 @@ describe("createCrossSessionService (production composition)", () => {
     await service.close();
   });
 
-  test.each(["claude", "codex", "opencode"])("production composition rejects an unverified selected Codebase Memory build before model startup (%s)", async (runnerId) => {
+  test.each(["claude", "codex", "opencode"])("production composition omits an unverified selected Codebase Memory build without advertising it (%s)", async (runnerId) => {
     const e = env();
     e.store.write({ crossRunner: { enabled: true, members: { lead: { runnerId, modelId: "fixture" } } } });
     let starts = 0;
-    const selected = { runnerId, getSessionDriver: () => ({ ...driver(runnerId), startTask: async () => { starts++; throw new Error("must not spawn"); } }),
+    const selected = { runnerId, getSessionDriver: () => ({ ...driver(runnerId), startTask: async (input: DriverTaskInput) => {
+      starts++; expect(input.mcp.servers).not.toContain("codebase-memory"); expect(input.mcpServerSpecs["codebase-memory"]).toBeUndefined();
+      expect(input.rolePrompt).toContain("Use file listing, rg searches, and focused file reads");
+      return {nativeSessionId:Promise.resolve("fixture"),send:async()=>({status:"completed" as const}),interrupt:async()=>{},done:Promise.resolve({status:"completed" as const}),close:async()=>{}};
+    } }),
       readSessionMcpServers: async () => ({ "codebase-memory": { command: process.execPath, args: [], env: {} } }),
     } as unknown as RunnerAdapter;
     const service = createCrossSessionService(e.services, { configStore: e.store, adapters: () => [selected] });
@@ -344,9 +351,9 @@ describe("createCrossSessionService (production composition)", () => {
       const sessionId = (created as { data: { sessionId: string } }).data.sessionId;
       await service.execute({ sessionId, clientId: "c", command: { v: 1, commandId: crypto.randomUUID(), type: "prompt.send", text: "go" } });
       for (let i = 0; i < 100 && service.hasRunningWork(); i++) await new Promise((r) => setTimeout(r, 1));
-      expect(starts).toBe(0);
+      expect(starts).toBe(1);
       const completion = [...service.openLog(sessionId)!.readAfter(0)].find((event) => event.kind === "turn.completed");
-      expect(completion?.data).toMatchObject({ status: "failed", error: expect.stringContaining("codebase-memory-unsupported") });
+      expect(completion?.data).toMatchObject({ status: "completed" });
     } finally { await service.close(); }
   });
 
@@ -364,8 +371,33 @@ describe("createCrossSessionService (production composition)", () => {
     const b = (await create(service, e.project) as { data: { sessionId: string } }).data.sessionId;
     await Promise.all([a, b].map((sessionId, i) => service.execute({ sessionId, clientId: "c", command: { v: 1, commandId: crypto.randomUUID(), type: "prompt.send", text: String(i) } })));
     for (let i = 0; i < 100 && service.hasRunningWork(); i++) await new Promise((r) => setTimeout(r, 1));
-    expect(inputs.find((input) => input.prompt === "0")?.mcp.servers).toEqual(["selected-1", "deck"]);
-    expect(inputs.find((input) => input.prompt === "1")?.mcp.servers).toEqual(["selected-2", "deck"]);
+    expect(inputs.find((input) => input.prompt === "0")?.mcp.servers).toEqual(["deck"]);
+    expect(inputs.find((input) => input.prompt === "1")?.mcp.servers).toEqual(["deck"]);
     await service.close();
   });
+});
+
+test.each(['claude','codex','opencode'].flatMap(runnerId=>[true,false].map(prepared=>({runnerId,prepared}))))('$runnerId production composition publishes native MCP state (prepared=$prepared)',async ({runnerId,prepared})=>{
+ const {FakeDriver}=await import('../../../packages/session-host/src/testing/fake-driver');
+ const e=env();const native=new FakeDriver(runnerId);native.onStart=turn=>{turn.emit('diagnostic',{code:'personal-mcp.sources',servers:[{id:'docs',source:'native',status:'configured',privateConfig:'SECRET_SENTINEL'},...Array.from({length:260},(_,i)=>({id:'native-'+i,source:'native',status:'configured'}))]});turn.emit('diagnostic',{code:'personal-mcp.runtime',active:turn.input.memberId==='lead'?['docs']:[],unavailable:turn.input.memberId==='lead'?[]:['docs']});turn.init();if(turn.input.memberId!=='lead')queueMicrotask(()=>turn.finish());};
+ e.store.write({crossRunner:{enabled:true,members:{lead:{runnerId:runnerId as any,modelId:'fixture/model'},investigate:{runnerId:runnerId as any,modelId:'fixture/model'}}},adaptiveMemory:{enabled:false,activeProvider:'none'}});
+ const adapter={runnerId,getSessionDriver:()=>native,readSessionMcpServers:async()=>({})} as any;
+ const service=createCrossSessionService(e.services,{configStore:e.store,adapters:()=>[adapter],environment:{}});
+ const command=async(type:string,data:Record<string,unknown>={},sessionId?:string)=>service.execute({clientId:'test',sessionId,command:{v:1,commandId:crypto.randomUUID(),type,...data} as any});
+ const until=async(check:()=>boolean|Promise<boolean>)=>{const end=Date.now()+3000;while(!await check()){if(Date.now()>end)throw new Error('test timeout');await new Promise(r=>setTimeout(r,5));}};
+ try{
+  const created=await command('session.create',{projectRoot:e.project});const id=(created as any).data.sessionId;expect(created.ok).toBe(true);
+  const readiness=async()=> (await service.query('session.readiness',{sessionId:id}) as any).data;
+  if(prepared){await command('session.prepare',{},id);await until(async()=> (await readiness()).status==='ready');expect((await readiness()).personalMcpAvailability).toEqual([]);}
+  await command('prompt.send',{text:'inspect'},id);await until(()=>native.turns.length===1);
+  expect(native.turns[0]!.input.mcp.servers).not.toContain('docs');expect((await readiness()).personalMcpAvailability?.find((x:any)=>x.id==='docs')?.status).toBe('active');expect((await readiness()).personalMcpAvailability).toHaveLength(240);expect((await readiness()).personalMcpAvailability).toContainEqual({id:'additional-servers',source:'native',status:'configured',reason:'limit-exceeded'});
+  expect((await readiness()).status).toBe(prepared?'ready':'unprepared');
+  const credential=JSON.parse(readFileSync(native.turns[0]!.input.credentialFile,'utf8'));
+  const grant=e.services.credentials.lookup(credential.token)!;expect(grant).toBeDefined();
+  const delegated=await service.callTaskTool(grant,'deck_delegate',{agent:'investigate',task:'inspect personal tools'});expect(delegated).toMatchObject({ok:true});
+  await until(()=>native.turns.length>=2&&native.turns[1]!.closed);
+  const member=native.turns[1]!.input;expect(member.memberId).toBe('investigate');expect(member.mcp.servers).not.toContain('docs');expect(member.mcp.sessionTools).not.toContain('deck_delegate');expect((await readiness()).memberMcpAvailability.investigate).toMatchObject({runnerId,servers:expect.arrayContaining([{id:'docs',source:'native',status:'unavailable',reason:'not-connected'}])});
+  native.turns[0]!.finish();
+  const events=[...service.openLog(id)!.readAfter(0)];expect(JSON.stringify(events)).not.toContain('SECRET_SENTINEL');expect(events.some(event=>event.data.code==='personal-mcp.sources'||event.data.code==='personal-mcp.runtime')).toBe(false);
+ }finally{await service.close();}
 });

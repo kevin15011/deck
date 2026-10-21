@@ -1,4 +1,6 @@
-/** Loopback-only browser transport. Unix socket remains the sole administrative surface. */
+/** Loopback browser transport with authenticated device actions and a CLI-injected lifecycle capability. */
+import type {WebRestart} from "./web-restart";
+import type {RestartRequest} from "@deck/core/session/daemon-restart";
 import { WebPush, type WebPushOptions } from './web-push';
 import { LeadReplies } from './lead-replies';
 import { validReplyId } from '@deck/core/session/lead-replies';
@@ -50,6 +52,7 @@ export type WebServiceOptions = {
   assets?: WebAssets;
   now?: () => number;
   push?: Pick<WebPushOptions, "send">;
+  restart?:WebRestart;
   maxReplayEvents?: number;
   maxQueuedBytes?: number;
 };
@@ -357,6 +360,15 @@ export class WebService {
         const device = this.device(r, s);
         if (!device)
           return this.response({ ok: false, code: 'device-required' }, 401);
+        if(path==='/api/daemon/restart'&&r.method==='GET')return this.response(this.options.restart?{ok:true,...await this.options.restart.preflight(device.id)}:{ok:true,available:false,code:'restart-unavailable',recoveryCommand:'deck daemon restart'});
+        if(path==='/api/daemon/restart'&&r.method==='POST'){
+          const body=await this.json(r);if(!this.device(r,s))return this.response({ok:false,code:'device-required'},401);
+          if(!this.options.restart)return this.response({ok:false,code:'restart-unavailable'},503);
+          const result=await this.options.restart.request(device.id,body as RestartRequest,()=>this.device(r,s)?.id===device.id);
+          return this.response(result,result.ok?202:result.code==='device-required'?401:409);
+        }
+        const restartStatus=/^\/api\/daemon\/restart\/([0-9a-f-]{36})$/.exec(path);
+        if(restartStatus&&r.method==='GET'){const value=this.options.restart?.status(device.id,restartStatus[1]!);return this.response(value?{ok:true,receipt:value}:{ok:false,code:'restart-request-not-found'},value?200:404);}
         if(path==='/api/replies' || /^\/api\/sessions\/[^/]+\/replies(?:\/[^/]+)?$/.test(path)) {
           if(!this.replies)return this.response({ok:false,code:'reply-storage-unavailable'},503);
           const match=/^\/api\/sessions\/([^/]+)\/replies(?:\/([^/]+))?$/.exec(path);
@@ -474,6 +486,12 @@ export class WebService {
           if (!safeId(prompts[1]!)) return this.response({ ok: false, code: 'session-invalid' }, 400);
           const outcome = await this.options.service.query?.('prompts.list', { sessionId: prompts[1] }) ?? { ok: false as const, code: 'query-unavailable' };
           return this.response(outcome, outcome.ok ? 200 : 404);
+        }
+        const projectTrust = /^\/api\/projects\/([^/]+)\/trust$/.exec(path);
+        if (projectTrust && r.method === 'GET') {
+          if (!safeId(projectTrust[1]!)) return this.response({ok:false,code:'project-invalid'},400);
+          const result = await this.options.service.query?.('project.trust',{projectId:projectTrust[1]}) ?? {ok:false as const,code:'query-unavailable'};
+          return this.response(result,result.ok ? 200 : 404);
         }
         const readiness = /^\/api\/sessions\/([^/]+)\/readiness$/.exec(path);
         if (readiness && r.method === 'GET') {

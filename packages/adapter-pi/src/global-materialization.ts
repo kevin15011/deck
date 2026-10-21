@@ -1,3 +1,4 @@
+import { CODEBASE_DISCOVERY_FALLBACK } from "@deck/core/session/mcp";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { piAgentPaths } from "./agent-dir";
 import {
@@ -43,6 +44,7 @@ export type PiGlobalMaterializationInput = {
   projectRoot: string;
   installOptions?: Omit<DeveloperTeamInstallOptions, "layout">;
   /** Deck MCP server entries to register in the global `mcp.json` (full entries; see `pi-deck-mcp`). */
+  availableMcpServers?: Readonly<Record<string, unknown>>;
   mcpServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /** Evidence that earlier Deck versions installed pi-subagents / pi-mcp-adapter. */
   legacyDeckEvidence: boolean;
@@ -69,7 +71,11 @@ export type PiGlobalMaterialization = {
 export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput): PiGlobalMaterialization {
   const teamId = input.teamId ?? PI_DEVELOPER_TEAM_ID;
   const paths = piAgentPaths(input.agentDir);
-  const installOptions = input.installOptions ?? {};
+  const selectedServers = configuredServerIds(input.availableMcpServers ?? input.mcpServers ?? {});
+  const suppliedOptions = input.installOptions ?? {};
+  const installOptions = { ...suppliedOptions, ...(suppliedOptions.capabilityInstructions ? { capabilityInstructions: {
+    instructions: suppliedOptions.capabilityInstructions.instructions.filter(fragment => selectedServers.includes("codebase-memory") || !["codebase-memory", "codebase-memory-mcp"].includes(fragment.packageId)),
+  } } : {}) };
   // A global team install always carries the complete catalog. Launch/model-save callers
   // may omit it or supply legacy body-only descriptors; neither may prune owned assets.
   const standaloneSkills = new Map(getStandaloneSkills().map(({ skillId }) => {
@@ -86,8 +92,7 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
     layout: { packageRoot: paths.packageRoot },
   });
 
-  const selectedServers = configuredServerIds(input.mcpServers ?? {});
-  const toolNamesSection = renderPiMcpToolNamesSection(selectedServers);
+  const toolNamesSection = [renderPiMcpToolNamesSection(selectedServers), ...(selectedServers.includes("codebase-memory") ? [] : [CODEBASE_DISCOVERY_FALLBACK])].filter(Boolean).join("\n\n");
 
   const profile = buildTeamSystemPrompt(teamId, {
     ...(nativePlan.memoryBundle ? { memoryInjection: nativePlan.memoryBundle, trustedMemoryInjection: true } : {}),
@@ -119,6 +124,7 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
     }, {
       // Role tool policy, RTK rewrite and graph redirection through one ordered tool_call handler (lead and children).
       name: PI_TOOL_POLICY_EXTENSION_NAME,
+      nativeShell: true,
       implementation: readDeckPiExtensionBundle("deck-tool-policy"),
       scope: "any",
       extraFiles: [{ name: "config.json", content: renderToolPolicyConfig({ rtkBinary: input.rtkBinary ?? null, graphRedirect: selectedServers.includes("codebase-memory") }) }],

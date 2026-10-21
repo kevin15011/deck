@@ -15,6 +15,9 @@ import { getDefaultDeckConfig, prepareAndBuildDeveloperTeamInstallPlan, type Run
 import { createCodexRunnerAdapter } from "@deck/adapter-codex";
 import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
 import { createPiRunnerAdapter } from "@deck/adapter-pi";
+import { createPiTools } from "../../../../../packages/adapter-pi/src/pi-owned-tools";
+import { createCodebaseGuardInvocation } from "../../../../../packages/adapter-pi/src/pi-codebase-guard-command";
+import { fileURLToPath } from "node:url";
 
 import {
   applyRunnerSyncToManifest,
@@ -368,7 +371,9 @@ describe("runner-sync", () => {
       expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
       expect(content).toContain("schemas permit model-selected project scope");
       expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-      expect(content).toContain("Codebase Memory Package");
+      expect(content).not.toContain("Codebase Memory Package");
+      expect(content).not.toContain("mcp__codebase_memory__search_graph");
+      expect(content).toContain("Codebase Memory is unavailable for this execution");
       expect(content).not.toContain("Adaptive-memory project operations are disabled");
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -403,13 +408,42 @@ describe("runner-sync", () => {
         ].join("\n");
         expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
         expect(content).toContain("schemas permit model-selected project scope");
-        expect(content).toContain("Codebase Memory Package");
+        expect(content).not.toContain("Codebase Memory Package");
+      expect(content).not.toContain("mcp__codebase_memory__search_graph");
+      expect(content).toContain("Codebase Memory is unavailable for this execution");
         expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
         expect(content).not.toContain(projectScope);
       } finally {
         await rm(root, { recursive: true, force: true });
       }
     }
+  });
+
+  it("Pi content-only sync omits missing Codebase and restores reviewed guidance without touching Supermemory", async () => {
+    const root=await mkdtemp(join(tmpdir(),"deck-pi-sync-codebase-restoration-")),home=join(root,"home");
+    try {
+      await initCanonicalRemote(root);await mkdir(home);
+      const configPath=join(home,".pi/agent/mcp.json");
+      await writePiSupermemoryConfig(configPath,"sm_project_v1_kevin15011_deck");
+      const personal=JSON.parse(await readFile(configPath,"utf8")).mcpServers.supermemory;
+      const binary=join(home,"codebase-memory-mcp"),bytes="#!/bin/sh\nprintf 'codebase-memory-mcp 0.11.0\\n'\n";
+      await writeFile(binary,bytes,{mode:0o700});
+      const tools=createPiTools({homeDir:home,env:{HOME:home,PATH:""},dataRoot:join(home,"data/deck"),resolveCommand:name=>name==="codebase-memory-mcp"?binary:undefined,codebaseReleaseOverride:{asset:"fixture",archiveBytes:1,archiveSha256:"0".repeat(64),binaryBytes:Buffer.byteLength(bytes),binarySha256:createHash("sha256").update(bytes).digest("hex")},codebaseArtifactEffects:{fetchArchive:async()=>{throw new Error("Content sync must not download");}}});
+      const adapter=createPiRunnerAdapter({homeDirectory:home,env:{},piTools:tools,codebaseGuardInvocation:()=>createCodebaseGuardInvocation(process.execPath,fileURLToPath(import.meta.url)),piVersionProbe:()=>({exitCode:0,stdout:"1.0.0"})});
+      const detected=Object.assign(adapter,{detectDeckInstall:async()=>({installed:true,managedPaths:[configPath]})}) as RunnerAdapter;
+      let selection: unknown;
+      for(const phase of ["available","missing","restored"] as const){
+        if(phase==="missing")await rm(binary);if(phase==="restored")await writeFile(binary,bytes,{mode:0o700});
+        const result=await runRunnerSync({config:supermemorySyncConfig("pi"),registry:makeRegistry([detected]),projectRoot:root,deckVersion:"next",runnerIds:["pi"]});
+        expect(result.outcomes[0]?.status).toBe("synced");
+        const content=await readFile(join(home,".pi/agent/deck/package/agents/deck-lead.md"),"utf8");
+        if(phase==="missing"){expect(content).not.toContain("Codebase Memory Package");expect(content).not.toContain("mcp__codebase_memory__search_graph");expect(content).toContain("Codebase Memory is unavailable for this execution");}
+        else {expect(content).toContain("Codebase Memory Package");expect(content).toContain("mcp__codebase_memory__search_graph");}
+        expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
+        const current=JSON.parse(await readFile(configPath,"utf8"));expect(current.mcpServers.supermemory).toEqual(personal);
+        if(phase==="available")selection=current.mcpServers["codebase-memory"];else expect(current.mcpServers["codebase-memory"]).toEqual(selection);
+      }
+    }finally{await rm(root,{recursive:true,force:true});}
   });
 
   it("Codex content-only sync repairs owned roles, support files, and bootstrap content with no optional selections", async () => {

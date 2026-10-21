@@ -142,9 +142,9 @@ describe("createClaudeSessionDriver.startTask", () => {
     expect(diag.data).toMatchObject({ expected: ["deck", "serena"], actual: ["deck"], missing: ["serena"], extra: [] });
   });
 
-  test("isolation: a leaked extra server is a violation (the --safe-mode inverse and the user-global MCP case)", async () => {
+  test("isolation: a suppressed native server remains a violation", async () => {
     const { h, driver } = make();
-    const handle = await driver.startTask(input(), h.io);
+    const handle = await driver.startTask(input({ suppressedMcpServers: ["context7"] }), h.io);
     const child = await h.nextChild();
     const lines = withSession("turn-success.jsonl");
     lines[0] = lines[0]!.replace('"mcp_servers":[{"name":"deck","status":"connected","source":"dynamic"}]', '"mcp_servers":[{"name":"deck","status":"connected"},{"name":"context7","status":"connected"}]');
@@ -351,8 +351,8 @@ describe("Claude driver probe (XR-4.6, XR-12.1, task 1.13)", () => {
 
   test("in range: ready, isolation verified, capabilities listed", async () => {
     expect(await probeWith("2.1.296 (Claude Code)\n")).toMatchObject({
-      status: "ready", version: "2.1.296", mcpIsolationVerified: true,
-      capabilities: expect.arrayContaining(["caller-assigned-session-id", "approval-relay", "strict-mcp-config"]),
+      status: "ready", version: "2.1.296", mcpIsolationVerified: false,
+      capabilities: expect.arrayContaining(["caller-assigned-session-id", "approval-relay", "native-mcp-additions"]),
     });
   });
   test("above the tested maximum: degraded (continues); below the minimum: blocked", async () => {
@@ -408,4 +408,18 @@ test("delayed full assistant cannot hold back the first partial chunk", async ()
   expect(h.events.filter(event => event.kind === "message.delta")).toHaveLength(1);
   expect(h.events.filter(event => event.kind === "message.completed")).toHaveLength(1);
   console.log(`Claude partial visibility: first chunk ${firstChunkMs.toFixed(2)} ms; final message ${fullMessageMs.toFixed(2)} ms`);
+});
+
+test('native personal failures are nonfatal while a missing managed server remains fatal',async()=>{
+ for(const missing of [false,true]){
+  const {h,driver}=make();const task=await driver.startTask(input(),h.io);const child=await h.nextChild();
+  const lines=withSession('turn-success.jsonl').map(line=>{const message=JSON.parse(line);if(message.type==='system'&&message.subtype==='init')message.mcp_servers=[...(missing?[]:[{name:'deck',status:'connected'}]),{name:'personal',status:'failed'}];return JSON.stringify(message);});
+  for(const line of lines)child.stdout(line+'\n');child.exit();expect((await task.done).status).toBe(missing?'failed':'completed');if(!missing)expect(h.events).toContainEqual({kind:'diagnostic',data:{code:'personal-mcp.runtime',active:[],unavailable:['personal']}});await task.close();
+ }
+});
+
+test('pre-init native stderr cannot publish literal configuration credentials',async()=>{
+ const {h,driver}=make(),task=await driver.startTask(input(),h.io),child=await h.nextChild();
+ child.stderr('invalid config FAKE_PRIVATE_NATIVE_SENTINEL');child.exit({ok:false,code:1});
+ const result=await task.done;expect(result.error).toContain('code 1');expect(result.error).not.toContain('FAKE_PRIVATE_NATIVE_SENTINEL');await task.close();
 });

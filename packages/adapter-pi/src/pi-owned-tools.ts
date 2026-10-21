@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   OWNED_CODEBASE_VERSION,
+  isCompatibleCodebaseExecutable,
   OWNED_RTK_VERSION,
   inspectOwnedCodebase,
   inspectOwnedRtk,
@@ -29,7 +30,7 @@ export type PiToolOptions = {
   codebaseReleaseOverride?: CodebaseNativeRelease;
   codebaseArtifactEffects?: { fetchArchive?: (asset: string) => Promise<Uint8Array> };
   verifyCodebaseNative?: (executable: string) => boolean;
-  /** Verifies an already-installed shared codebase-memory-mcp (defaults to a real `--version` probe). */
+  /** Verifies an already-installed shared codebase-memory-mcp (defaults to the reviewed size and hash). */
   verifyExistingCodebase?: (executable: string) => boolean;
 };
 
@@ -88,31 +89,27 @@ export function createPiTools(options: PiToolOptions = {}) {
   const codebaseRelease = options.codebaseReleaseOverride ?? pinnedOwnedCodebaseRelease();
   const ownedCodebaseRoot = join(toolRoot, `codebase-native-v${OWNED_CODEBASE_VERSION}`, platform);
   const verifyOwnedCodebase = options.verifyCodebaseNative ?? ((executable: string) => runVersion(executable, home).status === 0);
-  const verifyExistingCodebase = options.verifyExistingCodebase ?? ((executable: string) => {
-    const result = runVersion(executable, home);
-    const match = `${result.stdout}`.trim().match(/^codebase-memory-mcp\s+(\d+)\.(\d+)\.(\d+)/i);
-    if (result.status !== 0 || !match) return false;
-    const [major, minor, patch] = [Number(match[1]), Number(match[2]), Number(match[3])];
-    return major > 0 || minor > 10 || (minor === 10 && patch >= 8);
-  });
+  const verifyExistingCodebase = options.verifyExistingCodebase ?? ((executable: string) => isCompatibleCodebaseExecutable(executable, codebaseRelease));
   const existingCodebase = (): string | undefined => {
     const candidates = options.resolveCommand
       ? [options.resolveCommand("codebase-memory-mcp")]
       : [Bun.which("codebase-memory-mcp") ?? undefined, join(home, ".local", "bin", "codebase-memory-mcp")];
     for (const candidate of candidates) {
       try {
-        const real = candidate && isAbsolute(candidate) && existsSync(candidate) ? executableFile(candidate) : undefined;
+        const real = candidate && isAbsolute(candidate) ? realpathSync(candidate) : undefined;
+        const metadata = real ? statSync(real) : undefined;
+        if (!metadata?.isFile() || (metadata.mode & 0o111) === 0) continue;
         if (real && verifyExistingCodebase(real)) return candidate;
-      } catch { /* try next */ }
+      } catch (error) {
+        if (!["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      }
     }
     return undefined;
   };
   const codebaseState = (): PiOwnedState => {
     if (!codebaseRelease) return "unsupported";
-    try {
-      const state = inspectOwnedCodebase(ownedCodebaseRoot, codebaseRelease);
-      return state === "ready" && !verifyOwnedCodebase(join(ownedCodebaseRoot, "codebase-memory-mcp")) ? "unusable" : state;
-    } catch { return "conflict"; }
+    const state = inspectOwnedCodebase(ownedCodebaseRoot, codebaseRelease);
+    return state === "ready" && !verifyOwnedCodebase(join(ownedCodebaseRoot, "codebase-memory-mcp")) ? "unusable" : state;
   };
 
   return Object.freeze({
@@ -142,7 +139,13 @@ export function createPiTools(options: PiToolOptions = {}) {
       root: ownedCodebaseRoot,
       existing: existingCodebase,
       supported: () => existingCodebase() !== undefined || codebaseRelease !== undefined,
-      command: (): string | undefined => existingCodebase() ?? (codebaseState() === "ready" ? join(ownedCodebaseRoot, "codebase-memory-mcp") : undefined),
+      command: (): string | undefined => {
+        const shared = existingCodebase();
+        if (shared) return shared;
+        const state = codebaseState();
+        if (state === "conflict" || state === "unusable") throw new Error("codebase-memory-integrity-failed");
+        return state === "ready" ? join(ownedCodebaseRoot, "codebase-memory-mcp") : undefined;
+      },
       async install(): Promise<"installed" | "unchanged"> {
         if (!codebaseRelease) throw new Error("No pinned Codebase Memory native release exists for this platform.");
         ensurePrivate(dirname(ownedCodebaseRoot));

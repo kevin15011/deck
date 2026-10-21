@@ -1,3 +1,4 @@
+import { createOpenCodeCodebaseTools } from "./codebase-tools";
 /**
  * OpenCode RunnerAdapter — TUI-facing facade for the OpenCode runner.
  *
@@ -145,6 +146,7 @@ import {
   type OpenCodeToolInstallResultExact,
   type SerenaBootstrapRunner,
 } from "./install-tools";
+import { assertOpenCodeProjectConfigAdmission } from "./personal-mcp";
 import { createOpenCodeSkillDiscoveryProvider, type OpenCodeSkillInventoryDiscovery } from "./skill-discovery-provider";
 import { inspectOpenCodeSupermemoryRegistrations, resolveOwnedOpenCodeSupermemoryPaths } from "./opencode-supermemory-plugin";
 export { createOpenCodeSkillDiscoveryProvider };
@@ -262,9 +264,13 @@ export function createDefaultOpenCodeInventoryDiscovery(overrides: Partial<OpenC
   const cache = new ModelInventoryCache({ now: dependencies.now });
   const lkgByScope = new Map<string, LastKnownGoodStore>();
   return async (request) => {
+    const discoveryEnv = request.projectConfigTrusted === false ? {...dependencies.env, OPENCODE_DISABLE_PROJECT_CONFIG: "true", OPENCODE_DISABLE_EXTERNAL_SKILLS:"true"} : dependencies.env;
     const startedAt = dependencies.now();
     const deadlineAt = startedAt + OPENCODE_DISCOVERY_TIMEOUT_MS;
     const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    if (request.signal?.aborted) controller.abort();
+    else request.signal?.addEventListener("abort",onAbort,{once:true});
     let candidate: { fingerprint: string; snapshot: { inventory: RunnerModelInventory; discoveredAt: number } } | undefined;
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<RunnerModelInventoryResult>((resolve) => {
@@ -275,23 +281,24 @@ export function createDefaultOpenCodeInventoryDiscovery(overrides: Partial<OpenC
       }, OPENCODE_DISCOVERY_TIMEOUT_MS);
     });
     const work = (async (): Promise<RunnerModelInventoryResult> => {
+      if (request.projectConfigTrusted === false) assertOpenCodeProjectConfigAdmission(request.projectRoot,discoveryEnv,false);
       const executable = await dependencies.resolveExecutable("opencode", dependencies.env);
       const versionResult = await dependencies.commandRunner.run({ file: executable, args: ["--version"], cwd: request.projectRoot, timeoutMs: Math.min(2_000, Math.max(0, deadlineAt - dependencies.now())), maxStdoutBytes: 4_096, maxStderrBytes: 4_096, signal: controller.signal });
       const version = versionResult.exitCode === 0 && !versionResult.terminationReason ? versionResult.stdout.trim().slice(0, 1_024) : null;
-      const context = await collectOpenCodeDiscoveryContext({ projectRoot: request.projectRoot, executable, version, env: dependencies.env, homeDir: dependencies.homeDir, xdgConfigHome: dependencies.xdgConfigHome, xdgDataHome: dependencies.xdgDataHome, fs: dependencies.fs, resolveWorkspaceRoot: dependencies.resolveWorkspaceRoot, resolvePluginEntry: dependencies.resolvePluginEntry });
+      const context = await collectOpenCodeDiscoveryContext({ projectRoot: request.projectRoot, executable, version, env: discoveryEnv, homeDir: dependencies.homeDir, xdgConfigHome: dependencies.xdgConfigHome, xdgDataHome: dependencies.xdgDataHome, fs: dependencies.fs, resolveWorkspaceRoot: dependencies.resolveWorkspaceRoot, resolvePluginEntry: dependencies.resolvePluginEntry });
       const fingerprint = await buildDiscoveryFingerprint(context);
       const scopeKey = buildLastKnownGoodScopeKey({ runnerRealPath: context.runner.realPath, projectRoot: context.scope.projectRoot, workspaceRoot: context.scope.workspaceRoot });
       let lkg = lkgByScope.get(scopeKey);
       if (!lkg) { lkg = new LastKnownGoodStore({ fs: dependencies.fs, now: dependencies.now }, join(dependencies.xdgCacheHome, "deck", "opencode-model-inventory"), scopeKey); lkgByScope.set(scopeKey, lkg); }
       const snapshot = await lkg.read(fingerprint);
       if (snapshot) candidate = { fingerprint, snapshot };
-      return discoverModelInventory({ projectRoot: request.projectRoot, mode: request.mode, cache, fingerprint, context, deadlineAt, signal: controller.signal, preloadedLastKnownGood: snapshot, readLastKnownGood: (key) => lkg!.read(key), writeLastKnownGood: (value) => lkg!.write(value.fingerprint, value.inventory, value.discoveredAt), dependencies: { commandRunner: dependencies.commandRunner, resolveExecutable: dependencies.resolveExecutable, env: dependencies.env, now: dependencies.now } });
+      return discoverModelInventory({ projectRoot: request.projectRoot, mode: request.mode, cache, fingerprint, context, deadlineAt, signal: controller.signal, preloadedLastKnownGood: snapshot, readLastKnownGood: (key) => lkg!.read(key), writeLastKnownGood: (value) => lkg!.write(value.fingerprint, value.inventory, value.discoveredAt), dependencies: { commandRunner: dependencies.commandRunner, resolveExecutable: dependencies.resolveExecutable, env: discoveryEnv, now: dependencies.now } });
     })();
     // Observe late work after the public race so it cannot become an unhandled rejection or a late commit.
     void work.catch(() => undefined);
     try { return await Promise.race([work, timeout]); }
     catch { return { state: "blocked", inventory: null, source: "none", error: { code: "command-failed", message: "OpenCode model discovery failed. Run opencode models --verbose to check the runner.", retryable: true } }; }
-    finally { if (deadlineTimer) dependencies.timers.clearTimeout(deadlineTimer); }
+    finally { request.signal?.removeEventListener("abort",onAbort); if (deadlineTimer) dependencies.timers.clearTimeout(deadlineTimer); }
   };
 }
 
@@ -352,6 +359,7 @@ class OpenCodeRunnerAdapterImpl {
   #latestReady: Extract<RunnerModelInventoryResult, { state: "ready" }> | null = null;
   #planBindings = new WeakMap<RunnerDeveloperTeamInstallPlan, { nativePlan: OpenCodeDeveloperTeamInstallPlan; validation: { changedAgentIds: readonly string[]; fingerprint?: string; modelAssignments: DeveloperTeamModelAssignments; thinkingAssignments: DeveloperTeamThinkingAssignments } }>();
   #developerTeamConfigDir?: string;
+  #sessionHomeDir?: string;
   #sessionDriver?: OpenCodeSessionDriverOptions;
   #toolsReview?: OpenCodeRunnerAdapterOptions["toolsReview"];
   #installTools: typeof installOpenCodeTools;
@@ -372,6 +380,7 @@ class OpenCodeRunnerAdapterImpl {
 
   constructor(options?: OpenCodeRunnerAdapterOptions) {
     this.#developerTeamConfigDir = options?.developerTeamConfigDir;
+    this.#sessionHomeDir = options?.skillDiscoveryHomeDir;
     this.#sessionDriver = options?.sessionDriver;
     this.#toolsReview = options?.toolsReview;
     this.#installTools = options?.installTools ?? installOpenCodeTools;
@@ -781,6 +790,7 @@ class OpenCodeRunnerAdapterImpl {
             undefined,
             {
               projectRoot: context.projectRoot,
+              signal: context.signal,
               evidenceContext: this.getEvidenceContext(context),
             },
           );
@@ -822,7 +832,7 @@ class OpenCodeRunnerAdapterImpl {
           return this.runSerenaMcpConfigAction(action, context);
         }
 
-        const result = await this.writeMcpConfigFromCapability(capabilityId, action.source, context.webSearchProvider);
+        const result = await this.writeMcpConfigFromCapability(capabilityId, action.source, context.webSearchProvider, context);
         return {
           actionId: action.id,
           status: result.ok ? "executed" : "failed",
@@ -1068,9 +1078,17 @@ class OpenCodeRunnerAdapterImpl {
     capabilityId: string,
     source?: string,
     webSearchProvider?: WebSearchProviderDescriptorV1,
+    actionContext?: RunnerActionContext,
   ): Promise<{ ok: boolean; diagnostics: string[] }> {
     try {
       switch (capabilityId) {
+        case "codebase-memory": {
+          const evidence = actionContext ? this.getEvidenceContext(actionContext) : undefined;
+          const tools = evidence?.codebaseTools ?? createOpenCodeCodebaseTools({ homeDirectory: evidence?.homeDirectory, environment: evidence?.env });
+          const command = tools.command();
+          if (!command) return { ok: false, diagnostics: ["Codebase Memory reviewed executable is unavailable; run Review & Install."] };
+          return writeOpenCodeMcpConfig({ configPath: join(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), "opencode.json"), homeDir: evidence?.homeDirectory, codebasePreviousCommands: tools.sharedCandidates(), serverName: "codebase-memory", type: "local", command: [command] });
+        }
         case "context7": {
           return writeOpenCodeMcpConfig({
             serverName: "context7",
@@ -1311,6 +1329,16 @@ class OpenCodeRunnerAdapterImpl {
   // -------------------------------------------------------------------------
 
   async writeMcpConfig(input: RunnerMcpConfigInput): Promise<RunnerMcpConfigResult> {
+    // Match the generic writer identity before choosing any capability-specific policy.
+    input = { ...input, serverName: input.serverName.trim() };
+    if (input.serverName === "codebase-memory" && !input.webSearchProvider) {
+      // The dashboard's public writer must use the same reviewed selection as runAction.
+      // Caller commands and legacy existence/version evidence are not execution grants.
+      const result = await this.writeMcpConfigFromCapability("codebase-memory", undefined, undefined, {
+        projectRoot: input.projectRoot ?? process.cwd(), runnerId: "opencode", environmentId: "opencode-development",
+      });
+      return { ...result, path: join(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), "opencode.json") };
+    }
     if (input.webSearchProvider) {
       const configPath = join(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), "opencode.json");
       if (input.serverName !== input.webSearchProvider.semanticServerId) {

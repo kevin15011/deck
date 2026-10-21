@@ -7,6 +7,13 @@ import { createChildRunner } from "./runner";
 import { parseAgentMarkdown } from "./agents";
 import { clean } from "./jobs";
 import { assertExecutionSettled, claimExecution, processIsExecuting } from "./execution-lease";
+function timeoutProbe(stage: string, data: Record<string, unknown> = {}) {
+  const observer = Reflect.get(globalThis, "__deckTimeoutProbe");
+  if (typeof observer === "function") {
+    try { observer(stage, data); } catch { /* Diagnostics must not alter test control flow. */ }
+  }
+}
+
 const agent = parseAgentMarkdown("deck-apply-fast", "---\nname: deck-apply-fast\n---\nApply");
 const executing = processIsExecuting;
 async function until(fn: () => boolean) { const end = Date.now() + 3000; while (!fn()) { if (Date.now() > end) throw new Error("Timed out"); await Bun.sleep(10); } }
@@ -56,22 +63,36 @@ test.skipIf(!["linux", "darwin"].includes(process.platform))("SIGKILL parent can
     const runnerPath = resolve(import.meta.dir, "runner.ts"), agentsPath = resolve(import.meta.dir, "agents.ts");
     const parentScript = join(dir, "parent.mjs");
     writeFileSync(parentScript, `import {createChildRunner} from ${JSON.stringify(runnerPath)}; import {parseAgentMarkdown} from ${JSON.stringify(agentsPath)}; await createChildRunner({piInvocation:()=>({command:process.execPath,args:[${JSON.stringify(child)}]})}).run({agent:parseAgentMarkdown("deck-quality","---\\nname: deck-quality\\n---\\nReview"),task:"work",cwd:${JSON.stringify(dir)},sessionFile:${JSON.stringify(file)},parentId:"parent",taskId:"task"});`);
+    timeoutProbe("parent-death.spawn.before", { dir });
     parent = spawn(process.execPath, [parentScript], { stdio: "ignore" });
+    timeoutProbe("parent-death.spawn.after", { pid: parent.pid });
     await until(() => existsSync(log)); pid = Number(readFileSync(log, "utf8"));
+    timeoutProbe("parent-death.child.ready", { parentPid: parent.pid, childPid: pid });
     await until(() => { try { return !!JSON.parse(readFileSync(file + ".execution", "utf8")).child && !existsSync(file + ".execution.gate"); } catch { return false; } });
+    timeoutProbe("parent-death.lease.ready", { parentPid: parent.pid, childPid: pid });
     expect(executing(pid)).toBe(true);
     expect(() => assertExecutionSettled(file, "parent", "task")).toThrow("settled");
     const runner = createChildRunner({ piInvocation: () => ({ command: process.execPath, args: [child] }) });
     const request = { agent: parseAgentMarkdown("deck-quality", "---\nname: deck-quality\n---\nReview"), task: "work", cwd: dir, sessionFile: file, parentId: "parent", taskId: "task" };
+    timeoutProbe("parent-death.refusal.before");
     const refused = await runner.run(request);
+    timeoutProbe("parent-death.refusal.after", { failed: refused.failed, parentExitCode: parent.exitCode, parentSignalCode: parent.signalCode });
     expect(refused.failed).toBe(true); expect(refused.errorMessage).toContain("settled");
     expect(Number(readFileSync(log, "utf8"))).toBe(pid);
     const group = JSON.parse(readFileSync(file + ".execution", "utf8")).group;
-    const exited = new Promise<void>(r => parent!.once("close", () => r())); parent.kill("SIGKILL"); await exited;
+    timeoutProbe("parent-death.close-listener.before", { parentPid: parent.pid, childPid: pid, group, exitCode: parent.exitCode, signalCode: parent.signalCode });
+    const exited = new Promise<void>(r => parent!.once("close", () => r()));
+    const signalled = parent.kill("SIGKILL");
+    timeoutProbe("parent-death.kill.after", { parentPid: parent.pid, signalled, exitCode: parent.exitCode, signalCode: parent.signalCode });
+    await exited;
+    timeoutProbe("parent-death.close.after", { parentPid: parent.pid, exitCode: parent.exitCode, signalCode: parent.signalCode });
     await until(() => !executing(pid));
+    timeoutProbe("parent-death.child.stopped", { childPid: pid });
     // Exit and OS reaping are distinct; do not treat a zombie group as absent.
     await until(() => { try { process.kill(-group, 0); return false; } catch { return true; } });
     expect(() => process.kill(-group, 0)).toThrow();
+    timeoutProbe("parent-death.recovery.before");
     expect((await runner.run(request)).failed).toBe(false);
+    timeoutProbe("parent-death.recovery.after");
   } finally { parent?.kill("SIGKILL"); if (pid && executing(pid)) process.kill(pid, "SIGKILL"); rmSync(dir, { recursive: true, force: true }); }
 }, 6000);

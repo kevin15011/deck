@@ -49,3 +49,9 @@ test("canonical cross-runner guidance requires yielding, answer-last and explici
   expect(CROSS_RUNNER_LEAD_CONTINUITY_GUIDANCE).toContain("retrieval and delivery are not integration");
   expect(CROSS_RUNNER_LEAD_CONTINUITY_GUIDANCE).toContain("Do not request recap-only turns");
 });
+
+test("capability availability is bounded and contains only reviewed non-secret fields", async () => {
+  const {validateCapabilityAvailability}=await import("./mcp");
+  expect(validateCapabilityAvailability([{capabilityId:"codebase-memory",status:"unavailable",reasonCode:"codebase-memory-unsupported",message:"private diagnostic",path:"/private/path"}])).toEqual([{capabilityId:"codebase-memory",status:"unavailable",reasonCode:"codebase-memory-unsupported"}]);
+  for (const value of [[{capabilityId:"supermemory",status:"unavailable",reasonCode:"codebase-memory-unavailable"}],[{capabilityId:"codebase-memory",status:"unavailable",reasonCode:"authorization-denied"}],[{},{}]]) expect(()=>validateCapabilityAvailability(value)).toThrow("capability-availability-invalid");
+});

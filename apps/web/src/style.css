@@ -898,3 +898,7 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .session-drawer .drawer-secondary { padding: .5rem 0 0; margin-top: .5rem; }
 .drawer-install.quiet { display: flex; align-items: center; gap: .75rem; width: 100%; min-height: 44px; padding: .5rem; text-align: left; font-size: .85rem; }
 @media(max-width:1000px){.session-drawer .project-menu .quiet{min-height:44px}.install-dialog .dialog-heading button,.install-dialog .dialog-actions button{min-width:44px;min-height:44px}}
+
+.workspace-dialog .restart-force{display:flex;flex-direction:row;align-items:flex-start;gap:.65rem;line-height:1.5;cursor:pointer}
+.workspace-dialog .restart-force input{width:1.1rem;height:1.1rem;padding:0;flex:none;margin-top:.3rem;min-width:1.1rem;min-height:1.1rem}
+.restart-dialog .dialog-actions{flex-wrap:wrap}

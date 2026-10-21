@@ -74,3 +74,23 @@ export function validTaskIntegration(d: Record<string, unknown>): d is Record<st
     && Array.isArray(d.evidenceSeqs) && d.evidenceSeqs.length > 0 && d.evidenceSeqs.length <= 16
     && new Set(d.evidenceSeqs).size === d.evidenceSeqs.length && d.evidenceSeqs.every(v => Number.isSafeInteger(v) && v >= 1);
 }
+
+/** Bounded per-execution availability. Only optional Codebase Memory may degrade. */
+export type CapabilityAvailability =
+  | { capabilityId: "codebase-memory"; status: "ready" | "unselected" }
+  | { capabilityId: "codebase-memory"; status: "unavailable"; reasonCode: "codebase-memory-unsupported" | "codebase-memory-unavailable" };
+
+/** Rebuild reviewed fields only; reject unknown capability/control contracts. */
+export function validateCapabilityAvailability(value: unknown): CapabilityAvailability[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 1) throw new Error("capability-availability-invalid");
+  return value.map(item => {
+    if (!item || typeof item !== "object" || item.capabilityId !== "codebase-memory") throw new Error("capability-availability-invalid");
+    if (item.status === "ready" || item.status === "unselected") return { capabilityId: "codebase-memory", status: item.status };
+    if (item.status === "unavailable" && ["codebase-memory-unsupported", "codebase-memory-unavailable"].includes(item.reasonCode)) return { capabilityId: "codebase-memory", status: "unavailable", reasonCode: item.reasonCode };
+    throw new Error("capability-availability-invalid");
+  });
+}
+
+export const CODEBASE_UNAVAILABLE_MESSAGE = "Codebase Memory is unavailable for this session. You can continue using other repository tools. Review & Install can repair the reviewed executable; preparation never downloads it.";
+export const CODEBASE_DISCOVERY_FALLBACK = "Codebase Memory is unavailable for this execution. Graph tools are not exposed: ignore static package instructions that assume graph access. Use file listing, rg searches, and focused file reads; use other repository discovery tools only when actually exposed. Do not claim graph-backed findings.";

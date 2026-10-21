@@ -95,6 +95,7 @@ const COMMAND_VARIANTS: ReadonlyArray<[string, Json, string[]]> = [
   ["project.register", { path: { ...nonEmptyString, maxLength: 4096 }, name: { ...nonEmptyString, maxLength: 160 } }, ["path"]],
   ["project.rename", { projectId: { ...nonEmptyString, maxLength: 64 }, name: { ...nonEmptyString, maxLength: 160 } }, ["projectId", "name"]],
   ["project.remove", { projectId: { ...nonEmptyString, maxLength: 64 } }, ["projectId"]],
+  ["project.trust", { projectId: { ...nonEmptyString, maxLength: 64 }, runnerId: { const: "opencode" }, trusted: { type: "boolean" }, expectedRevision: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER } }, ["projectId", "runnerId", "trusted", "expectedRevision"]],
   ["session.create", { approvals: { enum: ["relay", "yolo"] }, projectRoot: nonEmptyString, projectId: nonEmptyString, title: { ...nonEmptyString, maxLength: 160 }, changeId: nonEmptyString, members: { type: "object", maxProperties: 32, additionalProperties: { type: "object", required: ["runnerId", "modelId"], properties: { runnerId: nonEmptyString, modelId: nonEmptyString, thinking: nonEmptyString } } } }, []],
   ["session.prepare", {}, []],
   ["session.prepare.cancel", { preparationId: nonEmptyString }, ["preparationId"]],

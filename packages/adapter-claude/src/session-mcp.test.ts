@@ -28,7 +28,7 @@ test("no owned Claude selection needs no install and yields no ordinary child se
   expect(await adapter.readSessionMcpServers()).toEqual({});
 });
 
-test("session MCP reads only verified owned ordinary packages and excludes memory, web and hooks", async () => {
+test("session additions read only guarded Codebase; ordinary native packages are not reconstructed", async () => {
   const e = setup(["context-mode", "codebase-memory", "context7", "web-search", "rtk"]);
   const adapter = createClaudeRunnerAdapter({ ...e, resolveCommand: () => process.execPath,
     resolveMemoryCredential: () => { throw new Error("must not read memory credentials"); },
@@ -36,13 +36,13 @@ test("session MCP reads only verified owned ordinary packages and excludes memor
     installSharedTool: async () => { throw new Error("must not install"); },
   });
   const servers = await adapter.readSessionMcpServers();
-  expect(Object.keys(servers).sort()).toEqual(["codebase-memory", "context-mode", "context7"]);
-  expect(servers["context-mode"]).toEqual({ command: realpathSync(process.execPath), args: [], env: {} });
+  expect(Object.keys(servers).sort()).toEqual(["codebase-memory"]);
+  expect(servers["context-mode"]).toBeUndefined();
 });
 
-test("a missing selected executable is refused rather than omitted", async () => {
+test("ordinary native executable readiness is left to the native loader", async () => {
   const e = setup(["context-mode"]);
-  await expect(createClaudeRunnerAdapter({ ...e, resolveCommand: () => undefined }).readSessionMcpServers()).rejects.toThrow("verified executable");
+  expect(await createClaudeRunnerAdapter({ ...e, resolveCommand: () => undefined }).readSessionMcpServers()).toEqual({});
 });
 
 test("untrusted owned selection is refused rather than treated as no selection", async () => {
@@ -51,11 +51,11 @@ test("untrusted owned selection is refused rather than treated as no selection",
   await expect(createClaudeRunnerAdapter(e).readSessionMcpServers()).rejects.toThrow("untrusted");
 });
 
-test("selected Serena requires read-only bootstrap evidence and never installs", async () => {
+test("ordinary native Serena is neither reconstructed nor bootstrapped by the resolver", async () => {
   const e = setup(["serena"]);
   const adapter = createClaudeRunnerAdapter({ ...e, serenaProxyCommand: [process.execPath, "internal", "serena-mcp"],
     serenaReadiness: async () => ({ state: "missing" }) as never,
     serenaBootstrap: async () => { throw new Error("must not bootstrap"); },
   });
-  await expect(adapter.readSessionMcpServers()).rejects.toThrow("Serena");
+  expect(await adapter.readSessionMcpServers()).toEqual({});
 });

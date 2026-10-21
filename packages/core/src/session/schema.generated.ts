@@ -2487,6 +2487,7 @@ export const SESSION_COMMAND_SCHEMA = {
         "project.register",
         "project.rename",
         "project.remove",
+        "project.trust",
         "session.create",
         "session.prepare",
         "session.prepare.cancel",
@@ -2594,6 +2595,44 @@ export const SESSION_COMMAND_SCHEMA = {
             "type": "string",
             "minLength": 1,
             "maxLength": 64
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "project.trust"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "projectId",
+          "runnerId",
+          "trusted",
+          "expectedRevision"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "runnerId": {
+            "const": "opencode"
+          },
+          "trusted": {
+            "type": "boolean"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         }
       }
@@ -3369,4 +3408,4 @@ export const SESSION_COMMAND_SCHEMA = {
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "56d559c29eff83b04f7b02b5da07f5688302ac90351e67a85edaa438206d1286";
+export const SESSION_SCHEMA_DIGEST = "5e1227b9623c31dd8323e816a9a265fca02682ebcd3bacd74c7a4800ee70ed0b";

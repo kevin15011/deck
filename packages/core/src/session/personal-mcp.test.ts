@@ -1,0 +1,4 @@
+import {test,expect} from 'bun:test';
+import {validatePersonalMcpAvailability,isReservedPersonalMcp} from './personal-mcp';
+test('public native availability strips configuration and validates its bounded vocabulary',()=>{expect(validatePersonalMcpAvailability([{id:'docs',source:'native',status:'active',secret:'FAKE'}])).toEqual([{id:'docs',source:'native',status:'active'}]);expect(()=>validatePersonalMcpAvailability([{id:'docs',source:'native',status:'active',reason:'SECRET'}])).toThrow();expect(validatePersonalMcpAvailability([{id:'project-configuration',source:'project',status:'unavailable',reason:'project-trust-pending'}])).toHaveLength(1);});
+test('unrelated native namespaces are retained while exact control namespaces stay protected',()=>{expect(isReservedPersonalMcp('deck-notes')).toBe(false);expect(isReservedPersonalMcp('deck')).toBe(true);expect(isReservedPersonalMcp('codebase-memory')).toBe(true);});

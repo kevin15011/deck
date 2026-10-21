@@ -22,6 +22,7 @@ import type { MemoryHandoff } from "../shared/memory-handoff";
 
 export type ChildRunnerOptions = {
   /** Resolves the `pi` executable. Default: the running Pi (`process.execPath`), else `pi`. */
+  personalToolNames?: () => readonly string[];
   piInvocation?: (args: readonly string[]) => PiInvocation;
   /** Parent environment the child inherits. Default: `process.env`. */
   env?: Readonly<Record<string, string | undefined>>;
@@ -142,7 +143,7 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
     if (agent.thinking !== undefined && !isThinkingLevel(agent.thinking)) {
       return failure(agent, task, `Invalid thinking level "${agent.thinking}" for ${agent.id}. Expected one of: ${PI_THINKING_LEVEL_NAMES.join(", ")}.`);
     }
-    const tools = agent.readOnly ? (agent.tools.length > 0 ? [...agent.tools] : [...READ_ONLY_FALLBACK_TOOLS]) : undefined;
+    const tools = agent.readOnly ? [...new Set([...(agent.tools.length > 0 ? agent.tools : READ_ONLY_FALLBACK_TOOLS), ...options.personalToolNames?.() ?? []])] : undefined;
     const args: string[] = ["--mode", "json", "-p", ...(request.sessionFile ? ["--session", request.sessionFile] : ["--no-session"])];
     if (agent.model) args.push("--model", agent.model);
     if (agent.thinking) args.push("--thinking", agent.thinking);

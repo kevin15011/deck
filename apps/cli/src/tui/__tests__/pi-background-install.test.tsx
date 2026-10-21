@@ -16,7 +16,7 @@ import { RunnerDashboardScreens } from "../screens/runner-dashboard-screens";
 test("Review & Install Run install upgrades managed subagent assets through the normal team action", async () => {
   const root = mkdtempSync(join(tmpdir(), "deck-pi-tui-background-install-"));
   try {
-    const projectRoot = join(root, "project"); const agentDir = join(root, "agent"); mkdirSync(projectRoot);
+    const projectRoot = join(root, "project"); const agentDir = join(root, "agent"); mkdirSync(projectRoot); mkdirSync(join(root, "home"), { mode: 0o700 });
     const previous = buildPiGlobalMaterialization({ agentDir, projectRoot, legacyDeckEvidence: false });
     const impl = previous.desired.files.find(f => f.relPath === "deck/package/extensions/deck-subagents/impl.js")!;
     impl.content = "// fixture: previous managed synchronous subagents\nexport default function () {}\n";
@@ -32,7 +32,7 @@ test("Review & Install Run install upgrades managed subagent assets through the 
       expect((await adapter.verifyDeveloperTeamInstall(install)).valid).toBe(true);
       return { results: [] };
     } });
-    expect(results.find(r => r.actionId === "team.developer-team.apply")?.status).toBe("executed");
+    expect(results.find(r => r.actionId === "team.developer-team.apply")).toMatchObject({ status: "executed", diagnostics: [] });
     const installed = readFileSync(join(agentDir, impl.relPath), "utf8");
     expect(installed).toContain("BackgroundJobs"); expect(installed).toContain("nonCapturing: true"); expect(installed).toContain("followUp");
     expect(installed).toBe(readFileSync(join(import.meta.dir, "../../../../../packages/adapter-pi/assets/pi/extensions/deck-subagents.generated.js"), "utf8"));

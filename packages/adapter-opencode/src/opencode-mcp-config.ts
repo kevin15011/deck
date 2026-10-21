@@ -437,6 +437,8 @@ export function writeSupermemoryOpenCodeMcpConfig(
 export type OpenCodeMcpServerType = "local" | "remote";
 
 export type WriteOpenCodeMcpConfigOptions = {
+  /** Exact shared candidates discovered for this reviewed operation, including rejected builds. */
+  codebasePreviousCommands?: readonly string[];
   /** Name of the MCP server (e.g., "context7", "supermemory") */
   serverName: string;
   /** Whether the server is local (npx command) or remote (URL) */
@@ -565,7 +567,23 @@ export function writeOpenCodeMcpConfig(
     }
   }
 
+  if (serverName === "codebase-memory" && (!isPlainRecord(config) || config.mcp !== undefined && !isPlainRecord(config.mcp))) {
+    return { ok: false, path: configPath, serverName, diagnostics: ["Codebase Memory MCP config is malformed; it was preserved."] };
+  }
+
   const mcpSection = (config.mcp ?? {}) as Record<string, unknown>;
+
+  if (serverName === "codebase-memory" && mcpSection[serverName] !== undefined) {
+    const previous = mcpSection[serverName];
+    const oldCommand = isPlainRecord(previous) && Array.isArray(previous.command) ? previous.command : [];
+    const sameCommand = JSON.stringify(oldCommand) === JSON.stringify(options.command);
+    const legacyCommand = oldCommand.length === 1 && (oldCommand[0] === "codebase-memory-mcp" || oldCommand[0] === join(homeDir, ".local", "bin", "codebase-memory-mcp") || (options.codebasePreviousCommands ?? []).includes(oldCommand[0] as string));
+    const standard = isPlainRecord(previous) && previous.type === "local" && previous.enabled !== false
+      && Object.keys(previous).every(key => ["type", "command", "enabled"].includes(key));
+    if (!standard || !sameCommand && !legacyCommand) {
+      return { ok: false, path: configPath, serverName, diagnostics: ["Codebase Memory MCP entry is custom or ambiguous; it was preserved."] };
+    }
+  }
 
   const serverEntry: Record<string, unknown> = {
     type: options.type,

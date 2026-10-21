@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 import type { DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
 import { redactText } from "@deck/core/session/redaction";
 import { CODEX_PROTOCOL, codexTurnStatus, mapCodexNotification } from "./mapper";
-import { buildCodexLaunch, isAdmittedCodexMemoryHook, nativeCodexMcpId, verifyCodexConfig, type CodexHookMetadata, type CodexLaunchOptions } from "./launch";
+import { buildCodexLaunch, matchesCodexMemoryGroups, codexThreadMcpConfig, isAdmittedCodexMemoryHook, nativeCodexMcpId, verifyCodexConfig, type CodexHookMetadata, type CodexLaunchOptions } from "./launch";
 import { CodexRpc, CodexRpcFrameError, object, type RpcMessage } from "./rpc";
 
 export const CODEX_TESTED_VERSIONS = { min: "0.162.1", maxTested: "0.162.1" } as const;
@@ -61,6 +61,7 @@ class CodexTask {
   private spawning?: Promise<SupervisedChild>;
   private rpc?: CodexRpc;
   private threadId?: string;
+  private readonly admittedNativeMcp = new Set<string>();
   private steeringHistoryVerified=false;
   private turn?: Turn;
   private closed = false;
@@ -76,7 +77,7 @@ class CodexTask {
   readonly nativeSessionId = new Promise<string>((resolve, reject) => { this.resolveId = resolve; this.rejectId = reject; });
   constructor(private readonly input: DriverTaskInput, private readonly io: DriverHostIo, private readonly options: CodexSessionDriverOptions) {
     const aliases = Object.fromEntries(input.mcp.servers.map((id) => [id, nativeCodexMcpId(input.taskId, id)]));
-    this.nativeInput = { ...input, mcp: { ...input.mcp, servers: input.mcp.servers.map((id) => aliases[id]!) }, mcpServerSpecs: Object.fromEntries(input.mcp.servers.map((id) => [aliases[id]!, input.mcpServerSpecs[id]!])) };
+    this.nativeInput = { ...input, suppressedMcpServers: [...new Set([...(input.suppressedMcpServers ?? []), ...input.mcp.servers])], mcp: { ...input.mcp, servers: input.mcp.servers.map((id) => aliases[id]!) }, mcpServerSpecs: Object.fromEntries(input.mcp.servers.map((id) => [aliases[id]!, input.mcpServerSpecs[id]!])) };
     this.emit({ kind: "diagnostic", data: { code: "codex-mcp-aliases", aliases } });
     // The host may await done before nativeSessionId; failed startup must not become an unhandled rejection.
     void this.nativeSessionId.catch(() => {});
@@ -106,8 +107,8 @@ class CodexTask {
     this.rpc?.close(); this.rpc = undefined;
     return this.drain;
   }
-  private async connect(inherited?: readonly string[], inheritedPlugins?: readonly string[], inheritedHooks?: readonly CodexHookMetadata[]): Promise<CodexRpc> {
-    const launch = buildCodexLaunch(this.nativeInput, inherited, this.options, inheritedPlugins, inheritedHooks);
+  private async connect(inheritedHooks?: readonly CodexHookMetadata[]): Promise<CodexRpc> {
+    const launch = buildCodexLaunch(this.nativeInput, this.options, inheritedHooks);
     const spawning = this.io.spawn(launch.command, launch.args, { cwd: this.input.cwd, env: launch.env });
     this.spawning = spawning;
     const child = await spawning;
@@ -149,21 +150,47 @@ class CodexTask {
     try {
       if (this.input.assignment.runnerId !== "codex" || !this.input.assignment.modelId.trim()) throw new Error("codex-invalid-assignment");
       const inventory = await this.connect();
-      const config = object(object(await inventory.call("config/read", { cwd: this.input.cwd, includeLayers: false })).config);
+      const inventoryConfig = object(await inventory.call("config/read", { cwd: this.input.cwd, includeLayers: this.input.nativeMemory?.status === "ready" }));
+      const config = object(inventoryConfig.config);
+      if (this.input.nativeMemory?.status === "ready" && Array.isArray(inventoryConfig.layers)) {
+        for (const layer of inventoryConfig.layers) {
+          const source = object(layer);
+          if (source.disabledReason || object(source.name).type === "sessionFlags") continue;
+          const hooks = object(object(source.config).hooks);
+          if (["UserPromptSubmit", "Stop"].some(event => Array.isArray(hooks[event]) && (hooks[event] as unknown[]).length > 0 && !matchesCodexMemoryGroups(hooks[event], event, this.input))) {
+            this.emit({kind:"diagnostic",data:{code:"personal-mcp.runtime",conflicting:["native-memory-hooks"]}});
+            throw new Error("codex-hook-isolation-violation");
+          }
+        }
+      }
+      verifyCodexConfig(config, this.nativeInput);
       const inherited = Object.keys(object(config.mcp_servers));
-      const inheritedHooks = this.input.nativeMemory?.status === "ready" ? await this.readHooks(inventory) : [];
-      await this.stopChild();
-      const rpc = await this.connect(inherited, Object.keys(object(config.plugins)), inheritedHooks);
-      verifyCodexConfig(object(object(await rpc.call("config/read", { cwd: this.input.cwd, includeLayers: false })).config), this.nativeInput);
+      const collisions = inherited.filter(id => id === "deck");
+      if (collisions.length) this.emit({ kind: "diagnostic", data: { code: "personal-mcp.runtime", conflicting: collisions } });
+      let rpc = inventory;
+      let runtimeConfig = config;
+      if (this.input.nativeMemory?.status === "ready") {
+        // Only managed hook-hash attestation needs a second process. Personal MCPs,
+        // skills and plugins use this process's fresh native configuration directly.
+        const inheritedHooks = await this.readHooks(inventory);
+        await this.stopChild();
+        rpc = await this.connect(inheritedHooks);
+        runtimeConfig = object(object(await rpc.call("config/read", { cwd: this.input.cwd, includeLayers: false })).config);
+      }
+      verifyCodexConfig(runtimeConfig, this.nativeInput);
+      const nativeDeclarations = Object.entries(object(runtimeConfig.mcp_servers)).filter(([id]) => !this.nativeInput.mcp.servers.includes(id) && !(this.nativeInput.suppressedMcpServers ?? []).includes(id)).map(([id, value]) => ({ id, source: "native", status: object(value).enabled === false ? "unavailable" : "configured", ...(object(value).enabled === false ? {reason:"disabled"} : {}) }));
+      if (nativeDeclarations.length) this.emit({kind:"diagnostic",data:{code:"personal-mcp.sources",servers:nativeDeclarations}});
       if (this.input.nativeMemory?.status === "ready") {
         const activeHooks = (await this.readHooks(rpc)).filter(hook => hook.enabled !== false);
-        if (activeHooks.length !== 2 || !["stop", "userPromptSubmit"].every(event => activeHooks.some(hook => hook.eventName === event))
-          || activeHooks.some(hook => !isAdmittedCodexMemoryHook(hook, this.input) || hook.trustStatus !== "trusted")) throw new Error("codex-hook-isolation-violation");
+        const memoryHooks = activeHooks.filter(hook => ["stop", "userPromptSubmit"].includes(hook.eventName));
+        if (memoryHooks.length !== 2 || !["stop", "userPromptSubmit"].every(event => memoryHooks.some(hook => hook.eventName === event))
+          || memoryHooks.some(hook => !isAdmittedCodexMemoryHook(hook, this.input) || hook.trustStatus !== "trusted")) throw new Error("codex-hook-isolation-violation");
         this.attestedMemory = { ...this.input.nativeMemory, plugin: { ...this.input.nativeMemory.plugin!, exclusiveHookEvents: ["userPromptSubmit", "stop"] } };
       }
       const thread = object(object(await rpc.call(this.input.resume ? "thread/resume" : "thread/start", {
         ...nativeModel(this.input.assignment.modelId), cwd: this.input.cwd,
         developerInstructions: this.input.rolePrompt,
+        config: codexThreadMcpConfig(this.nativeInput, Object.keys(object(runtimeConfig.mcp_servers))),
         approvalPolicy: this.input.approvals === "relay" ? "on-request" : "never",
         approvalsReviewer: "user", sandbox: this.input.approvals === "relay" ? "read-only" : "danger-full-access",
         // Only thread.id is consumed; full resume history can exceed the RPC frame bound.
@@ -198,6 +225,9 @@ class CodexTask {
   private async verifyRuntimeMcp(rpc: CodexRpc, deadline: number): Promise<void> {
     for (;;) {
       const names: string[] = [], seen = new Set<string>();
+      const personal: string[] = [];
+      const unavailable: string[] = [];
+      const active: string[] = [];
       let page = object(await rpc.call("mcpServerStatus/list", { threadId: this.threadId, detail: "full" }));
       let starting = false;
       for (;;) {
@@ -206,6 +236,13 @@ class CodexTask {
           const server = object(item);
           if (typeof server.name !== "string") throw new Error("codex-mcp-status-invalid");
           if (server.runtimeStatus === "disabled") continue;
+          if (!this.nativeInput.mcp.servers.includes(server.name)) {
+            if ((this.nativeInput.suppressedMcpServers ?? []).includes(server.name)) { this.emit({kind:"diagnostic",data:{code:"personal-mcp.runtime",conflicting:[server.name]}}); throw new Error("codex-runtime-mcp-isolation-violation"); }
+            personal.push(server.name);
+            this.admittedNativeMcp.add(server.name);
+            if (!server.toolsError && server.runtimeStatus === "connected") active.push(server.name); else unavailable.push(server.name);
+            continue;
+          }
           if (server.runtimeStatus === "starting" || server.runtimeStatus === "notStarted") starting = true;
           else if (server.toolsError || server.runtimeStatus && server.runtimeStatus !== "connected") throw new Error("codex-mcp-server-not-connected");
           names.push(server.name);
@@ -216,8 +253,11 @@ class CodexTask {
         seen.add(cursor);
         page = object(await rpc.call("mcpServerStatus/list", { threadId: this.threadId, detail: "full", cursor }));
       }
-      if (JSON.stringify(names.sort()) !== JSON.stringify([...this.nativeInput.mcp.servers].sort())) throw new Error("codex-runtime-mcp-isolation-violation");
-      if (!starting) return;
+      if (this.nativeInput.mcp.servers.some(id => !names.includes(id))) throw new Error("codex-runtime-mcp-isolation-violation");
+      if (!starting) {
+        if (personal.length) this.emit({ kind: "diagnostic", data: { code: "personal-mcp.runtime", active, unavailable } });
+        return;
+      }
       if (Date.now() >= deadline) throw new Error("codex-mcp-server-not-connected");
       await new Promise((resolve) => setTimeout(resolve, 50));
       if (this.closed) throw new Error("codex-task-closed");
@@ -286,7 +326,7 @@ class CodexTask {
     // Codex wraps tool approval in an empty form; a general MCP elicitation can request
     // arbitrary user data and must never be treated as permission to run a tool.
     const mcpApproval = message.method === "mcpServer/elicitation/request" && p.mode === "form"
-      && meta.codex_approval_kind === "mcp_tool_call" && typeof p.serverName === "string" && this.nativeInput.mcp.servers.includes(p.serverName)
+      && meta.codex_approval_kind === "mcp_tool_call" && typeof p.serverName === "string" && (this.nativeInput.mcp.servers.includes(p.serverName) || this.admittedNativeMcp.has(p.serverName))
       && schema.type === "object" && typeof schema.properties === "object" && schema.properties !== null && !Array.isArray(schema.properties)
       && Object.keys(object(schema.properties)).length === 0 && Object.keys(schema).every((key) => key === "type" || key === "properties");
     const commandApproval = message.method === "item/commandExecution/requestApproval";
@@ -418,14 +458,14 @@ export function createCodexSessionDriver(options: CodexSessionDriverOptions = {}
   return {
     runnerId: "codex", protocol: CODEX_PROTOCOL, testedVersions: CODEX_TESTED_VERSIONS,
     async probe(ctx): Promise<DriverProbe> {
-      const capabilities = ["native-resume", "approval-relay", "interrupt-rpc", "metadata-verified-mcp-isolation", "hooks-disabled"];
+      const capabilities = ["native-resume", "approval-relay", "interrupt-rpc", "native-mcp-additions", "native-customizations"];
       try {
         const result = await (options.exec ?? defaultExec)(ctx.executablePath ?? options.executable ?? "codex", ["--version"], { cwd: ctx.cwd, timeoutMs: 5000 });
         const version = /codex-cli\s+(\d+\.\d+\.\d+)/.exec(result.stdout)?.[1];
         if (result.code !== 0 || !version) return { status: "blocked", reasonCode: "codex-version-unavailable", capabilities };
         if (compare(version, CODEX_TESTED_VERSIONS.min) < 0) return { version, status: "blocked", reasonCode: "codex-version-too-old", capabilities };
         if (compare(version, CODEX_TESTED_VERSIONS.maxTested) > 0) return { version, status: "degraded", reasonCode: "codex-version-untested", capabilities, mcpIsolationVerified: false };
-        return { version, status: "ready", capabilities: [...capabilities, ...(result.stdout.trim() === "codex-cli 0.162.1" ? [CODEX_STEERING_CAPABILITY] : [])], mcpIsolationVerified: true };
+        return { version, status: "ready", capabilities: [...capabilities, ...(result.stdout.trim() === "codex-cli 0.162.1" ? [CODEX_STEERING_CAPABILITY] : [])], mcpIsolationVerified: false };
       } catch { return { status: "blocked", reasonCode: "codex-executable-unavailable", capabilities }; }
     },
     async startTask(input, io): Promise<DriverTaskHandle> {

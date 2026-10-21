@@ -27,6 +27,21 @@ function files(dir: string): string[] {
   });
 }
 
+function hasPreferenceArgv(rel: string, text: string): boolean {
+  // This embedded process anchor forwards its explicit child command, not preferences.
+  // Exempt only that exact expression; additional argv reads remain forbidden.
+  if (rel === "packages/adapter-pi/src/pi-extensions/subagents/supervisor.ts") {
+    text = text.replace("const [command, ...args] = process.argv.slice(2);", "");
+  }
+  // This exact read compares the executing development script to its reviewed guard
+  // receipt. It fails closed on provenance drift and does not select preferences.
+  // Strip only one expression; every other argv read in this file still fails audit.
+  if (rel === "packages/adapter-pi/src/pi-codebase-guard.ts") {
+    text = text.replace("realpathSync(process.argv[1]!)", "");
+  }
+  return /process\.argv/.test(text);
+}
+
 describe("production Deck preference source audit", () => {
   test("forbids production use of project-local Deck config APIs outside compatibility and tests", () => {
     const offenders = files(repoRoot).filter((rel) => {
@@ -72,14 +87,18 @@ describe("production Deck preference source audit", () => {
     const offenders = adapterFiles.filter((rel) => {
       if (rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) return false;
       let text = readFileSync(join(repoRoot, rel), "utf8");
-      // This embedded process anchor forwards its explicit child command, not preferences.
-      // Exempt only that exact expression; additional argv reads remain forbidden.
-      if (rel === "packages/adapter-pi/src/pi-extensions/subagents/supervisor.ts") {
-        text = text.replace("const [command, ...args] = process.argv.slice(2);", "");
-      }
-      return /process\.argv/.test(text);
+      return hasPreferenceArgv(rel, text);
     });
     expect(offenders).toEqual([]);
+  });
+
+  test("the provenance exception cannot hide extra argv reads or preference selection", () => {
+    const path = "packages/adapter-pi/src/pi-codebase-guard.ts";
+    const source = readFileSync(join(repoRoot, path), "utf8");
+    expect(hasPreferenceArgv(path, source)).toBe(false);
+    expect(hasPreferenceArgv(path, `${source}\nconst preferences = process.argv[2];`)).toBe(true);
+    expect(hasPreferenceArgv(path, `${source}\nrealpathSync(process.argv[1]!)`)).toBe(true);
+    expect(hasPreferenceArgv("packages/adapter-pi/src/runner-adapter.ts", source)).toBe(true);
   });
 
   test("requires explicit Deck config on preference-sensitive Core contracts", () => {

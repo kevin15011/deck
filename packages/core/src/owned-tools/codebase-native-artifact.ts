@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, openSync, readSync, closeSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, openSync, readSync, closeSync, readdirSync, realpathSync, statSync, createReadStream, unlinkSync, rmdirSync } from "node:fs";
 import { mkdir, mkdtemp, open, realpath, rm, link } from "node:fs/promises";
 import { get } from "node:https";
 import { join, dirname } from "node:path";
-import { Readable } from "node:stream";
+import { Readable, addAbortSignal } from "node:stream";
 import { createGunzip } from "node:zlib";
 
 export const OWNED_CODEBASE_VERSION = "0.11.0";
@@ -37,6 +37,63 @@ function hashFileBounded(path: string, size: number): string | undefined {
   } finally { closeSync(fd); }
 }
 
+/** Read-only compatibility shared by reviewed installation and session preparation.
+ * Cache both outcomes by complete file identity and release; never execute an unknown build.
+ */
+export function createCodebaseCompatibilityInspector(options: {
+  maxEntries?: number;
+  /** Test seam for counting bounded reads. */
+  hashFile?: typeof hashFileBounded;
+} = {}) {
+  const cache = new Map<string, boolean>();
+  const capacity = Math.max(1, Math.min(256, options.maxEntries ?? 64));
+  const identity = (path: string) => {
+    const stat = statSync(path, { bigint: true });
+    return { stat, key: [path, stat.dev, stat.ino, stat.size, stat.mode, stat.uid, stat.gid, stat.mtimeNs, stat.ctimeNs].map(String).join("\0") };
+  };
+  return (path: string, release: CodebaseNativeRelease | undefined = pinnedOwnedCodebaseRelease()): boolean => {
+    if (!release || /[\0\r\n]/.test(path)) return false;
+    try {
+      const real = realpathSync(path), before = identity(real);
+      if (!before.stat.isFile() || before.stat.size !== BigInt(release.binaryBytes) || (before.stat.mode & 0o111n) === 0n) return false;
+      const key = `${before.key}\0${release.binaryBytes}\0${release.binarySha256}`;
+      if (cache.has(key)) {
+        const result = cache.get(key)!; cache.delete(key); cache.set(key, result); return result;
+      }
+      const result = (options.hashFile ?? hashFileBounded)(real, release.binaryBytes) === release.binarySha256;
+      if (realpathSync(path) !== real || identity(real).key !== before.key) return false;
+      cache.set(key, result);
+      while (cache.size > capacity) cache.delete(cache.keys().next().value!);
+      return result;
+    } catch (error) {
+      if (["ENOENT", "ENOTDIR", "ELOOP"].includes((error as NodeJS.ErrnoException).code ?? "")) return false;
+      throw error;
+    }
+  };
+}
+
+export const isCompatibleCodebaseExecutable = createCodebaseCompatibilityInspector();
+
+/** Abortable bounded read for the session admission path; same reviewed bytes as install selection. */
+export async function verifyCodebaseExecutable(path: string, signal: AbortSignal, release = pinnedOwnedCodebaseRelease()): Promise<boolean> {
+  signal.throwIfAborted();
+  if (!release || /[\0\r\n]/.test(path)) return false;
+  const real = realpathSync(path);
+  const before = statSync(real, { bigint: true });
+  if (!before.isFile() || before.size !== BigInt(release.binaryBytes) || (before.mode & 0o111n) === 0n) return false;
+  const digest = createHash("sha256");
+  let total = 0;
+  for await (const chunk of createReadStream(real, { signal })) {
+    total += chunk.length;
+    if (total > release.binaryBytes) return false;
+    digest.update(chunk);
+  }
+  signal.throwIfAborted();
+  const after = statSync(real, { bigint: true });
+  const identity = (stat: typeof before) => [stat.dev, stat.ino, stat.size, stat.mode, stat.uid, stat.gid, stat.mtimeNs, stat.ctimeNs].map(String).join("\0");
+  return realpathSync(path) === real && identity(before) === identity(after) && total === release.binaryBytes && digest.digest("hex") === release.binarySha256;
+}
+
 /** Never trust the npm shim: only the pinned, directly verified native executable can be ready. */
 export function inspectOwnedCodebase(root: string, release: CodebaseNativeRelease): "absent" | "ready" | "conflict" {
   try {
@@ -46,17 +103,18 @@ export function inspectOwnedCodebase(root: string, release: CodebaseNativeReleas
     if (members.length !== 1 || members[0] !== "codebase-memory-mcp") return "conflict";
     const stat = lstatSync(join(root, members[0]));
     if (!stat.isFile() || stat.size !== release.binaryBytes || (stat.mode & 0o111) === 0 || (stat.mode & 0o077) !== 0 || typeof process.getuid === "function" && stat.uid !== process.getuid()) return "conflict";
-    return hashFileBounded(join(root, members[0]), release.binaryBytes) === release.binarySha256 ? "ready" : "conflict";
+    return isCompatibleCodebaseExecutable(join(root, members[0]), release) ? "ready" : "conflict";
   } catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT" && !existsSync(root) ? "absent" : "conflict"; }
 }
 
-async function download(release: CodebaseNativeRelease): Promise<Uint8Array> {
+async function download(release: CodebaseNativeRelease, signal?: AbortSignal): Promise<Uint8Array> {
+  signal?.throwIfAborted();
   const start = `https://github.com/DeusData/codebase-memory-mcp/releases/download/v${OWNED_CODEBASE_VERSION}/${release.asset}`;
   const hosts = new Set(["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]);
   const visit = (address: string, redirects: number): Promise<Uint8Array> => new Promise((resolve, reject) => {
     const target = new URL(address);
     if (target.protocol !== "https:" || !hosts.has(target.hostname) || redirects > 2) { reject(new Error("Codebase Memory release redirect is untrusted.")); return; }
-    const request = get(target, { timeout: 120_000 }, (response) => {
+    const request = get(target, { timeout: 120_000, signal }, (response) => {
       if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
         const next = response.headers.location;
         response.resume();
@@ -78,7 +136,8 @@ async function download(release: CodebaseNativeRelease): Promise<Uint8Array> {
 }
 
 /** Stream exactly the pinned tar members; never extract install.sh or run npm's self-downloading shim. */
-async function extractBinary(archive: Uint8Array, target: string, release: CodebaseNativeRelease): Promise<void> {
+async function extractBinary(archive: Uint8Array, target: string, release: CodebaseNativeRelease, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   const expected = new Set(["codebase-memory-mcp", "LICENSE", "install.sh", "THIRD_PARTY_NOTICES.md"]);
   const seen = new Set<string>();
   const hash = createHash("sha256");
@@ -91,12 +150,17 @@ async function extractBinary(archive: Uint8Array, target: string, release: Codeb
   let total = 0;
   let binaryBytes = 0;
   try {
-    for await (const raw of Readable.from([archive]).pipe(createGunzip())) {
+    signal?.throwIfAborted();
+    const decompressed = createGunzip();
+    if (signal) addAbortSignal(signal, decompressed);
+    for await (const raw of Readable.from([archive]).pipe(decompressed)) {
+      signal?.throwIfAborted();
       const chunk = Buffer.from(raw);
       total += chunk.length;
       if (total > 320 * 1024 * 1024) throw new Error("Codebase Memory archive expanded beyond its bound.");
       pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
       while (pending.length > 0) {
+        signal?.throwIfAborted();
         if (footer) {
           if (pending.some((byte) => byte !== 0)) throw new Error("Codebase Memory archive has unexpected trailing data.");
           pending = Buffer.alloc(0);
@@ -129,7 +193,9 @@ async function extractBinary(archive: Uint8Array, target: string, release: Codeb
         if (name === "codebase-memory-mcp") {
           let offset = 0;
           while (offset < take) {
+            signal?.throwIfAborted();
             const written = (await output.write(pending.subarray(offset, take))).bytesWritten;
+            signal?.throwIfAborted();
             if (!written) throw new Error("Codebase Memory native binary write failed.");
             offset += written;
           }
@@ -141,25 +207,64 @@ async function extractBinary(archive: Uint8Array, target: string, release: Codeb
       }
     }
     if (!footer || pending.length || remaining || padding || seen.size !== expected.size || binaryBytes !== release.binaryBytes || hash.digest("hex") !== release.binarySha256) throw new Error("Codebase Memory pinned native binary integrity mismatch.");
+    signal?.throwIfAborted();
     await output.sync();
+    signal?.throwIfAborted();
   } finally { await output.close(); }
 }
 
 /** Reviewed, Deck-owned native acquisition; the next session performs no download. */
-export async function installOwnedCodebase(root: string, release: CodebaseNativeRelease, effects: { fetchArchive?: (asset: string) => Promise<Uint8Array> } = {}): Promise<"installed" | "unchanged"> {
+export async function installOwnedCodebase(root: string, release: CodebaseNativeRelease, effects: {
+  fetchArchive?: (asset: string, signal?: AbortSignal) => Promise<Uint8Array>;
+  signal?: AbortSignal;
+} = {}): Promise<"installed" | "unchanged"> {
+  const { signal } = effects;
+  signal?.throwIfAborted();
   const before = inspectOwnedCodebase(root, release);
   if (before === "ready") return "unchanged";
   if (before !== "absent") throw new Error("Codebase Memory native destination conflicts with unknown content.");
-  const archive = await (effects.fetchArchive?.(release.asset) ?? download(release));
+  const archive = await (effects.fetchArchive?.(release.asset, signal) ?? download(release, signal));
+  signal?.throwIfAborted();
   if (archive.length !== release.archiveBytes || sha(archive) !== release.archiveSha256) throw new Error("Codebase Memory release archive integrity mismatch.");
   const parent = dirname(root);
+  signal?.throwIfAborted();
   const stage = await mkdtemp(join(parent, ".codebase-native-stage-"));
+  const identity = (path: string) => {
+    try { const stat = lstatSync(path, { bigint: true }); return `${stat.dev}:${stat.ino}`; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+  };
+  let createdRoot: string | undefined;
+  let stagedBinary: string | undefined;
   try {
-    await extractBinary(archive, join(stage, "codebase-memory-mcp"), release);
-    if (inspectOwnedCodebase(stage, release) !== "ready" || inspectOwnedCodebase(root, release) !== "absent") throw new Error("Codebase Memory native publication is unsafe.");
-    await mkdir(root, { mode: 0o700 });
-    await link(join(stage, "codebase-memory-mcp"), join(root, "codebase-memory-mcp"));
-  } finally { if (await realpath(stage).catch(() => undefined) === stage) await rm(stage, { recursive: true, force: true }); }
-  if (inspectOwnedCodebase(root, release) !== "ready") throw new Error("Codebase Memory native publication is indeterminate; manual recovery required.");
-  return "installed";
+    try {
+      signal?.throwIfAborted();
+      await extractBinary(archive, join(stage, "codebase-memory-mcp"), release, signal);
+      signal?.throwIfAborted();
+      if (inspectOwnedCodebase(stage, release) !== "ready" || inspectOwnedCodebase(root, release) !== "absent") throw new Error("Codebase Memory native publication is unsafe.");
+      stagedBinary = identity(join(stage, "codebase-memory-mcp"));
+      signal?.throwIfAborted();
+      await mkdir(root, { mode: 0o700 });
+      createdRoot = identity(root);
+      signal?.throwIfAborted();
+      await link(join(stage, "codebase-memory-mcp"), join(root, "codebase-memory-mcp"));
+      signal?.throwIfAborted();
+    } finally {
+      if (await realpath(stage).catch(() => undefined) === stage) await rm(stage, { recursive: true, force: true });
+    }
+    signal?.throwIfAborted();
+    if (inspectOwnedCodebase(root, release) !== "ready") throw new Error("Codebase Memory native publication is indeterminate; manual recovery required.");
+    signal?.throwIfAborted();
+    return "installed";
+  } catch (error) {
+    // Only undo this attempt's publication, never recursively remove a destination
+    // another actor populated. The staging link's inode proves ownership of the file.
+    if (signal?.aborted && createdRoot && identity(root) === createdRoot) {
+      const binary = join(root, "codebase-memory-mcp");
+      try { if (stagedBinary && identity(binary) === stagedBinary) unlinkSync(binary); }
+      catch (cleanupError) { if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") throw cleanupError; }
+      try { rmdirSync(root); }
+      catch (cleanupError) { if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes((cleanupError as NodeJS.ErrnoException).code ?? "")) throw cleanupError; }
+    }
+    throw error;
+  }
 }

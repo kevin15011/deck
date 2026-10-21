@@ -1,3 +1,4 @@
+import { personalPiToolNames } from "../pi-personal-mcp";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
@@ -84,6 +85,7 @@ export function createDeckSubagentsExtension(options: DeckSubagentsOptions = {})
     const agentsDir = options.agentsDir ?? fileURLToPath(new URL("../../agents/", import.meta.url));
     const packageRoot = dirname(agentsDir.replace(/[\\/]+$/, ""));
     const runner = createChildRunner({ env,
+      personalToolNames: () => personalPiToolNames(pi.getAllTools?.() ?? []),
       ...(existsSync(join(packageRoot, "package.json")) ? { packageRoot } : {}),
       memory: () => resolveMemoryHandoff(env),
       ...(options.piInvocation ? { piInvocation: options.piInvocation } : {}),

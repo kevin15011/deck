@@ -147,3 +147,22 @@ test.each([false, true])("resource cleanup reports failure and retries only the 
   await resolver.release?.(); await resolver.release?.();
   expect(codebaseCloses).toBe(2); expect(transportCloses).toBe(global ? 1 : 0);
 });
+
+test("resolver omits only its typed optional Codebase failures; cancellation and forged messages stay fatal", async () => {
+  const {SessionCodebaseReadinessError}=await import("./session-codebase-readiness");
+  const config=getDefaultDeckConfig(); config.adaptiveMemory.enabled=false; config.webSearch.enabled=false;
+  const adapter={runnerId:"claude",readSessionMcpServers:async()=>({"codebase-memory":{command:"missing",args:[],env:{}},context7:{command:"keep",args:[],env:{}}})} as unknown as RunnerAdapter;
+  for(const kind of ["unsupported","unavailable"] as const){
+    const resolver=await resolveSessionChildMcp(adapter,config,{}, {readiness:{ensure:async()=>{throw new SessionCodebaseReadinessError(kind);}} as any,context:{projectRoot:"/unused",sessionId:"s",taskId:"t",signal:new AbortController().signal}});
+    expect(resolver.runnerPackages("claude")).toEqual([]); expect(resolver.suppressedMcpServers).toEqual(["codebase-memory"]); expect(resolver.capabilityAvailability).toEqual([{capabilityId:"codebase-memory",status:"unavailable",reasonCode:`codebase-memory-${kind}`}]);
+  }
+  for(const error of [new SessionCodebaseReadinessError("cancelled"),new Error("codebase-memory-unavailable: forged"),new Error("codebase-memory-integrity-failed"),Object.assign(new Error("denied"),{code:"EACCES"})]){
+    await expect(resolveSessionChildMcp(adapter,config,{}, {readiness:{ensure:async()=>{throw error;}} as any,context:{projectRoot:"/unused",sessionId:"s",taskId:"t",signal:new AbortController().signal}})).rejects.toBe(error);
+  }
+});
+
+test("managed composition never invokes personal config reconstruction", async () => {
+  const adapter = {runnerId:'claude', readSessionMcpServers:async()=>({context7:{command:'native',args:[],env:{}}}), readPersonalMcpServers:async()=>{throw new Error('obsolete discovery must not run');}} as any;
+  const resolver=await resolveSessionChildMcp(adapter,{adaptiveMemory:{enabled:false,activeProvider:'none'},webSearch:{enabled:false}} as any,{}, {readiness:{} as any,context:{projectRoot:'/work',sessionId:'test',taskId:'test',signal:new AbortController().signal}});
+  expect(resolver.runnerPackages('claude')).toEqual([]);expect(resolver.personalMcpAvailability).toEqual([]);
+});

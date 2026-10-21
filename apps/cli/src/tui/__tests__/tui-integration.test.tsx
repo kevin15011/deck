@@ -276,6 +276,7 @@ describe("TUI self-update integration (T3.6)", () => {
     // 1ms timeout with a 50ms delay: the timeout wins.
     const state = await runReleaseCheckWithTimeout(1, {
       delayMs: 50,
+      fetchImpl: () => ({ kind: "network-error", error: "local timeout fixture" }),
       currentVersion: () => "0.0.0-dev",
     });
     expect(state.kind).toBe("network-error");

@@ -11,7 +11,7 @@ const MAX_BLOCK_BYTES = 256 * 1024;
 const MAX_VARIANT_BYTES = 128;
 const MAX_VARIANTS = 64;
 
-export type OpenCodeCommandRequest = { file: string; args: readonly string[]; cwd: string; timeoutMs: number; maxStdoutBytes: number; maxStderrBytes: number; signal?: AbortSignal };
+export type OpenCodeCommandRequest = { file: string; args: readonly string[]; cwd: string; timeoutMs: number; maxStdoutBytes: number; maxStderrBytes: number; signal?: AbortSignal; env?: Readonly<Record<string,string|undefined>> };
 export type OpenCodeCommandResult = { exitCode: number | null; signal: string | null; stdout: string; stderr: string; terminationReason?: "timeout" | "output-limit" };
 export interface OpenCodeCommandRunner { run(request: OpenCodeCommandRequest): Promise<OpenCodeCommandResult>; }
 export interface ModelDiscoveryFileSystem {
@@ -110,7 +110,7 @@ export async function discoverOpenCodeModels(input: { projectRoot: string; timeo
   catch { return error("runner-not-found", "OpenCode was not found. Check that the runner is installed."); }
   if (!executable.startsWith("/")) return error("runner-not-found", "OpenCode was not found. Check that the runner is installed.");
   try {
-    const result = await input.dependencies.commandRunner.run({ file: executable, args: ["models", "--verbose"], cwd: input.projectRoot, timeoutMs: input.timeoutMs ?? OPENCODE_DISCOVERY_TIMEOUT_MS, maxStdoutBytes: OPENCODE_MAX_STDOUT_BYTES, maxStderrBytes: OPENCODE_MAX_STDERR_BYTES, ...(input.signal ? { signal: input.signal } : {}) });
+    const result = await input.dependencies.commandRunner.run({ file: executable, args: ["models", "--verbose"], cwd: input.projectRoot, env: input.dependencies.env, timeoutMs: input.timeoutMs ?? OPENCODE_DISCOVERY_TIMEOUT_MS, maxStdoutBytes: OPENCODE_MAX_STDOUT_BYTES, maxStderrBytes: OPENCODE_MAX_STDERR_BYTES, ...(input.signal ? { signal: input.signal } : {}) });
     if (result.terminationReason === "output-limit" || byteLength(result.stdout) > OPENCODE_MAX_STDOUT_BYTES || byteLength(result.stderr) > OPENCODE_MAX_STDERR_BYTES) return error("output-too-large", "OpenCode model discovery output was too large.");
     if (result.terminationReason === "timeout") return error("timeout", "OpenCode model discovery timed out. Try again.");
     if (result.exitCode !== 0) return error("command-failed", "OpenCode model discovery failed. Run opencode models --verbose to check the runner.");
@@ -123,7 +123,7 @@ export type NodeOpenCodeCommandRunnerDependencies = {
   spawn: (
     file: string,
     args: string[],
-    options: { cwd: string; shell: false; stdio: ["ignore", "pipe", "pipe"] },
+    options: { cwd: string; shell: false; stdio: ["ignore", "pipe", "pipe"]; env?: Record<string,string|undefined> },
   ) => {
     stdout: { on(event: "data", listener: (chunk: Buffer | string) => void): unknown };
     stderr: { on(event: "data", listener: (chunk: Buffer | string) => void): unknown };
@@ -148,9 +148,11 @@ export function createNodeOpenCodeCommandRunner(
 ): OpenCodeCommandRunner {
   return {
     run(request) {
+      if (request.signal?.aborted) return Promise.resolve({exitCode:null,signal:null,stdout:"",stderr:"",terminationReason:"timeout"});
       return new Promise((resolve) => {
         const child = dependencies.spawn(request.file, [...request.args], {
           cwd: request.cwd,
+          ...(request.env ? {env: {...request.env}} : {}),
           shell: false,
           stdio: ["ignore", "pipe", "pipe"],
         });

@@ -5,11 +5,13 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { assertPrivateFile, writePrivateFile } from "./paths";
 
 export type WorkspaceProject = { projectId: string; path: string; name: string; createdAt: string; available: boolean };
-type StoredProject = Omit<WorkspaceProject, "available"> & { hidden?: boolean };
+export type ProjectTrust = { projectId: string; projectRoot: string; trusted: boolean; revision: number };
+type StoredProject = Omit<WorkspaceProject, "available"> & { hidden?: boolean; opencodeTrust?: { trusted: boolean; revision: number } };
 type ProjectMutation =
   | { type: "project.register"; commandId: string; path: string; name?: string }
   | { type: "project.rename"; commandId: string; projectId: string; name: string }
-  | { type: "project.remove"; commandId: string; projectId: string };
+  | { type: "project.remove"; commandId: string; projectId: string }
+  | { type: "project.trust"; commandId: string; projectId: string; runnerId: "opencode"; trusted: boolean; expectedRevision: number };
 type ProjectMutationData = { project: WorkspaceProject } | { projectId: string; removed: true };
 type ProjectReceipt = { type?: ProjectMutation["type"]; fingerprint: string; project?: WorkspaceProject; data?: ProjectMutationData };
 const MAX_PROJECTS = 1000;
@@ -29,7 +31,7 @@ export class ProjectStore {
       if (statSync(this.file).size > 16 * 1024 * 1024) throw new Error("project-store-too-large");
       const stored = JSON.parse(readFileSync(this.file, "utf8"));
       const value: unknown = Array.isArray(stored) ? stored : stored?.v === 1 ? stored.projects : undefined;
-      if (!Array.isArray(value) || value.length > MAX_PROJECTS || !value.every(p => p && typeof p.path === "string" && isAbsolute(p.path) && p.projectId === projectIdentity(p.path) && typeof p.name === "string" && p.name.length <= 160 && typeof p.createdAt === "string" && (p.hidden === undefined || typeof p.hidden === "boolean"))) throw new Error("project-store-invalid");
+      if (!Array.isArray(value) || value.length > MAX_PROJECTS || !value.every(p => p && typeof p.path === "string" && isAbsolute(p.path) && p.projectId === projectIdentity(p.path) && typeof p.name === "string" && p.name.length <= 160 && typeof p.createdAt === "string" && (p.hidden === undefined || typeof p.hidden === "boolean") && (p.opencodeTrust === undefined || typeof p.opencodeTrust.trusted === "boolean" && Number.isSafeInteger(p.opencodeTrust.revision) && p.opencodeTrust.revision >= 1))) throw new Error("project-store-invalid");
       this.records = value;
       if (!Array.isArray(stored)) {
         if (!stored.registrations || typeof stored.registrations !== "object" || Array.isArray(stored.registrations) || Object.keys(stored.registrations).length > 1000) throw new Error("project-store-invalid");
@@ -39,6 +41,12 @@ export class ProjectStore {
   }
   list(): WorkspaceProject[] { return this.records.filter(p => !p.hidden).map(p => this.view(p)); }
   get(projectId: string, includeHidden = false): WorkspaceProject | undefined { const project = this.records.find(p => p.projectId === projectId && (includeHidden || !p.hidden)); return project ? this.view(project) : undefined; }
+  /** The daemon owns this registry; prepared sessions never memoize grant decisions. */
+  projectTrust(projectId: string): ProjectTrust {
+    const record = this.records.find(p => p.projectId === projectId);
+    if (!record) throw new Error("project-unknown");
+    return {projectId, projectRoot:record.path, trusted:record.opencodeTrust?.trusted === true && this.available(record.path), revision:record.opencodeTrust?.revision ?? 0};
+  }
   register(path: string, name?: string, restore = true, persist = true): WorkspaceProject {
     const canonical = this.canonical(path);
     const entered = path === "~" ? this.home : path.startsWith("~/") ? join(this.home, path.slice(2)) : path;
@@ -55,9 +63,11 @@ export class ProjectStore {
     return { ...(result.data as { project: WorkspaceProject }), ...(result.duplicate ? { duplicate: true } : {}) };
   }
   executeCommand(command: ProjectMutation): { data: ProjectMutationData; duplicate?: true } {
+    // Revisionless clients cannot replay legacy authorization, even with a retained receipt.
+    if (command.type === "project.trust" && (!Number.isSafeInteger(command.expectedRevision) || command.expectedRevision < 0)) throw new Error("project-trust-invalid");
     // Keep the original registration fingerprint shape for receipts from older builds.
     const fingerprint = command.type === "project.register" ? JSON.stringify([command.path, command.name ?? null])
-      : command.type === "project.rename" ? JSON.stringify([command.type, command.projectId, command.name]) : JSON.stringify([command.type, command.projectId]);
+      : command.type === "project.rename" ? JSON.stringify([command.type, command.projectId, command.name]) : command.type === "project.trust" ? JSON.stringify([command.type, command.projectId, command.runnerId, command.trusted, command.expectedRevision]) : JSON.stringify([command.type, command.projectId]);
     const previous = Object.hasOwn(this.registrations, command.commandId) ? this.registrations[command.commandId] : undefined;
     if (previous) {
       if ((previous.type ?? "project.register") !== command.type || previous.fingerprint !== fingerprint) throw new Error("command-id-reused");
@@ -70,7 +80,17 @@ export class ProjectStore {
       else {
         const project = this.records.find(p => p.projectId === command.projectId);
         if (!project) throw new Error("project-unknown");
-        if (command.type === "project.rename") {
+        if (command.type === "project.trust") {
+          if (command.runnerId !== "opencode" || typeof command.trusted !== "boolean") throw new Error("project-trust-invalid");
+          if (command.trusted && !this.available(project.path)) throw new Error("project-unavailable");
+          const revision = project.opencodeTrust?.revision ?? 0;
+          if (command.expectedRevision !== revision) throw new Error("project-trust-conflict");
+          if (revision === Number.MAX_SAFE_INTEGER) throw new Error("project-trust-invalid");
+          // Every accepted consent consumes its revision, including unchanged-state
+          // revocation. The durable fence survives bounded command-receipt eviction.
+          project.opencodeTrust = {trusted:command.trusted, revision:revision + 1};
+          data = {project:this.view(project)};
+        } else if (command.type === "project.rename") {
           this.validName(command.name); project.name = command.name.trim(); data = { project: this.view(project) };
         } else { project.hidden = true; data = { projectId: project.projectId, removed: true }; }
       }
@@ -83,7 +103,7 @@ export class ProjectStore {
     } catch (error) { this.records = oldRecords; this.registrations = oldReceipts; throw error; }
   }
   private validName(name: string): void { if (!name.trim() || name.length > 160 || /[\x00-\x1f]/.test(name)) throw new Error("project-name-invalid"); }
-  private view(record: StoredProject): WorkspaceProject { const { hidden: _hidden, ...project } = record; return { ...project, available: this.available(project.path) }; }
+  private view(record: StoredProject): WorkspaceProject { const { hidden: _hidden, opencodeTrust: _trust, ...project } = record; return { ...project, available: this.available(project.path) }; }
   /** Import old session roots, including unavailable directories, without widening folder browsing. */
   importLegacy(path: string): WorkspaceProject {
     if (!isAbsolute(path) || path.length > 4096 || path.includes("\0")) throw new Error("project-path-invalid");

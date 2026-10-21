@@ -15,7 +15,7 @@ const input: DriverTaskInput = {
   approvals: "runner-default", credentialFile: "/private/credential", disableNativeDelegation: true,
 };
 const config = (isolated: boolean) => ({ features: Object.fromEntries(ISOLATION_FEATURES.map((f) => [f, false])), mcp_servers: {
-  foreign: { enabled: !isolated, command: "foreign" }, ...(isolated ? { "deck-session-task-deck": { enabled: true, ...input.mcpServerSpecs.deck } } : {}),
+  foreign: { enabled: true, command: "foreign" },
 } });
 function responder(child: FakeChild, index: number, m: Record<string, unknown>) {
   const params = m.params as Record<string, unknown>;
@@ -39,7 +39,7 @@ describe("Codex native image inputs", () => {
   test.each([false, true])("passes multiple localImage inputs to fresh/resumed turns (%s) without inheriting attachments", async (resumed) => {
     const files = images(); const h = harness(responder);
     const task = await createCodexSessionDriver().startTask({ ...input, images: files, ...(resumed ? { resume: { nativeSessionId: "native-thread" } } : {}) }, h.io);
-    await task.nativeSessionId; const child = h.children[1]!;
+    await task.nativeSessionId; const child = h.children.at(-1)!;
     for (let i = 0; i < 100 && !child.writes.some(m => m.method === "turn/start"); i++) await new Promise(r => setTimeout(r, 1));
     expect((child.writes.find(m => m.method === "turn/start")!.params as any).input).toEqual([{ type: "text", text: "hello" }, ...files.map(file => ({ type: "localImage", path: file.path }))]);
     child.stdout({ method: "item/started", params: { threadId: "native-thread", item: { type: "userMessage", content: [{ type: "localImage", path: files[0]!.path }] } } });
@@ -69,7 +69,7 @@ describe("Codex session driver", () => {
     h.io.approval = async (request) => { approvals.push(request); return { decision, scope: "always" }; };
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
     await task.nativeSessionId;
-    const child = h.children[1]!; child.stdout(mcpMemoryApproval);
+    const child = h.children.at(-1)!; child.stdout(mcpMemoryApproval);
     await Promise.resolve(); await Promise.resolve();
     expect(approvals).toEqual([{ approvalId: "codex:0", toolKey: "codex:mcp:deck-session-task-deck:deck_memory_recall", identity: JSON.stringify({ query: "acceptance" }), exactKey: JSON.stringify({ query: "acceptance" }), risk: "normal", tool: "mcp__deck-session-task-deck__deck_memory_recall", summary: mcpMemoryApproval.params.message, input: { query: "acceptance" } }]);
     expect(child.writes.find((m) => m.id === 0)?.result).toEqual({ action: decision === "allow" ? "accept" : "decline", content: decision === "allow" ? {} : null, _meta: null });
@@ -79,7 +79,7 @@ describe("Codex session driver", () => {
     const h = harness(responder); let brokerCalls = 0;
     h.io.approval = async () => { brokerCalls++; return { decision: "deny" }; };
     const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
-    const child = h.children[1]!; child.stdout(mcpMemoryApproval);
+    const child = h.children.at(-1)!; child.stdout(mcpMemoryApproval);
     await Promise.resolve();
     expect(child.writes.find((m) => m.id === 0)?.result).toEqual({ action: "accept", content: {}, _meta: null });
     expect(brokerCalls).toBe(0); await task.close(); await task.done;
@@ -93,7 +93,7 @@ describe("Codex session driver", () => {
     const h = harness(responder); let brokerCalls = 0;
     h.io.approval = async () => { brokerCalls++; return { decision: "allow" }; };
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io); await task.nativeSessionId;
-    const child = h.children[1]!; child.stdout({ ...mcpMemoryApproval, params: { ...mcpMemoryApproval.params, ...override } });
+    const child = h.children.at(-1)!; child.stdout({ ...mcpMemoryApproval, params: { ...mcpMemoryApproval.params, ...override } });
     await Promise.resolve();
     expect(child.writes.find((m) => m.id === 0)?.error).toMatchObject({ code: -32601 });
     expect(brokerCalls).toBe(0); await task.close(); await task.done;
@@ -102,7 +102,7 @@ describe("Codex session driver", () => {
     const h = harness(responder); let release!: (decision: { decision: "allow" }) => void;
     h.io.approval = () => new Promise((resolve) => { release = resolve; });
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io); await task.nativeSessionId;
-    const child = h.children[1]!; child.stdout(mcpMemoryApproval);
+    const child = h.children.at(-1)!; child.stdout(mcpMemoryApproval);
     await task.interrupt(); release({ decision: "allow" }); await Promise.resolve(); await Promise.resolve();
     expect(child.writes.find((m) => m.id === 0)?.result).toEqual({ action: "decline", content: null, _meta: null });
     await task.done; await task.close();
@@ -111,7 +111,7 @@ describe("Codex session driver", () => {
     const h = harness((child, index, m) => { if (m.method !== "turn/start") responder(child, index, m); });
     const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
     const { turnId: _turnId, ...params } = mcpMemoryApproval.params;
-    const child = h.children[1]!; child.stdout({ ...mcpMemoryApproval, params });
+    const child = h.children.at(-1)!; child.stdout({ ...mcpMemoryApproval, params });
     await Promise.resolve();
     expect(child.writes.find((m) => m.id === 0)?.error).toMatchObject({ code: -32601 });
     await task.close(); await task.done;
@@ -120,7 +120,7 @@ describe("Codex session driver", () => {
     const h = harness(responder); let release!: (decision: { decision: "allow" }) => void;
     h.io.approval = () => new Promise((resolve) => { release = resolve; });
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io); await task.nativeSessionId;
-    const child = h.children[1]!; child.stdout(mcpMemoryApproval);
+    const child = h.children.at(-1)!; child.stdout(mcpMemoryApproval);
     child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "completed" } } });
     await task.done;
     const followup = task.send("next turn"); await Promise.resolve();
@@ -136,19 +136,20 @@ describe("Codex session driver", () => {
       });
       const task = await createCodexSessionDriver().startTask({ ...input, resume: { nativeSessionId: "saved" } }, h.io);
       expect((await task.done).reasonCode).toBe(missing ? "native-session-not-found" : undefined);
-      expect(h.children[1]?.terminations).toBe(1);
+      expect(h.children.at(-1)?.terminations).toBe(1);
       await task.close();
     }
   });
-  test("isolates via metadata inventory/restart, keeps native auth home and reuses one thread for followups", async () => {
+  test("reads native config in the execution process, keeps auth home and reuses its thread for followups", async () => {
     const h = harness(responder), driver = createCodexSessionDriver({ baseEnv: { CODEX_HOME: "/native/auth-home" } });
     const task = await driver.startTask(input, h.io);
     expect(await task.nativeSessionId).toBe("native-thread");
-    expect(h.children[0]?.terminations).toBe(1);
-    expect(h.spawns[1]?.args.find((arg) => arg.startsWith("mcp_servers="))).toContain('"foreign"={"enabled"=false}');
-    expect(h.spawns[1]?.options?.env?.CODEX_HOME).toBe("/native/auth-home");
-    expect(h.children[0]?.writes.some((m) => m.method === "thread/start")).toBe(false);
-    const child = h.children[1]!;
+    expect(h.children[0]?.terminations).toBe(0);
+    expect(h.spawns.at(-1)?.args.some(arg => arg.startsWith("mcp_servers="))).toBe(false);
+    expect(h.children.at(-1)?.writes.find(m => m.method === "thread/start")?.params).toMatchObject({config:{mcp_servers:{"deck-session-task-deck":{command:"/deck"}}}});
+    expect(h.spawns.at(-1)?.options?.env?.CODEX_HOME).toBe("/native/auth-home");
+    expect(h.children[0]?.writes.some((m) => m.method === "thread/start")).toBe(true);
+    const child = h.children.at(-1)!;
     expect(child.writes.find((m) => m.method === "thread/start")?.params).toMatchObject({ sandbox: "danger-full-access", approvalPolicy: "never", model: "gpt-5", developerInstructions: input.rolePrompt });
     child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "completed" } } });
     expect(await task.done).toEqual({ status: "completed" });
@@ -160,7 +161,7 @@ describe("Codex session driver", () => {
     const h = harness(responder); h.io.approval = async () => ({ decision });
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay", resume: { nativeSessionId: "saved" } }, h.io);
     await task.nativeSessionId;
-    const child = h.children[1]!;
+    const child = h.children.at(-1)!;
     expect(child.writes.find((m) => m.method === "thread/resume")?.params).toMatchObject({ threadId: "saved", approvalPolicy: "on-request", sandbox: "read-only" });
     child.stdout({ id: "approval", method: "item/commandExecution/requestApproval", params: { threadId: "saved", turnId: "turn", command: "echo hi" } });
     await Promise.resolve(); await Promise.resolve();
@@ -169,14 +170,14 @@ describe("Codex session driver", () => {
   });
   test("fails closed on a changed effective config before any thread exists", async () => {
     const h = harness((child, index, m) => {
-      if (index === 2 && m.method === "config/read") child.stdout({ id: m.id, result: { config: config(false) } });
+      if (m.method === "config/read") child.stdout({ id: m.id, result: { config: {...config(false),features:{multi_agent:true,multi_agent_v2:false}} } });
       else responder(child, index, m);
     });
     const task = await createCodexSessionDriver().startTask(input, h.io);
     await expect(task.nativeSessionId).rejects.toThrow("isolation");
     expect((await task.done).status).toBe("failed");
-    expect(h.children[1]?.writes.some((m) => m.method === "thread/start")).toBe(false);
-    expect(h.children[1]?.terminations).toBe(1);
+    expect(h.children.at(-1)?.writes.some((m) => m.method === "thread/start")).toBe(false);
+    expect(h.children.at(-1)?.terminations).toBe(1);
   });
   test("reports tested version range without running a model", async () => {
     expect(await createCodexSessionDriver({ exec: async () => ({ code: 0, stdout: "codex-cli 0.162.1" }) }).probe({ cwd: "/work" })).toMatchObject({ status: "ready", version: "0.162.1" });
@@ -190,12 +191,12 @@ describe("Codex session driver", () => {
     const task = await createCodexSessionDriver({ escalationMs: 1 }).startTask(input, h.io);
     await task.nativeSessionId; await task.interrupt();
     expect(await task.done).toEqual({ status: "interrupted-forced" });
-    expect(h.children[1]?.terminations).toBe(1);
+    expect(h.children.at(-1)?.terminations).toBe(1);
     await expect(task.send("after forced shutdown")).rejects.toThrow("closed");
   });
   test("fails pending turn on process exit and rejects further turns", async () => {
     const h = harness(responder), task = await createCodexSessionDriver().startTask(input, h.io);
-    await task.nativeSessionId; h.children[1]!.exit();
+    await task.nativeSessionId; h.children.at(-1)!.exit();
     expect((await task.done).status).toBe("failed");
     await expect(task.send("after crash")).rejects.toThrow("closed");
   });
@@ -206,7 +207,7 @@ describe("Codex session driver", () => {
     });
     const task = await createCodexSessionDriver().startTask(input, h.io);
     expect((await task.done).status).toBe("failed");
-    expect(h.children[1]?.writes.some((m) => m.method === "turn/start")).toBe(false);
+    expect(h.children.at(-1)?.writes.some((m) => m.method === "turn/start")).toBe(false);
   });
   test("does not release broker approval after interruption", async () => {
     const h = harness(responder);
@@ -214,7 +215,7 @@ describe("Codex session driver", () => {
     h.io.approval = () => new Promise((resolve) => { resolveDecision = resolve; });
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
     await task.nativeSessionId;
-    const child = h.children[1]!;
+    const child = h.children.at(-1)!;
     child.stdout({ id: 50, method: "item/fileChange/requestApproval", params: { threadId: "native-thread", turnId: "turn" } });
     await task.interrupt(); resolveDecision({ decision: "allow" });
     await Promise.resolve(); await Promise.resolve();
@@ -286,37 +287,37 @@ test("isolates inherited hooks.json without changing native auth home and trusts
   const task = await createCodexSessionDriver({ baseEnv: { CODEX_HOME: "/native/auth-and-resume" } }).startTask(requested, h.io);
   expect(await task.nativeSessionId).toBe("saved");
   expect(h.children[0]!.writes.some(m => m.method === "thread/start" || m.method === "thread/resume")).toBe(false);
-  expect(h.spawns[1]!.options?.env?.CODEX_HOME).toBe("/native/auth-and-resume");
-  const hooks = h.spawns[1]!.args.find(arg => arg.startsWith("hooks="))!;
-  expect(hooks).toContain('"foreign-json"={"enabled"=false}');
+  expect(h.spawns.at(-1)!.options?.env?.CODEX_HOME).toBe("/native/auth-and-resume");
+  const hooks = h.spawns.at(-1)!.args.find(arg => arg.startsWith("hooks="))!;
+  expect(hooks).not.toContain("foreign-json");
   expect(hooks).toContain('"recall"={"enabled"=true,"trusted_hash"="recall-hash"}');
   expect(hooks).toContain('"flush"={"enabled"=true,"trusted_hash"="flush-hash"}');
-  expect(h.spawns[1]!.args.join(" ")).not.toContain("bypass-hook-trust");
-  expect(h.children[1]!.writes.find(m => m.method === "thread/resume")?.params).toMatchObject({ threadId: "saved" });
-  h.children[1]!.stdout({ method: "hook/started", params: { threadId: "saved", turnId: "turn", run: { id: "actual-recall-run", eventName: "userPromptSubmit", source: "sessionFlags", status: "running", handlerType: "command" } } });
+  expect(h.spawns.at(-1)!.args.join(" ")).not.toContain("bypass-hook-trust");
+  expect(h.children.at(-1)!.writes.find(m => m.method === "thread/resume")?.params).toMatchObject({ threadId: "saved" });
+  h.children.at(-1)!.stdout({ method: "hook/started", params: { threadId: "saved", turnId: "turn", run: { id: "actual-recall-run", eventName: "userPromptSubmit", source: "sessionFlags", status: "running", handlerType: "command" } } });
   expect(h.events.find(e => e.kind === "hook.started")?.data).toMatchObject({ provider: "supermemory", integration: "runner-plugin" });
   expect(requested.nativeMemory!.plugin!.exclusiveHookEvents).toBeUndefined();
   await task.close(); await task.done;
 });
 test.each([
-  ["foreign hook remains enabled", (hooks: ReturnType<typeof memoryHooks>) => hooks.map(h => h.key === "foreign-json" ? { ...h, enabled: true } : h)],
+  ["foreign hook conflicts with memory recall", (hooks: ReturnType<typeof memoryHooks>) => hooks.map(h => h.key === "foreign-json" ? { ...h, enabled: true, eventName: "userPromptSubmit" } : h)],
   ["official hook was modified", (hooks: ReturnType<typeof memoryHooks>) => hooks.map(h => h.key === "recall" ? { ...h, trustStatus: "modified" } : h)],
   ["official flush is missing", (hooks: ReturnType<typeof memoryHooks>) => hooks.filter(h => h.key !== "flush")],
 ])("blocks native prompt effects when hook isolation fails: %s", async (_name, transform) => {
   const h = harness(memoryResponder(transform));
   const task = await createCodexSessionDriver({ rpcTimeoutMs: 100 }).startTask(memoryInput(), h.io);
   expect(await task.done).toMatchObject({ status: "failed" });
-  expect(h.children[1]!.writes.some(m => m.method === "thread/start" || m.method === "thread/resume" || m.method === "turn/start")).toBe(false);
-  expect(h.children[1]!.terminations).toBe(1);
+  expect(h.children.at(-1)!.writes.some(m => m.method === "thread/start" || m.method === "thread/resume" || m.method === "turn/start")).toBe(false);
+  expect(h.children.at(-1)!.terminations).toBe(1);
   await task.close();
 });
 test("foreign-thread hook notifications retain only metadata, never raw hook output", async () => {
   const h = harness(responder);
   const task = await createCodexSessionDriver().startTask(input, h.io);
   await task.nativeSessionId;
-  for (const method of ["hook/started", "hook/completed", "hook/future"]) h.children[1]!.stdout({ method, params: { threadId: "foreign-thread", run: { id: "foreign-run", eventName: "stop", entries: [{ kind: "context", text: "PRIVATE_HOOK_STDOUT_SENTINEL" }], stdout: "PRIVATE_HOOK_STDOUT_SENTINEL" } } });
-  h.children[1]!.stdout({ id: 0, method: "hook/completed", params: { threadId: "native-thread", run: { id: "malformed-request", stdout: "PRIVATE_HOOK_STDOUT_SENTINEL" } } });
-  h.children[1]!.stdout({ id: 1, method: "hook/future", params: { threadId: "native-thread", run: { stdout: "PRIVATE_HOOK_STDOUT_SENTINEL" } } });
+  for (const method of ["hook/started", "hook/completed", "hook/future"]) h.children.at(-1)!.stdout({ method, params: { threadId: "foreign-thread", run: { id: "foreign-run", eventName: "stop", entries: [{ kind: "context", text: "PRIVATE_HOOK_STDOUT_SENTINEL" }], stdout: "PRIVATE_HOOK_STDOUT_SENTINEL" } } });
+  h.children.at(-1)!.stdout({ id: 0, method: "hook/completed", params: { threadId: "native-thread", run: { id: "malformed-request", stdout: "PRIVATE_HOOK_STDOUT_SENTINEL" } } });
+  h.children.at(-1)!.stdout({ id: 1, method: "hook/future", params: { threadId: "native-thread", run: { stdout: "PRIVATE_HOOK_STDOUT_SENTINEL" } } });
   expect(h.events.filter(e => e.kind === "runner.unmapped" && e.data.reason === "foreign-thread")).toHaveLength(3);
   expect(JSON.stringify(h.events)).not.toContain("PRIVATE_HOOK_STDOUT_SENTINEL");
   await task.close(); await task.done;
@@ -342,7 +343,7 @@ describe("Codex user questions", () => {
       const task = await createCodexSessionDriver().startTask({ ...input, approvals }, h.io);
       try {
         await task.nativeSessionId;
-        const child = h.children[1]!; child.stdout(questionRequest); await Promise.resolve();
+        const child = h.children.at(-1)!; child.stdout(questionRequest); await Promise.resolve();
         expect(child.writes.find(m => m.id === "question")?.result).toEqual({ answers: { choice: { answers: ["A"] }, secret: { answers: ["value"] } } });
       } finally { await task.close(); }
     }
@@ -352,7 +353,7 @@ describe("Codex user questions", () => {
     const h = harness(responder); const requests: unknown[] = [];
     h.io.question = async request => { requests.push(request); return { outcome: "answered", answers: { choice: ["A"], secret: ["SECRET_SENTINEL"] } }; };
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io); await task.nativeSessionId;
-    const child = h.children[1]!; child.stdout(questionRequest); await Promise.resolve();
+    const child = h.children.at(-1)!; child.stdout(questionRequest); await Promise.resolve();
     expect(requests).toEqual([{ questionId: expect.stringMatching(/^codex:task:question:[0-9a-f-]{36}$/), questions: [
       { id: "choice", header: "Pick", prompt: "Choose", options: [{ label: "A", description: "First" }], multiple: false, allowOther: true, secret: false },
       { id: "secret", header: "Key", prompt: "Enter key", options: [], multiple: false, allowOther: false, secret: true },
@@ -364,7 +365,7 @@ describe("Codex user questions", () => {
     const h = harness(responder);
     if (outcome !== "absent") h.io.question = async () => { if (outcome === "throws") throw new Error("SECRET_SENTINEL"); return { outcome: outcome as "dismissed" | "cancelled" }; };
     const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
-    const child = h.children[1]!; child.stdout(questionRequest); await Promise.resolve();
+    const child = h.children.at(-1)!; child.stdout(questionRequest); await Promise.resolve();
     expect(child.writes.find(m => m.id === "question")?.result).toEqual(emptyQuestionAnswers);
     expect(h.events.filter(event => event.kind === "diagnostic" && event.data.code === "codex-question-broker-failed")).toHaveLength(outcome === "throws" ? 1 : 0);
     expect(JSON.stringify(h.events)).not.toContain("SECRET_SENTINEL"); await task.close();
@@ -372,7 +373,7 @@ describe("Codex user questions", () => {
   test.each([{ threadId: "foreign" }, { turnId: "stale" }])("dismisses stale requests without relaying %j", async override => {
     const h = harness(responder); let calls = 0; h.io.question = async () => { calls++; return { outcome: "dismissed" }; };
     const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
-    const child = h.children[1]!; child.stdout({ ...questionRequest, params: { ...questionRequest.params, ...override } });
+    const child = h.children.at(-1)!; child.stdout({ ...questionRequest, params: { ...questionRequest.params, ...override } });
     expect(calls).toBe(0); expect(child.writes.find(m => m.id === "question")?.result).toEqual(emptyQuestionAnswers); await task.close();
   });
   test("deduplicates pending and completed requests and discards answers after interruption", async () => {
@@ -380,7 +381,7 @@ describe("Codex user questions", () => {
     let release!: (v: { outcome: "answered"; answers: Record<string, string[]> }) => void;
     h.io.question = () => { calls++; return new Promise(resolve => { release = resolve; }); };
     const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
-    const child = h.children[1]!; child.stdout(questionRequest); child.stdout(questionRequest);
+    const child = h.children.at(-1)!; child.stdout(questionRequest); child.stdout(questionRequest);
     await task.interrupt(); release({ outcome: "answered", answers: { choice: ["A"], secret: ["SECRET_SENTINEL"] } }); await Promise.resolve();
     child.stdout(questionRequest);
     expect(calls).toBe(1); expect(child.writes.filter(m => m.id === "question")).toEqual([{ id: "question", result: emptyQuestionAnswers }]);
@@ -393,7 +394,7 @@ test("Codex question answers from a previous turn cannot reach a replacement tur
   let release!: (v: { outcome: "answered"; answers: Record<string, string[]> }) => void;
   h.io.question = () => new Promise(resolve => { release = resolve; });
   const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
-  const child = h.children[1]!; child.stdout(questionRequest);
+  const child = h.children.at(-1)!; child.stdout(questionRequest);
   child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "completed" } } }); await task.done;
   const next = task.send("next"); await Promise.resolve();
   release({ outcome: "answered", answers: { choice: ["A"], secret: ["SECRET_SENTINEL"] } }); await Promise.resolve();
@@ -404,7 +405,7 @@ test("Codex question reply write failures redact secret-bearing errors", async (
   const h = harness(responder);
   h.io.question = async () => ({ outcome: "answered", answers: { choice: ["A"], secret: ["SECRET_SENTINEL"] } });
   const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
-  const child = h.children[1]!;
+  const child = h.children.at(-1)!;
   child.responder = m => { if (m.id === "question") throw new Error("SECRET_SENTINEL"); responder(child, 2, m); };
   child.stdout(questionRequest);
   expect(await task.done).toMatchObject({ status: "failed", error: "codex-question-reply-failed" });
@@ -414,7 +415,7 @@ test("Codex questions support zero request IDs and empty option arrays", async (
   const h = harness(responder); let seen: unknown;
   h.io.question = async request => { seen = request; return { outcome: "dismissed" }; };
   const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
-  const child = h.children[1]!; child.stdout({ ...questionRequest, id: 0, params: { ...questionRequest.params, questions: [{ id: "text", header: "Text", question: "Type", options: [] }] } }); await Promise.resolve();
+  const child = h.children.at(-1)!; child.stdout({ ...questionRequest, id: 0, params: { ...questionRequest.params, questions: [{ id: "text", header: "Text", question: "Type", options: [] }] } }); await Promise.resolve();
   expect(seen).toMatchObject({ questionId: expect.stringMatching(/^codex:task:0:[0-9a-f-]{36}$/), questions: [{ id: "text", options: [], multiple: false, allowOther: false, secret: false }] });
   expect(child.writes.find(m => m.id === 0)?.result).toEqual({ answers: { text: { answers: [] } } }); await task.close();
 });
@@ -432,7 +433,7 @@ describe("Codex approval scopes", () => {
       h.io.approval = async req => { seen = req; return { decision: scope === "deny" ? "deny" : "allow", scope: scope === "always" ? "always" : "once" }; };
       const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
       try {
-        await task.nativeSessionId; const child = h.children[1]!;
+        await task.nativeSessionId; const child = h.children.at(-1)!;
         child.stdout(nativeApproval(request.name, request.params)); await Promise.resolve();
         expect(seen).toMatchObject({ toolKey: `codex:${request.name}`, exactKey: request.exactKey, risk: request.risk });
         if (request.name === "commandExecution") {
@@ -454,7 +455,7 @@ describe("Codex approval scopes", () => {
       h.io.approval = () => new Promise(resolve => { release = resolve; });
       const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
       try {
-        await task.nativeSessionId; const child = h.children[1]!; child.stdout(nativeApproval(request.name, request.params));
+        await task.nativeSessionId; const child = h.children.at(-1)!; child.stdout(nativeApproval(request.name, request.params));
         await task.interrupt(); release({ decision: "allow", scope: "always" }); await Promise.resolve();
         expect(child.writes.find(m => m.id === "scoped")?.result).toEqual(request.name === "permissions" ? { permissions: {} } : { decision: "decline" });
       } finally { await task.close(); }
@@ -463,7 +464,7 @@ describe("Codex approval scopes", () => {
       const h = harness(responder); let calls = 0; h.io.approval = async () => { calls++; return { decision: "allow" }; };
       const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
       try {
-        await task.nativeSessionId; const child = h.children[1]!;
+        await task.nativeSessionId; const child = h.children.at(-1)!;
         child.stdout(nativeApproval(request.name, { ...request.params, turnId: "old" }));
         expect(child.writes.find(m => m.id === "scoped")?.error).toMatchObject({ code: -32601 }); expect(calls).toBe(0);
       } finally { await task.close(); }
@@ -474,7 +475,7 @@ describe("Codex approval scopes", () => {
     h.io.approval = async req => { seen = req; return { decision: "allow", scope: "always" }; };
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
     try {
-      await task.nativeSessionId; const child = h.children[1]!;
+      await task.nativeSessionId; const child = h.children.at(-1)!;
       child.stdout(nativeApproval("commandExecution", { command: "echo hi", proposedExecpolicyAmendment: amendment, proposedNetworkPolicyAmendments: [{ host: "example.com", action: "allow" }] })); await Promise.resolve();
       expect(seen.nativeScopes).toBeUndefined(); expect(seen.alwaysNote).toBeUndefined();
       expect(child.writes.find(m => m.id === "scoped")?.result).toEqual({ decision: "accept" });
@@ -485,7 +486,7 @@ describe("Codex approval scopes", () => {
     h.io.approval = async req => { seen.push(req); return { decision: "deny" }; };
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
     try {
-      await task.nativeSessionId; const child = h.children[1]!;
+      await task.nativeSessionId; const child = h.children.at(-1)!;
       child.stdout(nativeApproval("commandExecution", { command: `TOKEN=SECRET_SENTINEL echo ${"x".repeat(600)}`, cwd: "/PRIVATE_CWD" })); await Promise.resolve();
       expect(seen[0].exactKey).toHaveLength(JSON.stringify({ command: `TOKEN=[redacted] echo ${"x".repeat(600)}`, cwd: "/PRIVATE_CWD" }).length); expect(seen[0].exactKey).toContain("[redacted]");
       expect(seen[0].exactKey).not.toContain("SECRET_SENTINEL"); expect(seen[0].exactKey).toContain("PRIVATE_CWD");
@@ -496,7 +497,7 @@ describe("Codex approval scopes", () => {
     const h = harness(responder); h.io.approval = async () => { throw new Error("SECRET_SENTINEL"); };
     const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
     try {
-      await task.nativeSessionId; const child = h.children[1]!; child.stdout(nativeApproval("permissions", scopeRequests[2].params)); await Promise.resolve();
+      await task.nativeSessionId; const child = h.children.at(-1)!; child.stdout(nativeApproval("permissions", scopeRequests[2].params)); await Promise.resolve();
       expect(child.writes.find(m => m.id === "scoped")?.result).toEqual({ permissions: {} }); expect(JSON.stringify(h.events)).not.toContain("SECRET_SENTINEL");
     } finally { await task.close(); }
   });
@@ -506,7 +507,7 @@ test("Codex unknown approval methods stay unsupported", async () => {
   const h = harness(responder); let calls = 0; h.io.approval = async () => { calls++; return { decision: "allow" }; };
   const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
   try {
-    await task.nativeSessionId; const child = h.children[1]!; child.stdout(nativeApproval("unknown"));
+    await task.nativeSessionId; const child = h.children.at(-1)!; child.stdout(nativeApproval("unknown"));
     expect(child.writes.find(m => m.id === "scoped")?.error).toMatchObject({ code: -32601 }); expect(calls).toBe(0);
   } finally { await task.close(); }
 });
@@ -515,7 +516,7 @@ test("Codex permissions from a previous turn cannot authorize a replacement turn
   h.io.approval = () => new Promise(resolve => { release = resolve; });
   const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
   try {
-    await task.nativeSessionId; const child = h.children[1]!; child.stdout(nativeApproval("permissions", scopeRequests[2].params));
+    await task.nativeSessionId; const child = h.children.at(-1)!; child.stdout(nativeApproval("permissions", scopeRequests[2].params));
     child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "completed" } } }); await task.done;
     const next = task.send("next"); await Promise.resolve(); release({ decision: "allow" }); await Promise.resolve();
     expect(child.writes.find(m => m.id === "scoped")?.result).toEqual({ permissions: {} });
@@ -530,7 +531,7 @@ async function captureApprovalRequests(messages: object[]): Promise<DriverApprov
   try {
     await task.nativeSessionId;
     for (const [index, message] of messages.entries()) {
-      h.children[1]!.stdout({ ...message, id: `identity-${index}` }); await Promise.resolve();
+      h.children.at(-1)!.stdout({ ...message, id: `identity-${index}` }); await Promise.resolve();
     }
     expect(requests).toHaveLength(messages.length);
     expect(JSON.stringify(h.events)).not.toContain("IDENTITY_SECRET_SENTINEL");
@@ -607,7 +608,7 @@ describe("Codex bounded resume responses", () => {
     const task = await createCodexSessionDriver().startTask({ ...input, ...(resumed ? { resume: { nativeSessionId: "saved" } } : {}) }, h.io);
     try {
       await task.nativeSessionId;
-      const request = h.children[1]!.writes.find(m => m.method === (resumed ? "thread/resume" : "thread/start"))!;
+      const request = h.children.at(-1)!.writes.find(m => m.method === (resumed ? "thread/resume" : "thread/start"))!;
       expect(Object.hasOwn(request.params as object, "excludeTurns")).toBe(resumed);
       if (resumed) expect(request.params).toMatchObject({ threadId: "saved", excludeTurns: true });
     } finally { await task.close(); }
@@ -622,7 +623,7 @@ describe("Codex bounded resume responses", () => {
     const task = await createCodexSessionDriver().startTask({ ...input, resume: { nativeSessionId: "saved" } }, h.io);
     try {
       await expect(task.nativeSessionId).resolves.toBe("saved");
-      const child = h.children[1]!;
+      const child = h.children.at(-1)!;
       expect(child.writes.some(m => m.method === "turn/start")).toBe(true);
       child.stdout({ method: "turn/completed", params: { threadId: "saved", turn: { id: "turn", status: "completed" } } });
       expect(await task.done).toEqual({ status: "completed" });
@@ -637,11 +638,11 @@ describe("Codex bounded resume responses", () => {
     try {
       if (phase === "running") {
         await task.nativeSessionId;
-        h.children[1]!.stdoutRaw(`{"text":"FRAME_SECRET_SENTINEL${"x".repeat(1024 * 1024)}"}\n`);
+        h.children.at(-1)!.stdoutRaw(`{"text":"FRAME_SECRET_SENTINEL${"x".repeat(1024 * 1024)}"}\n`);
       } else await expect(task.nativeSessionId).rejects.toThrow("codex-rpc-frame-too-large");
       expect(await task.done).toEqual({ status: "failed", error: "codex-rpc-frame-too-large" });
-      expect(h.events.filter(event => event.kind === "diagnostic" && event.data.code !== "codex-mcp-aliases")).toEqual([{ kind: "diagnostic", data: { code: "codex-rpc-frame-too-large" } }]);
-      expect(h.children[1]!.terminations).toBe(1);
+      expect(h.events.filter(event => event.kind === "diagnostic" && event.data.code !== "codex-mcp-aliases" && event.data.code !== "personal-mcp.sources")).toEqual([{ kind: "diagnostic", data: { code: "codex-rpc-frame-too-large" } }]);
+      expect(h.children.at(-1)!.terminations).toBe(1);
       expect(JSON.stringify(h.events)).not.toContain("FRAME_SECRET_SENTINEL");
     } finally { await task.close(); }
   });
@@ -657,7 +658,7 @@ describe("Codex bounded resume responses", () => {
       const code = mode === "invalid-json" ? "codex-rpc-invalid-frame" : "codex-startup-failed";
       expect(await task.done).toEqual({ status: "failed", error: code });
       await expect(task.nativeSessionId).rejects.toThrow(code);
-      expect(h.events.filter(event => event.kind === "diagnostic" && event.data.code !== "codex-mcp-aliases")).toEqual([{ kind: "diagnostic", data: { code } }]);
+      expect(h.events.filter(event => event.kind === "diagnostic" && event.data.code !== "codex-mcp-aliases" && event.data.code !== "personal-mcp.sources")).toEqual([{ kind: "diagnostic", data: { code } }]);
       expect(JSON.stringify(h.events)).not.toContain("UNKNOWN_SECRET_SENTINEL");
     } finally { await task.close(); }
   });
@@ -684,7 +685,7 @@ describe('Codex text steering',()=>{
 
 test.each(['complete-first','close-first','lost-receipt'] as const)('steering remains conservative across native completion/transport ordering: %s',async(mode)=>{
  let request:any;const h=harness((child,index,m)=>{responder(child,index,m);if(m.method==='turn/steer')request=m;});
- const handle=await createCodexSessionDriver({rpcTimeoutMs:mode==='lost-receipt'?5:100}).startTask({...input,steeringVersion:'0.162.1'},h.io);await handle.nativeSessionId;await Promise.resolve();const child=h.children[1]!,target=handle.steeringTarget!()!;
+ const handle=await createCodexSessionDriver({rpcTimeoutMs:mode==='lost-receipt'?5:100}).startTask({...input,steeringVersion:'0.162.1'},h.io);await handle.nativeSessionId;await Promise.resolve();const child=h.children.at(-1)!,target=handle.steeringTarget!()!;
  const outcome=handle.steer!({...target,clientUserMessageId:'one-write',text:'Exact input'});
  if(mode==='complete-first'){child.stdout({method:'turn/completed',params:{threadId:'native-thread',turn:{id:'turn',status:'completed'}}});child.stdout({id:request.id,result:{turnId:'turn'}});expect(await outcome).toMatchObject({state:'accepted'});}
  else if(mode==='close-first'){await handle.close();expect(await outcome).toMatchObject({state:'unknown'});}
@@ -693,11 +694,32 @@ test.each(['complete-first','close-first','lost-receipt'] as const)('steering re
 });
 test('steering requires a turn/start-confirmed identity and rejects stale turn-start notifications',async()=>{
  let request:any;const h=harness((child,index,m)=>{if(m.method==='turn/start'){request=m;return;}responder(child,index,m);});
- const handle=await createCodexSessionDriver().startTask({...input,steeringVersion:'0.162.1'},h.io);await handle.nativeSessionId;const child=h.children[1]!;
+ const handle=await createCodexSessionDriver().startTask({...input,steeringVersion:'0.162.1'},h.io);await handle.nativeSessionId;const child=h.children.at(-1)!;
  child.stdout({method:'turn/started',params:{threadId:'native-thread',turn:{id:'unconfirmed'}}});expect(handle.steeringTarget!()).toBeUndefined();
  child.stdout({id:request.id,result:{turn:{id:'turn'}}});await Promise.resolve();expect(handle.steeringTarget!()).toMatchObject({nativeTurnId:'turn'});
  child.stdout({method:'turn/started',params:{threadId:'native-thread',turn:{id:'stale'}}});expect(handle.steeringTarget!()).toMatchObject({nativeTurnId:'turn'});await handle.close();
 });
 test('unverified build suffixes do not advertise native steering even with the tested base version',async()=>{
  const driver=createCodexSessionDriver({exec:async()=>({code:0,stdout:'codex-cli 0.162.1-custom\n'})});expect((await driver.probe({cwd:'/work'})).capabilities).not.toContain('turn-steer-text-0.162.1');
+});
+
+test('native personal names stay stable and connection failures stay nonfatal without copying secrets',async()=>{
+ const h=harness((child,index,m)=>{
+  if(m.method==='mcpServerStatus/list'){child.stdout({id:m.id,result:{data:[{name:'deck-session-task-deck',runtimeStatus:'connected'},{name:'personal',runtimeStatus:'failed',toolsError:'PRIVATE_FAILURE_SENTINEL'}]}});return;}
+  responder(child,index,m);
+ });
+ const task=await createCodexSessionDriver().startTask(input,h.io);await task.nativeSessionId;
+ const start=h.children.at(-1)!.writes.find(m=>m.method==='thread/start')!;expect((start.params as any).config.mcp_servers.personal).toBeUndefined();expect(JSON.stringify(h.events)).not.toContain('PRIVATE_FAILURE_SENTINEL');expect(h.events).toContainEqual({kind:'diagnostic',data:{code:'personal-mcp.runtime',active:[],unavailable:['personal']}});await task.close();await task.done;
+});
+
+test('one existing native process reads config and starts the thread when managed memory needs no hook calibration',async()=>{
+ const h=harness(responder),task=await createCodexSessionDriver().startTask(input,h.io);
+ try{await task.nativeSessionId;expect(h.spawns).toHaveLength(1);expect(h.children[0]!.writes.some(m=>m.method==='config/read')).toBe(true);expect(h.children[0]!.writes.some(m=>m.method==='thread/start')).toBe(true);}finally{await task.close();await task.done;}
+});
+
+test('an admitted native personal server uses the existing approval broker; arbitrary foreign names stay rejected',async()=>{
+ const h=harness((child,index,message)=>{if(message.method==='mcpServerStatus/list')child.stdout({id:message.id,result:{data:[{name:'deck-session-task-deck',runtimeStatus:'connected'},{name:'personal',runtimeStatus:'connected'}]}});else responder(child,index,message);});
+ const requests:DriverApprovalRequest[]=[];h.io.approval=async request=>{requests.push(request);return{decision:'allow'};};
+ const task=await createCodexSessionDriver().startTask({...input,approvals:'relay'},h.io);
+ try{await task.nativeSessionId;const child=h.children.at(-1)!;child.stdout({...mcpMemoryApproval,params:{...mcpMemoryApproval.params,serverName:'personal',message:mcpMemoryApproval.params.message.replace('deck-session-task-deck','personal')}});await Promise.resolve();await Promise.resolve();expect(requests).toHaveLength(1);expect(requests[0]!.toolKey).toStartWith('codex:mcp:personal:');expect(child.writes.find(m=>m.id===0)?.result).toMatchObject({action:'accept'});}finally{await task.close();await task.done;}
 });

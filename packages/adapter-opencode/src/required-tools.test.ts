@@ -28,6 +28,7 @@ function contextFor(options: {
   };
 
   return {
+    verifyCodebaseExecutable: () => true, // Hash verification is exercised by the real-filesystem compatibility suite.
     projectRoot: "/project",
     workspaceRoot: "/project",
     homeDirectory: "/home/tester",
@@ -62,7 +63,7 @@ describe("reviewOpenCodeTools", () => {
     expect(result.tools).toEqual([
       { name: "RTK", installed: false },
       { name: "context-mode", installed: false },
-      { name: "codebase-memory", installed: true },
+      { name: "codebase-memory", installed: false },
       { name: "Context7", installed: false },
       { name: "Serena", installed: false },
     ]);

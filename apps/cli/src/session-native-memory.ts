@@ -36,15 +36,15 @@ function prepareClaudePlugin(environment: Readonly<Record<string, string | undef
   if (inspectClaudeSupermemoryArtifact(root) !== "ready") throw new Error("Pinned Claude plugin is unavailable");
   const node = Bun.which("node", { PATH: environment.PATH });
   if (!node || Number(Bun.spawnSync([node, "--version"], { stdout: "pipe", stderr: "ignore", timeout: 3000 }).stdout.toString().match(/^v(\d+)/)?.[1] ?? 0) < 18) throw new Error("Official plugin needs Node.js 18+");
-  // --setting-sources excludes optional user/project/local settings; mandatory managed
-  // settings still apply, so do not claim an exclusive plugin when they add hooks/plugins.
+  // Native sources coexist. Mandatory policy may still forbid required memory hooks;
+  // personal hook activity is never attributed by event name alone.
   const managed = [join(home, ".claude", "managed-settings.json"), ...(process.platform === "darwin" ? ["/Library/Application Support/ClaudeCode/managed-settings.json"] : process.platform === "linux" ? ["/etc/claude-code/managed-settings.json"] : [])];
   for (const file of managed) {
     try {
       const stat = lstatSync(file);
       if (!stat.isFile() || stat.size > 64 * 1024) throw new Error("Untrusted managed Claude settings");
       const data = JSON.parse(readFileSync(file, "utf8"));
-      if (data.hooks && Object.keys(data.hooks).length || data.enabledPlugins && Object.values(data.enabledPlugins).some(value => value !== false) || data.disableAllHooks === true) throw new Error("Managed Claude hooks cannot be isolated");
+      if (data.disableAllHooks === true) throw new Error("Managed Claude policy disables required memory hooks");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
   return readPreparedClaudeMemoryPlugin(root);

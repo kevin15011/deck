@@ -28,7 +28,7 @@ function build(over: Partial<DriverTaskInput> = {}) {
 const valueAfter = (args: readonly string[], flag: string) => args[args.indexOf(flag) + 1];
 
 describe("buildClaudeTurnLaunch (XR-4.3, design 4.1)", () => {
-  test("first turn: --session-id, stream-json in/out, verbose, strict MCP file, settings override, relay prompt tool", () => {
+  test("first turn: --session-id, stream-json in/out, verbose, additive MCP file, settings override, relay prompt tool", () => {
     const { launch } = build();
     const a = launch.args;
     expect(launch.command).toBe("claude");
@@ -41,12 +41,12 @@ describe("buildClaudeTurnLaunch (XR-4.3, design 4.1)", () => {
     expect(valueAfter(a, "--output-format")).toBe("stream-json");
     expect(a).toContain("--verbose");
     expect(a).toContain("--include-partial-messages");
-    expect(a).toContain("--strict-mcp-config");
+    expect(a).not.toContain("--strict-mcp-config");
     expect(valueAfter(a, "--mcp-config")).toBe("/state/tasks/lead/mcp-config.json");
     expect(valueAfter(a, "--permission-prompt-tool")).toBe(DECK_APPROVE_PROMPT_TOOL);
     expect(a).not.toContain("--dangerously-skip-permissions");
     expect(DECK_APPROVE_PROMPT_TOOL).toBe("mcp__deck__deck_approve");
-    expect(JSON.parse(valueAfter(a, "--settings")!)).toMatchObject({ disableAllHooks: true });
+    expect(JSON.parse(valueAfter(a, "--settings")!).disableAllHooks).toBeUndefined();
     expect(valueAfter(a, "--disallowedTools")).toBe("Task,Agent");
     expect(valueAfter(a, "--append-system-prompt-file")).toBe("/state/tasks/lead/role-prompt.md");
   });
@@ -164,15 +164,15 @@ test.each<Record<string, string>>([{ "X-Key": "inline-secret-value" }, { "X-Key"
 
 describe("prepared official native Supermemory", () => {
   const memory = { provider: "supermemory", integration: "runner-plugin", status: "ready", projectScope: "sm_project_v1_acme_deck", plugin: { root: "/owned/official", exclusiveHookEvents: ["SessionStart", "UserPromptSubmit", "Stop"], mcpServers: { plugin_supermemory_supermemory: { command: "node", args: ["/owned/official/hooks/mcp-proxy.js"], env: {} } } } } as const;
-  test("admit only official plugin hooks and explicit native MCP in fresh and resumed execution", () => {
+  test("admit the official plugin alongside native user sources and explicit managed MCP in fresh and resumed execution", () => {
     for (const resumed of [false, true]) {
       const { launch, files } = build({ nativeMemory: memory, ...(resumed ? { resume: { nativeSessionId: SID } } : {}) });
       expect(valueAfter(launch.args, "--plugin-dir")).toBe(memory.plugin.root);
-      expect(valueAfter(launch.args, "--setting-sources")).toBe("");
-      expect(JSON.parse(valueAfter(launch.args, "--settings")!).disableAllHooks).toBe(false);
+      expect(valueAfter(launch.args, "--setting-sources")).toBe("user");
+      expect(JSON.parse(valueAfter(launch.args, "--settings")!).disableAllHooks).toBeUndefined();
       expect(launch.expectedMcpServers).toEqual(["serena", "deck", "plugin_supermemory_supermemory"]);
       expect(JSON.parse(files.get("mcp-config.json")!).mcpServers.plugin_supermemory_supermemory.args).toEqual(["/owned/official/hooks/mcp-proxy.js"]);
-      expect(launch.args).toContain("--strict-mcp-config");
+      expect(launch.args).not.toContain("--strict-mcp-config");
       expect(valueAfter(launch.args, "--disallowedTools")).toBe("Task,Agent");
     }
   });
@@ -180,10 +180,10 @@ describe("prepared official native Supermemory", () => {
     expect(() => build({ nativeMemory: { ...memory, status: "unavailable", reasonCode: "native-memory-profile-unavailable" } })).toThrow("native-memory-profile-unavailable");
     expect(() => build({ nativeMemory: { ...memory, projectScope: "sm_project_default" } })).toThrow("canonical");
   });
-  test("disabled memory keeps hooks disabled and adds no native plugin", () => {
+  test("disabled Deck memory preserves native hooks and adds no managed plugin", () => {
     const { launch } = build({ nativeMemory: { provider: "supermemory", integration: "runner-plugin", status: "disabled" } });
     expect(launch.args).not.toContain("--plugin-dir");
-    expect(JSON.parse(valueAfter(launch.args, "--settings")!).disableAllHooks).toBe(true);
+    expect(JSON.parse(valueAfter(launch.args, "--settings")!).disableAllHooks).toBeUndefined();
   });
 });
 

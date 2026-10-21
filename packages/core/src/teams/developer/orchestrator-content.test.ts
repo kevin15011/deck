@@ -117,7 +117,7 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
 
   test("SDD triage starts clear work and reuses classification for conversational deltas", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("For each new desired outcome");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("begin without a separate restatement-confirmation ceremony");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("proceed without redundant approval");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("An in-scope conversational delta reuses the existing classification");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Use Automatic mode unless the user explicitly requested phase-by-phase interaction");
   });

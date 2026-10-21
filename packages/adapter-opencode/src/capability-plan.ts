@@ -166,6 +166,16 @@ function addCapabilityActions(
     const capability = getUserFacingOpenCodeCapability(capabilityId);
     if (!capability) continue;
 
+    if (capabilityId === "codebase-memory") {
+      if (entry?.status !== "ready") groups.automaticInstalls.push({
+        id: "capability.codebase-memory.install", kind: "install-opencode-plugin", title: "Install reviewed Codebase Memory native release",
+        capabilityId, toolId: capabilityId, status: "ready",
+      });
+      // Always rematerialize reviewed selection: an older shared command may still be configured.
+      groups.configWrites.push({ id: "capability.codebase-memory.mcp-config", kind: "write-mcp-config", title: "Configure verified Codebase Memory MCP", capabilityId, toolId: capabilityId, status: "ready" });
+      continue;
+    }
+
     if (capabilityId === "web-search") {
       if (!entry || entry.status === "ready" || entry.status === "unsupported") continue;
       if (!isWebSearchProviderDescriptor(state.webSearchProvider)) {

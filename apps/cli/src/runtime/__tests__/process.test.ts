@@ -7,6 +7,13 @@
 import { describe, it, expect } from "bun:test";
 import { realpathSync } from "node:fs";
 
+function timeoutProbe(stage: string, data: Record<string, unknown> = {}) {
+  const observer = Reflect.get(globalThis, "__deckTimeoutProbe");
+  if (typeof observer === "function") {
+    try { observer(stage, data); } catch { /* Diagnostics must not alter test control flow. */ }
+  }
+}
+
 describe("runtime/process.ts", () => {
   describe("spawnAsync", () => {
     it("captures stdout and returns exitCode 0 for successful command", async () => {
@@ -40,7 +47,9 @@ describe("runtime/process.ts", () => {
     it("accepts cwd option", async () => {
       const { spawnAsync } = await import("../process");
 
+      timeoutProbe("process.cwd.before", { cwd: "/tmp" });
       const result = await spawnAsync("pwd", [], { cwd: "/tmp" });
+      timeoutProbe("process.cwd.after", { exitCode: result.exitCode, stdoutBytes: result.stdout.length, stderrBytes: result.stderr.length });
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout.trim()).toBe(realpathSync("/tmp"));
@@ -49,10 +58,12 @@ describe("runtime/process.ts", () => {
     it("accepts env option to pass environment variables", async () => {
       const { spawnAsync } = await import("../process");
 
+      timeoutProbe("process.env.before");
       const result = await spawnAsync("node", ["-e", "console.log(process.env.TEST_VAR)"], {
         env: { ...process.env, TEST_VAR: "test-value" },
       });
 
+      timeoutProbe("process.env.after", { exitCode: result.exitCode, stdoutBytes: result.stdout.length, stderrBytes: result.stderr.length });
       expect(result.stdout.trim()).toBe("test-value");
     });
 

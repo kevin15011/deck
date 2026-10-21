@@ -39,3 +39,8 @@ export * from "./web-search";
 export type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 export * from "./pi-doctor";
 export * from "./pi-extension-assets";
+
+export * from "./pi-native-codebase-readiness";
+
+export * from "./pi-codebase-guard-command";
+export { runPiCodebaseGuard } from "./pi-codebase-guard";

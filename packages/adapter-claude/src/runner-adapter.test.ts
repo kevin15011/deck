@@ -191,7 +191,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
       await writeFile(owned, binary, { mode: 0o700 });
       await writeFile(shared, "fixture shared older binary", { mode: 0o700 });
       const adapter = createClaudeRunnerAdapter({
-        homeDir: home, dataRoot, resolveCommand: (name) => name === "codebase-memory-mcp" ? shared : undefined,
+        homeDir: home, dataRoot, resolveCommand: (name) => name === "codebase-memory-mcp" ? shared : undefined, verifyExistingCodebase: () => true,
         verifyCodebaseNative: () => true,
         codebaseReleaseOverride: { asset: "fixture.tar.gz", archiveBytes: 0, archiveSha256: "unused", binaryBytes: binary.length, binarySha256: createHash("sha256").update(binary).digest("hex") },
       });
@@ -211,7 +211,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-readonly-")));
     try {
       const commands = new Map(["context7-mcp", "codebase-memory-mcp", "context-mode"].map((name) => [name, process.execPath]));
-      const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: (name) => commands.get(name) });
+      const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: (name) => commands.get(name), verifyExistingCodebase: () => true });
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: getDefaultDeckConfig(), capabilityIds: ["claude-team-files", "context7", "codebase-memory", "context-mode"] });
       expect(plan.blocked).toBe(false);
       const investigator = plan.files.find((file) => file.path.endsWith("/agents/deck-investigate.md"))?.content ?? "";
@@ -469,7 +469,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
         ["context7-mcp", join(home, "bin", "context7-mcp")],
         ["tavily-mcp", join(home, "bin", "tavily-mcp")],
       ]);
-      const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: (name) => commands.get(name), verifyRtkCommand: () => true, webSearchProviderResolver: () => TAVILY_PROVIDER_DESCRIPTOR, webSearchCredential: () => "fake-shared-tavily-token" });
+      const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: (name) => commands.get(name), verifyExistingCodebase: () => true, verifyRtkCommand: () => true, webSearchProviderResolver: () => TAVILY_PROVIDER_DESCRIPTOR, webSearchCredential: () => "fake-shared-tavily-token" });
       const deckConfig = { ...getDefaultDeckConfig(), webSearch: { enabled: true, provider: "tavily" } } as ReturnType<typeof getDefaultDeckConfig>;
       const capabilities = ["claude-team-files", "context-mode", "codebase-memory", "rtk", "context7", "web-search"];
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig, capabilityIds: capabilities });

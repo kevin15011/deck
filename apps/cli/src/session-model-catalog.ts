@@ -2,7 +2,7 @@ import type { RunnerAdapter } from "@deck/core";
 import type { DriverLookup } from "@deck/session-host";
 
 /** Discover only runner-owned models; failed or stale discovery never invents choices. */
-export async function discoverSessionModels(adapters: readonly RunnerAdapter[], drivers: DriverLookup, projectRoot: string) {
+export async function discoverSessionModels(adapters: readonly RunnerAdapter[], drivers: DriverLookup, projectRoot: string, projectConfigTrusted = false, signal?: AbortSignal) {
   const runners = await Promise.all(adapters.filter(adapter => typeof adapter.getSessionDriver === "function").map(async adapter => {
     const base = { runnerId: adapter.runnerId, label: adapter.displayName ?? adapter.runnerId };
     const unavailable = (reasonCode:string) => ({...base,available:false,reasonCode,models:[]});
@@ -12,7 +12,7 @@ export async function discoverSessionModels(adapters: readonly RunnerAdapter[], 
     try {
       const probe = await driver.probe({cwd:projectRoot});
       if (probe.status === "blocked") return unavailable("runner-unavailable");
-      const result = await adapter.getModelInventory({projectRoot,mode:"prefer-cache",signal:AbortSignal.timeout(15_000)});
+      const result = await adapter.getModelInventory({projectRoot,...(adapter.runnerId === "opencode" ? {projectConfigTrusted} : {}),mode:"prefer-cache",signal:signal ? AbortSignal.any([signal,AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000)});
       if (result.state !== "ready") return unavailable("model-discovery-unavailable");
       const models = Object.values(result.inventory.modelsByProvider).flat()
         .filter(model => model.visibility !== "hidden" && !(adapter.runnerId === "claude" && model.id === "inherit"))

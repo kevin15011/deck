@@ -1,3 +1,4 @@
+import { classifyNativeCodebase, nativeCodebaseFailureCode, resolvePiAgentDir } from "@deck/adapter-pi";
 import type {
   RunnerAdapter,
   RunnerDiagnostic,
@@ -84,6 +85,7 @@ export function classifyExplicitMemoryIntent(launch: RunnerLaunchInput): Explici
 export async function executeRunnerLaunchPlan(
   plan: RunnerLaunchPlan,
   effects: RunnerProcessEffects,
+  signal?: AbortSignal,
 ): Promise<RunnerProcessOutcome> {
   if (plan.stdinPayload && (!validStdinPayload(plan.stdinPayload) || plan.stdio !== "pipe" || plan.stdin !== "closed")) {
     throw new Error("Runner stdin payload is invalid.");
@@ -111,6 +113,17 @@ export async function executeRunnerLaunchPlan(
     env[key] = entry.value;
     if (entry.sensitive) secrets.push(entry.value);
   }
+  signal?.throwIfAborted();
+  if (plan.envOverlay?.DECK_PI_SESSION?.value === "1") {
+    const directory = resolvePiAgentDir(env, env.HOME ?? "");
+    if (!directory.ok) throw new Error("Pi startup blocked (pi-agent-dir-invalid).");
+    try { classifyNativeCodebase({ agentDir: directory.dir, signal }); }
+    catch (error) {
+      if (signal?.aborted || error instanceof Error && error.name === "AbortError") throw error;
+      throw new Error(`Pi startup blocked (${nativeCodebaseFailureCode(error)}).`, { cause: error });
+    }
+  }
+  signal?.throwIfAborted();
   const raw = await effects.spawn(plan.command, plan.args, {
     cwd: plan.cwd,
     env,
@@ -298,6 +311,7 @@ export function createNodeRunnerProcessEffects(nodeSpawner: typeof nodeSpawn = n
 }
 
 export type RunRunnerLaunchInput = {
+  signal?: AbortSignal;
   adapter: RunnerAdapter;
   launch: RunnerLaunchInput;
   installOnly?: boolean;
@@ -476,6 +490,7 @@ function conciseLaunchSummary(context: {
 
 /** Generic CLI-owned install/verify/consent/spawn orchestration. */
 export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunRunnerLaunchResult> {
+  input.signal?.throwIfAborted();
   // The native Claude lane is separate. No Claude Developer Team adapter is verified yet;
   // never let a newly registered adapter inherit this legacy Deck memory-host pipeline.
   if (input.adapter.runnerId === "claude") {
@@ -657,7 +672,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
       : { plan: executablePlan, close: async () => [] as readonly { code: string; severity: "warning"; message: string }[] };
     executablePlan = memoryTools.plan;
     try {
-      const outcome = await executeRunnerLaunchPlan(executablePlan, input.processEffects);
+      const outcome = await executeRunnerLaunchPlan(executablePlan, input.processEffects, input.signal);
       const memoryToolsDiagnostics = await memoryTools.close();
       return {
         status: "launched",
@@ -675,6 +690,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
       };
     } catch (error) {
       await memoryTools.close();
+      if (input.signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
       return { status: "blocked", message: error instanceof Error ? `Runner spawn failed: ${error.message}` : "Runner spawn failed." };
     }
   }
@@ -717,7 +733,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     }
 
     try {
-      const outcome = await executeRunnerLaunchPlan(executablePlan, input.processEffects);
+      const outcome = await executeRunnerLaunchPlan(executablePlan, input.processEffects, input.signal);
       return {
         status: "launched",
         outcome,
@@ -728,6 +744,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
         },
       };
     } catch (error) {
+      if (input.signal?.aborted || error instanceof Error && error.name === "AbortError") throw error;
       return { status: "blocked", message: error instanceof Error ? `Runner spawn failed: ${error.message}` : "Runner spawn failed." };
     }
   }
@@ -820,7 +837,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
       let finalAssistant: Awaited<ReturnType<typeof trustedFinalAssistantMessage>>;
       let memoryCapture: Awaited<ReturnType<typeof safeMemoryCapture>>;
       try {
-        outcome = await executeRunnerLaunchPlan(executableLaunch.plan, input.processEffects);
+        outcome = await executeRunnerLaunchPlan(executableLaunch.plan, input.processEffects, input.signal);
         closeReason = outcome.signal ? "signal" : "normal";
         finalAssistant = await trustedFinalAssistantMessage(executableLaunch.plan, input.processEffects);
         memoryCapture = loopbackBridge
@@ -851,6 +868,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
       };
     }
   } catch (error) {
+    if (input.signal?.aborted || error instanceof Error && error.name === "AbortError") throw error;
     closeReason = closeReason === "normal" ? "exception" : closeReason;
     const reasonForMessage = closeReason as SessionCloseReason;
     const prefix = reasonForMessage === "spawn-failed" ? "Runner spawn failed" : "Runner launch failed";

@@ -1,3 +1,4 @@
+import { CODEX_MCP_SERVER_IDS } from "./mcp-config";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, type Stats } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -681,18 +682,20 @@ class CodexRunnerAdapter implements RunnerAdapter {
   /** Real install roots: CODEX_HOME (default ~/.codex) and the user's home. Nothing is ever written under a project. */
   getSessionDriver() { return createCodexSessionDriver(this.#sessionDriverOptions); }
 
-  /** Rebuild only Deck-owned ordinary MCPs; memory/search are supplied by the session host. */
   async readSessionMcpServers(): Promise<Record<string, ChildMcpServerSpec>> {
     const source = readGlobalConfigSource(this.#roots) ?? "";
-    const ids = ["context-mode", "codebase-memory", "context7", "serena"].filter((id) => isDeckManagedCodexMcpServer(source, id as CodexMcpServerId));
-    let serenaReady = false;
-    if (ids.includes("serena")) {
-      serenaReady = (await this.#serenaReadinessResolver()).state === "ready" && (await this.#serenaProxyProbe()).state === "ready";
-      if (!serenaReady) throw new Error("Codex session Serena readiness is stale.");
+    const ids = ["codebase-memory"].filter((id) => isDeckManagedCodexMcpServer(source, id as CodexMcpServerId));
+    if (!ids.length) return {};
+    const desired = buildCodexMcpServers({ packageIds: ids, memoryProvider: "none", codebaseMemoryCommand: this.#tools.codebase.command() });
+    if (desired.gaps.some(gap => gap !== "codebase-memory-not-ready")) throw new Error("Codex session ordinary MCP readiness is stale.");
+    const servers: Record<string, ChildMcpServerSpec> = Object.fromEntries(desired.servers.map((server) => [server.id, server.transport === "stdio" ? { command: server.command, args: server.args ?? [], env: {} } : { transport: "http" as const, url: server.url, ...(server.envHttpHeaders ? { envHttpHeaders: server.envHttpHeaders } : {}) }]));
+    if (desired.gaps.includes("codebase-memory-not-ready")) {
+      if (["conflict", "unusable"].includes(this.#tools.codebase.state())) throw new Error("codebase-memory-integrity-failed");
+      const command = inspectCodexMcpServerCommand(source, "codebase-memory");
+      if (!command) throw new Error("Codex session ordinary MCP readiness is stale.");
+      servers["codebase-memory"] = { command, args: [], env: {} };
     }
-    const desired = buildCodexMcpServers({ packageIds: ids, memoryProvider: "none", contextModeCommand: this.#tools.contextMode.command(), codebaseMemoryCommand: this.#tools.codebase.command(), serenaLauncherAvailable: serenaReady, serenaProxyAvailable: serenaReady, serenaProxyCommand: this.#serenaProxyCommand });
-    if (desired.gaps.length) throw new Error("Codex session ordinary MCP readiness is stale.");
-    return Object.fromEntries(desired.servers.map((server) => [server.id, server.transport === "stdio" ? { command: server.command, args: server.args ?? [], env: {} } : { transport: "http" as const, url: server.url, ...(server.envHttpHeaders ? { envHttpHeaders: server.envHttpHeaders } : {}) }]));
+    return servers;
   }
 
   get #roots(): CodexInstallRoots {

@@ -2,7 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {validReplyId} from '../../../packages/core/src/session/lead-replies';
 export type ChatAnchor={id:number;seq:number;offset:number};
-export type DeckOverlay={kind:'drawer'|'unread'|'install'}|{kind:'origin';decisionId:string}|{kind:'image';attachmentId:string};
+export type DeckOverlay={kind:'drawer'|'unread'|'install'|'restart'}|{kind:'origin';decisionId:string}|{kind:'image';attachmentId:string};
 export type DeckRoute={project:string;session?:string;tab:'chat'|'activity'|'subagents'|'openspec';overlay?:DeckOverlay;reply?:string;anchor?:ChatAnchor};
 export type DeckEntry={v:1;owner:string;key:string;parent?:string;slot:number;route:DeckRoute};
 type RecordEntry={entry:DeckEntry;from?:{key:string;slot:number;signature:string}};
@@ -20,7 +20,7 @@ export function parseRoute(v:unknown):DeckRoute|undefined{
  if(!object(v)||!keys(v,['project','session','tab','overlay','reply','anchor'])||v.project!==''&&!id(v.project,128)||v.session!==undefined&&!id(v.session)||typeof(v.tab??'chat')!=='string'||!['chat','activity','subagents','openspec'].includes(String(v.tab??'chat'))||v.reply!==undefined&&(!validReplyId(v.reply)||!v.session))return;
  let overlay:DeckOverlay|undefined;
  if(v.overlay!==undefined){const o=v.overlay;if(!object(o)||typeof o.kind!=='string'||!keys(o,['kind','decisionId','attachmentId']))return;
-  if(['drawer','unread','install'].includes(String(o.kind))&&Object.keys(o).length===1)overlay={kind:o.kind as 'drawer'|'unread'|'install'};
+  if(['drawer','unread','install','restart'].includes(String(o.kind))&&Object.keys(o).length===1)overlay={kind:o.kind as 'drawer'|'unread'|'install'|'restart'};
   else if(o.kind==='origin'&&v.session&&id(o.decisionId,128)&&Object.keys(o).length===2)overlay={kind:'origin',decisionId:o.decisionId};
   else if(o.kind==='image'&&v.session&&uuid(o.attachmentId)&&Object.keys(o).length===2)overlay={kind:'image',attachmentId:o.attachmentId};else return;
  }

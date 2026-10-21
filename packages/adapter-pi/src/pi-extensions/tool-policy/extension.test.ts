@@ -1,3 +1,4 @@
+import { CODEBASE_DISCOVERY_FALLBACK } from "@deck/core/session/mcp";
 import { describe, expect, test } from "bun:test";
 
 import type { ToolPolicyConfig } from "./config";
@@ -6,11 +7,11 @@ import type { RtkRewriter } from "./rtk";
 
 type Handler = (event: any, ctx: any) => Promise<unknown> | unknown;
 
-function load(options: { env?: Record<string, string | undefined>; config?: Partial<ToolPolicyConfig>; rewriter?: RtkRewriter } = {}) {
+function load(options: { env?: Record<string, string | undefined>; config?: Partial<ToolPolicyConfig>; rewriter?: RtkRewriter; activeTools?: string[] } = {}) {
   const handlers: Record<string, Handler[]> = {};
   const notices: string[] = [];
   const config: ToolPolicyConfig = { version: 1, rtkBinary: null, graphRedirect: false, ...options.config };
-  createDeckToolPolicyExtension({ env: { DECK_PI_SESSION: "1", DECK_PI_ROLE: "lead", ...options.env }, config, rewriter: options.rewriter })({ on: (name: string, handler: Handler) => { (handlers[name] ??= []).push(handler); } } as never);
+  createDeckToolPolicyExtension({ env: { DECK_PI_SESSION: "1", DECK_PI_ROLE: "lead", ...options.env }, config, rewriter: options.rewriter, reviewedReadiness: () => true })({ getActiveTools: () => options.activeTools ?? ["mcp__codebase_memory__search_graph", "mcp__codebase_memory__trace_path", "mcp__codebase_memory__get_code_snippet", "mcp__codebase_memory__search_code"], on: (name: string, handler: Handler) => { (handlers[name] ??= []).push(handler); } } as never);
   const ctx = { hasUI: true, ui: { notify: (message: string) => notices.push(message) } };
   const call = async (toolName: string, input: Record<string, unknown>) => {
     const event = { type: "tool_call", toolCallId: "c1", toolName, input };
@@ -173,3 +174,33 @@ describe("handler order: policy, then RTK, then graph", () => {
     expect(spy.seen).toEqual([]);
   });
 });
+
+ test("native turn uses fallback and one bounded visible notice until graph tools return", async () => {
+   const activeTools: string[] = [];
+   const h = load({ config: { graphRedirect: true }, activeTools });
+   const event = { systemPrompt: "Existing instructions" };
+   const ctx = { hasUI: true, ui: { notify: (text: string) => h.notices.push(text) } };
+   const turn = async () => { let out: any; for (const handler of h.handlers.before_agent_start ?? []) out = await handler(event, ctx); return out; };
+   expect((await turn())?.systemPrompt).toContain("Use file listing, rg searches");
+   await turn();
+   expect(h.notices).toHaveLength(1);
+   await h.call("grep", { pattern: "createUser", path: "src" });
+   for (const handler of h.handlers.tool_result ?? []) expect(await handler({ toolCallId: "c1", content: [], isError: false }, ctx)).toBeUndefined();
+   activeTools.push("mcp__codebase_memory__search_graph", "mcp__codebase_memory__trace_path", "mcp__codebase_memory__get_code_snippet", "mcp__codebase_memory__search_code");
+   expect(await turn()).toBeUndefined();
+   event.systemPrompt = CODEBASE_DISCOVERY_FALLBACK;
+   expect((await turn())?.systemPrompt).toContain("Codebase Memory is available for this execution");
+   expect((await turn())?.systemPrompt).not.toContain("unavailable");
+ });
+
+ test("active graph names alone never establish reviewed restoration", async () => {
+   const handlers: Record<string, Handler[]> = {};
+   const notices: string[] = [];
+   createDeckToolPolicyExtension({ env: { DECK_PI_SESSION: "1" }, config: { version: 1, rtkBinary: null, graphRedirect: false } })({
+     getActiveTools: () => ["search_graph", "trace_path", "get_code_snippet", "search_code"].map(name => `mcp__codebase_memory__${name}`),
+     on: (name: string, handler: Handler) => { (handlers[name] ??= []).push(handler); },
+   } as never);
+   const output: any = await handlers.before_agent_start[0]!({ systemPrompt: CODEBASE_DISCOVERY_FALLBACK }, { hasUI: true, ui: { notify: (text: string) => notices.push(text) } });
+   expect(output.systemPrompt).not.toContain("Codebase Memory is available");
+   expect(notices).toHaveLength(1);
+ });

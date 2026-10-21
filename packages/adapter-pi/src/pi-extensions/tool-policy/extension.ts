@@ -1,8 +1,9 @@
+import { CODEBASE_DISCOVERY_FALLBACK } from "@deck/core/session/mcp";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { piMcpToolName } from "../../pi-mcp-catalog";
-import type { ExtensionAPI } from "../shared/pi-api";
+import type { ExtensionAPI, ExtensionContext } from "../shared/pi-api";
 import { isReadOnlyRole } from "../shared/roles";
 import { DEFAULT_TOOL_POLICY_CONFIG, parseToolPolicyConfig, type ToolPolicyConfig } from "./config";
 import { classifyCodeSearch } from "./graph";
@@ -13,6 +14,10 @@ export type DeckToolPolicyOptions = {
   env?: Readonly<Record<string, string | undefined>>;
   config?: ToolPolicyConfig;
   rewriter?: RtkRewriter;
+  reviewedReadiness?: () => boolean;
+  customCodebase?: () => boolean;
+  protectedDiagnostic?: (ctx: ExtensionContext) => string | undefined;
+  codebaseToolBlock?: (ctx: ExtensionContext) => string | undefined;
 };
 
 function graphGuidance(): string {
@@ -37,7 +42,7 @@ function readConfig(): ToolPolicyConfig {
 
 /**
  * One `tool_call` handler with a deterministic pipeline: role policy -> RTK rewrite -> graph redirection.
- * Only role policy blocks (Pi's `{ block, reason }`: the model receives an error result; `tool_result` is not emitted).
+ * Reviewed Codebase availability and role policy block (Pi's `{ block, reason }`: the model receives an error result; `tool_result` is not emitted).
  * Graph guidance is advisory and appended to the search result through `tool_result`.
  */
 export function createDeckToolPolicyExtension(options: DeckToolPolicyOptions = {}) {
@@ -47,7 +52,46 @@ export function createDeckToolPolicyExtension(options: DeckToolPolicyOptions = {
     const config = options.config ?? readConfig();
     const rewriter = options.rewriter ?? (config.rtkBinary ? createRtkRewriter({ binary: config.rtkBinary }) : undefined);
     const readOnly = isReadOnlyRole(role);
-    if (!readOnly && !rewriter && !config.graphRedirect) return;
+    const deckSession = env.DECK_PI_SESSION === "1";
+    if (!readOnly && !rewriter && !config.graphRedirect && !deckSession) return;
+    const graphAvailable = () => options.reviewedReadiness?.() === true && ["search_graph", "trace_path", "get_code_snippet", "search_code"]
+      .every((name) => pi.getActiveTools().includes(piMcpToolName("codebase-memory", name)));
+    const suppressGraph = () => pi.setActiveTools?.(pi.getActiveTools().filter(name => !name.startsWith("mcp__codebase_memory__")));
+    let protectedMessage: string | undefined;
+    const reportProtected = (ctx: ExtensionContext, message: string | undefined) => {
+      ctx.ui?.setStatus?.("deck-codebase", message);
+      if (message) suppressGraph();
+      if (message && message !== protectedMessage) {
+        if (ctx.hasUI) ctx.ui.notify(message, "error"); else process.stderr.write(`${message}\n`);
+      }
+      protectedMessage = message;
+    };
+    if (deckSession && options.protectedDiagnostic) pi.on("session_start", (_event, ctx) => reportProtected(ctx, options.protectedDiagnostic!(ctx)));
+    let availabilityDiagnosed = false;
+    if (deckSession) pi.on("before_agent_start", (event, ctx) => {
+      const protectedFailure = options.protectedDiagnostic?.(ctx);
+      reportProtected(ctx, protectedFailure);
+      if (protectedFailure) return { systemPrompt: `${event.systemPrompt}\n\n${protectedFailure} Use file listing, rg searches, and focused reads. Do not claim graph-backed findings.` };
+      if (options.customCodebase?.()) return {
+        systemPrompt: event.systemPrompt.replaceAll(CODEBASE_DISCOVERY_FALLBACK, "Custom Codebase MCP configuration is active under Pi's native rules. Deck has not verified it. Use only tools actually exposed, or file search and focused reads."),
+      };
+      if (graphAvailable()) {
+        availabilityDiagnosed = false;
+        return event.systemPrompt.includes(CODEBASE_DISCOVERY_FALLBACK)
+          ? { systemPrompt: event.systemPrompt.replaceAll(CODEBASE_DISCOVERY_FALLBACK, "Codebase Memory is available for this execution. Use its currently exposed graph tools for code discovery.") }
+          : undefined;
+      }
+      suppressGraph();
+      if (!availabilityDiagnosed) {
+        availabilityDiagnosed = true;
+        const message = "Deck: Codebase Memory is unavailable for this execution. Use file search and reads. Review & Install can restore the reviewed executable.";
+        if (ctx.hasUI) ctx.ui.notify(message, "warning");
+        else process.stderr.write(`${message}\n`);
+      }
+      return { systemPrompt: `${event.systemPrompt}\n\n${CODEBASE_DISCOVERY_FALLBACK}` };
+    });
+
+    if (!readOnly && !rewriter && !config.graphRedirect && !options.codebaseToolBlock) return;
 
     let rtkDiagnosed = false;
     let guided = false;
@@ -57,6 +101,11 @@ export function createDeckToolPolicyExtension(options: DeckToolPolicyOptions = {
     pi.on("tool_call", async (event, ctx) => {
       const toolName = event.toolName;
       const input = event.input as Record<string, unknown> | undefined;
+
+      if (toolName.startsWith("mcp__codebase_memory__") && options.codebaseToolBlock) {
+        const reason = options.codebaseToolBlock(ctx);
+        if (reason) { reportProtected(ctx, reason); return { block: true, reason }; }
+      }
 
       // 1. Role policy.
       const decision = evaluateRolePolicy(role, toolName);
@@ -81,7 +130,7 @@ export function createDeckToolPolicyExtension(options: DeckToolPolicyOptions = {
 
       // 3. Graph guidance (advisory, never blocks: the search runs and a concise note is appended to its result,
       //    at most once per session; non-code searches are untouched).
-      if (config.graphRedirect && !guided) {
+      if (config.graphRedirect && graphAvailable() && !guided) {
         const classification = classifyCodeSearch(toolName, originalCommand !== undefined ? { command: originalCommand } : input);
         if (classification?.code) {
           guided = true;
@@ -93,7 +142,7 @@ export function createDeckToolPolicyExtension(options: DeckToolPolicyOptions = {
 
     if (config.graphRedirect) {
       pi.on("tool_result", (event) => {
-        if (!pendingAdvisories.delete(event.toolCallId) || event.isError) return undefined;
+        if (!pendingAdvisories.delete(event.toolCallId) || event.isError || !graphAvailable()) return undefined;
         return { content: [...event.content, { type: "text" as const, text: guidance }] };
       });
     }

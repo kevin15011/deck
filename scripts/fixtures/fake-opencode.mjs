@@ -2,7 +2,7 @@
 import { appendFileSync } from "node:fs";
 import { createServer } from "node:http";
 const argv = process.argv.slice(2);
-if (process.env.FAKE_OPENCODE_LOG) appendFileSync(process.env.FAKE_OPENCODE_LOG, JSON.stringify({ argv, configDir: process.env.OPENCODE_CONFIG_DIR, disableProjectConfig: process.env.OPENCODE_DISABLE_PROJECT_CONFIG, disableClaudeCode: process.env.OPENCODE_DISABLE_CLAUDE_CODE, config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}"), passwordConfigured: (process.env.OPENCODE_SERVER_PASSWORD?.length ?? 0) >= 32 }) + "\n");
+if (process.env.FAKE_OPENCODE_LOG) appendFileSync(process.env.FAKE_OPENCODE_LOG, JSON.stringify({ argv, home: process.env.HOME, configDir: process.env.OPENCODE_CONFIG_DIR, disableProjectConfig: process.env.OPENCODE_DISABLE_PROJECT_CONFIG, disableClaudeCode: process.env.OPENCODE_DISABLE_CLAUDE_CODE, config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}"), passwordConfigured: (process.env.OPENCODE_SERVER_PASSWORD?.length ?? 0) >= 32 }) + "\n");
 if (argv.includes("--version")) { console.log("1.18.31"); process.exit(0); }
 const config = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}");
 const authorization = "Basic " + Buffer.from("opencode:" + process.env.OPENCODE_SERVER_PASSWORD).toString("base64");
@@ -13,8 +13,13 @@ const server = createServer(async (req, res) => {
   if (req.url === "/event") { res.writeHead(200, { "content-type": "text/event-stream" }); res.write(": ready\n\n"); streams.add(res); req.on("close", () => streams.delete(res)); return; }
   let text = ""; for await (const chunk of req) text += chunk;
   const body = text ? JSON.parse(text) : {};
+  if (process.env.FAKE_OPENCODE_LOG && (req.url === "/session" || req.method === "PATCH")) appendFileSync(process.env.FAKE_OPENCODE_LOG, JSON.stringify({ event: "session-permission", method: req.method, permission: body.permission }) + "\n");
   let result = {};
-  if (req.url === "/mcp") result = Object.fromEntries(Object.keys(config.mcp || {}).map(id => [id, { status: "connected" }]));
+  // Supplied fixture content represents the post-native-load effective config.
+  // Plugins are retained as declarations; this fake never executes plugin files.
+  if (req.url === "/config") result = config;
+  else if (req.url === "/agent") result = [{ name: config.default_agent ?? "build", permission: Object.entries(config.permission ?? {}).flatMap(([permission, rule]) => typeof rule === "string" ? [{ permission, pattern: "*", action: rule }] : Object.entries(rule).map(([pattern, action]) => ({ permission, pattern, action }))) }];
+  else if (req.url === "/mcp") result = Object.fromEntries(Object.keys(config.mcp || {}).map(id => [id, { status: config.mcp[id].enabled === false ? "disabled" : "connected" }]));
   else if (req.url === "/session" || req.url === "/session/fake-session") result = session;
   else if (req.url === "/permission") result = [];
   else if (req.url === "/session/fake-session/message") result = { info: { id: "fake-message", sessionID: session.id, role: "assistant" }, parts: [{ type: "text", text: "echo: " + body.parts?.[0]?.text }] };

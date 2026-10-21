@@ -123,6 +123,6 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
     closeChildMcp: () => readiness.close(),
     memory: async (context) => createSessionMemoryPort(context, options.configStore.read(), options.memoryRuntime),
     rolePrompt: sessionRolePrompt,
-    modelCatalog: (projectRoot) => discoverSessionModels(list, drivers, projectRoot),
+    modelCatalog: (projectRoot, projectConfigTrusted, signal) => discoverSessionModels(list, drivers, projectRoot, projectConfigTrusted, signal),
   });
 }

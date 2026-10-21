@@ -17,7 +17,7 @@ export type InstallableOpenCodeTool = {
   name: string;
   module: string;
   required: boolean;
-  installKind: "opencode-plugin" | "deck-owned-opencode-plugin" | "external" | "mcp-server" | "npm-package" | "npm-package-plus-mcp" | "shell-script" | "shell-script-plus-mcp" | "serena-agent";
+  installKind: "deck-owned-native" | "opencode-plugin" | "deck-owned-opencode-plugin" | "external" | "mcp-server" | "npm-package" | "npm-package-plus-mcp" | "shell-script" | "shell-script-plus-mcp" | "serena-agent";
   /** Canonical capability ID from Core registry - used for registry validation and parity reporting */
   capabilityId?: CanonicalCapabilityId;
   /** For shell-script: curl URL to pipe to shell */
@@ -51,9 +51,8 @@ export const OPENCODE_INSTALLABLE_TOOLS: InstallableOpenCodeTool[] = [
     name: "codebase-memory",
     module: "DeusData/codebase-memory-mcp",
     required: false,
-    installKind: "shell-script",
+    installKind: "deck-owned-native",
     capabilityId: "codebase-memory",
-    shellInstallUrl: "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh",
   },
   { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "mcp-server", capabilityId: "context7" },
   {

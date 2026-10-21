@@ -1,8 +1,10 @@
+import { type PersonalMcpAvailability } from "@deck/core/session/personal-mcp";
+import type { CapabilityAvailability } from "@deck/core/session/mcp";
 /** Shared provider composition; credentials remain in host memory and spawn environment only. */
 import type { NormalizedDeckConfig, RunnerAdapter } from "@deck/core";
 import type { ChildMcpServerSpec } from "@deck/core/session/driver";
 import type { ChildMcpContext, ChildMcpResolver, SessionMemoryPort } from "@deck/session-host";
-import type { SessionCodebaseReadiness } from "./session-codebase-readiness";
+import { SessionCodebaseReadinessError, type SessionCodebaseReadiness } from "./session-codebase-readiness";
 import { createSupermemoryRuntimeHost } from "./supermemory-runtime-host";
 import { getWebSearchProviderDescriptor } from "./web-search-provider";
 import { startGlobalMemoryTransport } from "./session-global-memory-transport";
@@ -41,7 +43,13 @@ export async function resolveSessionChildMcp(
   startGlobalTransport: typeof startGlobalMemoryTransport = startGlobalMemoryTransport,
 ): Promise<ChildMcpResolver> {
   const memory = managed ? prepareSessionNativeMemory(adapter?.runnerId ?? "", managed.context.projectRoot, config, environment, nativeMemoryEffects) : undefined;
-  const servers: Record<string, ChildMcpServerSpec> = { ...await adapter?.readSessionMcpServers?.() };
+  const configured = { ...await adapter?.readSessionMcpServers?.() };
+  // Ordinary servers, skills and plugins stay in the native loader. Only Codebase
+  // needs a task binding prepared by the managed recovery service.
+  const servers: Record<string, ChildMcpServerSpec> = managed
+    ? (configured["codebase-memory"] ? { "codebase-memory": configured["codebase-memory"] } : {})
+    : configured;
+  const suppressedMcpServers: string[] = [];
   const memoryProviderIds = [...new Set(["supermemory", "adaptive-memory", ...(config.adaptiveMemory.supermemory?.mcpServerName ? [config.adaptiveMemory.supermemory.mcpServerName] : [])])];
   // Claude persists an explicit trusted selection. Codex and OpenCode use the global web
   // policy in their native install plans; their absent optional selection seam is intentional.
@@ -59,6 +67,8 @@ export async function resolveSessionChildMcp(
     envOverlay = { ...envOverlay, [provider.credentialEnvVar]: credential };
     webSearch = { enabled: true, serverId: provider.semanticServerId };
   }
+  const capabilityAvailability: CapabilityAvailability[] = [];
+  const personalMcpAvailability: PersonalMcpAvailability[] = [];
   let release: (() => Promise<void>) | undefined;
   let releases: Array<() => Promise<void>> = [];
   let releasing: Promise<void> | undefined;
@@ -77,11 +87,22 @@ export async function resolveSessionChildMcp(
         ...(adapter?.runnerId === "claude" ? { SUPERMEMORY_MCP_URL: transport.mcpUrl } : {}) };
     }
     const codebase = servers["codebase-memory"];
-    if (managed && codebase) {
-      if (codebase.transport === "http") throw new Error("codebase-memory-unsupported: the selected managed backend requires the reviewed native release");
-      const prepared = await managed.readiness.ensure(codebase, managed.context, envOverlay);
-      servers["codebase-memory"] = prepared;
-      releases.push(() => managed.readiness.release(prepared));
+    if (managed) {
+      if (!codebase) capabilityAvailability.push({ capabilityId: "codebase-memory", status: "unselected" });
+      else {
+        try {
+          if (codebase.transport === "http") throw new SessionCodebaseReadinessError("unsupported");
+          const prepared = await managed.readiness.ensure(codebase, managed.context, envOverlay);
+          servers["codebase-memory"] = prepared;
+          releases.push(() => managed.readiness.release(prepared));
+          capabilityAvailability.push({ capabilityId: "codebase-memory", status: "ready" });
+        } catch (error) {
+          if (managed.context.signal.aborted || !(error instanceof SessionCodebaseReadinessError) || error.kind === "cancelled") throw error;
+          delete servers["codebase-memory"];
+          suppressedMcpServers.push("codebase-memory");
+          capabilityAvailability.push({ capabilityId: "codebase-memory", status: "unavailable", reasonCode: `codebase-memory-${error.kind}` });
+        }
+      }
     }
     if (releases.length) {
       release = releaseResources;
@@ -92,6 +113,7 @@ export async function resolveSessionChildMcp(
   }
 
   return {
+    ...(managed ? { capabilityAvailability, personalMcpAvailability, suppressedMcpServers } : {}),
     ...(memory ? { nativeMemory: memory.nativeMemory } : {}),
     runnerPackages: () => Object.keys(servers), memoryProviderIds, webSearch,
     ...(envOverlay ? { envOverlay } : {}), resolveServer: (id) => servers[id],

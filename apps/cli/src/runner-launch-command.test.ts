@@ -9,7 +9,7 @@ import { deriveDeckRuntimeSessionId } from "./supermemory-runtime-host";
 import { createFreshDeckSessionId, persistNativeDeckRuntimeSessionMapping, resolveDeckRuntimeSessionId } from "./supermemory-session-store";
 import { createOwnerOnlyFileSecretStore, getDefaultDeckConfig, type RunnerAdapter, type RunnerLaunchInput } from "@deck/core";
 import { storeOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
-import { createPiRunnerAdapter } from "@deck/adapter-pi";
+import { createPiRunnerAdapter, createCodebaseGuardInvocation } from "@deck/adapter-pi";
 import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
 import { buildCodexLaunchPlan, createCodexRunnerAdapter } from "@deck/adapter-codex";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -1563,8 +1563,9 @@ describe("runRunnerLaunch consent and status", () => {
   test("real Pi and OpenCode adapters traverse generic preview, consent, apply, verify, and spawn", async () => {
     const root = await mkdtemp(join(tmpdir(), "deck-generic-runners-"));
     try {
+      await mkdir(join(root, "pi-home"), { recursive: true });
       const adapters = [
-        createPiRunnerAdapter({ homeDirectory: join(root, "pi-home") }),
+        createPiRunnerAdapter({ homeDirectory: join(root, "pi-home"), env: { HOME: join(root, "pi-home") }, codebaseGuardInvocation: () => createCodebaseGuardInvocation(process.execPath, join(import.meta.dir, "main.tsx")) }),
         createOpenCodeRunnerAdapter({ developerTeamConfigDir: join(root, "opencode-home") }),
       ];
       for (const runner of adapters) {
@@ -1577,9 +1578,9 @@ describe("runRunnerLaunch consent and status", () => {
           interactive: true,
           presentPreview: async (value) => { preview = value; events.push("preview"); },
           confirm: async () => { events.push("consent"); return true; },
-          processEffects: { spawn: async () => { events.push("spawn"); return { exitCode: 0, stdout: "", stderr: "" }; } },
+          processEffects: { inheritedEnv: { HOME: join(root, "pi-home"), PATH: process.env.PATH }, spawn: async () => { events.push("spawn"); return { exitCode: 0, stdout: "", stderr: "" }; } },
         });
-        expect(result.status).toBe("launched");
+        expect(result).toMatchObject({ status: "launched" });
         expect(events).toEqual(["preview", "consent", "spawn"]);
         expect(preview).not.toContain("sandboxing and command approvals are disabled");
       }

@@ -10,6 +10,8 @@ describe("validateSessionCommand", () => {
       { type: "project.register", path: "~/repos/deck", name: "Deck" },
       { type: "project.rename", projectId: "project-123", name: "Deck workspace" },
       { type: "project.remove", projectId: "project-123" },
+      { type:"project.trust",projectId:"p",runnerId:"opencode",trusted:true,expectedRevision:0 },
+      { type:"project.trust",projectId:"p",runnerId:"opencode",trusted:false,expectedRevision:0 },
       { type: "session.create", projectId: "project-123", title: "Feature", members: { lead: { runnerId: "codex", modelId: "gpt", thinking: "high" } } },
       { type: "session.prepare" },
       { type: "session.prepare.cancel", preparationId: "p" },
@@ -42,6 +44,7 @@ describe("validateSessionCommand", () => {
       { type: "project.rename", projectId: "project-123", name: "   " },
       { type: "project.rename", projectId: "project-123", name: "x".repeat(161) },
       { type: "project.remove", projectId: "" },
+      ...[{projectId:"p",runnerId:"codex",trusted:true,expectedRevision:0},{projectId:"p",runnerId:"opencode",trusted:"true",expectedRevision:0},{projectId:"",runnerId:"opencode",trusted:true,expectedRevision:0}].map(value=>({type:"project.trust",...value})),
     ]) expect(validateSessionCommand({ v: 1, commandId: id, ...c }).ok).toBe(false);
   });
   test("rejects unknown type, bad version, bad fields", () => {
@@ -94,4 +97,11 @@ test("approval scopes and revoke commands preserve legacy syntax and reject malf
   for (const fields of [{ scope: "forever" }, { scope: null }, { grant: "all" }, { confirmed: "yes" }]) expect(command(fields)).toBe(false);
   expect(command({ type: "session.revokeGrant", grantId: "g" })).toBe(true);
   expect(command({ type: "session.revokeGrant" })).toBe(false);
+});
+
+test("project trust requires a reviewed nonnegative safe revision, including legacy clients", () => {
+ const command = {v:1,commandId:id,type:"project.trust",projectId:"p",runnerId:"opencode",trusted:true};
+ expect(validateSessionCommand(command).ok).toBe(false);
+ for (const expectedRevision of [-1, 0.5, "0", null, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity]) expect(validateSessionCommand({...command,expectedRevision}).ok).toBe(false);
+ for (const expectedRevision of [0,1,Number.MAX_SAFE_INTEGER]) expect(validateSessionCommand({...command,expectedRevision}).ok).toBe(true);
 });

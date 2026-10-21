@@ -1072,7 +1072,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
    */
   useEffect(() => {
     let cancelled = false;
-    const deps: ReleaseCheckDeps = {};
+    const controller = new AbortController();
+    const deps: ReleaseCheckDeps = { signal: controller.signal };
     releaseCheckFor(DEFAULT_RELEASE_CHECK_TIMEOUT_MS, deps)
       .then((state) => {
         if (cancelled) return;
@@ -1090,6 +1091,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, []);
 

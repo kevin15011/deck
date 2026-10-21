@@ -3034,3 +3034,59 @@ describe('Stage 3 exact-turn steering',()=>{
  });
 
 });
+
+test('explicit forced Web restart retains interruption, denied approval, cancelled question and queued-input reasons',async()=>{
+ const t=setup(),id=await t.create();await t.run({type:'prompt.send',text:'active'},id);await waitFor(()=>t.driver.turns.length===1,5000,'active');const turn=lastTurn(t.driver);turn.init();
+ const approval=t.broker.request({sessionId:id,taskId:'lead',tool:'Bash'}),question=turn.ask([{id:'q',prompt:'Choose',options:[{label:'A'}],multiple:false,allowOther:true,secret:false}],'restart-question');
+ const queued=await t.run({type:'prompt.send',text:'must not run after forced restart'},id);expect(queued.ok).toBe(true);const before=t.manager.restartSnapshot();expect(before.tasks).toBe(1);
+ const reason='web-restart-forced:00000000-0000-4000-8000-000000000001';t.broker.dispose(reason);await t.manager.close(reason);expect((await approval.resolution).decision).toBe('deny');expect((await question).outcome).toBe('cancelled');expect(t.driver.turns).toHaveLength(1);
+ const records=readdirSync(sessionPaths(t.paths,id).eventsDir).filter(f=>f.endsWith('.jsonl')).flatMap(f=>readFileSync(join(sessionPaths(t.paths,id).eventsDir,f),'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line))) as SessionEvent[];
+ expect(records.some(e=>e.kind==='approval.resolved'&&e.data.by===reason&&e.data.decision==='deny')).toBe(true);expect(records.some(e=>e.kind==='question.resolved'&&e.data.by===reason&&e.data.outcome==='cancelled')).toBe(true);expect(records.some(e=>e.kind==='prompt.state'&&e.data.state==='cancelled'&&e.data.reason===reason)).toBe(true);expect(records.some(e=>e.kind==='task.state'&&e.data.state==='interrupted'&&e.data.reason===reason)).toBe(true);
+});
+
+describe('canonical OpenCode project execution trust',()=>{
+ test('stale settings receive a conflict without reauthorization; refreshed explicit consent succeeds',async()=>{
+  const t=setup();await t.create();const projectId=(await t.manager.query('projects.list',{}) as any).data.projects[0].projectId;
+  const consent=(trusted:boolean,expectedRevision:number)=>t.run({type:'project.trust',projectId,runnerId:'opencode',trusted,expectedRevision},undefined,'web:fixture');
+  expect(await consent(true,0)).toMatchObject({ok:true});expect(await consent(false,1)).toMatchObject({ok:true});
+  expect(await consent(true,0)).toMatchObject({ok:false,code:'project-trust-conflict'});
+  expect((await t.manager.query('project.trust',{projectId}) as any).data).toMatchObject({trusted:false,revision:2});
+  expect(await consent(true,2)).toMatchObject({ok:true,data:{trust:{trusted:true,revision:3}}});
+ });
+
+ test('only authenticated settings can grant, and revoke clears status before future prepare and launches',async()=>{
+  const driver=new FakeDriver('opencode');const t=setup({driver,config:baseConfig({members:{lead:{runnerId:'opencode',modelId:'fixture'}}})});const id=await t.create();
+  const list=await t.manager.query('projects.list',{}) as any,projectId=list.data.projects[0].projectId;
+  const trust=async(trusted:boolean,client='web:fixture')=>t.run({type:'project.trust',projectId,runnerId:'opencode',trusted,expectedRevision:(await t.manager.query('project.trust',{projectId}) as any).data.revision},undefined,client);
+  expect(await trust(true,'c-1')).toMatchObject({ok:false,code:'project-trust-user-required'});
+  expect((await t.manager.query('session.readiness',{sessionId:id}) as any).data.projectTrust.trusted).toBe(false);
+  expect(await trust(true)).toMatchObject({ok:true,data:{trust:{trusted:true,revision:1}}});
+  await t.run({type:'session.prepare'},id);await waitFor(async()=> (await t.manager.query('session.readiness',{sessionId:id}) as any).data.status==='ready');
+  await t.run({type:'prompt.send',text:'trusted'},id);await waitFor(()=>driver.turns.length===1);const first=driver.turns[0]!;first.init();expect(first.input.projectConfigTrusted).toBe(true);
+  first.emit('diagnostic',{code:'personal-mcp.runtime',active:['project-docs']});expect((await t.manager.query('session.readiness',{sessionId:id}) as any).data.personalMcpAvailability).toContainEqual({id:'project-docs',source:'native',status:'active'});
+  expect(await trust(false)).toMatchObject({ok:true,data:{trust:{trusted:false,revision:2}}});
+  await expect(first.io.spawn('/must-not-execute',[])).rejects.toThrow('project-trust-changed');
+  first.emit('diagnostic',{code:'personal-mcp.runtime',active:['stale-project-docs']});
+  const revoked=(await t.manager.query('session.readiness',{sessionId:id}) as any).data;expect(revoked.status).toBe('unprepared');expect(revoked.personalMcpAvailability).toBeUndefined();expect(revoked.projectTrust.trusted).toBe(false);
+  first.finish();await t.idle();await t.run({type:'session.prepare'},id);await waitFor(async()=> (await t.manager.query('session.readiness',{sessionId:id}) as any).data.status==='ready');
+  await t.run({type:'prompt.send',text:'untrusted'},id);await waitFor(()=>driver.turns.length===2);expect(driver.turns[1]!.input.projectConfigTrusted).toBe(false);driver.turns[1]!.finish();
+ });
+ test.each(['architect','investigate','quality','setup','apply-fast','apply-deep'])('the canonical grant reaches %s without expanding member authority',async memberId=>{
+  const driver=new FakeDriver('opencode');const t=setup({driver,config:baseConfig({members:{lead:{runnerId:'opencode',modelId:'fixture'},[memberId]:{runnerId:'opencode',modelId:'fixture'}}})});const id=await t.create();const projectId=(await t.manager.query('projects.list',{}) as any).data.projects[0].projectId;
+  expect(await t.run({type:'project.trust',runnerId:'opencode',projectId,trusted:true,expectedRevision:0},undefined,'web:fixture')).toMatchObject({ok:true});await t.run({type:'prompt.send',text:'delegate'},id);await waitFor(()=>driver.turns.length===1);const lead=driver.turns[0]!;lead.init();const grant=t.credentials.lookup(JSON.parse(readFileSync(lead.input.credentialFile,'utf8')).token)!;
+  expect(await t.manager.callTaskTool(grant,'project.trust',{projectId,trusted:true})).toMatchObject({ok:false});
+  expect(await t.manager.callTaskTool(grant,'deck_delegate',{agent:memberId,task:'inspect'})).toMatchObject({ok:true});await waitFor(()=>driver.turns.length===2);const member=driver.turns[1]!;expect(member.input.projectConfigTrusted).toBe(true);expect(member.input.disableNativeDelegation).toBe(true);expect(member.input.approvals).toBe('relay');expect(member.input.mcp.sessionTools).not.toContain('deck_delegate');member.finish();lead.finish();
+ });
+ test('revocation drains a pending prepare and reprepare reads the new grant',async()=>{
+  let calls=0,released=0,aborted=false;
+  const driver=new FakeDriver('opencode');const t=setup({driver,config:baseConfig({members:{lead:{runnerId:'opencode',modelId:'fixture'}}}),options:{childMcp:async(_runner,context)=>{if(++calls===1)await new Promise<void>(resolve=>context.signal.addEventListener('abort',()=>{aborted=true;resolve();},{once:true}));return{runnerPackages:()=>[],resolveServer:()=>undefined,release:async()=>{released++;}};}}});const id=await t.create();const projectId=(await t.manager.query('projects.list',{}) as any).data.projects[0].projectId;
+  await t.run({type:'project.trust',runnerId:'opencode',projectId,trusted:true,expectedRevision:0},undefined,'web:fixture');await t.run({type:'session.prepare'},id);await waitFor(()=>calls===1);await t.run({type:'project.trust',runnerId:'opencode',projectId,trusted:false,expectedRevision:1},undefined,'web:fixture');await waitFor(()=>!t.manager.hasRunningWork());expect(aborted).toBe(true);expect(released).toBe(1);expect((await t.manager.query('session.readiness',{sessionId:id}) as any).data).toMatchObject({status:'unprepared',projectTrust:{trusted:false,revision:2}});
+  await t.run({type:'session.prepare'},id);await waitFor(async()=> (await t.manager.query('session.readiness',{sessionId:id}) as any).data.status==='ready');expect(calls).toBe(2);expect(driver.turns).toHaveLength(0);
+ });
+ test('grant changes abort in-flight model discovery and future lookups read current state',async()=>{
+  const calls:Array<{trusted:boolean|undefined;signal:AbortSignal|undefined}>=[];let finish!:()=>void;
+  const t=setup({options:{modelCatalog:async(_root,trusted,signal)=>{calls.push({trusted,signal});if(calls.length===1)await new Promise<void>(r=>finish=r);return{runners:[]};}}});await t.create();const projectId=(await t.manager.query('projects.list',{}) as any).data.projects[0].projectId;
+  const query=t.manager.query('runners.models',{projectId});await waitFor(()=>calls.length===1);expect(calls[0]!.trusted).toBe(false);await t.run({type:'project.trust',runnerId:'opencode',projectId,trusted:true,expectedRevision:0},undefined,'web:fixture');expect(calls[0]!.signal?.aborted).toBe(true);finish();expect(await query).toMatchObject({ok:false,code:'project-trust-changed'});
+  await t.manager.query('runners.models',{projectId});expect(calls[1]!.trusted).toBe(true);await t.run({type:'project.trust',runnerId:'opencode',projectId,trusted:false,expectedRevision:1},undefined,'web:fixture');await t.manager.query('runners.models',{projectId});expect(calls[2]!.trusted).toBe(false);
+ });
+});

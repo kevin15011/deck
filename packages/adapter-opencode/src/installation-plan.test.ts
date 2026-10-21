@@ -29,9 +29,8 @@ describe("buildOpenCodeInstallationPlan", () => {
         name: "codebase-memory",
         module: "DeusData/codebase-memory-mcp",
         required: false,
-        installKind: "shell-script",
+        installKind: "deck-owned-native",
         capabilityId: "codebase-memory",
-        shellInstallUrl: "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh",
       },
       { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "mcp-server", capabilityId: "context7" },
     ]);

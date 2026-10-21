@@ -1,3 +1,4 @@
+import { PersonalMcpPreparationError } from "@deck/core/session/personal-mcp";
 /**
  * Claude session driver (D-22, XR-4.x, XR-5.4): one `claude -p` process per turn behind the
  * host's process-group anchor, stream-json in and out. The driver never spawns directly
@@ -21,7 +22,7 @@ export const INTERRUPT_ESCALATION_MS = 10_000;
 export const KILL_GRACE_MS = 2_000;
 const STDERR_TAIL = 2048;
 const PROBE_TIMEOUT_MS = 5_000;
-const CAPABILITIES = ["caller-assigned-session-id", "approval-relay", "interrupt-sigint", "strict-mcp-config", "hooks-disabled"] as const;
+const CAPABILITIES = ["caller-assigned-session-id", "approval-relay", "interrupt-sigint", "native-mcp-additions", "native-customizations"] as const;
 
 type TimerApi = { setTimeout(fn: () => void, ms: number): unknown; clearTimeout(handle: unknown): void };
 export type ProbeExec = (command: string, args: readonly string[], options: { cwd?: string; timeoutMs: number }) => Promise<{ code: number | null; stdout: string }>;
@@ -119,10 +120,12 @@ class ClaudeTask {
         { executable: this.options.executable, baseEnv: this.options.baseEnv, extraArgs: this.options.extraArgs },
       );
     } catch (error) {
-      const code = error instanceof ClaudeLaunchError ? error.code : "claude-launch-failed";
+      const code = error instanceof ClaudeLaunchError ? error.code : error instanceof PersonalMcpPreparationError ? error.reasonCode : "claude-launch-failed";
+      if (error instanceof PersonalMcpPreparationError) emit({ kind: "diagnostic", data: { code: "personal-mcp.runtime", conflicting: error.availability.map(item => item.id) } });
       emit({ kind: "diagnostic", data: { code } });
       return { status: "failed", error: `${code}: ${(error as Error).message}` };
     }
+    if (launch.nativeMcpAvailability.length) emit({kind:"diagnostic",data:{code:"personal-mcp.sources",servers:launch.nativeMcpAvailability}});
     for (const d of launch.diagnostics) emit({ kind: "diagnostic", data: { ...d } });
 
     this.historyPath=claudeTranscriptPath(this.input.cwd,this.nativeId,launch.env);
@@ -137,7 +140,9 @@ class ClaudeTask {
     }
     state.child = child;
     const splitter = new ClaudeLineSplitter();
-    const mapper = new ClaudeStreamMapper(this.input.nativeMemory);
+    // Native personal hooks can share events. Event names alone no longer prove provider provenance.
+    const memory = this.input.nativeMemory;
+    const mapper = new ClaudeStreamMapper(memory?.plugin ? { ...memory, plugin: { ...memory.plugin, exclusiveHookEvents: [] } } : memory);
     const onLine = (line: string) => this.onLine(line, mapper, state, launch, emit, Boolean(images?.length));
     child.onStdout((chunk) => { for (const line of splitter.push(chunk)) onLine(line); });
     child.onStderr((chunk) => { state.stderr = (state.stderr + chunk).slice(-STDERR_TAIL); });
@@ -203,18 +208,20 @@ class ClaudeTask {
     const actual = init.mcpServers.map((s) => s.name);
     const missing = expected.filter((n) => !actual.includes(n));
     const extra = actual.filter((n) => !expected.includes(n));
-    if (missing.length > 0 || extra.length > 0) {
+    const personal = actual.filter(id => !expected.includes(id));
+    if (missing.length > 0 || extra.some(id => (this.input.suppressedMcpServers ?? []).includes(id))) {
       emit({ kind: "diagnostic", data: { code: "claude-isolation-violation", expected, actual, missing, extra } });
       this.fail(state, "claude-isolation-violation: the native CLI did not load exactly the Deck-computed MCP set");
       return;
     }
     for (const server of init.mcpServers) {
-      if (server.status !== "connected" && expected.includes(server.name)) {
+      if (server.status !== "connected" && expected.includes(server.name) ) {
         emit({ kind: "diagnostic", data: { code: "claude-mcp-server-not-connected", server: server.name, status: server.status ?? "missing" } });
         this.fail(state, "claude-mcp-server-not-connected: an expected MCP server is not connected");
         return;
       }
     }
+    if (personal.length) emit({ kind: "diagnostic", data: { code: "personal-mcp.runtime", active: personal.filter(id => init.mcpServers.some(s => s.name === id && s.status === "connected")), unavailable: personal.filter(id => !init.mcpServers.some(s => s.name === id && s.status === "connected")) } });
     if (init.sessionId !== this.nativeId) {
       emit({ kind: "diagnostic", data: { code: "claude-session-id-mismatch", expected: this.nativeId, actual: init.sessionId } });
       this.fail(state, "claude-session-id-mismatch: the native CLI reported a different session id than the one assigned");
@@ -294,7 +301,8 @@ class ClaudeTask {
     if (state.interruptRequested && exit.ok) return { status: "interrupted" };
     const how = exit.anchorLost ? (exit.error ?? "Anchor ended before reporting the child's exit")
       : exit.ok ? "claude ended without a result" : `claude exited with ${exit.signal ? `signal ${exit.signal}` : `code ${exit.code}`}`;
-    const tail = redactText(state.stderr, 400).trim();
+    // Native configuration/parser errors may contain literal personal credentials.
+    const tail = state.init ? redactText(state.stderr, 400).trim() : "";
     return { status: "failed", error: tail ? `${how}: ${tail}` : how };
   }
 
@@ -360,7 +368,7 @@ export function createClaudeSessionDriver(options: ClaudeSessionDriverOptions = 
       if (compareVersions(version, CLAUDE_TESTED_VERSIONS.maxTested) > 0) {
         return { version, status: "degraded", reasonCode: "claude-version-untested", capabilities: [...CAPABILITIES], mcpIsolationVerified: false };
       }
-      return { version, status: "ready", capabilities: [...CAPABILITIES,CLAUDE_STEERING_CAPABILITY], mcpIsolationVerified: true };
+      return { version, status: "ready", capabilities: [...CAPABILITIES,CLAUDE_STEERING_CAPABILITY], mcpIsolationVerified: false };
     },
 
     async startTask(input: DriverTaskInput, io: DriverHostIo): Promise<DriverTaskHandle> {

@@ -46,3 +46,9 @@ test("excludes unsupported runners, inherit and stale fallback; sanitizes failur
   expect(result.runners.every(row=>!row.available&&row.models.length===0)).toBe(true);
   expect(JSON.stringify(result)).not.toContain("secret-token");expect(JSON.stringify(result)).not.toContain("invented");
 });
+
+test('preliminary OpenCode inventory receives explicit trust and defaults to global-only discovery',async()=>{
+ const calls:any[]=[];const adapter={runnerId:'opencode',getSessionDriver(){},getThinkingLevels:()=>[],getModelInventory:async(request:any)=>{calls.push(request);return{state:'ready',inventory:{modelsByProvider:{}}};}} as unknown as RunnerAdapter;
+ await discoverSessionModels([adapter],lookup,'/project');await discoverSessionModels([adapter],lookup,'/project',true);
+ expect(calls.map(x=>x.projectConfigTrusted)).toEqual([false,true]);
+});

@@ -43,6 +43,21 @@ describe("adaptive Developer Team installed content", () => {
     expect(getTeamSessionInstructions("developer-team")).toContain("specialists load the applicable execution skills themselves");
   });
 
+  test.each(["compact", "legacy"] as const)("calibrated intake reaches assembled Lead surfaces (%s)", (promptProfile) => {
+    const lead = getAgentContent(promptProfile === "compact" ? "deck-lead" : "deck-developer-orchestrator", { promptProfile })!;
+    for (const body of [lead.agentBody, lead.skillBody, ...(["guia", "pragmatica"] as const).map(personality =>
+      getTeamSessionInstructions("developer-team", { promptProfile, personality })!)]) {
+      expect(body).toContain("For new substantive work, briefly state the understood objective and scope");
+      expect(body).toContain("missing required input");
+      expect(body).toContain("ambiguity that would materially change the result");
+      expect(body).toContain("ask ONE concise question and wait for the reply before dependent action");
+      expect(body).toContain("Bounded read-only clarification discovery is allowed");
+      expect(body).toContain("proceed without redundant approval");
+      expect(body).toContain("confirm only changed scope and do not restart intake");
+      expect(body).not.toContain("when that helps the user predict");
+    }
+  });
+
   test("Apply owns proportional TDD and vertical implementation", () => {
     for (const id of ["deck-apply-fast", "deck-apply-deep"]) {
       const body = getAgentContent(id)!.agentBody;

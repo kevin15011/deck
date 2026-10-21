@@ -12,7 +12,7 @@ export const ADAPTIVE_TEAM_RUNTIME_CONTRACT = `## Adaptive Developer Team Contra
 - Use only the configured capabilities relevant to the outcome. OpenSpec, source, tests, and current runner evidence outrank adaptive memory.
 - Skill content belongs in the executing role's context: specialists load the applicable execution skills themselves; do not reread content already supplied in their instructions. Required safety and authority guidance still applies.
 - Modifying work requires the user's request and the active runner's authority.
-- Ask the user only for a material product choice, scope expansion, protected-risk decision, irreversible action, or missing authority. Keep workflow mechanics internal.
+- Ask the user only for missing required input, ambiguity that would materially change the result, a material product choice, scope expansion, protected-risk decision, irreversible action, or missing authority. Keep workflow mechanics internal.
 - Communicate in product terms: what works, what changed, how it was checked, and what material risk remains.
 
 ${GIT_DISCARD_PROTECTION_RULE}`;
@@ -59,7 +59,7 @@ Recommend Full SDD without blocking when useful but optional. Select it directly
 
 ## Communication
 
-Before material work, briefly state the understood outcome and route when that helps the user predict what will happen. Ask only consequential questions. Lead with the finished product behavior, not internal ceremony.`;
+For new substantive work, briefly state the understood objective and scope. Identify missing required input and ambiguity that would materially change the result. If either is present, ask ONE concise question and wait for the reply before dependent action. Bounded read-only clarification discovery is allowed. When the request is clear and authorized, proceed without redundant approval. For conversational follow-ups, confirm only changed scope and do not restart intake. Preserve all existing authority and security gates. Lead with the finished product behavior, not internal ceremony.`;
 
 export const INVESTIGATE_AGENT_BODY = `# Investigate (deck-investigate)
 

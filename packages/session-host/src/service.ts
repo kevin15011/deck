@@ -36,7 +36,8 @@ export interface SessionService {
   /** Authenticated task tool effects; bridge owns credential lookup, host validates ownership. */
   callTaskTool?(grant: CredentialGrant, name: string, args: unknown, context: { signal?: AbortSignal }): Promise<CommandOutcome>;
   /** Release resources on daemon stop (logs, handles). */
-  close?(): Promise<void> | void;
+  close?(reason?:string): Promise<void> | void;
+  restartSnapshot?():{fingerprint:string;tasks:number};
 }
 
 /** Production placeholder until the SessionManager lands: every command is refused, no sessions exist. */

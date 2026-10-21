@@ -61,3 +61,5 @@ export { WebService, type WebConfig, type WebAssets, type WebAsset, type WebServ
 
 export { QuestionBroker, type QuestionBrokerOptions, type QuestionRequest, type PendingQuestion, type QuestionRespondResult } from "./question-broker";
 export type { LedgerPendingQuestion } from "./ledger";
+
+export {WebRestart,readRestartIntent,writeRestartIntent,restartIntentPath,type RestartIdentity,type RestartIntent,type RestartLauncher,type RestartTarget} from './web-restart';

@@ -1,9 +1,11 @@
+import { PersonalMcpPreparationError } from "@deck/core/session/personal-mcp";
+import { claudeNativePolicy } from "../personal-mcp";
 /**
  * Per-turn launch plan for the Claude session driver (XR-4.3, XR-4.7, design 4.1).
  *
  * One `claude -p` process per turn. The first turn assigns the native session id
- * (`--session-id`), later turns `--resume` it. Isolation: a strict, explicit MCP set from a
- * 0600 file and a `--settings` override that disables hooks. Never `--bare` (API-key only) and
+ * (`--session-id`), later turns `--resume` it. Deck additions use a 0600 file;
+ * native user sources remain enabled and project sources require prior trust. Never `--bare` (API-key only) and
  * never `--safe-mode` (verified on 2.1.296 to drop the explicit MCP set too). The existing
  * interactive launch lane in `claude-launch-plan.ts` is not touched.
  */
@@ -25,6 +27,7 @@ export class ClaudeLaunchError extends Error {
 }
 
 export type ClaudeTurnLaunch = {
+  nativeMcpAvailability: ReturnType<typeof claudeNativePolicy>["availability"];
   command: string;
   args: string[];
   env: Record<string, string>;
@@ -63,11 +66,14 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   const sessionId = input.resume?.nativeSessionId ?? input.nativeSessionId;
   if (!sessionId || !UUID.test(sessionId)) throw new ClaudeLaunchError("claude-invalid-session-id", "Claude native session id must be a UUID");
 
+  const baseEnv = options.baseEnv ?? process.env;
+  const policy = claudeNativePolicy(baseEnv.HOME ?? process.env.HOME ?? "", input.cwd, baseEnv);
   const diagnostics: ClaudeTurnLaunch["diagnostics"] = [];
-  const specs: Record<string, ({ command: string; args: readonly string[]; env: Readonly<Record<string, string>> } | { type: "http"; url: string; headers?: Record<string, string> }) & { alwaysLoad?: true }> = {};
+  const specs: Record<string, Record<string, unknown>> = { ...policy.localServers };
   const memoryServers = nativePlugin?.mcpServers ?? {};
   for (const id of Object.keys(memoryServers)) if (input.mcp.servers.includes(id)) throw new ClaudeLaunchError("claude-memory-mcp-conflict", "Native memory MCP server conflicts with the ordinary child set");
   const expectedMcpServers = [...input.mcp.servers, ...Object.keys(memoryServers)];
+  for (const id of policy.userMcpIds) if (expectedMcpServers.includes(id)) throw new PersonalMcpPreparationError("claude-native-mcp-conflict", [{id,source:"native",status:"conflicting",reason:"managed-name-conflict"}]);
   for (const id of expectedMcpServers) {
     const spec = input.mcpServerSpecs[id] ?? memoryServers[id];
     if (!spec) throw new ClaudeLaunchError("claude-mcp-spec-missing", `No launch spec for MCP server "${id}"`);
@@ -96,9 +102,11 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   args.push(...(input.resume ? ["--resume", sessionId] : ["--session-id", sessionId]));
   args.push("--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages");
   if(input.steeringVersion==='2.1.296')args.push('--replay-user-messages');
-  args.push("--strict-mcp-config", "--mcp-config", mcpConfigFile);
-  args.push("--setting-sources", "");
-  args.push("--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, disableAllHooks: !nativePlugin }));
+  args.push("--mcp-config", mcpConfigFile);
+  args.push("--setting-sources", policy.sources);
+  const denied = [...new Set([...policy.denied, ...input.suppressedMcpServers ?? [],
+    ...([...input.mcp.servers, ...input.suppressedMcpServers ?? []].includes("codebase-memory") ? ["plugin:deck-developer-team:codebase-memory"] : [])])];
+  args.push("--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, ...(denied.length ? { deniedMcpServers: denied.map(serverName => ({ serverName })) } : {}) }));
   if (nativePlugin) args.push("--plugin-dir", nativePlugin.root);
   // Claude has no native approval scopes: only once/deny. Session grants are
   // Deck-owned; never offer persistent "always" or write Claude settings for approvals.
@@ -116,5 +124,5 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   env.MCP_TOOL_TIMEOUT = String(MCP_TOOL_TIMEOUT_MS);
 
   if (input.nativeMemory?.scopeMode === "global") for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
-  return { command: options.executable ?? "claude", args, env, expectedMcpServers, diagnostics };
+  return { command: options.executable ?? "claude", args, env, expectedMcpServers, diagnostics, nativeMcpAvailability: policy.availability };
 }

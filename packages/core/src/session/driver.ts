@@ -16,10 +16,10 @@ export type DriverProbe = {
   mcpIsolationVerified?: boolean;
 };
 
-/** Launch spec of one MCP server of a child. Secrets are file paths in `env`, never values. */
-export type ChildMcpServerSpec =
+/** Launch spec of one MCP server of a child. */
+export type ChildMcpServerSpec = (
   | { transport?: "stdio"; command: string; args: readonly string[]; env: Readonly<Record<string, string>> }
-  | { transport: "http"; url: string; /** Header name to environment variable NAME; never a resolved credential. */ envHttpHeaders?: Readonly<Record<string, string>> };
+  | { transport: "http"; url: string; /** Header name to environment variable NAME; never a resolved credential. */ envHttpHeaders?: Readonly<Record<string, string>> });
 
 /** Prepared by the CLI composition after native artifact, profile and canonical scope checks.
  * Contains no credential values. Credentials travel only through the private spawn environment.
@@ -63,6 +63,10 @@ export type DriverTaskInput = {
   /** Launch spec for every id in `mcp.servers` (the Deck session server included). */
   mcpServerSpecs: Readonly<Record<string, ChildMcpServerSpec>>;
   nativeMemory?: NativeMemoryDescriptor;
+  /** Host-owned canonical project grant. Absence never authorizes OpenCode project execution. */
+  projectConfigTrusted?: boolean;
+  /** Native names suppressed only for an unavailable managed binding or protected conflict. */
+  suppressedMcpServers?: readonly string[];
   approvals: "relay" | "runner-default"; credentialFile: string;
   disableNativeDelegation: boolean;
 };

@@ -275,9 +275,69 @@ describe("Deck MCP servers in the global mcp.json", () => {
   test("a server whose binary is missing is skipped with a warning and nothing relative is ever written", async () => {
     const pi = adapter({ piTools: fakeTools({ codebase: undefined }) });
     const plan = pi.buildDeveloperTeamInstallPlan(input(["codebase-memory-mcp", "context7"]));
-    expect(plan.diagnosticEntries?.some((entry) => entry.code === "PI_MCP_SERVER_UNAVAILABLE" && entry.severity === "warning")).toBe(true);
+    expect(plan.diagnosticEntries?.some((entry) => entry.code === "codebase-memory-unavailable" && entry.severity === "warning")).toBe(true);
     await pi.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan });
     expect(Object.keys(readMcp())).toEqual(["context7"]);
+  });
+
+  test("native owned selection survives missing executable, suppresses materialized graph tools, and restores", async () => {
+    mkdirSync(agentDir, { recursive: true });
+    const personal = { command: "/custom/personal", args: ["keep"], exposure: "codemode" };
+    writeFileSync(piAgentPaths(agentDir).mcp, JSON.stringify({ mcpServers: { personal } }));
+    let command: string | undefined = "/missing/codebase-memory-mcp";
+    const tools = { ...fakeTools(), codebase: { command: () => command } };
+    const pi = adapter({ piTools: tools });
+    const apply = async () => {
+      const plan = pi.buildDeveloperTeamInstallPlan(input());
+      expect(plan.blocked).toBeFalsy();
+      await pi.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan });
+      return plan;
+    };
+    await apply();
+    const owned = readMcp()["codebase-memory"];
+    command = undefined;
+    const absent = await apply();
+    expect(absent.diagnosticEntries?.some(d => d.code === "codebase-memory-unavailable")).toBe(true);
+    expect(readMcp()["codebase-memory"]).toEqual(owned);
+    expect(readMcp().personal).toEqual(personal);
+    const profile = () => readFileSync(join(agentDir, "deck/profiles/developer-team/system-prompt.md"), "utf8");
+    expect(profile()).not.toContain("mcp__codebase_memory__search_graph");
+    expect(profile()).toContain("Use file listing, rg searches");
+    const policy = JSON.parse(readFileSync(join(agentDir, "deck/package/extensions/deck-tool-policy/config.json"), "utf8"));
+    expect(policy.graphRedirect).toBe(false);
+    const launch = launchOf(pi, { mode: "interactive", teamId: "developer", projectRoot, deckConfig: validateDeckConfig({}) });
+    expect(launch.status).toBe("ready");
+    expect(launch.diagnostics.some(d => d.message.includes("Codebase Memory is unavailable"))).toBe(true);
+    command = "/restored/verified/codebase-memory-mcp";
+    await apply();
+    expect(readMcp()["codebase-memory"].command).toBe(command);
+    expect(readMcp().personal).toEqual(personal);
+    expect(profile()).toContain("mcp__codebase_memory__search_graph");
+    expect(launchOf(pi, { mode: "interactive", teamId: "developer", projectRoot, deckConfig: validateDeckConfig({}) }).diagnostics.some(d => d.message.includes("Codebase Memory is unavailable"))).toBe(false);
+  });
+
+  test("unavailable owned selection never adopts a user-modified Codebase entry", async () => {
+    const initial = adapter({ piTools: fakeTools() });
+    await initial.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan: initial.buildDeveloperTeamInstallPlan(input(["codebase-memory-mcp"])) });
+    const path = piAgentPaths(agentDir).mcp;
+    const document = JSON.parse(readFileSync(path, "utf8"));
+    document.mcpServers["codebase-memory"].command = "/custom/user-codebase";
+    const personal = JSON.stringify(document);
+    writeFileSync(path, personal);
+    const absent = adapter({ piTools: fakeTools({ codebase: undefined }) });
+    const plan = absent.buildDeveloperTeamInstallPlan(input(["codebase-memory-mcp"]));
+    expect(plan.blocked).toBeFalsy();
+    await absent.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan });
+    expect(readFileSync(path, "utf8")).toBe(personal);
+    expect(JSON.parse(readFileSync(piAgentPaths(agentDir).manifest, "utf8")).mcp.servers["codebase-memory"]).toBeUndefined();
+  });
+
+  test("protected resolution failures retain identity instead of becoming availability", () => {
+    for (const error of [new DOMException("cancelled", "AbortError"), Object.assign(new Error("denied"), { code: "EACCES" }), new Error("codebase-memory-integrity-failed")]) {
+      const pi = adapter({ piTools: { ...fakeTools(), codebase: { command: () => { throw error; } } } });
+      expect(() => pi.buildDeveloperTeamInstallPlan(input())).toThrow(error);
+      expect(() => launchOf(pi, { mode: "interactive", teamId: "developer", projectRoot, deckConfig: validateDeckConfig({}) })).toThrow(error);
+    }
   });
 
   test("a user-installed pi-mcp-adapter blocks MCP configuration with a remediation hint and is kept", () => {

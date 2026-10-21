@@ -3,7 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   OWNED_CODEBASE_VERSION,
-  isSupportedCodebaseVersion,
+  isCompatibleCodebaseExecutable,
   OWNED_RTK_VERSION,
   inspectOwnedCodebase,
   inspectOwnedRtk,
@@ -41,9 +41,9 @@ export type CodexToolOptions = {
   codebaseReleaseOverride?: CodebaseNativeRelease;
   codebaseArtifactEffects?: { fetchArchive?: (asset: string) => Promise<Uint8Array> };
   verifyCodebaseNative?: (executable: string) => boolean;
-  /** Verifies an already-installed shared codebase-memory-mcp (defaults to a real `--version` probe). */
+  /** Verifies an already-installed shared codebase-memory-mcp (defaults to the reviewed size and hash). */
   verifyExistingCodebase?: (executable: string) => boolean;
-  /** Verifies a shared Context Mode executable (defaults to a real `--version` probe). */
+  /** Verifies a shared Context Mode executable (defaults to the reviewed size and hash). */
   verifyContextMode?: (executable: string) => boolean;
   installContextMode?: () => Promise<boolean>;
   /** Absolute Node.js used by Deck-owned hook scripts; production resolves `node` and checks the version. */
@@ -117,21 +117,15 @@ export function createCodexTools(options: CodexToolOptions = {}) {
   const codebaseRelease = options.codebaseReleaseOverride ?? pinnedOwnedCodebaseRelease();
   const ownedCodebaseRoot = join(toolRoot, `codebase-native-v${OWNED_CODEBASE_VERSION}`, platform);
   const verifyOwnedCodebase = options.verifyCodebaseNative ?? ((executable: string) => runVersion(executable, home).status === 0);
-  const verifyExistingCodebase = options.verifyExistingCodebase ?? ((executable: string) => {
-    const result = runVersion(executable, home);
-    const match = `${result.stdout}`.trim().match(/^codebase-memory-mcp\s+(\d+)\.(\d+)\.(\d+)$/i);
-    if (result.status !== 0 || !match) return false;
-    return isSupportedCodebaseVersion(`${match[1]}.${match[2]}.${match[3]}`);
-  });
+  const verifyExistingCodebase = options.verifyExistingCodebase ?? ((executable: string) => isCompatibleCodebaseExecutable(executable, codebaseRelease));
   const existingCodebase = (): string | undefined => {
     const candidates = options.resolveCommand
       ? [options.resolveCommand("codebase-memory-mcp")]
       : [Bun.which("codebase-memory-mcp") ?? undefined, join(home, ".local", "bin", "codebase-memory-mcp")];
     for (const candidate of candidates) {
       try {
-        const real = candidate && isAbsolute(candidate) && existsSync(candidate) ? executableFile(candidate) : undefined;
-        if (real && verifyExistingCodebase(real)) return candidate;
-      } catch { /* try next */ }
+        if (candidate && isAbsolute(candidate) && verifyExistingCodebase(candidate)) return candidate;
+      } catch (error) { if (!["ENOENT", "ENOTDIR", "ELOOP"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; }
     }
     return undefined;
   };

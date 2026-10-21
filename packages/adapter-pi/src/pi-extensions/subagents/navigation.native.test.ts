@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { createFauxCore, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { createDeckSubagentsExtension } from "./extension";
+import { captureNavigationFailure } from "./navigation-diagnostics.test-support";
 
 const fake = fileURLToPath(new URL("../../__fixtures__/fake-pi-child.mjs", import.meta.url));
 async function until(fn: () => boolean) { const end = Date.now() + 3000; while (!fn()) { if (Date.now() > end) throw new Error("Timed out"); await Bun.sleep(10); } }
@@ -44,7 +45,23 @@ test("native tree journal survives old/root navigation and reload; veto/summary 
     manager.appendMessage(fauxAssistantMessage("initial lead"));
     const accepted = await call({ agent: "deck-quality", task: "HOLD" }); const id = accepted.details.taskIds[0];
     const runningEntry = entries().at(-1).id;
-    await until(() => entries().at(-1)?.data.jobs[0]?.state === "completed");
+    try {
+      await until(() => entries().at(-1)?.data.jobs[0]?.state === "completed");
+    } catch (error) {
+      // Observe before finally removes this fixture. Reads never resume or admit another attempt.
+      try {
+        const journal = structuredClone(entries().slice(-4));
+        const job = journal.at(-1)?.data.jobs.find((item: any) => item.id === id);
+        const observe = async (params: any) => { try { return await call(params); } catch (reason) { return { error: String(reason).slice(0, 256) }; } };
+        const controls = { list: await observe({ action: "list" }), inspect: await observe({ action: "inspect", taskId: id }) };
+        const path = captureNavigationFailure({ cwd: root, parentFile: manager.getSessionFile()!, childLog: log,
+          accepted, journal, controls, job });
+        process.stderr.write(`Pi navigation failure evidence: ${path}\n`);
+      } catch (captureError) {
+        process.stderr.write(`Pi navigation diagnostic capture failed: ${String(captureError).slice(0, 256)}\n`);
+      }
+      throw error;
+    }
     for (const target of [runningEntry, beforeAcceptance]) {
       expect((await session.navigateTree(target)).cancelled).toBe(false);
       expect((await call({ action: "inspect", taskId: id })).content[0].text).toContain("completed");
