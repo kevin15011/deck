@@ -112,3 +112,9 @@ Lead reviewed result/end60172/60173, source for trusted stop classification, bou
 Handoffs explicitly retain partial public text or unavailable status, task-attributed file references and the current instruction; they require checking current file state before continuing. The instruction is a requirement supplied to the agent, not proof that a future agent has performed the inspection. Metrics include pending admissions and no-edit samples with explicit provenance, denominator and partial/censored semantics. No measured production cost result yet.
 
 Same reviewer `task-50b2cdbf-317f-4827-9e27-7282c779b0b8` continues as attempt4 for this delivery delta only. Fresh-all is accepted first-delivery scope, not a blocker; Codex internal histories/databases remain excluded. Earlier findings remain closed. Delivery/activation awaits this focused check.
+
+## Delivery accepted and canary installed
+
+Quality attempt4 result/end60922/60923 accepted by Lead integration `continuity-quality-a4-delivery-accepted` (61066). All31 focused independent checks pass; no remaining delivery findings. Official verify-report.md/review-report.md summarize evidence and accepted limits. Reviewed production/test hashes matched before commit.
+
+Implementation committed as c1e88ea; canonical canary build/install completed exit0 and installed identity verified. The daemon still reports its previous digest with running work, so activation is pending and explicitly distinguished from installation in delivery.md. No forced restart, provider benchmark or native-history reader was introduced. Existing unrelated dirty activation notes and .bun-cache were preserved outside this commit.

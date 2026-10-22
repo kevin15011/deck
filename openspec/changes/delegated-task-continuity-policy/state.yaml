@@ -3,7 +3,7 @@ changeId: delegated-task-continuity-policy
 name: Separate logical task ownership from native context reuse
 currentPhase: review
 status: approved
-next_action: "Reviewed first-delivery scope accepted. Prepare and verify local canary; track daemon activation and real interrupted-continuation cost separately in delivery.md."
+next_action: "Commit c1e88ea canary installed and identity verified; active daemon still uses previous digest with running work. Activate via normal deck-canary daemon restart after work ends, verify digest, then measure interrupted-continuation cohort separately. See delivery.md."
 artifacts:
   proposal: proposal.md
   spec: acceptance.md
