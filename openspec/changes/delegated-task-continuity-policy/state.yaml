@@ -3,7 +3,7 @@ changeId: delegated-task-continuity-policy
 name: Separate logical task ownership from native context reuse
 currentPhase: review
 status: approved
-next_action: "Commit c1e88ea canary installed and identity verified; active daemon still uses previous digest with running work. Activate via normal deck-canary daemon restart after work ends, verify digest, then measure interrupted-continuation cohort separately. See delivery.md."
+next_action: "Canary c1e88ea active after user restart; daemon digest matches installed payload at2026-10-22T22:28:21Z. Collect real interrupted-continuation cohort data during subsequent work; no performance claim yet. See delivery.md."
 artifacts:
   proposal: proposal.md
   spec: acceptance.md

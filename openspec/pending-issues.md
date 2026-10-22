@@ -20,7 +20,7 @@ Statuses: **Reported**, **Investigated**, **In progress**, **Resolved**.
 | P-010 | Review session modifications in a Git diff tab in the web UI | Reported | User request |
 | P-011 | Evaluate context-window visibility for the Lead and each subagent | Reported | User request |
 | P-012 | Explain provider/runner failures and offer appropriate recovery | Implemented, reviewed, and active in canary fc3ea86 | Live user report and explicit resilience request, 2026-10-22 |
-| P-013 | Separate logical task ownership from native context reuse | Fresh-all delivery reviewed; canary c1e88ea installed, activation pending | Explicit user policy decision, 2026-10-22 |
+| P-013 | Separate logical task ownership from native context reuse | Fresh-all delivery reviewed and active in canary c1e88ea; live cost measurement pending | Explicit user policy decision, 2026-10-22 |
 | P-014 | Deliver corrections to active delegated members | Registered separately; deferred | Explicit user request, 2026-10-22 |
 | P-015 | Verified Codex native continuation | Deferred; outside the first continuity delivery | Accepted measurement limitation, 2026-10-22 |
 

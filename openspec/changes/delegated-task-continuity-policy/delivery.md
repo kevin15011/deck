@@ -1,6 +1,6 @@
 # First delivery
 
-Status: local canary built and installed; daemon activation pending.
+Status: local canary active; executable identity verified after the user's restart.
 
 Accepted behavior: fresh sessions for all runners with stable logical tasks, bounded handoff and separate interrupted-continuation metrics. Codex native support is deferred as P-015; internal native databases/histories are outside this change. Claude effective compaction evidence is also unverified. High interruption recovery cost prioritizes P-014 steering.
 
@@ -17,3 +17,9 @@ After activation, use actual task continuations to collect the offline metrics d
 - The installer does not restart the daemon. Status after installation still reports the previous digest `10daee171e51c200933697e2d0c00338aa819661226e0792c06527e32f2875b2`, started2026-10-22T18:09:55.113Z, with running work. The candidate is installed but not active.
 
 Once running work has ended, `deck-canary daemon restart` activates the invoking canary executable. The normal command refuses running work or pending approvals; no forced interruption or restart diagnostic work was performed. After restart, verify executable digest and then collect actual continuation/cohort samples. No production comparison or demonstrated latency gain exists yet.
+
+## Activation verified
+
+After the user reported restarting, `deck-canary daemon status --json` at2026-10-22T22:28:21Z reported PID4077977, start2026-10-22T22:27:10.805Z, channel canary and digest `838f05a5990cb251de593c3d827a11f23f26f829455081622e868fba21063270`. This exactly matches the installed immutable payload for commit c1e88ea. Web UI is enabled on port7421; no pending approvals/questions were reported. Earlier activation-pending observations above are historical and superseded by this check.
+
+First delivery is active. This verifies the executable, not production performance or that a delegated interruption has already exercised the new handoff. Collect cohort data from subsequent genuine continuations; no artificial provider calls were launched for this confirmation.
