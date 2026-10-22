@@ -46,7 +46,8 @@ function fixture(runnerId: string) {
   store.write({ crossRunner: { enabled: true, members: { lead: { runnerId: runnerId as any, modelId: "fixture/model" } } }, adaptiveMemory: { enabled: false, activeProvider: "none" } });
   const driver = new FakeDriver(runnerId); driver.autoComplete = true;
   let healthy = false, spawns = 0, backendUnavailable = false, verificationFailure: Error | undefined, verificationGate: Promise<boolean> | undefined, verificationCalls=0;
-  const readiness = new SessionCodebaseReadiness({ coldTimeoutMs: 50, warmTimeoutMs: 20, cleanupTimeoutMs: 20, verifyExecutable: async () => { verificationCalls++; if (verificationFailure) throw verificationFailure; return verificationGate ? await verificationGate : healthy; }, supervisor: { spawn() {
+  let verificationStarted: (() => void) | undefined;
+  const readiness = new SessionCodebaseReadiness({ coldTimeoutMs: 50, warmTimeoutMs: 20, cleanupTimeoutMs: 20, verifyExecutable: async () => { verificationCalls++; verificationStarted?.(); if (verificationFailure) throw verificationFailure; return verificationGate ? await verificationGate : healthy; }, supervisor: { spawn() {
     spawns++; const stdin = new PassThrough(), stdout = new PassThrough(), stderr = new PassThrough();
     let exit!: (value: any) => void; const exited = new Promise<any>(resolve => { exit = resolve; });
     stdin.on("finish", () => exit({ code: 0, drained: true }));
@@ -66,7 +67,12 @@ function fixture(runnerId: string) {
     expect(response.status).toBe(200); return (await response.json()).data;
   };
   const run = (command: any, sessionId?: string) => service.execute({ clientId:"test", sessionId, command:{v:1, commandId:crypto.randomUUID(), ...command} });
-  return { service, driver, project, run, read, spawns:()=>spawns, verificationCalls:()=>verificationCalls, pause() { let release!: (ok:boolean)=>void; verificationGate=new Promise<boolean>(resolve=>{release=resolve;}); return ()=>release(true); }, fail(error: Error) { verificationFailure=error; }, unavailable() { healthy=true; backendUnavailable=true; }, recover() { healthy=true; backendUnavailable=false; writeFileSync(binary,"repaired build identity"); } };
+  return { service, driver, project, run, read, spawns:()=>spawns, verificationCalls:()=>verificationCalls, pause() {
+    let release!: (ok:boolean)=>void;
+    const started = new Promise<void>(resolve=>{verificationStarted=resolve;});
+    verificationGate=new Promise<boolean>(resolve=>{release=resolve;});
+    return { started, release:()=>release(true) };
+  }, fail(error: Error) { verificationFailure=error; }, unavailable() { healthy=true; backendUnavailable=true; }, recover() { healthy=true; backendUnavailable=false; writeFileSync(binary,"repaired build identity"); } };
 }
 
 for (const runner of ["claude", "codex", "opencode"]) for (const reason of ["unsupported", "unavailable"] as const) {
@@ -103,12 +109,16 @@ test.each(["codebase-memory-unavailable: forged optional failure", "codebase-mem
 });
 
 test("cancelling actual preparation cannot become optional ready", async () => {
-  const t=fixture("claude"), release=t.pause();
+  const t=fixture("claude"), {started,release}=t.pause();
   const created=await t.run({type:"session.create",projectRoot:t.project}),id=(created as any).data.sessionId;
-  await t.run({type:"session.prepare"},id);await until(()=>t.verificationCalls()===1);
+  const prepared=await t.run({type:"session.prepare"},id);
+  expect(prepared.ok).toBe(true);
+  await started; expect(t.verificationCalls()).toBe(1);
+  // Cancel at verifier entry, before any HTTP request can consume the 50 ms cold budget.
+  const preparationId=(prepared as any).data.preparation.preparationId;
+  expect(await t.run({type:"session.prepare.cancel",preparationId},id)).toMatchObject({ok:true,data:{preparation:{status:"cancelled",reasonCode:"preparation-cancelled"}}}); release();
   const state=await t.read(id);
-  expect(await t.run({type:"session.prepare.cancel",preparationId:state.preparationId},id)).toMatchObject({ok:true}); release();
-  expect((await t.read(id)).status).toBe("cancelled");expect((await t.read(id)).capabilityAvailability).toBeUndefined();
+  expect(state.status).toBe("cancelled");expect(state.capabilityAvailability).toBeUndefined();
   expect(t.spawns()).toBe(0);expect(t.driver.turns).toHaveLength(0);
 });
 
