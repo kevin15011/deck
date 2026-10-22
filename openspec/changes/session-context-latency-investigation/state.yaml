@@ -4,7 +4,7 @@ name: Session latency and context investigation
 currentPhase: apply
 status: completed
 exploration_context: sdd
-next_action: "Activate the measurement candidate in a development session to collect real preparation substages, then select a minimal optimization from matched Claude/Codex evidence. Running daemon unchanged; community correlation and live benchmarks remain outstanding."
+next_action: "Bounded readiness cache correction implemented and independently approved. Build the updated local canary, verify activation, then measure real preparation latency. Community incident correlation remains outstanding."
 artifacts:
   exploration: working-brief.md
   apply_progress: preparation-progress.md

@@ -217,7 +217,7 @@ Screenshot reference: local session `20261022T003008-6f199c`, attachment `714c6c
 
 **Investigation:** [Session latency and context investigation](changes/session-context-latency-investigation/working-brief.md), with a runnable synthetic reproduction and results. Main already excludes history on resume; full-history steering reconciliation and oversized tool output still reproduce fatal framing failures. Native task continuation retains context and thinking level. A startup timeout also reproduces P-006's generic error. Local compaction measurements are independent supporting evidence, not proof of the community incident's cause.
 
-**Implementation change:** [Preparation measurement candidate](changes/session-context-latency-investigation/preparation-progress.md) adds bounded per-stage diagnostics and compares isolated fresh/warm preparation for Claude and Codex. Tests pass; active daemon unchanged. Root-cause correlation and runtime performance fixes remain pending.
+**Implementation change:** [Preparation measurement candidate](changes/session-context-latency-investigation/preparation-progress.md) adds bounded per-stage diagnostics and compares isolated fresh/warm preparation for Claude and Codex. Tests pass; [canary activation](changes/session-context-latency-investigation/canary-activation.md) is verified with the candidate executable digest. The current session is the user-selected live test. Root-cause correlation and runtime performance fixes remain pending.
 
 ## P-009 — First mobile image attachment attempt fails without delivering an image
 

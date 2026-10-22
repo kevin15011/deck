@@ -2,6 +2,8 @@
 
 ## Outcome
 
+Activation follow-up: [canary build and deferred restart](canary-activation.md). Canary installation succeeded after user authorization; the immediate restart was busy and a bounded idle retry was launched. Verify its outcome before claiming the active daemon changed.
+
 Following the user's instruction to proceed, implemented a bounded, provider-neutral tool-preparation diagnostic and collected more precise historical milestones for Claude and Codex. The candidate is tested in the checkout; it has not been installed into or activated in the running daemon. No inference calls or quota-consuming model benchmarks were performed.
 
 This is a measurement slice, not a claimed latency fix. It makes the next optimization decision reviewable without modifying native context, model effort, permission enforcement, process lifetime or UI paging.
