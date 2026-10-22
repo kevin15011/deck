@@ -7,6 +7,8 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
 import { redactText } from "@deck/core/session/redaction";
+import type { TurnFailure } from "@deck/core/session/failure";
+import { classifyCodexFailure, codexNotificationFailure } from "./failure";
 import { CODEX_PROTOCOL, codexTurnStatus, mapCodexNotification } from "./mapper";
 import { buildCodexLaunch, matchesCodexMemoryGroups, codexThreadMcpConfig, isAdmittedCodexMemoryHook, nativeCodexMcpId, verifyCodexConfig, type CodexHookMetadata, type CodexLaunchOptions } from "./launch";
 import { CodexRpc, CodexRpcFrameError, object, type RpcMessage } from "./rpc";
@@ -28,7 +30,7 @@ function nativeModel(modelId: string): { model: string; modelProvider?: string }
   const slash = modelId.indexOf("/");
   return slash < 0 ? { model: modelId } : { model: modelId.slice(slash + 1), ...(modelId.slice(0, slash) === "openai-codex" ? {} : { modelProvider: modelId.slice(0, slash) }) };
 }
-type Turn = { id?: string; confirmedId?: string; resolve(outcome: TurnOutcome): void; interrupted: boolean; escalation?: ReturnType<typeof setTimeout> };
+type Turn = { id?: string; confirmedId?: string; resolve(outcome: TurnOutcome): void; interrupted: boolean; escalation?: ReturnType<typeof setTimeout>; nativeFailure?: { turnId: string; failure: TurnFailure } };
 const isHookNotification = (message: RpcMessage) => message.method?.startsWith("hook/") === true;
 
 // Canonical action data is passed only to the in-memory approval broker, never emitted.
@@ -287,11 +289,31 @@ class CodexTask {
       if(this.turn.confirmedId && object(p.turn).id!==this.turn.confirmedId){this.emit({kind:"runner.unmapped",data:{nativeType:message.method,reason:"stale-turn"}});return;}
       this.turn.id = typeof object(p.turn).id === "string" ? object(p.turn).id as string : this.turn.id;
     }
+    if (message.method === "error") {
+      const active = this.turn, turnId = active?.confirmedId ?? active?.id;
+      // Notifications are fallback evidence, never terminal signals. A later retry
+      // supersedes the error; neither a missing identity nor a stale turn can seed it.
+      if (!this.closed && !this.failed && active && !active.interrupted && turnId
+        && p.threadId === this.threadId && p.turnId === turnId) {
+        if (p.willRetry === true) active.nativeFailure = undefined;
+        else if (p.willRetry === false) {
+          const failure = codexNotificationFailure(p, { threadId: this.threadId, turnId });
+          active.nativeFailure = failure ? { turnId, failure } : undefined;
+        }
+      }
+    }
     if (message.method === "turn/completed") {
       const id = object(p.turn).id;
       if (!this.turn || this.turn.id && id !== this.turn.id) { this.emit({ kind: "runner.unmapped", data: { nativeType: message.method, reason: "stale-turn" }, raw: message }); return; }
+      const active = this.turn, turnId = active.confirmedId ?? active.id;
+      const status = codexTurnStatus(object(p.turn).status);
+      const correlated = !!turnId && p.threadId === this.threadId && id === turnId;
+      const failure: TurnFailure | undefined = status !== "failed" || active.interrupted ? undefined
+        : (correlated ? classifyCodexFailure(object(p.turn).error)
+          ?? (active.nativeFailure?.turnId === turnId ? active.nativeFailure.failure : undefined) : undefined)
+          ?? { category: "unknown", origin: "unknown", certainty: "inferred" };
       for (const event of mapCodexNotification(message, this.attestedMemory)) this.emit(event);
-      this.finish({ status: codexTurnStatus(object(p.turn).status) }, true);
+      this.finish({ status, ...(failure ? { failure } : {}) }, true);
       return;
     }
     for (const event of mapCodexNotification(message, this.attestedMemory)) this.emit(event);
@@ -447,6 +469,7 @@ class CodexTask {
     }
     if (!state || state.interrupted) return;
     state.interrupted = true;
+    state.nativeFailure = undefined;
     state.escalation = setTimeout(() => {
       void (async () => { this.closed = true; try { await this.stopChild(); } finally { this.finish({ status: "interrupted-forced" }); } })();
     }, this.options.escalationMs ?? 10_000);

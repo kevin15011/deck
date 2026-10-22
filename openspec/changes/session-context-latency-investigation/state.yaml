@@ -4,7 +4,7 @@ name: Session latency and context investigation
 currentPhase: apply
 status: completed
 exploration_context: sdd
-next_action: "Bounded readiness cache correction implemented and independently approved. Build the updated local canary, verify activation, then measure real preparation latency. Community incident correlation remains outstanding."
+next_action: "P012 provider-failure reporting independently approved together with prior compaction 484fd39. Commit and build the combined local canary, then verify daemon activation. Cache correction 1a371a3 remains active; broader community correlation is still outstanding."
 artifacts:
   exploration: working-brief.md
   apply_progress: preparation-progress.md

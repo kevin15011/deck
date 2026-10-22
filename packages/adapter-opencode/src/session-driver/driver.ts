@@ -6,6 +6,7 @@ import { validateQuestions, validateQuestionAnswers, type DriverQuestionAnswer, 
 import { redactText } from "@deck/core/session/redaction";
 import { conflictingOpenCodeMcp, buildOpenCodeLaunch, type OpenCodeLaunchOptions } from "./launch";
 import { OpenCodeEventMapper, OpenCodeSseParser, OPENCODE_PROTOCOL, record } from "./mapper";
+import { classifyOpenCodeFailure } from "./failure";
 
 export const OPENCODE_TESTED_VERSIONS = { min: "1.18.31", maxTested: "1.18.31" } as const;
 export type OpenCodeSessionDriverOptions = OpenCodeLaunchOptions & {
@@ -55,7 +56,7 @@ class OpenCodeTask {
       if (match && Number(match[1]) > 0 && Number(match[1]) <= 65535) endpointResolve(`http://127.0.0.1:${match[1]}`);
     };
     this.child.onStdout(onOutput); this.child.onStderr(onOutput); this.child.endStdin();
-    void this.child.exited.then(() => { this.serverDead = true; endpointReject(new Error("OpenCode server exited before readiness")); this.lifetime.abort(); if (!this.current?.forced) this.finish({ status: "failed", error: "OpenCode server exited" }); }, () => { this.serverDead = true; endpointReject(new Error("OpenCode anchor lost")); this.lifetime.abort(); if (!this.current?.forced) this.finish({ status: "failed", error: "OpenCode anchor lost" }); });
+    void this.child.exited.then(exit => { this.serverDead = true; endpointReject(new Error("OpenCode server exited before readiness")); this.lifetime.abort(); if (!this.current?.forced) this.finish({ status: "failed", error: "OpenCode server exited", failure: exit.anchorLost ? { category: "unknown", origin: "unknown", certainty: "inferred" } : { category: "runner-process", origin: "runner", certainty: "reported" } }); }, () => { this.serverDead = true; endpointReject(new Error("OpenCode anchor lost")); this.lifetime.abort(); if (!this.current?.forced) this.finish({ status: "failed", error: "OpenCode anchor lost", failure: { category: "unknown", origin: "unknown", certainty: "inferred" } }); });
     const startup = new AbortController();
     const startupSignal = AbortSignal.any([this.lifetime.signal, startup.signal]);
     const startupFailure = new Promise<never>((_resolve, reject) => {
@@ -139,7 +140,7 @@ class OpenCodeTask {
         for (const event of parser.push(decoder.decode(chunk.value, { stream: true }))) this.event(event);
       }
     } catch (error) {
-      if (!this.closed && !this.serverDead) { this.serverDead = true; this.finish({ status: "failed", error: redactText((error as Error).message, 400) }); void this.terminate().catch(() => {}); }
+      if (!this.closed && !this.serverDead) { this.serverDead = true; this.finish({ status: "failed", error: redactText((error as Error).message, 400), failure: { category: "network", origin: "unknown", certainty: "inferred" } }); void this.terminate().catch(() => {}); }
     } finally { reader.releaseLock(); }
   }
 
@@ -154,7 +155,9 @@ class OpenCodeTask {
     if (raw.type === "question.asked") this.question(p);
     if (raw.type === "session.error") {
       const aborted = this.current?.interrupted && record(p.error) && p.error.name === "MessageAbortedError";
-      this.finish(aborted ? { status: "interrupted" } : { status: "failed", error: "OpenCode session error" });
+      // This event has only session identity, no request/turn identity. Preserve its terminal
+      // behavior without assigning an uncorrelated provider cause to a newer request.
+      this.finish(aborted ? { status: "interrupted" } : { status: "failed", error: "OpenCode session error", failure: { category: "unknown", origin: "unknown", certainty: "inferred" } });
     }
     if ((raw.type === "session.idle" || (raw.type === "session.status" && record(p.status) && p.status.type === "idle")) && this.current?.interrupted) this.finish({ status: "interrupted" });
   }
@@ -249,7 +252,7 @@ Patterns: ${raw.always.join("\n")}`,
     }, AbortSignal.any([turn.controller.signal, this.lifetime.signal])).then(result => {
       if (this.current !== turn) return;
       if (turn.interrupted && record(result) && record(result.info) && record(result.info.error) && result.info.error.name === "MessageAbortedError") return this.finish({ status: "interrupted" });
-      if (!record(result) || !record(result.info) || result.info.error) return this.finish({ status: "failed", error: "OpenCode message failed" });
+      if (!record(result) || !record(result.info) || result.info.error) return this.finish({ status: "failed", error: "OpenCode message failed", failure: classifyOpenCodeFailure(record(result) && record(result.info) ? result.info.error : undefined) });
       for (const part of Array.isArray(result.parts) ? result.parts : []) if (record(part) && part.type === "text" && typeof part.text === "string") this.emit({ kind: "message.completed", data: { text: part.text, messageId: result.info.id }, raw: part });
       this.finish({ status: turn.interrupted ? "interrupted" : "completed" });
     }, error => { if (this.current === turn && !turn.interrupted) this.finish({ status: "failed", error: redactText((error as Error).message, 400) }); });

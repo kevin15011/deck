@@ -8,7 +8,7 @@ Statuses: **Reported**, **Investigated**, **In progress**, **Resolved**.
 
 | ID | Issue | Status | Source |
 | --- | --- | --- | --- |
-| P-001 | Lead appears idle during Codex context compaction | Investigated | Local session report, 2026-10-21 |
+| P-001 | Lead appears idle during Codex context compaction | Implemented and reviewed; activation pending | Local session report, 2026-10-21 |
 | P-002 | Double Escape cancels Lead execution and recalls unread messages | Reported | Community feedback relayed by the user |
 | P-003 | Stop an individual subagent from the subagent list | Reported | User request |
 | P-004 | Lead delegation should not require permission prompts | Reported | User request |
@@ -19,10 +19,11 @@ Statuses: **Reported**, **Investigated**, **In progress**, **Resolved**.
 | P-009 | First mobile image attachment attempt fails without delivering an image | Reported | User report in this conversation |
 | P-010 | Review session modifications in a Git diff tab in the web UI | Reported | User request |
 | P-011 | Evaluate context-window visibility for the Lead and each subagent | Reported | User request |
+| P-012 | Explain provider/runner failures and offer appropriate recovery | Implemented and reviewed; activation pending | Live user report and explicit resilience request, 2026-10-22 |
 
 ## P-001 — Lead appears idle during Codex context compaction
 
-- **Status:** Investigated; implementation pending.
+- **Status:** Implemented and independently reviewed in `484fd39`; activation pending.
 - **Environment:** Deck 0.13.0, Codex 0.162.1, web session UI.
 - **Reported behavior:** The UI stayed on `Waiting for Lead…`. A response appeared shortly after the user enabled YOLO, suggesting an approval blockage.
 - **Impact:** Users cannot distinguish context maintenance from a stalled runner and may change permission settings unnecessarily.
@@ -53,7 +54,7 @@ Local evidence: `~/.local/state/deck/sessions/20261021T141551-27e992/events/0000
 - [ ] Cover the observed event sequence and session/turn boundaries with focused regression tests.
 - [ ] Verify visibility in both desktop and mobile progress indicators.
 
-**Implementation change:** Not assigned. No runtime changes made during diagnosis.
+**Implementation change:** [Compaction progress slice](changes/session-context-latency-investigation/compaction-progress-brief.md), commit `484fd39`. Confirmed Codex compaction reaches bounded snapshot/live progress with identity and turn fencing. Independent review approved. Shared accessible desktop/mobile markup is tested; no live-browser or Claude compaction claim. Not yet active in the daemon.
 
 ## P-002 — Double Escape cancels Lead execution and recalls unread messages
 
@@ -281,3 +282,13 @@ Screenshot reference: local session `20261022T003008-6f199c`, attachment `714c6c
 **Related investigation:** [Session latency and context investigation](changes/session-context-latency-investigation/working-brief.md), especially the usage-counter limitations in finding 6. P-001 covers compaction progress itself.
 
 **Implementation change:** Not assigned. Evaluate feasibility before promising a precise live context meter; no runtime changes have been made.
+
+## P-012 — Generic turn failure hides native model-capacity error
+
+- **Observed:** The user saw `Turn failed` followed by `The runner could not complete this turn. Try again.` in this session.
+- **Confirmed cause of this turn failure:** Codex returned `codexErrorInfo: serverOverloaded` with `Selected model is at capacity. Please try a different model.` at `2026-10-22T13:46:21.195Z` (08:46:21 America/Bogota).
+- **Evidence:** Session `20261022T003008-6f199c`, Lead, ledger sequence 18870 contains the native error and sequence 18871 contains the failed native turn with the same error. Host sequence 18876 contains only `turn.completed {status: failed}`. The web renderer in `apps/web/src/main.tsx` uses the reported generic fallback when `event.data.error` is absent. Source literal and bounded ledger fields were inspected directly; graph coverage is stale/untracked.
+- **Boundary:** This identifies service capacity as the reported failure reason, not context exhaustion or the readiness-cache fix. It does not prove a reason for other failures such as P-006.
+- **Desired correction:** Preserve a sanitized actionable native failure category/message through the adapter, host terminal result and web history. Avoid exposing raw payloads or credentials; preserve safe fallback for unknown errors. Verify model overload, missing error, and unrelated error types, and keep retry/model-change guidance explicit without automatic model changes or duplicate execution.
+- **Scope update:** The user explicitly requested preparedness for provider instability and clear attribution. See [provider failure brief](changes/session-context-latency-investigation/provider-failure-brief.md) for cross-runner classification, actionable recovery, redaction, persistence and safe-retry constraints.
+- **Status:** Cross-runner failure reporting implemented and independently approved; activation pending. Fixed explanations preserve confirmed versus inferred/unknown attribution and manual recovery without automatic replay. See the provider failure brief for test evidence and limitations, including uncorrelated OpenCode session-only errors.

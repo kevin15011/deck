@@ -33,6 +33,7 @@ import { boundRaw, SESSION_EVENT_KINDS, type SessionEvent, type SessionEventKind
 import { continuityContext } from "./continuity";
 import { CROSS_RUNNER_LEAD_CONTINUITY_GUIDANCE, validTaskIntegration, computeChildMcpSet, validateCapabilityAvailability, CODEBASE_DISCOVERY_FALLBACK, type CapabilityAvailability } from "@deck/core/session/mcp";
 import { redactText } from "@deck/core/session/redaction";
+import { sanitizeTurnFailure } from "@deck/core/session/failure";
 import type { ApprovalBroker } from "./approval-broker";
 import { SESSION_MCP_SERVER_ID, sessionMcpServerSpec } from "./bridge-config";
 import { systemClock, type Clock } from "./clock";
@@ -1730,12 +1731,12 @@ export class SessionManager implements SessionService {
         }, () => {});
       }
       void handle.nativeSessionId.then(()=>{this.publishSteering(live);this.pumpSteering(live);this.reconcileHistoricalSteering(live,turn);},()=>{});
-      outcome = await handle.done.catch((error: Error) => ({ status: "failed", error: bounded(error.message) }) as TurnOutcome);
+      outcome = await handle.done.catch((error: Error) => ({ status: "failed", error: bounded(error.message), failure: { category: "unknown", origin: "unknown", certainty: "inferred" } }) as TurnOutcome);
       turn.nativeEnded=true;this.publishSteering(live);
       if(live.steering?.turn===turn)await live.steering.barrier;
     } catch (error) {
       if (!turn.controller.signal.aborted && error instanceof PersonalMcpPreparationError) this.publishMcpAvailability(live, turn.memberId, assignment.runnerId, validatePersonalMcpAvailability(error.availability));
-      outcome = turn.controller.signal.aborted ? { status: "interrupted" } : { status: "failed", error: `Unable to start the turn: ${bounded((error as Error).message)}`, ...((error as {reasonCode?: string}).reasonCode === "native-session-not-found" ? { reasonCode: "native-session-not-found" as const } : {}) };
+      outcome = turn.controller.signal.aborted ? { status: "interrupted" } : { status: "failed", error: `Unable to start the turn: ${bounded((error as Error).message)}`, failure: sanitizeTurnFailure((error as {failure?: unknown})?.failure) ?? { category: "unknown", origin: "unknown", certainty: "inferred" }, ...((error as {reasonCode?: string}).reasonCode === "native-session-not-found" ? { reasonCode: "native-session-not-found" as const } : {}) };
     }
     let drained = true;
     try { await this.closeTurnHandle(turn); }
@@ -1746,7 +1747,7 @@ export class SessionManager implements SessionService {
       this.options.logger?.warn("session.mcp-binding-retained", { sessionId: live.sessionId, taskId: turn.taskId, reason: "native-close-failed" });
     }
     try { if (drained) await resolver?.release?.(); }
-    catch { if(resolver?.release) (live.cleanupFailures??=[]).push(()=>resolver!.release!()); outcome = { status: "failed", error: "Unable to release the managed MCP binding" }; }
+    catch { if(resolver?.release) (live.cleanupFailures??=[]).push(()=>resolver!.release!()); outcome = { status: "failed", error: "Unable to release the managed MCP binding", failure: { category: "deck", origin: "deck", certainty: "inferred" } }; }
     if (outcome.reasonCode === "native-session-not-found" && resume && !turn.reseeded && !turn.kind && !this.closing && !live.stopping) {
       this.options.broker.cancelTask(live.sessionId, turn.taskId, "task-ended");
       this.questionBroker.cancelTask(live.sessionId, turn.taskId, "task-ended");
@@ -1865,8 +1866,10 @@ export class SessionManager implements SessionService {
       this.options.broker.cancelTask(live.sessionId, turn.taskId, "task-ended");
       this.questionBroker.cancelTask(live.sessionId, turn.taskId, "task-ended");
       const source = { taskId: turn.taskId, memberId: turn.memberId, runnerId, ...(turn.nativeSessionId ? { nativeSessionId: turn.nativeSessionId } : {}) };
+      // Optional adapter evidence is untrusted. Malformed metadata cannot block terminal persistence.
+      const failure = status === "failed" ? sanitizeTurnFailure(outcome.failure) : undefined;
       const drafts: EventDraft[] = [
-        { kind: "turn.completed", source, data: { status, ...(outcome.error ? { error: bounded(outcome.error) } : {}) } },
+        { kind: "turn.completed", source, data: { status, ...(outcome.error ? { error: bounded(outcome.error) } : {}), ...(failure ? { failure } : {}) } },
       ];
       if (turn.lastText) drafts.push({ kind: "task.result", source, data: { taskId: turn.taskId, summary: turn.lastText } });
       drafts.push({ kind: "task.state", source, data: { taskId: turn.taskId, state: task.state, ...(task.reason ? { reason: task.reason } : {}) } });

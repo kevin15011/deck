@@ -80,6 +80,50 @@ function setup(over: { config?: CrossRunnerConfig | undefined; driver?: FakeDriv
 
 const lastTurn = (driver: FakeDriver): FakeTurn => driver.turns.at(-1)!;
 
+describe("P012 terminal failure boundary", () => {
+  test("a known host binding cleanup failure is distinguished from ambiguous startup", async () => {
+    let failRelease = false;
+    const t = setup({ options: { childMcp: async () => ({ runnerPackages: () => [], resolveServer: () => undefined, release: async () => { if (failRelease) throw new Error("binding cleanup failed"); } }) } });
+    const id = await t.create(); await t.run({ type: "session.prepare" }, id); await t.idle();
+    expect(await t.run({ type: "prompt.send", text: "original" }, id)).toMatchObject({ ok: true }); await waitFor(() => t.driver.turns.length === 1);
+    failRelease = true; lastTurn(t.driver).finish(); await waitFor(() => t.events(id).some(e => e.kind === "turn.completed")); failRelease = false;
+    expect(t.events(id).find(e => e.kind === "turn.completed")?.data.failure).toEqual({ category: "deck", origin: "deck", certainty: "inferred" });
+  });
+  test("ambiguous startup failure is explicitly unknown, not blamed on Deck or a provider", async () => {
+    const t = setup(); t.driver.startError = new Error("startup failed token=private-token"); const id = await t.create();
+    await t.run({ type: "prompt.send", text: "original" }, id); await t.idle();
+    const terminal = t.events(id).find(e => e.kind === "turn.completed")!;
+    expect(terminal.data.failure).toEqual({ category: "unknown", origin: "unknown", certainty: "inferred" });
+    expect(JSON.stringify(t.events(id))).not.toContain("private-token");
+  });
+  test("persists only safe failure metadata with partial work and a paused, untouched queue", async () => {
+    const t = setup(); const id = await t.create();
+    await t.run({ type: "prompt.send", text: "original" }, id); await waitFor(() => t.driver.turns.length === 1);
+    const turn = lastTurn(t.driver); turn.init(); turn.say("Partial work is retained");
+    await t.run({ type: "prompt.send", text: "queued input" }, id);
+    turn.finish({ status: "failed", failure: { category: "provider-overloaded", origin: "provider", certainty: "reported", code: "serverOverloaded", provider: "not-allowlisted", message: "PRIVATE_SENTINEL", body: "PRIVATE_SENTINEL" } as never });
+    await t.idle();
+    const terminal = t.events(id).find(e => e.kind === "turn.completed")!;
+    expect(terminal.data).toEqual({ status: "failed", failure: { category: "provider-overloaded", origin: "provider", certainty: "reported", code: "serverOverloaded" } });
+    expect(terminal.source).toMatchObject({ taskId: turn.input.taskId, memberId: "lead", runnerId: "claude" });
+    expect(t.events(id).find(e => e.kind === "task.result")?.data.summary).toBe("Partial work is retained");
+    expect((await t.manager.query("prompts.list", { sessionId: id }) as any).data).toMatchObject({ paused: true, queued: [{ text: "queued input" }] });
+    expect(t.driver.turns).toHaveLength(1);
+    expect(JSON.stringify(t.events(id))).not.toContain("PRIVATE_SENTINEL");
+    const reloaded = EventLog.open({ dir: sessionPaths(t.paths, id).eventsDir, sessionId: id });
+    try { expect([...reloaded.readAfter(0)].find(e => e.kind === "turn.completed")?.data).toEqual(terminal.data); } finally { reloaded.close(); }
+  });
+  test.each(["completed", "interrupted", "interrupted-forced", "failed"] as const)("%s cannot persist stale or invalid failure metadata", async status => {
+    const t = setup(); const id = await t.create();
+    await t.run({ type: "prompt.send", text: "original" }, id); await waitFor(() => t.driver.turns.length === 1);
+    lastTurn(t.driver).finish({ status, error: "legacy error", failure: (status === "failed" ? { category: "invalid", secret: "PRIVATE_SENTINEL" } : { category: "quota", origin: "provider", certainty: "reported" }) as never });
+    await t.idle();
+    const terminal = t.events(id).find(e => e.kind === "turn.completed")!;
+    expect(terminal.data).toEqual({ status, error: "legacy error" });
+    expect(t.events(id).some(e => e.kind === "task.state" && e.data.state === (status.startsWith("interrupted") ? "interrupted" : status))).toBe(true);
+  });
+});
+
 describe("Stage 1 conversational continuity", () => {
   const config = baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } });
   const grant = (t: ReturnType<typeof setup>, id: string) => t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths, id).taskCredentialFile("lead"), "utf8")).token)!;

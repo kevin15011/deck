@@ -9,6 +9,8 @@
 import { boundRaw } from "@deck/core/session/events";
 import { redactText } from "@deck/core/session/redaction";
 import type { DriverEvent, NativeMemoryDescriptor } from "@deck/core/session/driver";
+import type { TurnFailure } from "@deck/core/session/failure";
+import { classifyClaudeFailure } from "./failure";
 
 export const CLAUDE_PROTOCOL = "claude-stream-json";
 const TOOL_INPUT_LIMIT = 8192;
@@ -23,6 +25,7 @@ export type ClaudeInit = {
 export type ClaudeResult = {
   subtype: string; isError: boolean; text?: string; sessionId?: string;
   permissionDenials: Array<{ tool: string; toolUseId?: string }>; terminalReason?: string; errors: string[];
+  failure?: TurnFailure;
 };
 export type MapOutput = { events: DriverEvent[]; init?: ClaudeInit; result?: ClaudeResult; hookSeen?: boolean };
 
@@ -81,9 +84,11 @@ function toolText(content: unknown): string {
 }
 
 export class ClaudeStreamMapper {
+  // One mapper per process/turn. Only correlated messages reach it from the driver.
+  private apiFailure?: TurnFailure;
   private hookReported = false;
   private streamingMessageId?: string;
-  constructor(private readonly nativeMemory?: NativeMemoryDescriptor) {}
+  constructor(private readonly nativeMemory?: NativeMemoryDescriptor, private readonly sessionId?: string) {}
 
   map(message: unknown): MapOutput {
     if (!isObj(message)) return { events: [] };
@@ -180,6 +185,7 @@ export class ClaudeStreamMapper {
   }
 
   private assistant(m: Record<string, unknown>): MapOutput {
+    if (m.parent_tool_use_id == null && (this.sessionId === undefined || m.session_id === this.sessionId)) this.apiFailure = classifyClaudeFailure(m);
     const message = isObj(m.message) ? m.message : {};
     const messageId = str(message.id);
     const events: DriverEvent[] = [];
@@ -228,11 +234,19 @@ export class ClaudeStreamMapper {
   }
 
   private result(m: Record<string, unknown>): MapOutput {
+    const correlated = m.parent_tool_use_id == null && (this.sessionId === undefined || m.session_id === this.sessionId);
+    const reported = correlated ? classifyClaudeFailure(m) : undefined;
+    const previous = correlated && m.terminal_reason === "api_error" ? this.apiFailure : undefined;
+    this.apiFailure = undefined;
+    // A result wins; a matching assistant may contribute only its structured reset time.
+    const failure = reported ? { ...reported, ...(!reported.resetAt && previous?.resetAt && previous.category === reported.category
+      && previous.origin === reported.origin && previous.code === reported.code ? { resetAt: previous.resetAt } : {}) } : previous;
     const denials = (Array.isArray(m.permission_denials) ? m.permission_denials : []).filter(isObj)
       .map((d) => ({ tool: str(d.tool_name) ?? "unknown", ...(str(d.tool_use_id) ? { toolUseId: str(d.tool_use_id) } : {}) }));
     const result: ClaudeResult = {
       subtype: str(m.subtype) ?? "unknown",
       isError: m.is_error === true,
+      ...((m.is_error === true || m.subtype !== "success") && failure ? { failure } : {}),
       ...(typeof m.result === "string" ? { text: m.result } : {}),
       ...(str(m.session_id) ? { sessionId: str(m.session_id) } : {}),
       permissionDenials: denials,

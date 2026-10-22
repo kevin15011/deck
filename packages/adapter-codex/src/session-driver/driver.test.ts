@@ -7,6 +7,7 @@ import { createCodexSessionDriver } from "./driver";
 import { ISOLATION_FEATURES } from "./launch";
 import { FakeChild, harness } from "./test-support";
 import mcpMemoryApproval from "./__fixtures__/0.162.1/mcp-memory-approval.json";
+import overloadIncident from "./__fixtures__/0.162.1/overload-incident.json";
 
 const input: DriverTaskInput = {
   taskId: "task", memberId: "lead", cwd: "/work", assignment: { runnerId: "codex", modelId: "openai-codex/gpt-5", thinking: "high" },
@@ -27,6 +28,82 @@ function responder(child: FakeChild, index: number, m: Record<string, unknown>) 
   if (m.method === "turn/interrupt") { child.stdout({ id: m.id, result: {} }); child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "interrupted" } } }); }
 }
 const imageDirs: string[] = [];
+
+describe("P012 Codex failure outcomes", () => {
+  test("the observed overload incident reaches the terminal outcome", async () => {
+    const h = harness(responder); const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId; await Promise.resolve();
+    const child = h.children.at(-1)!; child.stdout(overloadIncident.notification); child.stdout(overloadIncident.terminal);
+    expect(await task.done).toEqual({ status: "failed", failure: { category: "provider-overloaded", origin: "provider", certainty: "reported", code: "serverOverloaded" } }); await task.close();
+  });
+  const overloaded = { codexErrorInfo: "serverOverloaded", message: "Selected model at capacity. PRIVATE_SENTINEL", additionalDetails: "PRIVATE_SENTINEL" };
+  const scope = { threadId: "native-thread", turnId: "turn" };
+  async function started() {
+    const h = harness(responder); const task = await createCodexSessionDriver().startTask(input, h.io);
+    await task.nativeSessionId; await Promise.resolve();
+    const child = h.children.at(-1)!;
+    return { h, task, child, notify: (patch: Record<string, unknown> = {}) => child.stdout({ method: "error", params: { ...scope, willRetry: false, error: overloaded, ...patch } }),
+      complete: (status = "failed", error?: unknown, threadId: string | undefined = scope.threadId) => child.stdout({ method: "turn/completed", params: { threadId, turn: { id: scope.turnId, status, error } } }) };
+  }
+  test("terminal result evidence wins over a different notification and never copies native prose", async () => {
+    const t = await started(); t.notify(); t.complete("failed", { codexErrorInfo: "usageLimitExceeded", message: "PRIVATE_SENTINEL" });
+    const outcome = await t.task.done;
+    expect(outcome).toMatchObject({ status: "failed", failure: { category: "quota", origin: "provider", code: "usageLimitExceeded" } });
+    expect(JSON.stringify(outcome)).not.toContain("PRIVATE_SENTINEL"); await t.task.close();
+  });
+  test.each([undefined, null, { message: "unclassified terminal detail" }])("matching nonretrying notification supplies a missing terminal category (%j)", async error => {
+    const t = await started(); t.notify(); t.complete("failed", error);
+    expect(await t.task.done).toEqual({ status: "failed", failure: { category: "provider-overloaded", origin: "provider", certainty: "reported", code: "serverOverloaded" } }); await t.task.close();
+  });
+  test("valid but unknown result evidence takes precedence over an earlier overload", async () => {
+    const t = await started(); t.notify(); t.complete("failed", { codexErrorInfo: "other", message: "PRIVATE_SENTINEL" });
+    expect(await t.task.done).toEqual({ status: "failed", failure: { category: "unknown", origin: "unknown", certainty: "inferred" } }); await t.task.close();
+  });
+  test.each([{ threadId: "foreign" }, { turnId: "old" }, { threadId: undefined }, { turnId: undefined }, { willRetry: undefined }])("ignores uncorrelated notification fallback (%j)", async patch => {
+    const t = await started(); t.notify(patch); t.complete();
+    expect((await t.task.done).failure).toEqual({ category: "unknown", origin: "unknown", certainty: "inferred" }); await t.task.close();
+  });
+  test("native retry never settles the turn and clears a superseded nonretrying error", async () => {
+    const t = await started(); let settled = false; void t.task.done.then(() => { settled = true; });
+    t.notify(); t.notify({ willRetry: true }); await Promise.resolve(); expect(settled).toBe(false);
+    t.complete(); expect((await t.task.done).failure?.category).toBe("unknown"); await t.task.close();
+  });
+  test.each(["completed", "interrupted"])("%s never inherits a failure, including erroneous terminal details", async status => {
+    const t = await started(); t.notify(); t.complete(status, overloaded);
+    expect(await t.task.done).toEqual({ status: status as "completed" | "interrupted" }); await t.task.close();
+  });
+  test("a requested interruption drops failure metadata even if native completion reports failed", async () => {
+    const h = harness((child, index, m) => { if (m.method === "turn/interrupt") child.stdout({ id: m.id, result: {} }); else responder(child, index, m); });
+    const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId; await Promise.resolve();
+    const child = h.children.at(-1)!; child.stdout({ method: "error", params: { ...scope, willRetry: false, error: overloaded } });
+    await task.interrupt(); child.stdout({ method: "turn/completed", params: { threadId: scope.threadId, turn: { id: scope.turnId, status: "failed", error: overloaded } } });
+    expect((await task.done).failure).toBeUndefined(); await task.close();
+  });
+  test("forced close cannot inherit a pending failure", async () => {
+    const t = await started(); t.notify(); await t.task.close();
+    expect(await t.task.done).toEqual({ status: "interrupted-forced" });
+  });
+  test("an error received before native turn identity is known cannot seed a later terminal", async () => {
+    const h = harness((child, index, m) => { if (m.method !== "turn/start") responder(child, index, m); });
+    const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
+    const child = h.children.at(-1)!;
+    child.stdout({ method: "error", params: { ...scope, willRetry: false, error: overloaded } });
+    const request = child.writes.find(m => m.method === "turn/start")!;
+    child.stdout({ id: request.id, result: { turn: { id: "turn" } } }); await Promise.resolve();
+    child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "failed" } } });
+    expect((await task.done).failure?.category).toBe("unknown"); await task.close();
+  });
+  test("later attempts cannot inherit an old fallback, even when a runner reuses a turn ID", async () => {
+    const t = await started(); t.notify(); t.complete(); await t.task.done;
+    t.notify(); const next = t.task.send("manual retry"); await Promise.resolve(); t.complete();
+    expect((await next).failure?.category).toBe("unknown");
+    const recovered = t.task.send("manual retry again"); await Promise.resolve(); t.notify({ willRetry: true }); t.complete("completed", overloaded);
+    expect(await recovered).toEqual({ status: "completed" }); await t.task.close();
+  });
+  test("a terminal without matching thread identity cannot acquire a provider cause", async () => {
+    const other = await started(); other.child.stdout({ method: "turn/completed", params: { turn: { id: "turn", status: "failed", error: overloaded } } });
+    expect((await other.task.done).failure?.category).toBe("unknown"); await other.task.close();
+  });
+});
 afterEach(() => { for (const dir of imageDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 function images() {
   const dir = mkdtempSync(join(tmpdir(), "deck-codex-images-")); imageDirs.push(dir);

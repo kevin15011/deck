@@ -142,7 +142,7 @@ class ClaudeTask {
     const splitter = new ClaudeLineSplitter();
     // Native personal hooks can share events. Event names alone no longer prove provider provenance.
     const memory = this.input.nativeMemory;
-    const mapper = new ClaudeStreamMapper(memory?.plugin ? { ...memory, plugin: { ...memory.plugin, exclusiveHookEvents: [] } } : memory);
+    const mapper = new ClaudeStreamMapper(memory?.plugin ? { ...memory, plugin: { ...memory.plugin, exclusiveHookEvents: [] } } : memory, this.nativeId);
     const onLine = (line: string) => this.onLine(line, mapper, state, launch, emit, Boolean(images?.length));
     child.onStdout((chunk) => { for (const line of splitter.push(chunk)) onLine(line); });
     child.onStderr((chunk) => { state.stderr = (state.stderr + chunk).slice(-STDERR_TAIL); });
@@ -171,6 +171,9 @@ class ClaudeTask {
     if (events) { for (const e of events) emit(e); return; }
     if (!parsed.ok) return;
     const message=parsed.message;
+    // Each process belongs to one turn. A foreign session must not seed its failure/reset fallback.
+    if ((message.type === "assistant" || message.type === "result" || message.type === "rate_limit_event")
+      && typeof message.session_id === "string" && message.session_id !== this.nativeId && !(state.guarded && message.type === "result")) return;
     if(state.guarded&&message.type==='result'){
       if(message.session_id!==this.nativeId){this.fail(state,'claude-result-session-mismatch');return;}
       const ids=message.user_message_uuids;
@@ -296,14 +299,16 @@ class ClaudeTask {
       }
       if (result.subtype === "error_during_execution" && state.interruptRequested) return { status: "interrupted" };
       const detail = result.errors[0] ?? result.terminalReason ?? "no error detail";
-      return { status: "failed", error: `Claude turn failed (${result.subtype}): ${detail}` };
+      return { status: "failed", error: `Claude turn failed (${result.subtype}): ${detail}`, failure: result.failure ?? { category: "unknown", origin: "unknown", certainty: "inferred" } };
     }
     if (state.interruptRequested && exit.ok) return { status: "interrupted" };
     const how = exit.anchorLost ? (exit.error ?? "Anchor ended before reporting the child's exit")
       : exit.ok ? "claude ended without a result" : `claude exited with ${exit.signal ? `signal ${exit.signal}` : `code ${exit.code}`}`;
     // Native configuration/parser errors may contain literal personal credentials.
     const tail = state.init ? redactText(state.stderr, 400).trim() : "";
-    return { status: "failed", error: tail ? `${how}: ${tail}` : how };
+    return { status: "failed", error: tail ? `${how}: ${tail}` : how,
+      failure: exit.anchorLost ? { category: "unknown", origin: "unknown", certainty: "inferred" }
+        : { category: "runner-process", origin: "runner", certainty: "reported" } };
   }
 
   async interrupt(): Promise<void> {

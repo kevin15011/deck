@@ -1,0 +1,41 @@
+{
+  "provenance": {
+    "session": "20261022T003008-6f199c",
+    "sequences": [
+      18870,
+      18871,
+      18876
+    ],
+    "note": "Selected failure fields from the observed native incident. Thread/turn identifiers and message prose replaced with safe deterministic values; unrelated payloads omitted."
+  },
+  "notification": {
+    "method": "error",
+    "params": {
+      "threadId": "native-thread",
+      "turnId": "turn",
+      "willRetry": false,
+      "error": {
+        "message": "Selected model at capacity.",
+        "codexErrorInfo": "serverOverloaded",
+        "additionalDetails": null,
+        "misalignment": null
+      }
+    }
+  },
+  "terminal": {
+    "method": "turn/completed",
+    "params": {
+      "threadId": "native-thread",
+      "turn": {
+        "id": "turn",
+        "status": "failed",
+        "error": {
+          "message": "Selected model at capacity.",
+          "codexErrorInfo": "serverOverloaded",
+          "additionalDetails": null,
+          "misalignment": null
+        }
+      }
+    }
+  }
+}

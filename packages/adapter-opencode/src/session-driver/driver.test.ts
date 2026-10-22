@@ -47,7 +47,7 @@ describe("OpenCode SSE", () => {
   });
 });
 
-function fakeServer(options: { personal?: boolean; extraMcp?: boolean; mutatedMcp?: boolean; nativePermissions?: Array<{permission:string;pattern:string;action:string}>; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number; pendingPermissions?: unknown[]; permissionReplyStatus?: number } = {}) {
+function fakeServer(options: { personal?: boolean; extraMcp?: boolean; mutatedMcp?: boolean; nativePermissions?: Array<{permission:string;pattern:string;action:string}>; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; messageError?: unknown; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number; pendingPermissions?: unknown[]; permissionReplyStatus?: number } = {}) {
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const requests: Array<{ path: string; body: any; auth: string | null }> = [];
   let messages = 0;
@@ -74,7 +74,7 @@ function fakeServer(options: { personal?: boolean; extraMcp?: boolean; mutatedMc
       if (options.hang || options.abortError) return new Promise<Response>(resolve => { blocked.push(resolve); });
       event("message.part.updated", { sessionID: "ses_native", part: { id: "text1", messageID: `msg${messages}`, type: "text", text: "" } });
       event("message.part.delta", { sessionID: "ses_native", messageID: `msg${messages}`, partID: "text1", field: "text", delta: "OK" });
-      return Response.json({ info: { id: `msg${messages}`, ...(options.failMessage ? { error: { name: "APIError" } } : {}) }, parts: [{ type: "text", text: "OK" }] });
+      return Response.json({ info: { id: `msg${messages}`, ...(options.failMessage || options.messageError ? { error: options.messageError ?? { name: "APIError" } } : {}) }, parts: [{ type: "text", text: "OK" }] });
     }
     return Response.json({ healthy: true });
   } });
@@ -121,6 +121,42 @@ describe("OpenCode native image inputs", () => {
 });
 
 describe("OpenCode driver production HTTP contract", () => {
+  test.each([false, true])("runner process exit retains supervision uncertainty (%s)", async anchorLost => {
+    const s = fakeServer({ hang: true }); const h = privateIo();
+    let exit!: (value: SupervisedChildExit) => void;
+    const exited = new Promise<SupervisedChildExit>(resolve => { exit = resolve; });
+    try {
+      const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => ({ ...s.child, exited }) });
+      exit({ ok: false, code: anchorLost ? null : 1, signal: null, drained: true, anchorLost });
+      expect(await task.done).toMatchObject({ status: "failed", failure: { category: anchorLost ? "unknown" : "runner-process", origin: anchorLost ? "unknown" : "runner" } });
+      await task.close();
+    } finally { await s.stop(); }
+  });
+  test("reports verified structured message failure through the production response path", async () => {
+    const s = fakeServer({ messageError: { name: "APIError", data: { statusCode: 503, isRetryable: true, message: "PRIVATE_SENTINEL", responseBody: "PRIVATE_SENTINEL" } } }); const h = privateIo();
+    try {
+      const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child });
+      const outcome = await task.done;
+      expect(outcome).toMatchObject({ status: "failed", failure: { category: "provider-unavailable", origin: "provider", httpStatus: 503 } });
+      expect(JSON.stringify(outcome)).not.toContain("PRIVATE_SENTINEL");
+      expect(s.requests.filter(r => r.path.endsWith("/message"))).toHaveLength(1); await task.close();
+    } finally { await s.stop(); }
+  });
+  test("foreign errors and late old request responses cannot attach failure to the next turn", async () => {
+    const s = fakeServer({ hang: true }); const h = privateIo();
+    try {
+      const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child });
+      s.event("session.error", { sessionID: "foreign", error: { name: "ProviderAuthError", data: { providerID: "anthropic", message: "secret" } } });
+      for (let i = 0; i < 50 && !s.requests.some(r => r.path.endsWith("/message")); i++) await new Promise(r => setTimeout(r, 1));
+      s.completeMessages(); expect(await task.done).toEqual({ status: "completed" });
+      s.event("session.error", { sessionID: "ses_native", error: { name: "ProviderAuthError", data: { providerID: "anthropic", message: "secret" } } });
+      // Drain the pre-turn event before the next request is admitted.
+      for (let i = 0; i < 50 && !h.events.some(e => e.raw && (e.raw as any).type === "session.error" && (e.raw as any).properties.sessionID === "ses_native"); i++) await new Promise(r => setTimeout(r, 1));
+      const next = task.send("manual follow-up");
+      for (let i = 0; i < 50 && s.requests.filter(r => r.path.endsWith("/message")).length < 2; i++) await new Promise(r => setTimeout(r, 1));
+      s.completeMessages(); expect(await next).toEqual({ status: "completed" }); await task.close();
+    } finally { await s.stop(); }
+  });
   test("uses native part types to stream reasoning separately and ignores unknown or foreign deltas", async () => {
     const s = fakeServer({ hang: true }); const h = privateIo();
     try {
@@ -188,7 +224,7 @@ describe("OpenCode driver production HTTP contract", () => {
   });
   test("SSE disconnect fails the active turn and terminates its server", async () => {
     const s = fakeServer({ hang: true }); const h = privateIo();
-    try { const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child }); s.disconnect(); expect((await task.done).status).toBe("failed"); await task.close(); expect(s.terminated).toBe(1); } finally { await s.stop(); }
+    try { const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child }); s.disconnect(); expect(await task.done).toMatchObject({ status: "failed", failure: { category: "network", origin: "unknown" } }); await task.close(); expect(s.terminated).toBe(1); } finally { await s.stop(); }
   });
   test("readiness timeout cleans up even when the supervised ready handshake never resolves", async () => {
     const s = fakeServer(); const h = privateIo();

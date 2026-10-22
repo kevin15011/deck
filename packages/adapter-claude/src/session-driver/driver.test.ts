@@ -71,6 +71,29 @@ describe("Claude native image inputs", () => {
 });
 
 describe("createClaudeSessionDriver.startTask", () => {
+  test("process exit and lost supervision have distinct evidence, and cancellation acquires no failure", async () => {
+    for (const anchorLost of [false, true]) {
+      const { h, driver } = make(); const handle = await driver.startTask(input(), h.io); const child = await h.nextChild();
+      child.exit({ ok: false, code: anchorLost ? null : 1, anchorLost });
+      expect(await handle.done).toMatchObject({ status: "failed", failure: { category: anchorLost ? "unknown" : "runner-process", origin: anchorLost ? "unknown" : "runner" } });
+    }
+    const { h, driver } = make(); const handle = await driver.startTask(input(), h.io); const child = await h.nextChild();
+    child.lines([JSON.stringify({ type: "assistant", session_id: SID, error: "rate_limit", api_error_status: 429, api_error_origin: "first_party" })]);
+    await handle.interrupt(); child.lines(withSession("turn-interrupted.jsonl")); child.exit();
+    expect(await handle.done).toEqual({ status: "interrupted" });
+  });
+  test("reports structured provider failure without stale/reset attribution on a later turn", async () => {
+    const { h, driver } = make(); const handle = await driver.startTask(input(), h.io); const child = await h.nextChild();
+    child.lines([JSON.stringify({ type: "assistant", session_id: "foreign", error: "rate_limit", api_error_status: 429, api_error_origin: "first_party", api_error: "usage_limit_reached", api_error_params: { rate_limit_info: { status: "rejected", resetsAt: 1792607400 } } }),
+      JSON.stringify({ type: "result", session_id: "foreign", subtype: "success", is_error: false }),
+      JSON.stringify({ type: "result", session_id: SID, subtype: "success", is_error: true, terminal_reason: "api_error", api_error_status: 429, api_error_origin: "first_party", api_error: "usage_limit_reached" })]);
+    child.exit(); const failed = await handle.done;
+    expect(failed).toMatchObject({ status: "failed", failure: { category: "quota", origin: "provider", provider: "anthropic" } });
+    expect(failed.failure?.resetAt).toBeUndefined();
+    const retry = handle.send("manual retry"); const next = await h.nextChild(2);
+    next.lines(withSession("turn-success.jsonl")); next.exit(); expect(await retry).toEqual({ status: "completed" });
+    await handle.close();
+  });
   test("only a confirmed missing resume context receives the reseed reason", async () => {
     for (const [message, missing] of [[`No conversation found with session ID: ${SID}`, true], ["API authentication failed", false]] as const) {
       const { h, driver } = make();

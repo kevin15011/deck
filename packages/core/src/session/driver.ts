@@ -6,6 +6,7 @@ import type { SteeringInput, SteeringOutcome, SteeringTarget } from "./steering"
 import type { DriverProtocol } from "./events";
 import type { RunnerQualifiedAssignment } from "./assignments";
 import type { ChildMcpSet } from "./mcp";
+import type { TurnFailure } from "./failure";
 
 export type DriverProbeContext = { executablePath?: string; cwd: string };
 export type DriverProbe = {
@@ -108,7 +109,7 @@ export type DriverHostIo = {
   writePrivateFile(name: string, content: string): string;
 };
 
-export type TurnOutcome = { status: "completed" | "interrupted" | "interrupted-forced" | "failed"; error?: string; reasonCode?: "native-session-not-found" };
+export type TurnOutcome = { status: "completed" | "interrupted" | "interrupted-forced" | "failed"; error?: string; failure?: TurnFailure; reasonCode?: "native-session-not-found" };
 
 export type DriverTaskHandle = {
   nativeSessionId: Promise<string>;
