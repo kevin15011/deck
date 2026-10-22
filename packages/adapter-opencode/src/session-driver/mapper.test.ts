@@ -132,3 +132,13 @@ describe("question tool answer privacy", () => {
     expect(events[0]!.raw).toBe(raw);
   });
 });
+
+
+test('OpenCode context matches the native positive-output assistant sum, not input alone', () => {
+  const info = { role: 'assistant', sessionID: 's', parentID: 'u', providerID: 'p', modelID: 'm', tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 80, write: 20 } } };
+  const map = (patch = {}) => mapOpenCodeEvent({ type: 'message.updated', properties: { info: { ...info, ...patch } } })[0].data;
+  expect(map()).toMatchObject({ input: 100, output: 10, cache: { read: 80, write: 20 }, context: { basis: 'opencode-assistant-context', tokens: 215, capacity: null, modelId: 'p/m' } });
+  expect(map({ summary: true }).context).toBeUndefined();
+  for (const output of [0, -1, NaN, Infinity, undefined]) expect(map({ tokens: { ...info.tokens, output } }).context).toBeUndefined();
+  for (const input of [NaN, Infinity, -1, 0.5, Number.MAX_SAFE_INTEGER, undefined]) expect(map({ tokens: { ...info.tokens, input } }).context).toMatchObject({ tokens: null });
+});

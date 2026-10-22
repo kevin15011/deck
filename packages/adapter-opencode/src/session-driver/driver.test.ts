@@ -47,7 +47,7 @@ describe("OpenCode SSE", () => {
   });
 });
 
-function fakeServer(options: { contextUsage?: boolean; compacted?: boolean; personal?: boolean; extraMcp?: boolean; mutatedMcp?: boolean; nativePermissions?: Array<{permission:string;pattern:string;action:string}>; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; messageError?: unknown; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number; pendingPermissions?: unknown[]; permissionReplyStatus?: number } = {}) {
+function fakeServer(options: { contextUsage?: boolean; catalog?: unknown; hangCatalog?: boolean; nativeModel?: string; compacted?: boolean; personal?: boolean; extraMcp?: boolean; mutatedMcp?: boolean; nativePermissions?: Array<{permission:string;pattern:string;action:string}>; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; messageError?: unknown; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number; pendingPermissions?: unknown[]; permissionReplyStatus?: number } = {}) {
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const requests: Array<{ path: string; body: any; auth: string | null }> = [];
   let messages = 0;
@@ -56,6 +56,7 @@ function fakeServer(options: { contextUsage?: boolean; compacted?: boolean; pers
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0, async fetch(req) {
     const path = new URL(req.url).pathname; const body = req.method === "POST" ? await req.json().catch(() => ({})) : undefined;
     requests.push({ path, body, auth: req.headers.get("authorization") });
+    if (path === "/provider") return options.hangCatalog ? new Promise<Response>(resolve => { blocked.push(resolve); }) : Response.json(options.catalog ?? { all: [{ id: "p", models: { m: { limit: { context: 1000 } }, other: { limit: { context: 2000 } } } }] });
     if (path === "/event" && options.hangEvent) return new Promise<Response>(resolve => { blocked.push(resolve); });
     if (path === "/event") return new Response(new ReadableStream({ start(c) { stream = c; c.enqueue(new TextEncoder().encode('data: {"type":"server.connected","properties":{}}\n\n')); }, cancel() {} }), { headers: { "content-type": "text/event-stream" } });
     if (path === "/mcp") return Response.json({ deck: { status: "connected" }, ...(options.personal ? {personal:{status:"failed",error:"PRIVATE_FAILURE_SENTINEL"}} : {}), ...(options.extraMcp ? { unwanted: { status: "connected" } } : {}) });
@@ -83,7 +84,7 @@ function fakeServer(options: { contextUsage?: boolean; compacted?: boolean; pers
           await new Promise(resolve => setTimeout(resolve, 10));
         }
       }
-      return Response.json({ info: { id: `msg${messages}`, ...(options.contextUsage ? { role: 'assistant', sessionID: 'ses_native', parentID: `user${messages}`, providerID: 'p', modelID: 'm', tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 80, write: 20 } } } : {}), ...(options.failMessage || options.messageError ? { error: options.messageError ?? { name: "APIError" } } : {}) }, parts: [{ type: "text", text: "OK" }] });
+      return Response.json({ info: { id: `msg${messages}`, ...(options.contextUsage ? { role: 'assistant', sessionID: 'ses_native', parentID: `user${messages}`, providerID: 'p', modelID: options.nativeModel ?? 'm', tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 80, write: 20 } } } : {}), ...(options.failMessage || options.messageError ? { error: options.messageError ?? { name: "APIError" } } : {}) }, parts: [{ type: "text", text: "OK" }] });
     }
     return Response.json({ healthy: true });
   } });
@@ -94,16 +95,17 @@ function fakeServer(options: { contextUsage?: boolean; compacted?: boolean; pers
   return { requests, child, event, completeMessages() { for (const resolve of blocked.splice(0)) resolve(Response.json({ info: { id: "completed" }, parts: [] })); }, disconnect() { stream.close(); }, get terminated() { return terminated; }, async stop() { for (const resolve of blocked) resolve(Response.json({ info: { id: "stopped" }, parts: [] })); await server.stop(true); } };
 }
 
-test('OpenCode usage comes from the correlated response, never stale SSE; cache counters are not summed', async () => {
+test('OpenCode usage comes from the correlated response, never stale SSE; native context sum joins exact server catalog once', async () => {
   const s = fakeServer({ contextUsage: true }); const h = privateIo();
   try {
     const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child });
     await task.done;
     expect(h.events.filter(e => e.kind === 'usage')).toHaveLength(1);
-    expect(h.events.find(e => e.kind === 'usage')?.data).toMatchObject({ input: 100, cache: { read: 80, write: 20 }, context: { basis: 'opencode-message-input', tokens: 100, capacity: null, modelId: 'p/m', nativeThreadId: 'ses_native', nativeTurnId: 'user1' } });
+    expect(h.events.find(e => e.kind === 'usage')?.data).toMatchObject({ input: 100, cache: { read: 80, write: 20 }, context: { basis: 'opencode-assistant-context', tokens: 215, capacity: 1000, modelId: 'p/m', nativeThreadId: 'ses_native', nativeTurnId: 'user1' } });
     await task.send('followup');
     expect(h.events.filter(e => e.kind === 'usage')).toHaveLength(2);
     expect(h.events.filter(e => e.kind === 'usage').at(-1)?.data.context).toMatchObject({ nativeTurnId: 'user2' });
+    expect(s.requests.filter(r => r.path === '/provider')).toHaveLength(1);
     await task.close();
   } finally { await s.stop(); }
 });
@@ -674,4 +676,21 @@ test('the untrusted external-skill gate re-admits global roots additively and re
  const disabled=buildOpenCodeLaunch({...input(),cwd:join(h.dir,'project')},h.io,{baseEnv:{HOME:home,OPENCODE_DISABLE_EXTERNAL_SKILLS:'true'}});expect(disabled.expectedGlobalSkillPaths).toEqual([]);expect(disabled.expectedPlugins).toEqual([]);
  const claudeDisabled=buildOpenCodeLaunch({...input(),cwd:join(h.dir,'project')},h.io,{baseEnv:{HOME:home,OPENCODE_DISABLE_CLAUDE_CODE_SKILLS:'1'}});expect(claudeDisabled.expectedGlobalSkillPaths).toEqual([join(home,'.agents','skills')]);
  const trusted=buildOpenCodeLaunch({...input(),cwd:join(h.dir,'project'),projectConfigTrusted:true},h.io,{baseEnv:{HOME:home}});expect(trusted.env.OPENCODE_DISABLE_EXTERNAL_SKILLS).toBeUndefined();expect(trusted.expectedGlobalSkillPaths).toEqual([]);
+});
+
+for (const [label, options, capacity] of [
+  ['missing catalog', { catalog: { all: [] } }, null],
+  ['invalid capacity', { catalog: { all: [{ id: 'p', models: { m: { limit: { context: -1 } } } }] } }, null],
+  ['hung catalog never blocks a turn', { hangCatalog: true }, null],
+  ['actual model switch uses its own capacity', { nativeModel: 'other' }, 2000],
+  ['unlisted model never borrows assignment capacity', { nativeModel: 'unlisted' }, null],
+] as const) test(`OpenCode ${label}`, async () => {
+  const s = fakeServer({ contextUsage: true, ...options }); const h = privateIo();
+  let task;
+  try {
+    task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child });
+    await task.done;
+    expect(h.events.find(e => e.kind === 'usage')?.data.context).toMatchObject({ tokens: 215, capacity });
+    expect(s.requests.filter(r => r.path === '/provider')).toHaveLength(1);
+  } finally { await task?.close(); await s.stop(); }
 });

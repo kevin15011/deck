@@ -2,16 +2,32 @@ import { describe, expect, test } from "bun:test";
 import { fixtureLines } from "./fixtures";
 import { ClaudeLineSplitter, ClaudeStreamMapper, parseClaudeLine } from "./mapper";
 
-test('Claude result accounting remains aggregate, with only unambiguous per-model capacity', () => {
+test('Claude context uses the latest main assistant API input and exact-model result capacity', () => {
   const mapper = new ClaudeStreamMapper(undefined, 'session', 'execution');
-  const result = { type: 'result', session_id: 'session', subtype: 'success', usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 200 }, modelUsage: { 'claude-model': { inputTokens: 10, contextWindow: 200000 } } };
-  expect(mapper.map(result).events.find(e => e.kind === 'usage')?.data).toMatchObject({ inputTokens: 10, cacheReadTokens: 200, context: { basis: 'claude-aggregate-input', tokens: 10, capacity: 200000, modelId: 'claude-model', nativeThreadId: 'session', nativeTurnId: 'execution' } });
-  expect(mapper.map({ ...result, modelUsage: { a: { contextWindow: 200000 }, b: { contextWindow: 1000000 } } }).events[0].data.context).toMatchObject({ capacity: null });
+  const assistant = { type: 'assistant', session_id: 'session', parent_tool_use_id: null, message: { id: 'msg1', model: 'claude-model', content: [], usage: { input_tokens: 2, cache_creation_input_tokens: 381, cache_read_input_tokens: 3485, output_tokens: 900 } } };
+  const result = { type: 'result', session_id: 'session', subtype: 'success', usage: { input_tokens: 99999, output_tokens: 999, cache_read_input_tokens: 99999 }, modelUsage: { 'claude-model': { contextWindow: 200000 }, other: { contextWindow: 1000000 } } };
+  expect(mapper.map(result).events[0].data.context).toBeUndefined();
+  expect(mapper.map(assistant).events.at(-1)?.data.context).toMatchObject({ basis: 'claude-last-request-input', tokens: 3868, capacity: null, modelId: 'claude-model', nativeThreadId: 'session', nativeTurnId: 'execution' });
+  expect(mapper.map(result).events[0].data).toMatchObject({ inputTokens: 99999, context: { tokens: 3868, capacity: 200000 } });
+  expect(mapper.map({ ...result, modelUsage: { alias: { contextWindow: 999999 } } }).events[0].data.context).toMatchObject({ tokens: 3868, capacity: null });
+  for (const patch of [{ session_id: 'foreign' }, { parent_tool_use_id: 'subagent' }]) expect(mapper.map({ ...assistant, ...patch }).events.some(e => e.kind === 'usage')).toBe(false);
   expect(mapper.map({ ...result, session_id: 'foreign' }).events[0].data.context).toBeUndefined();
+  mapper.map({ ...assistant, message: { ...assistant.message, id: 'msg2', model: 'new-model', usage: { input_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 10 } } });
+  expect(mapper.map(result).events[0].data.context).toMatchObject({ tokens: 15, capacity: null, modelId: 'new-model' });
   mapper.map({ type: 'system', subtype: 'compact_boundary', session_id: 'foreign' });
   expect(mapper.map(result).events[0].data.context).toBeDefined();
-  mapper.map({ type: 'system', subtype: 'compact_boundary' });
+  mapper.map({ type: 'system', subtype: 'compact_boundary', session_id: 'session' });
+  expect(mapper.map(assistant).events.some(e => e.data.context)).toBe(false);
   expect(mapper.map(result).events[0].data.context).toBeUndefined();
+});
+
+test('Claude sanitized fixture has per-call usage distinct from result accounting', () => {
+  const messages = fixtureLines('turn-success.jsonl').map(line => JSON.parse(line));
+  const mapper = new ClaudeStreamMapper(undefined, messages.find(m => m.type === 'assistant').session_id, 'execution');
+  const observations = messages.flatMap(m => mapper.map(m).events).filter(e => e.data.context);
+  expect(observations).toHaveLength(2);
+  expect(observations[0].data.context).toMatchObject({ tokens: 3868, capacity: null, basis: 'claude-last-request-input', modelId: 'claude-haiku-5-5' });
+  expect(observations[1].data.context).toMatchObject({ tokens: 3868, capacity: 1000000 });
 });
 
 function run(name: string) {
@@ -210,4 +226,31 @@ describe("Claude partial message stream", () => {
     const mapper = new ClaudeStreamMapper();
     expect(mapper.map({ type: "stream_event", event: { type: "future_stream" } }).events).toMatchObject([{ kind: "runner.unmapped", data: { type: "stream_event/future_stream" } }]);
   });
+});
+
+
+test('Claude incomplete, invalid or overflowing per-call usage does not carry the previous call', () => {
+  for (const usage of [undefined, { input_tokens: 1 }, ...[NaN, Infinity, -1, 0.5, Number.MAX_SAFE_INTEGER].map(input_tokens => ({ input_tokens, cache_creation_input_tokens: 1, cache_read_input_tokens: 0 }))]) {
+    const mapper = new ClaudeStreamMapper(undefined, 's', 'execution');
+    const message = { type: 'assistant', session_id: 's', message: { model: 'model', usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } };
+    mapper.map(message);
+    expect(mapper.map({ ...message, message: { model: 'model', usage } }).events.at(-1)?.data.context).toMatchObject({ tokens: null, capacity: null });
+    expect(mapper.map({ type: 'result', session_id: 's', usage: { input_tokens: 99999 }, modelUsage: { model: { contextWindow: 200000 } } }).events[0].data.context).toMatchObject({ tokens: null, capacity: 200000 });
+  }
+});
+
+test('recorded synthetic API error shape preserves the last valid context and visible error; genuine zero is valid', () => {
+  // Reviewed retained seq27013 fields; identifiers/text are sanitized, no history read.
+  const error = JSON.parse(fixtureLines('context-synthetic-api-error.jsonl')[0]!);
+  for (const patch of [{}, { is_api_error_message: true, message: { ...error.message, model: 'model' } }, { is_api_error_message: false }, { is_api_error_message: false, message: { ...error.message, model: 'model' }, error: 'rate_limit', api_error_status: 429, api_error_origin: 'first_party' }]) {
+    const mapper = new ClaudeStreamMapper(undefined, 'session', 'execution');
+    mapper.map({ type: 'assistant', session_id: 'session', message: { model: 'model', usage: { input_tokens: 148000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } });
+    const out = mapper.map({ ...error, ...patch });
+    expect(out.events.some(e => e.kind === 'usage')).toBe(false);
+    expect(out.events.find(e => e.kind === 'message.completed')?.data.text).toBe('Sanitized API failure');
+    const result = mapper.map({ type: 'result', session_id: 'session', subtype: 'error_during_execution', is_error: true, terminal_reason: 'api_error', usage: { input_tokens: 0 }, modelUsage: { model: { contextWindow: 200000 } } });
+    expect(result.events[0].data.context).toMatchObject({ tokens: 148000, capacity: 200000, modelId: 'model' });
+    if ('error' in patch) expect(result.result?.failure).toMatchObject({ category: 'rate-limit', httpStatus: 429 });
+    expect(mapper.map({ ...error, is_api_error_message: false, message: { ...error.message, model: 'model' } }).events.find(e => e.kind === 'usage')?.data.context).toMatchObject({ tokens: 0, modelId: 'model' });
+  }
 });

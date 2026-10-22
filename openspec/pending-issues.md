@@ -263,25 +263,25 @@ Screenshot reference: local session `20261022T003008-6f199c`, attachment `714c6c
 
 ## P-011 — Evaluate context-window visibility for the Lead and each subagent
 
-- **Status:** Implemented and independently approved; canary activation pending.
+- **Status:** Compact percentage/used/max and stable overlays independently approved; combined canary activation pending. Earlier counter-only build 13ef94f is active.
 - **Source:** User request following the P-008 investigation.
 - **Requested behavior:** Determine whether the UI can display the context window and its usage separately for the Lead and every subagent.
 - **Impact:** Users can understand context pressure and interpret slowdowns or compaction without relying on a generic waiting indicator.
-- **Existing evidence:** The P-008 investigation found native Codex usage counters and a reported context-window limit. It also identified differences between cumulative usage, last-request counters, and post-compaction events. Reliable current occupancy and equivalent data across runners have not been established.
+- **Existing evidence:** The P-008 investigation found native Codex usage counters and a reported context-window limit. It also identified differences between cumulative usage, last-request counters, and post-compaction events. Runner-native estimate formulas and per-response fields were subsequently verified; documented missing-data and compaction freshness limits remain.
 
 ### Feasibility and acceptance checks
 
-- [ ] Identify the available context limit, current-usage measurement, units, and update semantics for each supported runner/model.
-- [ ] Separate actual context occupancy from cumulative tokens, output tokens, and cached-input counters; do not present total session usage as window occupancy.
-- [ ] Evaluate displaying used tokens, capacity, and percentage for the Lead and each subagent when compatible, reliable measurements are available.
-- [ ] Explicitly distinguish measured, estimated, stale, and unavailable values; missing data must not appear as zero usage.
-- [ ] Attribute values to the correct session, task, native thread, and attempt; prevent stale values from a previous model or context from appearing current.
-- [ ] Verify updates across compaction, continuation, model changes, completion, and reconnection.
-- [ ] Evaluate accessible desktop and mobile placement alongside Lead status and subagent entries.
+- [x] Identify the available context limit, current-usage measurement, units, and update semantics for each supported runner/model.
+- [x] Separate actual context occupancy from cumulative tokens, output tokens, and cached-input counters; do not present total session usage as window occupancy.
+- [x] Evaluate displaying used tokens, capacity, and percentage for the Lead and each subagent when compatible, reliable measurements are available.
+- [x] Explicitly distinguish measured, estimated, stale, and unavailable values; missing data must not appear as zero usage.
+- [x] Attribute values to the correct session, task, native thread, and attempt; prevent stale values from a previous model or context from appearing current.
+- [x] Verify updates across compaction, continuation, model changes, completion, and reconnection.
+- [x] Evaluate accessible desktop and mobile placement alongside Lead status and subagent entries.
 
 **Related investigation:** [Session latency and context investigation](changes/session-context-latency-investigation/working-brief.md), especially the usage-counter limitations in finding 6. P-001 covers compaction progress itself.
 
-**Implementation change:** [Context visibility brief](changes/session-context-latency-investigation/context-window-brief.md). Approved candidate shows last-reported native counters and attributable capacity, with explicit unavailable values; current occupancy and percentage remain unavailable. Canary activation pending.
+**Implementation change:** [Context visibility brief](changes/session-context-latency-investigation/context-window-brief.md). Approved combined candidate shows native context estimates with used/max/percentage, truthful partial-data fallbacks, and nonshifting shared MCP/context overlays. Historical aggregate values never gain percentages. Hydrated mobile/desktop and lifecycle regressions passed; combined canary activation pending.
 
 ## P-012 — Generic turn failure hides native model-capacity error
 

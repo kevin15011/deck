@@ -1,14 +1,14 @@
 import { expect, test } from 'bun:test';
 import type { SessionEvent } from './events';
 import { CurrentEvents } from './chat-history';
-import { ContextWindowProjection, sanitizeContextObservation } from './context-window';
+import { ContextWindowProjection, sanitizeContextObservation, contextEstimate, contextTokenSum } from './context-window';
 
 const observation = { basis: 'codex-last-total' as const, tokens: 34794, capacity: 258400, nativeThreadId: 'thread', nativeTurnId: 'turn', modelId: 'model' };
 const event = (seq: number, kind: SessionEvent['kind'], data: Record<string, unknown> = {}, taskId = 'lead'): SessionEvent => ({ v: 1, sessionId: 's', seq, ts: '2026-10-22T00:00:00Z', kind, source: { taskId, memberId: taskId, runnerId: 'codex', nativeSessionId: 'thread' }, data });
 const start = [event(1, 'task.created', { taskId: 'lead', attempt: 1, modelId: 'model' }), event(2, 'turn.started', { attempt: 1, nativeTurnId: 'turn', nativeThreadId: 'thread' })];
 const usage = (seq = 3, patch = {}) => event(seq, 'usage', { attempt: 1, context: { ...observation, ...patch } });
 
-test.each(['codex', 'opencode'])('late-discovered %s thread survives running/completed snapshots and rebuilding CurrentEvents', runnerId => {
+test.each(['codex', 'opencode', 'claude'])('late-discovered %s thread survives running/completed snapshots and rebuilding CurrentEvents', runnerId => {
     const source = { taskId: 'lead', memberId: 'lead', runnerId };
     const e = (seq: number, kind: SessionEvent['kind'], data: Record<string, unknown>, native = false): SessionEvent => ({ ...event(seq, kind, data), source: { ...source, ...(native ? { nativeSessionId: 'thread' } : {}) } });
     const current = new CurrentEvents(), live = new ContextWindowProjection();
@@ -24,7 +24,7 @@ test.each(['codex', 'opencode'])('late-discovered %s thread survives running/com
         expect(JSON.stringify(snapshot)).not.toContain('PRIVATE_DISCOVERY');
         return rebuilt;
     };
-    const basis = runnerId === 'codex' ? 'codex-last-total' : 'opencode-message-input';
+    const basis = runnerId === 'codex' ? 'codex-last-total' : runnerId === 'claude' ? 'claude-last-request-input' : 'opencode-assistant-context';
     const usage = (seq: number, attempt = 1, turn = 'turn') => e(seq, 'usage', { attempt, context: { ...observation, basis, tokens: 100, nativeTurnId: turn } }, true);
     append(e(1, 'task.created', { taskId: 'lead', attempt: 1 }),
         { ...e(2, 'task.state', { state: 'running', nativeSessionId: 'thread', private: 'PRIVATE_DISCOVERY' }, true), raw: { runnerId, protocol: 'test', payload: 'PRIVATE_DISCOVERY', truncated: false } },
@@ -48,7 +48,7 @@ test.each(['codex', 'opencode'])('late-discovered %s thread survives running/com
     }
 });
 
-test('only finite nonnegative integer counters and positive capacity survive; no derived occupancy', () => {
+test('only finite nonnegative integer counters and positive capacity survive normalization', () => {
     expect(sanitizeContextObservation(observation)).toEqual(observation);
     for (const value of [NaN, Infinity, -1, 1.5, '2', null, undefined]) {
         expect(sanitizeContextObservation({ ...observation, tokens: value })?.tokens).toBeNull();
@@ -136,4 +136,28 @@ test('session-scoped late compaction invalidates a completed counter and cannot 
     for (const e of [event(6, 'task.continued', { attempt: 2 }), event(7, 'turn.started', { attempt: 2, nativeTurnId: 'next' }), { ...usage(8, { nativeTurnId: 'next' }), data: { attempt: 2, context: { ...observation, nativeTurnId: 'next' } } }]) p.apply(e);
     p.apply(event(9, 'diagnostic', { code: 'context.invalidated', reason: 'compaction', nativeThreadId: 'thread', attempt: 1 }));
     expect(p.values()).toHaveLength(1);
+});
+
+test('native context estimates use distinct arithmetic and preserve old ledger semantics', () => {
+    const measure = (patch = {}) => contextEstimate({ ...observation, ...patch });
+    expect(measure()).toEqual({ used: 34794, max: 258400, percent: 9 });
+    expect(measure({ tokens: 18060, capacity: 24000 })).toMatchObject({ percent: 50 });
+    expect(measure({ tokens: 148000 })).toMatchObject({ percent: 55 });
+    expect(measure({ tokens: 0 })).toMatchObject({ percent: 0 });
+    expect(measure({ tokens: 258401 })).toMatchObject({ percent: 100 });
+    expect(measure({ tokens: 0, capacity: 12000 })).toMatchObject({ percent: 100 });
+    expect(measure({ tokens: 1, capacity: 12001 })).toMatchObject({ percent: 0 });
+    expect(measure({ basis: 'claude-last-request-input', tokens: 3868, capacity: 1000000 })).toMatchObject({ used: 3868, percent: 0 });
+    expect(measure({ basis: 'opencode-assistant-context', tokens: 215, capacity: 1000 })).toMatchObject({ used: 215, percent: 22 });
+    // Native OpenCode rounds the ratio; it does not clamp it to 100.
+    expect(measure({ basis: 'opencode-assistant-context', tokens: 1200, capacity: 1000 })).toMatchObject({ percent: 120 });
+    for (const basis of ['claude-aggregate-input', 'opencode-message-input']) expect(measure({ basis })).toEqual({ used: null, max: 258400, percent: null });
+    for (const invalid of [null, undefined, -1, NaN, Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+        expect(measure({ tokens: invalid })).toEqual({ used: null, max: 258400, percent: null });
+        expect(measure({ capacity: invalid })).toEqual({ used: 34794, max: null, percent: null });
+    }
+    expect(measure({ capacity: 0 })).toMatchObject({ max: null, percent: null });
+    expect(contextTokenSum(2, 381, 3485)).toBe(3868);
+    for (const invalid of [null, undefined, -1, NaN, Infinity, 1.5]) expect(contextTokenSum(2, invalid)).toBeNull();
+    expect(contextTokenSum(Number.MAX_SAFE_INTEGER, 1)).toBeNull();
 });

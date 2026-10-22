@@ -34,7 +34,7 @@ test('Claude usage follows one exact process execution, preserving raw usage wit
   const { h, driver } = make(); const task = await driver.startTask(input(), h.io); const child = await h.nextChild();
   child.lines(withSession('turn-success.jsonl')); child.exit(); await task.done;
   const usage = h.events.find(e => e.kind === 'usage')!;
-  expect(usage.data.context).toMatchObject({ nativeThreadId: SID, basis: 'claude-aggregate-input' });
+  expect(usage.data.context).toMatchObject({ nativeThreadId: SID, basis: 'claude-last-request-input', tokens: 3868 });
   const first = usage.data.context as { nativeTurnId: string };
   const nextTurn = task.send('next'); const next = await h.nextChild(2);
   const previousCount = h.events.filter(e => e.kind === 'usage').length;
@@ -42,7 +42,7 @@ test('Claude usage follows one exact process execution, preserving raw usage wit
   next.lines([JSON.stringify({ type: 'result', session_id: 'foreign', subtype: 'success', usage: { input_tokens: 999 } })]);
   expect(h.events.filter(e => e.kind === 'usage')).toHaveLength(previousCount);
   next.lines(withSession('turn-success.jsonl')); next.exit(); await nextTurn;
-  expect(h.events.filter(e => e.kind === 'usage')).toHaveLength(previousCount + 1);
+  expect(h.events.filter(e => e.kind === 'usage')).toHaveLength(previousCount + 2);
   expect((h.events.filter(e => e.kind === 'usage').at(-1)?.data.context as { nativeTurnId: string }).nativeTurnId).not.toBe(first.nativeTurnId);
   await task.close();
 });
@@ -142,7 +142,7 @@ describe("createClaudeSessionDriver.startTask", () => {
     child.lines(withSession("turn-success.jsonl"));
     child.exit();
     expect(await handle.done).toEqual({ status: "completed" });
-    expect(h.events.map((e) => e.kind)).toEqual(["turn.started", "message.completed", "rate-limit", "usage"]);
+    expect(h.events.map((e) => e.kind)).toEqual(["turn.started", "message.completed", "usage", "rate-limit", "usage"]);
     expect(h.events[1]!.data.text).toBe("pong");
   });
 

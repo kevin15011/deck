@@ -1,11 +1,10 @@
 import type { SessionEvent } from './events';
 import { redactText } from './redaction';
 
-/** Counters with deliberately different meanings. None is current occupancy.
- * In particular Codex last.total is not summed with cached input or divided by
- * modelContextWindow. Native compaction can report a total with zero input. */
+/** Native context estimates use runner-specific arithmetic. Legacy aggregate
+ * and input-only bases remain readable but cannot yield a usage percentage. */
 export type ContextObservation = {
-    basis: 'codex-last-total' | 'claude-aggregate-input' | 'opencode-message-input';
+    basis: 'codex-last-total' | 'claude-aggregate-input' | 'opencode-message-input' | 'claude-last-request-input' | 'opencode-assistant-context';
     tokens: number | null;
     capacity: number | null;
     nativeThreadId: string;
@@ -22,9 +21,37 @@ export const contextCapacity = (v: unknown): number | null => contextTokens(v) !
 export function sanitizeContextObservation(value: unknown): ContextObservation | undefined {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return;
     const c = value as Record<string, unknown>;
-    if (!['codex-last-total', 'claude-aggregate-input', 'opencode-message-input'].includes(String(c.basis)) || !contextIdentity(c.nativeThreadId) || !contextIdentity(c.nativeTurnId)) return;
+    if (!['codex-last-total', 'claude-aggregate-input', 'opencode-message-input', 'claude-last-request-input', 'opencode-assistant-context'].includes(String(c.basis)) || !contextIdentity(c.nativeThreadId) || !contextIdentity(c.nativeTurnId)) return;
     if (c.modelId !== undefined && !contextIdentity(c.modelId)) return;
     return { basis: c.basis as ContextObservation['basis'], tokens: contextTokens(c.tokens), capacity: contextCapacity(c.capacity), nativeThreadId: c.nativeThreadId, nativeTurnId: c.nativeTurnId, ...(c.modelId ? { modelId: c.modelId as string } : {}) };
+}
+
+/** Missing, fractional or overflowing components are unknown, never zero. */
+export function contextTokenSum(...values: unknown[]): number | null {
+    let sum = 0;
+    for (const value of values) {
+        const tokens = contextTokens(value);
+        if (tokens === null || !Number.isSafeInteger(sum + tokens)) return null;
+        sum += tokens;
+    }
+    return sum;
+}
+
+/** Mirrors Codex rust-v0.162.1's baseline-adjusted remaining percentage and
+ * OpenCode v1.19.1's rounded ratio. Claude's latest-response input formula is
+ * documented by its statusline API; Deck rounds that estimate for display.
+ * No cumulative accounting or legacy input-only observation feeds a ratio. */
+export function contextEstimate(value: unknown): { used: number | null; max: number | null; percent: number | null } {
+    const c = sanitizeContextObservation(value);
+    const max = c?.capacity ?? null;
+    const used = c && ['codex-last-total', 'claude-last-request-input', 'opencode-assistant-context'].includes(c.basis) ? c.tokens : null;
+    let percent: number | null = null;
+    if (used !== null && max !== null) {
+        percent = c?.basis === 'codex-last-total'
+            ? max <= 12000 ? 100 : 100 - Math.round(Math.min(100, Math.max(0, max - 12000 - Math.max(used - 12000, 0)) / (max - 12000) * 100))
+            : Math.round(used / max * 100);
+    }
+    return { used, max, percent };
 }
 
 type Fence = { attempt?: number; memberId?: string; runnerId?: string; thread?: string; turn?: string; model?: string; closed: boolean; compacted: boolean; observation?: SessionEvent; threadEvidence?: SessionEvent; turnEvidence?: SessionEvent };

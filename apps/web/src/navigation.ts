@@ -37,6 +37,10 @@ function parseEntry(value:unknown):DeckEntry|undefined{
 const equivalent=(a:DeckEntry,b:DeckEntry)=>a.owner===b.owner&&a.key===b.key&&a.parent===b.parent&&a.slot===b.slot&&sameRoute(a.route,b.route);
 export class DeckHistory{
  current:DeckEntry;
+ secondary?:string;
+ private secondaryClosing=false;
+ private secondaryOpening?:string;
+ private secondaryNavigation?:{route:DeckRoute;mode:'push'|'replace'};
  generation=0;
  capture?:()=>ChatAnchor|undefined;
  private journal:Journal;
@@ -51,7 +55,9 @@ export class DeckHistory{
    this.journal={v:1,owner:j.owner,records};}}
   catch{this.storage=false;}
   const existing=this.readOwned();
-  this.current=existing??this.fresh(this.fallbackRoute());
+  const dismissed=this.dismissedSecondary();
+  this.current=existing??(dismissed?this.record(dismissed.key)!.entry:this.fresh(this.fallbackRoute()));
+  this.secondary=existing?this.readSecondary(existing):undefined;
   this.write(this.current,'replace');
  }
  private urlRoute():DeckRoute{const url=new URL(this.adapter.url),session=url.searchParams.get('session'),reply=url.searchParams.get('reply');return{project:'',tab:'chat',...(id(session)?{session}:{}),...(id(session)&&validReplyId(reply)?{reply}:{})};}
@@ -67,33 +73,83 @@ export class DeckHistory{
  private persist(){try{this.adapter.save(JSON.stringify(this.journal));}catch{this.storage=false;}}
  private remember(entry:DeckEntry,from?:RecordEntry['from']){const old=this.record(entry.key);if(old)old.entry=entry;else this.journal.records.push({entry,...(from?{from}:{})});this.journal.records=this.journal.records.slice(-50);this.persist();}
  private write(entry:DeckEntry,mode:'push'|'replace',from?:RecordEntry['from']){
-  try{if(mode==='push')this.adapter.push({deck:entry},routeURL(entry.route,this.adapter.url));else this.adapter.replace({deck:entry},routeURL(entry.route,this.adapter.url));}
+  const marker=mode==='replace'&&entry.key===this.current?.key?this.secondaryMarker(entry):undefined;
+  const state={deck:entry,...(marker?{deckSecondary:marker}:{})};
+  try{if(mode==='push')this.adapter.push(state,routeURL(entry.route,this.adapter.url));else this.adapter.replace(state,routeURL(entry.route,this.adapter.url));}
   catch{if(mode==='push'){entry={...this.current,route:entry.route};try{this.adapter.replace({deck:entry},routeURL(entry.route,this.adapter.url));}catch{}}}
   this.current=entry;this.remember(entry,from);
  }
- private notify(){this.generation++;for(const fn of this.listeners)fn();}
- subscribe(fn:()=>void){this.listeners.add(fn);return()=>{this.listeners.delete(fn);};}
+ private notify(navigation=true){if(navigation)this.generation++;for(const fn of this.listeners)fn();}
+ private secondaryMarker(entry:DeckEntry):{owner:string;key:string;panelId:string;dismissed?:true}|undefined{
+  const state=this.adapter.state,value=object(state)?state.deckSecondary:undefined;
+  if(object(value)&&keys(value,['owner','key','panelId','dismissed'])&&value.owner===this.journal.owner&&value.key===entry.key&&id(value.panelId,128)&&(value.dismissed===undefined||value.dismissed===true))
+   return{owner:this.journal.owner,key:entry.key,panelId:value.panelId,...(value.dismissed?{dismissed:true}:{})};
+ }
+ private readSecondary(entry=this.current):string|undefined{const marker=this.secondaryMarker(entry);return marker&&!marker.dismissed?marker.panelId:undefined;}
+ /** A tombstone belongs to a recorded base key, even if that base was later
+  * replaced. Never skip a foreign owner, unknown key or unrelated URL. */
+ private dismissedSecondary():DeckEntry|undefined{
+  const state=this.adapter.state,entry=object(state)?parseEntry(state.deck):undefined;
+  if(entry?.owner===this.journal.owner&&this.record(entry.key)&&routeURL(entry.route,this.adapter.url)===this.adapter.url&&this.secondaryMarker(entry)?.dismissed)return entry;
+ }
+ private backSecondary(dismissed:boolean):boolean{
+  try{
+   const marker=this.secondaryMarker(this.current);if(!marker)return false;
+   if(dismissed){this.adapter.replace({deck:this.current,deckSecondary:{...marker,dismissed:true}},routeURL(this.current.route,this.adapter.url));this.secondary=undefined;}
+   this.secondaryClosing=true;this.adapter.back();if(dismissed)this.notify(false);return true;
+  }catch{this.secondaryClosing=false;return false;}
+ }
+ /** Ephemeral presentation, not a route or a session-resolution generation.
+  * Switching panels replaces the same owned Back entry. No journal growth. */
+ openSecondary(panelId:string){
+  if(!id(panelId,128)||this.current.route.overlay)return;
+  if(this.secondaryClosing){this.secondaryOpening=panelId;return;}
+  const actual=this.readOwned(),replacing=!!this.readSecondary();
+  if(this.storage&&actual?.key===this.current.key)try{
+   const state={deck:this.current,deckSecondary:{owner:this.journal.owner,key:this.current.key,panelId}};
+   if(replacing)this.adapter.replace(state,this.adapter.url);else this.adapter.push(state,this.adapter.url);
+  }catch{/* Local dismissal remains usable when browser history is blocked. */}
+  this.secondary=panelId;this.secondaryClosing=false;this.notify(false);
+ }
+ closeSecondary(replace=false){
+  if(replace)this.secondaryOpening=undefined;
+  if(!this.secondary||this.secondaryClosing)return;
+  const owned=this.readOwned()?.key===this.current.key&&!!this.readSecondary();
+  if(owned&&this.backSecondary(replace))return;
+  this.secondary=undefined;this.secondaryClosing=false;this.secondaryNavigation=undefined;
+  if(owned)try{this.adapter.replace({deck:this.current},routeURL(this.current.route,this.adapter.url));}catch{}
+  this.notify(false);
+ }
+ subscribe(fn:()=>void){this.listeners.add(fn);if(!this.secondaryClosing&&this.dismissedSecondary())this.backSecondary(true);return()=>{this.listeners.delete(fn);};}
  anchor(anchor:ChatAnchor|undefined){if(!anchor)return;const clean=parseAnchor(anchor);if(!clean||!this.current.route.session)return;
   const entry={...this.current,route:{...this.current.route,anchor:clean}};const actual=this.readOwned();
   if(actual?.key===this.current.key)this.write(entry,'replace');else this.remember(entry);
  }
  navigate(route:DeckRoute,mode:'push'|'replace'='push'){
-  const clean=parseRoute(route);if(!clean)return;this.closingKey=undefined;
+  const clean=parseRoute(route);if(!clean)return;
+  // A browser Back already in flight cannot be cancelled. Commit only the
+  // latest requested route after it reaches this exact owned base entry.
+  if(this.secondaryClosing){this.secondaryNavigation={route:clean,mode};return;}
+  this.closingKey=undefined;
+  const transient=this.readOwned()?.key===this.current.key&&!!this.readSecondary();
+  if(transient&&mode==='replace'){this.secondaryNavigation={route:clean,mode};this.closeSecondary(true);return;}
+  if(this.secondary&&!transient)this.closeSecondary(true);
   const exactRequest=!!clean.reply&&!route.anchor&&!route.overlay;
   const previousSession=this.current.route.session,previousReply=this.current.route.reply;
   this.anchor(this.capture?.());
   if(!exactRequest&&clean.session&&clean.session===previousSession&&clean.reply===previousReply&&this.current.route.anchor)clean.anchor=this.current.route.anchor;
   if(!exactRequest&&clean.session&&!clean.anchor&&clean.session!==previousSession){const prior=[...this.journal.records].reverse().find(r=>r.entry.route.session===clean.session&&r.entry.route.anchor);if(prior)clean.anchor=prior.entry.route.anchor;}
-  if(sameRoute(clean,this.current.route)){if(exactRequest){this.write({...this.current,route:{...clean,anchor:undefined}},'replace');this.notify();}else if(clean.anchor)this.anchor(clean.anchor);return;}
+  if(sameRoute(clean,this.current.route)){if(this.secondary)this.closeSecondary(true);if(exactRequest){this.write({...this.current,route:{...clean,anchor:undefined}},'replace');this.notify();}else if(clean.anchor)this.anchor(clean.anchor);return;}
   const previous=this.current,owned=this.readOwned();
+  if(transient){this.secondary=undefined;this.secondaryClosing=false;}
   if(mode==='push'){
    const entry={...this.fresh(clean),...(owned?.key===previous.key?{parent:previous.key,slot:previous.slot+1}:{})};
-   this.write(entry,'push',entry.parent?{key:previous.key,slot:previous.slot,signature:signature(previous.route)}:undefined);
+   this.write(entry,transient?'replace':'push',entry.parent?{key:previous.key,slot:previous.slot,signature:signature(previous.route)}:undefined);
   }else this.write({...previous,route:clean},'replace');
   this.notify();
  }
  /** Async completion may annotate only its current entry. It never adds history. */
- annotate(key:string,patch:Partial<DeckRoute>){if(this.current.key!==key||this.readOwned()?.key!==key)return;const route=parseRoute({...this.current.route,...patch});if(route)this.write({...this.current,route},'replace');}
+ annotate(key:string,patch:Partial<DeckRoute>){if(this.secondaryClosing||this.current.key!==key||this.readOwned()?.key!==key)return;const route=parseRoute({...this.current.route,...patch});if(route)this.write({...this.current,route},'replace');}
  canBack(){
   if(!this.storage)return false;const actual=this.readOwned();if(!actual||actual.key!==this.current.key||!actual.parent)return false;
   const record=this.record(actual.key),parent=this.record(actual.parent),from=record?.from;
@@ -104,6 +160,13 @@ export class DeckHistory{
   this.navigate({...this.current.route,overlay:undefined},'replace');
  }
  pop(){
+  const dismissed=this.dismissedSecondary();
+  if(dismissed?.key===this.current.key){this.secondary=undefined;if(!this.secondaryClosing)this.backSecondary(true);return;}
+  const actual=this.readOwned(),secondary=actual?this.readSecondary(actual):undefined;
+  if(actual?.key===this.current.key&&sameRoute(actual.route,this.current.route)&&(this.secondary||secondary||this.secondaryClosing)){
+   this.secondary=secondary;this.secondaryClosing=false;const requested=this.secondaryNavigation,opening=this.secondaryOpening;this.secondaryNavigation=undefined;this.secondaryOpening=undefined;this.notify(false);if(requested)this.navigate(requested.route,requested.mode);else if(opening)this.openSecondary(opening);return;
+  }
+  this.secondary=undefined;this.secondaryClosing=false;this.secondaryNavigation=undefined;this.secondaryOpening=undefined;
   this.closingKey=undefined;
   // The DOM still shows the departing view at this point. Keep its last anchor in
   // the bounded journal; never rewrite the newly active browser entry with it.
@@ -115,8 +178,8 @@ export class DeckHistory{
 export function useDeckHistory(){
  const controller=useRef<DeckHistory|undefined>(undefined);
  if(!controller.current)controller.current=new DeckHistory({get state(){return window.history.state;},get url(){return window.location.href;},push:(state,url)=>window.history.pushState(state,'',url),replace:(state,url)=>window.history.replaceState(state,'',url),back:()=>window.history.back(),load:()=>sessionStorage.getItem('deck.nav'),save:value=>sessionStorage.setItem('deck.nav',value)});
- const nav=controller.current;const [snapshot,setSnapshot]=useState(()=>({entry:nav.current,generation:nav.generation}));
- useEffect(()=>{const unsubscribe=nav.subscribe(()=>setSnapshot({entry:nav.current,generation:nav.generation}));const pop=()=>nav.pop();const show=(event:PageTransitionEvent)=>{if(event.persisted)nav.pop();};
+ const nav=controller.current;const [snapshot,setSnapshot]=useState(()=>({entry:nav.current,generation:nav.generation,secondary:nav.secondary}));
+ useEffect(()=>{const unsubscribe=nav.subscribe(()=>setSnapshot({entry:nav.current,generation:nav.generation,secondary:nav.secondary}));const pop=()=>nav.pop();const show=(event:PageTransitionEvent)=>{if(event.persisted)nav.pop();};
   window.addEventListener('popstate',pop);window.addEventListener('pageshow',show);let scroll:ScrollRestoration|undefined;try{scroll=history.scrollRestoration;history.scrollRestoration='manual';}catch{}
   return()=>{unsubscribe();window.removeEventListener('popstate',pop);window.removeEventListener('pageshow',show);try{if(scroll)history.scrollRestoration=scroll;}catch{}};
  },[nav]);

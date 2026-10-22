@@ -1,3 +1,4 @@
+import { contextCapacity, contextIdentity, sanitizeContextObservation } from "@deck/core/session/events";
 import { openCodeProjectConfigDisabled, pendingOpenCodeProjectSources } from "../personal-mcp";
 import { prepareImages, redactImagePayload } from "./images";
 import { execFile } from "node:child_process";
@@ -33,6 +34,9 @@ class OpenCodeTask {
   private readonly seenQuestions = new Set<string>();
   private stream?: Promise<void>;
   private authorization = "";
+  // This task owns one native server. Keep only validated limits, keyed by the
+  // exact provider/model tuple; no cross-server or growing global cache.
+  private readonly contextLimits = new Map<string, number>();
   private readonly mapper = new OpenCodeEventMapper();
   constructor(private readonly input: DriverTaskInput, private readonly io: DriverHostIo, private readonly options: OpenCodeSessionDriverOptions) {}
 
@@ -67,6 +71,7 @@ class OpenCodeTask {
       const [url] = await Promise.all([endpoint, this.child.ready]);
       startupSignal.throwIfAborted();
       this.base = url;
+      void this.loadContextLimits();
       const config = await this.request("/config", undefined, startupSignal);
       if (!record(config) || !record(config.mcp)) throw new Error("opencode-native-config-unavailable");
       const conflicts = conflictingOpenCodeMcp(config, launch, this.input.suppressedMcpServers);
@@ -120,6 +125,36 @@ class OpenCodeTask {
     };
     try { await Promise.race([setup(), startupFailure]);
     } catch (error) { await this.close(); throw error; } finally { clearTimeout(timeout); }
+  }
+
+  /** One bounded local metadata request, independent of readiness/turn latency.
+   * The inventory CLI does not retain model limits, so it cannot supply them.
+   * If this has not completed by a prompt response, publish used tokens alone. */
+  private async loadContextLimits(): Promise<void> {
+    try {
+      const response = await fetch(this.base + '/provider', { redirect: 'error', headers: { authorization: this.authorization }, signal: AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(1500)]) });
+      if (!response.ok || !response.body) { await response.body?.cancel(); return; }
+      const reader = response.body.getReader(), chunks: Uint8Array[] = [];
+      let bytes = 0;
+      try {
+        for (;;) {
+          const chunk = await reader.read(); if (chunk.done) break;
+          bytes += chunk.value.byteLength;
+          if (bytes > 4 * 1024 * 1024) { await reader.cancel(); return; }
+          chunks.push(chunk.value);
+        }
+      } finally { reader.releaseLock(); }
+      const catalog: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (this.closed || this.lifetime.signal.aborted || !record(catalog) || !Array.isArray(catalog.all)) return;
+      for (const provider of catalog.all) {
+        if (!record(provider) || !contextIdentity(provider.id) || !record(provider.models)) continue;
+        for (const [modelId, model] of Object.entries(provider.models)) {
+          if (this.contextLimits.size >= 10000) return;
+          const capacity = record(model) && record(model.limit) ? contextCapacity(model.limit.context) : null;
+          if (contextIdentity(modelId) && capacity !== null) this.contextLimits.set(JSON.stringify([provider.id, modelId]), capacity);
+        }
+      }
+    } catch { /* Optional metadata never delays or fails a turn. */ }
   }
 
   private async request(path: string, body?: unknown, signal?: AbortSignal, method?: "PATCH"): Promise<unknown> {
@@ -263,7 +298,9 @@ Patterns: ${raw.always.join("\n")}`,
       if (result.info.sessionID === this.nativeId && !turn.interrupted) {
         for (const event of this.mapper.map({ type: 'message.updated', properties: { info: result.info } })) {
           if (event.kind === 'usage') {
-            const { context, ...native } = event.data;
+            const { context: reported, ...native } = event.data;
+            const capacity = this.contextLimits.get(JSON.stringify([result.info.providerID, result.info.modelID])) ?? null;
+            const context = record(reported) ? sanitizeContextObservation({ ...reported, capacity }) : undefined;
             this.emit({ ...event, data: { ...native, ...(!turn.contextCompacted && context ? { context } : {}) } });
           }
         }

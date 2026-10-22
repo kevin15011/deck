@@ -6,7 +6,7 @@
  * Shapes verified against 2.1.296 recordings in `__fixtures__/2.1.296` (tool_use/tool_result
  * and permission_denials per the documented format; see the fixture README).
  */
-import { boundRaw, sanitizeContextObservation } from "@deck/core/session/events";
+import { boundRaw, sanitizeContextObservation, contextTokenSum, type ContextObservation } from "@deck/core/session/events";
 import { redactText } from "@deck/core/session/redaction";
 import type { DriverEvent, NativeMemoryDescriptor } from "@deck/core/session/driver";
 import type { TurnFailure } from "@deck/core/session/failure";
@@ -89,6 +89,7 @@ export class ClaudeStreamMapper {
   private hookReported = false;
   private streamingMessageId?: string;
   private contextCompacted = false;
+  private contextObservation?: ContextObservation;
   constructor(private readonly nativeMemory?: NativeMemoryDescriptor, private readonly sessionId?: string, private readonly contextTurnId?: string) {}
 
   map(message: unknown): MapOutput {
@@ -118,6 +119,7 @@ export class ClaudeStreamMapper {
     if (subtype === 'compact_boundary' || subtype === 'status' && m.status === 'compacting') {
       if (m.session_id !== undefined && m.session_id !== this.sessionId) return { events: [] };
       this.contextCompacted = true;
+      this.contextObservation = undefined;
       return { events: [{ kind: 'diagnostic', data: { code: 'context.invalidated', reason: 'compaction', nativeThreadId: this.sessionId, nativeTurnId: this.contextTurnId } }] };
     }
     if (subtype === "init") return this.init(m);
@@ -208,6 +210,20 @@ export class ClaudeStreamMapper {
         events.push(this.unmapped(`assistant/${str(block.type) ?? "unknown"}`, block));
       }
     }
+    // Synthetic API failures carry zero-filled assistant envelopes, not a new
+    // API usage reading. Keep their visible text and structured failure handling
+    // above; preserve the last valid observation. Genuine zero usage is valid.
+    const usageError = m.is_api_error_message === true || message.model === '<synthetic>'
+      || typeof m.error === 'string' || classifyClaudeFailure(m) !== undefined;
+    if (!usageError && !this.contextCompacted && m.parent_tool_use_id == null && m.session_id === this.sessionId) {
+      const usage = isObj(message.usage) ? message.usage : {};
+      const context = sanitizeContextObservation({ basis: 'claude-last-request-input',
+        tokens: contextTokenSum(usage.input_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens),
+        capacity: null, nativeThreadId: this.sessionId, nativeTurnId: this.contextTurnId, modelId: message.model });
+      // Replace, never accumulate across assistant calls or models.
+      this.contextObservation = context;
+      if (context) events.push({ kind: 'usage', data: { context } });
+    }
     // keep the whole message once, on its first event, so detail the mapping drops stays inspectable
     if (events.length > 0 && events[0]!.raw === undefined) events[0] = { ...events[0]!, raw: m };
     return { events };
@@ -261,11 +277,12 @@ export class ClaudeStreamMapper {
     };
     const events: DriverEvent[] = [];
     if (isObj(m.usage)) {
-      // modelUsage is aggregate accounting. Only an unambiguous single native
-      // model can contribute capacity; never sum it with cached input.
-      const models = isObj(m.modelUsage) ? Object.entries(m.modelUsage).filter(([, value]) => isObj(value)) : [];
-      const [modelId, modelUsage] = models.length === 1 ? models[0] : [];
-      const context = !this.contextCompacted && m.session_id === this.sessionId ? sanitizeContextObservation({ basis: 'claude-aggregate-input', tokens: m.usage.input_tokens, capacity: isObj(modelUsage) ? modelUsage.contextWindow : null, nativeThreadId: this.sessionId, nativeTurnId: this.contextTurnId, ...(modelId ? { modelId } : {}) }) : undefined;
+      // Capacity may arrive at result time. Join only the exact native model
+      // of the latest main assistant response, even in multi-model accounting.
+      const latest = this.contextObservation;
+      const modelUsage = latest?.modelId && isObj(m.modelUsage) && Object.hasOwn(m.modelUsage, latest.modelId) ? m.modelUsage[latest.modelId] : undefined;
+      const context = !this.contextCompacted && correlated && m.session_id === this.sessionId && latest
+        ? sanitizeContextObservation({ ...latest, capacity: isObj(modelUsage) ? modelUsage.contextWindow : null }) : undefined;
       events.push({
         kind: "usage",
         data: {

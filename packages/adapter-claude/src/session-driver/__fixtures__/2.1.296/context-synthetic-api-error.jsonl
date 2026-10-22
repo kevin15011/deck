@@ -1,0 +1,1 @@
+{"type":"assistant","session_id":"session","parent_tool_use_id":null,"is_api_error_message":true,"message":{"id":"synthetic-error","role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Sanitized API failure"}],"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}

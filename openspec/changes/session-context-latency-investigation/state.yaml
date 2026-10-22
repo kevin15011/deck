@@ -4,7 +4,7 @@ name: Session latency and context investigation
 currentPhase: apply
 status: completed
 exploration_context: sdd
-next_action: "P011 approved by quality attempt7. Commit and build local canary, then independently verify installed/running digest. Context displays last-reported counters and available capacity, not occupancy percentages. Web restart diagnosis deferred."
+next_action: "Combined context percentage/used/max and stable MCP/context overlays approved by quality attempt9. Commit/build/install local canary, then verify activation independently. Previous13ef94f still active until checked."
 artifacts:
   exploration: working-brief.md
   apply_progress: preparation-progress.md
