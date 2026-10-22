@@ -1,4 +1,5 @@
 import { PersonalMcpPreparationError, validatePersonalMcpAvailability, type PersonalMcpAvailability, type PersonalMcpByMember } from "@deck/core/session/personal-mcp";
+import { sanitizeContextObservation } from '@deck/core/session/events';
 import type { SessionGrant } from "@deck/core/session/approval";
 import { isApprovalMode, type ApprovalMode } from "@deck/core/session/commands";
 import { QuestionBroker } from "./question-broker";
@@ -1801,6 +1802,9 @@ export class SessionManager implements SessionService {
   }
 
   private driverEvent(live: Live, turn: Turn, runnerId: string, event: DriverEvent): void {
+    // An old driver's callbacks can outlive its attempt. They must never refresh
+    // a context observation owned by a continuation or a different native task.
+    if (event.kind === 'usage' && (live.turns.get(turn.taskId) !== turn || turn.nativeEnded || turn.kind || turn.controller.signal.aborted)) return;
     if (runnerId === "opencode" && event.kind === "diagnostic" && ["personal-mcp.sources","personal-mcp.runtime"].includes(String(event.data.code))
       && turn.projectTrustRevision !== this.projectStore().projectTrust(live.meta.projectId ?? projectIdentity(live.meta.projectRoot)).revision) return;
     if (event.kind === "diagnostic" && event.data.code === "personal-mcp.sources") {
@@ -1836,6 +1840,13 @@ export class SessionManager implements SessionService {
     const known = DRIVER_KINDS.has(event.kind);
     const kind: SessionEventKind = known ? (event.kind as SessionEventKind) : "runner.unmapped";
     const data: Record<string, unknown> = known ? { ...event.data } : { type: event.kind, ...(ALL_KINDS.has(event.kind) ? { reason: "kind-reserved-for-host" } : {}) };
+    if (kind === 'usage' || kind === 'turn.started' || kind === 'turn.completed' || kind === 'diagnostic' && ['context.compaction', 'context.invalidated'].includes(String(data.code))) data.attempt = turn.attempt;
+    if (kind === 'turn.started') data.modelId = turn.assignment.modelId;
+    if (kind === 'usage') {
+      const context = sanitizeContextObservation(data.context);
+      delete data.context;
+      if (context && (!turn.nativeSessionId || context.nativeThreadId === turn.nativeSessionId)) data.context = { ...context, ...(context.modelId ? {} : context.basis === 'codex-last-total' ? { modelId: turn.assignment.modelId } : {}) };
+    }
     if (kind === "hook.started" || kind === "hook.completed") data.attempt = turn.attempt;
     if (kind === "message.completed") {
       data.role ??= "assistant";
@@ -1843,7 +1854,7 @@ export class SessionManager implements SessionService {
     }
     const draft: EventDraft = {
       kind, data,
-      source: { taskId: turn.taskId, memberId: turn.memberId, runnerId, ...(turn.nativeSessionId ? { nativeSessionId: turn.nativeSessionId } : {}) },
+      source: { taskId: turn.taskId, memberId: turn.memberId, runnerId, ...(turn.nativeSessionId ? { nativeSessionId: turn.nativeSessionId } : kind === 'usage' && data.context ? { nativeSessionId: (data.context as { nativeThreadId: string }).nativeThreadId } : {}) },
       ...(event.raw !== undefined ? { raw: boundRaw({ runnerId, protocol, payload: event.raw }) } : {}),
     };
     try { this.append(live, draft); } catch { /* live.broken is set; the turn winds down on its own */ }

@@ -1,5 +1,5 @@
 import type { DriverEvent, NativeMemoryDescriptor } from "@deck/core/session/driver";
-import { boundRaw, HOOK_STATUSES } from "@deck/core/session/events";
+import { boundRaw, HOOK_STATUSES, sanitizeContextObservation } from "@deck/core/session/events";
 import { redactText } from "@deck/core/session/redaction";
 import { object, type RpcMessage } from "./rpc";
 
@@ -36,7 +36,7 @@ export function mapCodexNotification(message: RpcMessage, nativeMemory?: NativeM
         ...(attributed ? { provider: "supermemory", integration: "runner-plugin" } : {}),
       } }];
     }
-    case "turn/started": return event("turn.started", { nativeTurnId: turn.id });
+    case "turn/started": return event("turn.started", { nativeTurnId: turn.id, nativeThreadId: p.threadId });
     case "turn/completed": return event("turn.completed", { nativeTurnId: turn.id, status: codexTurnStatus(turn.status) });
     case "item/agentMessage/delta": return event("message.delta", { text: text(p.delta), messageId: p.itemId });
     case "item/reasoning/textDelta":
@@ -46,7 +46,11 @@ export function mapCodexNotification(message: RpcMessage, nativeMemory?: NativeM
       const reasoningKind = summary ? "summary" : "text";
       return event("reasoning.delta", { text: text(p.delta), messageId: p.itemId, reasoningKind, format: "delta", ...(Number.isInteger(index) ? { partId: `${reasoningKind}:${index}` } : {}) });
     }
-    case "thread/tokenUsage/updated": return event("usage", { ...object(p.tokenUsage) });
+    case "thread/tokenUsage/updated": {
+      const usage = object(p.tokenUsage);
+      const context = sanitizeContextObservation({ basis: 'codex-last-total', tokens: object(usage.last).totalTokens, capacity: usage.modelContextWindow, nativeThreadId: p.threadId, nativeTurnId: p.turnId });
+      return event("usage", { ...usage, ...(context ? { context } : {}) });
+    }
     case "account/rateLimits/updated": return event("rate-limit", { ...object(p.rateLimits) });
     case "item/started":
     case "item/completed": {

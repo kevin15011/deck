@@ -4,7 +4,7 @@ name: Session latency and context investigation
 currentPhase: apply
 status: completed
 exploration_context: sdd
-next_action: "P012 provider-failure reporting independently approved together with prior compaction 484fd39. Commit and build the combined local canary, then verify daemon activation. Cache correction 1a371a3 remains active; broader community correlation is still outstanding."
+next_action: "P011 approved by quality attempt7. Commit and build local canary, then independently verify installed/running digest. Context displays last-reported counters and available capacity, not occupancy percentages. Web restart diagnosis deferred."
 artifacts:
   exploration: working-brief.md
   apply_progress: preparation-progress.md

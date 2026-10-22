@@ -20,6 +20,7 @@ import { recoverAllSessions } from "../recovery";
 import { SessionManager, type SessionManagerOptions } from "../session-manager";
 import { Supervisor } from "../supervisor";
 import { FakeDriver, type FakeTurn } from "../testing/fake-driver";
+import { ChatHistory } from '../chat-history';
 import { cleanupTempDirs, FakeClock, tempDir, tempSubdir, waitFor } from "./test-helpers";
 
 // These waits observe durable lifecycle progress, not a subsecond latency contract.
@@ -79,6 +80,26 @@ function setup(over: { config?: CrossRunnerConfig | undefined; driver?: FakeDriv
 }
 
 const lastTurn = (driver: FakeDriver): FakeTurn => driver.turns.at(-1)!;
+
+test('P011 usage reaches default host composition and snapshot, with authoritative attempt/model and stale producer fencing', async () => {
+  const t = setup(); const id = await t.create();
+  await t.run({ type: 'prompt.send', text: 'original' }, id); await waitFor(() => t.driver.turns.length === 1);
+  const first = lastTurn(t.driver); first.init();
+  const context = { basis: 'claude-aggregate-input', tokens: 100, capacity: 200000, nativeThreadId: first.nativeSessionId, nativeTurnId: 'execution', modelId: 'native-opus' };
+  first.emit('usage', { inputTokens: 100, attempt: 999, context }, { PRIVATE: 'native body' });
+  const emitted = t.events(id).filter(e => e.kind === 'usage').at(-1)!;
+  expect(emitted.data).toMatchObject({ inputTokens: 100, attempt: 1, context });
+  const current = new ChatHistory(t.manager.openLog(id)!).current.values();
+  expect(current.find(e => e.kind === 'usage')?.data).toMatchObject({ context: { tokens: 100 } });
+  expect(current.find(e => e.kind === 'usage')?.raw).toBeUndefined();
+  first.finish(); await t.idle();
+  await t.run({ type: 'prompt.send', text: 'followup' }, id); await waitFor(() => t.driver.turns.length === 2);
+  const count = t.events(id).filter(e => e.kind === 'usage').length;
+  first.emit('usage', { inputTokens: 999, context });
+  expect(t.events(id).filter(e => e.kind === 'usage')).toHaveLength(count);
+  expect(new ChatHistory(t.manager.openLog(id)!).current.values().some(e => e.kind === 'usage')).toBe(false);
+  lastTurn(t.driver).init(); lastTurn(t.driver).finish(); await t.idle();
+});
 
 describe("P012 terminal failure boundary", () => {
   test("a known host binding cleanup failure is distinguished from ambiguous startup", async () => {

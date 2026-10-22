@@ -47,7 +47,7 @@ describe("OpenCode SSE", () => {
   });
 });
 
-function fakeServer(options: { personal?: boolean; extraMcp?: boolean; mutatedMcp?: boolean; nativePermissions?: Array<{permission:string;pattern:string;action:string}>; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; messageError?: unknown; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number; pendingPermissions?: unknown[]; permissionReplyStatus?: number } = {}) {
+function fakeServer(options: { contextUsage?: boolean; compacted?: boolean; personal?: boolean; extraMcp?: boolean; mutatedMcp?: boolean; nativePermissions?: Array<{permission:string;pattern:string;action:string}>; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; messageError?: unknown; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number; pendingPermissions?: unknown[]; permissionReplyStatus?: number } = {}) {
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const requests: Array<{ path: string; body: any; auth: string | null }> = [];
   let messages = 0;
@@ -74,7 +74,16 @@ function fakeServer(options: { personal?: boolean; extraMcp?: boolean; mutatedMc
       if (options.hang || options.abortError) return new Promise<Response>(resolve => { blocked.push(resolve); });
       event("message.part.updated", { sessionID: "ses_native", part: { id: "text1", messageID: `msg${messages}`, type: "text", text: "" } });
       event("message.part.delta", { sessionID: "ses_native", messageID: `msg${messages}`, partID: "text1", field: "text", delta: "OK" });
-      return Response.json({ info: { id: `msg${messages}`, ...(options.failMessage || options.messageError ? { error: options.messageError ?? { name: "APIError" } } : {}) }, parts: [{ type: "text", text: "OK" }] });
+      if (options.contextUsage) {
+        event('message.updated', { info: { role: 'assistant', sessionID: 'ses_native', parentID: 'old', providerID: 'p', modelID: 'wrong', tokens: { input: 999999 } } });
+        if (options.compacted) {
+          event('session.compacted', { sessionID: 'ses_native' });
+          // Exercise the ordered stream-before-response case. Separate core
+          // coverage handles invalidation delivered after a terminal response.
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      }
+      return Response.json({ info: { id: `msg${messages}`, ...(options.contextUsage ? { role: 'assistant', sessionID: 'ses_native', parentID: `user${messages}`, providerID: 'p', modelID: 'm', tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 80, write: 20 } } } : {}), ...(options.failMessage || options.messageError ? { error: options.messageError ?? { name: "APIError" } } : {}) }, parts: [{ type: "text", text: "OK" }] });
     }
     return Response.json({ healthy: true });
   } });
@@ -84,6 +93,31 @@ function fakeServer(options: { personal?: boolean; extraMcp?: boolean; mutatedMc
   const child = { ready: Promise.resolve({ workerPid: 123 }), exited, onStdout(fn: (c: string) => void) { stdout = fn; queueMicrotask(() => stdout(`opencode server listening on http://127.0.0.1:${server.port}\n`)); }, onStderr() {}, writeStdin() {}, endStdin() {}, interrupt() { return true; }, async terminateGroup() { terminated++; finish({ ok: false, code: null, signal: "SIGTERM", drained: true, anchorLost: false }); } };
   return { requests, child, event, completeMessages() { for (const resolve of blocked.splice(0)) resolve(Response.json({ info: { id: "completed" }, parts: [] })); }, disconnect() { stream.close(); }, get terminated() { return terminated; }, async stop() { for (const resolve of blocked) resolve(Response.json({ info: { id: "stopped" }, parts: [] })); await server.stop(true); } };
 }
+
+test('OpenCode usage comes from the correlated response, never stale SSE; cache counters are not summed', async () => {
+  const s = fakeServer({ contextUsage: true }); const h = privateIo();
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child });
+    await task.done;
+    expect(h.events.filter(e => e.kind === 'usage')).toHaveLength(1);
+    expect(h.events.find(e => e.kind === 'usage')?.data).toMatchObject({ input: 100, cache: { read: 80, write: 20 }, context: { basis: 'opencode-message-input', tokens: 100, capacity: null, modelId: 'p/m', nativeThreadId: 'ses_native', nativeTurnId: 'user1' } });
+    await task.send('followup');
+    expect(h.events.filter(e => e.kind === 'usage')).toHaveLength(2);
+    expect(h.events.filter(e => e.kind === 'usage').at(-1)?.data.context).toMatchObject({ nativeTurnId: 'user2' });
+    await task.close();
+  } finally { await s.stop(); }
+});
+
+test('OpenCode post-compaction response preserves usage but invalidates context for this request', async () => {
+  const s = fakeServer({ contextUsage: true, compacted: true }); const h = privateIo();
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child });
+    await task.done;
+    expect(h.events.filter(e => e.kind === 'usage').at(-1)?.data.context).toBeUndefined();
+    expect(h.events.some(e => e.data.code === 'context.invalidated')).toBe(true);
+    await task.close();
+  } finally { await s.stop(); }
+});
 
 describe("OpenCode native image inputs", () => {
   test.each([false, true])("passes multiple image file parts to fresh/resumed turns (%s) without inheriting attachments", async (resumed) => {

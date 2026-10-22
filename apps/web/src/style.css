@@ -718,6 +718,20 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .lead-progress[data-phase=question] { color:var(--warning); }
 .lead-progress[data-phase=question] .lead-progress-dot { background:var(--warning); }
 
+.lead-progress { flex-wrap: wrap; }
+.lead-progress-status { display: inline-flex; align-items: center; gap: .5rem; }
+.context-window { position: relative; color: var(--muted); font-size: .75rem; line-height: 1.5; min-width: 0; max-width: 100%; }
+.context-window summary { cursor: pointer; overflow-wrap: anywhere; }
+.context-window summary:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+.context-window-details { padding: .5rem 0; overflow-wrap: anywhere; }
+.context-window-details p { margin: .25rem 0; }
+.lead-progress .context-window { margin-left: auto; }
+.task-heading > .context-window { grid-column: 1 / -1; justify-self: stretch; }
+@media (max-width: 640px) {
+    .lead-progress .context-window { margin-left: 0; flex-basis: 100%; }
+    .context-window summary { min-height: 1.75rem; }
+}
+
 .question-dock:has(.question-toggle[aria-expanded=true]) { display:flex; flex-direction:column; flex-shrink:1; min-height:0; }
 .question-docks { display:flex; flex-direction:column; flex:0 1 auto; min-height:0; max-height:45dvh; overflow:auto; }
 

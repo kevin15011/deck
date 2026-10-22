@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { mapCodexNotification } from "./mapper";
 
+test('context observation preserves Codex last counter without treating total or cached input as occupancy', () => {
+  const tokenUsage = { last: { totalTokens: 34794, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }, total: { totalTokens: 9000000 }, modelContextWindow: 258400 };
+  const result = mapCodexNotification({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread', turnId: 'turn', tokenUsage } })[0];
+  expect(result.data).toMatchObject({ ...tokenUsage, context: { basis: 'codex-last-total', tokens: 34794, capacity: 258400, nativeThreadId: 'thread', nativeTurnId: 'turn' } });
+  expect(result.data.context).not.toHaveProperty('percentage');
+  expect(mapCodexNotification({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread', turnId: 'turn', tokenUsage: { ...tokenUsage, modelContextWindow: null } } })[0].data.context).toMatchObject({ capacity: null });
+});
+
 describe("Codex app-server notification mapping", () => {
   test("future hook methods retain only bounded sanitized metadata without inventing lifecycle semantics", () => {
     const method = "hook/future token=synthetic-method-secret " + "x".repeat(1000);

@@ -9,6 +9,7 @@ import { Markdown } from './markdown';
 import { activityText, type HookActivity } from './activity';
 import { isLeadEvent } from './event-source';
 import { Avatar, agentProfile, FollowTranscript } from './subagent-parts';
+import { ContextWindowIndicator, contextIndexForEvents, type ContextWindowIndex } from './context-window';
 
 export type WorkspaceTab = 'chat' | 'activity' | 'subagents' | 'openspec';
 export type Api = (path: string, init?: RequestInit) => Promise<any>;
@@ -120,11 +121,11 @@ export function Activity({ events, sessionId = events[0]?.sessionId ?? '', visib
 }
 
 type TaskEntry = [string, ViewState['tasks'][string]];
-function taskModel(view: ViewState, id: string, task: TaskEntry[1], sessionId: string, readMarkers: ReadMarkers) {
+function taskModel(view: ViewState, id: string, task: TaskEntry[1], sessionId: string, readMarkers: ReadMarkers, context?: SessionEvent) {
     const reply = replyForTask(view.events, id), key = `${sessionId}:${id}:${reply?.attempt ?? task.attempt ?? 1}`;
     const messages = conversationEvents(view.events, id);
     return {
-        id, task, reply, key, messages,
+        id, task, reply, key, messages, context,
         member: String(task.memberId ?? id),
         questions: Object.values(view.questions).filter(event => event.source.taskId === id).length,
         approvals: Object.values(view.approvals).filter(event => event.source.taskId === id).length,
@@ -138,7 +139,7 @@ type TaskModel = ReturnType<typeof taskModel>;
 
 function TaskHeading({ model, onOpen }: { model: TaskModel; onOpen?: () => void }) {
     const { label } = agentProfile(model.member), state = String(model.task.state ?? 'created');
-    return <div className="task-heading"><Avatar memberId={model.member} size={onOpen ? 40 : 64}/><div className="task-identity"><h3>{label}</h3><p className="runner">{String(model.task.runnerId ?? 'Runner pending')} <span>· {String(model.task.modelId ?? 'Model pending')} · Attempt {String(model.task.attempt ?? 1)}</span></p></div><StatusIndicator state={state} approvals={model.approvals} questions={model.questions} unread={model.unread}/><span className="status-chip">{state}</span>{onOpen && <button type="button" className="open-detail" onClick={onOpen}>Open full view<svg className="navigation-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M9.5 2.5h4v4M13.5 2.5 8.5 7.5M6.5 3.5h-3v9h9v-3"/></svg></button>}</div>;
+    return <div className="task-heading"><Avatar memberId={model.member} size={onOpen ? 40 : 64}/><div className="task-identity"><h3>{label}</h3><p className="runner">{String(model.task.runnerId ?? 'Runner pending')} <span>· {String(model.task.modelId ?? 'Model pending')} · Attempt {String(model.task.attempt ?? 1)}</span></p></div><StatusIndicator state={state} approvals={model.approvals} questions={model.questions} unread={model.unread}/><span className="status-chip">{state}</span>{onOpen && <button type="button" className="open-detail" onClick={onOpen}>Open full view<svg className="navigation-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M9.5 2.5h4v4M13.5 2.5 8.5 7.5M6.5 3.5h-3v9h9v-3"/></svg></button>}<ContextWindowIndicator observation={model.context}/></div>;
 }
 function TaskResult({ model, visible, acknowledge, preview = false }: { model: TaskModel; visible: boolean; acknowledge: (key: string, seq: number) => void; preview?: boolean }) {
     if (model.result === undefined) return null;
@@ -148,7 +149,8 @@ function TranscriptMessages({ model, visible, acknowledge }: { model: TaskModel;
     return <>{model.messages.map(event => event.autoApproval?<AutoApprovalMessage key={event.seq} detail={event.autoApproval} label={agentProfile(model.member).label}/>:event.questionResolution?<QuestionAnswerMessage key={event.seq} resolution={event.questionResolution} ts={event.ts} label={agentProfile(model.member).label}/>:<article key={event.seq}><p className="message-meta">{event.data.role === 'user' ? 'Delegation' : agentProfile(model.member).label}</p><VisibleReply visible={visible} replyKey={model.key} seq={model.reply?.seq === event.seq ? event.seq : 0} acknowledge={acknowledge}><Markdown text={displayValue(event.data.text ?? event.data.error)}/></VisibleReply></article>)}</>;
 }
 
-export function Subagents({ api,view, sessionId = '', visible = false, readMarkers = {}, acknowledge = () => {} }: { api?:Api;view: ViewState; sessionId?: string; visible?: boolean; readMarkers?: ReadMarkers; acknowledge?: (key: string, seq: number) => void }) {
+export function Subagents({ api,view, sessionId = '', visible = false, readMarkers = {}, acknowledge = () => {}, contexts }: { api?:Api;view: ViewState; sessionId?: string; visible?: boolean; readMarkers?: ReadMarkers; acknowledge?: (key: string, seq: number) => void; contexts?: ContextWindowIndex }) {
+    const contextIndex = useMemo(() => contextIndexForEvents(view.events, sessionId, contexts), [view.events, sessionId, contexts]);
     const entries = Object.entries(view.tasks).filter(([id, task]) => id !== 'lead' && task.memberId !== 'lead') as TaskEntry[];
     // Compact reconnect history retains these lifecycle events as well as replies.
     const delegations = new Map<string, number>();
@@ -157,7 +159,7 @@ export function Subagents({ api,view, sessionId = '', visible = false, readMarke
         const id = event.source.taskId ?? event.data.taskId;
         if (typeof id === 'string') delegations.set(id, Math.max(delegations.get(id) ?? 0, event.seq));
     }
-    const models = entries.map(([id, task]) => ({ ...taskModel(view, id, task, sessionId, readMarkers), delegationSeq: delegations.get(id) ?? 0 }))
+    const models = entries.map(([id, task]) => ({ ...taskModel(view, id, task, sessionId, readMarkers, contextIndex.get(id)), delegationSeq: delegations.get(id) ?? 0 }))
         .sort((a, b) => Math.max(b.delegationSeq, b.reply?.seq ?? 0) - Math.max(a.delegationSeq, a.reply?.seq ?? 0));
     const [openId, setOpenId] = useState('');
     useEffect(() => { setOpenId(''); }, [sessionId]);

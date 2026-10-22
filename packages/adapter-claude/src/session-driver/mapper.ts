@@ -6,7 +6,7 @@
  * Shapes verified against 2.1.296 recordings in `__fixtures__/2.1.296` (tool_use/tool_result
  * and permission_denials per the documented format; see the fixture README).
  */
-import { boundRaw } from "@deck/core/session/events";
+import { boundRaw, sanitizeContextObservation } from "@deck/core/session/events";
 import { redactText } from "@deck/core/session/redaction";
 import type { DriverEvent, NativeMemoryDescriptor } from "@deck/core/session/driver";
 import type { TurnFailure } from "@deck/core/session/failure";
@@ -88,7 +88,8 @@ export class ClaudeStreamMapper {
   private apiFailure?: TurnFailure;
   private hookReported = false;
   private streamingMessageId?: string;
-  constructor(private readonly nativeMemory?: NativeMemoryDescriptor, private readonly sessionId?: string) {}
+  private contextCompacted = false;
+  constructor(private readonly nativeMemory?: NativeMemoryDescriptor, private readonly sessionId?: string, private readonly contextTurnId?: string) {}
 
   map(message: unknown): MapOutput {
     if (!isObj(message)) return { events: [] };
@@ -114,6 +115,11 @@ export class ClaudeStreamMapper {
 
   private system(m: Record<string, unknown>): MapOutput {
     const subtype = str(m.subtype) ?? "";
+    if (subtype === 'compact_boundary' || subtype === 'status' && m.status === 'compacting') {
+      if (m.session_id !== undefined && m.session_id !== this.sessionId) return { events: [] };
+      this.contextCompacted = true;
+      return { events: [{ kind: 'diagnostic', data: { code: 'context.invalidated', reason: 'compaction', nativeThreadId: this.sessionId, nativeTurnId: this.contextTurnId } }] };
+    }
     if (subtype === "init") return this.init(m);
     if (HOOK_SYSTEM.has(subtype)) {
       const events: DriverEvent[] = [];
@@ -255,12 +261,18 @@ export class ClaudeStreamMapper {
     };
     const events: DriverEvent[] = [];
     if (isObj(m.usage)) {
+      // modelUsage is aggregate accounting. Only an unambiguous single native
+      // model can contribute capacity; never sum it with cached input.
+      const models = isObj(m.modelUsage) ? Object.entries(m.modelUsage).filter(([, value]) => isObj(value)) : [];
+      const [modelId, modelUsage] = models.length === 1 ? models[0] : [];
+      const context = !this.contextCompacted && m.session_id === this.sessionId ? sanitizeContextObservation({ basis: 'claude-aggregate-input', tokens: m.usage.input_tokens, capacity: isObj(modelUsage) ? modelUsage.contextWindow : null, nativeThreadId: this.sessionId, nativeTurnId: this.contextTurnId, ...(modelId ? { modelId } : {}) }) : undefined;
       events.push({
         kind: "usage",
         data: {
           inputTokens: num(m.usage.input_tokens), outputTokens: num(m.usage.output_tokens),
           cacheReadTokens: num(m.usage.cache_read_input_tokens), cacheCreationTokens: num(m.usage.cache_creation_input_tokens),
           costUsd: num(m.total_cost_usd), durationMs: num(m.duration_ms), numTurns: num(m.num_turns),
+          ...(context ? { context } : {}),
         },
         raw: m,
       });

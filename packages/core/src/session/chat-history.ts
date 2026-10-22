@@ -2,6 +2,7 @@
  * independently of its completion cursor and of the authoritative live watermark. */
 import type { SessionEvent } from './events';
 import { redactText } from './redaction';
+import { ContextWindowProjection } from './context-window';
 
 /** Exact, bounded identity: never correlate using truncated or sanitized IDs. */
 export function compactionIdentity(event: SessionEvent): string | undefined {
@@ -26,6 +27,7 @@ export const HISTORY_WINDOW_SIZE = 120;
  * projection. Cardinality follows tasks, current queue receipts, outstanding
  * controls and a bounded recent activity buffer, rather than ledger size. */
 export class CurrentEvents {
+    private context = new ContextWindowProjection();
     private activity: SessionEvent[] = [];
     private entries = new Map<string, SessionEvent>();
     private compactionClosed = new Set<string>();
@@ -35,6 +37,7 @@ export class CurrentEvents {
         this.entries.delete(`progress:${task}:compaction:end`);
     }
     apply(event: SessionEvent) {
+        this.context.apply(event);
         if (event.kind === 'question.resolved')
             event = { ...event, data: { questionId: event.data.questionId, outcome: event.data.outcome, by: event.data.by } };
         const { kind, data, source } = event, task = String(source.taskId ?? data.taskId ?? 'lead');
@@ -114,6 +117,10 @@ export class CurrentEvents {
             put(`progress:${task}:phase`);
         if (kind === 'diagnostic' && ['turn.preparation', 'session.preparation', 'prompt.steering-capability'].includes(String(data.code)))
             put(`diagnostic:${data.code}:${task}`);
+        if (kind === 'diagnostic' && data.code === 'context.invalidated') {
+            const { raw: _raw, ...canonical } = event;
+            this.entries.set(`progress:${task}:context-invalidated`, { ...canonical, data: { code: data.code, nativeThreadId: data.nativeThreadId, nativeTurnId: data.nativeTurnId, attempt: data.attempt } });
+        }
         // Keep current queued/failed receipts, so failure notices survive paging.
         // Dispatched and cancelled content is removed rather than becoming history.
         const promptKey = `queued:${data.promptId}`, failureKey = `failed:${data.promptId}`;
@@ -163,5 +170,5 @@ export class CurrentEvents {
                 if (key.startsWith('progress:'))
                     this.entries.delete(key);
     }
-    values(): SessionEvent[] { return [...new Map([...this.activity, ...this.entries.values()].map(event => [event.seq, event])).values()].sort((a, b) => a.seq - b.seq); }
+    values(): SessionEvent[] { return [...new Map([...this.context.attributionEvents(), ...this.activity, ...this.entries.values(), ...this.context.values()].map(event => [event.seq, event])).values()].sort((a, b) => a.seq - b.seq); }
 }

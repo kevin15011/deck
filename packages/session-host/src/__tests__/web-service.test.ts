@@ -31,6 +31,31 @@ function fixture(extra = {}) {
 }
 async function pair(f: ReturnType<typeof fixture>) { const p = f.host.pair(); const response = await fetch(`${f.base}/pair`, { method: "POST", headers: { Origin: f.base, "Content-Type": "application/json" }, body: JSON.stringify({ code: p.code, name: "Test" }) }); return { response, cookie: response.headers.get("set-cookie")!.split(";")[0]!, p }; }
 
+test('P011 context observation crosses the production history and live chat transports', async () => {
+  const f = fixture(), { cookie } = await pair(f), headers = { Cookie: cookie };
+  const source = { taskId: 'lead', memberId: 'lead', runnerId: 'codex', nativeSessionId: 'thread' };
+  f.log.append({ kind: 'task.created', source, data: { taskId: 'lead', attempt: 1 } });
+  f.log.append({ kind: 'turn.started', source, data: { attempt: 1, nativeTurnId: 'turn' } });
+  const context = { basis: 'codex-last-total', tokens: 34794, capacity: 258400, nativeThreadId: 'thread', nativeTurnId: 'turn', modelId: 'model' };
+  f.log.append({ kind: 'usage', source, data: { attempt: 1, context }, raw: { runnerId: 'codex', protocol: 'codex-app-server', payload: { secret: 'RAW_NATIVE' }, truncated: false } });
+  const url = `${f.base}/api/sessions/s/history`;
+  const snapshot = await (await fetch(url, { headers })).json();
+  expect(snapshot.events.find((e: any) => e.kind === 'usage')?.data.context).toEqual(context);
+  expect(JSON.stringify(snapshot.events)).not.toContain('RAW_NATIVE');
+  const socket = new NativeWebSocket(`${f.base.replace('http:', 'ws:')}/api/sessions/s/events?after=${snapshot.seq}&view=chat`, { headers: { ...headers, Origin: f.base } });
+  const frames: any[] = []; socket.onmessage = event => frames.push(JSON.parse(String(event.data)));
+  try {
+    await waitFor(() => socket.readyState === WebSocket.OPEN);
+    f.log.append({ kind: 'usage', source, data: { attempt: 1, context: { ...context, tokens: 40000 } } });
+    f.log.append({ kind: 'turn.completed', source, data: { status: 'completed', attempt: 1 } });
+    await waitFor(() => frames.some(f => f.event?.kind === 'turn.completed'));
+    const live = frames.find(f => f.event?.kind === 'usage')?.event;
+    const reconnected = await (await fetch(url, { headers })).json();
+    expect(reconnected.events.filter((e: any) => e.kind === 'usage')).toHaveLength(1);
+    expect(reconnected.events.find((e: any) => e.kind === 'usage')).toEqual(live);
+  } finally { socket.close(); }
+});
+
 test("project actions require the authenticated same-origin workspace command boundary", async () => {
   const f = fixture();
   const commands = [{ type:"project.trust",projectId:"p",runnerId:"opencode",trusted:true,expectedRevision:0 }, { type: "project.rename", projectId: "p", name: "Renamed" }, { type: "project.remove", projectId: "p" }];

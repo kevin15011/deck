@@ -29,6 +29,21 @@ function responder(child: FakeChild, index: number, m: Record<string, unknown>) 
 }
 const imageDirs: string[] = [];
 
+test('usage belongs to exact live native turn; post-compaction counters remain raw usage only', async () => {
+  const h = harness(responder); const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId; await Promise.resolve();
+  const child = h.children.at(-1)!;
+  const usage = (patch = {}) => child.stdout({ method: 'thread/tokenUsage/updated', params: { threadId: 'native-thread', turnId: 'turn', tokenUsage: { last: { totalTokens: 100, cachedInputTokens: 90 }, total: { totalTokens: 90000 }, modelContextWindow: 200 }, ...patch } });
+  usage({ threadId: 'foreign' }); usage({ turnId: 'old' }); usage({ turnId: undefined });
+  expect(h.events.filter(e => e.kind === 'usage')).toHaveLength(0);
+  usage(); expect(h.events.filter(e => e.kind === 'usage').at(-1)?.data.context).toMatchObject({ tokens: 100, capacity: 200 });
+  for (const method of ['item/started', 'item/completed']) child.stdout({ method, params: { threadId: 'native-thread', turnId: 'turn', item: { id: 'compaction', type: 'contextCompaction' } } });
+  usage(); expect(h.events.filter(e => e.kind === 'usage').at(-1)?.data.context).toBeUndefined();
+  expect(h.events.filter(e => e.kind === 'usage').at(-1)?.data.last).toEqual({ totalTokens: 100, cachedInputTokens: 90 });
+  child.stdout({ method: 'turn/completed', params: { threadId: 'native-thread', turn: { id: 'turn', status: 'completed' } } }); await task.done;
+  const count = h.events.filter(e => e.kind === 'usage').length; usage();
+  expect(h.events.filter(e => e.kind === 'usage')).toHaveLength(count); await task.close();
+});
+
 describe("P012 Codex failure outcomes", () => {
   test("the observed overload incident reaches the terminal outcome", async () => {
     const h = harness(responder); const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId; await Promise.resolve();

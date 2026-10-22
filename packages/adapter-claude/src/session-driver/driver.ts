@@ -110,7 +110,7 @@ class ClaudeTask {
     catch { return { status: "failed", error: "image-input-invalid" }; }
     const resume = this.input.resume !== undefined || !this.firstTurnPending;
     this.firstTurnPending = false;
-    const emit = (event: DriverEvent) => { try { this.io.emit(event); } catch { /* a sink failure must not break the turn */ } };
+    const emit = (event: DriverEvent) => { try { this.io.emit(event.kind === 'turn.started' ? { ...event, data: { ...event.data, nativeThreadId: this.nativeId, nativeTurnId: executionId } } : event); } catch { /* a sink failure must not break the turn */ } };
 
     let launch: ClaudeTurnLaunch;
     try {
@@ -142,7 +142,7 @@ class ClaudeTask {
     const splitter = new ClaudeLineSplitter();
     // Native personal hooks can share events. Event names alone no longer prove provider provenance.
     const memory = this.input.nativeMemory;
-    const mapper = new ClaudeStreamMapper(memory?.plugin ? { ...memory, plugin: { ...memory.plugin, exclusiveHookEvents: [] } } : memory, this.nativeId);
+    const mapper = new ClaudeStreamMapper(memory?.plugin ? { ...memory, plugin: { ...memory.plugin, exclusiveHookEvents: [] } } : memory, this.nativeId, executionId);
     const onLine = (line: string) => this.onLine(line, mapper, state, launch, emit, Boolean(images?.length));
     child.onStdout((chunk) => { for (const line of splitter.push(chunk)) onLine(line); });
     child.onStderr((chunk) => { state.stderr = (state.stderr + chunk).slice(-STDERR_TAIL); });
@@ -165,7 +165,7 @@ class ClaudeTask {
   }
 
   private onLine(line: string, mapper: ClaudeStreamMapper, state: TurnState, launch: ClaudeTurnLaunch, emit: (e: DriverEvent) => void, imageTurn = false): void {
-    if (state.fatal) return;
+    if (state.fatal || state.finished || this.current !== state) return;
     const parsed = parseClaudeLine(line);
     const events = parsed.ok ? undefined : mapper.unparsable(imageTurn ? "Image turn native diagnostic omitted" : redactImagePayload(line));
     if (events) { for (const e of events) emit(e); return; }

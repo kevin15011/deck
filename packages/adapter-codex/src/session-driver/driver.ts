@@ -30,7 +30,7 @@ function nativeModel(modelId: string): { model: string; modelProvider?: string }
   const slash = modelId.indexOf("/");
   return slash < 0 ? { model: modelId } : { model: modelId.slice(slash + 1), ...(modelId.slice(0, slash) === "openai-codex" ? {} : { modelProvider: modelId.slice(0, slash) }) };
 }
-type Turn = { id?: string; confirmedId?: string; resolve(outcome: TurnOutcome): void; interrupted: boolean; escalation?: ReturnType<typeof setTimeout>; nativeFailure?: { turnId: string; failure: TurnFailure } };
+type Turn = { id?: string; confirmedId?: string; contextCompacted?: boolean; resolve(outcome: TurnOutcome): void; interrupted: boolean; escalation?: ReturnType<typeof setTimeout>; nativeFailure?: { turnId: string; failure: TurnFailure } };
 const isHookNotification = (message: RpcMessage) => message.method?.startsWith("hook/") === true;
 
 // Canonical action data is passed only to the in-memory approval broker, never emitted.
@@ -284,6 +284,20 @@ class CodexTask {
         || p.threadId !== this.threadId || p.turnId !== (active.confirmedId ?? active.id)) {
         this.emit({ kind: "runner.unmapped", data: { nativeType: message.method, reason: "stale-turn" } }); return;
       }
+      if (message.method === 'item/started') active.contextCompacted = true;
+    }
+    if (message.method === 'thread/tokenUsage/updated') {
+      const active = this.turn;
+      if (this.closed || this.failed || !active || active.interrupted || !active.id || p.threadId !== this.threadId || p.turnId !== (active.confirmedId ?? active.id)) {
+        this.emit({ kind: 'runner.unmapped', data: { nativeType: message.method, reason: 'stale-turn' } }); return;
+      }
+      // Preserve raw/native usage compatibility, but no delayed pre-compaction
+      // counter may become a new context observation in this native turn.
+      for (const event of mapCodexNotification(message, this.attestedMemory)) {
+        if (active.contextCompacted) { const { context: _context, ...data } = event.data; this.emit({ ...event, data }); }
+        else this.emit(event);
+      }
+      return;
     }
     if (message.method === "turn/started" && this.turn) {
       if(this.turn.confirmedId && object(p.turn).id!==this.turn.confirmedId){this.emit({kind:"runner.unmapped",data:{nativeType:message.method,reason:"stale-turn"}});return;}

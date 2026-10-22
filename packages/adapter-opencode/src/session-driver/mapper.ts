@@ -1,5 +1,5 @@
 import type { DriverEvent } from "@deck/core/session/driver";
-import { boundRaw } from "@deck/core/session/events";
+import { boundRaw, sanitizeContextObservation } from "@deck/core/session/events";
 import { redactText } from "@deck/core/session/redaction";
 export const OPENCODE_PROTOCOL = "opencode-serve-sse";
 export const record = (v: unknown): v is Record<string, any> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -41,6 +41,14 @@ export function mapOpenCodeEvent(raw: unknown, partTypes = new Map<string, strin
   if (typeof raw.type === "string" && (raw.type === "question.asked" || raw.type === "question.replied" || raw.type === "question.rejected" || raw.type.startsWith("question.v2."))) return [];
   const p = record(raw.properties) ? raw.properties : {};
   const part = record(p.part) ? p.part : {};
+  if (raw.type === 'message.updated' && record(p.info) && p.info.role === 'assistant') {
+    const info = p.info;
+    const tokens = record(info.tokens) ? info.tokens : {};
+    const context = sanitizeContextObservation({ basis: 'opencode-message-input', tokens: tokens.input, capacity: null, nativeThreadId: info.sessionID, nativeTurnId: info.parentID, modelId: typeof info.providerID === 'string' && typeof info.modelID === 'string' ? `${info.providerID}/${info.modelID}` : undefined });
+    // The SDK separates input/output/reasoning/cache. Their composition is not
+    // an occupancy contract: retain the individual input counter, no arithmetic.
+    return [{ kind: 'usage', data: { ...tokens, ...(context && info.summary !== true ? { context } : {}) }, raw }];
+  }
   if (raw.type === "message.part.delta") {
     const key = partKey(p.messageID, p.partID);
     if (!key || !partTypes.has(key) || partTypes.get(key) === "question" || partTypes.get(key) === "tool") return [{ kind: "runner.unmapped", data: { type: raw.type } }];

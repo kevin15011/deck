@@ -9,6 +9,7 @@ import { isQuestionAnswers } from "./question";
 import { isApprovalMode } from "./commands";
 import { validTaskAccounting, validTaskIntegration } from "./mcp";
 import { redactText } from "./redaction";
+export { sanitizeContextObservation, contextTokens, contextCapacity, contextIdentity, type ContextObservation } from './context-window';
 
 export const SESSION_EVENT_VERSION = 1 as const;
 export const RAW_PAYLOAD_LIMIT_BYTES = 64 * 1024;

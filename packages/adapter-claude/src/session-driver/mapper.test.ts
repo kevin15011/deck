@@ -2,6 +2,18 @@ import { describe, expect, test } from "bun:test";
 import { fixtureLines } from "./fixtures";
 import { ClaudeLineSplitter, ClaudeStreamMapper, parseClaudeLine } from "./mapper";
 
+test('Claude result accounting remains aggregate, with only unambiguous per-model capacity', () => {
+  const mapper = new ClaudeStreamMapper(undefined, 'session', 'execution');
+  const result = { type: 'result', session_id: 'session', subtype: 'success', usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 200 }, modelUsage: { 'claude-model': { inputTokens: 10, contextWindow: 200000 } } };
+  expect(mapper.map(result).events.find(e => e.kind === 'usage')?.data).toMatchObject({ inputTokens: 10, cacheReadTokens: 200, context: { basis: 'claude-aggregate-input', tokens: 10, capacity: 200000, modelId: 'claude-model', nativeThreadId: 'session', nativeTurnId: 'execution' } });
+  expect(mapper.map({ ...result, modelUsage: { a: { contextWindow: 200000 }, b: { contextWindow: 1000000 } } }).events[0].data.context).toMatchObject({ capacity: null });
+  expect(mapper.map({ ...result, session_id: 'foreign' }).events[0].data.context).toBeUndefined();
+  mapper.map({ type: 'system', subtype: 'compact_boundary', session_id: 'foreign' });
+  expect(mapper.map(result).events[0].data.context).toBeDefined();
+  mapper.map({ type: 'system', subtype: 'compact_boundary' });
+  expect(mapper.map(result).events[0].data.context).toBeUndefined();
+});
+
 function run(name: string) {
   const mapper = new ClaudeStreamMapper();
   const events: Array<{ kind: string; data: Record<string, unknown>; raw?: unknown }> = [];

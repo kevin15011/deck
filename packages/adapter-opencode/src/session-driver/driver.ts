@@ -18,7 +18,7 @@ const nativeExec: NonNullable<OpenCodeSessionDriverOptions["exec"]> = (cmd, args
 });
 const compare = (a: string, b: string) => { const aa = a.split(".").map(Number), bb = b.split(".").map(Number); for (let i = 0; i < 3; i++) if (aa[i] !== bb[i]) return aa[i]! - bb[i]!; return 0; };
 
-type Turn = { settle: (outcome: TurnOutcome) => void; interrupted: boolean; forced?: boolean; timer?: ReturnType<typeof setTimeout>; controller: AbortController };
+type Turn = { settle: (outcome: TurnOutcome) => void; interrupted: boolean; contextCompacted?: boolean; forced?: boolean; timer?: ReturnType<typeof setTimeout>; controller: AbortController };
 
 class OpenCodeTask {
   private base = "";
@@ -149,8 +149,15 @@ class OpenCodeTask {
     const p = record(raw) && record(raw.properties) ? raw.properties : {};
     const sid = p.sessionID ?? (record(p.part) ? p.part.sessionID : undefined) ?? (record(p.info) ? p.info.sessionID : undefined);
     if (sid && sid !== this.nativeId) return;
-    for (const event of this.mapper.map(raw)) this.emit(event);
+    // SSE assistant updates carry a parent id but this request does not yet
+    // know its native user-message id. Use the existing correlated HTTP result
+    // below instead of assigning a late same-session update to a new request.
+    for (const event of this.mapper.map(raw)) if (event.kind !== 'usage') this.emit(event);
     if (!record(raw)) return;
+    if (raw.type === 'session.compacted' && sid === this.nativeId) {
+      if (this.current) this.current.contextCompacted = true;
+      this.emit({ kind: 'diagnostic', data: { code: 'context.invalidated', reason: 'compaction', nativeThreadId: this.nativeId } });
+    }
     if (raw.type === "permission.asked") this.permission(p);
     if (raw.type === "question.asked") this.question(p);
     if (raw.type === "session.error") {
@@ -245,7 +252,7 @@ Patterns: ${raw.always.join("\n")}`,
     if (split <= 0) return Promise.resolve({ status: "failed", error: "OpenCode model must be provider/model" });
     const done = new Promise<TurnOutcome>(settle => { this.current = { settle, interrupted: false, controller: new AbortController() }; });
     const turn = this.current!;
-    this.emit({ kind: "turn.started", data: { nativeSessionId: this.nativeId, model: this.input.assignment.modelId } });
+    this.emit({ kind: "turn.started", data: { nativeSessionId: this.nativeId, nativeThreadId: this.nativeId, model: this.input.assignment.modelId } });
     void this.request(`/session/${encodeURIComponent(this.nativeId)}/message`, {
       system: this.input.rolePrompt, model: { providerID: modelId.slice(0, split), modelID: modelId.slice(split + 1) },
       ...(this.input.assignment.thinking && this.input.assignment.thinking !== "off" ? { variant: this.input.assignment.thinking } : {}), parts: [...(prompt || !nativeImages.length ? [{ type: "text", text: prompt }] : []), ...nativeImages.map(image => ({ type: "file", mime: image.mimeType, filename: image.name, url: `data:${image.mimeType};base64,${image.data}` }))],
@@ -253,6 +260,14 @@ Patterns: ${raw.always.join("\n")}`,
       if (this.current !== turn) return;
       if (turn.interrupted && record(result) && record(result.info) && record(result.info.error) && result.info.error.name === "MessageAbortedError") return this.finish({ status: "interrupted" });
       if (!record(result) || !record(result.info) || result.info.error) return this.finish({ status: "failed", error: "OpenCode message failed", failure: classifyOpenCodeFailure(record(result) && record(result.info) ? result.info.error : undefined) });
+      if (result.info.sessionID === this.nativeId && !turn.interrupted) {
+        for (const event of this.mapper.map({ type: 'message.updated', properties: { info: result.info } })) {
+          if (event.kind === 'usage') {
+            const { context, ...native } = event.data;
+            this.emit({ ...event, data: { ...native, ...(!turn.contextCompacted && context ? { context } : {}) } });
+          }
+        }
+      }
       for (const part of Array.isArray(result.parts) ? result.parts : []) if (record(part) && part.type === "text" && typeof part.text === "string") this.emit({ kind: "message.completed", data: { text: part.text, messageId: result.info.id }, raw: part });
       this.finish({ status: turn.interrupted ? "interrupted" : "completed" });
     }, error => { if (this.current === turn && !turn.interrupted) this.finish({ status: "failed", error: redactText((error as Error).message, 400) }); });
