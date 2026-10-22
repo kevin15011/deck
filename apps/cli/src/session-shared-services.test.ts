@@ -11,6 +11,30 @@ import { execFileSync } from "node:child_process";
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
+test.each(["claude", "codex"])("%s preparation reports bounded stages without extra provider calls", async runnerId => {
+  const config = getDefaultDeckConfig(); config.adaptiveMemory.enabled = false; config.webSearch.enabled = false;
+  const stages: string[] = []; let reads = 0, checks = 0;
+  const spec = { command: "fixture-private-command", args: [], env: {} };
+  const adapter = { runnerId, readSessionMcpServers: async () => { reads++; return { "codebase-memory": spec }; } } as unknown as RunnerAdapter;
+  const resolver = await resolveSessionChildMcp(adapter, config, {}, {
+    context: { projectRoot: "/fixture", sessionId: "s", taskId: "t", signal: new AbortController().signal, preparationStep: step => stages.push(step) },
+    readiness: { ensure: async () => { checks++; return spec; }, release: async () => {} } as never,
+  });
+  expect(stages).toEqual(["native-memory", "native-mcp-config", "capability-policy", "codebase-readiness"]);
+  expect(reads).toBe(1); expect(checks).toBe(1);
+  expect(resolver.resolveServer("codebase-memory")).toEqual(spec);
+  await resolver.release?.();
+});
+
+test("preparation observation cannot fail resolver work", async () => {
+  const config = getDefaultDeckConfig(); config.adaptiveMemory.enabled = false; config.webSearch.enabled = false;
+  const resolver = await resolveSessionChildMcp({ runnerId: "claude" } as RunnerAdapter, config, {}, {
+    context: { projectRoot: "/fixture", sessionId: "s", taskId: "t", signal: new AbortController().signal, preparationStep: () => { throw new Error("observer failure"); } },
+    readiness: {} as never,
+  });
+  expect(resolver.runnerPackages("claude")).toEqual([]);
+});
+
 describe("cross-session shared services", () => {
   test("memory is lazy, scoped to one Deck session, and uses explicit host operations only", async () => {
     const config = getDefaultDeckConfig();

@@ -89,7 +89,13 @@ export type ChildMcpResolver = {
   release?(): Promise<void>;
 };
 
-export type ChildMcpContext = { projectRoot: string; sessionId: string; taskId: string; signal: AbortSignal };
+const CHILD_MCP_PREPARATION_STEPS = ["native-memory", "native-mcp-config", "capability-policy", "memory-transport", "codebase-readiness", "cleanup"] as const;
+type ChildMcpPreparationStep = typeof CHILD_MCP_PREPARATION_STEPS[number];
+export type ChildMcpContext = {
+  projectRoot: string; sessionId: string; taskId: string; signal: AbortSignal;
+  /** Optional metadata-only stage boundary; never pass paths, configuration or payloads. */
+  preparationStep?: (step: ChildMcpPreparationStep) => void;
+};
 
 /** Structural counterpart of the CLI prompt context; session-host never imports the composition root. */
 export type SessionRolePromptContext = {
@@ -1594,7 +1600,34 @@ export class SessionManager implements SessionService {
       this.options.credentials.revokeTask(live.sessionId, turn.taskId);
       if (turn.controller.signal.aborted) throw new Error("turn-cancelled");
       preparation("preparing-tools");
-      resolver = typeof this.options.childMcp === "function" ? await this.options.childMcp(assignment.runnerId, { projectRoot: live.meta.projectRoot, sessionId: live.sessionId, taskId: turn.taskId, signal: turn.controller.signal }) : this.options.childMcp;
+      if (typeof this.options.childMcp === "function") {
+        const startedAt = this.clock.now();
+        const durations = new Map<ChildMcpPreparationStep, number>();
+        let step: ChildMcpPreparationStep | undefined, stepStartedAt = startedAt, finished = false, completed = false;
+        const finishStep = (now: number) => {
+          if (step) durations.set(step, (durations.get(step) ?? 0) + Math.max(0, now - stepStartedAt));
+        };
+        try {
+          resolver = await this.options.childMcp(assignment.runnerId, {
+            projectRoot: live.meta.projectRoot, sessionId: live.sessionId, taskId: turn.taskId, signal: turn.controller.signal,
+            preparationStep: next => {
+              if (finished || !CHILD_MCP_PREPARATION_STEPS.includes(next)) return;
+              const now = this.clock.now(); finishStep(now); step = next; stepStartedAt = now;
+            },
+          });
+          completed = true;
+        } finally {
+          finished = true;
+          const now = this.clock.now(); finishStep(now);
+          // One bounded event per observed resolver call, including failures; no extra flush or native request.
+          if (durations.size) this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: {
+            code: "turn.preparation-detail", phase: "preparing-tools", attempt: preparationAttempt,
+            outcome: turn.controller.signal.aborted ? "cancelled" : completed ? "completed" : "failed",
+            durationMs: Math.max(0, now - startedAt),
+            steps: [...durations].map(([step, durationMs]) => ({ step, durationMs })),
+          } });
+        }
+      } else resolver = this.options.childMcp;
       if (turn.controller.signal.aborted) throw new Error("turn-cancelled");
       const capabilityAvailability = reviewedCapabilityAvailability(resolver, assignment.runnerId);
       const personalMcpAvailability = validatePersonalMcpAvailability(resolver?.personalMcpAvailability);

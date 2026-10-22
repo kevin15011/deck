@@ -1,0 +1,93 @@
+{
+  "kind": "historical-task-attempt-milestones",
+  "sessions": 7,
+  "malformedLines": 0,
+  "runners": [
+    {
+      "runner": "claude",
+      "attempts": 143,
+      "withoutOutput": 3,
+      "terminalStatuses": {
+        "completed": 136,
+        "failed": 3,
+        "interrupted": 4
+      },
+      "observedVersions": [
+        "2.1.301"
+      ],
+      "metrics": {
+        "preparationToNativeStart": {
+          "n": 142,
+          "medianMs": 12883.0,
+          "p95Ms": 19543.0,
+          "maxMs": 35906.0
+        },
+        "preparationToFirstActivity": {
+          "n": 142,
+          "medianMs": 16816.5,
+          "p95Ms": 30466.0,
+          "maxMs": 49255.0
+        },
+        "preparationToFirstOutput": {
+          "n": 140,
+          "medianMs": 33981.0,
+          "p95Ms": 124747.0,
+          "maxMs": 917137.0
+        },
+        "nativeStartToFirstOutput": {
+          "n": 140,
+          "medianMs": 19298.0,
+          "p95Ms": 111323.0,
+          "maxMs": 906075.0
+        }
+      }
+    },
+    {
+      "runner": "codex",
+      "attempts": 259,
+      "withoutOutput": 15,
+      "terminalStatuses": {
+        "completed": 229,
+        "failed": 12,
+        "interrupted": 17,
+        "not-observed": 1
+      },
+      "observedVersions": [],
+      "metrics": {
+        "preparationToNativeStart": {
+          "n": 246,
+          "medianMs": 15681.0,
+          "p95Ms": 26262.0,
+          "maxMs": 38420.0
+        },
+        "preparationToFirstActivity": {
+          "n": 245,
+          "medianMs": 22104.0,
+          "p95Ms": 33863.0,
+          "maxMs": 140535.0
+        },
+        "preparationToFirstOutput": {
+          "n": 244,
+          "medianMs": 22036.5,
+          "p95Ms": 33863.0,
+          "maxMs": 140535.0
+        },
+        "nativeStartToFirstOutput": {
+          "n": 244,
+          "medianMs": 5780.0,
+          "p95Ms": 9985.0,
+          "maxMs": 130150.0
+        }
+      }
+    }
+  ],
+  "preparationSteps": [],
+  "limitations": [
+    "Historical local builds and unequal workloads; not a controlled runner benchmark.",
+    "First output is a nonempty assistant message event, not first model token or browser paint.",
+    "First activity includes tool starts and reasoning deltas; neither implies a rendered user-visible message.",
+    "Native start has runner-specific semantics; tool/approval/compaction waits may precede output.",
+    "No timing is assigned to missing milestones; medians must not be added.",
+    "Correlation uses task event order; the old ledger has no universal attempt ID on native events."
+  ]
+}

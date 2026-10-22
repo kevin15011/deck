@@ -1,0 +1,24 @@
+schema: spec-registry-v1
+changeId: session-context-latency-investigation
+name: Session latency and context investigation
+currentPhase: apply
+status: completed
+exploration_context: sdd
+next_action: "Activate the measurement candidate in a development session to collect real preparation substages, then select a minimal optimization from matched Claude/Codex evidence. Running daemon unchanged; community correlation and live benchmarks remain outstanding."
+artifacts:
+  exploration: working-brief.md
+  apply_progress: preparation-progress.md
+  preconditions: preconditions.md
+provenance:
+  - phase: apply
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-22T12:10:58Z"
+    registryWrite: non-deferred
+    note: "User authorized proceeding. Bounded cross-runner preparation measurement implemented and tested; isolated fresh/warm preparation compared without inference. No daemon activation or claimed performance fix."
+  - phase: explore
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-22T11:07:27Z"
+    registryWrite: non-deferred
+    note: "User prioritized P-008 research on the branch from updated main. Source fallback for stale graph coverage, four synthetic driver characterizations, and 122 existing tests; no product changes or original-machine root-cause claim."

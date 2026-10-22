@@ -1,0 +1,44 @@
+{
+  "kind": "synthetic-driver-characterization",
+  "results": [
+    {
+      "scenario": "bounded-resume",
+      "outcome": {
+        "status": "completed"
+      },
+      "excludedResumeTurns": true
+    },
+    {
+      "scenario": "oversized-steering-history",
+      "historyBytes": 1050808,
+      "maxFrameBytes": 1048576,
+      "reconciliation": "unknown",
+      "outcome": {
+        "status": "failed",
+        "error": "codex-rpc-frame-too-large"
+      },
+      "childTerminations": 1
+    },
+    {
+      "scenario": "oversized-tool-output",
+      "frameBytes": 1050882,
+      "outcome": {
+        "status": "failed",
+        "error": "codex-rpc-frame-too-large"
+      },
+      "mappedToolCompletions": 0
+    },
+    {
+      "scenario": "startup-timeout",
+      "outcome": {
+        "status": "failed",
+        "error": "codex-startup-failed"
+      },
+      "unansweredMethod": "config/read",
+      "diagnosticCodes": [
+        "codex-mcp-aliases",
+        "codex-startup-failed"
+      ]
+    }
+  ]
+}

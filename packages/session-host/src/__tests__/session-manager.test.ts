@@ -1043,6 +1043,38 @@ describe("persistent workspace sessions", () => {
 describe("turn preparation diagnostics", () => {
   const preparation = (events: SessionEvent[]) => events.filter(e => e.kind === "diagnostic" && e.data.code === "turn.preparation");
 
+  test.each(["completed", "failed", "cancelled"])("records one bounded tool preparation breakdown on %s", async outcome => {
+    const clock = new FakeClock();
+    let lateStep: ((step: any) => void) | undefined;
+    const t = setup({ options: { clock, childMcp: async (_runner, context) => {
+      lateStep = context.preparationStep;
+      context.preparationStep?.("native-memory"); clock.advance(10);
+      context.preparationStep?.("native-mcp-config"); clock.advance(20);
+      context.preparationStep?.("private-token-and-path" as never);
+      context.preparationStep?.("codebase-readiness"); clock.advance(30);
+      if (outcome === "cancelled") {
+        await t.run({ type: "task.cancel", taskId: "lead" }, sessionId);
+        throw new Error("cancelled fixture");
+      }
+      if (outcome === "failed") throw new Error("private failure content");
+      return { runnerPackages: () => [], resolveServer: () => undefined };
+    } } });
+    const sessionId = await t.create();
+    await t.run({ type: "prompt.send", text: "private prompt" }, sessionId);
+    if (outcome === "completed") {
+      await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "native start");
+      lastTurn(t.driver).finish();
+    }
+    await t.idle();
+    lateStep?.("native-memory"); clock.advance(100);
+    const details = t.events(sessionId).filter(e => e.data.code === "turn.preparation-detail");
+    expect(details).toHaveLength(1);
+    expect(details[0]!.data).toEqual({ code: "turn.preparation-detail", phase: "preparing-tools", attempt: 1, outcome, durationMs: 60,
+      steps: [{ step: "native-memory", durationMs: 10 }, { step: "native-mcp-config", durationMs: 20 }, { step: "codebase-readiness", durationMs: 30 }] });
+    expect(details[0]!.source).toMatchObject({ taskId: "lead", runnerId: "claude" });
+    expect(JSON.stringify(details)).not.toContain("private");
+  });
+
   test("durably records actual preparation boundaries and driver turn start once with injected timing", async () => {
     const clock = new FakeClock();
     const driver = new FakeDriver();

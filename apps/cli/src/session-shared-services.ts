@@ -42,8 +42,14 @@ export async function resolveSessionChildMcp(
   nativeMemoryEffects?: NativeMemoryPreparationEffects,
   startGlobalTransport: typeof startGlobalMemoryTransport = startGlobalMemoryTransport,
 ): Promise<ChildMcpResolver> {
+  const step = (name: Parameters<NonNullable<ChildMcpContext["preparationStep"]>>[0]) => {
+    try { managed?.context.preparationStep?.(name); } catch { /* Observation must not change preparation or cleanup. */ }
+  };
+  step("native-memory");
   const memory = managed ? prepareSessionNativeMemory(adapter?.runnerId ?? "", managed.context.projectRoot, config, environment, nativeMemoryEffects) : undefined;
+  step("native-mcp-config");
   const configured = { ...await adapter?.readSessionMcpServers?.() };
+  step("capability-policy");
   // Ordinary servers, skills and plugins stay in the native loader. Only Codebase
   // needs a task binding prepared by the managed recovery service.
   const servers: Record<string, ChildMcpServerSpec> = managed
@@ -80,6 +86,7 @@ export async function resolveSessionChildMcp(
   })().finally(() => { releasing = undefined; });
   try {
     if (memory?.globalTransportToken) {
+      step("memory-transport");
       const transport = await startGlobalTransport({ token: memory.globalTransportToken, signal: managed?.context.signal });
       releases.push(() => transport.close());
       const credentialKey = adapter?.runnerId === "claude" ? "SUPERMEMORY_CC_API_KEY" : "SUPERMEMORY_API_KEY";
@@ -91,6 +98,7 @@ export async function resolveSessionChildMcp(
       if (!codebase) capabilityAvailability.push({ capabilityId: "codebase-memory", status: "unselected" });
       else {
         try {
+          step("codebase-readiness");
           if (codebase.transport === "http") throw new SessionCodebaseReadinessError("unsupported");
           const prepared = await managed.readiness.ensure(codebase, managed.context, envOverlay);
           servers["codebase-memory"] = prepared;
@@ -108,6 +116,7 @@ export async function resolveSessionChildMcp(
       release = releaseResources;
     }
   } catch (error) {
+    step("cleanup");
     await Promise.allSettled(releases.map(close => Promise.resolve().then(close)));
     throw error;
   }

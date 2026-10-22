@@ -1,0 +1,29 @@
+{
+  "kind": "local-copied-ledger-characterization",
+  "runtime": "1.4.0",
+  "sessionId": "20261021T141551-27e992",
+  "segments": 9,
+  "events": 96090,
+  "diskBytes": 143689486,
+  "openMs": 238.783,
+  "coldHistoryIndexMs": 977.755,
+  "indexRandomReads": 2614,
+  "firstPageMs": 3.352,
+  "firstPageReads": 46,
+  "warmLatestPageMedianMs": 0.793,
+  "warmLatestPageP95Ms": 1.01,
+  "warmSamples": 20,
+  "pageMessages": 40,
+  "pageCurrentEvents": 355,
+  "pageBytes": 810744,
+  "hypotheticalPageBytesWithoutRaw": 445522,
+  "eventsWithRaw": 76420,
+  "eventBytes": 143593396,
+  "hypotheticalEventBytesWithoutRaw": 63613804,
+  "limitations": [
+    "One local ledger; application-cold index, warm filesystem cache after copying; no mobile or browser measurement.",
+    "Index construction includes any lazy byte-index construction triggered by readEvent.",
+    "Raw removal is hypothetical serialization only; not a supported protocol change or measured transfer saving.",
+    "Timings are observations, not regression thresholds or community incident attribution."
+  ]
+}

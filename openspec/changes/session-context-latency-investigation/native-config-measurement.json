@@ -1,0 +1,52 @@
+{
+  "kind": "local-read-only-native-config",
+  "runtime": "1.4.0",
+  "registryMs": 1.414858000000038,
+  "results": [
+    {
+      "runnerId": "claude",
+      "samples": [
+        {
+          "durationMs": 479.362,
+          "status": "ok",
+          "serverCount": 1
+        },
+        {
+          "durationMs": 3.6,
+          "status": "ok",
+          "serverCount": 1
+        },
+        {
+          "durationMs": 3.536,
+          "status": "ok",
+          "serverCount": 1
+        }
+      ]
+    },
+    {
+      "runnerId": "codex",
+      "samples": [
+        {
+          "durationMs": 256.273,
+          "status": "ok",
+          "serverCount": 1
+        },
+        {
+          "durationMs": 3.246,
+          "status": "ok",
+          "serverCount": 1
+        },
+        {
+          "durationMs": 3.057,
+          "status": "ok",
+          "serverCount": 1
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Three sequential observations per runner; not matched native model workloads.",
+    "Only adapter inventory is measured, excluding managed readiness, native process initialization and model work.",
+    "Source checkout and currently installed selection; not the already-running daemon build."
+  ]
+}

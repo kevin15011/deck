@@ -1,0 +1,161 @@
+{
+  "kind": "isolated-managed-tool-preparation",
+  "runtime": "1.4.0",
+  "results": [
+    {
+      "runnerId": "claude",
+      "sample": 0,
+      "status": "completed",
+      "capabilityStatus": "ready",
+      "durationMs": 6325.919,
+      "steps": [
+        {
+          "step": "native-memory",
+          "durationMs": 0.251
+        },
+        {
+          "step": "native-mcp-config",
+          "durationMs": 255.728
+        },
+        {
+          "step": "capability-policy",
+          "durationMs": 0.435
+        },
+        {
+          "step": "codebase-readiness",
+          "durationMs": 6068.553
+        }
+      ]
+    },
+    {
+      "runnerId": "claude",
+      "sample": 1,
+      "status": "completed",
+      "capabilityStatus": "ready",
+      "durationMs": 10.793,
+      "steps": [
+        {
+          "step": "native-memory",
+          "durationMs": 0.007
+        },
+        {
+          "step": "native-mcp-config",
+          "durationMs": 3.667
+        },
+        {
+          "step": "capability-policy",
+          "durationMs": 0.324
+        },
+        {
+          "step": "codebase-readiness",
+          "durationMs": 6.736
+        }
+      ]
+    },
+    {
+      "runnerId": "claude",
+      "sample": 2,
+      "status": "completed",
+      "capabilityStatus": "ready",
+      "durationMs": 11.359,
+      "steps": [
+        {
+          "step": "native-memory",
+          "durationMs": 0.005
+        },
+        {
+          "step": "native-mcp-config",
+          "durationMs": 3.332
+        },
+        {
+          "step": "capability-policy",
+          "durationMs": 0.346
+        },
+        {
+          "step": "codebase-readiness",
+          "durationMs": 7.6
+        }
+      ]
+    },
+    {
+      "runnerId": "codex",
+      "sample": 0,
+      "status": "completed",
+      "capabilityStatus": "ready",
+      "durationMs": 6102.836,
+      "steps": [
+        {
+          "step": "native-memory",
+          "durationMs": 0.009
+        },
+        {
+          "step": "native-mcp-config",
+          "durationMs": 267.187
+        },
+        {
+          "step": "capability-policy",
+          "durationMs": 0.013
+        },
+        {
+          "step": "codebase-readiness",
+          "durationMs": 5835.561
+        }
+      ]
+    },
+    {
+      "runnerId": "codex",
+      "sample": 1,
+      "status": "completed",
+      "capabilityStatus": "ready",
+      "durationMs": 11.151,
+      "steps": [
+        {
+          "step": "native-memory",
+          "durationMs": 0.006
+        },
+        {
+          "step": "native-mcp-config",
+          "durationMs": 3.343
+        },
+        {
+          "step": "capability-policy",
+          "durationMs": 0.026
+        },
+        {
+          "step": "codebase-readiness",
+          "durationMs": 7.731
+        }
+      ]
+    },
+    {
+      "runnerId": "codex",
+      "sample": 2,
+      "status": "completed",
+      "capabilityStatus": "ready",
+      "durationMs": 11.588,
+      "steps": [
+        {
+          "step": "native-memory",
+          "durationMs": 0.005
+        },
+        {
+          "step": "native-mcp-config",
+          "durationMs": 3.901
+        },
+        {
+          "step": "capability-policy",
+          "durationMs": 0.011
+        },
+        {
+          "step": "codebase-readiness",
+          "durationMs": 7.628
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Separate readiness service per runner, three sequential samples; local installed selection and OS cache.",
+    "Memory and web search disabled; no model, native CLI initialization, browser or concurrent user workload.",
+    "Uses source-checkout composition, not the already-running daemon; no deployment or native-context changes."
+  ]
+}
