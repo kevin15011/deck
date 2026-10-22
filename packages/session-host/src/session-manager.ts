@@ -1,3 +1,7 @@
+import { developerRoleContinuity } from "@deck/core/teams/developer/catalog";
+import { normalizeContinuityPolicy, sanitizeRequestInput, selectContinuity, type NativeCompactionBound } from "@deck/core/session/task-continuity";
+import { mergeStructuredTask, projectRelativePath, utf8Bytes, type StructuredTaskState, type FindingResolution } from "@deck/core/session/task-handoff";
+import { buildTaskHandoff, byteExcerpt, digest, type ScopedDiffProvider } from "./task-handoff";
 import { PersonalMcpPreparationError, validatePersonalMcpAvailability, type PersonalMcpAvailability, type PersonalMcpByMember } from "@deck/core/session/personal-mcp";
 import { sanitizeContextObservation } from '@deck/core/session/events';
 import type { SessionGrant } from "@deck/core/session/approval";
@@ -22,7 +26,7 @@ import { DECISION_GUIDANCE, validDependencyInput, idList, object, text, validDec
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { CrossRunnerConfig } from "@deck/core/config/deck-config";
 import { IMAGE_ATTACHMENT_LIMITS, type ImageAttachment, type SessionCommand } from "@deck/core/session/commands";
 import { AttachmentStore } from "./attachment-store";
@@ -121,6 +125,11 @@ export type SessionManagerOptions = {
   config: () => CrossRunnerConfig | undefined;
   /** Command prefix that starts the session MCP bridge inside a child, e.g. [deck, "internal", "session-mcp"]. */
   sessionMcpCommand: readonly string[];
+  /** Must identify the actual materialized role; aliases without a mapping remain unknown. */
+  assignedRoleId?: (memberId: string) => string | undefined;
+  /** Verified runner/version/effective-settings only. No resolver means fresh-only. */
+  compactionBound?: (input: {assignment:RunnerQualifiedAssignment;version?:string;projectRoot:string}) => NativeCompactionBound | undefined;
+  scopedDiff?: ScopedDiffProvider;
   rolePrompt?: (memberId: string, context: SessionRolePromptContext) => string;
   childMcp?: ChildMcpResolver | ((runnerId: string, context: ChildMcpContext) => Promise<ChildMcpResolver>);
   closeChildMcp?: () => Promise<void>;
@@ -157,6 +166,8 @@ type Turn = {
   kind?: "interrupt" | "cancel" | "stop" | "release";
   controller: AbortController;
   ownershipUnsettled?: boolean;
+  launched?: boolean;
+  stop?: import("./task-evidence").AttemptContinuityState["stop"];
   lastText?: string;
   nativeMemory?: NativeMemoryDescriptor;
   promptId?: string;
@@ -572,14 +583,20 @@ export class SessionManager implements SessionService {
           if (!caller.admissionSeq) return fail("credential-revoked");
           if (typeof d.commandId === "string" && (live.ledger.prompt(d.commandId) || live.ledger.receipt(d.commandId) || live.ledger.lifecycleReceipt(d.commandId))) return fail("command-id-reused");
           return this.decisions(live).tool(name, d, caller);
-        case "deck_delegate": return this.delegate(live, d, caller);
+        case "deck_delegate": {
+          const outcome=this.delegate(live,d,caller);
+          if(d.continuity==='native' && !outcome.ok){
+            this.append(live,{kind:'diagnostic',source:{taskId:caller.taskId,memberId:LEAD_MEMBER_ID},data:{code:'continuity.request-rejected',reason:outcome.code,leadAttempt:caller.attempt,requestedNative:true}});this.flush(live);
+          }
+          return outcome;
+        }
         case "deck_task_result": return typeof d.taskId === "string" ? this.leadResult(live, d.taskId, caller, d.attempt) : fail("invalid-arguments");
         case "deck_task_wait": return this.waitTasks(live, d, caller, context.signal);
         case "deck_task_integrate": return this.integrateTask(live, d, caller);
         case "deck_task_list": return ok({ tasks: this.delegatedTasks(live, true) });
         case "deck_task_cancel": {
           if (typeof d.taskId !== "string" || live.ledger.task(d.taskId)?.memberId === LEAD_MEMBER_ID) return fail("invalid-arguments");
-          return this.interrupt(live, { v: 1, type: "turn.interrupt", commandId: randomUUID(), taskId: d.taskId }, "cancel");
+          return this.interrupt(live, { v: 1, type: "turn.interrupt", commandId: randomUUID(), taskId: d.taskId }, "cancel", undefined, caller);
         }
         case "deck_memory_recall": case "deck_memory_propose": {
           if (caller.nativeMemory?.integration === "runner-plugin") return fail("tool-not-allowed");
@@ -642,17 +659,31 @@ export class SessionManager implements SessionService {
     if (!driver) return fail("runner-driver-unavailable");
     const taskId = priorId ?? `task-${randomUUID()}`;
     const attempt = (prior?.attempt ?? 0) + 1;
-    const native = prior?.nativeSessionId ?? driver.newNativeSessionId?.();
-    const resume = prior && native && live.ledger.nativeConfirmed(taskId) ? { nativeSessionId: native } : undefined;
+    const assignedRoleId = priorTask?.assignedRoleId ?? (this.options.assignedRoleId ? this.options.assignedRoleId(agent) : agent.startsWith('deck-') ? agent : `deck-${agent}`);
+    const continuityRole = priorTask?.continuityRole ?? developerRoleContinuity(assignedRoleId);
+    if(d.continuity !== undefined && !['auto','fresh','native'].includes(String(d.continuity)))return fail('invalid-continuity');
+    if(d.continuityJustification !== undefined && (typeof d.continuityJustification !== 'string' || !d.continuityJustification.trim() || d.continuityJustification.length>512))return fail('native-justification-required');
+    if(d.continuity==='native' && (!prior || !d.continuityJustification || continuityRole==='review'))return fail(continuityRole==='review'?'review-native-forbidden':'native-justification-required');
+    let structured: StructuredTaskState;
+    try { const config=this.options.config();if(!config)throw new Error('cross-runner-config-unavailable');normalizeContinuityPolicy(config.continuity); structured=mergeStructuredTask(priorTask??{},d,ref=>typeof ref==='number'?ref>0&&ref<=live.log.lastSeq:!!live.ledger.task(ref.taskId)?.attempts.find(a=>a.attempt===ref.attempt)); }
+    catch(error){return fail('invalid-structured-continuation',(error as Error).message);}
+    // Full instructions remain retrievable even when the handoff excerpt is small.
+    if(utf8Bytes(d.task)>200*1024)return fail('task-instruction-byte-limit');
+    const taskDir=live.paths.taskDir(taskId);ensurePrivateDir(live.paths.tasksDir);ensurePrivateDir(taskDir);
+    const instructionText=bounded(d.task,MAX_PROMPT_CHARS);
+    const artifact=join(taskDir,`instruction-attempt-${attempt}.txt`);writePrivateFile(artifact,instructionText);
+    const instruction={text:byteExcerpt(instructionText,2048),bytes:utf8Bytes(instructionText),artifact,digest:digest(instructionText)};
+    const reworkSources=prior?(structured.findings??[]).flatMap(f=>{const source=f.source&&live.ledger.task(f.source.taskId);return source?.continuityRole==='review'&&source.attempts.some(a=>a.attempt===f.source!.attempt&&TERMINAL_TASK_STATES.includes(a.state))?[{taskId:f.source!.taskId,attempt:f.source!.attempt,findingId:f.id}]:[];}):[];
+    const continuityData={reworkSources,continuityRequester:{taskId:caller!.taskId,memberId:caller!.memberId,attempt:caller!.attempt},continuityPending:true,continuityRequest:d.continuity??'auto',...(d.continuityJustification?{continuityJustification:d.continuityJustification}:{}),assignedRoleId,continuityRole,structured,structuredUpdate:Object.fromEntries(['acceptance','findings','sourceTasks'].filter(k=>Object.hasOwn(d,k)).map(k=>[k,d[k]])),structuredActor:{taskId:caller!.taskId,attempt:caller!.attempt},instruction};
     const source = { taskId, memberId: agent, runnerId: assignment.runnerId };
     this.append(live, [
-      prior ? { kind: "task.continued", source, data: { taskId, attempt, continuity: "native", dependsOn, ...(action ? {action} : {}), ...(d.replan ? {replan:d.replan} : {}), ...(decisionCommand ? {decisionCommand} : {}), ...(native ? { nativeSessionId: native } : {}) } }
-        : { kind: "task.created", source, data: { taskId, memberId: agent, ...assignment, dependsOn, ...(action ? {action} : {}), state: "created", ...(native ? { nativeSessionId: native } : {}) } },
+      prior ? { kind: "task.continued", source, data: { taskId, attempt, ...continuityData, dependsOn, ...(action ? {action} : {}), ...(d.replan ? {replan:d.replan} : {}), ...(decisionCommand ? {decisionCommand} : {}) } }
+        : { kind: "task.created", source, data: { taskId, memberId: agent, ...assignment, ...continuityData, dependsOn, ...(action ? {action} : {}), state: "created" } },
       { kind: "message.completed", source, data: { role: "user", text: d.task } },
       { kind: "task.state", source, data: { taskId, state: "queued", reason: "global-delegated-capacity" } },
     ]);
     if (decisionCommand) this.flush(live);
-    live.queue.push(this.newTurn(taskId, agent, { ...assignment }, attempt, d.task, native, resume));
+    live.queue.push(this.newTurn(taskId, agent, { ...assignment }, attempt, d.task));
     this.schedule(live);
     return ok({ taskId });
   }
@@ -695,10 +726,19 @@ export class SessionManager implements SessionService {
           this.append(chosen, [{ kind: "task.state", source: { taskId: turn.taskId, memberId: turn.memberId }, data: { taskId: turn.taskId, state: "running" } }, { kind: "session.state", data: { state: "running" } }]);
           this.flush(chosen);
           chosen.turns.set(turn.taskId, turn); running++;
+          this.recordTaskOverlap(chosen,turn);
           void this.launchTurn(chosen, turn, driver, turn.assignment, turn.prompt, turn.nativeSessionId, turn.resume);
         }
       }
     } finally { this.scheduling = false; }
+  }
+
+  private recordTaskOverlap(live:Live,turn:Turn):void {
+    // The active local-daemon set is bounded by execution budgets. External/unloaded history remains unknown.
+    for(const other of this.sessions.values())if(other.meta.projectRoot===live.meta.projectRoot)for(const active of other.turns.values())if(active!==turn){
+      this.append(live,{kind:'task.state',source:{taskId:turn.taskId},data:{taskId:turn.taskId,state:'running',attempt:turn.attempt,potentiallyMixed:true,concurrency:'unknown',overlaps:[{sessionId:other.sessionId,taskId:active.taskId,attempt:active.attempt}]}});
+      this.append(other,{kind:'task.state',source:{taskId:active.taskId},data:{taskId:active.taskId,state:'running',attempt:active.attempt,potentiallyMixed:true,concurrency:'unknown',overlaps:[{sessionId:live.sessionId,taskId:turn.taskId,attempt:turn.attempt}]}});
+    }
   }
 
   private scheduleWake(live: Live): void {
@@ -783,15 +823,15 @@ export class SessionManager implements SessionService {
       this.append(live, { kind: "task.retrieval", source: { taskId: caller.taskId, memberId: LEAD_MEMBER_ID }, data: { taskId, attempt: attempt.attempt, leadTaskId: caller.taskId, leadAttempt: caller.attempt, ...(caller.promptId ? { promptId: caller.promptId } : {}) } });
       this.flush(live); this.refreshNotices(live);
     }
-    return ok({ taskId, memberId: task.memberId, ...attempt });
+    return ok({ taskId, memberId: task.memberId, ...attempt, assignedRoleId:task.assignedRoleId,continuityRole:task.continuityRole,acceptance:task.acceptance,findings:task.findings,sourceTasks:task.sourceTasks,structuredSeq:task.structuredSeq });
   }
 
   private integrateTask(live: Live, d: Record<string, unknown>, caller: Turn): ExecuteOutcome {
-    if (!validTaskIntegration(d) || Object.keys(d).some(k => !["commandId", "taskId", "attempt", "state", "note", "evidenceSeqs"].includes(k))) return fail("invalid-arguments");
+    if (!validTaskIntegration(d) || Object.keys(d).some(k => !["commandId", "taskId", "attempt", "state", "note", "evidenceSeqs", "findingResolutions"].includes(k))) return fail("invalid-arguments");
     const identity = live.ledger.mutationIdentity(d.commandId);
     if (identity && (identity.type !== "deck_task_integrate" || identity.fingerprint && identity.fingerprint !== decisionFingerprint("deck_task_integrate", d))) return fail("command-id-reused");
     // Canonical field order makes identity independent of JSON object property order.
-    const content = (v: Record<string, unknown>) => JSON.stringify([v.taskId, v.attempt, v.state, v.note, v.evidenceSeqs]);
+    const content = (v: Record<string, unknown>) => JSON.stringify([v.taskId, v.attempt, v.state, v.note, v.evidenceSeqs, v.findingResolutions]);
     for (const task of live.ledger.tasks()) for (const a of task.attempts) for (const record of a.integrations ?? []) if (record.commandId === d.commandId) {
       return content({ taskId: task.taskId, attempt: a.attempt, ...record }) === content(d) ? { ...ok({ taskId: task.taskId, attempt: a.attempt, integration: record }), duplicate: true } : fail("command-id-reused");
     }
@@ -799,9 +839,27 @@ export class SessionManager implements SessionService {
     if (!task || task.memberId === LEAD_MEMBER_ID || !attempt) return fail("task-unknown");
     if (!TERMINAL_TASK_STATES.includes(attempt.state) || !attempt.retrieval || !caller.admissionSeq) return fail("integration-evidence-required");
     const evidence = d.evidenceSeqs as number[];
-    const events = [...live.log.readAfter(0)].filter(e => evidence.includes(e.seq));
+    const events = evidence.map(seq=>live.log.readEvent(seq)).filter((e):e is SessionEvent=>!!e);
     if (events.length !== evidence.length || !events.every(e => e.source.taskId === task.taskId && e.seq >= attempt.startedSeq && e.seq <= (attempt.endedSeq ?? 0))) return fail("integration-evidence-invalid");
-    this.append(live, { kind: "task.integration", source: { taskId: caller.taskId, memberId: LEAD_MEMBER_ID }, data: { ...d, leadTaskId: caller.taskId, leadAttempt: caller.attempt, ...(caller.promptId ? { promptId: caller.promptId } : {}) } });
+    const structuredUpdates:Record<string,StructuredTaskState>={};
+    const structuredTransitions:Record<string,import('@deck/core/session/task-handoff').Finding[]>={};
+    try { for(const resolution of (d.findingResolutions??[]) as FindingResolution[]) {
+      const target=live.ledger.task(resolution.taskId);if(!target||target.memberId===LEAD_MEMBER_ID)throw new Error('finding-task-unknown');
+      const base=structuredUpdates[target.taskId]??target;
+      let finding=base.findings?.find(f=>f.id===resolution.findingId);
+      if(!finding){
+        const ref=target.findingStates?.[resolution.findingId]?.seq;
+        const historical=ref?live.log.readEvent(ref):undefined;
+        const data=historical?.data;
+        finding=(data?.structuredTransitions as Record<string,import('@deck/core/session/task-handoff').Finding[]>|undefined)?.[target.taskId]?.find(f=>f.id===resolution.findingId)
+          ?? (data?.structuredUpdate as {findings?:{items:import('@deck/core/session/task-handoff').Finding[]}}|undefined)?.findings?.items.find(f=>f.id===resolution.findingId);
+      }
+      if(!finding)throw new Error('finding-unknown');
+      const changed={...finding,state:resolution.state,resolution:resolution.reason,evidenceSeqs:resolution.evidenceSeqs};
+      structuredUpdates[target.taskId]=mergeStructuredTask(base,{findings:{items:[changed]}},ref=>typeof ref==='number'?!!live.log.readEvent(ref):!!live.ledger.task(ref.taskId)?.attempts.find(a=>a.attempt===ref.attempt));
+      (structuredTransitions[target.taskId]??=[]).push(changed);
+    }} catch(error){return fail('finding-resolution-invalid',(error as Error).message);}
+    this.append(live, { kind: "task.integration", source: { taskId: caller.taskId, memberId: LEAD_MEMBER_ID }, data: { ...d, ...(d.findingResolutions?{structuredUpdates,structuredTransitions}:{}), leadTaskId: caller.taskId, leadAttempt: caller.attempt, ...(caller.promptId ? { promptId: caller.promptId } : {}) } });
     this.flush(live);
     return ok({ taskId: task.taskId, attempt: attempt.attempt, integration: attempt.integration });
   }
@@ -838,14 +896,55 @@ export class SessionManager implements SessionService {
     });
   }
 
-  private taskSummary(live: Live, taskId: string): string {
-    const parts: string[] = [];
-    for (const event of live.log.readAfter(0)) {
-      if (event.source.taskId !== taskId) continue;
-      if (event.kind === "message.completed" && typeof event.data.text === "string") parts.push(`${String(event.data.role ?? "assistant")}: ${bounded(event.data.text, 2048)}`);
-      if (parts.length > 8) parts.shift();
+  private async prepareDelegatedDiff(live:Live,turn:Turn):Promise<import('./task-handoff').ScopedDiff|undefined> {
+    if(!this.options.scopedDiff)return;
+    const task=live.ledger.task(turn.taskId)!;
+    const sources=(task.sourceTasks??[]).map(ref=>live.ledger.task(ref.taskId)?.attempts.find(a=>a.attempt===ref.attempt));
+    const attempts=task.continuityRole==='review'?sources:[];
+    const paths=[...new Set(task.continuityRole==='review'?attempts.flatMap(a=>(a?.edits??[]).map(e=>e.path)):(task.taskEdits??[]).map(e=>e.path))];
+    const omitted=paths.length>256;
+    const selectedPaths=paths.slice(0,256);
+    if(!selectedPaths.length)return;
+    try{const diff=await this.options.scopedDiff({projectRoot:live.meta.projectRoot,paths:selectedPaths,maxBytes:16384,signal:turn.controller.signal});return {...diff,...(omitted?{unavailable:`Current diff limited to 256 of ${paths.length} recorded paths; remaining immutable edit references are in the handoff.`}:{})};}
+    catch{return {text:'',capturedAt:new Date(this.clock.now()).toISOString(),status:'unavailable',truncated:false,unavailable:'scoped-diff-failed'};}
+  }
+
+  private delegatedLaunchContext(live:Live,turn:Turn,driver:RunnerSessionDriver,version?:string,diff?:import('./task-handoff').ScopedDiff):{prompt:string;nativeSessionId?:string;resume?:{nativeSessionId:string}} {
+    const task=live.ledger.task(turn.taskId)!;
+    const current=task.attempts.at(-1)!;
+    const predecessor=current.recoveryPredecessorAttempt===undefined?task.attempts.at(-2):task.attempts.find(a=>a.attempt===current.recoveryPredecessorAttempt);
+    const sources=(task.sourceTasks??[]).map(ref=>({task:live.ledger.task(ref.taskId)!,attempt:live.ledger.task(ref.taskId)!.attempts.find(a=>a.attempt===ref.attempt)!}));
+    if(turn.controller.signal.aborted||turn.kind||this.closing||live.stopping||live.broken||live.ledger.session.released||live.turns.get(turn.taskId)!==turn||live.ledger.latest(turn.taskId)?.attempt!==turn.attempt)throw new Error('turn-cancelled');
+    const config=this.options.config();if(!config)throw new Error('cross-runner-config-unavailable');
+    const policy=normalizeContinuityPolicy(config.continuity);
+    let candidateBound:NativeCompactionBound|undefined;
+    try{candidateBound=this.options.compactionBound?.({assignment:turn.assignment,version,projectRoot:live.meta.projectRoot});}catch{/* Unavailable local evidence forces fresh, never a guessed bound. */}
+    const bound=candidateBound?.version===version?candidateBound:undefined;
+    const selection=turn.reseeded?{...selectContinuity({now:this.clock.now(),role:task.continuityRole??'unknown',request:'fresh',runnerId:turn.assignment.runnerId,modelId:turn.assignment.modelId,policy}),reason:'native-session-not-found'}:selectContinuity({now:this.clock.now(),role:task.continuityRole??'unknown',request:current.continuityRequest,justification:current.continuityJustification,runnerId:turn.assignment.runnerId,modelId:turn.assignment.modelId,policy,bound,predecessor:predecessor?{state:predecessor.state,endedAt:predecessor.endedAt,launched:predecessor.launchedAt!==undefined,nativeConfirmed:live.ledger.nativeConfirmed(task.taskId),nativeSessionId:predecessor.nativeSessionId,input:predecessor.requestInput,integrated:predecessor.integration?.state==='integrated',stopOrigin:predecessor.stop?.launched?predecessor.stop.origin:undefined}:undefined});
+    let prompt=turn.prompt;
+    let handoff:import('./task-evidence').AttemptContinuityState['handoff'];
+    const nativeSessionId=selection.continuity==='native'?predecessor?.nativeSessionId:driver.newNativeSessionId?.();
+    if(selection.continuity==='reseeded' && (predecessor || task.continuityRole==='review')) {
+      const artifact=join(live.paths.taskDir(turn.taskId),`handoff-attempt-${turn.attempt}.txt`);
+      const overlaps=[...this.sessions.values()].filter(s=>s.meta.projectRoot===live.meta.projectRoot).flatMap(s=>[...s.turns.values()].filter(t=>t!==turn).map(t=>`${s.sessionId}/${t.taskId}/${t.attempt}`)).slice(0,32);
+      const editSources=task.continuityRole==='review'?sources.map(s=>({identity:{sourceTask:s.task.taskId,sourceAttempt:s.attempt.attempt},edits:s.attempt.edits??[]})):
+        [{identity:{sourceTask:task.taskId,captureAttempt:turn.attempt,sourceAttempts:[...new Set((task.taskEdits??[]).map(e=>e.attempt))]},edits:task.taskEdits??[]}];
+      const editArtifacts=editSources.map((s,index)=>{
+        const path=join(live.paths.taskDir(turn.taskId),`handoff-edits-attempt-${turn.attempt}-source-${index}.json`);
+        const content=JSON.stringify({...s.identity,edits:s.edits});
+        if(utf8Bytes(content)>256*1024)throw new Error('handoff-edit-artifact-overflow');
+        writePrivateFile(path,content);return {...s.identity,path,digest:digest(content),bytes:utf8Bytes(content)};
+      });
+      const built=buildTaskHandoff({task,predecessor,sources,editArtifacts,maxBytes:policy.handoffMaxBytes,captureSeq:live.log.lastSeq,artifact,diff,overlaps});
+      writePrivateFile(artifact,built.artifactText);
+      handoff={bytes:built.bytes,truncated:built.truncated,artifact,digest:built.digest,captureSeq:live.log.lastSeq,editArtifacts};
+      prompt=`${built.text}\nCurrent Lead instruction:\n${turn.prompt}`;
     }
-    return bounded(parts.join("\n"), 8192);
+    const source={taskId:turn.taskId,memberId:turn.memberId,runnerId:turn.assignment.runnerId};
+    this.append(live,{kind:'task.state',source,data:{taskId:turn.taskId,state:'running',attempt:turn.attempt,launched:true,selection,...(nativeSessionId?{nativeSessionId}:{}),...(handoff?{handoff}:{}),potentiallyMixed:true,concurrency:'unknown'}});this.flush(live);
+    turn.nativeSessionId=nativeSessionId;
+    turn.resume=selection.continuity==='native'&&nativeSessionId?{nativeSessionId}:undefined;
+    return {prompt,nativeSessionId,resume:turn.resume};
   }
 
   // ---- loading ---------------------------------------------------------------------------
@@ -1660,6 +1759,7 @@ export class SessionManager implements SessionService {
       const approvals = this.approvalMode(live.meta, live.ledger).approvalMode === "relay" ? "relay" : "runner-default";
       const projectTrust = this.projectStore().projectTrust(live.meta.projectId ?? projectIdentity(live.meta.projectRoot));
       turn.projectTrustRevision = projectTrust.revision;
+      const preparedDiff=turn.memberId!==LEAD_MEMBER_ID?await this.prepareDelegatedDiff(live,turn):undefined;
       const input: DriverTaskInput = {
         ...(assignment.runnerId === "opencode" ? {projectConfigTrusted:projectTrust.trusted} : {}),
         ...(turn.steeringAllowed?{steeringVersion,inputOrigin:turn.promptId?'user' as const:'host' as const}:{}),
@@ -1670,8 +1770,10 @@ export class SessionManager implements SessionService {
         ...(nativeMemory ? { nativeMemory } : {}),
       };
       const spawn = createDriverSpawn(this.options.supervisor, { lease: { file: live.paths.taskLeaseFile(turn.taskId), taskId: turn.taskId } });
+      const launchedAttempt=turn.attempt;
       const io: DriverHostIo = {
         spawn: (command, args, options) => {
+          if(turn.attempt!==launchedAttempt || live.turns.get(turn.taskId)!==turn || turn.nativeEnded || turn.controller.signal.aborted || turn.kind)return Promise.reject(new Error('driver-attempt-ended'));
           if (assignment.runnerId === "opencode") {
             const current = this.projectStore().projectTrust(projectTrust.projectId);
             if (current.revision !== projectTrust.revision || current.trusted !== projectTrust.trusted) return Promise.reject(new Error("project-trust-changed"));
@@ -1681,22 +1783,25 @@ export class SessionManager implements SessionService {
           return spawn(command, args, { ...options, env: { ...env, ...resolver?.envOverlay } });
         },
         emit: (event) => {
-          if(event.kind==="turn.completed" || event.kind==='diagnostic'&&event.data.code==='claude-steering-ended')turn.nativeEnded=true;
-          this.driverEvent(live, turn, assignment.runnerId, event);
+          if(turn.attempt!==launchedAttempt || live.turns.get(turn.taskId)!==turn || turn.nativeEnded)return;
+          if (!this.driverEvent(live, turn, assignment.runnerId, event)) return;
+          if (turn.nativeEnded) { this.publishSteering(live); return; }
           // This is the driver's observed turn boundary, not uniform model readiness:
           // Claude reports native init; OpenCode reports its prompt request boundary.
           if (event.kind === "turn.started" || event.kind === "diagnostic" && ['codex-steering-ready','claude-steering-ready','claude-steering-ended'].includes(String(event.data.code))) {preparation("turn-started");this.publishSteering(live);this.pumpSteering(live);}
         },
         question: async (req) => {
-          if (turn.controller.signal.aborted || this.closing || turn.kind) return { outcome: "cancelled" };
+          if (turn.attempt!==launchedAttempt || live.turns.get(turn.taskId)!==turn || turn.nativeEnded || turn.controller.signal.aborted || this.closing || turn.kind) return { outcome: "cancelled" };
           return this.questionBroker.request({ ...req, sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId }).resolution;
         },
         approval: async (req) => {
+          if(turn.attempt!==launchedAttempt || live.turns.get(turn.taskId)!==turn || turn.nativeEnded || turn.controller.signal.aborted || this.closing || turn.kind)return {decision:'deny',scope:'once'};
           const pending = this.options.broker.request({ sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId, tool: req.tool, summary: req.summary, input: req.input, toolKey: req.toolKey, identity: req.identity, exactKey: req.exactKey, risk: req.risk, nativeScopes: req.nativeScopes, alwaysNote: req.alwaysNote });
           const resolution = await pending.resolution;
           return { decision: resolution.decision === "allow-once" ? "allow" : "deny", scope: resolution.scope === "always" && req.nativeScopes?.includes("always") ? "always" : "once" };
         },
         writePrivateFile: (name, content) => {
+          if(turn.attempt!==launchedAttempt || live.turns.get(turn.taskId)!==turn || turn.nativeEnded || turn.controller.signal.aborted || turn.kind)throw new Error('driver-attempt-ended');
           const file = join(taskDir, assertSafeSegment(name, "file name"));
           writePrivateFile(file, content);
           return file;
@@ -1719,13 +1824,20 @@ export class SessionManager implements SessionService {
         const task = live.ledger.task(turn.taskId);
         if (!this.decisions(live).dependencies(task?.dependsOn ?? [], task?.action)) throw new Error("decision-dependency-blocked");
       }
+      if(turn.memberId!==LEAD_MEMBER_ID){
+        ({prompt,nativeSessionId,resume}=this.delegatedLaunchContext(live,turn,driver,probe.version,preparedDiff));
+        input.prompt=prompt;delete input.resume;delete input.nativeSessionId;
+        if(resume)input.resume=resume;else if(nativeSessionId)input.nativeSessionId=nativeSessionId;
+      }
+      turn.launched=true;
+      if(turn.memberId===LEAD_MEMBER_ID){this.append(live,{kind:'task.state',source:{taskId:turn.taskId},data:{taskId:turn.taskId,state:'running',attempt:turn.attempt,launched:true}});this.flush(live);}
       const handle = await driver.startTask(input, io);
       turn.handle = handle;this.publishSteering(live);this.pumpSteering(live);
       if (turn.kind) void handle.interrupt().catch(() => {});
       if (this.closing) void this.closeTurnHandle(turn).catch(() => {});
       if (!driver.newNativeSessionId) {
         void handle.nativeSessionId.then((id) => {
-          if (id !== turn.nativeSessionId && live.turns.get(turn.taskId) === turn) {
+          if (turn.attempt===launchedAttempt && id !== turn.nativeSessionId && live.turns.get(turn.taskId) === turn) {
             turn.nativeSessionId = id;
             try { this.append(live, { kind: "task.state", source: { taskId: turn.taskId, nativeSessionId: id }, data: { taskId: turn.taskId, state: "running", nativeSessionId: id } }); } catch { /* surfaced by append */ }
           }
@@ -1753,19 +1865,26 @@ export class SessionManager implements SessionService {
       this.options.broker.cancelTask(live.sessionId, turn.taskId, "task-ended");
       this.questionBroker.cancelTask(live.sessionId, turn.taskId, "task-ended");
       this.options.credentials.revokeTask(live.sessionId, turn.taskId);
-      const summary = this.taskSummary(live, turn.taskId);
+
       const source = { taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId };
+      const recoveryPredecessorAttempt=turn.memberId===LEAD_MEMBER_ID?undefined:live.ledger.task(turn.taskId)?.attempts.at(-2)?.attempt;
       turn.attempt++; turn.reseeded = true; turn.nativeSessionId = driver.newNativeSessionId?.();
-      turn.handle = undefined; turn.closeHandle = undefined; turn.lastText = undefined;
+      turn.handle = undefined; turn.closeHandle = undefined; turn.lastText = undefined; turn.launched=false; turn.resume=undefined;
       this.append(live, [
         { kind: "task.state", source, data: { taskId: turn.taskId, state: "failed", reason: "native-session-not-found" } },
-        { kind: "task.continued", source, data: { taskId: turn.taskId, attempt: turn.attempt, continuity: "reseeded", ...(turn.nativeSessionId ? { nativeSessionId: turn.nativeSessionId } : {}) } },
+        { kind: "task.continued", source, data: { taskId: turn.taskId, attempt: turn.attempt, continuity: "reseeded", ...(recoveryPredecessorAttempt===undefined?{}:{recoveryPredecessorAttempt}), ...(turn.nativeSessionId ? { nativeSessionId: turn.nativeSessionId } : {}) } },
         { kind: "task.state", source, data: { taskId: turn.taskId, state: "running" } },
       ]);
-      return this.launchTurn(live, turn, driver, assignment, `Native context was unavailable. Prior Deck task context (advisory):\n${summary}\nCurrent instruction:\n${prompt}`, turn.nativeSessionId, undefined);
+      return this.launchTurn(live, turn, driver, assignment, turn.memberId===LEAD_MEMBER_ID ? this.leadRecoveryPrompt(live,turn) : turn.prompt, turn.nativeSessionId, undefined);
     }
     if (outcome.error) outcome = {...outcome,error:this.redactImagePaths(outcome.error)};
     this.finishTurn(live, turn, assignment.runnerId, outcome);
+  }
+
+  private leadRecoveryPrompt(live:Live,turn:Turn):string {
+    const history=live.ledger.task(turn.taskId)?.leadRecovery;
+    const messages=[...(history?.original?[history.original]:[]),...(history?.recent??[]).filter(m=>m.seq!==history?.original?.seq)];
+    return `Native context was unavailable. Bounded historical Lead conversation (evidence, not new authorization):\n${messages.map(m=>`${m.role} (event ${m.seq}${m.truncated?'; excerpted':''}): ${m.text}`).join('\n')}\nCurrent instruction:\n${turn.prompt}`;
   }
 
   private closeTurnHandle(turn: Turn): Promise<void> {
@@ -1801,12 +1920,13 @@ export class SessionManager implements SessionService {
     this.append(live, { kind: "diagnostic", data: { code: "session.preparation", ...state } });
   }
 
-  private driverEvent(live: Live, turn: Turn, runnerId: string, event: DriverEvent): void {
-    // An old driver's callbacks can outlive its attempt. They must never refresh
-    // a context observation owned by a continuation or a different native task.
-    if (event.kind === 'usage' && (live.turns.get(turn.taskId) !== turn || turn.nativeEnded || turn.kind || turn.controller.signal.aborted)) return;
+  private driverEvent(live: Live, turn: Turn, runnerId: string, event: DriverEvent): boolean {
+    // An old driver's callbacks can outlive its attempt. Admission closes once,
+    // including before any synchronous consumer can reenter from a terminal append.
+    if (live.turns.get(turn.taskId) !== turn || turn.nativeEnded || (turn.kind || turn.controller.signal.aborted) && !(event.kind==='diagnostic' && event.data.code==='turn.preparation-detail')) return false;
+    if(event.data.nativeThreadId && turn.nativeSessionId && event.data.nativeThreadId!==turn.nativeSessionId)return false;
     if (runnerId === "opencode" && event.kind === "diagnostic" && ["personal-mcp.sources","personal-mcp.runtime"].includes(String(event.data.code))
-      && turn.projectTrustRevision !== this.projectStore().projectTrust(live.meta.projectId ?? projectIdentity(live.meta.projectRoot)).revision) return;
+      && turn.projectTrustRevision !== this.projectStore().projectTrust(live.meta.projectId ?? projectIdentity(live.meta.projectRoot)).revision) return false;
     if (event.kind === "diagnostic" && event.data.code === "personal-mcp.sources") {
       const state = this.readiness(live);
       const current = turn.memberId === LEAD_MEMBER_ID ? state?.personalMcpAvailability : state?.memberMcpAvailability?.[turn.memberId]?.servers;
@@ -1817,7 +1937,7 @@ export class SessionManager implements SessionService {
         if (Array.isArray(input) && input.length > 240) merged.set("additional-servers", {id:"additional-servers",source:"native",status:"configured",reason:"limit-exceeded"});
         this.publishMcpAvailability(live, turn.memberId, runnerId, this.boundedMcpAvailability([...merged.values()]));
       } catch { /* no raw native config enters preparation */ }
-      return;
+      return true;
     }
     if (event.kind === "diagnostic" && event.data.code === "personal-mcp.runtime") {
       const state = this.readiness(live);
@@ -1831,7 +1951,7 @@ export class SessionManager implements SessionService {
       }
       if (active.length + unavailable.length + conflicts.length > 240) entries.set("additional-servers", {id:"additional-servers",source:"native",status:"configured",reason:"limit-exceeded"});
       try { this.publishMcpAvailability(live, turn.memberId, runnerId, validatePersonalMcpAvailability(this.boundedMcpAvailability([...entries.values()]))); } catch { /* malformed native names never enter public state */ }
-      return; // Public metadata lives only on preparation, never as a chat diagnostic.
+      return true; // Public metadata lives only on preparation, never as a chat diagnostic.
     }
     const scrub = (value: unknown): unknown => typeof value === "string" ? this.redactImagePaths(value) : Array.isArray(value) ? value.map(scrub) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, scrub(item)])) : value;
     event = {...event, data:scrub(event.data) as Record<string,unknown>, ...(event.raw !== undefined ? {raw:scrub(event.raw)} : {})};
@@ -1840,13 +1960,25 @@ export class SessionManager implements SessionService {
     const known = DRIVER_KINDS.has(event.kind);
     const kind: SessionEventKind = known ? (event.kind as SessionEventKind) : "runner.unmapped";
     const data: Record<string, unknown> = known ? { ...event.data } : { type: event.kind, ...(ALL_KINDS.has(event.kind) ? { reason: "kind-reserved-for-host" } : {}) };
+    data.attempt=turn.attempt;
     if (kind === 'usage' || kind === 'turn.started' || kind === 'turn.completed' || kind === 'diagnostic' && ['context.compaction', 'context.invalidated'].includes(String(data.code))) data.attempt = turn.attempt;
     if (kind === 'turn.started') data.modelId = turn.assignment.modelId;
     if (kind === 'usage') {
+      const requestInput=sanitizeRequestInput(data.requestInput);
+      if(requestInput && requestInput.nativeThreadId===turn.nativeSessionId && requestInput.modelId===turn.assignment.modelId)data.requestInput=requestInput;
+      else if(Object.hasOwn(data,'requestInput'))data.requestInput=null;
       const context = sanitizeContextObservation(data.context);
       delete data.context;
       if (context && (!turn.nativeSessionId || context.nativeThreadId === turn.nativeSessionId)) data.context = { ...context, ...(context.modelId ? {} : context.basis === 'codex-last-total' ? { modelId: turn.assignment.modelId } : {}) };
     }
+    if(kind==='tool.completed' && Array.isArray(data.edits))data.edits=data.edits.slice(0,257).flatMap(e=>{
+      if(!e||typeof e!=='object')return [];
+      const edit=e as {path?:unknown;op?:unknown;diff?:unknown};
+      if(typeof edit.path!=='string'||edit.path.includes('\\')||!['add','update','delete','rename-from','rename-to'].includes(String(edit.op)))return [];
+      const path=isAbsolute(edit.path)?relative(live.meta.projectRoot,edit.path):edit.path;
+      if(!projectRelativePath(path)||relative(live.meta.projectRoot,resolve(live.meta.projectRoot,path)).startsWith('..'))return [];
+      return [{path,op:edit.op,...(typeof edit.diff==='string'?{diff:byteExcerpt(bounded(edit.diff,32768),8192)}:{})}];
+    });
     if (kind === "hook.started" || kind === "hook.completed") data.attempt = turn.attempt;
     if (kind === "message.completed") {
       data.role ??= "assistant";
@@ -1857,7 +1989,11 @@ export class SessionManager implements SessionService {
       source: { taskId: turn.taskId, memberId: turn.memberId, runnerId, ...(turn.nativeSessionId ? { nativeSessionId: turn.nativeSessionId } : kind === 'usage' && data.context ? { nativeSessionId: (data.context as { nativeThreadId: string }).nativeThreadId } : {}) },
       ...(event.raw !== undefined ? { raw: boundRaw({ runnerId, protocol, payload: event.raw }) } : {}),
     };
-    try { this.append(live, draft); } catch { /* live.broken is set; the turn winds down on its own */ }
+    // Preserve the first admitted native boundary (including host-reserved mapping),
+    // but close all subsequent callbacks BEFORE append notifies ledger consumers.
+    if (event.kind === "turn.completed" || event.kind === "diagnostic" && data.code === "claude-steering-ended") turn.nativeEnded = true;
+    try { this.append(live, draft); return true; }
+    catch { return false; /* live.broken is set; the turn winds down on its own */ }
   }
 
   private finishTurn(live: Live, turn: Turn, runnerId: string, outcome: TurnOutcome): void {
@@ -1882,8 +2018,15 @@ export class SessionManager implements SessionService {
       const drafts: EventDraft[] = [
         { kind: "turn.completed", source, data: { status, ...(outcome.error ? { error: bounded(outcome.error) } : {}), ...(failure ? { failure } : {}) } },
       ];
-      if (turn.lastText) drafts.push({ kind: "task.result", source, data: { taskId: turn.taskId, summary: turn.lastText } });
-      drafts.push({ kind: "task.state", source, data: { taskId: turn.taskId, state: task.state, ...(task.reason ? { reason: task.reason } : {}) } });
+      if (turn.lastText) {
+        const path=join(live.paths.taskDir(turn.taskId),`report-attempt-${turn.attempt}.txt`);
+        const content=byteExcerpt(bounded(turn.lastText,256*1024),255*1024);
+        const reportArtifact={path,digest:digest(content),bytes:utf8Bytes(content),originalBytes:utf8Bytes(turn.lastText),truncated:utf8Bytes(content)<utf8Bytes(turn.lastText)};
+        let reportArtifactUnavailable:string|undefined;
+        try{writePrivateFile(path,content);}catch{reportArtifactUnavailable='artifact-write-failed';}
+        drafts.push({ kind: "task.result", source, data: { taskId: turn.taskId, summary: turn.lastText,...(reportArtifactUnavailable?{reportArtifactUnavailable}:{reportArtifact}) } });
+      }
+      drafts.push({ kind: "task.state", source, data: { taskId: turn.taskId, state: task.state, ...(task.reason ? { reason: task.reason } : {}), ...(turn.stop?{stop:turn.stop}:{}) } });
       if (!live.stopping && live.turns.size === 1) drafts.push({ kind: "session.state", data: { state: "idle" } });
       for(const input of live.ledger.prompts())if(input.promptId!==turn.promptId&&input.taskId===turn.taskId&&input.attempt===turn.attempt&&input.state==="accepted")drafts.push({kind:"prompt.state",data:{promptId:input.promptId,state:task.state,...(task.reason?{reason:task.reason}:{})}});
       if (turn.promptId && !(turn.kind==="release" && live.ledger.prompt(turn.promptId)?.state==="queued")) drafts.push({ kind: "prompt.state", data: { promptId: turn.promptId, state: task.state, ...(task.reason ? { reason: task.reason } : {}) } });
@@ -1895,7 +2038,9 @@ export class SessionManager implements SessionService {
       this.options.credentials.revokeTask(live.sessionId, turn.taskId);
       live.turns.delete(turn.taskId);
       if (turn.memberId !== LEAD_MEMBER_ID) this.queueNotice(live, turn, live.ledger.latest(turn.taskId)?.state ?? outcome.status);
-      try { saveLedgerSnapshot(live.ledger, live.log, live.paths.ledgerSnapshotFile); } catch { /* optimisation only */ }
+      // Terminal events are already fsynced. Amortize the optional full projection checkpoint
+      // while a delegated backlog drains; the last active completions checkpoint the whole prefix.
+      if(turn.memberId===LEAD_MEMBER_ID || !live.queue.some(t=>t.memberId!==LEAD_MEMBER_ID))try { saveLedgerSnapshot(live.ledger, live.log, live.paths.ledgerSnapshotFile); } catch { /* optimisation only */ }
       if (live.stopping && live.turns.size === 0 && live.ledger.session.state !== "ended" && !live.ledger.tasks().some((task) => task.attempts.at(-1)?.state === "ownership-unsettled")) {
         try { this.append(live, { kind: "session.ended", data: { reason: "stopped" } }); } catch { /* surfaced by append */ }
       }
@@ -1907,7 +2052,7 @@ export class SessionManager implements SessionService {
 
   // ---- interrupt / cancel / approvals / bind / stop ---------------------------------------
 
-  private interrupt(live: Live, command: Extract<SessionCommand, { type: "turn.interrupt" }>, kind: "interrupt" | "cancel", receiptType?: string): ExecuteOutcome {
+  private interrupt(live: Live, command: Extract<SessionCommand, { type: "turn.interrupt" }>, kind: "interrupt" | "cancel", receiptType?: string, caller?:Turn): ExecuteOutcome {
     if (!live.ledger.task(command.taskId)) return fail("task-unknown");
     const turn = live.turns.get(command.taskId);
     const queued = live.queue.find((t) => t.taskId === command.taskId);
@@ -1921,6 +2066,7 @@ export class SessionManager implements SessionService {
     }
     const receipt: SessionCommand = { ...command, type: (receiptType ?? command.type) as never } as SessionCommand;
     try { this.append(live, this.receiptDraft(receipt, { ok: true })); } catch { return fail("log-write-failed"); }
+    if(!turn.kind)turn.stop={origin:caller?'lead':'user',kind,commandId:command.commandId,launched:turn.launched===true,...(caller?{leadTaskId:caller.taskId,leadAttempt:caller.attempt}:{})};
     turn.kind ??= kind;
     turn.controller.abort();
     this.questionBroker.cancelTask(live.sessionId, turn.taskId, kind);

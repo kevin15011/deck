@@ -92,3 +92,14 @@ export function mapOpenCodeEvent(raw: unknown, partTypes = new Map<string, strin
   }
   return [{ kind: "runner.unmapped", data: { type: typeof raw.type === "string" ? raw.type : "unknown" }, raw }];
 }
+
+/** HTTP prompt response is fenced by the driver request. Never use an unfenced SSE patch for membership. */
+export function correlatedOpenCodeEdits(result:unknown,nativeSessionId:string):DriverEvent[] {
+ if(!record(result)||!record(result.info)||result.info.role!=='assistant'||result.info.sessionID!==nativeSessionId||typeof result.info.id!=='string'||!Array.isArray(result.parts))return [];
+ const events:DriverEvent[]=[];
+ for(const part of result.parts.slice(0,256)){
+  if(!record(part)||part.type!=='tool'||part.sessionID!==nativeSessionId||part.messageID!==result.info.id||typeof part.callID!=='string'||!record(part.state)||part.state.status!=='completed'||!['edit','write'].includes(String(part.tool))||!record(part.state.input)||typeof part.state.input.filePath!=='string')continue;
+  events.push({kind:'tool.completed',data:{toolUseId:part.callID,name:part.tool,status:'completed',isError:false,edits:[{path:part.state.input.filePath,op:'update'}],nativeThreadId:nativeSessionId,nativeRequestId:result.info.id}});
+ }
+ return events;
+}

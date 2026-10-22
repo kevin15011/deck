@@ -12,6 +12,7 @@ export type DeveloperTeamAgent = {
   displayName: string;
   description: string;
   skillId: string;
+  continuityRole: "work" | "review";
 };
 
 export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = Object.freeze([
@@ -20,6 +21,7 @@ export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = Object.freez
     name: "deck-lead",
     displayName: "Lead",
     description: "Owns the user outcome, selects the smallest safe route, coordinates specialists, and can implement clear low-risk deltas directly.",
+    continuityRole: "work",
     skillId: "deck-lead",
   },
   {
@@ -27,6 +29,7 @@ export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = Object.freez
     name: "deck-investigate",
     displayName: "Investigate",
     description: "Traces unfamiliar code and production composition, locates causes and risks, and returns a compact evidence-backed handoff.",
+    continuityRole: "work",
     skillId: "deck-investigate",
   },
   {
@@ -34,6 +37,7 @@ export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = Object.freez
     name: "deck-architect",
     displayName: "Architect",
     description: "Plans proportionally from a compact Working Brief through Full SDD only when durable design decisions justify the cost.",
+    continuityRole: "work",
     skillId: "deck-architect",
   },
   {
@@ -41,6 +45,7 @@ export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = Object.freez
     name: "deck-apply-fast",
     displayName: "Apply Fast",
     description: "Implements clear, routine, localized, or pattern-based changes as a complete vertical slice with proportional tests.",
+    continuityRole: "work",
     skillId: "deck-apply-fast",
   },
   {
@@ -48,6 +53,7 @@ export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = Object.freez
     name: "deck-apply-deep",
     displayName: "Apply Deep",
     description: "Implements algorithmic, concurrent, performance-sensitive, protocol, migration, or difficult debugging work requiring deep reasoning.",
+    continuityRole: "work",
     skillId: "deck-apply-deep",
   },
   {
@@ -55,6 +61,7 @@ export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = Object.freez
     name: "deck-quality",
     displayName: "Quality",
     description: "Independently verifies behavior, architecture, regression risk, security, and protected boundaries without modifying the candidate.",
+    continuityRole: "review",
     skillId: "deck-quality",
   },
   {
@@ -62,6 +69,7 @@ export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = Object.freez
     name: "deck-setup",
     displayName: "Setup",
     description: "Repairs only missing, stale, invalid, or indeterminate project-readiness components discovered by the once-per-session preflight.",
+    continuityRole: "work",
     skillId: "deck-setup",
   },
 ]);
@@ -95,4 +103,11 @@ export function resolveLegacyDeveloperTeamAgentId(agentId: string): string | und
 
 export function getDeveloperTeamCatalog(): readonly DeveloperTeamAgent[] {
   return DEVELOPER_TEAM_AGENTS;
+}
+
+/** Classify actual materialized role identity, including legacy canonical mappings. Unknown stays fresh. */
+export function developerRoleContinuity(roleId: string | undefined): "work" | "review" | "unknown" {
+  if (!roleId) return "unknown";
+  const canonical = resolveLegacyDeveloperTeamAgentId(roleId) ?? roleId;
+  return DEVELOPER_TEAM_AGENTS.find(role => role.id === canonical)?.continuityRole ?? "unknown";
 }

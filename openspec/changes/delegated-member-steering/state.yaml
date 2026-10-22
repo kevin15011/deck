@@ -1,0 +1,15 @@
+schema: spec-registry-v1
+changeId: delegated-member-steering
+name: Deliver corrections to active delegated members
+currentPhase: proposal
+status: parked
+next_action: "Keep separate from delegated-task-continuity-policy. Await a separate user instruction to define acceptance and design member steering."
+artifacts:
+  proposal: proposal.md
+provenance:
+  - phase: proposal
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-22T18:45:18Z"
+    registryWrite: non-deferred
+    note: "User requested registration as a separate change, explicitly excluding it from continuity work."

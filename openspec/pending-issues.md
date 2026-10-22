@@ -20,6 +20,29 @@ Statuses: **Reported**, **Investigated**, **In progress**, **Resolved**.
 | P-010 | Review session modifications in a Git diff tab in the web UI | Reported | User request |
 | P-011 | Evaluate context-window visibility for the Lead and each subagent | Reported | User request |
 | P-012 | Explain provider/runner failures and offer appropriate recovery | Implemented, reviewed, and active in canary fc3ea86 | Live user report and explicit resilience request, 2026-10-22 |
+| P-013 | Separate logical task ownership from native context reuse | Fresh-all first delivery reviewed; canary preparation in progress | Explicit user policy decision, 2026-10-22 |
+| P-014 | Deliver corrections to active delegated members | Registered separately; deferred | Explicit user request, 2026-10-22 |
+| P-015 | Verified Codex native continuation | Deferred; outside the first continuity delivery | Accepted measurement limitation, 2026-10-22 |
+
+## P-015 — Verified Codex native continuation
+
+The user explicitly accepts fresh Codex continuations for the first delivery and excludes internal Codex database/history parsing from this change. Codex's next-resume counted context includes output, subsequent items and native reasoning accounting absent from Deck's reliable last-request INPUT evidence; observing the compaction trigger alone does not establish a safe input-equivalent cap. See [native-bound evidence](changes/delegated-task-continuity-policy/compaction-bounds.md). Future support requires a reliable measured contract and a separate scope decision, not guessed margins or internal-history coupling added here.
+
+OpenCode remains fresh, and Claude remains fresh because its effective compaction/accounting evidence is also unverified. If interrupted fresh continuations have high measured first-edit acquisition cost, prioritize P-014 member steering rather than native Codex resume. No native parser implementation is authorized by this backlog entry.
+
+## P-013 — Separate logical task ownership from native context reuse
+
+Preserve task identity and ledger accounting while defaulting continuations to bounded reseeded native sessions. Evaluate at launch against prior attempt end and reliable last-request input including cache. Recent small unintegrated completed/operator-interrupted attempts can resume; failures remain fresh. Overrides cannot bypass effective native compaction caps; assigned review roles always fresh. Lead explicitly closes findings; handoff includes open findings only. Add structured inputs, task-attributed edits and mixed-diff disclosure. Compare compaction, steps, tokens, duration, rework, override rates, first-edit cost and review-completion cost without a new reviewer tool.
+
+Official proposal: [Continuity policy](changes/delegated-task-continuity-policy/proposal.md). [Acceptance criteria](changes/delegated-task-continuity-policy/acceptance.md) and [design](changes/delegated-task-continuity-policy/design.md) include the approved final amendments. [Implementation](changes/delegated-task-continuity-policy/apply-progress.md) and independent review are complete for the accepted fresh-all first delivery; [delivery](changes/delegated-task-continuity-policy/delivery.md) is in progress. Native Codex support is deferred as P-015; no internal native-history parser is included. [Baseline evidence](changes/delegated-task-continuity-policy/evidence.md) includes tool counts. Related to P-008; this does not declare the overall latency issue resolved.
+
+## P-014 — Deliver corrections to active delegated members
+
+Track pending, delivered and incorporated feedback to a running member without treating delivery as proof of incorporation. Register and investigate independently of native-session continuity.
+
+Official deferred proposal: [Member steering](changes/delegated-member-steering/proposal.md). No implementation or design is included in P-013.
+
+Priority signal: the first continuity delivery separately measures operator-interrupted continuation frequency and first-edit steps/tokens. High observed cost should advance this steering work; it must not be used to justify native Codex resume or introduce steering incidentally into P-013.
 
 ## P-001 — Lead appears idle during Codex context compaction
 

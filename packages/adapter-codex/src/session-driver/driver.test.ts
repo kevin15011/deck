@@ -863,3 +863,37 @@ test('compaction cannot revive interrupted or closed turns', async () => {
  child.stdout({ method: 'item/started', params: { threadId: 'native-thread', turnId: 'turn', item: { type: 'contextCompaction', id: 'late' } } });
  expect(h.events.filter(e => e.data.code === 'context.compaction')).toHaveLength(0);
 });
+
+// Promoted from the independent review's real-driver/fake-transport reproduction.
+test('tool attribution and policy mutation require exact known live thread and turn',async()=>{
+ const h=harness(responder);const task=await createCodexSessionDriver().startTask(input,h.io);await task.nativeSessionId;await Promise.resolve();
+ const child=h.children.at(-1)!;
+ const usage=()=>child.stdout({method:'thread/tokenUsage/updated',params:{threadId:'native-thread',turnId:'turn',tokenUsage:{last:{inputTokens:100,cachedInputTokens:20,outputTokens:1,totalTokens:101,reasoningOutputTokens:0},total:{totalTokens:101}}}});
+ const tool=(method:string,threadId:unknown,turnId:unknown)=>child.stdout({method,params:{threadId,turnId,item:{id:'file',type:'fileChange',status:'completed',changes:[{path:'/work/current.ts',kind:'update',diff:'+current'}]}}});
+ try {
+  usage();const before=h.events.length;
+  for(const method of ['item/started','item/completed'])for(const [thread,turn] of [['native-thread','previous-turn'],['native-thread',undefined],[undefined,'turn'],['foreign','turn']])tool(method,thread,turn);
+  expect(h.events.filter(e=>e.kind==='tool.completed'||e.kind==='tool.started')).toHaveLength(0);
+  expect(h.events.slice(before).filter(e=>e.data.code==='request.input-invalidated')).toHaveLength(0);
+  tool('item/started','native-thread','turn');tool('item/completed','native-thread','turn');
+  expect(h.events.filter(e=>e.kind==='tool.completed')).toMatchObject([{data:{nativeThreadId:'native-thread',nativeTurnId:'turn',edits:[{path:'/work/current.ts',op:'update'}]}}]);
+  expect(h.events.slice(before).filter(e=>e.data.code==='request.input-invalidated')).toHaveLength(1);
+  usage();child.stdout({method:'turn/completed',params:{threadId:'native-thread',turn:{id:'turn',status:'completed'}}});await task.done;
+  expect(h.events.some(e=>e.data.code==='request.input-finalized')).toBe(true);
+  const ended=h.events.filter(e=>e.kind==='tool.completed').length;tool('item/completed','native-thread','turn');
+  expect(h.events.filter(e=>e.kind==='tool.completed')).toHaveLength(ended);
+ }finally{await task.close();}
+});
+
+test('tool attribution is unavailable before native turn identity is known',async()=>{
+ const h=harness((child,index,m)=>{if(m.method!=='turn/start')responder(child,index,m);});
+ const task=await createCodexSessionDriver().startTask(input,h.io);await task.nativeSessionId;
+ try {
+  const child=h.children.at(-1)!;
+  // An unconfirmed/missing-thread turn-start notification cannot manufacture proof.
+  child.stdout({method:'turn/started',params:{turn:{id:'turn'}}});
+  child.stdout({method:'item/completed',params:{threadId:'native-thread',turnId:'turn',item:{id:'early',type:'fileChange',status:'completed',changes:[{path:'/work/early.ts',kind:'add'}]}}});
+  expect(h.events.filter(e=>e.kind==='tool.completed')).toHaveLength(0);
+  expect(h.events.some(e=>e.data.code==='request.input-invalidated')).toBe(false);
+ }finally{await task.close();}
+});

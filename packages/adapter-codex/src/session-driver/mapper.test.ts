@@ -109,3 +109,9 @@ test('maps verified compaction lifecycle with bounded exact correlation identity
     expect(mapCodexNotification({ method: 'item/started', params: { threadId: 'thread', turnId: 'turn', item: { type: 'contextCompaction', id } } })[0]?.data.code).not.toBe('context.compaction');
   }
 });
+
+test('only successful native fileChange completions record attributable edit paths',()=>{
+ const params={threadId:'n',turnId:'t',item:{type:'fileChange',id:'edit',status:'completed',changes:[{path:'src/a.ts',kind:{type:'update'},diff:'+new'}]}};
+ expect(mapCodexNotification({method:'item/completed',params})[0]?.data.edits).toEqual([{path:'src/a.ts',op:'update',diff:'+new'}]);
+ for(const method of ['item/started','item/completed'])expect(mapCodexNotification({method,params:{...params,item:{...params.item,status:'failed'}}})[0]?.data.edits).toBeUndefined();
+});

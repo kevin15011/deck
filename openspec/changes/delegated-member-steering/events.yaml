@@ -1,0 +1,12 @@
+schema: spec-registry-events-v1
+events:
+  - phase: proposal
+    status: parked
+    event: proposal.parked
+    artifact: proposal.md
+    timestamp: "2026-10-22T18:45:18Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Recorded pending/delivered/incorporated member feedback as a separate future change."
+      - "No steering design or implementation mixed into the continuity proposal."

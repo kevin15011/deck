@@ -1,3 +1,4 @@
+import { DELEGATED_CONTINUITY_PROPERTIES } from "@deck/core/session/task-handoff";
 import { DECISION_TOOLS, DECISION_DEPENDENCY_PROPERTIES, DECISION_DELEGATION_RULES } from "@deck/core/session/decisions";
 /**
  * `deck internal session-mcp` (D-11): an MCP stdio server inside each native child that forwards
@@ -28,7 +29,7 @@ const TOOLS = [
   { name: "deck_task_list", description: "List this session's delegated tasks with owner and whether they can be continued; use before delegating to reuse the owner.", inputSchema: { type: "object", properties: {} } },
   DECK_TASK_INTEGRATE_TOOL,
   ...DECISION_TOOLS,
-  { name: "deck_delegate", description: "Delegate a task to a configured member; continueTaskId preserves the original owner and native context.", inputSchema: { type: "object", properties: { agent: { type: "string" }, task: { type: "string" }, continueTaskId: { type: "string" }, ...DECISION_DEPENDENCY_PROPERTIES }, required: ["agent", "task"], allOf:DECISION_DELEGATION_RULES } },
+  { name: "deck_delegate", description: "Delegate a task to a configured member; continueTaskId preserves the logical task and owner; native context is policy-selected at launch. Optional acceptance/sourceTasks replace (empty clears), missing inherits; findings merge by stable ID, replace cannot omit open findings.", inputSchema: { type: "object", properties: { agent: { type: "string" }, task: { type: "string" }, continueTaskId: { type: "string" }, ...DECISION_DEPENDENCY_PROPERTIES, ...DELEGATED_CONTINUITY_PROPERTIES }, required: ["agent", "task"], allOf:DECISION_DELEGATION_RULES } },
   { name: "deck_task_wait", description: "Wait for the requested tasks, for at most 50 seconds.", inputSchema: { type: "object", properties: { taskIds: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 100 }, timeoutSec: { type: "number", minimum: 0, maximum: 50 } }, required: ["taskIds"] } },
   { name: "deck_task_result", description: "Retrieve an original task attempt and bounded result; this does not verify or integrate it.", inputSchema: { type: "object", properties: { taskId: { type: "string" }, attempt: { type: "integer", minimum: 1 } }, required: ["taskId"] } },
   { name: "deck_task_cancel", description: "Cancel a delegated task, including queued work.", inputSchema: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] } },

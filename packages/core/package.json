@@ -48,7 +48,10 @@
     "./teams/developer/explorer-content": "./src/teams/developer/explorer-content.ts",
     "./skills/external": "./src/skills/external/index.ts",
     "./skills/bootstrap": "./src/skills/bootstrap/index.ts",
-    "./spec-registry": "./src/spec-registry/index.ts"
+    "./spec-registry": "./src/spec-registry/index.ts",
+    "./session/task-continuity": "./src/session/task-continuity.ts",
+    "./session/task-handoff": "./src/session/task-handoff.ts",
+    "./session/request-input": "./src/session/request-input.ts"
   },
   "devDependencies": {
     "@deck/adapter-codex": "workspace:*",

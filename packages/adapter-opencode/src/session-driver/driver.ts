@@ -1,3 +1,4 @@
+import {correlatedOpenCodeEdits} from "./mapper";
 import { contextCapacity, contextIdentity, sanitizeContextObservation } from "@deck/core/session/events";
 import { openCodeProjectConfigDisabled, pendingOpenCodeProjectSources } from "../personal-mcp";
 import { prepareImages, redactImagePayload } from "./images";
@@ -301,10 +302,11 @@ Patterns: ${raw.always.join("\n")}`,
             const { context: reported, ...native } = event.data;
             const capacity = this.contextLimits.get(JSON.stringify([result.info.providerID, result.info.modelID])) ?? null;
             const context = record(reported) ? sanitizeContextObservation({ ...reported, capacity }) : undefined;
-            this.emit({ ...event, data: { ...native, ...(!turn.contextCompacted && context ? { context } : {}) } });
+            this.emit({ ...event, data: { ...native, requestInput:null, requestInputUnknownReason:'provider-normalization-unverified', ...(!turn.contextCompacted && context ? { context } : {}) } });
           }
         }
       }
+      if(!turn.interrupted && result.info.sessionID===this.nativeId)for(const event of correlatedOpenCodeEdits(result,this.nativeId))this.emit(event);
       for (const part of Array.isArray(result.parts) ? result.parts : []) if (record(part) && part.type === "text" && typeof part.text === "string") this.emit({ kind: "message.completed", data: { text: part.text, messageId: result.info.id }, raw: part });
       this.finish({ status: turn.interrupted ? "interrupted" : "completed" });
     }, error => { if (this.current === turn && !turn.interrupted) this.finish({ status: "failed", error: redactText((error as Error).message, 400) }); });

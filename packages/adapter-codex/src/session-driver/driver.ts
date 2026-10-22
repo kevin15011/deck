@@ -1,3 +1,4 @@
+import {codexRequestInput} from "@deck/core/session/request-input";
 import { validateQuestions, type Question } from "@deck/core/session/question";
 import { CODEX_STEERING_CAPABILITY, type SteeringInput, type SteeringOutcome } from "@deck/core/session/steering";
 import { steeringFailure, reconcileHistory } from "./steering";
@@ -30,7 +31,7 @@ function nativeModel(modelId: string): { model: string; modelProvider?: string }
   const slash = modelId.indexOf("/");
   return slash < 0 ? { model: modelId } : { model: modelId.slice(slash + 1), ...(modelId.slice(0, slash) === "openai-codex" ? {} : { modelProvider: modelId.slice(0, slash) }) };
 }
-type Turn = { id?: string; confirmedId?: string; contextCompacted?: boolean; resolve(outcome: TurnOutcome): void; interrupted: boolean; escalation?: ReturnType<typeof setTimeout>; nativeFailure?: { turnId: string; failure: TurnFailure } };
+type Turn = { policyInput?:ReturnType<typeof codexRequestInput>; policyInputAfterTool?:boolean; id?: string; confirmedId?: string; contextCompacted?: boolean; resolve(outcome: TurnOutcome): void; interrupted: boolean; escalation?: ReturnType<typeof setTimeout>; nativeFailure?: { turnId: string; failure: TurnFailure } };
 const isHookNotification = (message: RpcMessage) => message.method?.startsWith("hook/") === true;
 
 // Canonical action data is passed only to the in-memory approval broker, never emitted.
@@ -286,16 +287,27 @@ class CodexTask {
       }
       if (message.method === 'item/started') active.contextCompacted = true;
     }
+    if ((message.method==='item/started'||message.method==='item/completed')
+      && ['commandExecution','fileChange','mcpToolCall','webSearch','dynamicToolCall'].includes(String(object(p.item).type))) {
+      const active=this.turn,turnId=active?.confirmedId;
+      // A turn/start-confirmed identity is required before attributing tools or mutating policy.
+      if(this.closed||this.failed||!active||active.interrupted||!this.threadId||!turnId
+        ||p.threadId!==this.threadId||p.turnId!==turnId){
+        this.emit({kind:'runner.unmapped',data:{nativeType:message.method,reason:'stale-turn'}});return;
+      }
+    }
     if (message.method === 'thread/tokenUsage/updated') {
       const active = this.turn;
       if (this.closed || this.failed || !active || active.interrupted || !active.id || p.threadId !== this.threadId || p.turnId !== (active.confirmedId ?? active.id)) {
         this.emit({ kind: 'runner.unmapped', data: { nativeType: message.method, reason: 'stale-turn' } }); return;
       }
+      const policyInput=active.contextCompacted?undefined:codexRequestInput(p.tokenUsage,p.threadId,p.turnId,this.input.assignment.modelId);
+      active.policyInput=policyInput;active.policyInputAfterTool=!!policyInput;
       // Preserve raw/native usage compatibility, but no delayed pre-compaction
       // counter may become a new context observation in this native turn.
       for (const event of mapCodexNotification(message, this.attestedMemory)) {
-        if (active.contextCompacted) { const { context: _context, ...data } = event.data; this.emit({ ...event, data }); }
-        else this.emit(event);
+        if (active.contextCompacted) { const { context: _context, ...data } = event.data; this.emit({ ...event, data:{...data,requestInput:null} }); }
+        else this.emit({...event,data:{...event.data,requestInput:policyInput??null}});
       }
       return;
     }
@@ -326,9 +338,15 @@ class CodexTask {
         : (correlated ? classifyCodexFailure(object(p.turn).error)
           ?? (active.nativeFailure?.turnId === turnId ? active.nativeFailure.failure : undefined) : undefined)
           ?? { category: "unknown", origin: "unknown", certainty: "inferred" };
+      if(correlated && status==='completed' && !active.contextCompacted && active.policyInputAfterTool && active.policyInput)this.emit({kind:'diagnostic',data:{code:'request.input-finalized',nativeThreadId:p.threadId,nativeTurnId:turnId}});
+      else this.emit({kind:'diagnostic',data:{code:'request.input-invalidated',reason:'final-request-unproven'}});
       for (const event of mapCodexNotification(message, this.attestedMemory)) this.emit(event);
       this.finish({ status, ...(failure ? { failure } : {}) }, true);
       return;
+    }
+    if(message.method==='item/completed' && ['commandExecution','fileChange','mcpToolCall','webSearch','dynamicToolCall'].includes(String(object(p.item).type)) && this.turn){
+      this.turn.policyInputAfterTool=false;
+      this.emit({kind:'diagnostic',data:{code:'request.input-invalidated',reason:'later-request-may-follow-tool',nativeThreadId:p.threadId,nativeTurnId:p.turnId}});
     }
     for (const event of mapCodexNotification(message, this.attestedMemory)) this.emit(event);
   }

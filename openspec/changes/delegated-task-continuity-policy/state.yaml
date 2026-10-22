@@ -1,0 +1,59 @@
+schema: spec-registry-v1
+changeId: delegated-task-continuity-policy
+name: Separate logical task ownership from native context reuse
+currentPhase: review
+status: approved
+next_action: "Reviewed first-delivery scope accepted. Prepare and verify local canary; track daemon activation and real interrupted-continuation cost separately in delivery.md."
+artifacts:
+  proposal: proposal.md
+  spec: acceptance.md
+  exploration: evidence.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+provenance:
+  - phase: review
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-22T22:13:59Z"
+    registryWrite: non-deferred
+    note: "Reviewed quality attempt4; accepted first-delivery fresh-all amendment and interruption delta. All findings closed;31 focused independent tests pass. Native DB/history excluded; local delivery pending."
+  - phase: design
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-22T20:18:13Z"
+    registryWrite: non-deferred
+    note: "User approved design and160000 ceiling, requested operator-stop resume, explicit finding closure/open-only handoff, no new reviewer tool/completion metrics, and verified runner/model compaction-constrained caps. Incorporated before implementation."
+  - phase: apply
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-22T20:18:13Z"
+    registryWrite: non-deferred
+    note: "Explicit user implementation authority. One vertical apply-deep owner; existing continuity architect verifies compaction bounds read-only. Unknown bounds remain fresh-only."
+  - phase: design
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-22T19:11:40Z"
+    registryWrite: non-deferred
+    note: "Reviewed architect attempt 1 and material source boundaries; persisted design with corrected hard-cap/rollback, byte budgets, role attribution, OpenCode reliability and handoff retrieval. Artifact complete, not implementation approval."
+  - phase: spec
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-22T18:55:51Z"
+    registryWrite: non-deferred
+    note: "User approved criteria with seven incorporated amendments and authorized design only; design must be presented before implementation."
+  - phase: design
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-22T18:55:51Z"
+    registryWrite: non-deferred
+    note: "Design analysis delegated for the new continuity area; no production edits or runtime activation."
+  - phase: proposal
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-22T18:45:18Z"
+    registryWrite: non-deferred
+    note: "User selected logical continuity with fresh native sessions by default; criteria-first proposal only. Design and implementation deferred until criteria review."

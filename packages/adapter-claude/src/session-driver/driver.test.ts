@@ -142,7 +142,9 @@ describe("createClaudeSessionDriver.startTask", () => {
     child.lines(withSession("turn-success.jsonl"));
     child.exit();
     expect(await handle.done).toEqual({ status: "completed" });
-    expect(h.events.map((e) => e.kind)).toEqual(["turn.started", "message.completed", "usage", "rate-limit", "usage"]);
+    expect(h.events.map((e) => e.kind)).toEqual(["turn.started", "message.completed", "diagnostic", "usage", "rate-limit", "usage", "diagnostic"]);
+    expect(h.events[2]!.data).toMatchObject({code:"request.observed",nativeThreadId:SID,nativeRequestId:h.events[1]!.data.messageId});
+    expect(h.events[3]!.data.requestUsage).toMatchObject({requestId:h.events[2]!.data.nativeRequestId});
     expect(h.events[1]!.data.text).toBe("pong");
   });
 
@@ -155,7 +157,7 @@ describe("createClaudeSessionDriver.startTask", () => {
     child.stdout(text.slice(137)); // no trailing newline: flushed at exit
     child.exit();
     expect(await handle.done).toEqual({ status: "completed" });
-    expect(h.events.at(-1)!.kind).toBe("usage");
+    expect(h.events.filter(e=>e.kind==="usage").at(-1)!.kind).toBe("usage");
   });
 
   test("a non-JSON stdout line is a diagnostic, not a crash", async () => {

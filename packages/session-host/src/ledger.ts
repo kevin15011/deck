@@ -1,3 +1,5 @@
+import { byteExcerpt } from "./task-handoff";
+import { projectTaskEvidence, type TaskContinuityState, type AttemptContinuityState } from "./task-evidence";
 import { isSessionGrantKind, isApprovalToolKey, isApprovalRisk, type SessionGrant } from "@deck/core/session/approval";
 import { isApprovalMode, type ApprovalMode } from "@deck/core/session/commands";
 import type { Question } from "@deck/core/session/question";
@@ -20,7 +22,7 @@ import type { CrossTeamAssignments } from "@deck/core/session/assignments";
 import type { EventLog } from "./event-log";
 import { writePrivateFile } from "./paths";
 
-export const LEDGER_SNAPSHOT_VERSION = 12 as const;
+export const LEDGER_SNAPSHOT_VERSION = 15 as const;
 const RESULT_LIMIT = 8192;
 
 export const TASK_STATES = ["created", "queued", "running", "completed", "failed", "cancelled", "interrupted", "ownership-unsettled"] as const;
@@ -37,15 +39,16 @@ const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
 
 export type SessionLifecycleState = "created" | "running" | "idle" | "stopping" | "ended" | "recovered";
 export type AttemptAccounting = { seq: number; leadTaskId: string; leadAttempt: number; promptId?: string };
-export type TaskIntegration = AttemptAccounting & { commandId: string; state: TaskIntegrationState; note: string; evidenceSeqs: number[] };
+export type TaskIntegration = AttemptAccounting & { commandId: string; state: TaskIntegrationState; note: string; evidenceSeqs: number[]; findingResolutions?: import("@deck/core/session/task-handoff").FindingResolution[] };
 export type ContinuityBlock = { promptId: string; taskId: string; attempt: number; startedSeq: number; answer?: string; answerTruncated?: boolean; answerSeq?: number };
-export type TaskAttempt = {
+export type TaskAttempt = AttemptContinuityState & {
   attempt: number; runnerId: string; modelId: string; thinking?: string; nativeSessionId?: string;
   state: TaskState; reason?: string; continuity?: "native" | "reseeded"; startedSeq: number; endedSeq?: number; unsettledSeq?: number; result?: string; resultSeq?: number; resultTruncated?: boolean;
   delivery?: AttemptAccounting; retrieval?: AttemptAccounting; integration?: TaskIntegration; integrations?: TaskIntegration[];
 };
 /** Native session confirmed by the runner (a `turn.started` was seen): only then may a later turn resume it. */
-export type LedgerTask = DecisionDependencies & { taskId: string; memberId: string; attempts: TaskAttempt[]; nativeConfirmed?: boolean };
+export type LeadRecoveryMessage = {role:"user"|"assistant";text:string;seq:number;truncated:boolean};
+export type LedgerTask = DecisionDependencies & TaskContinuityState & { leadRecovery?:{original?:LeadRecoveryMessage;recent:LeadRecoveryMessage[]}; taskId: string; memberId: string; attempts: TaskAttempt[]; nativeConfirmed?: boolean };
 /** Durable idempotency receipt (XR-1.5): the command's type and its original outcome. */
 export type LedgerCommandReceipt = { type: string; outcome: { ok: boolean; [key: string]: unknown } };
 export type LedgerPendingQuestion = { questionId: string; taskId?: string; tool?: string; questions: Question[]; seq: number };
@@ -167,6 +170,8 @@ export class Ledger {
     this.state.lastEventTs = event.ts;
     const d = event.data;
     if(event.kind==="diagnostic" && d.code==="session.preparation" && d.commandId && d.outcome) this.onLifecycle(event,"session.prepare","");
+    const evidenceTask = this.task(String(d.taskId ?? event.source.taskId ?? ''));
+    if(evidenceTask && event.kind !== 'task.continued') projectTaskEvidence(evidenceTask,event);
     switch (event.kind) {
       case "decision.command": this.recordDecisionCommand(d.command); break;
       case "decision.opened": case "decision.revised": case "decision.state": {
@@ -192,7 +197,13 @@ export class Ledger {
         else if (event.kind === "task.retrieval") attempt.retrieval ??= accounting;
         else {
           const integration: TaskIntegration = { ...accounting, commandId: String(d.commandId), state: d.state as TaskIntegration["state"], note: String(d.note), evidenceSeqs: [...d.evidenceSeqs as number[]] };
-          (this.state.mutationIdentities ??= {})[integration.commandId] ??= {type:"deck_task_integrate",fingerprint:decisionFingerprint("deck_task_integrate",Object.fromEntries(["commandId","taskId","attempt","state","note","evidenceSeqs"].map(k=>[k,d[k]])))};
+          if(d.structuredUpdates && typeof d.structuredUpdates==='object') for(const [id,update] of Object.entries(d.structuredUpdates)) {
+            const target=this.task(id);if(!target)continue;
+            Object.assign(target,structuredClone(update));target.structuredSeq=event.seq;target.structuredActor={taskId:accounting.leadTaskId,attempt:accounting.leadAttempt};
+            for(const value of Object.values(target.findingStates??{}))if(value.seq===0)value.seq=event.seq;
+          }
+          if(d.findingResolutions) Object.assign(integration,{findingResolutions:structuredClone(d.findingResolutions)});
+          (this.state.mutationIdentities ??= {})[integration.commandId] ??= {type:"deck_task_integrate",fingerprint:decisionFingerprint("deck_task_integrate",Object.fromEntries(["commandId","taskId","attempt","state","note","evidenceSeqs", ...(d.findingResolutions === undefined ? [] : ["findingResolutions"])].map(k=>[k,d[k]])))};
           const records = attempt.integrations ??= [];
           if (!records.some(r => r.commandId === integration.commandId)) { records.push(integration); attempt.integration = integration; }
         }
@@ -353,6 +364,21 @@ export class Ledger {
       case "task.result": return this.onTaskResult(event);
       case "message.completed": {
         const task = event.source.taskId ? this.state.tasks[event.source.taskId] : undefined;
+        // Bounded append/replay projection for Lead's protected missing-native recovery.
+        // Keep the original request even after the rolling eight messages expire.
+        const active=task?.attempts.at(-1);
+        if(task?.memberId==="lead" && /^lead(?:-g[1-9]\d*)?$/.test(task.taskId)
+          && (event.source.memberId===undefined||event.source.memberId==="lead")
+          && (d.attempt===undefined||d.attempt===active?.attempt)
+          && (!event.source.nativeSessionId||event.source.nativeSessionId===active?.nativeSessionId)
+          && (d.role==="user"||d.role==="assistant"&&active?.state==="running") && !d.internal && d.by!=="daemon"
+          && typeof d.text==="string" && d.text.trim()) {
+          const recovery=task.leadRecovery??={recent:[]};
+          const text=byteExcerpt(d.text,1024);
+          const message:LeadRecoveryMessage={role:d.role,text,seq:event.seq,truncated:text!==d.text};
+          if(d.role==="user")recovery.original??=message;
+          recovery.recent.push(message);if(recovery.recent.length>8)recovery.recent.shift();
+        }
         if (task?.memberId === "lead" && /^lead(?:-g[1-9]\d*)?$/.test(task.taskId) && (event.source.memberId === undefined || event.source.memberId === "lead") && d.role === "assistant" && !d.internal && typeof d.text === "string" && d.text.trim()) {
           this.state.lastLeadReplySeq = event.seq;
           const block = this.state.continuityBlock;
@@ -419,6 +445,7 @@ export class Ledger {
         state: initial, startedSeq: event.seq,
       }],
     };
+    projectTaskEvidence(this.state.tasks[taskId]!,event);
     const queuedPrompt = str(d.promptId) ? this.state.prompts?.[d.promptId as string] : undefined;
     if (queuedPrompt?.state === "queued") { queuedPrompt.taskId = taskId; queuedPrompt.attempt = 1; }
   }
@@ -440,7 +467,7 @@ export class Ledger {
       attempt.state = wanted;
       if (wanted === "ownership-unsettled") attempt.unsettledSeq = event.seq; else delete attempt.unsettledSeq;
       if (str(d.reason)) attempt.reason = str(d.reason); else delete attempt.reason;
-      if (TERMINAL_TASK_STATES.includes(wanted)) attempt.endedSeq = event.seq;
+      if (TERMINAL_TASK_STATES.includes(wanted)) { attempt.endedSeq = event.seq; attempt.endedAt = Date.parse(event.ts); }
     }
     for (const prompt of Object.values(this.state.prompts ?? {})) {
       if ((prompt.state !== "dispatched" && prompt.state !== "accepted") || prompt.taskId !== taskId || prompt.attempt !== attempt.attempt) continue;
@@ -463,7 +490,7 @@ export class Ledger {
     if (!TERMINAL_TASK_STATES.includes(previous.state)) return this.anomaly("task-continue-not-terminal", event.seq, taskId);
     const attemptNo = Number.isInteger(d.attempt) ? (d.attempt as number) : previous.attempt + 1;
     if (attemptNo !== previous.attempt + 1) return this.anomaly("task-attempt-out-of-order", event.seq, String(attemptNo));
-    const continuity = d.continuity === "reseeded" ? "reseeded" : "native";
+    const continuity = d.continuityPending === true ? undefined : d.continuity === "reseeded" ? "reseeded" : "native";
     if (continuity === "reseeded") {
       task.nativeConfirmed = false;
       const block = this.state.continuityBlock;
@@ -478,6 +505,7 @@ export class Ledger {
       ...(str(d.nativeSessionId) ? { nativeSessionId: str(d.nativeSessionId) } : {}),
       state: "created", continuity, startedSeq: event.seq,
     });
+    projectTaskEvidence(task,event);
     const queuedPrompt = str(d.promptId) ? this.state.prompts?.[d.promptId as string] : undefined;
     if (queuedPrompt?.state === "queued") { queuedPrompt.taskId = taskId; queuedPrompt.attempt = attemptNo; }
     if (continuity === "reseeded") for (const prompt of Object.values(this.state.prompts ?? {})) if (prompt.state === "dispatched" && prompt.taskId === taskId && prompt.attempt === previous.attempt) prompt.attempt = attemptNo;
@@ -489,6 +517,8 @@ export class Ledger {
     const attempt = taskId ? this.state.tasks[taskId]?.attempts.at(-1) : undefined;
     if (!attempt) return this.anomaly("task-unknown", event.seq, taskId);
     const summary = typeof d.summary === "string" ? d.summary : undefined;
+    if(typeof d.reportArtifactUnavailable==='string')attempt.reportArtifactUnavailable=d.reportArtifactUnavailable;
+    if(d.reportArtifact)attempt.reportArtifact=structuredClone(d.reportArtifact) as TaskAttempt["reportArtifact"];
     if (summary !== undefined) {
       attempt.result = summary.slice(0, RESULT_LIMIT); attempt.resultSeq = event.seq; attempt.resultTruncated = summary.length > RESULT_LIMIT;
     }
@@ -550,7 +580,7 @@ export function saveLedgerSnapshot(ledger: Ledger, log: EventLog, snapshotFile: 
   const seq = ledger.seq;
   let hash = sha256("");
   if (seq > 0) {
-    const at = log.readAfter(seq - 1).next().value;
+    const at = log.readEvent(seq);
     if (!at || at.seq !== seq) throw new Error(`Cannot snapshot ledger at seq ${seq}: event missing from log`);
     hash = eventDigest(at);
   }

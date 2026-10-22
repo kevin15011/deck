@@ -73,6 +73,12 @@ export function mapCodexNotification(message: RpcMessage, nativeMemory?: NativeM
       if (["commandExecution", "fileChange", "mcpToolCall", "webSearch", "dynamicToolCall"].includes(String(item.type))) {
         const isError = item.status === "failed" || item.status === "declined" || item.success === false || item.error != null || (typeof item.exitCode === "number" && item.exitCode !== 0);
         return event(complete ? "tool.completed" : "tool.started", {
+          ...(complete && !isError && item.type==='fileChange' && item.status==='completed' && Array.isArray(item.changes) ? {edits:item.changes.slice(0,257).flatMap((change:unknown)=>{
+            const c=object(change),k=object(c.kind);const op=typeof c.kind==='string'?c.kind:k.type;
+            if(typeof c.path!=='string'||!['add','update','delete'].includes(String(op)))return [];
+            return [{path:c.path,op:typeof k.move_path==='string'?'rename-from':op,...(typeof c.diff==='string'?{diff:text(c.diff)}:{})},...(typeof k.move_path==='string'?[{path:k.move_path,op:'rename-to'}]:[])];
+          })} : {}),
+          nativeThreadId:p.threadId,nativeTurnId:p.turnId,
           toolCallId: item.id, tool: item.type, ...(typeof item.tool === "string" ? { toolName: text(item.tool) } : {}), ...(typeof item.server === "string" ? { server: text(item.server) } : {}),
           status: complete ? (isError ? "failed" : "completed") : "running", nativeStatus: item.status, isError,
           input: bounded(item.arguments ?? item.changes ?? (item.type === "webSearch" ? { query: item.query, action: item.action } : { command: item.command, cwd: item.cwd })),

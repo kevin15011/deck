@@ -254,3 +254,29 @@ test('recorded synthetic API error shape preserves the last valid context and vi
     expect(mapper.map({ ...error, is_api_error_message: false, message: { ...error.message, model: 'model' } }).events.find(e => e.kind === 'usage')?.data.context).toMatchObject({ tokens: 0, modelId: 'model' });
   }
 });
+
+test('continuity input is last main request with cache and real identity; later failure invalidates it without changing UI',()=>{
+ const mapper=new ClaudeStreamMapper(undefined,'s','turn');
+ const message={type:'assistant',session_id:'s',message:{id:'r',model:'m',content:[],usage:{input_tokens:1,cache_creation_input_tokens:2,cache_read_input_tokens:3}}};
+ expect(mapper.map(message).events.find(e=>e.kind==='usage')?.data.requestInput).toMatchObject({tokens:6,nativeRequestId:'r',final:false});
+ expect(mapper.map({...message,parent_tool_use_id:'nested'}).events.some(e=>e.data.requestInput)).toBe(false);
+ expect(mapper.map({type:'result',session_id:'s',subtype:'success'}).events).toContainEqual({kind:'diagnostic',data:{code:'request.input-finalized',nativeThreadId:'s',nativeTurnId:'turn',nativeRequestId:'r'}});
+ const error=mapper.map({...message,is_api_error_message:true});expect(error.events.some(e=>e.data.code==='request.input-invalidated')).toBe(true);expect(error.events.some(e=>e.kind==='usage')).toBe(false);
+});
+test.each(['Edit','Write','NotebookEdit'])('successful correlated %s records edits; nested/failed results do not',name=>{
+ const mapper=new ClaudeStreamMapper(undefined,'s','turn');
+ const assistant={type:'assistant',session_id:'s',message:{id:'r',model:'m',content:[{type:'tool_use',id:'edit',name,input:{file_path:'/project/a.ts',notebook_path:'/project/a.ipynb'}}]}};
+ mapper.map(assistant);
+ const result={type:'user',session_id:'s',message:{content:[{type:'tool_result',tool_use_id:'edit',is_error:false,content:'success'}]}};
+ expect(mapper.map(result).events.find(e=>e.kind==='tool.completed')?.data).toMatchObject({requestId:'r',edits:[{path:name==='NotebookEdit'?'/project/a.ipynb':'/project/a.ts'}]});
+ mapper.map(assistant);expect(mapper.map({...result,message:{content:[{...result.message.content[0],is_error:true}]}}).events.find(e=>e.kind==='tool.completed')?.data.edits).toBeUndefined();
+ mapper.map({...assistant,parent_tool_use_id:'nested'});expect(mapper.map({...result,parent_tool_use_id:'nested'}).events.find(e=>e.kind==='tool.completed')?.data.edits).toBeUndefined();
+});
+
+test('a delayed older request snapshot cannot establish continuity input after a newer request',()=>{
+ const mapper=new ClaudeStreamMapper(undefined,'s','turn');
+ const assistant=(id:string,tokens:number)=>({type:'assistant',session_id:'s',message:{id,model:'m',content:[],usage:{input_tokens:tokens,cache_creation_input_tokens:0,cache_read_input_tokens:0}}});
+ mapper.map(assistant('r1',10));mapper.map(assistant('r2',20));
+ expect(mapper.map(assistant('r1',10)).events.find(e=>e.kind==='usage')?.data.requestInput).toBeNull();
+ expect(mapper.map({type:'result',session_id:'s',subtype:'success'}).events.some(e=>e.data.code==='request.input-finalized')).toBe(false);
+});

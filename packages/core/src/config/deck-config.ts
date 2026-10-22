@@ -1,3 +1,4 @@
+import { normalizeContinuityPolicy, type ContinuityPolicy } from "../session/task-continuity";
 import { createHash } from "node:crypto";
 import { chmodSync, closeSync, existsSync, fsyncSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, parse, relative, resolve } from "node:path";
@@ -225,6 +226,7 @@ export type CrossRunnerConfig = {
   approvals: Record<string, CrossRunnerApprovalMode>;
   maxConcurrentTasks: number;
   executionBudget?: { lead: number; delegated: number };
+  continuity?: ContinuityPolicy;
   web: { port: number; trustedProxy: string | null; allowedOrigins: string[]; allowFunnel: boolean; tailscaleServeAccess?: boolean };
   claudeTosAcknowledgedAt: string | null;
 };
@@ -956,7 +958,7 @@ export function diagnoseDeckConfigDeprecations(config: unknown): readonly DeckCo
   return diagnostics;
 }
 
-const CROSS_RUNNER_FIELDS = new Set(["enabled", "defaultRunner", "members", "approvals", "maxConcurrentTasks", "executionBudget", "web", "claudeTosAcknowledgedAt"]);
+const CROSS_RUNNER_FIELDS = new Set(["enabled", "defaultRunner", "members", "approvals", "maxConcurrentTasks", "executionBudget", "continuity", "web", "claudeTosAcknowledgedAt"]);
 const CROSS_MEMBER_FIELDS = new Set(["runnerId", "modelId", "thinking"]);
 const CROSS_WEB_FIELDS = new Set(["port", "trustedProxy", "allowedOrigins", "allowFunnel", "tailscaleServeAccess"]);
 // Compatibility defaults only; session execution ignores crossRunner.approvals.
@@ -1022,6 +1024,9 @@ function normalizeCrossRunnerConfig(value: unknown, configPath?: string): CrossR
     }
   }
 
+  let continuity: ContinuityPolicy;
+  try { continuity = normalizeContinuityPolicy(value.continuity); } catch(error) { throw crossInvalid((error as Error).message, "crossRunner.continuity", configPath); }
+
   const web = { port: 7421, trustedProxy: null as string | null, allowedOrigins: [] as string[], allowFunnel: false, tailscaleServeAccess: false };
   if (value.web !== undefined) {
     assertPlainObject(value.web, "crossRunner.web", configPath);
@@ -1067,6 +1072,7 @@ function normalizeCrossRunnerConfig(value: unknown, configPath?: string): CrossR
     approvals,
     maxConcurrentTasks: max,
     executionBudget,
+    continuity,
     web,
     claudeTosAcknowledgedAt: ack,
   };
@@ -1613,7 +1619,7 @@ function rejectSecretFields(value: unknown, fieldPath: string, configPath?: stri
 
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     const childPath = `${fieldPath}.${key}`;
-    if (SECRET_FIELD_PATTERN.test(key) && !SAFE_CONTROL_FIELD_KEYS.has(key)) {
+    if (SECRET_FIELD_PATTERN.test(key) && !SAFE_CONTROL_FIELD_KEYS.has(key) && !(fieldPath === 'config.crossRunner.continuity' && ['autoNativeMaxInputTokens','nativeHardCapInputTokens'].includes(key))) {
       throw new DeckConfigError(
         "DECK_CONFIG_SECRET_FIELD",
         "Deck config may not store credentials or secret-shaped fields.",

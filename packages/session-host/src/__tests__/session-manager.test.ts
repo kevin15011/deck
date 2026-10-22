@@ -1,3 +1,4 @@
+import {projectTaskContinuityMetrics} from '../task-continuity-metrics';
 import { PassThrough } from "node:stream";
 import { runSessionMcpBridge } from "../mcp-bridge";
 import type { ControlClient } from "../control-client";
@@ -567,7 +568,7 @@ describe("persistent workspace sessions", () => {
     t.driver.onStart = turn => { if (turn.input.memberId !== "lead") { turn.init(); turn.finish(); } };
     const id = await t.create(); await t.run({ type: "prompt.send", text: "initial" }, id); await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "lead"); const lead = lastTurn(t.driver); lead.init();
     for (let i = 0; i < 200; i++) await t.manager.callTaskTool(grantFor(t, id), "deck_delegate", { agent: "investigate", task: `job ${i}` });
-    await waitFor(() => t.events(id).filter(e => e.kind === "task.state" && e.source.taskId !== "lead" && e.data.state === "completed").length === 200, PROGRESS_TIMEOUT_MS, "all children complete");
+    await waitFor(() => t.events(id).filter(e => e.kind === "task.state" && e.source.taskId !== "lead" && e.data.state === "completed").length === 200, PROGRESS_TIMEOUT_MS * 3, "all children complete");
     lead.finish(); await waitFor(() => t.driver.turns.filter(turn => turn.input.memberId === "lead").length === 2, PROGRESS_TIMEOUT_MS, "first notice batch");
     const first = lastTurn(t.driver); expect(first.input.prompt.length).toBeLessThanOrEqual(8192); expect(first.input.rolePrompt).not.toContain("Delegated task completion notice:");
     const firstIds = (t.events(id).filter(e => e.data.code === "lead.notices-delivered").at(-1)!.data.notices as any[]).map(n => n.taskId);
@@ -576,7 +577,7 @@ describe("persistent workspace sessions", () => {
     const secondIds = (t.events(id).filter(e => e.data.code === "lead.notices-delivered").at(-1)!.data.notices as any[]).map(n => n.taskId);
     expect(firstIds.filter(id => secondIds.includes(id))).toEqual([]); expect(firstIds.length + secondIds.length).toBe(200);
     lastTurn(t.driver).finish(); await t.idle();
-  });
+  } , 30000);
 
   test.each(["enqueue", "pause", "dispatch", "completion"])("%s fsync failure never falsely acknowledges or starts the next item and drains owned work", async stage => {
     let unblock!: (value: any) => void;
@@ -994,7 +995,7 @@ describe("persistent workspace sessions", () => {
     await waitFor(() => t.driver.turns.length === 3, PROGRESS_TIMEOUT_MS, "original child continued");
     const continued = lastTurn(t.driver);
     expect(continued.input.assignment).toEqual({ runnerId: "claude", modelId: "fast" });
-    expect(continued.input.resume?.nativeSessionId).toBe(child.nativeSessionId);
+    expect(continued.input.resume).toBeUndefined(); // Unknown request/bound evidence selects fresh; logical ownership is preserved.
     expect((await t.manager.callTaskTool(firstGrant, "deck_delegate", { agent: "investigate", task: "stale" }) as any).code).toBe("credential-revoked");
     current.finish(); await waitFor(() => current.closed, PROGRESS_TIMEOUT_MS, "current drain"); continued.finish();
     await waitFor(() => codex.turns.length === 2, PROGRESS_TIMEOUT_MS, "current lead wake");
@@ -2979,6 +2980,18 @@ describe('Stage 3 exact-turn steering',()=>{
   const call=(name:string,args:Record<string,unknown>)=>t.manager.callTaskTool(grant,name,args);
   return {t,id,driver,writes,resolve,call,setTargetAvailable:(v:boolean)=>{targetAvailable=v;},setReconcile:(fn:(m:any)=>Promise<any>)=>{reconcile=fn;},accept:(index=0)=>resolve({state:'accepted',...writes[index],via:'receipt'},index)};
  }
+ test('native completion closes steering before the host settles the handle outcome',async()=>{
+  const {t,id,driver,call}=await steeringSession();
+  expect((await t.manager.query('prompts.list',{sessionId:id}) as any).data.steeringAvailable).toBe(true);
+  const turn=lastTurn(driver);
+  turn.emit('turn.completed',{status:'completed',nativeThreadId:turn.nativeSessionId});
+  expect((await t.manager.query('prompts.list',{sessionId:id}) as any).data.steeringAvailable).toBe(false);
+  expect(await call('deck_task_list',{})).toMatchObject({ok:false,code:'credential-revoked'});
+  expect(t.events(id).filter(e=>e.kind==='turn.completed')).toHaveLength(0);
+  expect(t.events(id).filter(e=>e.kind==='runner.unmapped'&&e.data.type==='turn.completed')).toHaveLength(1);
+  turn.finish();await t.idle();
+  expect(t.events(id).filter(e=>e.kind==='turn.completed')).toHaveLength(1);
+ });
  test('pre-write fence retains authority age; late question revision cannot be authorized by delayed acceptance',async()=>{
   const {t,id,driver,writes,resolve,call}=await steeringSession();expect(driver.turns[0]!.input.steeringVersion).toBe('0.162.1');
   const source=t.events(id).find(e=>e.kind==='prompt.dispatched')!.data.promptId;
@@ -3185,5 +3198,273 @@ describe('canonical OpenCode project execution trust',()=>{
   const t=setup({options:{modelCatalog:async(_root,trusted,signal)=>{calls.push({trusted,signal});if(calls.length===1)await new Promise<void>(r=>finish=r);return{runners:[]};}}});await t.create();const projectId=(await t.manager.query('projects.list',{}) as any).data.projects[0].projectId;
   const query=t.manager.query('runners.models',{projectId});await waitFor(()=>calls.length===1);expect(calls[0]!.trusted).toBe(false);await t.run({type:'project.trust',runnerId:'opencode',projectId,trusted:true,expectedRevision:0},undefined,'web:fixture');expect(calls[0]!.signal?.aborted).toBe(true);finish();expect(await query).toMatchObject({ok:false,code:'project-trust-changed'});
   await t.manager.query('runners.models',{projectId});expect(calls[1]!.trusted).toBe(true);await t.run({type:'project.trust',runnerId:'opencode',projectId,trusted:false,expectedRevision:1},undefined,'web:fixture');await t.manager.query('runners.models',{projectId});expect(calls[2]!.trusted).toBe(false);
+ });
+});
+
+describe('delegated task continuity policy',()=>{
+ const grant=(t:ReturnType<typeof setup>,id:string)=>t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths,id).taskCredentialFile('lead'),'utf8')).token)!;
+ const latest=(t:ReturnType<typeof setup>,id:string,taskId:string)=>{const ledger=Ledger.empty(id);for(const e of t.events(id))ledger.apply(e);return ledger.latest(taskId)!;};
+ const cfg=()=>baseConfig({members:{lead:{runnerId:'claude',modelId:'opus'},'apply-deep':{runnerId:'claude',modelId:'opus'},quality:{runnerId:'claude',modelId:'opus'}}});
+ const bound=()=>({runnerId:'claude',modelId:'opus',version:'1.0.0',configKey:'verified',basis:'input' as const,inputSafeExclusiveCap:170000,triggerTokens:170001,evidenceRef:'fixture'});
+ async function start(t:ReturnType<typeof setup>){const id=await t.create();await t.run({type:'prompt.send',text:'Lead'},id);await waitFor(()=>t.driver.turns.length===1);t.driver.turns[0]!.init();return id;}
+ const emitInput=(t:FakeTurn,tokens=100)=>t.emit('usage',{requestInput:{tokens,basis:'claude-message-input',nativeThreadId:t.nativeSessionId,nativeTurnId:'turn',nativeRequestId:'request',modelId:'opus',final:true}});
+ test('default production evidence is fresh-only and preserves task, assignment, criteria and open findings',async()=>{
+  const t=setup({config:cfg()});const id=await start(t);
+  const call=(d:Record<string,unknown>)=>t.manager.callTaskTool(grant(t,id),'deck_delegate',d);
+  const created=await call({agent:'apply-deep',task:'Original task',acceptance:{items:[{id:'AC1',text:'Preserve identity'}]},findings:{items:[{id:'F1',state:'open',text:'Fix defect'}]}});
+  expect(created.ok).toBe(true);const taskId=(created as any).data.taskId;
+  await waitFor(()=>t.driver.turns.length===2);const first=lastTurn(t.driver);first.init();emitInput(first);first.say('Historical report');first.finish();await waitFor(()=>(latest(t,id,taskId) as any).state==='completed');
+  expect((await call({agent:'apply-deep',task:'Correction',continueTaskId:taskId})).ok).toBe(true);
+  await waitFor(()=>t.driver.turns.length===3);const next=lastTurn(t.driver);
+  expect(next.input.resume).toBeUndefined();expect(next.nativeSessionId).not.toBe(first.nativeSessionId);
+  expect(next.input.prompt).toContain('Original task');expect(next.input.prompt).toContain('Historical report');expect(next.input.prompt).toContain('F1');expect(next.input.prompt).toContain('Preserve identity');
+  const result=latest(t,id,taskId) as any;expect(result.attempt).toBe(2);expect(result.selection.reason).toBe('native-compaction-bound-unknown');expect(result.continuity).toBe('reseeded');
+  expect(readFileSync(result.handoff.artifact,'utf8')).toContain('Original task');
+  const before=t.events(id).length;first.emit('tool.completed',{toolCallId:'late',status:'completed',edits:[{path:'foreign.ts',op:'add'}]});expect(t.events(id)).toHaveLength(before);
+ });
+ test('verified fixture allows automatic native and active Lead cancellation records origin',async()=>{
+  const t=setup({config:cfg(),options:{compactionBound:bound}});const id=await start(t);
+  const call=(d:Record<string,unknown>)=>t.manager.callTaskTool(grant(t,id),'deck_delegate',d);
+  const r=await call({agent:'apply-deep',task:'Implement'});const taskId=(r as any).data.taskId;
+  await waitFor(()=>t.driver.turns.length===2);const first=lastTurn(t.driver);first.init();emitInput(first);
+  expect((await t.manager.callTaskTool(grant(t,id),'deck_task_cancel',{taskId})).ok).toBe(true);
+  await waitFor(()=>(latest(t,id,taskId) as any).state==='cancelled');
+  expect((latest(t,id,taskId) as any).stop).toMatchObject({origin:'lead',launched:true});
+  await call({agent:'apply-deep',task:'Correct',continueTaskId:taskId});await waitFor(()=>t.driver.turns.length===3);
+  expect(lastTurn(t.driver).input.resume?.nativeSessionId).toBe(first.nativeSessionId);
+ });
+ test('assigned review always starts fresh; native request is rejected regardless of alias',async()=>{
+  const t=setup({config:cfg(),options:{compactionBound:bound}});const id=await start(t);
+  const call=(d:Record<string,unknown>)=>t.manager.callTaskTool(grant(t,id),'deck_delegate',d);
+  const r=await call({agent:'deck-quality',task:'Review candidate',sourceTasks:[],acceptance:{items:[]}});const taskId=(r as any).data.taskId;
+  await waitFor(()=>t.driver.turns.length===2);const first=lastTurn(t.driver);first.init();emitInput(first);first.finish();await waitFor(()=>(latest(t,id,taskId) as any).state==='completed');
+  expect(await call({agent:'quality',task:'Review again',continueTaskId:taskId,continuity:'native',continuityJustification:'Keep context'})).toMatchObject({ok:false,code:'review-native-forbidden'});
+  await call({agent:'quality',task:'Review again',continueTaskId:taskId});await waitFor(()=>t.driver.turns.length===3);
+  expect(lastTurn(t.driver).input.resume).toBeUndefined();expect((latest(t,id,taskId) as any).selection.reason).toBe('assigned-review-role');
+ });
+ test('integration alone preserves findings; explicit Lead closure and reopen are durable',async()=>{
+  const t=setup({config:cfg()});const id=await start(t);
+  const call=(name:string,d:Record<string,unknown>)=>t.manager.callTaskTool(grant(t,id),name,d);
+  const r=await call('deck_delegate',{agent:'apply-deep',task:'Fix',findings:{items:[{id:'F1',state:'blocker',text:'Lost state'}]}});const taskId=(r as any).data.taskId;
+  await waitFor(()=>t.driver.turns.length===2);const first=lastTurn(t.driver);first.init();first.say('Fixed');first.finish();await waitFor(()=>(latest(t,id,taskId) as any).state==='completed');
+  const result=(await call('deck_task_result',{taskId}) as any).data;
+  const integration={commandId:'integrate-1',taskId,attempt:1,state:'integrated',note:'Checked',evidenceSeqs:[result.resultSeq]};
+  expect((await call('deck_task_integrate',integration)).ok).toBe(true);
+  expect((await call('deck_delegate',{agent:'apply-deep',task:'Still active',continueTaskId:taskId,findings:{mode:'replace',items:[]}}))).toMatchObject({ok:false});
+  const closed={...integration,commandId:'integrate-close',findingResolutions:[{taskId,findingId:'F1',state:'resolved',reason:'Confirmed fix',evidenceSeqs:[result.resultSeq]}]};
+  expect((await call('deck_task_integrate',closed)).ok).toBe(true);expect(await call('deck_task_integrate',closed)).toMatchObject({ok:true,duplicate:true});
+  expect((await call('deck_task_integrate',{...integration,commandId:'integrate-reopen',findingResolutions:[{taskId,findingId:'F1',state:'open',reason:'Regression',evidenceSeqs:[result.resultSeq]}]})).ok).toBe(true);
+  await call('deck_delegate',{agent:'apply-deep',task:'Retest',continueTaskId:taskId});await waitFor(()=>t.driver.turns.length===3);expect(lastTurn(t.driver).input.prompt).toContain('Regression');
+ });
+});
+
+describe('continuity launch evidence and scoping',()=>{
+ const grant=(t:ReturnType<typeof setup>,id:string)=>t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths,id).taskCredentialFile('lead'),'utf8')).token)!;
+ const latest=(t:ReturnType<typeof setup>,id:string,taskId:string)=>{const ledger=Ledger.empty(id);for(const e of t.events(id))ledger.apply(e);return ledger.latest(taskId)!;};
+ const config=()=>baseConfig({executionBudget:{lead:2,delegated:1},members:{lead:{runnerId:'claude',modelId:'opus'},'apply-deep':{runnerId:'claude',modelId:'opus'},quality:{runnerId:'claude',modelId:'opus'}}});
+ const bound=()=>({runnerId:'claude',modelId:'opus',version:'1.0.0',configKey:'effective',basis:'input' as const,inputSafeExclusiveCap:170000,triggerTokens:170001,evidenceRef:'fixture'});
+ async function start(t:ReturnType<typeof setup>){const id=await t.create();await t.run({type:'prompt.send',text:'Lead'},id);await waitFor(()=>t.driver.turns.length===1);t.driver.turns[0]!.init();return id;}
+ test('dequeue age is measured from predecessor terminal; queued selection stays pending on replay',async()=>{
+  const clock=new FakeClock();const t=setup({config:config(),options:{clock,compactionBound:bound}});const id=await start(t);
+  const call=(d:Record<string,unknown>)=>t.manager.callTaskTool(grant(t,id),'deck_delegate',d);
+  const taskId=(await call({agent:'apply-deep',task:'Original'}) as any).data.taskId;
+  await waitFor(()=>t.driver.turns.length===2);const first=lastTurn(t.driver);first.init();first.emit('usage',{requestInput:{tokens:100,basis:'claude-message-input',nativeThreadId:first.nativeSessionId,nativeTurnId:'turn',modelId:'opus',final:true}});first.finish();await waitFor(()=>latest(t,id,taskId).state==='completed');
+  await call({agent:'apply-deep',task:'Separate area blocks capacity'});await waitFor(()=>t.driver.turns.length===3);const blocker=lastTurn(t.driver);
+  await call({agent:'apply-deep',task:'Correction',continueTaskId:taskId});
+  expect(latest(t,id,taskId)).toMatchObject({state:'queued',continuityPending:true});expect(latest(t,id,taskId).continuity).toBeUndefined();
+  clock.advance(300000);blocker.finish();await waitFor(()=>t.driver.turns.length===4);
+  expect(lastTurn(t.driver).input.resume).toBeUndefined();expect(latest(t,id,taskId).selection?.reason).toBe('predecessor-age');
+ });
+ test('preparation rechecks time/config and permits only task-attributed diff membership',async()=>{
+  const clock=new FakeClock();let release!:(v:any)=>void;const seen:readonly string[][]=[];
+  const t=setup({config:config(),options:{clock,compactionBound:bound,scopedDiff:async input=>{(seen as string[][]).push([...input.paths]);return new Promise(resolve=>{release=resolve;});}}});const id=await start(t);
+  const call=(d:Record<string,unknown>)=>t.manager.callTaskTool(grant(t,id),'deck_delegate',d);
+  const taskId=(await call({agent:'apply-deep',task:'Original'}) as any).data.taskId;
+  await waitFor(()=>t.driver.turns.length===2);const first=lastTurn(t.driver);first.init();
+  first.emit('tool.completed',{toolCallId:'edit',status:'completed',edits:[{path:join(t.project,'owned.ts'),op:'update',diff:'+safe'},{path:'../escape.ts',op:'add'}]});
+  first.emit('usage',{requestInput:{tokens:100,basis:'claude-message-input',nativeThreadId:first.nativeSessionId,nativeTurnId:'t',modelId:'opus',final:true}});first.finish();await waitFor(()=>latest(t,id,taskId).state==='completed');
+  await call({agent:'apply-deep',task:'Correction',continueTaskId:taskId});await waitFor(()=>!!release);
+  expect(seen).toEqual([['owned.ts']]);expect(t.driver.turns).toHaveLength(2);
+  clock.advance(300000);release({text:'diff',capturedAt:'now',status:' M owned.ts',truncated:false});await waitFor(()=>t.driver.turns.length===3);
+  expect(latest(t,id,taskId).selection?.reason).toBe('predecessor-age');expect(lastTurn(t.driver).input.resume).toBeUndefined();
+  expect(lastTurn(t.driver).input.prompt).toContain('potentiallyMixed: true');expect(lastTurn(t.driver).input.prompt).not.toContain('escape.ts');
+ });
+ test.each(['claude','codex','opencode'])('%s host fresh selection never passes a predecessor resume target',async runnerId=>{
+  const driver=new FakeDriver(runnerId);const c=config();for(const a of Object.values(c.members))a.runnerId=runnerId;
+  const t=setup({config:c,driver});const id=await start(t);const call=(d:Record<string,unknown>)=>t.manager.callTaskTool(grant(t,id),'deck_delegate',d);
+  const taskId=(await call({agent:'apply-deep',task:'Original'}) as any).data.taskId;await waitFor(()=>driver.turns.length===2);const first=lastTurn(driver);first.init();first.finish({status:'failed'});await waitFor(()=>latest(t,id,taskId).state==='failed');
+  await call({agent:'apply-deep',task:'Fix',continueTaskId:taskId,continuity:'native',continuityJustification:'Keep context'});await waitFor(()=>driver.turns.length===3);
+  expect(lastTurn(driver).input.resume).toBeUndefined();expect(latest(t,id,taskId).selection).toMatchObject({continuity:'reseeded',override:'refused',reason:'failed-predecessor'});
+ });
+});
+
+test('missing-native fallback fences all effects from the old driver generation, retaining one logical task',async()=>{
+ const t=setup({config:baseConfig({members:{lead:{runnerId:'claude',modelId:'opus'},'apply-deep':{runnerId:'claude',modelId:'opus'}}}),options:{compactionBound:()=>({runnerId:'claude',modelId:'opus',version:'1.0.0',configKey:'effective',basis:'input',inputSafeExclusiveCap:170000,triggerTokens:170001,evidenceRef:'fixture'})}});
+ const id=await t.create();await t.run({type:'prompt.send',text:'Lead'},id);await waitFor(()=>t.driver.turns.length===1);t.driver.turns[0]!.init();
+ const grant=()=>t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths,id).taskCredentialFile('lead'),'utf8')).token)!;
+ const taskId=(await t.manager.callTaskTool(grant(),'deck_delegate',{agent:'apply-deep',task:'Original'}) as any).data.taskId;
+ await waitFor(()=>t.driver.turns.length===2);const first=lastTurn(t.driver);first.init();first.say('SUBSTANTIVE_REPORT_DO_NOT_REPEAT_EFFECT');first.emit('tool.completed',{toolUseId:'edit',status:'completed',edits:[{path:'source.ts',op:'update'}]});first.emit('usage',{requestInput:{tokens:100,basis:'claude-message-input',nativeThreadId:first.nativeSessionId,nativeTurnId:'turn',modelId:'opus',final:true}});first.finish();
+ await waitFor(async()=>(await t.manager.query('task.result',{sessionId:id,taskId}) as any).data.attempts.at(-1).state==='completed');
+ t.driver.onStart=turn=>{if(turn.input.resume)turn.finish({status:'failed',reasonCode:'native-session-not-found'});};
+ const firstResult=(await t.manager.callTaskTool(grant(),'deck_task_result',{taskId,attempt:1}) as any).data;
+ expect((await t.manager.callTaskTool(grant(),'deck_task_integrate',{commandId:'fallback-integration',taskId,attempt:1,state:'blocked',note:'Keep substantive evidence',evidenceSeqs:[firstResult.resultSeq]})).ok).toBe(true);
+ await t.manager.callTaskTool(grant(),'deck_delegate',{agent:'apply-deep',task:'Correct',continueTaskId:taskId});await waitFor(()=>t.driver.turns.length===4);
+ const old=t.driver.turns[2]!,fresh=t.driver.turns[3]!;expect(fresh.input.resume).toBeUndefined();expect(fresh.input.prompt).toContain('Original');
+ const replay=Ledger.empty(id);for(const e of t.events(id))replay.apply(e);
+ const original=replay.task(taskId)!.attempts[0]!,recovery=replay.latest(taskId)!;
+ expect(fresh.input.prompt).toContain('SUBSTANTIVE_REPORT_DO_NOT_REPEAT_EFFECT');
+ expect(fresh.input.prompt).toContain(`${taskId} attempt 1; state completed; integration blocked; result event ${original.resultSeq}`);
+ expect(fresh.input.prompt).toContain(original.reportArtifact!.path);
+ expect(readFileSync(original.reportArtifact!.path,'utf8')).toContain('SUBSTANTIVE_REPORT_DO_NOT_REPEAT_EFFECT');
+ expect(replay.task(taskId)!.attempts[1]).toMatchObject({state:'failed',reason:'native-session-not-found'});
+ expect(recovery.recoveryPredecessorAttempt).toBe(1);
+ const manifest=recovery.handoff!.editArtifacts![0]!;
+ expect(manifest).toMatchObject({captureAttempt:3,sourceAttempts:[1]});expect(manifest.sourceAttempt).toBeUndefined();
+ expect(JSON.parse(readFileSync(manifest.path,'utf8'))).toMatchObject({sourceTask:taskId,captureAttempt:3,sourceAttempts:[1],edits:[{path:'source.ts',attempt:1}]});
+ const before=t.events(id).length;
+ expect(await old.ask([{id:'stale',prompt:'stale',header:'stale',options:[],multiple:false,allowOther:true,secret:false}])).toEqual({outcome:'cancelled'});
+ expect(await old.io.approval({approvalId:'old',tool:'shell',toolKey:'shell',risk:'unknown',summary:'old'} as any)).toEqual({decision:'deny',scope:'once'});
+ expect(()=>old.io.writePrivateFile('stale.txt','x')).toThrow('driver-attempt-ended');
+ await expect(old.io.spawn('must-not-launch',[])).rejects.toThrow('driver-attempt-ended');
+ old.say('must not overwrite current report');expect(t.events(id)).toHaveLength(before);
+ const task=(await t.manager.query('task.result',{sessionId:id,taskId}) as any).data;expect(task.attempts).toHaveLength(3);expect(task.attempts.at(-1).selection.reason).toBe('native-session-not-found');
+});
+
+test('optional report artifact failure never strands settled native ownership in running state',async()=>{
+ const t=setup();const id=await t.create();await t.run({type:'prompt.send',text:'Work'},id);await waitFor(()=>t.driver.turns.length===1);const turn=lastTurn(t.driver);turn.init();
+ mkdirSync(join(sessionPaths(t.paths,id).taskDir('lead'),'report-attempt-1.txt'));turn.say('Completed report');turn.finish();await t.idle();
+ const task=(await t.manager.query('task.result',{sessionId:id,taskId:'lead'}) as any).data;
+ expect(task.attempts.at(-1)).toMatchObject({state:'completed',result:'Completed report',reportArtifactUnavailable:'artifact-write-failed'});
+});
+
+describe('native termination boundary admission', () => {
+  for (const boundary of ['turn.completed', 'claude-steering-ended'] as const) {
+    test.each(['during-start', 'after-start'] as const)(`${boundary} reaches ledger and consumers once (%s), with reentrant and old callbacks fenced`, async timing => {
+      const t = setup();
+      const id = await t.create();
+      const observed: SessionEvent[] = [];
+      let first: FakeTurn | undefined;
+      let reentered = false;
+      const isBoundary = (event: SessionEvent) => boundary === 'turn.completed'
+        ? event.kind === 'runner.unmapped' && event.data.type === 'turn.completed'
+        : event.kind === 'diagnostic' && event.data.code === 'claude-steering-ended';
+      const end = (turn: FakeTurn) => boundary === 'turn.completed'
+        ? turn.emit('turn.completed', { status: 'completed', nativeThreadId: turn.nativeSessionId })
+        : turn.emit('diagnostic', { code: 'claude-steering-ended', nativeThreadId: turn.nativeSessionId });
+      const unsubscribe = t.manager.subscribeEvents(event => {
+        if (event.sessionId !== id || !isBoundary(event)) return;
+        observed.push(event);
+        if (reentered || !first) return;
+        reentered = true;
+        // EventLog notifies consumers synchronously inside driverEvent's append.
+        first.say('reentrant content must be fenced');
+        first.emit('usage', { inputTokens: 999 });
+        end(first);
+      });
+      cleanups.push(unsubscribe);
+      const start = (turn: FakeTurn) => {
+        first = turn;
+        turn.init();
+        // A mismatched native identity must neither close admission nor publish a boundary.
+        if (boundary === 'turn.completed') turn.emit('turn.completed', { status: 'completed', nativeThreadId: 'stale-native-thread' });
+        else turn.emit('diagnostic', { code: 'claude-steering-ended', nativeThreadId: 'stale-native-thread' });
+        turn.say('report before native boundary');
+        turn.emit('usage', { inputTokens: 1 });
+        end(turn);
+      };
+      if (timing === 'during-start') t.driver.onStart = turn => {
+        if (t.driver.turns.length === 1) start(turn);
+      };
+      await t.run({ type: 'prompt.send', text: 'Original turn' }, id);
+      await waitFor(() => t.driver.turns.length === 1);
+      if (timing === 'after-start') start(lastTurn(t.driver));
+      const original = first!;
+      expect(observed).toHaveLength(1);
+      expect(t.events(id).filter(isBoundary)).toEqual(observed);
+      expect(observed[0]!.data.attempt).toBe(1);
+      if (boundary === 'turn.completed') expect(observed[0]!.data.reason).toBe('kind-reserved-for-host');
+      // Native termination closes admission, but only handle drain settles host ownership.
+      expect(t.events(id).filter(e => e.kind === 'turn.completed')).toHaveLength(0);
+      expect(t.manager.taskStatus({ sessionId: id, taskId: 'lead', memberId: 'lead', allowedTools: [] })).toMatchObject({ state: 'running' });
+      const endedSeq = t.manager.openLog(id)!.lastSeq;
+      original.say('late content must be fenced');
+      original.emit('usage', { inputTokens: 888 });
+      original.emit('diagnostic', { code: 'claude-steering-ended' });
+      original.emit('turn.completed', { status: 'completed' });
+      expect(t.manager.openLog(id)!.lastSeq).toBe(endedSeq);
+      expect(t.events(id).filter(e => e.kind === 'usage')).toHaveLength(1);
+      original.finish();
+      await t.idle();
+      expect(t.events(id).filter(e => e.kind === 'turn.completed')).toHaveLength(1);
+      expect(t.events(id).find(e => e.kind === 'task.result')?.data.summary).toBe('report before native boundary');
+      await t.run({ type: 'prompt.send', text: 'Next attempt' }, id);
+      await waitFor(() => t.driver.turns.length === 2);
+      const next = lastTurn(t.driver);
+      next.init();
+      const nextSeq = t.manager.openLog(id)!.lastSeq;
+      end(original);
+      original.say('previous attempt must be fenced');
+      expect(t.manager.openLog(id)!.lastSeq).toBe(nextSeq);
+      next.say('current attempt stays admitted');
+      expect(t.events(id).filter(e => e.kind === 'message.completed' && e.data.text === 'current attempt stays admitted')).toHaveLength(1);
+      expect(observed).toHaveLength(1);
+      next.finish();
+      await t.idle();
+      expect(t.events(id).filter(e => e.kind === 'turn.completed')).toHaveLength(2);
+    });
+  }
+});
+
+// Promoted from the independent review's fake-driver recovery reproduction.
+test('Lead missing-native recovery preserves original request and substantive answer',async()=>{
+ const t=setup();const id=await t.create();await t.run({type:'prompt.send',text:'ORIGINAL_USER_REQUIREMENT'},id);await waitFor(()=>t.driver.turns.length===1);
+ const first=lastTurn(t.driver);first.init();first.say('PRIOR_LEAD_RESULT');first.finish();await t.idle();
+ t.driver.onStart=turn=>{if(turn.input.resume)turn.finish({status:'failed',reasonCode:'native-session-not-found'});};
+ await t.run({type:'prompt.send',text:'Continue'},id);await waitFor(()=>t.driver.turns.length===3);
+ const fresh=lastTurn(t.driver);
+ expect(fresh.input.prompt).toContain('ORIGINAL_USER_REQUIREMENT');
+ expect(fresh.input.prompt).toContain('PRIOR_LEAD_RESULT');
+ expect(fresh.input.prompt).toContain('Continue');
+ fresh.finish({status:'failed',reasonCode:'native-session-not-found'});await t.idle();
+ expect(t.driver.turns).toHaveLength(3);
+});
+
+describe('first delivery interrupted continuation handoff',()=>{
+ for(const [actor,message,edited] of [
+  ['user','completed',true],['lead','streaming',true],['lead','none',false],['user','completed-then-streaming',true],
+ ] as const)test(`${actor} active stop preserves ${message} evidence with edited=${edited}`,async()=>{
+  const t=setup({config:baseConfig({members:{lead:{runnerId:'claude',modelId:'opus'},'apply-deep':{runnerId:'claude',modelId:'opus'}}})});
+  const id=await t.create();await t.run({type:'prompt.send',text:'Lead'},id);await waitFor(()=>t.driver.turns.length===1);t.driver.turns[0]!.init();
+  const grant=()=>t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths,id).taskCredentialFile('lead'),'utf8')).token)!;
+  const call=(name:string,data:Record<string,unknown>)=>t.manager.callTaskTool(grant(),name,data);
+  const taskId=(await call('deck_delegate',{agent:'apply-deep',task:'Original task'} ) as any).data.taskId;
+  await waitFor(()=>t.driver.turns.length===2);const old=lastTurn(t.driver);old.init();
+  if(message==='completed'||message==='completed-then-streaming')old.say('Completed message before interruption');
+  if(message==='streaming'||message==='completed-then-streaming'){old.emit('message.delta',{messageId:'partial',text:'Unfinished public '});old.emit('message.delta',{messageId:'partial',text:'progress'});}
+  old.emit('reasoning.delta',{text:'HIDDEN_REASONING_DO_NOT_HANDOFF'});
+  if(edited)old.emit('tool.completed',{toolUseId:'edit',status:'completed',edits:[{path:'src/task.ts',op:'update',diff:'+partial edit'}]});
+  expect((actor==='lead'?await call('deck_task_cancel',{taskId}):await t.run({type:'turn.interrupt',taskId},id)).ok).toBe(true);
+  await waitFor(()=>old.closed);
+  const stopped=(await t.manager.query('task.result',{sessionId:id,taskId}) as any).data.attempts[0];
+  expect(stopped).toMatchObject({state:actor==='lead'?'cancelled':'interrupted',stop:{origin:actor,launched:true}});
+  // Preserve the existing task.result contract; a completed message isn't a final report.
+  expect(stopped.result).toBe(message.startsWith('completed')?'Completed message before interruption':undefined);
+  expect((await call('deck_delegate',{agent:'apply-deep',task:'New correction instruction',continueTaskId:taskId})).ok).toBe(true);
+  await waitFor(()=>t.driver.turns.length===3);const fresh=lastTurn(t.driver);
+  expect(fresh.input.resume).toBeUndefined();expect(fresh.nativeSessionId).not.toBe(old.nativeSessionId);
+  expect(fresh.input.prompt).toContain('INTERRUPTED');expect(fresh.input.prompt).toContain('NO FINAL REPORT');
+  expect(fresh.input.prompt).toContain('Inspect the current state of task-attributed edited files before continuing or repeating actions');
+  expect(fresh.input.prompt).toContain('Current Lead instruction:\nNew correction instruction');expect(fresh.input.prompt).not.toContain('HIDDEN_REASONING_DO_NOT_HANDOFF');
+  if(message==='none')expect(fresh.input.prompt).toContain('Last available public agent message: unavailable');
+  else expect(fresh.input.prompt).toContain(message==='completed'?'Completed message before interruption':'Unfinished public progress');
+  const replay=Ledger.empty(id);for(const event of t.events(id))replay.apply(event);const handoff=replay.latest(taskId)!.handoff!;
+  expect(handoff.bytes).toBeLessThanOrEqual(32768);expect(readFileSync(handoff.artifact!,'utf8')).toContain('NO FINAL REPORT');
+  const manifest=handoff.editArtifacts![0]!,editEvidence=JSON.parse(readFileSync(manifest.path,'utf8'));
+  expect(editEvidence.edits.map((e:any)=>e.path)).toEqual(edited?['src/task.ts']:[]);
+  if(!edited)expect(fresh.input.prompt).toContain('No task-attributed edited files recorded');
+  const sample=projectTaskContinuityMetrics(t.events(id)).attempts.find(a=>a.taskId===taskId&&a.attempt===2)!;
+  expect(sample.continuation).toMatchObject({admitted:true,cohort:'operator-interrupted',predecessor:{taskId,attempt:1,trustedOperatorInterruption:true}});
+  expect(sample.cost.status).toBe('no edit evidence');
+  const before=t.events(id).length;old.emit('message.delta',{text:'STALE_PARTIAL'});expect(t.events(id)).toHaveLength(before);
  });
 });

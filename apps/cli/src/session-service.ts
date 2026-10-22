@@ -1,3 +1,4 @@
+import {readScopedTaskDiff} from "./session-task-diff";
 /**
  * Production composition of the session daemon's service (D-6: apps/cli is the only place that
  * knows adapters). Builds the driver lookup from the adapter registry, wires live config,
@@ -70,7 +71,7 @@ function sessionDelegationPrompt(context: SessionRolePromptContext): string {
   return [
     "Session delegation",
     "The ONLY delegation path is the Deck MCP tools: deck_delegate {agent, task, continueTaskId?}, deck_task_wait {taskIds, timeoutSec<=50}, deck_task_result {taskId}, deck_task_cancel {taskId}; native Task/Agent subagents are disabled. deck_delegate returns immediately with a taskId; poll with deck_task_wait.",
-    "OWNER RULE: A task belongs to the member that created it. To give feedback, iterate or follow up on the same area, ALWAYS call deck_delegate with that same member and continueTaskId=<that task's id>; the original runner/model/native context is reused. Never switch owners, and never start a new task for the same work. Start a new task only for a different area or when the owner cannot continue.",
+    "OWNER RULE: A task belongs to the member that created it. To give feedback, iterate or follow up on the same area, ALWAYS call deck_delegate with that same member and continueTaskId=<that task's id>; the original task, owner, runner and model are preserved; Deck chooses fresh or native context at launch. Review roles always start fresh. Never switch owners, and never start a new task for the same work. Start a new task only for a different area or when the owner cannot continue.",
     "Use deck_task_list to recover this session’s delegated task ids and owners before delegating.",
     "Keep the returned taskId next to the member in your working notes and re-read the task roster before delegating.",
     "Route non-trivial or independent work to specialists; direct work is only for seconds-scale or clearly trivial changes. Run independent tasks in parallel, waiting with deck_task_wait.",
@@ -113,7 +114,7 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
   return new SessionManager({
     paths: services.paths, broker: services.broker, credentials: services.credentials, supervisor: services.supervisor,
     clock: services.clock, logger: services.logger, drivers,
-    config: (): CrossRunnerConfig | undefined => { try { return options.configStore.read().crossRunner; } catch { return undefined; } },
+    config: (): CrossRunnerConfig | undefined => options.configStore.read().crossRunner,
     sessionMcpCommand: options.sessionMcpCommand ?? deckInternalCommand("session-mcp"),
     childMcp: async (runnerId, context) => {
       // Keep each turn's resolved specs isolated from concurrent sessions.
@@ -123,6 +124,8 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
     closeChildMcp: () => readiness.close(),
     memory: async (context) => createSessionMemoryPort(context, options.configStore.read(), options.memoryRuntime),
     rolePrompt: sessionRolePrompt,
+    assignedRoleId: memberId => { const roleId=memberId.startsWith("deck-")?memberId:`deck-${memberId}`; return getAgentContent(roleId,{promptProfile:"compact"}) ? roleId : undefined; },
+    scopedDiff: readScopedTaskDiff,
     modelCatalog: (projectRoot, projectConfigTrusted, signal) => discoverSessionModels(list, drivers, projectRoot, projectConfigTrusted, signal),
   });
 }

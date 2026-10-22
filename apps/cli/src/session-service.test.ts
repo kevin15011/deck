@@ -118,7 +118,7 @@ describe("createCrossSessionService (production composition)", () => {
       expect(text).toContain("returns immediately with a taskId");
       expect(text).toContain("native Task/Agent subagents are disabled");
       expect(text).toContain("same member and continueTaskId=<that task's id>");
-      expect(text).toContain("original runner/model/native context is reused");
+      expect(text).toContain("original task, owner, runner and model are preserved");
       expect(text).toContain("never start a new task for the same work");
       expect(text).toContain("only for a different area or when the owner cannot continue");
       expect(text).toContain("taskId next to the member in your working notes");

@@ -63,3 +63,7 @@ export { QuestionBroker, type QuestionBrokerOptions, type QuestionRequest, type 
 export type { LedgerPendingQuestion } from "./ledger";
 
 export {WebRestart,readRestartIntent,writeRestartIntent,restartIntentPath,type RestartIdentity,type RestartIntent,type RestartLauncher,type RestartTarget} from './web-restart';
+
+export {buildTaskHandoff, type ScopedDiff, type ScopedDiffProvider} from "./task-handoff";
+
+export {projectTaskContinuityMetrics} from "./task-continuity-metrics";

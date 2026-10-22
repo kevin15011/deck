@@ -121,3 +121,27 @@ for(const fault of ['append','flush'] as const)test(`${fault} retained fence fai
  await t.command({commandId:id,type:'prompt.send',text:'Must not write before flush',delivery:'current-turn'},t.id);expect(t.child.stdin).toHaveLength(1);
  t.config.enabled=false;t.finish();
 });
+
+test('native Claude end boundary reaches consumers once and closes steering before host finalization', async () => {
+ const t = await setup();
+ expect((await t.manager.query('prompts.list', { sessionId: t.id }) as any).data.steeringAvailable).toBe(true);
+ const observed: number[] = [];
+ const unsubscribe = t.manager.subscribeEvents(event => {
+  if (event.sessionId === t.id && event.kind === 'diagnostic' && event.data.code === 'claude-steering-ended') observed.push(event.seq);
+ });
+ cleanups.push(async () => unsubscribe());
+ const result = { type: 'result', subtype: 'success', is_error: false, session_id: t.sent.session_id, user_message_uuid: t.sent.uuid, user_message_uuids: [t.sent.uuid], num_turns: 1 };
+ t.child.stdout(JSON.stringify(result) + '\n');
+ expect(observed).toHaveLength(1);
+ expect(t.events().filter(event => event.data.code === 'claude-steering-ended').map(event => event.seq)).toEqual(observed);
+ expect((await t.manager.query('prompts.list', { sessionId: t.id }) as any).data.steeringAvailable).toBe(false);
+ expect(t.events().filter(event => event.kind === 'turn.completed')).toHaveLength(0);
+ expect(t.ledger().latest('lead')?.state).toBe('running');
+ t.child.stdout(JSON.stringify(result) + '\n');
+ expect(observed).toHaveLength(1);
+ t.child.exit();
+ await waitFor(() => !t.manager.hasRunningWork());
+ expect(t.ledger().latest('lead')?.state).toBe('completed');
+ expect(t.events().filter(event => event.kind === 'turn.completed')).toHaveLength(1);
+ expect(t.events().filter(event => event.seq > observed[0]! && event.data.code === 'prompt.steering-capability' && event.data.available === false)).toHaveLength(1);
+});

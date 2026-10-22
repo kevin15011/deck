@@ -1,3 +1,4 @@
+import {correlatedOpenCodeEdits} from "./mapper";
 import { describe, expect, test } from "bun:test";
 import { OpenCodeEventMapper, mapOpenCodeEvent } from "./mapper";
 
@@ -141,4 +142,11 @@ test('OpenCode context matches the native positive-output assistant sum, not inp
   expect(map({ summary: true }).context).toBeUndefined();
   for (const output of [0, -1, NaN, Infinity, undefined]) expect(map({ tokens: { ...info.tokens, output } }).context).toBeUndefined();
   for (const input of [NaN, Infinity, -1, 0.5, Number.MAX_SAFE_INTEGER, undefined]) expect(map({ tokens: { ...info.tokens, input } }).context).toMatchObject({ tokens: null });
+});
+
+test('edit membership requires the exact correlated assistant response and completed edit/write tool parts',()=>{
+ const result={info:{id:'response',sessionID:'s',role:'assistant'},parts:[{type:'tool',tool:'edit',callID:'edit',sessionID:'s',messageID:'response',state:{status:'completed',input:{filePath:'/project/a.ts'}}}]};
+ expect(correlatedOpenCodeEdits(result,'s')[0]?.data.edits).toEqual([{path:'/project/a.ts',op:'update'}]);
+ for(const patch of [{sessionID:'foreign'},{messageID:'old'},{state:{...result.parts[0]!.state,status:'error'}}])expect(correlatedOpenCodeEdits({...result,parts:[{...result.parts[0],...patch}]},'s')).toEqual([]);
+ expect(correlatedOpenCodeEdits({...result,info:{...result.info,role:'user'}},'s')).toEqual([]);
 });

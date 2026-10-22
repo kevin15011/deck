@@ -367,3 +367,38 @@ test('push block occurrence seqs survive replay, snapshot and previous-version m
  log.appendMany([state('lead','interrupted'),{kind:'session.reopened',data:{epoch:1,prepared:true}}]);
  const cleared=loadLedger(log,file).ledger;expect(cleared.latest('lead')?.unsettledSeq).toBeUndefined();expect(cleared.session.releaseFailureSeq).toBeUndefined();log.close();
 });
+
+test('v13 snapshots rebuild bounded Lead recovery and substantive retry references; v14 snapshots retain both',()=>{
+ const dir=tempDir(),log=openLog(dir),file=join(dir,'snapshot.json');
+ log.appendMany([
+  created('lead',{memberId:'lead'}),state('lead','running'),
+  {kind:'message.completed',source:{taskId:'lead'},data:{role:'user',text:'original request'}},
+  {kind:'message.completed',source:{taskId:'lead'},data:{role:'assistant',text:'substantive answer'}},
+  state('lead','completed'),
+  created('work'),state('work','running'),{kind:'task.result',source:{taskId:'work'},data:{taskId:'work',summary:'substantive work'}},state('work','completed'),
+  {kind:'task.continued',source:{taskId:'work'},data:{taskId:'work',attempt:2,continuity:'native'}},state('work','running'),state('work','failed',{reason:'native-session-not-found'}),
+  {kind:'task.continued',source:{taskId:'work'},data:{taskId:'work',attempt:3,continuity:'reseeded',recoveryPredecessorAttempt:1}},
+ ]);
+ const initial=loadLedger(log,file).ledger;saveLedgerSnapshot(initial,log,file);
+ const old=JSON.parse(readFileSync(file,'utf8'));old.v=13;delete old.state.tasks.lead.leadRecovery;writeFileSync(file,JSON.stringify(old));
+ const rebuilt=loadLedger(log,file);expect(rebuilt.source).toBe('rebuilt');
+ expect(rebuilt.ledger.task('lead')!.leadRecovery).toMatchObject({original:{text:'original request'},recent:[{role:'user'},{role:'assistant',text:'substantive answer'}]});
+ expect(rebuilt.ledger.latest('work')!.recoveryPredecessorAttempt).toBe(1);
+ expect(rebuilt.ledger.task('work')!.attempts[1]).toMatchObject({state:'failed',reason:'native-session-not-found'});
+ saveLedgerSnapshot(rebuilt.ledger,log,file);const restored=loadLedger(log,file);
+ expect(restored.source).toBe('snapshot');expect(restored.ledger.toState()).toEqual(rebuilt.ledger.toState());log.close();
+});
+
+test('v14 snapshot rebuild restores public streaming evidence and stop provenance; v15 retains them',()=>{
+ const dir=tempDir(),log=openLog(dir),file=join(dir,'snapshot.json');
+ log.appendMany([
+  created('work'),state('work','running',{launched:true,nativeSessionId:'native'}),
+  {kind:'message.delta',source:{taskId:'work',nativeSessionId:'native'},data:{messageId:'partial',text:'Streaming public progress'}},
+  {kind:'reasoning.delta',source:{taskId:'work',nativeSessionId:'native'},data:{text:'HIDDEN'}},
+  state('work','interrupted',{stop:{origin:'user',kind:'interrupt',commandId:'stop',launched:true}}),
+ ]);
+ const initial=loadLedger(log,file).ledger;saveLedgerSnapshot(initial,log,file);
+ const old=JSON.parse(readFileSync(file,'utf8'));old.v=14;delete old.state.tasks.work.attempts[0].lastAgentMessage;delete old.state.tasks.work.attempts[0].stopSeq;writeFileSync(file,JSON.stringify(old));
+ const rebuilt=loadLedger(log,file);expect(rebuilt.source).toBe('rebuilt');expect(rebuilt.ledger.latest('work')).toMatchObject({stopSeq:5,lastAgentMessage:{text:'Streaming public progress',streaming:true,seq:3}});
+ saveLedgerSnapshot(rebuilt.ledger,log,file);const restored=loadLedger(log,file);expect(restored.source).toBe('snapshot');expect(restored.ledger.toState()).toEqual(rebuilt.ledger.toState());log.close();
+});

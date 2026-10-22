@@ -1,3 +1,4 @@
+import {claudeRequestInput} from "@deck/core/session/request-input";
 /**
  * Claude Code stream-json mapper (XR-1.4, XR-4.5): one stdout JSON message in, normalized
  * driver events out. Tracks the current streamed message id and one-shot diagnostics; unknown shapes
@@ -85,6 +86,17 @@ function toolText(content: unknown): string {
 
 export class ClaudeStreamMapper {
   // One mapper per process/turn. Only correlated messages reach it from the driver.
+  private readonly policyRequests=new Map<string,number>();
+  private policyRequestOrder=0;
+  private policyOrderingOverflow=false;
+  private observePolicyRequest(id:string|undefined):boolean {
+    if(!id){this.policyRequestOrder++;return false;}
+    let order=this.policyRequests.get(id);
+    if(order===undefined){order=++this.policyRequestOrder;if(this.policyRequests.size>=256){this.policyOrderingOverflow=true;return false;}this.policyRequests.set(id,order);}
+    return !this.policyOrderingOverflow && order===this.policyRequestOrder;
+  }
+  private policyInput?:ReturnType<typeof claudeRequestInput>;
+  private readonly editTools=new Map<string,{path:string;op:string;requestId?:string}>();
   private apiFailure?: TurnFailure;
   private hookReported = false;
   private streamingMessageId?: string;
@@ -118,6 +130,7 @@ export class ClaudeStreamMapper {
     const subtype = str(m.subtype) ?? "";
     if (subtype === 'compact_boundary' || subtype === 'status' && m.status === 'compacting') {
       if (m.session_id !== undefined && m.session_id !== this.sessionId) return { events: [] };
+      this.policyInput=undefined;
       this.contextCompacted = true;
       this.contextObservation = undefined;
       return { events: [{ kind: 'diagnostic', data: { code: 'context.invalidated', reason: 'compaction', nativeThreadId: this.sessionId, nativeTurnId: this.contextTurnId } }] };
@@ -172,6 +185,11 @@ export class ClaudeStreamMapper {
     const type = str(event.type) ?? "unknown";
     if (type === "message_start") {
       this.streamingMessageId = isObj(event.message) ? str(event.message.id) : undefined;
+      if(this.sessionId!==undefined && m.parent_tool_use_id==null && m.session_id===this.sessionId
+        && (!this.streamingMessageId || this.streamingMessageId!==this.policyInput?.nativeRequestId)) {
+        this.observePolicyRequest(this.streamingMessageId);this.policyInput=undefined;
+        return {events:[{kind:'diagnostic',data:{code:'request.input-invalidated',reason:'new-main-message',nativeRequestId:this.streamingMessageId??null,nativeThreadId:this.sessionId,nativeTurnId:this.contextTurnId}}]};
+      }
       return { events: [] };
     }
     if (type === "content_block_delta") {
@@ -205,6 +223,10 @@ export class ClaudeStreamMapper {
         if (typeof block.thinking === "string" && block.thinking.length > 0) events.push({ kind: "reasoning.delta", data: { ...(messageId ? { messageId } : {}), blockIndex, partId: String(blockIndex), reasoningKind: "text", format: "snapshot", text: redactText(block.thinking, TOOL_OUTPUT_LIMIT) } });
       } else if (block.type === "tool_use") {
         const input = boundRaw({ runnerId: "claude", protocol: CLAUDE_PROTOCOL, payload: block.input ?? {} }, TOOL_INPUT_LIMIT).payload;
+        if(this.sessionId!==undefined && m.parent_tool_use_id==null && m.session_id===this.sessionId && str(block.id) && isObj(block.input) && ['Edit','Write','NotebookEdit'].includes(String(block.name))){
+          const path=block.name==='NotebookEdit'?block.input.notebook_path:block.input.file_path;
+          if(typeof path==='string' && path.length<=4096){this.editTools.set(String(block.id),{path,op:'update',requestId:messageId});if(this.editTools.size>256)this.editTools.delete(this.editTools.keys().next().value!);}
+        }
         events.push({ kind: "tool.started", data: { toolUseId: str(block.id), name: typeof block.name === "string" ? redactText(block.name, 500) : undefined, input, status: "running" } });
       } else {
         events.push(this.unmapped(`assistant/${str(block.type) ?? "unknown"}`, block));
@@ -215,14 +237,22 @@ export class ClaudeStreamMapper {
     // above; preserve the last valid observation. Genuine zero usage is valid.
     const usageError = m.is_api_error_message === true || message.model === '<synthetic>'
       || typeof m.error === 'string' || classifyClaudeFailure(m) !== undefined;
+    if(this.sessionId!==undefined && m.parent_tool_use_id==null && m.session_id===this.sessionId){
+      this.policyInput=this.observePolicyRequest(messageId)&&!usageError&&!this.contextCompacted?claudeRequestInput(message.usage,this.sessionId,this.contextTurnId,messageId,message.model):undefined;
+      if(usageError||this.contextCompacted)events.push({kind:'diagnostic',data:{code:'request.input-invalidated',reason:'usage-unreliable'}});
+    }
     if (!usageError && !this.contextCompacted && m.parent_tool_use_id == null && m.session_id === this.sessionId) {
+      // Coverage is independent of usable usage and of latest-request policy proof.
+      // A delayed snapshot can reconcile an earlier request without making it current.
+      if(this.sessionId!==undefined)events.push({kind:'diagnostic',data:{code:'request.observed',nativeRequestId:messageId??null,nativeThreadId:this.sessionId,nativeTurnId:this.contextTurnId}});
+      const observedInput=claudeRequestInput(message.usage,this.sessionId,this.contextTurnId,messageId,message.model);
       const usage = isObj(message.usage) ? message.usage : {};
       const context = sanitizeContextObservation({ basis: 'claude-last-request-input',
         tokens: contextTokenSum(usage.input_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens),
         capacity: null, nativeThreadId: this.sessionId, nativeTurnId: this.contextTurnId, modelId: message.model });
       // Replace, never accumulate across assistant calls or models.
       this.contextObservation = context;
-      if (context) events.push({ kind: 'usage', data: { context } });
+      if (context) events.push({ kind: 'usage', data: { context, requestInput:this.policyInput??null, ...(observedInput?{requestUsage:{requestId:messageId,inputTokens:observedInput.tokens,cachedReadTokens:observedInput.cachedReadTokens,cacheWriteTokens:observedInput.cacheWriteTokens,outputTokens:null,reasoningTokens:null,basis:'claude-message-snapshot'}}:{}) } });
     }
     // keep the whole message once, on its first event, so detail the mapping drops stays inspectable
     if (events.length > 0 && events[0]!.raw === undefined) events[0] = { ...events[0]!, raw: m };
@@ -236,7 +266,10 @@ export class ClaudeStreamMapper {
     for (const block of message.content) {
       if (!isObj(block)) continue;
       if (block.type === "tool_result") {
-        events.push({ kind: "tool.completed", data: { toolUseId: str(block.tool_use_id), isError: block.is_error === true, status: block.is_error === true ? "failed" : "completed", output: redactText(toolText(block.content), TOOL_OUTPUT_LIMIT) } });
+        const edit=this.sessionId!==undefined && m.parent_tool_use_id==null && m.session_id===this.sessionId?this.editTools.get(String(block.tool_use_id)):undefined;
+        this.editTools.delete(String(block.tool_use_id));
+        if(this.sessionId!==undefined && m.parent_tool_use_id==null && m.session_id===this.sessionId){this.policyInput=undefined;events.push({kind:'diagnostic',data:{code:'request.input-invalidated',reason:'later-request-may-follow-tool'}});}
+        events.push({ kind: "tool.completed", data: { ...(edit && block.is_error!==true?{edits:[{path:edit.path,op:edit.op}],requestId:edit.requestId}:{}), toolUseId: str(block.tool_use_id), isError: block.is_error === true, status: block.is_error === true ? "failed" : "completed", output: redactText(toolText(block.content), TOOL_OUTPUT_LIMIT) } });
       } else if (block.type !== "text") {
         events.push(this.unmapped(`user/${str(block.type) ?? "unknown"}`, block));
       }
@@ -293,6 +326,10 @@ export class ClaudeStreamMapper {
         },
         raw: m,
       });
+    }
+    if(correlated && m.session_id===this.sessionId){
+      if(!result.isError && result.subtype==='success' && this.policyInput && !this.contextCompacted)events.push({kind:'diagnostic',data:{code:'request.input-finalized',nativeThreadId:this.policyInput.nativeThreadId,nativeTurnId:this.policyInput.nativeTurnId,nativeRequestId:this.policyInput.nativeRequestId}});
+      else events.push({kind:'diagnostic',data:{code:'request.input-invalidated',reason:'final-request-unproven'}});
     }
     if (denials.length > 0) events.push({ kind: "diagnostic", data: { code: "claude-permission-denied", tools: denials.map((d) => d.tool) } });
     return { events, result };

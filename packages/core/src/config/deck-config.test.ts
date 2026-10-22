@@ -1175,3 +1175,10 @@ describe("deprecated config fields migration", () => {
     );
   });
 });
+
+test('continuity defaults survive config roundtrip as numeric controls; unsafe/unknown fields and legacy bypass are rejected',()=>{
+ const valid=validateDeckConfig({version:1,crossRunner:{enabled:true,continuity:{nativeHardCapInputTokens:160000,autoNativeMaxInputTokens:80000}}});
+ expect(valid.crossRunner?.continuity).toMatchObject({mode:'policy',handoffMaxBytes:32768,nativeHardCapInputTokens:160000});
+ expect(validateDeckConfig(valid).crossRunner?.continuity).toEqual(valid.crossRunner?.continuity);
+ for(const continuity of [{mode:'legacy'}, {handoffMaxBytes:16384},{autoNativeMaxInputTokens:160001},{nativeHardCapInputTokens:0},{apiToken:'secret'}])expect(()=>validateDeckConfig({version:1,crossRunner:{continuity}})).toThrow();
+});
