@@ -121,3 +121,27 @@ test('compacted current evidence retains a bounded decision refresh cursor', () 
     index.apply(later);
     expect(index.current.values().filter(event => event.kind.startsWith('decision.')).map(event => event.seq)).toEqual([later.seq]);
 });
+
+test('compaction survives real history hydration, live projection and reconnect independently of paging', async () => {
+ const { leadProgress } = await import('../../../../apps/web/src/lead-progress');
+ const { snapshotView } = await import('../../../../apps/web/src/chat-history');
+ const { log, append } = fixture();
+ append('turn.started');
+ const data = { code: 'context.compaction', state: 'started', itemId: 'compact', nativeThreadId: 'thread', nativeTurnId: 'turn' };
+ append('diagnostic', data);
+ for (let i = 0; i < 150; i++) append('message.completed', { role: 'user', text: `row ${i}` });
+ const index = new ChatHistory(log), page = index.page();
+ expect(page.messages).toHaveLength(40);
+ expect(leadProgress(snapshotView(page.events, page.seq).events, { sessionId: 's' })?.phase).toBe('compacting');
+ const before = index.current.values();
+ expect(index.page({ before: page.before }).events).toEqual([]);
+ expect(index.current.values()).toEqual(before);
+ expect(leadProgress(new ChatHistory(log).page().events, { sessionId: 's' })?.phase).toBe('compacting');
+ index.apply(append('diagnostic', { ...data, state: 'completed', itemId: 'unknown' }));
+ expect(leadProgress(index.current.values(), { sessionId: 's' })?.phase).toBe('compacting');
+ index.apply(append('diagnostic', { ...data, state: 'completed' }));
+ expect(leadProgress(index.current.values(), { sessionId: 's' })?.phase).toBe('waiting');
+ expect(leadProgress(new ChatHistory(log).page().events, { sessionId: 's' })?.phase).toBe('waiting');
+ index.apply(append('turn.completed', { status: 'completed' }));
+ expect(leadProgress(new ChatHistory(log).page().events, { sessionId: 's' })).toBeUndefined();
+});

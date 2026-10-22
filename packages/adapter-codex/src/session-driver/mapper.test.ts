@@ -90,3 +90,14 @@ describe("Codex app-server notification mapping", () => {
     expect(thought.data.text).not.toContain("\u001b");
   });
 });
+
+test('maps verified compaction lifecycle with bounded exact correlation identity', () => {
+  for (const [method, state] of [['item/started', 'started'], ['item/completed', 'completed']]) {
+    const mapped = mapCodexNotification({ method, params: { threadId: 'thread', turnId: 'turn', item: { type: 'contextCompaction', id: 'compact', private: 'not canonical' } } })[0]!;
+    expect(mapped).toMatchObject({ kind: 'diagnostic', data: { code: 'context.compaction', state, itemId: 'compact', nativeThreadId: 'thread', nativeTurnId: 'turn' } });
+    expect(JSON.stringify(mapped.data)).not.toContain('private');
+  }
+  for (const id of ['', undefined, 'x'.repeat(257), '\u001b[31m']) {
+    expect(mapCodexNotification({ method: 'item/started', params: { threadId: 'thread', turnId: 'turn', item: { type: 'contextCompaction', id } } })[0]?.data.code).not.toBe('context.compaction');
+  }
+});

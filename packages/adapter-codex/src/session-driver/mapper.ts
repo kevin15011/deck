@@ -51,6 +51,12 @@ export function mapCodexNotification(message: RpcMessage, nativeMemory?: NativeM
     case "item/started":
     case "item/completed": {
       const complete = message.method === "item/completed";
+      if (item.type === "contextCompaction") {
+        // Reject oversized/redacted identities rather than truncate them into collisions.
+        const identity = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 256 && redactText(value, 256) === value;
+        if (![item.id, p.threadId, p.turnId].every(identity)) return event("runner.unmapped", { nativeType: message.method });
+        return event("diagnostic", { code: "context.compaction", state: complete ? "completed" : "started", itemId: item.id, nativeThreadId: p.threadId, nativeTurnId: p.turnId });
+      }
       if (item.type === "agentMessage" && complete) return event("message.completed", { text: text(item.text), messageId: item.id });
       if (item.type === "reasoning" && complete) {
         const snapshots: DriverEvent[] = [];

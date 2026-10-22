@@ -274,6 +274,15 @@ class CodexTask {
     if (p.threadId !== undefined && this.threadId !== undefined && p.threadId !== this.threadId) {
       this.emit({ kind: "runner.unmapped", data: { nativeType: isHookNotification(message) ? redactText(message.method!, 128) : message.method, reason: "foreign-thread" }, ...(isHookNotification(message) ? {} : { raw: message }) }); return;
     }
+    if ((message.method === "item/started" || message.method === "item/completed") && object(p.item).type === "contextCompaction") {
+      // Like native requests, compaction requires a known, live turn. Do not infer
+      // its identity from an item that could have arrived late from a prior turn.
+      const active = this.turn;
+      if (this.closed || this.failed || !active || active.interrupted || !active.id
+        || p.threadId !== this.threadId || p.turnId !== (active.confirmedId ?? active.id)) {
+        this.emit({ kind: "runner.unmapped", data: { nativeType: message.method, reason: "stale-turn" } }); return;
+      }
+    }
     if (message.method === "turn/started" && this.turn) {
       if(this.turn.confirmedId && object(p.turn).id!==this.turn.confirmedId){this.emit({kind:"runner.unmapped",data:{nativeType:message.method,reason:"stale-turn"}});return;}
       this.turn.id = typeof object(p.turn).id === "string" ? object(p.turn).id as string : this.turn.id;

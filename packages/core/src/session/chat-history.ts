@@ -1,6 +1,14 @@
 /** Additive browser history contract. History cursors identify a row's first event,
  * independently of its completion cursor and of the authoritative live watermark. */
 import type { SessionEvent } from './events';
+import { redactText } from './redaction';
+
+/** Exact, bounded identity: never correlate using truncated or sanitized IDs. */
+export function compactionIdentity(event: SessionEvent): string | undefined {
+    const { itemId, nativeThreadId, nativeTurnId } = event.data;
+    if (![itemId, nativeThreadId, nativeTurnId].every(value => typeof value === 'string' && value.trim().length > 0 && value.length <= 256 && redactText(value, 256) === value)) return;
+    return JSON.stringify([event.sessionId, event.source.taskId, event.source.memberId, event.source.runnerId, event.source.nativeSessionId, nativeThreadId, nativeTurnId, itemId]);
+}
 export type HistoryMessage = SessionEvent & {
     historyId: number;
     request?: SessionEvent;
@@ -20,6 +28,12 @@ export const HISTORY_WINDOW_SIZE = 120;
 export class CurrentEvents {
     private activity: SessionEvent[] = [];
     private entries = new Map<string, SessionEvent>();
+    private compactionClosed = new Set<string>();
+    private compactionSessionEnded = false;
+    private clearCompaction(task: string) {
+        this.entries.delete(`progress:${task}:compaction:start`);
+        this.entries.delete(`progress:${task}:compaction:end`);
+    }
     apply(event: SessionEvent) {
         if (event.kind === 'question.resolved')
             event = { ...event, data: { questionId: event.data.questionId, outcome: event.data.outcome, by: event.data.by } };
@@ -55,6 +69,30 @@ export class CurrentEvents {
             for (const key of this.entries.keys())
                 if (key.startsWith(`progress:${task}:`))
                     this.entries.delete(key);
+        if (terminal) {
+            if (kind === 'turn.started' || kind === 'task.continued') {
+                this.compactionClosed.delete(task);
+                this.compactionSessionEnded = false;
+            } else this.compactionClosed.add(task);
+        }
+        if (kind === 'task.state' && ['queued', 'running'].includes(String(data.state))) {
+            this.compactionClosed.delete(task);
+            this.compactionSessionEnded = false;
+        }
+        if (kind === 'diagnostic' && data.code === 'context.compaction' && !data.internal && data.role !== 'system'
+            && !this.compactionSessionEnded && !this.compactionClosed.has(task)) {
+            const identity = compactionIdentity(event), startKey = `progress:${task}:compaction:start`, endKey = `progress:${task}:compaction:end`;
+            const start = this.entries.get(startKey);
+            if (identity && (data.state === 'started' || data.state === 'completed' && start && compactionIdentity(start) === identity)) {
+                // Keep only canonical evidence, never a native transcript, in this projection.
+                const { raw: _raw, ...canonical } = event;
+                const evidence = { ...canonical, data: { code: 'context.compaction', state: data.state, itemId: data.itemId, nativeThreadId: data.nativeThreadId, nativeTurnId: data.nativeTurnId } };
+                if (data.state === 'started') {
+                    this.entries.set(startKey, evidence);
+                    this.entries.delete(endKey);
+                } else this.entries.set(endKey, evidence);
+            }
+        }
         if (kind === 'turn.started' || kind === 'turn.completed')
             put(`${task}:turn`);
         if (kind === 'task.continued')
@@ -101,7 +139,13 @@ export class CurrentEvents {
             this.entries.delete(failureKey);
         }
         if (kind === 'prompt.state') {
-            if(this.entries.get('prompt:active')?.data.promptId===data.promptId)this.entries.delete('prompt:active');
+            const activePrompt = this.entries.get('prompt:active');
+            if (activePrompt && activePrompt.data.promptId === data.promptId) {
+                const activeTask = String(activePrompt.data.taskId ?? activePrompt.source.taskId ?? 'lead');
+                this.clearCompaction(activeTask);
+                this.compactionClosed.add(activeTask);
+                this.entries.delete('prompt:active');
+            }
             if (['failed', 'ownership-unsettled'].includes(String(data.state)) && this.entries.has(promptKey))
                 put(failureKey);
             else {
@@ -113,6 +157,7 @@ export class CurrentEvents {
         // Keep the complete current queue projection as well as a refresh cursor.
         if (kind.startsWith('prompt.'))
             put('prompt');
+        if (kind === 'session.ended') this.compactionSessionEnded = true;
         if (kind === 'session.ended')
             for (const key of this.entries.keys())
                 if (key.startsWith('progress:'))

@@ -723,3 +723,51 @@ test('an admitted native personal server uses the existing approval broker; arbi
  const task=await createCodexSessionDriver().startTask({...input,approvals:'relay'},h.io);
  try{await task.nativeSessionId;const child=h.children.at(-1)!;child.stdout({...mcpMemoryApproval,params:{...mcpMemoryApproval.params,serverName:'personal',message:mcpMemoryApproval.params.message.replace('deck-session-task-deck','personal')}});await Promise.resolve();await Promise.resolve();expect(requests).toHaveLength(1);expect(requests[0]!.toolKey).toStartWith('codex:mcp:personal:');expect(child.writes.find(m=>m.id===0)?.result).toMatchObject({action:'accept'});}finally{await task.close();await task.done;}
 });
+
+test('compaction fences foreign threads, stale/inactive turns and delayed completion across turns', async () => {
+  let turn = 0;
+  const h = harness((child, index, m) => {
+    if (m.method === 'turn/start') child.stdout({ id: m.id, result: { turn: { id: `turn-${++turn}` } } });
+    else responder(child, index, m);
+  });
+  const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId; await Promise.resolve();
+  const child = h.children.at(-1)!;
+  const compact = (method: string, turnId = 'turn-1', threadId = 'native-thread') => child.stdout({ method, params: { threadId, turnId, item: { type: 'contextCompaction', id: 'compact' } } });
+  const observed = () => h.events.filter(e => e.data.code === 'context.compaction');
+  compact('item/started', 'turn-1', 'foreign'); compact('item/started', 'stale');
+  expect(observed()).toHaveLength(0);
+  compact('item/started'); expect(observed()).toHaveLength(1);
+  child.stdout({ method: 'turn/completed', params: { threadId: 'native-thread', turn: { id: 'turn-1', status: 'completed' } } }); await task.done;
+  compact('item/started'); compact('item/completed'); expect(observed()).toHaveLength(1);
+  const next = task.send('next'); await Promise.resolve(); await Promise.resolve();
+  compact('item/started', 'turn-2'); compact('item/completed', 'turn-1');
+  expect(observed().map(e => e.data.state)).toEqual(['started', 'started']);
+  compact('item/completed', 'turn-2'); expect(observed().at(-1)?.data.state).toBe('completed');
+  await task.close(); await next;
+});
+
+test('compaction requires a known current turn while startup identity is unknown', async () => {
+  const h = harness((child, index, m) => { if (m.method !== 'turn/start') responder(child, index, m); });
+  const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId;
+  const child = h.children.at(-1)!;
+  const compact = () => child.stdout({ method: 'item/started', params: { threadId: 'native-thread', turnId: 'turn', item: { type: 'contextCompaction', id: 'c' } } });
+  compact(); expect(h.events.filter(e => e.data.code === 'context.compaction')).toHaveLength(0);
+  child.stdout({ method: 'turn/started', params: { threadId: 'native-thread', turn: { id: 'turn' } } });
+  compact(); expect(h.events.filter(e => e.data.code === 'context.compaction')).toHaveLength(1);
+  await task.close(); await task.done;
+});
+
+test('compaction cannot revive interrupted or closed turns', async () => {
+ const h = harness((child, index, m) => {
+  if (m.method === 'turn/interrupt') child.stdout({ id: m.id, result: {} });
+  else responder(child, index, m);
+ });
+ const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId; await Promise.resolve();
+ const child = h.children.at(-1)!;
+ await task.interrupt();
+ for (const method of ['item/started', 'item/completed']) child.stdout({ method, params: { threadId: 'native-thread', turnId: 'turn', item: { type: 'contextCompaction', id: 'c' } } });
+ expect(h.events.filter(e => e.data.code === 'context.compaction')).toHaveLength(0);
+ await task.close(); await task.done;
+ child.stdout({ method: 'item/started', params: { threadId: 'native-thread', turnId: 'turn', item: { type: 'contextCompaction', id: 'late' } } });
+ expect(h.events.filter(e => e.data.code === 'context.compaction')).toHaveLength(0);
+});
