@@ -1,0 +1,4 @@
+# These pinned upstream distributions are evaluator input, not generated builds.
+!fixtures/native/opencode/dist/
+!fixtures/native/opencode/dist/index.js
+!fixtures/native/opencode/dist/server.js

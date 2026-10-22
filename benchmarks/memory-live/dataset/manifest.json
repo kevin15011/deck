@@ -1,0 +1,49 @@
+{
+  "schema": "deck-memory-live-eval-draft-v1",
+  "snapshot_commit": "fc667aadbb052e2e4515889e425848762769c838",
+  "snapshot_date": "2026-10-21",
+  "status": "DESIGN_ONLY_NOT_RUN",
+  "questions": 50,
+  "category_counts": {
+    "superseded_decisions": 8,
+    "root_causes": 8,
+    "conventions": 6,
+    "user_preferences": 4,
+    "known_pitfalls": 6,
+    "cross_runner_continuity": 4,
+    "transfer": 4,
+    "contamination_negative": 3,
+    "confidentiality_negative": 2,
+    "generalization": 2,
+    "cross_project_leak_and_secret_negative": 3
+  },
+  "role_counts": {
+    "lead": 10,
+    "architect": 14,
+    "investigate": 9,
+    "quality": 14,
+    "apply-fast": 3
+  },
+  "seed_documents": 61,
+  "source_roots": [
+    "openspec/changes/archive/ (recursive)",
+    "openspec/archive/ (recursive)",
+    "openspec/changes/",
+    "openspec/releases/",
+    "CHANGELOG.md",
+    "docs/",
+    "CONTRIBUTING.md",
+    "git log and HEAD snapshot",
+    "targeted runtime source"
+  ],
+  "transcripts_used": false,
+  "provider_calls": 0,
+  "graph_tools": "not exposed; graph generation and index coverage unknown; targeted source fallback used",
+  "skill_discovery_context": "absent/indeterminate; bounded direct discovery only",
+  "git_intake": "only untracked .bun-cache/ observed; no repository writes authorized or performed",
+  "limitations": [
+    "Reconstructed conversation seeds are evidence-grounded but do not reproduce historical transcript extraction fidelity.",
+    "Memory v2 transfer, sharing=none and promotion cases are prospective capability probes, not claims of current functionality.",
+    "Live baseline and provider pricing are unmeasured; no live calls authorized in this task."
+  ]
+}

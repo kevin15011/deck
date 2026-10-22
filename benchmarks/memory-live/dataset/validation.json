@@ -1,0 +1,23 @@
+{
+  "status": "passed",
+  "questions": 50,
+  "seeds": 61,
+  "checks": [
+    "JSONL parse",
+    "unique IDs",
+    "all seed references resolve",
+    "all deterministic regexes compile",
+    "snapshot evidence paths exist",
+    "five requested query roles present"
+  ],
+  "not_executed": [
+    "provider calls",
+    "product tests",
+    "baseline scoring",
+    "native plugins"
+  ],
+  "remaining_review": [
+    "Offline human calibration of proposition/negation matching before freezing scorer",
+    "Official-plugin egress interception feasibility before native live execution"
+  ]
+}

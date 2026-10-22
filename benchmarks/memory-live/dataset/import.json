@@ -1,0 +1,47 @@
+{
+  "schema": "deck-memory-live-import-v1",
+  "source_snapshot": "fc667aadbb052e2e4515889e425848762769c838",
+  "corrections": [
+    "H8: current OpenCode automatic route is official opencode-supermemory 2.0.15 via Deck compatibility loader; HARNESS.md route paragraph is stale.",
+    "Quality: q019-g2 regex now matches its own frozen gold (Regenerate only affected outputs with pinned Bun)."
+  ],
+  "anonymization": "Absolute user home paths replaced with [ANON_HOME]; synthetic secret strings intentionally preserved as NONFUNCTIONAL fixtures.",
+  "api_snapshot_sha256": "4062a3b085eadfb70b993176d4b858ba2c752648b3a1fb085e18d2cc37ca03a4",
+  "api_paths": [
+    "/ns/{namespace}/document",
+    "/ns/{namespace}/document/batch",
+    "/ns/{namespace}/document/{id}",
+    "/ns/{namespace}/document/file",
+    "/ns/{namespace}/document/file/{id}",
+    "/ns/{namespace}/search",
+    "/ns/{namespace}/profile",
+    "/ns/{namespace}/profile/buckets",
+    "/ns/{namespace}/memories",
+    "/ns/{namespace}/memories/semantic",
+    "/ns/{namespace}/list/{type}",
+    "/connectors",
+    "/ns/{namespace}/connectors",
+    "/ns/{namespace}/connectors/{id}",
+    "/ns/{namespace}/connectors/{id}/sync",
+    "/namespaces",
+    "/ns",
+    "/ns/{namespace}",
+    "/organization",
+    "/ns/{namespace}/memories/{id}",
+    "/ns/{namespace}/list/documents/memory-counts",
+    "/feedback"
+  ],
+  "originalImportedHashes": {
+    "validation.json": "cb8c3aa9ae4a152eafa86f2d4a244979336d96ed24404261c40632b7b8c2dbe5",
+    "questions.jsonl": "bff8ae15c2935a875fdb4be31dc5015e782f444cc0399827cb6d0f3fbb7ff622",
+    "seeds.jsonl": "76c741378c7eaea012014e7e3a6cf43e2b7960ba3bec52c5bdc4f46cce01d7e2",
+    "manifest.json": "03d39b84a5c11c3ed019b356ef6e65edeabd8639d4f55e2ca3b9325b3e2a4604"
+  },
+  "currentCorpusHashes": {
+    "questions.jsonl": "0aa99c3b84a42839cf32fde87fd461a85e4fac6803f08dd0648d491eb63ff8f1",
+    "seeds.jsonl": "76c741378c7eaea012014e7e3a6cf43e2b7960ba3bec52c5bdc4f46cce01d7e2",
+    "manifest.json": "03d39b84a5c11c3ed019b356ef6e65edeabd8639d4f55e2ca3b9325b3e2a4604",
+    "validation.json": "cb8c3aa9ae4a152eafa86f2d4a244979336d96ed24404261c40632b7b8c2dbe5"
+  },
+  "scorerCorrectionsVersion": 2
+}

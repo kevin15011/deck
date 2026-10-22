@@ -1,0 +1,10 @@
+{
+  "schema": "deck-memory-live-pool-controls-v1",
+  "purpose": "Three fixed neutral B distractors; supplement, rather than alter, the supplied 61-seed corpus.",
+  "evidence": ["fixtures/project-b/ARCHITECTURE.md", "fixtures/project-b/README.md"],
+  "seeds": [
+    {"id":"pool-b-worker","project":"B","session_id":"session-pool-b-worker","role":"user","source":"trusted-user-prompt","content":"Confirmed constraint: Harbor Queue uses apps/worker to consume queue jobs."},
+    {"id":"pool-b-console","project":"B","session_id":"session-pool-b-console","role":"user","source":"trusted-user-prompt","content":"Confirmed convention: Harbor Queue uses apps/console as its operator interface."},
+    {"id":"pool-b-toolchain","project":"B","session_id":"session-pool-b-toolchain","role":"user","source":"trusted-user-prompt","content":"Confirmed constraint: Harbor Queue pins its Bun toolchain to version 1.3.12."}
+  ]
+}
