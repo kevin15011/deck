@@ -15,3 +15,16 @@ test('mobile navigation exposes installation directly in its secondary footer wi
  expect(html).toContain('Install Deck');expect(html).not.toContain('aria-haspopup');expect(html).not.toContain('deck-menu-items');
  expect(renderToStaticMarkup(<DeckMenu inline hidden onInstall={()=>{}}/>)).toBe('');
 });
+test('mobile drawer has one theme dialog action alongside install and restart',()=>{
+ const html=renderToStaticMarkup(<DeckMenu inline hidden={false} onInstall={()=>{}} onRestart={()=>{}} theme="green" onTheme={()=>{}}/>);
+ expect(html).toContain('Install Deck');expect(html).toContain('Restart Deck');
+ expect((html.match(/aria-haspopup="dialog"/g)??[]).length).toBe(1);
+ expect(html).toContain('Green');expect(html).not.toContain('Light');
+});
+test('notifications have one dialog action with state and attention in either menu',()=>{
+ const props={hidden:true,onInstall:()=>{},onNotifications:()=>{},notificationsEnabled:true,notificationsAttention:true};
+ const inline=renderToStaticMarkup(<DeckMenu {...props} inline/>);
+ expect(inline).toContain('Notifications');expect(inline).toContain('On');expect(inline).toContain('aria-haspopup="dialog"');
+ const popup=renderToStaticMarkup(<DeckMenu {...props}/>);
+ expect(popup).toContain('menu-attention');expect(popup).toContain('Notifications need attention');
+});

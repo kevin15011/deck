@@ -1,4 +1,5 @@
 import {projectTaskContinuityMetrics} from '../task-continuity-metrics';
+import { DriverStartupCleanupError } from '@deck/core/session/failure';
 import { PassThrough } from "node:stream";
 import { runSessionMcpBridge } from "../mcp-bridge";
 import type { ControlClient } from "../control-client";
@@ -103,6 +104,22 @@ test('P011 usage reaches default host composition and snapshot, with authoritati
 });
 
 describe("P012 terminal failure boundary", () => {
+  test.each(['startup','startup-cleanup','runtime','cleanup'] as const)('transport cause survives the host %s boundary', async phase => {
+    let released=0;
+    const t=setup({options:{childMcp:async()=>({runnerPackages:()=>[],resolveServer:()=>undefined,release:async()=>{released++;}})}}), failure={category:'deck',origin:'deck',certainty:'reported',code:'opencode-http-invalid-body'};
+    if(phase==='startup')t.driver.startError=Object.assign(new Error('opencode-http-invalid-body'),{failure});
+    if(phase==='startup-cleanup')t.driver.startError=new DriverStartupCleanupError(async()=>{throw new Error('fixture cleanup rejected');},failure as never);
+    if(phase==='cleanup'){
+      const start=t.driver.startTask.bind(t.driver);
+      t.driver.startTask=async(...args)=>({...await start(...args),close:async()=>{throw new Error('fixture cleanup rejected');}});
+    }
+    const id=await t.create();await t.run({type:'prompt.send',text:'original'},id);
+    if(phase!=='startup'&&phase!=='startup-cleanup'){await waitFor(()=>t.driver.turns.length===1);lastTurn(t.driver).finish({status:'failed',error:'opencode-http-invalid-body',failure:failure as never});}
+    await waitFor(()=>t.events(id).some(e=>e.kind==='turn.completed'));
+    expect(t.events(id).find(e=>e.kind==='turn.completed')?.data.failure).toEqual(failure);
+    await t.idle();expect(released).toBe(phase.includes('cleanup')?0:1);
+    if(phase.includes('cleanup'))expect(t.events(id).filter(e=>e.kind==='task.state').at(-1)?.data).toMatchObject({state:'ownership-unsettled',reason:'native-close-failed'});
+  });
   test("a known host binding cleanup failure is distinguished from ambiguous startup", async () => {
     let failRelease = false;
     const t = setup({ options: { childMcp: async () => ({ runnerPackages: () => [], resolveServer: () => undefined, release: async () => { if (failRelease) throw new Error("binding cleanup failed"); } }) } });
@@ -3467,4 +3484,141 @@ describe('first delivery interrupted continuation handoff',()=>{
   expect(sample.cost.status).toBe('no edit evidence');
   const before=t.events(id).length;old.emit('message.delta',{text:'STALE_PARTIAL'});expect(t.events(id)).toHaveLength(before);
  });
+});
+
+test('idle forced restart does not pause an empty prompt queue',async()=>{
+ const t=setup(),id=await t.create();await t.manager.close('web-restart-forced:idle');
+ const sp=sessionPaths(t.paths,id),log=EventLog.open({dir:sp.eventsDir,sessionId:id});
+ try {expect(loadLedger(log,sp.ledgerSnapshotFile).ledger.promptQueue.paused).toBe(false);}finally{log.close();}
+});
+
+test.each(['web-restart-forced:old','daemon-restart'])('successful preparation emits repair for stale empty restart pause: %s',async reason=>{
+ const t=setup(),id=await t.create();
+ t.manager.openLog(id)!.append({kind:'prompt.queue',data:{paused:true,reason}});
+ expect((await t.run({type:'session.prepare'},id)).ok).toBe(true);
+ await waitFor(()=>t.events(id).some(e=>e.kind==='diagnostic'&&e.data.code==='session.preparation'&&e.data.status==='ready'));
+ expect(t.events(id).some(e=>e.kind==='prompt.queue'&&e.data.paused===false&&e.data.reason==='restart-prepared')).toBe(true);
+});
+
+test('forced restart with only a running Lead keeps interruption paused through preparation',async()=>{
+ const t=setup(),id=await t.create();await t.run({type:'prompt.send',text:'active'},id);
+ await waitFor(()=>t.driver.turns.length===1);lastTurn(t.driver).init();
+ await t.manager.close('web-restart-forced:lead-only');
+ const next=setup({dir:t.dir});await next.manager.query('prompts.list',{sessionId:id});
+ expect((await next.manager.query('prompts.list',{sessionId:id}) as any).data.paused).toBe(true);
+ await next.run({type:'session.prepare'},id);
+ await waitFor(()=>next.events(id).some(e=>e.kind==='diagnostic'&&e.data.code==='session.preparation'&&e.data.status==='ready'));
+ expect((await next.manager.query('prompts.list',{sessionId:id}) as any).data.paused).toBe(true);
+});
+
+test('forced restart cancelling queued input preserves its pause after recovery and preparation',async()=>{
+ const t=setup(),id=await t.create();
+ t.manager.openLog(id)!.append({kind:'prompt.queue',data:{paused:true,reason:'interrupted'}});
+ expect((await t.run({type:'prompt.send',text:'waiting'},id)).ok).toBe(true);
+ await t.manager.close('web-restart-forced:queued-only');
+ const next=setup({dir:t.dir});
+ expect((await next.manager.query('prompts.list',{sessionId:id}) as any).data).toMatchObject({paused:true,queued:[]});
+ await next.run({type:'session.prepare'},id);
+ await waitFor(()=>next.events(id).some(e=>e.kind==='diagnostic'&&e.data.code==='session.preparation'&&e.data.status==='ready'));
+ expect((await next.manager.query('prompts.list',{sessionId:id}) as any).data.paused).toBe(true);
+ expect(next.driver.turns).toHaveLength(0);
+});
+
+
+describe('gated Lead prompt delivery', () => {
+  function gated(){const driver=new FakeDriver();Object.assign(driver,{supportsInputClaim:true});return setup({driver});}
+  test('cancel wins before claim and returns pending attachments; the late claim cannot write',async()=>{
+    const t=gated(),id=await t.create();const sent=await t.run({type:'prompt.send',text:'not yet read'},id);
+    await waitFor(()=>t.driver.turns.length===1);const turn=lastTurn(t.driver);
+    expect((await t.manager.query('prompts.list',{sessionId:id}) as any).data.active).toMatchObject({handoff:'pending',text:'not yet read'});
+    expect(await t.run({type:'prompt.cancel',promptId:(sent as any).data.promptId},id)).toMatchObject({ok:true,data:{state:'cancelled'}});
+    expect(turn.io.claimInput!()).toBe(false);await t.idle();
+    expect(t.events(id).some(e=>e.kind==='prompt.requeued')).toBe(false);
+  });
+  test.each(['failure','interrupt'] as const)('%s before claim requeues exact input and pauses without retry',async mode=>{
+    const t=gated(),id=await t.create();const sent=await t.run({type:'prompt.send',text:'Si, apruebo lo que recomiendas'},id);
+    await waitFor(()=>t.driver.turns.length===1);const turn=lastTurn(t.driver);
+    if(mode==='failure')turn.finish({status:'failed',error:'startup failed'});else await t.run({type:'turn.interrupt',taskId:'lead'},id);
+    await t.idle();expect((await t.manager.query('prompts.list',{sessionId:id}) as any).data).toMatchObject({paused:true,queued:[{promptId:(sent as any).data.promptId,text:'Si, apruebo lo que recomiendas'}]});
+    expect(t.driver.turns).toHaveLength(1);
+    await t.run({type:'prompt.resume'},id);await waitFor(()=>t.driver.turns.length===2);lastTurn(t.driver).io.claimInput!();lastTurn(t.driver).say('received');lastTurn(t.driver).finish();await t.idle();
+    expect(t.events(id).filter(e=>e.kind==='message.completed'&&e.data.role==='user')).toHaveLength(2);
+  });
+  test.each([false,true])('claimed input is not recallable; receipt is idempotent; delivered=%s',async delivered=>{
+    const t=gated(),id=await t.create();const sent=await t.run({type:'prompt.send',text:'possibly read'},id);
+    await waitFor(()=>t.driver.turns.length===1);const turn=lastTurn(t.driver);expect(turn.io.claimInput!()).toBe(true);
+    expect(await t.run({type:'prompt.cancel',promptId:(sent as any).data.promptId},id)).toMatchObject({ok:false,code:'prompt-already-started'});
+    if(delivered){turn.say('received');turn.emit('diagnostic',{code:'input.delivered',evidence:'receipt'});}
+    turn.finish({status:'failed',error:'exit'});await t.idle();
+    const handoffs=t.events(id).filter(e=>e.kind==='prompt.handoff');expect(handoffs.map(e=>e.data.state)).toEqual(['sending',delivered?'delivered':'unknown']);
+    expect((await t.manager.query('prompts.list',{sessionId:id}) as any).data.queued).toEqual([]);
+  });
+});
+
+test('gated startup error and forced daemon shutdown retain images without automatic resend',async()=>{
+  const driver=new FakeDriver();Object.assign(driver,{supportsInputClaim:true});driver.startError=Error('startup unavailable');
+  const t=setup({driver}),id=await t.create();
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==','base64');
+  const uploaded=t.manager.uploadAttachment({sessionId:id,bytes:png,mimeType:'image/png',name:'image.png'});expect(uploaded.ok).toBe(true);const image=(uploaded as any).data.attachment;
+  await t.run({type:'prompt.send',text:'image prompt',attachmentIds:[image.attachmentId]},id);await t.idle();
+  expect((await t.manager.query('prompts.list',{sessionId:id}) as any).data).toMatchObject({paused:true,queued:[{text:'image prompt',attachments:[image]}]});
+  await t.manager.close('web-restart-forced:fixture');const nextDriver=new FakeDriver();Object.assign(nextDriver,{supportsInputClaim:true});const next=setup({dir:t.dir,driver:nextDriver});
+  await Promise.resolve();expect(nextDriver.turns).toHaveLength(0);
+  const inbox=(await next.manager.query('prompts.list',{sessionId:id}) as any).data;expect(inbox).toMatchObject({paused:true,queued:[{text:'image prompt',attachments:[image]}]});
+  await next.run({type:'prompt.resume'},id);await waitFor(()=>nextDriver.turns.length===1);expect(lastTurn(nextDriver).input.images).toHaveLength(1);
+  expect((await next.manager.query('prompts.list',{sessionId:id}) as any).data.active).toMatchObject({handoff:'pending',attachments:[image]});
+  expect(await next.runWithId('88888888-8888-4888-8888-888888888888',{type:'prompt.cancel',promptId:inbox.queued[0].promptId},id)).toMatchObject({ok:true});await next.idle();expect(next.manager.readAttachment(id,image.attachmentId)?.bytes).toEqual(png);
+});
+
+test('claim fsync failure cannot return permission to write input',async()=>{
+  const driver=new FakeDriver();Object.assign(driver,{supportsInputClaim:true});const t=setup({driver}),id=await t.create();
+  await t.run({type:'prompt.send',text:'must not write'},id);await waitFor(()=>driver.turns.length===1);
+  const log=t.manager.openLog(id)!,flush=log.flush.bind(log);log.flush=()=>{throw Error('claim flush failed');};
+  let wrote=false;expect(()=>{if(lastTurn(driver).io.claimInput!())wrote=true;}).toThrow('claim flush failed');log.flush=flush;
+  expect(wrote).toBe(false);await t.idle();
+});
+
+test('gated delivery defers decision replies, continuity and completion notices through startup requeue',async()=>{
+  const driver=new FakeDriver();Object.assign(driver,{supportsInputClaim:true});
+  const t=setup({driver,config:baseConfig({members:{lead:{runnerId:'claude',modelId:'opus'},investigate:{runnerId:'claude',modelId:'fast'}}})}),id=await t.create();
+  const first=await t.run({type:'prompt.send',text:'Plan'},id);await waitFor(()=>driver.turns.length===1);const initial=lastTurn(driver);initial.io.claimInput!();initial.say('May I proceed?');
+  const invoke=(name:string,args:Record<string,unknown>)=>t.manager.callTaskTool(t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths,id).taskCredentialFile("lead"),"utf8")).token)!,name,args);
+  const opened=await invoke('deck_decision_open',{commandId:'open-delivery-decision',key:'permission',question:'May I proceed?',source:{promptId:(first as any).data.promptId}});expect(opened.ok).toBe(true);const decisionId=(opened as any).data.decisionId;
+  const child=await invoke('deck_delegate',{agent:'investigate',task:'Inspect'});expect(child.ok).toBe(true);await waitFor(()=>driver.turns.length===2);const delegated=lastTurn(driver);delegated.say('Evidence');delegated.finish();await waitFor(()=>delegated.closed);
+  const reply=await t.run({type:'prompt.send',text:'Approved',decisionTarget:{decisionId,revision:1}},id);expect(reply.ok).toBe(true);initial.finish();await waitFor(()=>driver.turns.length===3);
+  expect(t.events(id).filter(e=>e.kind==='decision.reply')).toHaveLength(0);expect(t.events(id).filter(e=>e.kind==='task.delivery')).toHaveLength(0);
+  let ledger=loadLedger(t.manager.openLog(id)!,sessionPaths(t.paths,id).ledgerSnapshotFile).ledger;expect(ledger.continuityBlock?.promptId).toBe((first as any).data.promptId);
+  lastTurn(driver).finish({status:'failed',error:'startup'});await t.idle();expect(t.events(id).filter(e=>e.kind==='decision.reply')).toHaveLength(0);
+  await t.run({type:'prompt.resume'},id);await waitFor(()=>driver.turns.length===4);const received=lastTurn(driver);expect(received.input.rolePrompt).toContain((child as any).data.taskId);received.io.claimInput!();received.say('Received approval');
+  expect(t.events(id).filter(e=>e.kind==='decision.reply')).toHaveLength(1);expect(t.events(id).filter(e=>e.kind==='task.delivery')).toHaveLength(1);
+  ledger=loadLedger(t.manager.openLog(id)!,sessionPaths(t.paths,id).ledgerSnapshotFile).ledger;expect(ledger.continuityBlock?.promptId).toBe((reply as any).data.promptId);
+  expect(ledger.decision(decisionId)?.replies).toMatchObject([{promptId:(reply as any).data.promptId,stale:false}]);received.finish();await t.idle();
+});
+
+test('gated shutdown preserves the paused backlog FIFO instead of reversing it',async()=>{
+  const driver=new FakeDriver();Object.assign(driver,{supportsInputClaim:true});const t=setup({driver}),id=await t.create();
+  await t.run({type:'prompt.send',text:'active'},id);await waitFor(()=>driver.turns.length===1);lastTurn(driver).io.claimInput!();lastTurn(driver).say('working');
+  await t.run({type:'prompt.send',text:'first queued'},id);await t.run({type:'prompt.send',text:'second queued'},id);
+  await t.manager.close();const next=setup({dir:t.dir,driver:new FakeDriver()});
+  expect((await next.manager.query('prompts.list',{sessionId:id}) as any).data).toMatchObject({paused:true,queued:[{text:'first queued'},{text:'second queued'}]});
+});
+
+test('completed delivered prompts remain completed and unpaused across manager reload',async()=>{
+ const driver=new FakeDriver();Object.assign(driver,{supportsInputClaim:true});
+ const t=setup({driver}),id=await t.create();const sent=await t.run({type:'prompt.send',text:'finish normally'},id);
+ await waitFor(()=>driver.turns.length===1);const turn=lastTurn(driver);expect(turn.io.claimInput!()).toBe(true);turn.say('done');turn.finish();await t.idle();
+ expect(loadLedger(t.manager.openLog(id)!,sessionPaths(t.paths,id).ledgerSnapshotFile).ledger.prompt((sent as any).data.promptId)?.state).toBe('completed');
+ await t.manager.close();const next=setup({dir:t.dir});await next.manager.query('prompts.list',{sessionId:id});
+ expect(loadLedger(next.manager.openLog(id)!,sessionPaths(next.paths,id).ledgerSnapshotFile).ledger.promptQueue.paused).toBe(false);
+ expect(next.events(id).filter(e=>e.kind==='prompt.queue'&&e.data.paused===true)).toHaveLength(0);
+});
+
+test.each(['legacy','delivered'] as const)('reload reconciles a stale dispatched completed attempt without pausing: %s',async handoff=>{
+ const t=setup(),id=await t.create();const log=t.manager.openLog(id)!;
+ log.appendMany([{kind:'task.created',data:{taskId:'lead',memberId:'lead',runnerId:'claude',modelId:'opus'}},{kind:'task.state',data:{taskId:'lead',state:'running'}},{kind:'task.state',data:{taskId:'lead',state:'completed'}},{kind:'prompt.queued',data:{promptId:'stale',text:'already done',textHash:'h',by:'web'}},{kind:'prompt.dispatched',data:{promptId:'stale',taskId:'lead',attempt:1,...(handoff==='delivered'?{handoff:'gated'}:{})}},...(handoff==='delivered'?[{kind:'prompt.handoff' as const,data:{promptId:'stale',taskId:'lead',attempt:1,state:'sending'}},{kind:'prompt.handoff' as const,data:{promptId:'stale',taskId:'lead',attempt:1,state:'delivered'}}]:[])]);
+ await t.manager.close();const next=setup({dir:t.dir});await next.manager.query('prompts.list',{sessionId:id});
+ await waitFor(()=>next.events(id).some(e=>e.kind==='prompt.state'&&e.data.promptId==='stale'&&e.data.state==='completed'));
+ const ledger=loadLedger(next.manager.openLog(id)!,sessionPaths(next.paths,id).ledgerSnapshotFile).ledger;
+ expect(ledger.prompt('stale')?.state).toBe('completed');expect(ledger.promptQueue.paused).toBe(false);
+ expect(next.events(id).filter(e=>e.kind==='prompt.queue'&&e.data.paused===true)).toHaveLength(0);
 });

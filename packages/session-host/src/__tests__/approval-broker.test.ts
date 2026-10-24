@@ -152,6 +152,26 @@ describe("ApprovalBroker (XR-5.1, XR-5.2)", () => {
 });
 
 describe("approval scopes", () => {
+  test('notification responses require explicit normal risk and never create grants', async () => {
+    const {broker, req, events} = setup();
+    for (const risk of [undefined, 'high']) {
+      const a = req({risk});
+      for (const decision of ['allow', 'deny'] as const)
+        expect(broker.respond({approvalId:a.approvalId, decision, scope:'once', origin:'notification', by:'web:device'})).toEqual({ok:false,code:'approval-notification-risk'});
+    }
+    const a=req({risk:'normal',toolKey:'claude:Bash',identity:'ls',nativeScopes:['always']});
+    for (const response of [{decision:'allow',scope:'session',grant:'tool'},{decision:'allow',scope:'always',confirmed:true},{decision:'deny',scope:'session'},{decision:'allow',scope:'once',grant:'tool'}])
+      expect(broker.respond({approvalId:a.approvalId,...response,origin:'notification',by:'web:device'} as any)).toEqual({ok:false,code:'approval-notification-scope'});
+    expect(broker.respond({approvalId:a.approvalId,decision:'allow',scope:'once',origin:'notification',by:'web:device'}).ok).toBe(true);
+    expect(await a.resolution).toMatchObject({decision:'allow-once',scope:'once'});
+    expect(events.at(-1)).toMatchObject({kind:'approval.resolved',data:{approvalId:a.approvalId}});
+    expect(broker.grants('s-1')).toEqual([]);
+    expect(broker.respond({approvalId:a.approvalId,decision:'deny',origin:'notification',by:'web:device'})).toEqual({ok:false,code:'already-resolved'});
+    const b=req({risk:'normal'});
+    expect(broker.respond({approvalId:b.approvalId,decision:'deny',origin:'notification',by:'web:device'}).ok).toBe(true);
+    expect(await b.resolution).toMatchObject({decision:'deny',scope:'once'});
+    broker.dispose();
+  });
   test("session exact grant audits later matches, isolates sessions/runners/actions, leaves existing pending alone", async () => {
     const { broker, req, events } = setup();
     const fields = { toolKey: "claude:Bash", exactKey: "ls", identity: "ls", risk: "high" as const };

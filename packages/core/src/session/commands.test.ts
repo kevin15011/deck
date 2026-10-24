@@ -4,6 +4,11 @@ import { validateSessionCommand } from "./commands";
 const id = "3f2b8c1e-5d4a-4b7e-9a1c-0e2d3f4a5b6c";
 
 describe("validateSessionCommand", () => {
+  test('approval origin is optional but only notification is recognized',()=>{
+    const c={v:1,commandId:id,type:'approval.respond',approvalId:'a',decision:'allow',scope:'once'};
+    expect(validateSessionCommand({...c,origin:'notification'})).toMatchObject({ok:true,value:{origin:'notification'}});
+    for(const origin of ['app','',null,true,{}])expect(validateSessionCommand({...c,origin}).ok).toBe(false);
+  });
   test("accepts each command kind", () => {
     const cmds = [
       { type: "session.create", projectRoot: "/p" },

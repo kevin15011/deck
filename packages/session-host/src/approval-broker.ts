@@ -21,7 +21,7 @@ export type ApprovalRequest = {
   toolKey?: string; identity?: string; exactKey?: string; risk?: ApprovalRisk; nativeScopes?: readonly ("always")[]; alwaysNote?: string;
 };
 export type ApprovalResolution = { approvalId: string; decision: ApprovalDecision; by: string; scope: ApprovalScope };
-export type RespondResult = { ok: true; resolution: ApprovalResolution } | { ok: false; code: "already-resolved" | "unknown-approval" | "approval-scope-unsupported" | "approval-confirmation-required" };
+export type RespondResult = { ok: true; resolution: ApprovalResolution } | { ok: false; code: "already-resolved" | "unknown-approval" | "approval-scope-unsupported" | "approval-confirmation-required" | "approval-notification-risk" | "approval-notification-scope" };
 export type PendingApproval = { approvalId: string; sessionId: string; taskId: string };
 
 export interface ApprovalEventSink {
@@ -100,7 +100,7 @@ export class ApprovalBroker {
     const allowedScopes: ApprovalScope[] = ["once", ...(request.toolKey ? ["session" as const] : []), ...(request.identity && !exactKeyTruncated && request.nativeScopes?.includes("always") ? ["always" as const] : [])];
     // Never retain raw identity in pending state or spread it into an event.
     const { identity: _, ...safeRequest } = request;
-    const normalized = { ...safeRequest, risk: request.risk ?? "normal", allowedScopes, grantKinds, exactKey, exactKeyTruncated, matchKey };
+    const normalized = { ...safeRequest, risk: request.risk ?? "high", allowedScopes, grantKinds, exactKey, exactKeyTruncated, matchKey };
     const approvalId = (this.options.newId ?? randomUUID)();
     let resolve!: (r: ApprovalResolution) => void;
     const resolution = new Promise<ApprovalResolution>((res) => { resolve = res; });
@@ -121,9 +121,16 @@ export class ApprovalBroker {
     return { approvalId, resolution };
   }
 
-  respond(input: ApprovalResponse & { approvalId: string; by: string }): RespondResult {
+  respond(input: ApprovalResponse & { approvalId: string; by: string; origin?: "notification" }): RespondResult {
     const entry = this.pendingById.get(input.approvalId);
     if (!entry) return { ok: false, code: this.resolvedSet.has(input.approvalId) ? "already-resolved" : "unknown-approval" };
+    // Read authoritative pending risk, never a client-supplied/push copy. Apply to
+    // deny too: notification responses have exactly one narrow contract.
+    if (input.origin === "notification") {
+      if (entry.request.risk !== "normal") return {ok:false,code:"approval-notification-risk"};
+      if ((input.decision !== "allow" && input.decision !== "deny") || (input.scope !== undefined && input.scope !== "once") || input.grant !== undefined)
+        return {ok:false,code:"approval-notification-scope"};
+    }
     const validation = validateApprovalResponse(entry.request, input);
     if (!validation.ok) return validation;
     if (validation.scope === "session") {

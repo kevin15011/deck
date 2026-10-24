@@ -10,7 +10,7 @@
 import { readdirSync } from "node:fs";
 import { EventLog, type EventDraft } from "./event-log";
 import { LeaseInvalidError, readLease, removeLease, type Lease } from "./lease";
-import { loadLedger, saveLedgerSnapshot, TERMINAL_TASK_STATES, type Ledger, type TaskAttempt } from "./ledger";
+import { loadLedger, promptEndDrafts, saveLedgerSnapshot, TERMINAL_TASK_STATES, type Ledger, type TaskAttempt } from "./ledger";
 import { assertSafeSegment, sessionPaths, type StatePaths } from "./paths";
 import type { Presence, ProcessIdentity, ProcessProbe } from "./process-probe";
 
@@ -108,6 +108,17 @@ export function recoverSession(options: RecoverSessionOptions): RecoveryReport {
     }
   }
 
+  for (const prompt of ledger.prompts()) {
+    if ((!prompt.handoff && !(prompt.gated && prompt.state === "queued")) || !prompt.taskId) continue;
+    const recovered = drafts.find(draft => draft.kind === 'task.state' && draft.data?.taskId === prompt.taskId);
+    const attempt = ledger.task(prompt.taskId)?.attempts.find(a=>a.attempt===prompt.attempt);
+    if (recovered || attempt && (TERMINAL_TASK_STATES.includes(attempt.state) || attempt.state === 'ownership-unsettled'))
+      {
+        drafts.push(...promptEndDrafts(prompt, String(recovered?.data?.state ?? attempt!.state), 'daemon-restart'));
+        if (prompt.handoff && prompt.handoff.state !== 'pending' && ['failed','interrupted','ownership-unsettled'].includes(String(recovered?.data?.state ?? attempt!.state))) drafts.push({kind:'prompt.queue',data:{paused:true,reason:'daemon-restart'}});
+      }
+  }
+
   for (const question of ledger.pendingQuestions()) {
     drafts.push({ kind: "question.resolved", source: question.taskId ? { taskId: question.taskId } : {}, data: { questionId: question.questionId, outcome: "cancelled", by: "daemon-restart" } });
     report.questionsCancelled.push(question.questionId);
@@ -121,13 +132,17 @@ export function recoverSession(options: RecoverSessionOptions): RecoveryReport {
     report.approvalsDenied.push(approval.approvalId);
   }
 
-  if (drafts.length > 0 || LIVE_SESSION_STATES.includes(ledger.session.state)) {
+  if (drafts.length > 0 || LIVE_SESSION_STATES.includes(ledger.session.state) || ledger.restartQueueRepair("restart-recovered")) {
     drafts.push({ kind: "session.recovered", data: { interrupted: report.interrupted, unsettled: report.unsettled } });
   }
   if (ledger.session.stopRequested && report.unsettled.length === 0) drafts.push({ kind: "session.ended", data: { reason: "stopped" } });
   if (drafts.length === 0) return report;
 
   for (const event of log.appendMany(drafts)) ledger.apply(event);
+  if (report.interrupted.length === 0 && report.unsettled.length === 0) {
+    const repair = ledger.restartQueueRepair("restart-recovered");
+    if (repair) { for (const event of log.appendMany([repair])) ledger.apply(event); drafts.push(repair); }
+  }
   report.eventsAppended = drafts.length;
   for (const file of settledLeases) { try { removeLease(file); } catch { /* an orphan lease is harmless once the task is terminal */ } }
   return report;

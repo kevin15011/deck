@@ -9,12 +9,12 @@ Statuses: **Reported**, **Investigated**, **In progress**, **Resolved**.
 | ID | Issue | Status | Source |
 | --- | --- | --- | --- |
 | P-001 | Lead appears idle during Codex context compaction | Implemented, reviewed, and active in canary fc3ea86 | Local session report, 2026-10-21 |
-| P-002 | Double Escape cancels Lead execution and recalls unread messages | Reported | Community feedback relayed by the user |
+| P-002 | Double Escape cancels Lead execution and recalls unread messages | Implemented; live verification pending | Community feedback relayed by the user |
 | P-003 | Stop an individual subagent from the subagent list | Reported | User request |
 | P-004 | Lead delegation should not require permission prompts | Reported | User request |
 | P-005 | Preserve session permission grants across daemon restarts and session reopening | Reported | User request |
 | P-006 | Recurring turn failures with `codex-startup-failed` | Reported | User reports frequent occurrences |
-| P-007 | Mobile Enter inserts a newline instead of sending the message | Reported | User request |
+| P-007 | Mobile Enter inserts a newline instead of sending the message | Implemented; real-device verification pending | User request |
 | P-008 | Slow sessions with accumulated context, repeated verification, and oversized RPC responses | Investigated; community correlation pending | Community analysis supplied as a screenshot |
 | P-009 | First mobile image attachment attempt fails without delivering an image | Reported | User report in this conversation |
 | P-010 | Review session modifications in a Git diff tab in the web UI | Reported | User request |
@@ -23,6 +23,8 @@ Statuses: **Reported**, **Investigated**, **In progress**, **Resolved**.
 | P-013 | Separate logical task ownership from native context reuse | Fresh-all delivery reviewed and active in canary c1e88ea; live cost measurement pending | Explicit user policy decision, 2026-10-22 |
 | P-014 | Deliver corrections to active delegated members | Registered separately; deferred | Explicit user request, 2026-10-22 |
 | P-015 | Verified Codex native continuation | Deferred; outside the first continuity delivery | Accepted measurement limitation, 2026-10-22 |
+| P-016 | Answer approval requests from push notifications | Implemented; opt-in, normal risk, once-only responses | User request, 2026-10-23 |
+| P-017 | Revoked session grant still applies within the running Lead turn | Reported; not investigated | Live observation, 2026-10-23 |
 
 ## P-015 — Verified Codex native continuation
 
@@ -81,24 +83,29 @@ Local evidence: `~/.local/state/deck/sessions/20261021T141551-27e992/events/0000
 
 ## P-002 — Double Escape cancels Lead execution and recalls unread messages
 
-- **Status:** Reported; implementation pending.
+- **Status:** Implemented; focused helpers, browser fixture, and backend delivery-race checks verified. Live runner/device verification remains open.
 - **Source:** Community feedback relayed by the user in this conversation.
-- **Requested behavior:** Pressing Escape twice cancels the Lead's current execution. A sent message that the Lead has not yet read can be cancelled and its text returned to the input for editing or resubmission.
+- **Requested behavior:** Pressing Escape twice cancels the Lead's current execution. A sent message that the Lead has not yet read can be cancelled and its text and image attachments returned to the input for editing or resubmission.
 - **Impact:** Users can stop unwanted execution and recover premature or mistaken submissions without retyping them.
-- **Evidence:** User request only; current behavior and runner support have not been investigated.
+- **Evidence:** The [delivery-boundary design and verification](changes/lead-prompt-delivery-boundary/design.md#candidate-verification) records host race/restart/snapshot tests, per-driver claims, image recall, Chromium composition, full package results and pre-existing failure attribution. Root TypeScript passes. Live runner/device verification remains open.
 
-### Proposed outcome and verification
+### Outcome and verification
 
-- [ ] Double Escape cancels the Lead's active execution and visibly confirms cancellation.
-- [ ] Cancelling an unread sent message removes it from pending delivery and restores its full text to the input.
-- [ ] A successfully recalled message is not subsequently delivered to the Lead.
-- [ ] If the Lead has already consumed the message, the UI does not claim that recall succeeded.
-- [ ] Restoring a message preserves any draft already in the input.
-- [ ] Verify cancellation and recall when message delivery races with the user's action.
+- [x] Double Escape cancels the Lead's active execution and visibly confirms cancellation through the existing Interrupt command path (browser fixture).
+- [x] Cancelling an unread sent message removes it from pending delivery and restores its full text to the input.
+- [x] A successfully recalled message is not subsequently delivered to the Lead (backend preflight/FIFO tests).
+- [x] If the Lead has already consumed the message, the UI does not claim that recall succeeded.
+- [x] Recalling queued or active-pending input restores its image attachments after server confirmation.
+- [x] Restoring a message preserves any draft already in the input, including edits during the request.
+- [x] Verify cancellation and recall when message delivery races with the user's action (backend tests plus stale/consumed/unconfirmed browser responses).
 
-**Details to settle during implementation:** Double-Escape timing and behavior inside dialogs; whether the same shortcut recalls an unread message before interrupting an active turn; selection when multiple messages are pending; the authoritative boundary for "read"; preserving an existing draft; supported UI surfaces and the scope of cancellation for delegated work.
+**Settled behavior:** Two distinct Escape presses within 1,000 ms act from the composer or visible chat surface. Recall takes priority over interruption and selects the newest item in the selected session's authoritative prompt inbox queue, then an active dispatched prompt whose handoff is pending; local sending indicators and consumed history are excluded. The first press shows an overlay hint without changing layout. Handled Escape, open dismissal layers/dialogs/menus, IME composition, and key repeat cannot complete the pair. An idle session does nothing. Interruption targets only the Lead through the existing button path and never restores its consumed prompt; no subagent cancellation is added.
 
-**Implementation change:** Not assigned. This entry records the requested behavior; no runtime changes have been made.
+**Stop/Edit follow-up:** Stop always interrupts the Lead first and never selects a later queued message. If its active pending prompt is confirmed requeued undelivered, a matching cancellation receipt restores its text/images; unresolved settlement leaves the paused queue available for Edit. Every queued item has a 44px mobile Edit action using the same confirmation and merge rules. Confirmed IDs are protected against duplicate restoration from stale queue views. See the [approved follow-up implementation](changes/lead-prompt-delivery-boundary/design.md#approved-follow-up-2026-10-23-user-si).
+
+**Recall authority and draft merge:** The server confirms `prompt.cancel` with a matching `{promptId, state: "cancelled"}` receipt after persisting cancellation. The synchronous native-input claim (or a steering fence) makes the prompt ineligible for cancellation; `prompt-already-started` reports delivery already started, which is a conservative boundary rather than proof of human-like reading. The UI restores only on the matching cancellation receipt; refusal or uncertainty leaves the draft untouched and shows a notice. Recalled full text is prepended to the latest draft with one blank line between them. The draft store is updated after acknowledgement; focus and caret move to the end only if the same session/navigation and text are still current. Confirmed prompt IDs are excluded from subsequent recall even if the inbox projection lags. Managed image attachments are restored after the same cancellation receipt, before existing image drafts and deduplicated by attachment ID; existing drafts are preserved. No reupload is needed.
+
+**Implementation change:** `apps/web/src/composer-keyboard.ts`, `apps/web/src/composer-keyboard.test.ts`, `apps/web/src/main.tsx`, `apps/web/src/style.css`, and `apps/web/composer-keyboard-acceptance.ts`. Reuses existing `prompt-queue.tsx`, `dismiss-layer.ts`, draft store, and backend cancellation with the approved [Lead prompt delivery boundary](changes/lead-prompt-delivery-boundary/design.md): synchronous per-driver claims, pending recall, paused undelivered requeue with images, and explicit unconfirmed delivery recovery. Not activated by restarting the daemon; live runner verification remains open.
 
 ## P-003 — Stop an individual subagent from the subagent list
 
@@ -191,23 +198,23 @@ codex-startup-failed
 
 ## P-007 — Mobile Enter inserts a newline instead of sending the message
 
-- **Status:** Reported; implementation pending.
+- **Status:** Implemented; automated keyboard/browser checks pass. Real iOS and Android virtual-keyboard verification remains open.
 - **Source:** User request in this conversation.
 - **Requested behavior:** In the mobile message composer, pressing Enter inserts a newline instead of submitting the message. Sending remains an explicit action through the Send button.
 - **Impact:** Users can compose multiline messages on mobile without accidentally sending unfinished text.
-- **Evidence:** User request only; current keyboard handling has not been investigated.
+- **Evidence:** Enter-policy helper tests and the composed Chromium fixture pass, including coarse-pointer input at desktop width, keyboard input at narrow width, cursor editing, repeated newlines, composition guards, and the four-line auto-grow cap. Root TypeScript checking passes. The web suite reports 263 pass and the 13 known failures in `session-codebase-availability.test.tsx`.
 
-### Proposed outcome and verification
+### Outcome and verification
 
-- [ ] Enter inserts a newline at the cursor in the mobile composer without submitting or queuing a message.
-- [ ] The Send button submits the complete message with its line breaks preserved.
-- [ ] Verify repeated newlines and editing within existing multiline text.
+- [x] Enter inserts a newline at the cursor in the mobile composer without submitting or queuing a message (emulated coarse-pointer browser input).
+- [x] The Send button submits the complete message with its line breaks preserved.
+- [x] Verify repeated newlines and editing within existing multiline text.
 - [ ] Verify behavior with iOS and Android virtual keyboards, including composition input.
-- [ ] Confirm existing desktop keyboard behavior remains intact.
+- [x] Confirm existing desktop keyboard behavior remains intact.
 
-**Details to settle during implementation:** How the composer identifies mobile input, including tablets and attached physical keyboards; suitable virtual-keyboard action hints.
+**Settled behavior:** The live media query `(pointer: coarse), (hover: none)` selects newline behavior independently of viewport width. Tablets and attached physical keyboards follow the device's reported primary pointer/hover capabilities; attaching a keyboard alone does not force Enter-to-send on a touch device. The query updates when those capabilities change. `enterKeyHint` is `enter` for touch input and `send` otherwise. Desktop keeps Enter-to-send and Shift+Enter-to-newline; IME composition does not submit. Existing auto-grow remains capped at four lines with internal scrolling. Real virtual-keyboard behavior is not established by desktop emulation.
 
-**Implementation change:** Not assigned. This entry records the requested behavior; no runtime changes have been made.
+**Implementation change:** `apps/web/src/composer-keyboard.ts`, `apps/web/src/composer-keyboard.test.ts`, `apps/web/src/main.tsx`, and `apps/web/composer-keyboard-acceptance.ts`; reuses the existing message-input auto-grow implementation. No daemon restart or production activation was performed.
 
 ## P-008 — Slow sessions with accumulated context, repeated verification, and oversized RPC responses
 
@@ -315,3 +322,25 @@ Screenshot reference: local session `20261022T003008-6f199c`, attachment `714c6c
 - **Desired correction:** Preserve a sanitized actionable native failure category/message through the adapter, host terminal result and web history. Avoid exposing raw payloads or credentials; preserve safe fallback for unknown errors. Verify model overload, missing error, and unrelated error types, and keep retry/model-change guidance explicit without automatic model changes or duplicate execution.
 - **Scope update:** The user explicitly requested preparedness for provider instability and clear attribution. See [provider failure brief](changes/session-context-latency-investigation/provider-failure-brief.md) for cross-runner classification, actionable recovery, redaction, persistence and safe-retry constraints.
 - **Status:** Cross-runner failure reporting implemented and independently approved; active in canary `fc3ea86` (daemon digest verified). Fixed explanations preserve confirmed versus inferred/unknown attribution and manual recovery without automatic replay. See the provider failure brief for test evidence and limitations, including uncorrelated OpenCode session-only errors.
+
+## P-016 — Answer approval requests from push notifications
+
+- **Status:** Implemented (2026-10-23) with the approved conditions: supported Chromium browsers, explicit normal risk, Allow once + Deny, default-off opt-in, and server enforcement. Feasibility report: investigation task d477b118 (session 20261023T162741-02bee6).
+- **Live verification (2026-10-24, canary, user device):** a high-risk Bash approval push arrived without action buttons (tap opens Deck), as designed; a normal-risk `Read` of a file outside the project root (`/etc/hostname`) produced an approval push that showed the Allow once / Deny buttons. Note: in-project Read/Glob/Grep are auto-allowed by Claude, so normal-risk approvals are rare in practice (risk classification: `packages/session-host/src/bridge-service.ts:113-116`).
+- **Verdict:** Feasible as a Chromium-only enhancement (Chrome/Edge desktop, Chrome Android). Firefox, Safari macOS and iOS/iPadOS PWAs do not render notification action buttons; there a tap keeps opening the app.
+- **Feasibility baseline (before implementation):** the worker could authenticate `POST /api/commands` with the existing HttpOnly SameSite=Strict device cookie; approval pushes lacked approval identity/tool/risk, and in-app high-risk allow-once responses remained valid. Late responses returned `already-resolved`/`unknown-approval`.
+- **Recommended slice:** add redacted tool name, `approvalId` and risk (unknown→high) to approval pushes; offer "Allow once" + "Deny" only for normal risk when `Notification.maxActions >= 2`; never session/always grants; high risk opens the app; on any failure close-and-open-app with a short "Couldn't apply — open Deck" notification, no silent retries; opt-in setting.
+- **Risks:** lock-screen exposure on Android unverified; long-lived device cookie means an unlocked stolen phone could approve normal-risk requests.
+- **Implementation:** `push-attention.ts` reads metadata from the exact pending request event; both push paths use `approvalPushFields` to transmit only a bounded approval identifier, a redacted tool identifier (80 ASCII characters maximum; unsafe names become `Tool`), and normal/high risk. Summary, input, command and path fields are never copied into approval pushes. Missing risk now defaults to high in the broker and push metadata.
+- **Server enforcement:** the core command contract validates optional `origin: 'notification'`; SessionManager forwards it to ApprovalBroker. The broker checks the authoritative pending request before resolving: only normal-risk `allow` with scope once (or omitted once default), or `deny`, with no grant fields. High/unknown risk returns `approval-notification-risk`; broader scopes/grants return `approval-notification-scope`. Rejections leave the request pending. Existing authenticated HTTP boundaries and first-response-wins behavior remain in force; normal `approval.resolved` events remove the web approval card.
+- **Browser opt-in:** the Notifications dialog adds “Answer approvals from notifications”. Cache Storage holds one boolean in `deck-notification-preferences`, at `/__deck_notification_preferences__`, shared directly by the page and worker. It survives worker restarts, is scoped to this browser/origin, and contains no authenticated responses or credentials. Reads fail closed; failed writes restore the checkbox and report an error. The worker rechecks this value both before display and before executing an action, so disabling it revokes older displayed actions too.
+- **Worker behavior:** only opt-in, normal-risk approvals with a valid identity and `Notification.maxActions >= 2` display “Allow <tool> once?” with Allow once/Deny. An action makes one same-origin, credentialed, redirect-rejecting `POST /api/commands`, marked with notification origin and once scope; network/HTTP/JSON/semantic failures (including stale approvals) produce “Couldn’t apply — open Deck” without retries. That fallback and ordinary body taps open/focus the session. Successful actions close only that approval's notices and recompute the badge; grouped replies and separate approval/decision tags remain intact.
+- **Evidence:** 191 focused tests passed across command validation, broker, attention projection, push transport/daemon, manager approval/grant behavior and web approval/push/worker tests. Three existing storage-capacity stress tests exceeded Bun's default five-second timeout and passed individually with `--timeout 60000`. Root `bunx tsc --noEmit -p .` passed. Full web suite: 288 passed, the same 13 known `session-codebase-availability` failures. `apps/web/push-acceptance.ts` passed all 16 checks with real Chromium registration/notifications and authenticated worker HTTP resolution/card removal, opt-in persistence/storage rollback, grouped notifications/badges, and 320/390/1440 dialog checks. Provider delivery was simulated via CDP, OS badge effects were faked, and the action click was dispatched in the real worker. Some headless runs lost a displayed notification after `showNotification` resolved; a complete final run passed without weakening notification assertions.
+- **Platform limits:** feature availability follows [Notification.maxActions](https://developer.mozilla.org/en-US/docs/Web/API/Notification/maxActions_static); browsers without two actions retain body-tap routing into Deck. Safari/Firefox action fallbacks and physical Android/iOS lock-screen behavior have not been exercised on devices. iOS/iPadOS push still requires a Home Screen app and notification permission ([WebKit](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)); badges remain optional and device-local. Live provider delivery is unverified. No running daemon restart or commit was performed.
+
+## P-017 — Revoked session grant still applies within the running Lead turn
+
+- **Status:** Reported; not investigated.
+- **Observed (session 20261023T162741-02bee6, 2026-10-24 UTC):** the user revoked the Bash session grant (command accepted 00:31:33); the Lead turn that started at 00:31:47 ran `date` at ~00:31:52 with no `approval.requested` event. The next Lead turn's Bash call (00:32:40) correctly requested approval.
+- **Hypothesis:** grants are snapshotted per turn (or the native runner keeps its own allowance) so revocation only takes effect on the next turn. Expected: revocation applies immediately to subsequent tool calls, including within a running turn.
+- **Related:** P-016 live testing — high-risk Bash approval push arrived without action buttons as designed; normal-risk buttons could not be exercised live because no normal-risk tool currently requests approval.

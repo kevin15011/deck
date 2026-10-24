@@ -1,4 +1,4 @@
-/* No application caching: authenticated workspace responses must never enter a worker cache. */
+/* Only a local boolean preference is cached; authenticated responses are never cached. */
 self.addEventListener('install', (event) =>
   event.waitUntil(self.skipWaiting()),
 );
@@ -17,9 +17,49 @@ const bodies = {
   approval: 'An approval needs your response.',
   failure: 'Work needs your attention.',
 };
+// Push, view and dismissal events can overlap at every await. Serialize the
+// notification read/replace/count cycle; the displayed notification is the
+// durable source of counts when the browser restarts this worker.
+let notificationWork = Promise.resolve();
+const enqueueNotifications = (work) => {
+  const next = notificationWork.then(work);
+  notificationWork = next.catch(() => {});
+  return next;
+};
+const notifications = async () => {
+  try { return await self.registration.getNotifications(); }
+  catch { return []; } // Limited platforms still display each valid push.
+};
+const updateBadge = async (pending) => {
+  const count = pending.filter(n => n.tag.startsWith('deck:')).reduce((total, n) =>
+    total + (Number.isSafeInteger(n.data?.count) && n.data.count > 0 ? n.data.count : 1), 0);
+  let timer;
+  try {
+    const operation = count ? self.navigator.setAppBadge?.(count) : self.navigator.clearAppBadge?.();
+    // Some platform integrations leave these promises pending. An optional OS
+    // effect must not hold the notification queue (or click routing) indefinitely.
+    await Promise.race([operation, new Promise(resolve => { timer = setTimeout(resolve, 250); })]);
+  } catch { /* Badging is optional and must never prevent display or routing. */ }
+  finally { clearTimeout(timer); }
+};
+const closeSessionNotifications = async (id) => {
+  const pending = await notifications(), prefix = `deck:${id}:`;
+  for (const notification of pending) if (notification.tag.startsWith(prefix)) notification.close();
+  await updateBadge(pending.filter(n => !n.tag.startsWith(prefix)));
+};
+const plainText = (value, bytes) => typeof value === 'string' && new TextEncoder().encode(value).length <= bytes
+  ? value.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '').replace(/\s+/g, ' ').trim() : '';
+const approvalIdentity = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
+const approvalActionsEnabled = async () => {
+  try {
+    const cache = await caches.open('deck-notification-preferences');
+    const response = await cache.match(new URL('/__deck_notification_preferences__', self.location.origin).href);
+    return (await response?.json())?.approvalActions === true;
+  } catch { return false; }
+};
 self.addEventListener('push', (event) => {
   event.waitUntil(
-    (async () => {
+    enqueueNotifications(async () => {
       let data;
       try {
         data = event.data.json();
@@ -37,28 +77,93 @@ self.addEventListener('push', (event) => {
       // userVisibleOnly requires every received valid push to display, even after
       // authorization expires or attention resolves. Suppression happens before send.
       const attention = Object.hasOwn(bodies, data.attention) ? data.attention : data.kind;
-      const titles = {decision:'Decision needed',result:data.othersActive === true ? 'Result reviewed · other work continues' : 'Result reviewed',finished:'Lead replied'};
-      const summary = typeof data.summary === 'string' && new TextEncoder().encode(data.summary).length <= 480
-        ? data.summary.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g,'').replace(/\s+/g,' ').trim() : '';
-      const tag = attention === 'decision' && typeof data.tagId === 'string' && /^[A-Za-z0-9_-]{16}$/.test(data.tagId)
-        ? `deck:${data.sessionId}:decision:${data.tagId}` : `deck:${data.sessionId}:${attention}:${data.seq}`;
-      await self.registration.showNotification(data.attention ? titles[attention] ?? 'Deck' : 'Deck', {
-        body: summary || bodies[attention],
+      const summary = attention === 'approval' ? '' : plainText(data.summary, 480);
+      const canAnswer = attention === 'approval' && approvalIdentity(data.approvalId) && data.risk === 'normal'
+        && typeof Notification !== 'undefined' && Notification.maxActions >= 2 && await approvalActionsEnabled();
+      const tool = typeof data.tool === 'string' && /^[A-Za-z][A-Za-z0-9_.:-]{0,79}$/.test(data.tool) ? data.tool : 'Tool';
+      const isReply = attention === 'finished' || attention === 'result';
+      const tag = isReply ? `deck:${data.sessionId}:replies`
+        : attention === 'decision' && typeof data.tagId === 'string' && /^[A-Za-z0-9_-]{16}$/.test(data.tagId)
+          ? `deck:${data.sessionId}:decision:${data.tagId}` : `deck:${data.sessionId}:${attention}:${data.seq}`;
+      const pending = await notifications(), previous = pending.find(n => n.tag === tag);
+      const seqs = isReply ? [...new Set([...(previous?.data?.replySeqs ?? []), data.seq])] : [];
+      const duplicate = isReply ? previous?.data?.replySeqs?.includes(data.seq) : previous?.data?.seq === data.seq;
+      const latest = isReply && previous?.data?.seq > data.seq;
+      const count = seqs.length;
+      const name = plainText(data.sessionName, 640) || data.sessionId;
+      const title = canAnswer ? `Allow ${tool} once?` : isReply ? `${count} new ${count === 1 ? 'reply' : 'replies'} · ${name}` : attention === 'decision' ? 'Decision needed' : 'Deck';
+      const identity = latest ? previous.data : {
+        sessionId: data.sessionId, seq: data.seq,
+        ...(typeof data.replyId==='string'&&/^reply-[1-9][0-9]*-[1-9][0-9]*$/.test(data.replyId)&&data.replyId.length<=48?{replyId:data.replyId}:{})
+      };
+      await self.registration.showNotification(title, {
+        body: latest ? previous.body : summary || bodies[attention],
         tag,
-        data: { sessionId: data.sessionId, ...(typeof data.replyId==='string'&&/^reply-[1-9][0-9]*-[1-9][0-9]*$/.test(data.replyId)&&data.replyId.length<=48?{replyId:data.replyId}:{}) },
-        renotify: false,
+        data: {...identity, ...(isReply ? { count, replySeqs: seqs } : {}), ...(canAnswer ? {approvalId:data.approvalId,risk:'normal',approvalActions:true} : {})},
+        ...(canAnswer ? {actions:[{action:'allow',title:'Allow once'},{action:'deny',title:'Deny'}]} : {}),
+        renotify: !duplicate,
       });
-    })(),
+      await updateBadge(await notifications());
+    }),
   );
+});
+self.addEventListener('message', event => {
+  const {type, sessionId} = event.data ?? {}, source = event.source;
+  if (type !== 'deck.session-viewed' || !safeId(sessionId) ||
+    !source?.focused || source.visibilityState !== 'visible') return;
+  try { if (new URL(source.url).origin !== self.location.origin) return; }
+  catch { return; }
+  event.waitUntil(enqueueNotifications(() => closeSessionNotifications(sessionId)));
+});
+self.addEventListener('notificationclose', event => {
+  event.waitUntil(enqueueNotifications(async () => {
+    const closed = event.notification;
+    await updateBadge((await notifications()).filter(n => n.tag !== closed.tag || n.data?.seq !== closed.data?.seq));
+  }));
 });
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const id = event.notification.data?.sessionId;
   if (!safeId(id)) return;
+  if (event.action) {
+    event.waitUntil((async () => {
+      const data = event.notification.data;
+      let timer;
+      try {
+        if (!['allow','deny'].includes(event.action) || !data.approvalActions || data.risk !== 'normal' ||
+          !approvalIdentity(data.approvalId) || !await approvalActionsEnabled()) throw Error('notification-action-disabled');
+        const controller = new AbortController();
+        timer = setTimeout(() => controller.abort(), 8000);
+        const response = await fetch('/api/commands', {
+          method:'POST', credentials:'same-origin', redirect:'error', cache:'no-store', signal:controller.signal,
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({sessionId:id,command:{v:1,commandId:crypto.randomUUID(),type:'approval.respond',
+            approvalId:data.approvalId,decision:event.action,scope:'once',origin:'notification'}}),
+        });
+        if (!response.ok || (await response.json()).ok !== true) throw Error('approval-not-applied');
+        await enqueueNotifications(async () => {
+          const pending = await notifications();
+          for (const notification of pending) if (notification.data?.sessionId === id && notification.data?.approvalId === data.approvalId) notification.close();
+          await updateBadge(await notifications());
+        });
+      } catch {
+        // The request may have reached the server. Never retry or infer success.
+        await enqueueNotifications(async () => {
+          await self.registration.showNotification('Deck', {
+            body:'Couldn’t apply — open Deck', tag:`deck:${id}:approval-action-failed:${data.seq}`,
+            data:{sessionId:id,seq:data.seq},
+          });
+          await updateBadge(await notifications());
+        });
+      } finally { clearTimeout(timer); }
+    })());
+    return;
+  }
   const replyId=event.notification.data?.replyId;
   const reply=typeof replyId==='string'&&/^reply-[1-9][0-9]*-[1-9][0-9]*$/.test(replyId)&&replyId.length<=48?replyId:'';
   event.waitUntil(
     (async () => {
+      await enqueueNotifications(() => closeSessionNotifications(id));
       const target = new URL(
         `/?session=${encodeURIComponent(id)}${reply?`&reply=${encodeURIComponent(reply)}`:''}`,
         self.location.origin,

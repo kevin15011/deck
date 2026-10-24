@@ -1,5 +1,5 @@
 /** Real Chromium worker/permission/notification flow; provider delivery is simulated through CDP. */
-import { chromium } from '@playwright/test';
+import { chromium, type Page } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -66,11 +66,18 @@ const result = await manager.execute({
 if (!result.ok) throw new Error(JSON.stringify(result));
 const id = (result.data as any).sessionId;
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+async function openNotifications(page: Page) {
+  const mobile = (page.viewportSize()?.width ?? 1440) <= 1000;
+  await page.getByRole('button', {name:mobile ? 'Open sessions' : 'Deck menu',exact:true}).click();
+  await page.getByRole(mobile ? 'button' : 'menuitem', {name:/Notifications/}).click();
+}
 try {
   browser = await chromium.launch({
     executablePath: process.env.DECK_TEST_CHROME ?? '/snap/bin/chromium',
     headless: true,
-    args: ['--no-sandbox'],
+    // Use Chromium's notification center: Linux desktop portals may immediately
+    // dismiss headless notifications, making getNotifications nondeterministic.
+    args: ['--no-sandbox','--disable-features=NativeNotifications'],
   });
   const context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
@@ -117,13 +124,7 @@ try {
     });
   }, subscription);
   await page.goto(`${base}/?session=${id}`);
-  await page
-    .getByRole('button', { name: 'Notifications', exact: true })
-    .waitFor()
-    .catch(async () =>
-      page.getByLabel('Notifications', { exact: true }).waitFor(),
-    );
-  await page.getByLabel('Notifications', { exact: true }).click();
+  await openNotifications(page);
   await page
     .getByRole('button', { name: 'Enable notifications', exact: true })
     .waitFor();
@@ -161,8 +162,64 @@ try {
   const registration = registrations.find((r) => r.scopeURL === `${base}/`);
   assert.ok(registration, 'real worker registered at root');
   assert.equal(new URL(page.url()).searchParams.get('session'), id);
+  const approvalSetting=page.getByRole('checkbox',{name:'Answer approvals from notifications'});
+  assert.equal(await approvalSetting.isChecked(),false);
+  await approvalSetting.check();
+  await page.getByText('Approval actions are on for this browser where supported.',{exact:true}).waitFor();
+  await page.reload();
+  await openNotifications(page);
+  assert.equal(await page.getByRole('checkbox',{name:'Answer approvals from notifications'}).isChecked(),true);
+  await page.getByRole('checkbox',{name:'Answer approvals from notifications'}).uncheck();
+  await page.getByText('Approval actions are off for this browser.',{exact:true}).waitFor();
+  await page.evaluate(()=>{
+    (window as any).__originalCachePut=Cache.prototype.put;
+    Cache.prototype.put=async()=>{throw Error('test storage unavailable');};
+  });
+  await page.getByRole('checkbox',{name:'Answer approvals from notifications'}).click();
+  await page.getByText('Could not save approval actions. Check browser storage settings and retry.',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('checkbox',{name:'Answer approvals from notifications'}).isChecked(),false);
+  await page.evaluate(()=>{Cache.prototype.put=(window as any).__originalCachePut;});
+  await page.getByRole('checkbox',{name:'Answer approvals from notifications'}).check();
+  await page.getByText('Approval actions are on for this browser where supported.',{exact:true}).waitFor();
   await page.keyboard.press('Escape');
-  // Complete a real host turn so the service worker's authenticated stale-attention check succeeds.
+  async function checkApprovalAction(page:Page) {
+    // Exercise a real worker action with the browser's HttpOnly cookie and the
+    // production command/broker/event path. Provider delivery alone is simulated.
+    driver.autoComplete=false;
+    cdp=await context.newCDPSession(page);
+    await cdp.send('ServiceWorker.enable');
+    const before=driver.turns.length;
+    await manager.execute({sessionId:id,clientId:'acceptance',command:{v:1,commandId:randomUUID(),type:'prompt.send',text:'approval fixture'}});
+    while(driver.turns.length===before)await Bun.sleep(20);
+    const approvalTurn=driver.turns.at(-1)!;approvalTurn.init();
+    const approvalResult=approvalTurn.io.approval({approvalId:'native',tool:'Bash',toolKey:'claude:Bash',risk:'normal',summary:'private command'});
+    const requested=[...manager.openLog(id)!.readAfter(0)].filter(e=>e.kind==='approval.requested').at(-1)!;
+    const approvalId=requested.data.approvalId as string;
+    await page.getByRole('button',{name:'Allow once',exact:true}).waitFor();
+    // Stop the app's presence acknowledgements from clearing the test notification.
+    const background=await context.newPage();await background.goto('about:blank');await background.bringToFront();
+    await cdp.send('ServiceWorker.deliverPushMessage',{origin:base,registrationId:registration.registrationId,data:JSON.stringify({sessionId:id,seq:requested.seq,kind:'approval',approvalId,tool:'Bash',risk:'normal'})});
+    const approvalDeadline=Date.now()+8000;
+    while(Date.now()<approvalDeadline && !await worker.evaluate(async()=> (await (self as any).registration.getNotifications()).some((n:any)=>n.data.approvalId)))await Bun.sleep(30);
+    const actionable=await worker.evaluate(async()=>{
+      const n=(await (self as any).registration.getNotifications()).find((n:any)=>n.data.approvalId);
+      return n ? {title:n.title,actions:n.actions.map((a:any)=>a.action)} : null;
+    });
+    assert.deepEqual(actionable,{title:'Allow Bash once?',actions:['allow','deny']});
+    await worker.evaluate(async()=>{
+      const n=(await (self as any).registration.getNotifications()).find((n:any)=>n.data.approvalId);
+      (self as any).dispatchEvent(new (self as any).NotificationEvent('notificationclick',{notification:n,action:'allow'}));
+    });
+    const answer=await Promise.race([approvalResult,Bun.sleep(10000).then(()=>{throw Error('worker approval response timed out');})]);
+    assert.deepEqual(answer,{decision:'allow',scope:'once'});
+    await page.bringToFront();await background.close();
+    await page.getByRole('button',{name:'Allow once',exact:true}).waitFor({state:'hidden'});
+    assert.equal(await worker.evaluate(async()=> (await (self as any).registration.getNotifications()).filter((n:any)=>n.data.approvalId).length),0);
+    approvalTurn.finish();while(manager.hasRunningWork())await Bun.sleep(20);
+    driver.autoComplete=true;
+    console.log('PASS opt-in persists and real worker action resolves the approval card through authenticated HTTP');
+  }
+  // Complete a real host turn; received pushes must display without further auth checks.
   driver.autoComplete = true;
   await manager.execute({
     sessionId: id,
@@ -214,6 +271,33 @@ try {
   }
   assert.equal(notices[0]?.body, 'The Lead is ready for you.');
   assert.equal(notices[0]?.data.sessionId, id);
+  // Real registration replacement and counting, with no app window open.
+  await worker.evaluate(() => {
+    (self as any).__badges = [];
+    Object.defineProperty((self as any).navigator, 'setAppBadge', {configurable:true,value:async(count:number)=>(self as any).__badges.push(count)});
+    Object.defineProperty((self as any).navigator, 'clearAppBadge', {configurable:true,value:async()=>(self as any).__badges.push(0)});
+  });
+  const readNotices = (): Promise<any[]> => worker.evaluate(async () => (await (self as any).registration.getNotifications()).map((n:any)=>({title:n.title,body:n.body,tag:n.tag,data:n.data,renotify:n.renotify})));
+  const deliver = async (data:Record<string,unknown>) => {
+    await cdp.send('ServiceWorker.deliverPushMessage',{origin:base,registrationId:registration.registrationId,data:JSON.stringify(data)});
+  };
+  for(const seq of [notificationSeq+1,notificationSeq+2]) {
+    await deliver({sessionId:id,seq,kind:'finished',sessionName:'Push acceptance',summary:`Latest reply ${seq}`,replyId:`reply-${seq}-1`});
+    const until=Date.now()+8000;
+    while(Date.now()<until && !(await readNotices()).some(n=>n.data.seq===seq))await Bun.sleep(30);
+  }
+  const grouped=await readNotices();
+  assert.equal(grouped.length,1);assert.equal(grouped[0].data.count,3);
+  assert.equal(grouped[0].title,'3 new replies · Push acceptance');
+  assert.equal(grouped[0].body,`Latest reply ${notificationSeq+2}`);
+  assert.equal(grouped[0].renotify,true);
+  await deliver({sessionId:id,seq:notificationSeq+3,kind:'question',attention:'decision',tagId:'abcdefghijklmnop'});
+  await deliver({sessionId:id,seq:notificationSeq+4,kind:'approval'});
+  await deliver({sessionId:'other-session',seq:1,kind:'finished'});
+  const until=Date.now()+8000;
+  while(Date.now()<until && (await readNotices()).length<4)await Bun.sleep(30);
+  assert.equal((await readNotices()).length,4,JSON.stringify(await readNotices()));
+  assert.equal(await worker.evaluate(()=>(self as any).__badges.at(-1)),6);
   // Cold routing and responsive control, against authenticated production APIs/assets.
   await other.close();
   const cold = await context.newPage();
@@ -247,12 +331,14 @@ try {
     { subscription, vapid },
   );
   await cold.goto(`${base}/?session=${id}`);
-  await cold
-    .getByRole('heading', { name: /Session/ })
-    .first()
-    .waitFor();
+  await cold.bringToFront();
+  await cold.locator('#conversation').waitFor();
   assert.equal(new URL(cold.url()).searchParams.get('session'), id);
-  await cold.getByLabel('Notifications', { exact: true }).click();
+  const cleared=Date.now()+8000;
+  while(Date.now()<cleared && (await readNotices()).some(n=>n.data.sessionId===id))await Bun.sleep(30);
+  assert.deepEqual((await readNotices()).map(n=>n.data.sessionId),['other-session']);
+  assert.equal(await worker.evaluate(()=>(self as any).__badges.at(-1)),1);
+  await openNotifications(cold);
   await cold
     .getByRole('button', { name: 'Enable notifications', exact: true })
     .click();
@@ -273,7 +359,8 @@ try {
       .deviceId,
     originalOwner,
   );
-  await cold.getByLabel('Notifications', {exact:true}).click();
+  await cold.getByRole('button',{name:'Done',exact:true}).click();
+  await checkApprovalAction(cold);
 
   // The worker-to-page route changes sessions in place and retains an unsent composer draft.
   const second = await manager.execute({
@@ -328,8 +415,8 @@ try {
   );
   for (const width of [1440, 390, 320]) {
     await cold.setViewportSize({ width, height: 850 });
-    await cold.getByLabel('Notifications', { exact: true }).click();
-    await cold.getByRole('region', { name: 'Browser notifications' }).waitFor();
+    await openNotifications(cold);
+    await cold.getByRole('dialog', { name: 'Notifications',exact:true }).waitFor();
     assert.equal(
       await cold.evaluate(
         () => document.documentElement.scrollWidth > innerWidth,
@@ -346,8 +433,8 @@ try {
   });
   const phone = await ios.newPage();
   await phone.goto(base);
-  await phone.getByLabel('Notifications', { exact: true }).click();
-  await phone.getByText(/Add to Home Screen/).waitFor();
+  await openNotifications(phone);
+  await phone.getByRole('status').filter({hasText:/Add to Home Screen/}).waitFor();
   assert.equal(
     await phone
       .getByRole('button', { name: 'Enable notifications', exact: true })
@@ -362,8 +449,14 @@ try {
       checks: [
         'real-service-worker-registration',
         'permission-granted',
+        'approval-opt-in-default-off-persists-and-rolls-back-storage-errors',
+        'real-worker-action-authenticated-http-resolves-approval-card',
         'CDP-simulated-push',
         'real-notification-api-without-cookie',
+        'grouped-replies-count-latest-preview-renotify',
+        'separate-decisions-approvals-and-session-tags',
+        'visible-session-clears-only-local-session-notifications',
+        'badge-total-and-session-clear-with-fake-OS-effects',
         'persistent-180-day-cookie',
         'cleared-cookie-safe-subscription-replacement',
         'cold-session-routing',

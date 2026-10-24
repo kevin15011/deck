@@ -1,4 +1,4 @@
-import { animateIn, duration, ease, gsap, installInteractionMotion, reducedMotion, type Preset } from './motion';
+import { animateIn, duration, ease, gsap, reducedMotion, type Preset } from './motion';
 
 /**
  * Document-level motion: entrances for content that appears after the first paint, dialog and
@@ -10,10 +10,10 @@ const entrances: { selector: string; preset: Preset; vars?: gsap.TweenVars }[] =
     { selector: '.prompt-queue, .prompt-queue li', preset: 'rise' },
     { selector: '.approvals .approval', preset: 'pop' },
     { selector: '.task-card', preset: 'rise' },
-    { selector: '.session-row, .project-group', preset: 'rise', vars: { duration: 0.22 } },
+    { selector: '.session-row, .project-group', preset: 'fade', vars: { duration: 0.22 } },
     { selector: '.image-drafts > *, .image-error', preset: 'pop' },
     { selector: '.empty', preset: 'rise', vars: { duration: 0.4 } },
-    { selector: '.error, [role="alert"], .history-error, .conversation-feedback > *', preset: 'drop' },
+    { selector: '.error, [role="alert"], .history-error', preset: 'drop' },
     { selector: '.question-dock, .question-panel', preset: 'rise' },
 ];
 const bulkLimit = 8, settleMs = 700, started = typeof performance !== 'undefined' ? performance.now() : 0;
@@ -40,7 +40,7 @@ function ambientSync(root: ParentNode): void {
 
 function reveal(element: HTMLElement, preset: Preset, vars?: gsap.TweenVars): void {
     if (element instanceof HTMLDialogElement) {
-        animateIn(element, element.classList.contains('session-drawer') ? 'slide-left' : 'pop', { duration: duration.base });
+        animateIn(element, 'fade', { duration: duration.base });
         gsap.fromTo(element, { '--backdrop-o': 0 }, { '--backdrop-o': 1, duration: duration.base, ease: ease.out });
         return;
     }
@@ -49,7 +49,6 @@ function reveal(element: HTMLElement, preset: Preset, vars?: gsap.TweenVars): vo
 
 export function installMotion(root: Document = document): () => void {
     if (typeof window === 'undefined') return () => {};
-    const stopInteractions = installInteractionMotion(root);
     const observer = new MutationObserver(records => {
         const settled = performance.now() - started > settleMs && root.visibilityState !== 'hidden';
         const entered = new Map<number, Set<HTMLElement>>();
@@ -59,7 +58,6 @@ export function installMotion(root: Document = document): () => void {
                 const target = record.target as HTMLElement;
                 if (record.attributeName === 'open' && target instanceof HTMLDialogElement && target.open && record.oldValue === null && !reducedMotion()) reveal(target, 'pop');
                 else if (record.attributeName === 'hidden' && !target.hidden && record.oldValue !== null && target.classList.contains('workspace-panel') && settled) animateIn(target, 'rise', { duration: duration.fast });
-                else if (record.attributeName === 'aria-selected' && target.getAttribute('role') === 'tab' && target.getAttribute('aria-selected') === 'true' && settled && !reducedMotion()) gsap.fromTo(target, { scale: 0.92 }, { scale: 1, duration: duration.base, ease: ease.spring, clearProps: 'transform', overwrite: 'auto' });
                 else if (record.attributeName === 'class' && target.classList.contains('app-body') && settled && !reducedMotion()) {
                     const was = (record.oldValue ?? '').split(/\s+/).includes('workspace-collapsed'), now = target.classList.contains('workspace-collapsed');
                     if (was !== now) {
@@ -97,5 +95,5 @@ export function installMotion(root: Document = document): () => void {
     });
     observer.observe(root.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['open', 'hidden', 'data-animate', 'data-phase', 'aria-selected', 'class'] });
     ambientSync(root);
-    return () => { observer.disconnect(); stopInteractions(); };
+    return () => { observer.disconnect(); };
 }

@@ -82,6 +82,8 @@ export const SESSION_EVENT_SCHEMA = {
         "prompt.steered",
         "prompt.queued",
         "prompt.dispatched",
+        "prompt.handoff",
+        "prompt.requeued",
         "prompt.state",
         "prompt.queue"
       ]
@@ -3458,4 +3460,4 @@ export const SESSION_COMMAND_SCHEMA = {
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "e4c2b323ae741829cc0134b17016b93c22c9263bd1e30622ffdc169c945b7947";
+export const SESSION_SCHEMA_DIGEST = "ce4adf869fadcadc79bfd600e8031d9faa31418bc0a9bfa05d88eb7401952530";

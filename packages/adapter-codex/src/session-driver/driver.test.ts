@@ -6,6 +6,7 @@ import type { DriverApprovalRequest, DriverTaskInput } from "@deck/core/session/
 import { createCodexSessionDriver } from "./driver";
 import { ISOLATION_FEATURES } from "./launch";
 import { FakeChild, harness } from "./test-support";
+import { CODEX_MAX_FRAME_BYTES } from "./rpc";
 import mcpMemoryApproval from "./__fixtures__/0.162.1/mcp-memory-approval.json";
 import overloadIncident from "./__fixtures__/0.162.1/overload-incident.json";
 
@@ -28,6 +29,128 @@ function responder(child: FakeChild, index: number, m: Record<string, unknown>) 
   if (m.method === "turn/interrupt") { child.stdout({ id: m.id, result: {} }); child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "interrupted" } } }); }
 }
 const imageDirs: string[] = [];
+
+describe("Codex transport capacity", () => {
+  // A separate Bun process must exit cleanly without an unhandledRejection listener.
+  // The parent test runner's rejection handling must not mask a leaked callback promise.
+  test.each(["transport-pending", "running-rejected", "running-drained", "native-interrupted"])("interruption cleanup has no unhandled rejection: %s", async mode => {
+    const script = `
+      import assert from "node:assert/strict";
+      import { createCodexSessionDriver } from ${JSON.stringify(import.meta.resolve("./driver"))};
+      import { harness } from ${JSON.stringify(import.meta.resolve("./test-support"))};
+      import { ISOLATION_FEATURES } from ${JSON.stringify(import.meta.resolve("./launch"))};
+      const input = ${JSON.stringify(input)};
+      const mode = ${JSON.stringify(mode)};
+      const h = harness((child, _index, m) => {
+        if (m.method === "initialize") child.stdout({ id: m.id, result: {} });
+        if (m.method === "config/read") child.stdout({ id: m.id, result: { config: {
+          features: Object.fromEntries(ISOLATION_FEATURES.map(f => [f, false])), mcp_servers: {}
+        } } });
+        if (m.method === "thread/start") child.stdout({ id: m.id, result: { thread: { id: "native-thread", historyMode: "legacy" } } });
+        if (m.method === "mcpServerStatus/list") child.stdout({ id: m.id, result: { data: [{ name: "deck-session-task-deck", runtimeStatus: "connected" }], nextCursor: null } });
+        if (m.method === "turn/start") child.stdout({ id: m.id, result: { turn: { id: "turn" } } });
+        if (m.method === "turn/interrupt") {
+          child.stdout({ id: m.id, result: {} });
+          if (mode === "native-interrupted") child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "interrupted" } } });
+        }
+      });
+      const task = await createCodexSessionDriver({ escalationMs: 5 }).startTask(input, h.io);
+      await task.nativeSessionId; await Promise.resolve();
+      const child = h.children.at(-1);
+      let release, entered;
+      const held = new Promise(r => { release = r; });
+      const started = new Promise(r => { entered = r; });
+      child.terminateGroup = async () => {
+        child.terminations++; entered(); await held;
+        if (mode === "transport-pending" || mode === "running-rejected") throw new Error("fixture cleanup rejected");
+        child.exit();
+      };
+      let settled = false;
+      void task.done.then(() => { settled = true; });
+      await task.interrupt();
+      if (mode === "transport-pending") child.stdoutRaw("PRIVATE_BAD_FRAME\\n");
+      if (mode.startsWith("running")) await started;
+      await Bun.sleep(25);
+      assert.equal(settled, mode === "native-interrupted");
+      assert.equal(child.terminations, mode === "native-interrupted" ? 0 : 1);
+      release();
+      const outcome = await task.done;
+      if (mode === "transport-pending") assert.deepEqual(outcome, { status: "failed", error: "codex-rpc-invalid-frame", failure: { category: "deck", origin: "deck", certainty: "reported", code: "codex-rpc-invalid-frame" } });
+      else assert.deepEqual(outcome, { status: mode === "native-interrupted" ? "interrupted" : "interrupted-forced" });
+      const firstClose = task.close();
+      assert.equal(task.close(), firstClose);
+      if (mode === "transport-pending" || mode === "running-rejected") {
+        await assert.rejects(firstClose, /fixture cleanup rejected/);
+        await assert.rejects(task.close(), /fixture cleanup rejected/);
+      } else { await firstClose; await task.close(); }
+      assert.equal(h.events.filter(e => e.kind === "turn.completed").length, 1);
+      assert.equal(JSON.stringify(h.events).includes("PRIVATE_BAD_FRAME"), false);
+      child.exit();
+      await Bun.sleep(25);
+      console.log("cleanup probe passed");
+    `;
+    const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" });
+    const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
+    expect(stdout.trim()).toBe("cleanup probe passed");
+  });
+
+  test('Codex transport failure retains cleanup rejection through repeated close', async () => {
+    const h=harness(responder);
+    const task=await createCodexSessionDriver().startTask(input,h.io);await task.nativeSessionId;await Promise.resolve();
+    const child=h.children.at(-1)!;let release!:()=>void;
+    const held=new Promise<void>(r=>{release=r;});
+    child.terminateGroup=async()=>{await held;throw new Error('fixture cleanup rejected');};
+    try {
+      child.stdoutRaw('PRIVATE_BAD_FRAME\n');release();
+      expect(await task.done).toEqual({status:'failed',error:'codex-rpc-invalid-frame',failure:{category:'deck',origin:'deck',certainty:'reported',code:'codex-rpc-invalid-frame'}});
+      await expect(task.close()).rejects.toThrow('fixture cleanup rejected');
+      await expect(task.close()).rejects.toThrow('fixture cleanup rejected');
+      expect(JSON.stringify(h.events)).not.toContain('PRIVATE_BAD_FRAME');
+    } finally {release();child.exit();}
+  });
+
+  test("preserves >1 MiB escaped command completion, exit status, and subsequent permission correlation", async () => {
+    const h = harness(responder);
+    const task = await createCodexSessionDriver().startTask({ ...input, approvals: "relay" }, h.io);
+    try {
+      await task.nativeSessionId; await Promise.resolve();
+      const child = h.children.at(-1)!;
+      const item = { id: "large-command", type: "commandExecution", command: "synthetic", cwd: "/work", status: "completed", exitCode: 7, durationMs: 12, aggregatedOutput: 'é😀"\\\n'.repeat(180_000) };
+      child.stdout({ method: "item/started", params: { threadId: "native-thread", turnId: "turn", item: { ...item, aggregatedOutput: null, status: "inProgress", exitCode: null } } });
+      const frame = JSON.stringify({ method: "item/completed", params: { threadId: "native-thread", turnId: "turn", item } }) + "\n";
+      expect(Buffer.byteLength(frame)).toBeGreaterThan(1024 * 1024);
+      for (let offset = 0; offset < frame.length; offset += 8191) child.stdoutRaw(frame.slice(offset, offset + 8191));
+      child.stdout(mcpMemoryApproval); await Promise.resolve(); await Promise.resolve();
+      expect(child.writes.find(m => m.id === 0)?.result).toMatchObject({ action: "decline" });
+      child.stdout({ method: "turn/completed", params: { threadId: "native-thread", turn: { id: "turn", status: "completed" } } });
+      expect(await task.done).toEqual({ status: "completed" });
+      expect(h.events.find(e => e.kind === "tool.completed")?.data).toMatchObject({ toolCallId: "large-command", nativeThreadId: "native-thread", nativeTurnId: "turn", status: "failed", exitCode: 7, durationMs: 12 });
+      expect(String(h.events.find(e => e.kind === "tool.completed")!.data.output).length).toBeLessThanOrEqual(16 * 1024);
+      expect(child.terminations).toBe(0);
+      expect(child.writes.filter(m => m.method === "turn/start")).toHaveLength(1);
+    } finally { await task.close(); }
+    expect(h.children[0]!.terminations).toBe(1);
+  });
+  test("correlates a large pending resume-shaped reply without replacing native identity or replaying", async () => {
+    const h = harness((child, index, m) => {
+      if (m.method === "thread/resume") {
+        expect(m.params).toMatchObject({ threadId: "saved", excludeTurns: true });
+        child.stdout({ id: m.id, result: { thread: { id: "saved", historyMode: "legacy", turns: [{ id: "prior", items: [{ type: "commandExecution", aggregatedOutput: "x".repeat(1_200_000) }] }] } } });
+      } else responder(child, index, m);
+    });
+    const task = await createCodexSessionDriver().startTask({ ...input, resume: { nativeSessionId: "saved" } }, h.io);
+    try {
+      expect(await task.nativeSessionId).toBe("saved"); await Promise.resolve();
+      const child = h.children[0]!;
+      child.stdout({ method: "turn/completed", params: { threadId: "saved", turn: { id: "turn", status: "completed" } } });
+      expect(await task.done).toEqual({ status: "completed" });
+      expect(child.writes.filter(m => m.method === "thread/resume")).toHaveLength(1);
+      expect(child.writes.some(m => m.method === "thread/start")).toBe(false);
+      expect(child.terminations).toBe(0);
+    } finally { await task.close(); }
+  });
+});
 
 test('usage belongs to exact live native turn; post-compaction counters remain raw usage only', async () => {
   const h = harness(responder); const task = await createCodexSessionDriver().startTask(input, h.io); await task.nativeSessionId; await Promise.resolve();
@@ -336,7 +459,7 @@ describe("Codex session driver", () => {
     const h = harness((child, _index, m) => {
       if (m.method !== "initialize") return;
       if (mode === "malformed-startup") child.stdoutRaw("invalid JSON\n");
-      if (mode === "oversized-startup") child.stdoutRaw("x".repeat(1024 * 1024 + 1));
+      if (mode === "oversized-startup") child.stdoutRaw("x".repeat(CODEX_MAX_FRAME_BYTES + 1));
     });
     const spawn = h.io.spawn;
     h.io.spawn = async (...args) => {
@@ -723,17 +846,20 @@ describe("Codex bounded resume responses", () => {
   });
   test.each(["startup", "running"])("preserves frame-too-large without exposing frames (%s)", async phase => {
     const h = harness((child, index, m) => {
-      if (phase === "startup" && m.method === "thread/resume") child.stdout({ id: m.id, result: { thread: { id: "saved", text: "FRAME_SECRET_SENTINEL" + "x".repeat(1024 * 1024) } } });
+      if (phase === "startup" && m.method === "thread/resume") child.stdout({ id: m.id, result: { thread: { id: "saved", text: "FRAME_SECRET_SENTINEL" + "x".repeat(CODEX_MAX_FRAME_BYTES) } } });
       else responder(child, index, m);
     });
     const task = await createCodexSessionDriver().startTask({ ...input, resume: { nativeSessionId: "saved" } }, h.io);
     try {
       if (phase === "running") {
         await task.nativeSessionId;
-        h.children.at(-1)!.stdoutRaw(`{"text":"FRAME_SECRET_SENTINEL${"x".repeat(1024 * 1024)}"}\n`);
+        h.children.at(-1)!.stdoutRaw(`{"text":"FRAME_SECRET_SENTINEL${"x".repeat(CODEX_MAX_FRAME_BYTES)}"}\n`);
       } else await expect(task.nativeSessionId).rejects.toThrow("codex-rpc-frame-too-large");
-      expect(await task.done).toEqual({ status: "failed", error: "codex-rpc-frame-too-large" });
-      expect(h.events.filter(event => event.kind === "diagnostic" && event.data.code !== "codex-mcp-aliases" && event.data.code !== "personal-mcp.sources")).toEqual([{ kind: "diagnostic", data: { code: "codex-rpc-frame-too-large" } }]);
+      expect(await task.done).toEqual({ status: "failed", error: "codex-rpc-frame-too-large", failure:{category:'deck',origin:'deck',certainty:'reported',code:'codex-rpc-frame-too-large'} });
+      const diagnostics = h.events.filter(event => event.kind === "diagnostic" && event.data.code === "codex-rpc-frame-too-large");
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]!.data).toEqual({ code: "codex-rpc-frame-too-large", frameBytes: expect.any(Number), frameBytesKind: "exact", maxFrameBytes: CODEX_MAX_FRAME_BYTES, pendingCalls: phase === "startup" ? 1 : 0 });
+      expect(diagnostics[0]!.data.frameBytes).toBeGreaterThan(CODEX_MAX_FRAME_BYTES);
       expect(h.children.at(-1)!.terminations).toBe(1);
       expect(JSON.stringify(h.events)).not.toContain("FRAME_SECRET_SENTINEL");
     } finally { await task.close(); }
@@ -748,7 +874,7 @@ describe("Codex bounded resume responses", () => {
     const task = await createCodexSessionDriver().startTask(input, h.io);
     try {
       const code = mode === "invalid-json" ? "codex-rpc-invalid-frame" : "codex-startup-failed";
-      expect(await task.done).toEqual({ status: "failed", error: code });
+      expect(await task.done).toEqual({ status: "failed", error: code, ...(mode==='invalid-json'?{failure:{category:'deck',origin:'deck',certainty:'reported',code}}:{}) });
       await expect(task.nativeSessionId).rejects.toThrow(code);
       expect(h.events.filter(event => event.kind === "diagnostic" && event.data.code !== "codex-mcp-aliases" && event.data.code !== "personal-mcp.sources")).toEqual([{ kind: "diagnostic", data: { code } }]);
       expect(JSON.stringify(h.events)).not.toContain("UNKNOWN_SECRET_SENTINEL");
@@ -896,4 +1022,31 @@ test('tool attribution is unavailable before native turn identity is known',asyn
   expect(h.events.filter(e=>e.kind==='tool.completed')).toHaveLength(0);
   expect(h.events.some(e=>e.data.code==='request.input-invalidated')).toBe(false);
  }finally{await task.close();}
+});
+
+
+test.each([true, false])("input claim gate precedes native turn/start: %s", async allowed => {
+  let claims = 0, writes = 0;
+  const h = harness((child, index, message) => {
+    if (message.method === 'turn/start') { expect(claims).toBe(1); writes++; }
+    responder(child, index, message);
+  });
+  const task = await createCodexSessionDriver().startTask(input, { ...h.io, claimInput: () => { claims++; return allowed; } });
+  await task.nativeSessionId;
+  if (!allowed) expect((await task.done).status).toBe('interrupted');
+  else { await new Promise(resolve => setTimeout(resolve, 5)); }
+  expect(claims).toBe(1); expect(writes).toBe(allowed ? 1 : 0);
+  await task.close();
+});
+
+test('interrupt after thread creation while MCP attestation waits cannot send turn/start',async()=>{
+  let reached=false,writes=0;
+  const h=harness((child,index,message)=>{
+    if(message.method==='mcpServerStatus/list'){reached=true;return;}
+    if(message.method==='turn/start')writes++;
+    responder(child,index,message);
+  });
+  const task=await createCodexSessionDriver().startTask(input,{...h.io,claimInput:()=>true});
+  for(let n=0;n<100&&!reached;n++)await Bun.sleep(1);expect(reached).toBe(true);
+  await task.interrupt();expect((await task.done).status).toBe('interrupted-forced');expect(writes).toBe(0);await task.close();
 });

@@ -39,7 +39,30 @@ describe("OpenCode SSE", () => {
     expect(parser.push(": heartbeat\r\ndata: {\"type\":\"future\",\r")).toEqual([]);
     expect(parser.push("\ndata: \"properties\":{}}\r\n\r\n")).toEqual([{ type: "future", properties: {} }]);
   });
-  test("bounds malformed streams", () => { expect(() => new OpenCodeSseParser(32).push("x".repeat(33))).toThrow("too large"); });
+  test("bounds malformed streams", () => { expect(() => new OpenCodeSseParser(32).push("x".repeat(33))).toThrow("opencode-sse-frame-too-large"); });
+  test('SSE byte boundary includes wire separators and split multibyte characters; rejection poisons the parser', () => {
+    const wire = 'data: {"x":"€😀"}\r\n\r\n';
+    const p = new OpenCodeSseParser(Buffer.byteLength(wire));
+    const at = wire.indexOf('😀') + 1;
+    expect(p.push(wire.slice(0, at))).toEqual([]);
+    expect(p.push(wire.slice(at) + 'data: {}\n\n')).toEqual([{ x: '€😀' }, {}]);
+    const over = new OpenCodeSseParser(Buffer.byteLength(wire) - 1);
+    expect(() => over.push(wire)).toThrow('opencode-sse-frame-too-large');
+    expect(over.push('data: {}\n\n')).toEqual([]);
+  });
+  test('invalid SSE JSON fails explicitly without preserving native payload', () => {
+    const p = new OpenCodeSseParser();
+    expect(() => p.push('data: PRIVATE_TRANSPORT_SECRET\n\ndata: {}\n\n')).toThrow('opencode-sse-invalid-frame');
+    expect(p.push('data: {}\n\n')).toEqual([]);
+  });
+  test('SSE accumulates multiline data and comments, with exact size only at the frame terminator', () => {
+    const wire = ': heartbeat\r\ndata: {"x":\r\ndata: 1}\r\n\r\n';
+    const size = Buffer.byteLength(wire), accepted = new OpenCodeSseParser(size), rejected = new OpenCodeSseParser(size-1);
+    expect(accepted.push(wire+'data: {}\n\n')).toEqual([{x:1},{}]);
+    let failure: unknown;
+    try { for (const character of wire) rejected.push(character); } catch (error) { failure = error; }
+    expect(failure).toMatchObject({code:'opencode-sse-frame-too-large',size:{frameBytes:size,frameBytesKind:'exact',maxFrameBytes:size-1}});
+  });
   test("maps text, reasoning and unknown events with raw payload", () => {
     expect(mapOpenCodeEvent({ type: "message.part.delta", properties: { field: "text", delta: "hi" } })[0]?.kind).toBe("runner.unmapped");
     expect(mapOpenCodeEvent({ type: "message.part.updated", properties: { part: { type: "reasoning", text: "thought" } } })[0]?.kind).toBe("reasoning.delta");
@@ -94,6 +117,169 @@ function fakeServer(options: { contextUsage?: boolean; catalog?: unknown; hangCa
   const child = { ready: Promise.resolve({ workerPid: 123 }), exited, onStdout(fn: (c: string) => void) { stdout = fn; queueMicrotask(() => stdout(`opencode server listening on http://127.0.0.1:${server.port}\n`)); }, onStderr() {}, writeStdin() {}, endStdin() {}, interrupt() { return true; }, async terminateGroup() { terminated++; finish({ ok: false, code: null, signal: "SIGTERM", drained: true, anchorLost: false }); } };
   return { requests, child, event, completeMessages() { for (const resolve of blocked.splice(0)) resolve(Response.json({ info: { id: "completed" }, parts: [] })); }, disconnect() { stream.close(); }, get terminated() { return terminated; }, async stop() { for (const resolve of blocked) resolve(Response.json({ info: { id: "stopped" }, parts: [] })); await server.stop(true); } };
 }
+
+test('OpenCode admits >1 MiB escaped tool completion, preserves following controls and completes its HTTP turn', async () => {
+  const s = fakeServer({ hang: true }); const h = privateIo();
+  let approvals = 0;
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child, approval: async () => { approvals++; return { decision: 'allow' }; } });
+    s.event('message.part.updated', { sessionID: 'ses_native', part: { id: 'large', messageID: 'msg', callID: 'large-tool', type: 'tool', tool: 'bash', state: { status: 'completed', output: '€😀"\\\n'.repeat(150000) } } });
+    s.event('permission.asked', { id: 'after-large', sessionID: 'ses_native', permission: 'bash', patterns: ['echo fixture'] });
+    for (let n = 0; n < 100 && !s.requests.some(r => r.path === '/permission/after-large/reply'); n++) await Bun.sleep(5);
+    expect(approvals).toBe(1);
+    expect(h.events.find(e => e.kind === 'tool.completed')?.data).toMatchObject({ toolUseId: 'large-tool', status: 'completed' });
+    s.completeMessages(); expect(await task.done).toEqual({ status: 'completed' });
+    const next = task.send('next');
+    for (let n = 0; n < 100 && s.requests.filter(r => r.path.endsWith('/message')).length < 2; n++) await Bun.sleep(5);
+    s.completeMessages(); expect(await next).toEqual({ status: 'completed' }); await task.close();
+  } finally { await s.stop(); }
+});
+
+test.each(['cleanup-reject', 'truncated-utf8', 'interrupt-race', 'coalesced', 'coalesced-utf8', 'split-utf8'] as const)('OpenCode transport review regression: %s', async mode => {
+  const s = fakeServer({hang:true}), h = privateIo(), originalFetch = globalThis.fetch;
+  let controller!: ReadableStreamDefaultController<Uint8Array>, release!: () => void, started = false;
+  const held = new Promise<void>(r => { release = r; });
+  globalThis.fetch = (async (url, init) => String(url).endsWith('/event') ? new Response(new ReadableStream<Uint8Array>({start(c){controller=c;}})) : originalFetch(url,init)) as typeof fetch;
+  try {
+    const task = await createOpenCodeSessionDriver({escalationMs:1}).startTask(input(), {...h.io,spawn:async()=>({...s.child,async terminateGroup(){
+      started = true;
+      if(mode==='cleanup-reject') throw new Error('fixture cleanup rejected');
+      await held; await s.child.terminateGroup();
+    }})});
+    if(mode==='interrupt-race') { await task.interrupt(); for(let n=0;n<100&&!started;n++)await Bun.sleep(2); expect(started).toBe(true); }
+    const valid = 'data: '+JSON.stringify({type:'message.part.updated',properties:{sessionID:'ses_native',part:{id:'part',messageID:'msg',callID:'before-error',type:'tool',tool:'bash',state:{status:'completed',output:'OK'}}}})+'\n\n';
+    if(mode==='truncated-utf8') {controller.enqueue(new Uint8Array([0xe2]));controller.close();}
+    else if(mode==='coalesced-utf8'||mode==='split-utf8') {
+      if(mode==='split-utf8'){controller.enqueue(new TextEncoder().encode(valid));await Bun.sleep(2);}
+      controller.enqueue(Buffer.concat([Buffer.from(mode==='coalesced-utf8'?valid:''),new Uint8Array([0xff]),Buffer.from(valid)]));
+    } else controller.enqueue(new TextEncoder().encode((mode==='coalesced'?valid:'')+'data: PRIVATE_BAD_FRAME\n\n'+valid));
+    for(let n=0;n<100&&!h.events.some(e=>e.data.code==='opencode-sse-invalid-frame');n++)await Bun.sleep(2);
+    expect(h.events.some(e=>e.data.code==='opencode-sse-invalid-frame')).toBe(true);
+    if(mode!=='cleanup-reject') {let settled=false;void task.done.then(()=>{settled=true;});await Bun.sleep(2);expect(settled).toBe(false);}
+    release();
+    expect(await task.done).toMatchObject({status:'failed',error:'opencode-sse-invalid-frame'});
+    expect(h.events.filter(e=>e.kind==='tool.completed')).toHaveLength(['coalesced','coalesced-utf8','split-utf8'].includes(mode)?1:0);
+    if(mode==='cleanup-reject') {
+      let exited=false;void s.child.exited.then(()=>{exited=true;});await Promise.resolve();expect(exited).toBe(false);
+      await expect(task.close()).rejects.toThrow('fixture cleanup rejected');
+      await expect(task.close()).rejects.toThrow('fixture cleanup rejected');
+    } else await task.close();
+  } finally { release();globalThis.fetch=originalFetch;await s.child.terminateGroup();await s.stop(); }
+});
+
+test('OpenCode SSE overflow is local, cancels pending HTTP/control work and drains before completion', async () => {
+  const s = fakeServer({ hang: true }); const h = privateIo();
+  let decide!: (value: DriverDecision) => void, asked = 0;
+  const decision = new Promise<DriverDecision>(r => { decide = r; });
+  let drain!: () => void; const drained = new Promise<void>(r => { drain = r; });
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => ({...s.child, async terminateGroup() { await drained; await s.child.terminateGroup(); }}), approval: () => {asked++;return decision;} });
+    s.event('permission.asked', { id: 'pending-control', sessionID: 'ses_native', permission: 'bash', patterns: ['echo fixture'] });
+    for(let n=0;n<100&&!asked;n++)await Bun.sleep(5);expect(asked).toBe(1);
+    s.event('future', { sessionID: 'ses_native', text: 'TRANSPORT_SECRET' + 'x'.repeat(16 * 1024 * 1024) });
+    for (let n = 0; n < 100 && !h.events.some(e => e.data.code === 'opencode-sse-frame-too-large'); n++) await Bun.sleep(5);
+    let settled = false; void task.done.then(() => { settled = true; });
+    s.completeMessages(); decide({decision:'allow'}); await Bun.sleep(5);
+    expect(settled).toBe(false); drain();
+    expect(await task.done).toMatchObject({ status: 'failed', error: 'opencode-sse-frame-too-large', failure: { category: 'deck', origin: 'deck', certainty: 'reported' } });
+    expect(s.terminated).toBe(1);
+    const diag = h.events.find(e => e.data.code === 'opencode-sse-frame-too-large');
+    expect(diag?.data).toMatchObject({ maxFrameBytes: 16 * 1024 * 1024, frameBytesKind: 'lower-bound' });
+    expect(JSON.stringify(h.events)).not.toContain('TRANSPORT_SECRET');
+    decide({ decision: 'allow' }); await Bun.sleep(5);
+    expect(s.requests.some(r => r.path === '/permission/pending-control/reply')).toBe(false);
+    expect((await task.send('next')).status).toBe('failed');
+    await task.close(); expect(s.terminated).toBe(1);
+    const fresh = fakeServer();
+    try {
+      const next = await createOpenCodeSessionDriver().startTask({...input(),prompt:'next fixture',resume:{nativeSessionId:'ses_native'}},{...privateIo().io,spawn:async()=>fresh.child});
+      expect(await next.done).toEqual({status:'completed'});
+      expect(fresh.requests.filter(r=>r.path.endsWith('/message'))).toHaveLength(1);await next.close();
+    } finally { await fresh.stop(); }
+  } finally { drain(); decide?.({ decision: 'deny' }); await s.stop(); }
+});
+
+test('OpenCode accepts a maximum-capacity SSE tool record before the correlated HTTP result', async () => {
+  const s = fakeServer({ hang: true }); const h = privateIo();
+  try {
+    const task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child });
+    const properties = { sessionID: 'ses_native', part: { id: 'max', messageID: 'msg', callID: 'max-tool', type: 'tool', tool: 'bash', state: { status: 'completed', output: '' } } };
+    properties.part.state.output = 'x'.repeat(16 * 1024 * 1024 - 8 - Buffer.byteLength(JSON.stringify({ type: 'message.part.updated', properties })));
+    s.event('message.part.updated', properties);
+    for (let n=0;n<200&&!h.events.some(e=>e.kind==='tool.completed');n++) await Bun.sleep(5);
+    expect(h.events.find(e => e.kind === 'tool.completed')?.data).toMatchObject({ toolUseId: 'max-tool', status: 'completed' });
+    s.completeMessages(); expect(await task.done).toEqual({status:'completed'}); await task.close();
+  } finally { await s.stop(); }
+});
+
+test.each(['overflow','malformed','cleanup-reject'] as const)('OpenCode startup HTTP transport failure aborts readiness with structured evidence and never sends a prompt: %s', async mode => {
+  const s = fakeServer(); const h = privateIo(); const originalFetch = globalThis.fetch;
+  let cancelled = 0;
+  globalThis.fetch = (async (url, init) => {
+    if (!String(url).endsWith('/config')) return originalFetch(url, init);
+    return new Response(new ReadableStream<Uint8Array>({ start(c) { c.enqueue(mode==='overflow'?new Uint8Array(16*1024*1024+1):new Uint8Array([0xff]));if(mode!=='overflow')c.close(); }, cancel() { cancelled++; } }));
+  }) as typeof fetch;
+  try {
+    const code=mode==='overflow'?'opencode-http-body-too-large':'opencode-http-invalid-body';
+    const starting=createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => mode==='cleanup-reject'?{...s.child,terminateGroup:async()=>{throw new Error('fixture cleanup rejected');}}:s.child });
+    await expect(starting).rejects.toMatchObject({message:mode==='cleanup-reject'?'runner-startup-cleanup-failed':code,failure:{category:'deck',origin:'deck',certainty:'reported',code}});
+    if(mode==='cleanup-reject'){
+      const error=await starting.catch(e=>e);await expect(error.close()).rejects.toThrow('fixture cleanup rejected');
+    }
+    expect(cancelled).toBe(mode==='overflow'?1:0); expect(s.terminated).toBe(mode==='cleanup-reject'?0:1); expect(s.requests.some(r=>r.path.endsWith('/message'))).toBe(false);
+    if(mode==='overflow')expect(h.events.find(e=>e.data.code===code)?.data.frameBytesKind).toBe('lower-bound');
+  } finally { globalThis.fetch=originalFetch; await s.child.terminateGroup();await s.stop(); }
+});
+
+test.each(['json', 'utf8'] as const)('OpenCode malformed SSE fails locally, cancels its reader and fences pending questions: %s', async mode => {
+  const s = fakeServer({hang:true}); const h = privateIo(); const originalFetch = globalThis.fetch;
+  let controller!: ReadableStreamDefaultController<Uint8Array>, cancelled=0, asked=0;
+  let answer!: (v: {outcome:'answered';answers:Record<string,string[]>})=>void;
+  const response = new Promise<{outcome:'answered';answers:Record<string,string[]>}>(r=>{answer=r;});
+  globalThis.fetch = (async (url, init) => String(url).endsWith('/event') ? new Response(new ReadableStream<Uint8Array>({start(c){controller=c;},cancel(){cancelled++;}})) : originalFetch(url,init)) as typeof fetch;
+  let task: Awaited<ReturnType<ReturnType<typeof createOpenCodeSessionDriver>['startTask']>> | undefined;
+  try {
+    task=await createOpenCodeSessionDriver().startTask(input(),{...h.io,spawn:async()=>s.child,question:()=>{asked++;return response;}});
+    controller.enqueue(new TextEncoder().encode('data: '+JSON.stringify({type:'question.asked',properties:{sessionID:'ses_native',id:'pending-question',questions:[{question:'Choose',header:'Fixture',options:[{label:'A',description:'a'}]}]}})+'\n\n'));
+    for(let n=0;n<100&&!asked;n++)await Bun.sleep(5);expect(asked).toBe(1);
+    controller.enqueue(mode==='json'?new TextEncoder().encode('data: TRANSPORT_SECRET\n\ndata: {}\n\n'):new Uint8Array([0xff]));
+    expect(await task.done).toMatchObject({status:'failed',error:'opencode-sse-invalid-frame',failure:{category:'deck',origin:'deck'}});
+    answer({outcome:'answered',answers:{q1:['A']}}); await Bun.sleep(5);
+    expect(s.requests.some(r=>r.path==='/question/pending-question/reply')).toBe(false);
+    expect(cancelled).toBe(1);expect(s.terminated).toBe(1);expect(JSON.stringify(h.events)).not.toContain('TRANSPORT_SECRET');await task.close();
+  } finally {answer?.({outcome:'answered',answers:{q1:['A']}});globalThis.fetch=originalFetch;await task?.close();await s.stop();}
+});
+
+test.each(['accepted', 'overflow', 'close', 'invalid-utf8'] as const)('OpenCode bounded HTTP reader through driver: %s', async mode => {
+  const s = fakeServer(); const h = privateIo();
+  const originalFetch = globalThis.fetch;
+  let cancelled = 0, aborted = false, sent = false, chunks = 0;
+  const responseBody = { info: { id: 'reply', sessionID: 'ses_native' }, parts: [{ type: 'text', text: '€😀"\\\n'.repeat(150000) }] };
+  if (mode === 'accepted') responseBody.parts[0]!.text += 'x'.repeat(16 * 1024 * 1024 - Buffer.byteLength(JSON.stringify(responseBody)));
+  const encoded = new TextEncoder().encode(JSON.stringify(responseBody));
+  globalThis.fetch = (async (url, init) => {
+    if (!String(url).endsWith('/message')) return originalFetch(url, init);
+    init?.signal?.addEventListener('abort', () => { aborted = true; }, { once: true });
+    return new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (mode === 'close') return;
+        if (mode === 'overflow') { if (chunks++ < 33) controller.enqueue(new Uint8Array(1024 * 1024).fill(120)); else controller.close(); return; }
+        if (sent) { controller.close(); return; } sent = true;
+        controller.enqueue(mode === 'invalid-utf8' ? new Uint8Array([0xff]) : encoded);
+      }, cancel() { cancelled++; },
+    }));
+  }) as typeof fetch;
+  let task: Awaited<ReturnType<ReturnType<typeof createOpenCodeSessionDriver>['startTask']>> | undefined;
+  try {
+    task = await createOpenCodeSessionDriver().startTask(input(), { ...h.io, spawn: async () => s.child });
+    if (mode === 'close') await task.close();
+    const result = await task.done;
+    if (mode === 'accepted') { expect(encoded.length).toBe(16 * 1024 * 1024); expect(result).toEqual({ status: 'completed' }); expect(h.events.find(e => e.kind === 'message.completed')?.data.text).toBe(responseBody.parts[0]!.text); }
+    else if (mode === 'close') { expect(result.status).toBe('interrupted-forced'); expect(cancelled).toBe(1); expect(aborted).toBe(true); }
+    else { expect(result).toMatchObject({ status: 'failed', error: mode === 'overflow' ? 'opencode-http-body-too-large' : 'opencode-http-invalid-body', failure: { category: 'deck', origin: 'deck' } }); expect(s.terminated).toBe(1); if(mode === 'overflow') expect(cancelled).toBe(1); }
+    await task.close();
+  } finally { globalThis.fetch = originalFetch; await task?.close(); await s.stop(); }
+});
 
 test('OpenCode usage comes from the correlated response, never stale SSE; native context sum joins exact server catalog once', async () => {
   const s = fakeServer({ contextUsage: true }); const h = privateIo();
@@ -693,4 +879,13 @@ for (const [label, options, capacity] of [
     expect(h.events.find(e => e.kind === 'usage')?.data.context).toMatchObject({ tokens: 215, capacity });
     expect(s.requests.filter(r => r.path === '/provider')).toHaveLength(1);
   } finally { await task?.close(); await s.stop(); }
+});
+
+test.each([true,false])('OpenCode claim gate prevents the native message POST; allowed=%s',async allowed=>{
+  const s=fakeServer(),h=privateIo();let claims=0;
+  try{
+    const task=await createOpenCodeSessionDriver().startTask(input(),{...h.io,spawn:async()=>s.child,claimInput:()=>{claims++;expect(s.requests.filter(r=>r.path.endsWith('/message'))).toEqual([]);return allowed;}});
+    expect((await task.done).status).toBe(allowed?'completed':'interrupted');expect(claims).toBe(1);
+    expect(s.requests.filter(r=>r.path.endsWith('/message'))).toHaveLength(allowed?1:0);await task.close();
+  }finally{await s.stop();}
 });

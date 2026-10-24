@@ -1,9 +1,8 @@
 import {useDeckHistory,type ChatAnchor,type DeckOverlay,routeURL,sameRoute} from './navigation';
 import {RestartDeckDialog} from './restart-deck';
 import {useInstallDeck,DeckMenu,InstallDeckDialog} from './install-deck';
-import { UnreadReplies, DisplayedReply, useLeadReplies, validReplyId } from './lead-replies';
-import type { LeadReply } from '../../../packages/core/src/session/lead-replies';
-import { PushNotifications, usePushPresence, sessionFromURL } from './push-notifications';
+import { DisplayedReply, useDisplayedReplies, validReplyId } from './lead-replies';
+import { usePushNotifications, NotificationsDialog, usePushPresence, sessionFromURL } from './push-notifications';
 import { DraftBoundary, DraftStore } from './draft-boundary';
 import { useChatHistory } from './chat-history';
 import { TurnFailureMessage } from './turn-failure';
@@ -15,9 +14,10 @@ import {CurrentTurnAction,SteeringStatus,steeringRunnerLabel} from "./steering";
 import { Decisions, DecisionOrigin, useDecisions, replySelectionStale, type DecisionSelection, type DecisionView } from "./decisions";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { sessionGrants, conversationEvents, emptyState, pairingToken, type ViewState } from './state';
+import { projectPromptDelivery, sessionGrants, conversationEvents, emptyState, pairingToken, type ViewState } from './state';
 import { Markdown } from './markdown';
 import { MessageInput } from './message-input';
+import { chooseEscapeAction, composerEnterSubmits, recallAndRestore, interruptAndRecall, useComposerKeyboard } from './composer-keyboard';
 import { installMobileViewport } from './mobile-viewport';
 import { leadProgress, LeadProgress, type PendingPrompt } from './lead-progress';
 import { projectContextWindows } from './context-window';
@@ -28,13 +28,13 @@ import { WorkspaceDialog, type WorkspaceDialogKind } from './workspace-dialogs';
 import { SessionControls, useSessionPreparation } from './session-controls';
 import { sessionIdOf, sessionName, type Project, type WorkspaceSession } from './workspace-types';
 import { attachmentURL, clipboardImages, imageDisplayName, imageMimeType, insertPastedText, ImageDraftStrip, ImagePicker, ImagePreview, ImageReferences, publicImages, useImageDrafts, type ImageAttachment, type PreviewImage } from './image-attachments';
-import { PromptQueue, usePromptInbox } from './prompt-queue';
+import { PromptQueue, usePromptInbox, type QueuedPrompt } from './prompt-queue';
 import { leadActivityFromEvents, useReadMarkers, VisibleReply } from './status-indicator';
 import { installMotion } from './motion-dom';
 import { DeckBrand } from './deck-logo';
 import { readTheme, persistTheme, type Theme } from './theme';
-import { ThemeSelect } from './theme-select';
 import './style.css';
+import './themes.css';
 installMotion();
 const initialToken = pairingToken(window.location, window.history);
 const initialTheme = readTheme();
@@ -57,6 +57,21 @@ export function App() {
     }, [theme]);
     const [paired, setPaired] = useState(false), [selected, setSelected] = useState(''), [view, setView] = useState<ViewState>(emptyState), [error, setError] = useState(''), [connection, setConnection] = useState('Connecting'), [busy, setBusy] = useState(false), [code, setCode] = useState(''), [connecting, setConnecting] = useState(true);
     const [closingSession, setClosingSession] = useState('');
+    const [reconnectAttempt, setReconnectAttempt] = useState('');
+    const [connectionNotice, setConnectionNotice] = useState({session:'',text:''});
+    useEffect(() => {
+        setConnectionNotice({session:selected,text:''});
+        if (connection === 'Connected') { setReconnectAttempt(''); return; }
+        const timer = setTimeout(() => setConnectionNotice({session:selected,text:connection}), 1500);
+        return () => clearTimeout(timer);
+    }, [selected, connection === 'Connected']);
+    const visibleConnection = connectionNotice.session === selected && connectionNotice.text ? connection : '';
+    // Opening/closing a presentation overlay does not invalidate the already resolved chat.
+    const overlayTransition = lastRoute.current.key !== navigation.entry.key && routeReady === lastRoute.current.key
+        && selected === (route.session ?? '') && !!(lastRoute.current.route.overlay || route.overlay)
+        && sameRoute({...lastRoute.current.route,overlay:undefined},{...route,overlay:undefined})
+        && JSON.stringify(lastRoute.current.route.anchor) === JSON.stringify(route.anchor);
+    const routeInteractive = routeReady === navigation.entry.key || overlayTransition;
     const [actionSession, setActionSession] = useState<WorkspaceSession>();
     const removedSessions = useRef(new Set<string>()), removingSessions = useRef(new Set<string>()), sessionMutation = useRef(0);
     const [projects, setProjects] = useState<Project[]>([]), [projectId, setProjectId] = useState(''), [dialogKind, setDialogKind] = useState<WorkspaceDialogKind>(), [reconnectRevision, setReconnectRevision] = useState(0);
@@ -76,6 +91,7 @@ export function App() {
     const [questionDrafts,setQuestionDrafts]=useState<Record<string,QuestionDrafts>>(Object.create(null));
     const [queueErrors,setQueueErrors]=useState<Record<string,string>>({});
     const [pendingPrompts, setPendingPrompts] = useState<Record<string, PendingPrompt>>({});
+    const recalledPrompts = useRef(new Set<string>());
     const conversation = useRef<HTMLElement>(null), drawer = useRef<HTMLDialogElement>(null), dialogReturnFocus = useRef<HTMLElement | null>(null);
     const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('deck.sidebar-collapsed') === 'true'; } catch { return false; } });
     const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 1000px)').matches);
@@ -92,7 +108,7 @@ export function App() {
         setPaired(false);
         throw new Error('Pair this browser to continue.');
     } const data = await r.json(); if (!r.ok || data.ok === false)
-        throw Object.assign(new Error(data.message ?? data.error?.message ?? data.error ?? data.code ?? 'Request failed. Try again.'),{status:r.status}); return data; }, []);
+        throw Object.assign(new Error(data.message ?? data.error?.message ?? data.error ?? data.code ?? 'Request failed. Try again.'),{status:r.status,code:data.code??data.error?.code}); return data; }, []);
     const decisionData = useDecisions(api, selected, connection === 'Connected', view.events);
     const [decisionSelection, setDecisionSelection] = useState<DecisionSelection>();
     const decisionEpoch = useRef(0);
@@ -217,7 +233,7 @@ export function App() {
     const anchor = useRef<ChatAnchor|undefined>(undefined);
     const historyRows=useRef<ReturnType<typeof useChatHistory>['messages']>([]);
     const captureAnchor = () => {
-        const element=conversation.current;if(!element||!element.clientHeight||following.current)return;
+        const element=conversation.current;if(!element||!element.clientHeight||following.current||element.scrollHeight-element.scrollTop-element.clientHeight<80)return;
         const top=element.getBoundingClientRect().top;
         const row=[...element.querySelectorAll<HTMLElement>('[data-history-id]')].find(row=>row.getBoundingClientRect().bottom>top);
         if(row){const message=historyRows.current.find(item=>item.historyId===Number(row.dataset.historyId));if(message)anchor.current={id:message.historyId,seq:message.seq,offset:row.getBoundingClientRect().top-top};}
@@ -238,20 +254,16 @@ export function App() {
       const message=row?historyRows.current.find(item=>item.historyId===Number(row.dataset.historyId)):undefined;
       return row&&message?{id:message.historyId,seq:message.seq,offset:row.getBoundingClientRect().top-top}:undefined;
     };
-    const messages=useMemo(()=>history.messages.flatMap(event=>conversationEvents([...(event.request?[event.request]:[]),event]).map(row=>({...row,historyId:event.historyId}))),[history.messages]);
-    const unreadReplies=useLeadReplies(api,paired,selected,history.messages.map(row=>row.seq),view.events.filter(e=>e.kind==='turn.completed').at(-1)?.seq??0);
-    const visibleReplyMap=useMemo(()=>new Map(unreadReplies.visibleReplies.map(reply=>[reply.displayMessageSeq,reply])),[unreadReplies.visibleReplies]);
-    function openReply(reply:LeadReply){
-      const project=sessionMetadata.current.get(reply.sessionId)?.projectId??nav.current.route.project;
-      nav.navigate({project,session:reply.sessionId,tab:'chat',reply:reply.replyId},nav.current.route.overlay?.kind==='unread'?'replace':'push');
-    }
+    const messages=useMemo(()=>projectPromptDelivery(history.messages.flatMap(event=>conversationEvents([...(event.request?[event.request]:[]),event]).map(row=>({...row,historyId:event.historyId}))),view.events),[history.messages,view.events]);
+    const displayedReplies=useDisplayedReplies(api,paired,selected,history.messages.map(row=>row.seq),view.events.filter(e=>e.kind==='turn.completed').at(-1)?.seq??0);
+    const visibleReplyMap=useMemo(()=>new Map(displayedReplies.visibleReplies.map(reply=>[reply.displayMessageSeq,reply])),[displayedReplies.visibleReplies]);
     function openOverlay(overlay:DeckOverlay,tab=nav.current.route.tab){
       const opener=document.activeElement instanceof HTMLElement?document.activeElement:undefined;
       nav.navigate({...nav.current.route,tab,overlay});if(opener){overlayOpeners.current.set(nav.current.key,opener);while(overlayOpeners.current.size>50)overlayOpeners.current.delete(overlayOpeners.current.keys().next().value!);}
     }
     function closeOverlay(){nav.closeOverlay();}
     function applySession(id:string){
-      if(id!==selectedSession.current){setDecisionSelection(undefined);setOrigin(undefined);anchor.current=undefined;historyGesture.current=false;touchY.current=undefined;setOpenQuestion('');selectedSession.current=id;setHydratedSession('');setView(emptyState());setConnection('Reconnecting');setError('');restored.current='';following.current=true;setUnseen(false);}
+      if(id!==selectedSession.current){setDecisionSelection(undefined);setOrigin(undefined);anchor.current=undefined;historyGesture.current=false;touchY.current=undefined;setOpenQuestion('');setReconnectAttempt('');selectedSession.current=id;setHydratedSession('');setView(emptyState());setConnection('Reconnecting');setError('');restored.current='';following.current=true;setUnseen(false);}
       setSelected(id);
     }
     // Route resolution has one owner. Polls and completion callbacks never enter it.
@@ -265,6 +277,7 @@ export function App() {
       const returning=departed.route.overlay&&(departed.parent===entry.key||departed.key===entry.key&&!entry.route.overlay&&sameRoute({...departed.route,overlay:undefined},entry.route));
       const opener=returning?overlayOpeners.current.get(departed.key):undefined;
       const focus=()=>requestAnimationFrame(()=>{if(!current())return;if(opener?.isConnected&&opener.getClientRects().length)opener.focus({preventScroll:true});else if(!entry.route.overlay)conversation.current?.focus({preventScroll:true});});
+      if(overlayTransition){setRouteReady(entry.key);if(returning)focus();return()=>controller.abort();}
       void(async()=>{try{
         let project=entry.route.project||projectsRef.current[0]?.projectId||'',id=entry.route.session??'';
         if(id){
@@ -329,7 +342,7 @@ export function App() {
       return()=>{clearTimeout(timer);viewport.removeEventListener('scroll',scroll);viewport.removeEventListener('scrollend',save);};
     },[selected,routeReady,navigation.entry.key]);
     const restoreAnchor=()=>{
-        const element=conversation.current,saved=anchor.current;if(!element||!element.clientHeight||!saved||following.current)return;
+        const element=conversation.current,saved=anchor.current;if(!element||!element.clientHeight||!saved||following.current||element.scrollHeight-element.scrollTop-element.clientHeight<80)return;
         const row=element.querySelector<HTMLElement>(`[data-history-id="${saved.id}"]`);
         if(row)element.scrollTop+=row.getBoundingClientRect().top-element.getBoundingClientRect().top-saved.offset;
     };
@@ -337,16 +350,21 @@ export function App() {
     const historyGesture=useRef(false),touchY=useRef<number|undefined>(undefined);
     function navigateHistory(direction:'older'|'newer') {
         const element=conversation.current;if(!element)return;
-        if(direction==='newer'&&!history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<80){following.current=true;anchor.current=undefined;historyGesture.current=false;setUnseen(false);return;}
-        historyGesture.current=true;following.current=false;
-        if(direction==='older'&&element.scrollTop<200){historyGesture.current=false;void history.older();}
+        const distance=element.scrollHeight-element.scrollTop-element.clientHeight;
+        // Wheel/touch/key intent arrives before scrolling, including tiny gestures at the tail.
+        if(distance<80&&!history.after){following.current=true;anchor.current=undefined;historyGesture.current=false;setUnseen(false);return;}
+        historyGesture.current=true;
+        if(distance>=80){following.current=false;captureAnchor();}
+        if(direction==='older'&&distance>=80&&element.scrollTop<200){historyGesture.current=false;void history.older();}
         if(direction==='newer'&&history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<200){historyGesture.current=false;void history.newer();}
     }
-    async function jumpLatest(){history.cancel();setRestoreTarget(undefined);setReplyHighlight(undefined);nav.annotate(nav.current.key,{reply:undefined,anchor:undefined});const owner=selected,generation=nav.generation;anchor.current=undefined;following.current=true;await history.latest();if(selectedSession.current!==owner||nav.generation!==generation)return;if(conversation.current)conversation.current.scrollTop=conversation.current.scrollHeight;setUnseen(false);}
+    function followLatest(){history.cancel();setRestoreTarget(undefined);setReplyHighlight(undefined);nav.annotate(nav.current.key,{reply:undefined,anchor:undefined});anchor.current=undefined;historyGesture.current=false;following.current=true;if(conversation.current)conversation.current.scrollTop=conversation.current.scrollHeight;setUnseen(false);}
+    async function jumpLatest(){followLatest();const owner=selected,generation=nav.generation;await history.latest();if(selectedSession.current!==owner||nav.generation!==generation)return;if(conversation.current)conversation.current.scrollTop=conversation.current.scrollHeight;setUnseen(false);}
+    function followOwnSend(){if(history.after||restoreTarget)void jumpLatest();else followLatest();}
 
     const promptInbox=usePromptInbox(api,selected,paired&&connection==='Connected',view.events);
     const contextWindows = useMemo(() => projectContextWindows(view.events, selected), [view.events, selected]);
-    const progress = useMemo(() => leadProgress(view.events, { sessionId: selected, pending: pendingPrompts[selected] ? {...pendingPrompts[selected],background:pendingPrompts[selected]?.background||promptInbox.inbox.paused} : undefined, connection }), [view.events, selected, pendingPrompts, connection, promptInbox.inbox.paused]);
+    const progress = useMemo(() => leadProgress(view.events, { sessionId: selected, pending: pendingPrompts[selected] ? {...pendingPrompts[selected],background:pendingPrompts[selected]?.background||promptInbox.inbox.paused} : undefined, connection:connection === 'Connected' ? connection : visibleConnection || 'Connected' }), [view.events, selected, pendingPrompts, connection, visibleConnection, promptInbox.inbox.paused]);
     useLayoutEffect(() => {
         const element = conversation.current;
         if (!element || !selected || (narrow && mobileTab !== 'chat')) return;
@@ -357,7 +375,7 @@ export function App() {
             restored.current = selected;
         } else if (following.current) element.scrollTop = element.scrollHeight;
         else if(!history.loading) setUnseen(true);
-    }, [messages, selected, narrow, mobileTab, hydratedSession, connection, progress?.label]);
+    }, [messages, selected, narrow, mobileTab, hydratedSession, connection, progress?.label, pendingPrompts]);
     useLayoutEffect(() => {
         const element = conversation.current;
         if (!element || hydratedSession !== selected || (narrow && mobileTab !== 'chat')) return;
@@ -430,12 +448,17 @@ export function App() {
         }) }])));
     }, [selected, hydratedSession, view.seq, leadTaskId]);
     const latestReplySeq = messages.filter(event => event.kind === 'message.completed' && (event.data.role === undefined || event.data.role === 'assistant') && typeof event.data.text === 'string' && event.data.text.trim()).at(-1)?.seq ?? 0;
-    const chatVisible = routeReady===navigation.entry.key && !route.overlay && hydratedSession === selected && (!narrow || mobileTab === 'chat') && !dialogKind && !drawerOpen;
+    const sessionControls = (compact: boolean) => selected ? <SessionControls key={selected} compact={compact} approvalMode={view.approvalMode??currentSession?.approvalMode} approvalModeSource={view.approvalModeSource??currentSession?.approvalModeSource} onApprovals={mode=>changeApprovals(selected,mode)} grants={sessionGrants(view,currentSession)} onRevokeGrant={grantId=>revokeGrant(selected,grantId)} showPrimary={compact || (narrow && mobileTab !== 'chat')} connected={connection === 'Connected'} ended={ended} closing={closing} releaseFailed={releaseFailed} removing={removing} working={working} busy={busy||!routeInteractive} preparation={readiness.preparation} error={readiness.error} sharedActive={Math.max(0, (currentSession?.sharedActiveSessions ?? 0) - (currentSession?.running ? 1 : 0))} predecessor={currentSession?.predecessorSessionId} onReconnect={() => setReconnectRevision(value => value + 1)} onPrepare={() => void lifecycle('session.prepare')} onCancel={() => void lifecycle('session.prepare.cancel')} onClose={() => removing && currentSession ? void removeSession(currentSession) : void lifecycle('session.release')} onAssignments={() => showDialog('assignments')} onPredecessor={() => { if (currentSession?.predecessorSessionId) selectSession(currentSession.predecessorSessionId); }}/> : null;
+    const chatVisible = routeInteractive && !route.overlay && hydratedSession === selected && (!narrow || mobileTab === 'chat') && !dialogKind && !drawerOpen;
 
     const approvals = Object.values(view.approvals);
     const ended = (view.events.length ? view.state : currentSession?.state) === 'ended';
     const working = (view.events.length ? view.state === 'running' : currentSession?.state === 'running') || Object.values(view.tasks).some(task => ['queued', 'running'].includes(String(task.state))) || approvals.length > 0 || promptInbox.inbox.queued.length > 0 || !!promptInbox.inbox.active;
-    usePushPresence(api, paired, selected, chatVisible && connection === 'Connected', view.seq);
+    const notifications=usePushNotifications(api);
+    const [notificationsOpen,setNotificationsOpen]=useState(false);
+    const notificationsReturnFocus=useRef<HTMLElement|null>(null);
+    const openNotifications=()=>{notificationsReturnFocus.current=narrow?document.querySelector('[aria-label="Open sessions"]'):document.querySelector('.deck-menu-toggle');drawer.current?.close();if(drawerOpen)closeOverlay();void notifications.refresh();setNotificationsOpen(true);};
+    usePushPresence(api, paired, selected, chatVisible && !notificationsOpen && connection === 'Connected', view.seq);
     const preparationSignal = view.events.filter(event => event.kind === 'session.assignment' || event.kind === 'session.reopened' || (event.kind === 'diagnostic' && event.data.code === 'session.preparation')).at(-1)?.seq ?? 0;
     const readiness = useSessionPreparation(api, selected, paired && connection === 'Connected', generation, preparationSignal);
     const removing = currentSession?.removing === true || removingSessions.current.has(selected);
@@ -443,10 +466,27 @@ export function App() {
     const releasePending = releaseEvent ? releaseEvent.data.phase === 'releasing' : currentSession?.releasing === true;
     const releaseFailed = (removing || releasePending) && readiness.preparation?.status === 'failed';
     const closing = removing || releasePending || closingSession === selected || readiness.preparation?.status === 'releasing' || (!readiness.preparation && currentSession?.releasing === true);
-    const canCompose = !!selected && !closing && !ended && connection === 'Connected' && readiness.preparation?.status === 'ready' && readiness.preparation.generation === generation;
+    const preparationStatus = readiness.preparation?.generation === generation ? readiness.preparation.status : currentSession?.preparationStatus;
+    // Stream connectivity gates delivery, never the mounted composer or its draft.
+    // Unknown readiness uses the composer shell until authoritative setup arrives.
+    const canCompose = !!selected && !closing && !ended && (!preparationStatus || preparationStatus === 'ready');
+    const leadRunning = view.tasks[leadTaskId]?.state === 'running' && !!progress && progress.phase !== 'connection';
+    const escapeAction = chooseEscapeAction(promptInbox.inbox.queued.filter(prompt => !recalledPrompts.current.has(JSON.stringify([selected,prompt.promptId]))), leadRunning ? leadTaskId : undefined, promptInbox.inbox.active && !recalledPrompts.current.has(JSON.stringify([selected,promptInbox.inbox.active.promptId])) ? promptInbox.inbox.active : undefined);
+    const escapeTarget = chatVisible && canCompose && !busy && connection === 'Connected' && escapeAction
+        ? JSON.stringify([selected, escapeAction.kind, escapeAction.kind === 'recall' ? escapeAction.prompt.promptId : [escapeAction.taskId, view.tasks[leadTaskId]?.attempt]]) : undefined;
+    const { touchEnter, actionHint } = useComposerKeyboard(escapeTarget, () => { void recallOrInterrupt(); });
+    const [composerNotice, setComposerNotice] = useState<{sessionId:string;text:string}>();
+    useEffect(() => {
+        if (!composerNotice) return;
+        const timer = setTimeout(() => setComposerNotice(undefined), 3500);
+        return () => clearTimeout(timer);
+    }, [composerNotice]);
+    const keyboardStatus = actionHint ? escapeAction?.kind === 'recall' ? 'Press Esc again to recall your unread message' : 'Press Esc again to interrupt'
+        : composerNotice?.sessionId === selected ? composerNotice.text : '';
+
     useEffect(()=>{++decisionEpoch.current;setDecisionError({sessionId:selected,text:''});if(!canCompose)setDecisionSelection(undefined);},[selected,canCompose]);
     const draftImages=imageDrafts.drafts[selected]??[];
-    const canSend = canCompose && routeReady===navigation.entry.key && route.session===selected && !busy && draftImages.every(item=>item.status==='ready');
+    const canSend = canCompose && readiness.preparation?.status === 'ready' && readiness.preparation.generation === generation && routeInteractive && route.session===selected && !busy && draftImages.every(item=>item.status==='ready');
     useEffect(() => {
         if(!selected || !readiness.preparation) return;
         const preparationStatus = closing ? 'releasing' : readiness.preparation.status;
@@ -481,6 +521,7 @@ export function App() {
         if (commandInFlight.current) throw new Error('Another request is still pending.');
         commandInFlight.current = true; setBusy(true); setError('');
         const commandId = crypto.randomUUID(), prompt = body.type === 'prompt.send';
+        if(prompt&&sessionId===selectedSession.current)followOwnSend();
         if(['session.rename','session.remove','session.release','session.setApprovals','session.revokeGrant'].includes(String(body.type))) ++sessionMutation.current;
         if (prompt && sessionId) setPendingPrompts(previous => ({ ...previous, [sessionId]: { commandId, afterSeq: view.seq, phase: 'sending', background: promptInbox.inbox.paused || !!promptInbox.inbox.active || promptInbox.inbox.queued.length>0 || (!!progress && progress.phase!=='connection') } }));
         try {
@@ -515,11 +556,54 @@ export function App() {
         try { await mutate(body, sessionId); return true; }
         catch (cause) { if (selectedSession.current === sessionId) setError((cause as Error).message); return false; }
     }
+    async function interruptLead() {
+        if(commandInFlight.current)return;
+        const sessionId=selected;
+        try {
+            const result=await interruptAndRecall({active:promptInbox.inbox.active,
+                interrupt:()=>mutate({type:'turn.interrupt',taskId:leadTaskId},sessionId),
+                readInbox:async()=>(await api(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`)).data,
+                recall:prompt=>restorePrompt(prompt),
+            });
+            setComposerNotice({sessionId,text:result==='recalled'?'Lead turn interrupted. Unread message restored; your draft is kept.':result==='unconfirmed'?'Lead turn interrupted. Message recovery could not be confirmed; check the paused queue.':'Lead turn interrupted.'});
+        }catch(cause){setComposerNotice({sessionId,text:`Stop or message recovery failed: ${(cause as Error).message}`});}
+    }
+    async function queueMutation(type:'prompt.cancel'|'prompt.resume',promptId?:string) {
+        const sessionId=selected;
+        try { return await mutate({type,...(promptId?{promptId}:{})},sessionId); }
+        finally { if(selectedSession.current===sessionId)promptInbox.refresh(); }
+    }
     async function queueCommand(type:'prompt.cancel'|'prompt.resume',promptId?:string) {
         const sessionId=selected;setQueueErrors(previous=>({...previous,[sessionId]:''}));
-        try{await mutate({type,...(promptId?{promptId}:{})},sessionId);}
+        try { await queueMutation(type,promptId); }
         catch(cause){const message=(cause as Error).message;setQueueErrors(previous=>({...previous,[sessionId]:message==='prompt-already-started'?'This message has already started. It was not interrupted.':message}));}
-        finally{if(selectedSession.current===sessionId)promptInbox.refresh();}
+    }
+    async function restorePrompt(prompt:QueuedPrompt) {
+        const sessionId = selected, navigationGeneration = nav.generation;
+        if(recalledPrompts.current.has(JSON.stringify([sessionId,prompt.promptId])))return 'unconfirmed' as const;
+        try {
+            const result = await recallAndRestore({
+                sessionId, prompt, drafts: drafts.current, restoreImages: imageDrafts.restore,
+                cancel: () => queueMutation('prompt.cancel', prompt.promptId),
+                focus: text => requestAnimationFrame(() => {
+                    if (selectedSession.current !== sessionId || nav.generation !== navigationGeneration || drafts.current.get(sessionId) !== text) return;
+                    const input = document.getElementById('prompt') as HTMLTextAreaElement | null;
+                    if (!input || input.disabled || input.value !== text) return;
+                    input.focus({preventScroll:true}); input.setSelectionRange(text.length, text.length);
+                }),
+            });
+            if (result === 'recalled') recalledPrompts.current.add(JSON.stringify([sessionId,prompt.promptId]));
+            setComposerNotice({sessionId,text:result === 'recalled' ? 'Unread message recalled. Your draft is kept.' : result === 'already-started' ? 'This message was already read or delivery started. It could not be recalled.' : 'Recall could not be confirmed. Your draft is unchanged.'});
+            return result;
+        } catch (cause) {
+            setComposerNotice({sessionId,text:`Could not recall message: ${(cause as Error).message}`});
+            return 'unconfirmed' as const;
+        }
+    }
+    async function recallOrInterrupt() {
+        if (commandInFlight.current || !escapeTarget || !escapeAction) return;
+        if (escapeAction.kind === 'interrupt') await interruptLead();
+        else await restorePrompt(escapeAction.prompt);
     }
     async function lifecycle(type: 'session.prepare' | 'session.prepare.cancel' | 'session.release') {
         const sessionId = selected;
@@ -551,19 +635,20 @@ export function App() {
         return <main className="pair"><p className="eyebrow">DECK / LOCAL WORKSPACE</p><h1>Pair this browser</h1><p>Use the pairing code from your Deck terminal to open your sessions.</p><form onSubmit={pair}><label htmlFor="code">Pairing code</label><input id="code" autoComplete="one-time-code" value={code} onChange={e => setCode(e.target.value)} required={!initialToken} aria-describedby={error ? 'pair-error' : undefined}/><button disabled={busy}>{busy ? 'Pairing…' : 'Pair browser'}</button></form>{error && <p id="pair-error" role="alert">{error}</p>}</main>;
     return <SecondaryInfoProvider scopeKey={`${selected}:${navigation.entry.key}`} navigation={nav} activeId={navigation.secondary} blocked={!!dialogKind||!!route.overlay||!!previewImage||!!origin}><div className={`workbench ${collapsed ? 'sidebar-collapsed' : ''}`}>
         <a className="skip" href="#conversation">Skip to conversation</a>
-        <nav className="sidebar" aria-label="Sessions"><DeckBrand/>{sessionButtons}<DeckMenu hidden={install.hidden} onRestart={()=>openOverlay({kind:'restart'})} onInstall={()=>{openOverlay({kind:'install'});install.activate();}}/></nav>
+        <nav className="sidebar" aria-label="Sessions"><DeckBrand/>{sessionButtons}<DeckMenu onNotifications={openNotifications} notificationsEnabled={notifications.enabled} notificationsAttention={notifications.attention} hidden={install.hidden} onRestart={()=>openOverlay({kind:'restart'})} onInstall={()=>{openOverlay({kind:'install'});install.activate();}} theme={theme} onTheme={setTheme}/></nav>
         <dialog ref={drawer} className="session-drawer" aria-labelledby="drawer-title" onCancel={event=>{event.preventDefault();closeOverlay();}} onClose={()=>{if(nav.current.route.overlay?.kind==='drawer')closeOverlay();}} onClick={event => {
             if (event.target !== event.currentTarget) return;
             const bounds = event.currentTarget.getBoundingClientRect();
             if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeOverlay();
-        }}><div className="drawer-heading"><h2 id="drawer-title">Workspace</h2><button className="quiet drawer-close" type="button" onClick={closeOverlay} aria-label="Close sessions"><NavigationIcon kind="close"/></button></div><nav aria-label="Mobile sessions">{sessionButtons}<DeckMenu inline hidden={install.hidden} onRestart={()=>openOverlay({kind:'restart'})} onInstall={()=>{openOverlay({kind:'install'});install.activate();}}/></nav></dialog>
-        <div className={`app-body${!narrow && workspaceCollapsed ? ' workspace-collapsed' : ''}`}><header className="app-header"><button className="sidebar-toggle quiet" type="button" aria-label={narrow ? 'Open sessions' : collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={narrow ? drawerOpen : !collapsed} onClick={() => narrow ? openOverlay({kind:'drawer'}) : setCollapsed(value => !value)}><NavigationIcon kind="menu"/></button><div className="session-identity"><h1>{selected ? currentSession ? sessionName(currentSession) : 'Session conversation' : project?.name ?? 'Choose a project'}</h1>{lead && <p className="lead-identity">Lead <strong>{String(lead.runnerId ?? 'Runner pending')}</strong><span title={String(lead.modelId ?? 'Model pending')}>{String(lead.modelId ?? 'Model pending')}</span></p>}</div><div className="connection"><span className={`connection-dot${canCompose&&routeReady===navigation.entry.key ? ' ready' : ''}`} aria-hidden="true"/><span>{selected ? routeReady!==navigation.entry.key ? 'Opening view…' : connection !== 'Connected' ? connection : canCompose ? 'Connected' : 'Disconnected' : 'Ready'}</span><small>{selected ? closing ? 'Closing' : ended ? 'Not prepared' : readiness.preparation?.status === 'ready' ? view.state : 'Not prepared' : 'Local'}</small></div>{!narrow && <button type="button" className="workspace-toggle quiet" aria-label={workspaceCollapsed ? 'Show workspace panel' : 'Hide workspace panel'} title={workspaceCollapsed ? 'Show workspace panel' : 'Hide workspace panel'} aria-expanded={!workspaceCollapsed} aria-controls="session-workspace" onClick={() => setWorkspaceCollapsed(value => !value)}><NavigationIcon kind="panel"/></button>}<PushNotifications api={api}/><ThemeSelect value={theme} onChange={setTheme}/></header>
+        }}><div className="drawer-heading"><h2 id="drawer-title">Workspace</h2><button className="quiet drawer-close" type="button" onClick={closeOverlay} aria-label="Close sessions"><NavigationIcon kind="close"/></button></div><nav aria-label="Mobile sessions">{sessionButtons}<DeckMenu inline onNotifications={openNotifications} notificationsEnabled={notifications.enabled} notificationsAttention={notifications.attention} onOpenTheme={()=>{drawer.current?.close();closeOverlay();}} onCloseTheme={()=>document.querySelector<HTMLElement>('[aria-label="Open sessions"]')?.focus({preventScroll:true})} hidden={install.hidden} onRestart={()=>openOverlay({kind:'restart'})} onInstall={()=>{openOverlay({kind:'install'});install.activate();}} theme={theme} onTheme={setTheme}/></nav></dialog>
+        {notificationsOpen&&<NotificationsDialog settings={notifications} onClose={()=>{setNotificationsOpen(false);requestAnimationFrame(()=>notificationsReturnFocus.current?.focus({preventScroll:true}));}}/>}
+        <div className={`app-body${!narrow && workspaceCollapsed ? ' workspace-collapsed' : ''}`}><header className="app-header"><button className="sidebar-toggle quiet" type="button" aria-label={narrow ? 'Open sessions' : collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={narrow ? drawerOpen : !collapsed} onClick={() => narrow ? openOverlay({kind:'drawer'}) : setCollapsed(value => !value)}><NavigationIcon kind="menu"/>{narrow&&notifications.attention&&<span className="menu-attention" role="img" aria-label="Notifications need attention"/>}</button><div className="session-identity"><h1>{selected ? currentSession ? sessionName(currentSession) : 'Session conversation' : project?.name ?? 'Choose a project'}</h1><p className={`lead-identity${lead?'':' control-placeholder'}`} aria-hidden={!lead || undefined}>Lead <strong>{String(lead?.runnerId ?? 'Runner pending')}</strong><span title={String(lead?.modelId ?? 'Model pending')}>{String(lead?.modelId ?? 'Model pending')}</span></p></div><div className="connection"><span className={`connection-dot${preparationStatus==='ready'&&connection==='Connected'&&routeInteractive ? ' ready' : ''}`} aria-hidden="true"/><span className="connection-label">{selected ? connection !== 'Connected' ? visibleConnection : preparationStatus === 'ready' ? 'Connected' : 'Not prepared' : 'Ready'}</span><small>{selected ? closing ? 'Closing' : ended ? 'Not prepared' : preparationStatus === 'ready' ? hydratedSession===selected ? view.state : currentSession?.state??'' : 'Not prepared' : 'Local'}</small></div>{!narrow && <button type="button" className="workspace-toggle quiet" aria-label={workspaceCollapsed ? 'Show workspace panel' : 'Hide workspace panel'} title={workspaceCollapsed ? 'Show workspace panel' : 'Hide workspace panel'} aria-expanded={!workspaceCollapsed} aria-controls="session-workspace" onClick={() => setWorkspaceCollapsed(value => !value)}><NavigationIcon kind="panel"/></button>}{narrow && sessionControls(true)}</header>
         {error && <p className="error app-error" role="alert">{error}</p>}
-        {selected && <SessionControls key={selected} approvalMode={view.approvalMode??currentSession?.approvalMode} approvalModeSource={view.approvalModeSource??currentSession?.approvalModeSource} onApprovals={mode=>changeApprovals(selected,mode)} grants={sessionGrants(view,currentSession)} onRevokeGrant={grantId=>revokeGrant(selected,grantId)} showPrimary={narrow && mobileTab !== 'chat'} connected={connection === 'Connected'} ended={ended} closing={closing} releaseFailed={releaseFailed} removing={removing} working={working} busy={busy||routeReady!==navigation.entry.key} preparation={readiness.preparation} error={readiness.error} sharedActive={Math.max(0, (currentSession?.sharedActiveSessions ?? 0) - (currentSession?.running ? 1 : 0))} predecessor={currentSession?.predecessorSessionId} onReconnect={() => setReconnectRevision(value => value + 1)} onPrepare={() => void lifecycle('session.prepare')} onCancel={() => void lifecycle('session.prepare.cancel')} onClose={() => removing && currentSession ? void removeSession(currentSession) : void lifecycle('session.release')} onAssignments={() => showDialog('assignments')} onPredecessor={() => { if (currentSession?.predecessorSessionId) selectSession(currentSession.predecessorSessionId); }}/>}
-        <Approvals key={`approvals:${selected}`} events={approvals} busy={busy||connection!=='Connected'||routeReady!==navigation.entry.key} onRespond={body=>mutate(body,selected)}/>
-        <div className="view-nav"><div className="conversation-title"><span className="chat-label"><Avatar memberId="lead" size={32}/>Conversation <small>You and the Lead</small></span><UnreadReplies loading={unreadReplies.loading} open={route.overlay?.kind==='unread'} onToggle={open=>open?openOverlay({kind:'unread'}):closeOverlay()} page={unreadReplies.page} error={unreadReplies.error} onOpen={openReply} onMore={unreadReplies.more} onFirst={unreadReplies.first} cursor={unreadReplies.cursor} onRefresh={unreadReplies.refresh} sessionLabel={id=>{const session=sessionMetadata.current.get(id);return session?sessionName(session):id;}}/></div><Tabs active={activeTab} onChange={changeTab} subagentsWorking={!!selected && hydratedSession===selected && hasWorkingSubagent(view)}/></div>
+        {!narrow && sessionControls(false)}
+
+        <div className="view-nav"><div className="conversation-title"><span className="chat-label"><Avatar memberId="lead" size={32}/>Conversation <small>You and the Lead</small></span></div><Tabs active={activeTab} onChange={changeTab} subagentsWorking={!!selected && hydratedSession===selected && hasWorkingSubagent(view)}/></div>
         {narrow && mobileTab !== 'chat' && <LeadProgress progress={progress} events={view.events} sessionId={selected} contexts={contextWindows} mobile/>}
-        <div className="panes"><main id="panel-chat" className="chat-pane" hidden={narrow && mobileTab !== 'chat'} aria-labelledby="tab-chat"><section id="conversation" ref={conversation} tabIndex={-1} className="conversation" aria-label="Conversation" onWheelCapture={event=>navigateHistory(event.deltaY<0?'older':'newer')} onKeyDownCapture={event=>{if(['ArrowUp','PageUp','Home'].includes(event.key))navigateHistory('older');if(['ArrowDown','PageDown','End'].includes(event.key))navigateHistory('newer');}} onTouchStartCapture={event=>{touchY.current=event.touches[0]?.clientY;}} onTouchMoveCapture={event=>{const next=event.touches[0]?.clientY;if(next!==undefined&&touchY.current!==undefined)navigateHistory(next>touchY.current?'older':'newer');touchY.current=next;}} onPointerDownCapture={()=>{historyGesture.current=true;}} onScroll={event => {
+        <div className="panes">{narrow&&mobileTab!=='chat'&&approvals.length>0&&<div className="mobile-approval-overlay"><Approvals key={`mobile-approvals:${selected}`} events={approvals} busy={busy||connection!=='Connected'||!routeInteractive} onRespond={body=>mutate(body,selected)}/></div>}<main id="panel-chat" className="chat-pane" hidden={narrow && mobileTab !== 'chat'} aria-labelledby="tab-chat"><section id="conversation" ref={conversation} tabIndex={-1} className="conversation" aria-label="Conversation" onWheelCapture={event=>navigateHistory(event.deltaY<0?'older':'newer')} onKeyDownCapture={event=>{if(['ArrowUp','PageUp','Home'].includes(event.key))navigateHistory('older');if(['ArrowDown','PageDown','End'].includes(event.key))navigateHistory('newer');}} onTouchStartCapture={event=>{touchY.current=event.touches[0]?.clientY;}} onTouchMoveCapture={event=>{const next=event.touches[0]?.clientY;if(next!==undefined&&touchY.current!==undefined)navigateHistory(next>touchY.current?'older':'newer');touchY.current=next;}} onScroll={event => {
             const element=event.currentTarget;
             if(history.loading)return;
             following.current=!history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<80;
@@ -572,36 +657,35 @@ export function App() {
         }}>
         <div className="history-content"><div className="history-navigation" role="status">{history.before?<button type="button" className="quiet" disabled={history.loading} onClick={()=>{following.current=false;void history.older();}}>{history.loading?'Loading history…':'Older messages'}</button>:messages.length>0?<span>Beginning of conversation</span>:null}{history.error&&<span role="alert">{history.error}</span>}</div>
         {!messages.length && <div className="empty"><DeckBrand large/><h2>{selected ? 'What are we working on?' : 'Your work, across runners'}</h2><p>{selected ? 'Send a message to the Lead. Follow the tools, delegated work and documents in the workspace alongside it.' : 'Choose a session to continue the conversation and see its work.'}</p></div>}
-        {messages.map(event => <div className="history-row" key={event.historyId} data-history-id={event.historyId}>{event.autoApproval ? <AutoApprovalMessage key={event.seq} detail={event.autoApproval}/>:event.questionResolution ? <QuestionAnswerMessage key={event.seq} resolution={event.questionResolution} ts={event.ts}/>:event.kind === 'turn.completed' ? <TurnFailureMessage key={event.seq} data={event.data}/> : <article id={`message-${event.seq}`} tabIndex={-1} className={`message ${event.data.role === 'user' ? 'user' : 'lead'}${event.seq===replyHighlight?' exact-reply':''}`}><div className="message-meta"><strong>{event.data.role === 'user' ? 'You' : 'Lead'}</strong>{event.data.role !== 'user' && <span>{event.source.runnerId ?? view.tasks[event.source.taskId ?? 'lead']?.runnerId as string ?? ''}{(event.data.modelId ?? view.tasks[event.source.taskId ?? 'lead']?.modelId) ? ` · ${String(event.data.modelId ?? view.tasks[event.source.taskId ?? 'lead']?.modelId)}` : ''}</span>}<time dateTime={event.ts}>{new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><DisplayedReply reply={visibleReplyMap.get(event.seq)} visible={chatVisible} root={conversation} onDisplayed={unreadReplies.displayed}><VisibleReply visible={chatVisible} replyKey={selected} seq={event.seq === latestReplySeq ? event.seq : 0} acknowledge={acknowledge}><Markdown text={String(event.data.text ?? event.data.delta ?? '')}/>{event.data.role==='user' && !event.source.runnerId && event.data.steering===true && event.data.historical===true && <p className="decision-note" role="status">Accepted by {steeringRunnerLabel(event.data.steeringRunnerId)} for its original turn.</p>}{event.data.role==='user' && (event.data.decisionReply as {stale?:boolean}|undefined)?.stale && <p className="decision-note" role="status">Reply to a changed or closed question. The text was delivered for clarification.</p>}<ImageReferences attachments={publicImages(event.data.attachments)} onPreview={previewAttachment}/></VisibleReply></DisplayedReply></article>}</div>)}
+        {messages.map(event => <div className="history-row" key={event.historyId} data-history-id={event.historyId}>{event.autoApproval ? <AutoApprovalMessage key={event.seq} detail={event.autoApproval}/>:event.questionResolution ? <QuestionAnswerMessage key={event.seq} resolution={event.questionResolution} ts={event.ts}/>:event.kind === 'turn.completed' ? <TurnFailureMessage key={event.seq} data={event.data}/> : <article id={`message-${event.seq}`} tabIndex={-1} className={`message ${event.data.role === 'user' ? 'user' : 'lead'}${event.seq===replyHighlight?' exact-reply':''}`}><div className="message-meta"><strong>{event.data.role === 'user' ? 'You' : 'Lead'}</strong>{event.data.role !== 'user' && <span>{event.source.runnerId ?? view.tasks[event.source.taskId ?? 'lead']?.runnerId as string ?? ''}{(event.data.modelId ?? view.tasks[event.source.taskId ?? 'lead']?.modelId) ? ` · ${String(event.data.modelId ?? view.tasks[event.source.taskId ?? 'lead']?.modelId)}` : ''}</span>}<time dateTime={event.ts}>{new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><DisplayedReply reply={visibleReplyMap.get(event.seq)} visible={chatVisible} root={conversation} onDisplayed={displayedReplies.displayed}><VisibleReply visible={chatVisible} replyKey={selected} seq={event.seq === latestReplySeq ? event.seq : 0} acknowledge={acknowledge}><Markdown text={String(event.data.text ?? event.data.delta ?? '')}/>{event.data.role==='user' && !event.source.runnerId && event.data.steering===true && event.data.historical===true && <p className="decision-note" role="status">Accepted by {steeringRunnerLabel(event.data.steeringRunnerId)} for its original turn.</p>}{event.data.role==='user' && (!event.data.handoff||event.data.handoff==='delivered') && (event.data.decisionReply as {stale?:boolean}|undefined)?.stale && <p className="decision-note" role="status">Reply to a changed or closed question. The text was delivered for clarification.</p>}{event.data.role==='user' && ['pending','sending','unknown'].includes(String(event.data.handoff)) && <p className="decision-note" role="status">{event.data.handoff==='unknown' ? <>Delivery unconfirmed <button type="button" className="quiet" onClick={()=>{followOwnSend();const session=selected,prior=drafts.current.get(session)??'';drafts.current.set(session,String(event.data.text??'')+(prior?'\n\n'+prior:''));imageDrafts.restore(session,publicImages(event.data.attachments));requestAnimationFrame(()=>document.getElementById('prompt')?.focus({preventScroll:true}));}}>Send again</button></> : 'Sending…'}</p>}<ImageReferences attachments={publicImages(event.data.attachments)} onPreview={previewAttachment}/></VisibleReply></DisplayedReply></article>}</div>)}
         {history.after&&<button type="button" className="quiet" disabled={history.loading} onClick={()=>{following.current=false;void history.newer();}}>Newer messages</button>}</div>
         {origin?.sessionId === selected && <DecisionOrigin decision={origin.decision} events={view.events} onClose={closeOverlay}/>}
         </section>
-        <div className="conversation-feedback">{(unseen||history.after) && <button type="button" className="jump-latest" onClick={()=>void jumpLatest()}>Jump to latest ↓</button>}</div>
-        <LeadProgress progress={progress} events={view.events} sessionId={selected} contexts={contextWindows}/>
+        <div className="conversation-feedback"><div className="conversation-float-stack"><Approvals key={`approvals:${selected}`} events={narrow&&mobileTab!=='chat'?[]:approvals} busy={busy||connection!=='Connected'||!routeInteractive} onRespond={body=>mutate(body,selected)}/>{(unseen||history.after) && <div className="conversation-float-actions"><button type="button" className="jump-latest" onClick={()=>void jumpLatest()}>Jump to latest ↓</button></div>}{canCompose && <>{keyboardStatus && <div className="composer-interrupt-hint" role="status">{keyboardStatus}</div>}{reconnectAttempt===selected && connection!=='Connected' && <div className="composer-reconnect" role="status"><span>Connect to this session to send. Your draft is kept.</span><button type="button" onClick={()=>setReconnectRevision(value=>value+1)}>Reconnect</button></div>}</>}<LeadProgress progress={progress} events={view.events} sessionId={selected} contexts={contextWindows}/></div></div>
         {/* Connection changes remount docks so secret DOM values and refs are wiped; ordinary drafts live above them. */}
-        <div className="question-docks">{Object.values(view.questions).sort((a,b)=>a.seq-b.seq).map(event=>{const id=String(event.data.questionId), draftKey=`${selected}:${id}`, member=String(event.source.memberId??view.tasks[String(event.data.taskId)]?.memberId??'lead');return <QuestionDock key={`${draftKey}:${connection}:${reconnectRevision}`} open={openQuestion===draftKey} onToggle={()=>setOpenQuestion(old=>old===draftKey?'':draftKey)} questionId={id} questions={event.data.questions as Question[]} label={member==='lead'?'The Lead':agentProfile(member).label} drafts={questionDrafts[draftKey]??Object.create(null)} onDrafts={draft=>setQuestionDrafts(old=>Object.assign(Object.create(null),old,{[draftKey]:draft}))} onCommand={body=>mutate(body,selected)} busy={busy||connection!=='Connected'||routeReady!==navigation.entry.key}/>;})}</div>
-        <PromptQueue key={`queue:${selected}`} items={promptInbox.inbox.queued} paused={promptInbox.inbox.paused&&!ended} pauseReason={promptInbox.inbox.pauseReason} failed={promptInbox.failed} connected={connection==='Connected'&&canCompose&&routeReady===navigation.entry.key} busy={busy} sending={pendingPrompts[selected]?.phase==='sending'&&!!pendingPrompts[selected]?.background} error={queueErrors[selected]||promptInbox.error} onCancel={id=>void queueCommand('prompt.cancel',id)} onResume={()=>void queueCommand('prompt.resume')} onImage={previewAttachment}/>
-        {selected && <Decisions key={`decisions:${selected}`} decisions={decisionData.decisions} connected={connection==='Connected'&&!ended&&!closing&&canCompose&&routeReady===navigation.entry.key} busy={busy} error={decisionError.sessionId===selected ? decisionError.text||decisionData.error : decisionData.error} loading={decisionData.loading} omittedTerminal={decisionData.omittedTerminal} selection={selectedDecision} stale={staleDecision} onReply={decision=>{setDecisionSelection({sessionId:selected,decisionId:decision.decisionId,revision:decision.revision,questionRevision:decision.questionRevision,question:decision.question});focusComposer();}} onClear={()=>{setDecisionSelection(undefined);focusComposer();}} onAction={(decision,type)=>void decisionAction(decision,type)} onOrigin={decisionOrigin} onRefresh={decisionData.refresh}/>}
+        <div className="question-docks">{Object.values(view.questions).sort((a,b)=>a.seq-b.seq).map(event=>{const id=String(event.data.questionId), draftKey=`${selected}:${id}`, member=String(event.source.memberId??view.tasks[String(event.data.taskId)]?.memberId??'lead');return <QuestionDock key={`${draftKey}:${connection}:${reconnectRevision}`} open={openQuestion===draftKey} onToggle={()=>setOpenQuestion(old=>old===draftKey?'':draftKey)} questionId={id} questions={event.data.questions as Question[]} label={member==='lead'?'The Lead':agentProfile(member).label} drafts={questionDrafts[draftKey]??Object.create(null)} onDrafts={draft=>setQuestionDrafts(old=>Object.assign(Object.create(null),old,{[draftKey]:draft}))} onCommand={body=>mutate(body,selected)} busy={busy||connection!=='Connected'||!routeInteractive}/>;})}</div>
+        <PromptQueue key={`queue:${selected}`} items={promptInbox.inbox.queued} paused={promptInbox.inbox.paused&&!ended} pauseReason={promptInbox.inbox.pauseReason} failed={promptInbox.failed} connected={connection==='Connected'&&canCompose&&routeInteractive} busy={busy} sending={pendingPrompts[selected]?.phase==='sending'&&!!pendingPrompts[selected]?.background} error={queueErrors[selected]||promptInbox.error} onEdit={prompt=>void restorePrompt(prompt)} onCancel={id=>void queueCommand('prompt.cancel',id)} onResume={()=>void queueCommand('prompt.resume')} onImage={previewAttachment}/>
+        {selected && <Decisions key={`decisions:${selected}`} decisions={decisionData.decisions} connected={connection==='Connected'&&!ended&&!closing&&canCompose&&routeInteractive} busy={busy} error={decisionError.sessionId===selected ? decisionError.text||decisionData.error : decisionData.error} loading={decisionData.loading} omittedTerminal={decisionData.omittedTerminal} selection={selectedDecision} stale={staleDecision} onReply={decision=>{setDecisionSelection({sessionId:selected,decisionId:decision.decisionId,revision:decision.revision,questionRevision:decision.questionRevision,question:decision.question});focusComposer();}} onClear={()=>{setDecisionSelection(undefined);focusComposer();}} onAction={(decision,type)=>void decisionAction(decision,type)} onOrigin={decisionOrigin} onRefresh={decisionData.refresh}/>}
         <SteeringStatus deliveries={promptInbox.inbox.deliveries??[]} omitted={promptInbox.inbox.omittedDeliveries}/>
-        <ImageDraftStrip items={draftImages} error={imageDrafts.errors[selected]} submitted={new Set(submittedImages[selected]??[])} onRemove={id=>imageDrafts.remove(selected,[id])} onRetry={id=>imageDrafts.retry(selected,id)} onPreview={item=>setPreviewImage({sessionId:selected,name:imageDisplayName(item.file.name),file:item.file})}/>
-        <DraftBoundary key={`composer:${selected}`} sessionId={selected} drafts={drafts.current}>{(text,setText)=><><CurrentTurnAction runnerId={promptInbox.inbox.steeringRunnerId} available={canCompose&&promptInbox.inbox.steeringAvailable===true&&!promptInbox.inbox.paused&&!promptInbox.inbox.queued.length&&!draftImages.length} disabled={!canSend||staleDecision||!text.trim()}/>{canCompose ? <form id="prompt-composer" className="composer" onSubmit={async event => {
+        <ImageDraftStrip items={draftImages} error={imageDrafts.errors[selected]} submitted={new Set(submittedImages[selected]??[])} onRemove={id=>imageDrafts.remove(selected,[id])} onRetry={id=>imageDrafts.retry(selected,id)} onPreview={item=>setPreviewImage({sessionId:selected,name:imageDisplayName(item.file?.name??item.attachment?.name??'Image'),file:item.file,src:item.src})}/>
+        <DraftBoundary key={`composer:${selected}`} sessionId={selected} drafts={drafts.current}>{(text,setText)=><><CurrentTurnAction runnerId={promptInbox.inbox.steeringRunnerId} available={canCompose&&promptInbox.inbox.steeringAvailable===true&&!promptInbox.inbox.paused&&!promptInbox.inbox.queued.length&&!draftImages.length} disabled={!canSend||staleDecision||!text.trim()}/>{canCompose ? <div className="composer-wrap"><form id="prompt-composer" className="composer" onSubmit={async event => {
             event.preventDefault();const submitter=(event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement|null;const currentTurn=submitter?.name==='delivery'&&submitter.value==='current-turn';const session=selected,prompt=text,images=[...draftImages],ids=images.map(item=>item.draftId);
             if(!canSend||staleDecision||(!prompt.trim()&&!images.length))return;
+            if(connection!=='Connected'){setReconnectAttempt(selected);return;}
             setSubmittedImages(previous=>({...previous,[session]:ids}));
             try{if(await command({type:'prompt.send',text:prompt,...(currentTurn?{delivery:'current-turn'}:{}),...(selectedDecision?{decisionTarget:{decisionId:selectedDecision.decisionId,revision:selectedDecision.revision}}:{}),...(images.length?{attachmentIds:images.map(item=>item.attachment!.attachmentId)}:{})})){
                 if(selectedSession.current===session)setDecisionSelection(undefined);
                 if(drafts.current.get(session)===prompt){drafts.current.set(session,'');}imageDrafts.consume(session,ids);
             }}finally{setSubmittedImages(previous=>({...previous,[session]:[]}));}
-        }}><label htmlFor="prompt">Message the lead</label><MessageInput id="prompt" value={text} onChange={event => setText(event.target.value)} disabled={!selected || ended || route.session!==selected} placeholder="Describe the next step…" aria-describedby={staleDecision ? "composer-help decision-target-status" : "composer-help"} aria-invalid={staleDecision || undefined} onPaste={event=>{
+        }}><label htmlFor="prompt">Message the lead</label><MessageInput id="prompt" enterKeyHint={touchEnter ? 'enter' : 'send'} value={text} onChange={event => setText(event.target.value)} disabled={!selected || ended || route.session!==selected} placeholder="Describe the next step…" aria-describedby={staleDecision ? "composer-help decision-target-status" : "composer-help"} aria-invalid={staleDecision || undefined} onPaste={event=>{
             const files=clipboardImages(event.clipboardData);if(!files.length)return;event.preventDefault();const session=selected,input=event.currentTarget,pasted=event.clipboardData.getData('text/plain');
             if(pasted){const inserted=insertPastedText(input.value,input.selectionStart,input.selectionEnd,pasted);setText(inserted.text);requestAnimationFrame(()=>{if(selectedSession.current===session&&document.activeElement===input)input.setSelectionRange(inserted.caret,inserted.caret);});}
             imageDrafts.add(session,files);
-        }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }}/><div className="composer-actions"><ImagePicker sessionId={selected} disabled={!canCompose||routeReady!==navigation.entry.key} onFiles={(files,owner)=>imageDrafts.add(owner,files)}/><span id="composer-help">{selected ? staleDecision ? 'Clear or update the changed reply target before sending.' : ended ? 'This session has ended.' : busy ? 'Saving message… Your draft is kept.' : draftImages.some(item=>item.status==='uploading') ? 'Uploading images…' : draftImages.some(item=>item.status==='error') ? 'Retry or remove failed images before sending.' : promptInbox.inbox.paused ? 'New messages wait until you resume the queue.' : working || promptInbox.inbox.active || promptInbox.inbox.queued.length ? 'Messages queue after current work · Enter to send' : 'Enter to send · Shift + Enter for a new line' : 'Choose a session to send a message.'}</span><button type="button" className="quiet" aria-label="Interrupt" title="Interrupt" disabled={!selected || busy || ended || !working || routeReady!==navigation.entry.key} onClick={() => void command({ type: 'turn.interrupt', taskId: leadTaskId })}><svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button><button aria-label="Send prompt" title="Send prompt" disabled={!canSend || staleDecision || (!text.trim()&&!draftImages.length)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></div></form> : <div className="composer-gate" aria-label="Session connection"><p>{!selected ? 'Choose a session or create one to start.' : releaseFailed ? 'Session resources could not be fully released. You can retry.' : removing ? 'Removing session… Waiting for its resources to stop.' : closing ? 'Closing session… History and drafts are kept.' : connection !== 'Connected' ? 'Connect to this session to continue.' : readiness.preparation?.status === 'preparing' ? 'Checking session setup…' : readiness.preparation?.status === 'failed' ? 'Session preparation failed. You can retry.' : 'Prepare the session before sending a message.'}</p>{selected && <button type="button" disabled={busy || (closing && !releaseFailed)} onClick={() => {
+        }} onKeyDown={event => { if (composerEnterSubmits({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing, defaultPrevented: event.defaultPrevented }, touchEnter)) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }}/><div className="composer-actions"><ImagePicker sessionId={selected} disabled={!canCompose||!routeInteractive} onFiles={(files,owner)=>imageDrafts.add(owner,files)}/><span id="composer-help">{selected ? staleDecision ? 'Clear or update the changed reply target before sending.' : ended ? 'This session has ended.' : busy ? 'Saving message… Your draft is kept.' : draftImages.some(item=>item.status==='uploading') ? 'Uploading images…' : draftImages.some(item=>item.status==='error') ? 'Retry or remove failed images before sending.' : promptInbox.inbox.paused ? 'New messages wait until you resume the queue.' : working || promptInbox.inbox.active || promptInbox.inbox.queued.length ? touchEnter ? 'Messages queue after current work · Use Send to send' : 'Messages queue after current work · Enter to send' : touchEnter ? 'Enter for a new line · Use Send to send' : 'Enter to send · Shift + Enter for a new line' : 'Choose a session to send a message.'}</span><button type="button" className="quiet" aria-label="Interrupt" title="Interrupt" disabled={!selected || busy || ended || !working || !routeInteractive} onClick={() => void interruptLead()}><svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button><button aria-label="Send prompt" title="Send prompt" disabled={!canSend || staleDecision || (!text.trim()&&!draftImages.length)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></div></form></div> : <div className="composer-gate" aria-label="Session connection"><p>{!selected ? 'Choose a session or create one to start.' : releaseFailed ? 'Session resources could not be fully released. You can retry.' : removing ? 'Removing session… Waiting for its resources to stop.' : closing ? 'Closing session… History and drafts are kept.' : readiness.preparation?.status === 'preparing' ? 'Checking session setup…' : readiness.preparation?.status === 'failed' ? 'Session preparation failed. You can retry.' : 'Prepare the session before sending a message.'}</p>{selected && <button type="button" disabled={busy || connection !== 'Connected' || (closing && !releaseFailed)} onClick={() => {
             if (releaseFailed) { if(removing && currentSession) void removeSession(currentSession); else void lifecycle('session.release'); }
-            else if (connection !== 'Connected') setReconnectRevision(value => value + 1);
             else if (readiness.preparation?.status === 'preparing') void lifecycle('session.prepare.cancel');
             else void lifecycle('session.prepare');
-        }}>{releaseFailed ? removing ? 'Retry removal' : 'Retry close' : closing ? removing ? 'Removing session…' : 'Closing session…' : connection !== 'Connected' ? 'Reconnect' : readiness.preparation?.status === 'preparing' ? 'Cancel preparation' : readiness.preparation?.status === 'failed' ? 'Retry preparation' : 'Prepare session'}</button>}{!!text && <small>Your draft is kept for this session.</small>}</div>}</>}</DraftBoundary></main>
+        }}>{releaseFailed ? removing ? 'Retry removal' : 'Retry close' : closing ? removing ? 'Removing session…' : 'Closing session…' : readiness.preparation?.status === 'preparing' ? 'Cancel preparation' : readiness.preparation?.status === 'failed' ? 'Retry preparation' : 'Prepare session'}</button>}{!!text && <small>Your draft is kept for this session.</small>}</div>}</>}</DraftBoundary></main>
         <aside className="workspace-pane" id="session-workspace" aria-label="Session workspace" hidden={narrow && mobileTab === 'chat'}><div className="workspace-panel" id="panel-activity" role="tabpanel" aria-labelledby="tab-activity" hidden={workspaceTab !== 'activity'} tabIndex={0}><Activity events={view.events} sessionId={selected} visible={paired && connection === 'Connected' && (narrow ? mobileTab === 'activity' : !workspaceCollapsed && workspaceTab === 'activity')}/></div><div className="workspace-panel" id="panel-subagents" role="tabpanel" aria-labelledby="tab-subagents" hidden={workspaceTab !== 'subagents'} tabIndex={0}><Subagents api={api} view={view} sessionId={selected} contexts={contextWindows} visible={hydratedSession === selected && !dialogKind && !drawerOpen && (narrow ? mobileTab === 'subagents' : !workspaceCollapsed && workspaceTab === 'subagents')} readMarkers={readMarkers} acknowledge={acknowledge}/></div><div className="workspace-panel" id="panel-openspec" role="tabpanel" aria-labelledby="tab-openspec" hidden={workspaceTab !== 'openspec'} tabIndex={0}><OpenSpec key={selected} sessionId={selected} visible={paired && (narrow ? mobileTab === 'openspec' : !workspaceCollapsed && workspaceTab === 'openspec')} api={api}/></div></aside></div>
         </div><ImagePreview image={previewImage} onClose={()=>{if(nav.current.route.overlay?.kind==='image')closeOverlay();else setPreviewImage(undefined);}}/><RestartDeckDialog open={route.overlay?.kind==='restart'} onClose={closeOverlay}/><InstallDeckDialog open={route.overlay?.kind==='install'} onClose={closeOverlay} help={install.help} status={install.status} pending={install.pending}/><WorkspaceDialog kind={dialogKind} project={dialogKind === 'session' || dialogKind === 'rename-project' ? creationProject : project} session={dialogKind === 'rename-session' ? actionSession : effectiveSession} api={api} mutate={mutate} returnFocus={dialogReturnFocus} onClose={() => setDialogKind(undefined)} onProject={next => { ++catalogRequest.current; setProjects(previous => previous.some(item => item.projectId === next.projectId) ? previous.map(item => item.projectId === next.projectId ? next : item) : [...previous, next]); if(dialogRenderToken===dialogToken.current&&dialogRenderGeneration===nav.generation&&dialogKind!=='rename-project'){expandProject(next.projectId);nav.navigate({project:next.projectId,tab:'chat'});} void load(); }} onCreated={id => { if(dialogRenderToken!==dialogToken.current||dialogRenderGeneration!==nav.generation){void load();return;} if (creationProject) { setProjectId(creationProject.projectId); expandProject(creationProject.projectId); void loadHistory(creationProject.projectId, undefined, true); } selectSession(id); void load(creationProject?.projectId); }} onRenamed={(id,title) => { ++sessionMutation.current; renameSessionView(id,title); if(actionSession?.projectId) void loadHistory(actionSession.projectId,undefined,true); }} onTrustChanged={() => {void load();void readiness.refresh();}} onAssigned={() => { if (projectId) void loadHistory(projectId, undefined, true); void load(); void readiness.refresh(); }}/></div></SecondaryInfoProvider>;
 }

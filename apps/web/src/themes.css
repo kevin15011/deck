@@ -1,0 +1,673 @@
+/* Popular developer palettes. Text roles are nudged only as far as needed for WCAG AA on Deck surfaces. */
+/* One Dark Pro: Atom One Dark (binaryify/OneDark-Pro). */
+:root[data-theme=one-dark-pro] {
+    color-scheme: dark;
+    --canvas: #21252b;
+    --surface: #282c34;
+    --logo-ink: #d7dae0;
+    --card: #2c313a;
+    --console: #21252b;
+    --input: #1e2227;
+    --soft: #abb2bf;
+    --quiet: #9da5b4;
+    --accent: #61afef;
+    --link: #61afef;
+    --action-hover: #74b9f1;
+    --focus: #528bff;
+    --terracotta: #61afef;
+    --hairline: #2c313a;
+    --accent-border: color-mix(in srgb, #61afef 45%, transparent);
+    --ink: #d7dae0;
+    --muted: #9da5b4;
+    --action: #61afef;
+    --on-action: #21252b;
+    --border: #3e4451;
+    --tint: #2c313a;
+    --warning: #e5c07b;
+    --warning-bg: color-mix(in srgb, #e5c07b 12%, #282c34);
+    --warning-border: color-mix(in srgb, #e5c07b 40%, transparent);
+    --error: #e37b83;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #e06c75 12%, #282c34);
+    --error-border: color-mix(in srgb, #e06c75 40%, transparent);
+    --backdrop: color-mix(in srgb, #21252b 80%, transparent);
+    --success: #98c379;
+    --md-text: var(--ink);
+    --md-heading: #e37b83;
+    --md-link: #61afef;
+    --md-inline: #98c379;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #c77bde;
+    --md-strong: #e5c07b;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #c77bde;
+    --md-ordered: #d19a66;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+/* Dracula: draculatheme.com official spec. */
+:root[data-theme=dracula] {
+    color-scheme: dark;
+    --canvas: #21222c;
+    --surface: #282a36;
+    --logo-ink: #f8f8f2;
+    --card: #2e303e;
+    --console: #21222c;
+    --input: #21222c;
+    --soft: #e2e2dc;
+    --quiet: #b0b4cf;
+    --accent: #ff79c6;
+    --link: #8be9fd;
+    --action-hover: #c5a0fa;
+    --focus: #ff79c6;
+    --terracotta: #ff79c6;
+    --hairline: #343746;
+    --accent-border: color-mix(in srgb, #ff79c6 45%, transparent);
+    --ink: #f8f8f2;
+    --muted: #b0b4cf;
+    --action: #bd93f9;
+    --on-action: #21222c;
+    --border: #44475a;
+    --tint: #343746;
+    --warning: #f1fa8c;
+    --warning-bg: color-mix(in srgb, #f1fa8c 12%, #282a36);
+    --warning-border: color-mix(in srgb, #f1fa8c 40%, transparent);
+    --error: #ff6666;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #ff5555 12%, #282a36);
+    --error-border: color-mix(in srgb, #ff5555 40%, transparent);
+    --backdrop: color-mix(in srgb, #21222c 80%, transparent);
+    --success: #50fa7b;
+    --md-text: var(--ink);
+    --md-heading: #bd93f9;
+    --md-link: #8be9fd;
+    --md-inline: #50fa7b;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #f1fa8c;
+    --md-strong: #ffb86c;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #ff79c6;
+    --md-ordered: #bd93f9;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+/* Catppuccin Mocha: catppuccin/palette Mocha. */
+:root[data-theme=catppuccin-mocha] {
+    color-scheme: dark;
+    --canvas: #181825;
+    --surface: #1e1e2e;
+    --logo-ink: #cdd6f4;
+    --card: #232334;
+    --console: #181825;
+    --input: #11111b;
+    --soft: #bac2de;
+    --quiet: #a6adc8;
+    --accent: #cba6f7;
+    --link: #89b4fa;
+    --action-hover: #d1b1f8;
+    --focus: #b4befe;
+    --terracotta: #cba6f7;
+    --hairline: #313244;
+    --accent-border: color-mix(in srgb, #cba6f7 45%, transparent);
+    --ink: #cdd6f4;
+    --muted: #a6adc8;
+    --action: #cba6f7;
+    --on-action: #181825;
+    --border: #45475a;
+    --tint: #313244;
+    --warning: #f9e2af;
+    --warning-bg: color-mix(in srgb, #f9e2af 12%, #1e1e2e);
+    --warning-border: color-mix(in srgb, #f9e2af 40%, transparent);
+    --error: #f38ba8;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #f38ba8 12%, #1e1e2e);
+    --error-border: color-mix(in srgb, #f38ba8 40%, transparent);
+    --backdrop: color-mix(in srgb, #181825 80%, transparent);
+    --success: #a6e3a1;
+    --md-text: var(--ink);
+    --md-heading: #cba6f7;
+    --md-link: #89b4fa;
+    --md-inline: #a6e3a1;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #f5c2e7;
+    --md-strong: #fab387;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #89b4fa;
+    --md-ordered: #fab387;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+/* Catppuccin Latte: catppuccin/palette Latte. */
+:root[data-theme=catppuccin-latte] {
+    color-scheme: light;
+    --canvas: #e6e9ef;
+    --surface: #eff1f5;
+    --logo-ink: #41445a;
+    --card: #ffffff;
+    --console: #e6e9ef;
+    --input: #ffffff;
+    --soft: #5c5f77;
+    --quiet: #5f6275;
+    --accent: #8538ea;
+    --link: #1c5ee1;
+    --action-hover: #7832d2;
+    --focus: #7287fd;
+    --terracotta: #8538ea;
+    --hairline: #ccd0da;
+    --accent-border: color-mix(in srgb, #8538ea 45%, transparent);
+    --ink: #41445a;
+    --muted: #5f6275;
+    --action: #8839ef;
+    --on-action: #ffffff;
+    --border: #bcc0cc;
+    --tint: #dce0e8;
+    --warning: #8f5b13;
+    --warning-bg: color-mix(in srgb, #df8e1d 12%, #eff1f5);
+    --warning-border: color-mix(in srgb, #df8e1d 40%, transparent);
+    --error: #ce0f38;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #d20f39 12%, #eff1f5);
+    --error-border: color-mix(in srgb, #d20f39 40%, transparent);
+    --backdrop: #1f232866;
+    --success: #2f7620;
+    --md-text: var(--ink);
+    --md-heading: #8538ea;
+    --md-link: #1c5ee1;
+    --md-inline: #2f7620;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #9a4e86;
+    --md-strong: #b24608;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #1c5ee1;
+    --md-ordered: #b24608;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+/* Tokyo Night: enkia/tokyo-night-vscode-theme Night. */
+:root[data-theme=tokyo-night] {
+    color-scheme: dark;
+    --canvas: #16161e;
+    --surface: #1a1b26;
+    --logo-ink: #c0caf5;
+    --card: #1f2335;
+    --console: #16161e;
+    --input: #14141b;
+    --soft: #a9b1d6;
+    --quiet: #9aa5ce;
+    --accent: #7aa2f7;
+    --link: #7dcfff;
+    --action-hover: #8aadf8;
+    --focus: #bb9af7;
+    --terracotta: #7aa2f7;
+    --hairline: #292e42;
+    --accent-border: color-mix(in srgb, #7aa2f7 45%, transparent);
+    --ink: #c0caf5;
+    --muted: #9aa5ce;
+    --action: #7aa2f7;
+    --on-action: #16161e;
+    --border: #3b4261;
+    --tint: #292e42;
+    --warning: #e0af68;
+    --warning-bg: color-mix(in srgb, #e0af68 12%, #1a1b26);
+    --warning-border: color-mix(in srgb, #e0af68 40%, transparent);
+    --error: #f7768e;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #f7768e 12%, #1a1b26);
+    --error-border: color-mix(in srgb, #f7768e 40%, transparent);
+    --backdrop: color-mix(in srgb, #16161e 80%, transparent);
+    --success: #9ece6a;
+    --md-text: var(--ink);
+    --md-heading: #bb9af7;
+    --md-link: #7dcfff;
+    --md-inline: #9ece6a;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #e0af68;
+    --md-strong: #ff9e64;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #7dcfff;
+    --md-ordered: #ff9e64;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+/* Nord: nordtheme.com palette. */
+:root[data-theme=nord] {
+    color-scheme: dark;
+    --canvas: #292e39;
+    --surface: #2e3440;
+    --logo-ink: #eceff4;
+    --card: #3b4252;
+    --console: #292e39;
+    --input: #262b35;
+    --soft: #d8dee9;
+    --quiet: #b8c0cf;
+    --accent: #88c0d0;
+    --link: #88c0d0;
+    --action-hover: #96c8d6;
+    --focus: #8fbcbb;
+    --terracotta: #88c0d0;
+    --hairline: #3b4252;
+    --accent-border: color-mix(in srgb, #88c0d0 45%, transparent);
+    --ink: #eceff4;
+    --muted: #b8c0cf;
+    --action: #88c0d0;
+    --on-action: #292e39;
+    --border: #4c566a;
+    --tint: #3b4252;
+    --warning: #ebcb8b;
+    --warning-bg: color-mix(in srgb, #ebcb8b 12%, #2e3440);
+    --warning-border: color-mix(in srgb, #ebcb8b 40%, transparent);
+    --error: #d9a0a6;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #bf616a 12%, #2e3440);
+    --error-border: color-mix(in srgb, #bf616a 40%, transparent);
+    --backdrop: color-mix(in srgb, #292e39 80%, transparent);
+    --success: #a3be8c;
+    --md-text: var(--ink);
+    --md-heading: #88c0d0;
+    --md-link: #88c0d0;
+    --md-inline: #a3be8c;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #c3a5bd;
+    --md-strong: #ebcb8b;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #98b2cc;
+    --md-ordered: #daa18f;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+/* Gruvbox Dark: morhetz/gruvbox dark medium. */
+:root[data-theme=gruvbox-dark] {
+    color-scheme: dark;
+    --canvas: #1d2021;
+    --surface: #282828;
+    --logo-ink: #ebdbb2;
+    --card: #32302f;
+    --console: #1d2021;
+    --input: #1d2021;
+    --soft: #d5c4a1;
+    --quiet: #bdae93;
+    --accent: #fe8019;
+    --link: #83a598;
+    --action-hover: #fbc548;
+    --focus: #fe8019;
+    --terracotta: #fe8019;
+    --hairline: #3c3836;
+    --accent-border: color-mix(in srgb, #fe8019 45%, transparent);
+    --ink: #ebdbb2;
+    --muted: #bdae93;
+    --action: #fabd2f;
+    --on-action: #1d2021;
+    --border: #504945;
+    --tint: #3c3836;
+    --warning: #fabd2f;
+    --warning-bg: color-mix(in srgb, #fabd2f 12%, #282828);
+    --warning-border: color-mix(in srgb, #fabd2f 40%, transparent);
+    --error: #fc6a59;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #fb4934 12%, #282828);
+    --error-border: color-mix(in srgb, #fb4934 40%, transparent);
+    --backdrop: color-mix(in srgb, #1d2021 80%, transparent);
+    --success: #b8bb26;
+    --md-text: var(--ink);
+    --md-heading: #fabd2f;
+    --md-link: #83a598;
+    --md-inline: #8ec07c;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #d3869b;
+    --md-strong: #fe8019;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #83a598;
+    --md-ordered: #fe8019;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+/* Monokai Pro: Monokai Pro (default filter). */
+:root[data-theme=monokai-pro] {
+    color-scheme: dark;
+    --canvas: #221f22;
+    --surface: #2d2a2e;
+    --logo-ink: #fcfcfa;
+    --card: #363337;
+    --console: #221f22;
+    --input: #19181a;
+    --soft: #e3e1e3;
+    --quiet: #c1c0c0;
+    --accent: #ffd866;
+    --link: #78dce8;
+    --action-hover: #ffdd78;
+    --focus: #ab9df2;
+    --terracotta: #ffd866;
+    --hairline: #403e41;
+    --accent-border: color-mix(in srgb, #ffd866 45%, transparent);
+    --ink: #fcfcfa;
+    --muted: #c1c0c0;
+    --action: #ffd866;
+    --on-action: #221f22;
+    --border: #5b595c;
+    --tint: #403e41;
+    --warning: #fc9867;
+    --warning-bg: color-mix(in srgb, #fc9867 12%, #2d2a2e);
+    --warning-border: color-mix(in srgb, #fc9867 40%, transparent);
+    --error: #ff6a8f;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #ff6188 12%, #2d2a2e);
+    --error-border: color-mix(in srgb, #ff6188 40%, transparent);
+    --backdrop: color-mix(in srgb, #221f22 80%, transparent);
+    --success: #a9dc76;
+    --md-text: var(--ink);
+    --md-heading: #ffd866;
+    --md-link: #78dce8;
+    --md-inline: #a9dc76;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #ab9df2;
+    --md-strong: #fc9867;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #ff6a8f;
+    --md-ordered: #78dce8;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+/* Rosé Pine: rose-pine/palette main. */
+:root[data-theme=rose-pine] {
+    color-scheme: dark;
+    --canvas: #191724;
+    --surface: #1f1d2e;
+    --logo-ink: #e0def4;
+    --card: #26233a;
+    --console: #191724;
+    --input: #191724;
+    --soft: #c9c6e0;
+    --quiet: #908caa;
+    --accent: #ebbcba;
+    --link: #9ccfd8;
+    --action-hover: #cbb2ea;
+    --focus: #ebbcba;
+    --terracotta: #ebbcba;
+    --hairline: #26233a;
+    --accent-border: color-mix(in srgb, #ebbcba 45%, transparent);
+    --ink: #e0def4;
+    --muted: #908caa;
+    --action: #c4a7e7;
+    --on-action: #191724;
+    --border: #403d52;
+    --tint: #26233a;
+    --warning: #f6c177;
+    --warning-bg: color-mix(in srgb, #f6c177 12%, #1f1d2e);
+    --warning-border: color-mix(in srgb, #f6c177 40%, transparent);
+    --error: #eb6f92;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #eb6f92 12%, #1f1d2e);
+    --error-border: color-mix(in srgb, #eb6f92 40%, transparent);
+    --backdrop: color-mix(in srgb, #191724 80%, transparent);
+    --success: #9ccfd8;
+    --md-text: var(--ink);
+    --md-heading: #c4a7e7;
+    --md-link: #9ccfd8;
+    --md-inline: #9ccfd8;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #f6c177;
+    --md-strong: #ebbcba;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #ebbcba;
+    --md-ordered: #c4a7e7;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+/* Night Owl: sdras/night-owl-vscode-theme. */
+:root[data-theme=night-owl] {
+    color-scheme: dark;
+    --canvas: #010e1a;
+    --surface: #011627;
+    --logo-ink: #d6deeb;
+    --card: #0b2942;
+    --console: #010e1a;
+    --input: #0b253a;
+    --soft: #c5cfe0;
+    --quiet: #8ba5c0;
+    --accent: #c792ea;
+    --link: #82aaff;
+    --action-hover: #91b4ff;
+    --focus: #7fdbca;
+    --terracotta: #c792ea;
+    --hairline: #0b2942;
+    --accent-border: color-mix(in srgb, #c792ea 45%, transparent);
+    --ink: #d6deeb;
+    --muted: #8ba5c0;
+    --action: #82aaff;
+    --on-action: #010e1a;
+    --border: #1d3b53;
+    --tint: #0b2942;
+    --warning: #ecc48d;
+    --warning-bg: color-mix(in srgb, #ecc48d 12%, #011627);
+    --warning-border: color-mix(in srgb, #ecc48d 40%, transparent);
+    --error: #f05d5a;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #ef5350 12%, #011627);
+    --error-border: color-mix(in srgb, #ef5350 40%, transparent);
+    --backdrop: color-mix(in srgb, #010e1a 80%, transparent);
+    --success: #addb67;
+    --md-text: var(--ink);
+    --md-heading: #c792ea;
+    --md-link: #82aaff;
+    --md-inline: #addb67;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #ecc48d;
+    --md-strong: #f78c6c;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #7fdbca;
+    --md-ordered: #f78c6c;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+/* Solarized Light: ethanschoonover.com/solarized. */
+:root[data-theme=solarized-light] {
+    color-scheme: light;
+    --canvas: #eee8d5;
+    --surface: #fdf6e3;
+    --logo-ink: #073642;
+    --card: #fffbf0;
+    --console: #eee8d5;
+    --input: #fffbf0;
+    --soft: #566c73;
+    --quiet: #576a71;
+    --accent: #1e6ca4;
+    --link: #1e6ca4;
+    --action-hover: #1d6ba3;
+    --focus: #6c71c4;
+    --terracotta: #1e6ca4;
+    --hairline: #e4ddc8;
+    --accent-border: color-mix(in srgb, #1e6ca4 45%, transparent);
+    --ink: #073642;
+    --muted: #576a71;
+    --action: #217ab9;
+    --on-action: #ffffff;
+    --border: #d3cbb7;
+    --tint: #eee8d5;
+    --warning: #826300;
+    --warning-bg: color-mix(in srgb, #b58900 12%, #fdf6e3);
+    --warning-border: color-mix(in srgb, #b58900 40%, transparent);
+    --error: #c22c29;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #dc322f 12%, #fdf6e3);
+    --error-border: color-mix(in srgb, #dc322f 40%, transparent);
+    --backdrop: #1f232866;
+    --success: #606e00;
+    --md-text: var(--ink);
+    --md-heading: #b34213;
+    --md-link: #1e6ca4;
+    --md-inline: #1e746d;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #ba3072;
+    --md-strong: #073642;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #1e6ca4;
+    --md-ordered: #b34213;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+/* GitHub Light: GitHub Light Default (Primer). */
+:root[data-theme=github-light] {
+    color-scheme: light;
+    --canvas: #f6f8fa;
+    --surface: #ffffff;
+    --logo-ink: #1f2328;
+    --card: #ffffff;
+    --console: #f6f8fa;
+    --input: #ffffff;
+    --soft: #393f46;
+    --quiet: #59636e;
+    --accent: #0969da;
+    --link: #0969da;
+    --action-hover: #1b7836;
+    --focus: #0969da;
+    --terracotta: #0969da;
+    --hairline: #d1d9e0;
+    --accent-border: color-mix(in srgb, #0969da 45%, transparent);
+    --ink: #1f2328;
+    --muted: #59636e;
+    --action: #1f883d;
+    --on-action: #ffffff;
+    --border: #d1d9e0;
+    --tint: #eff2f5;
+    --warning: #9a6700;
+    --warning-bg: color-mix(in srgb, #9a6700 12%, #ffffff);
+    --warning-border: color-mix(in srgb, #9a6700 40%, transparent);
+    --error: #d1242f;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #d1242f 12%, #ffffff);
+    --error-border: color-mix(in srgb, #d1242f 40%, transparent);
+    --backdrop: #1f232866;
+    --success: #1a7f37;
+    --md-text: var(--ink);
+    --md-heading: #0550ae;
+    --md-link: #0969da;
+    --md-inline: #0a3069;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #8250df;
+    --md-strong: #953800;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #cf222e;
+    --md-ordered: #0550ae;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
+:root[data-theme=one-dark-pro] input::placeholder,
+:root[data-theme=one-dark-pro] textarea::placeholder,
+:root[data-theme=dracula] input::placeholder,
+:root[data-theme=dracula] textarea::placeholder,
+:root[data-theme=catppuccin-mocha] input::placeholder,
+:root[data-theme=catppuccin-mocha] textarea::placeholder,
+:root[data-theme=catppuccin-latte] input::placeholder,
+:root[data-theme=catppuccin-latte] textarea::placeholder,
+:root[data-theme=tokyo-night] input::placeholder,
+:root[data-theme=tokyo-night] textarea::placeholder,
+:root[data-theme=nord] input::placeholder,
+:root[data-theme=nord] textarea::placeholder,
+:root[data-theme=gruvbox-dark] input::placeholder,
+:root[data-theme=gruvbox-dark] textarea::placeholder,
+:root[data-theme=monokai-pro] input::placeholder,
+:root[data-theme=monokai-pro] textarea::placeholder,
+:root[data-theme=rose-pine] input::placeholder,
+:root[data-theme=rose-pine] textarea::placeholder,
+:root[data-theme=night-owl] input::placeholder,
+:root[data-theme=night-owl] textarea::placeholder,
+:root[data-theme=solarized-light] input::placeholder,
+:root[data-theme=solarized-light] textarea::placeholder,
+:root[data-theme=github-light] input::placeholder,
+:root[data-theme=github-light] textarea::placeholder { color: var(--muted); opacity: 1; }
+:root[data-theme=one-dark-pro] .connection-dot.ready,
+:root[data-theme=one-dark-pro] .session-readiness.ready,
+:root[data-theme=dracula] .connection-dot.ready,
+:root[data-theme=dracula] .session-readiness.ready,
+:root[data-theme=catppuccin-mocha] .connection-dot.ready,
+:root[data-theme=catppuccin-mocha] .session-readiness.ready,
+:root[data-theme=catppuccin-latte] .connection-dot.ready,
+:root[data-theme=catppuccin-latte] .session-readiness.ready,
+:root[data-theme=tokyo-night] .connection-dot.ready,
+:root[data-theme=tokyo-night] .session-readiness.ready,
+:root[data-theme=nord] .connection-dot.ready,
+:root[data-theme=nord] .session-readiness.ready,
+:root[data-theme=gruvbox-dark] .connection-dot.ready,
+:root[data-theme=gruvbox-dark] .session-readiness.ready,
+:root[data-theme=monokai-pro] .connection-dot.ready,
+:root[data-theme=monokai-pro] .session-readiness.ready,
+:root[data-theme=rose-pine] .connection-dot.ready,
+:root[data-theme=rose-pine] .session-readiness.ready,
+:root[data-theme=night-owl] .connection-dot.ready,
+:root[data-theme=night-owl] .session-readiness.ready,
+:root[data-theme=solarized-light] .connection-dot.ready,
+:root[data-theme=solarized-light] .session-readiness.ready,
+:root[data-theme=github-light] .connection-dot.ready,
+:root[data-theme=github-light] .session-readiness.ready { background: var(--success); }

@@ -301,3 +301,43 @@ describe("continuationBlock (XR-3.7)", () => {
     expect(continuationBlock(l, "nope")).toEqual({ code: "task-unknown" });
   });
 });
+
+test('recovery durably repairs an empty restart pause, including previously recovered sessions',()=>{
+ for(const reason of ['daemon-stopped','daemon-restart'])for(const lifecycle of ['idle','recovered'])for(const queued of [false,true]) {
+  const log=EventLog.open({dir:join(tempDir(),'events'),sessionId:'repair'}),ledger=Ledger.empty('repair');
+  const drafts:EventDraft[]=[{kind:'session.state',data:{state:lifecycle}}];
+  if(queued)drafts.push({kind:'prompt.queued',data:{promptId:'p',text:'wait',textHash:'h',by:'user'}});
+  drafts.push({kind:'prompt.queue',data:{paused:true,reason}});
+  for(const event of log.appendMany(drafts))ledger.apply(event);
+  const report=recoverSession({log,ledger,probe:fakeOs('linux').probe,leaseFileFor:()=>join(tempDir(),'absent')});
+  expect(report.interrupted).toEqual([]);expect(report.unsettled).toEqual([]);
+  expect(ledger.promptQueue.paused).toBe(queued);
+  const replayed=Ledger.empty('repair');for(const event of log.readAfter(0))replayed.apply(event);
+  expect(replayed.toState()).toEqual(ledger.toState());
+  expect([...log.readAfter(0)].some(e=>e.kind==='prompt.queue'&&e.data.paused===false)).toBe(!queued);log.close();
+ }
+});
+
+test.each(['pending','sending','delivered','legacy'] as const)('restart preserves the delivery boundary and images: %s',handoff=>{
+  const dir=tempDir(),log=EventLog.open({dir:join(dir,'events'),sessionId:'s-1'}),ledger=Ledger.empty('s-1'),file=join(dir,'lead.lease');
+  const drafts:EventDraft[]=[{kind:'session.created',data:{projectRoot:'/p'}},{kind:'session.state',data:{state:'running'}},{kind:'task.created',source:{taskId:'lead'},data:{taskId:'lead',memberId:'lead',runnerId:'codex',modelId:'m'}},{kind:'task.state',source:{taskId:'lead'},data:{taskId:'lead',state:'running'}},{kind:'prompt.queued',data:{promptId:'p',text:'kept',textHash:'hash',by:'web',attachments:[{attachmentId:'image',name:'photo.png',mimeType:'image/png',sizeBytes:10}]}},{kind:'prompt.dispatched',data:{promptId:'p',taskId:'lead',attempt:1,...(handoff!=='legacy'?{handoff:'gated'}:{})}}];
+  if(['sending','delivered'].includes(handoff))drafts.push({kind:'prompt.handoff',data:{promptId:'p',taskId:'lead',attempt:1,state:'sending'}});
+  if(handoff==='delivered')drafts.push({kind:'prompt.handoff',data:{promptId:'p',taskId:'lead',attempt:1,state:'delivered'}});
+  for(const event of log.appendMany(drafts))ledger.apply(event);writeLease(file,lease('lead'));
+  recoverSession({log,ledger,probe:fakeOs('linux').probe,leaseFileFor:()=>file});
+  const prompt=ledger.prompt('p')!;
+  if(handoff==='pending'){expect(prompt).toMatchObject({state:'queued',text:'kept',attachments:[{attachmentId:'image'}]});expect(ledger.promptQueue).toMatchObject({paused:true,reason:'daemon-restart'});}
+  else if(handoff==='sending'){expect(prompt.handoff?.state).toBe('unknown');expect(ledger.promptQueue.paused).toBe(true);}
+  else if(handoff==='delivered'){expect(prompt.handoff?.state).toBe('delivered');expect(ledger.promptQueue.paused).toBe(true);}
+  else expect(prompt.handoff).toBeUndefined();
+  const replayed=Ledger.empty('s-1');for(const event of log.readAfter(0))replayed.apply(event);expect(replayed.toState()).toEqual(ledger.toState());log.close();
+});
+
+test('recovery of an already completed delivered attempt never pauses the queue',()=>{
+ const log=EventLog.open({dir:join(tempDir(),'events'),sessionId:'s-1'}),ledger=Ledger.empty('s-1');
+ const drafts:EventDraft[]=[{kind:'session.state',data:{state:'idle'}},{kind:'task.created',data:{taskId:'lead',memberId:'lead',runnerId:'codex',modelId:'m'}},{kind:'task.state',data:{taskId:'lead',state:'running'}},{kind:'task.state',data:{taskId:'lead',state:'completed'}},{kind:'prompt.queued',data:{promptId:'p',text:'done',textHash:'h',by:'web'}},{kind:'prompt.dispatched',data:{promptId:'p',taskId:'lead',attempt:1,handoff:'gated'}},{kind:'prompt.handoff',data:{promptId:'p',taskId:'lead',attempt:1,state:'sending'}},{kind:'prompt.handoff',data:{promptId:'p',taskId:'lead',attempt:1,state:'delivered'}}];
+ for(const e of log.appendMany(drafts))ledger.apply(e);
+ recoverSession({log,ledger,probe:fakeOs('linux').probe,leaseFileFor:()=>join(tempDir(),'absent')});
+ expect(ledger.prompt('p')?.state).toBe('completed');expect(ledger.promptQueue.paused).toBe(false);
+ expect([...log.readAfter(0)].filter(e=>e.kind==='prompt.queue'&&e.data.paused===true)).toHaveLength(0);log.close();
+});

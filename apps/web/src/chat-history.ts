@@ -228,21 +228,21 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
                 }
             }
         }
+        // Visibility/online notifications are hints, not reasons to replace a healthy
+        // socket or an in-flight history request. Focus alone never reconnects.
         const resume = () => {
-            if (document.visibilityState === 'visible' && active()) {
+            if (document.visibilityState === 'visible' && active() && socket?.readyState !== WebSocket.OPEN && socket?.readyState !== WebSocket.CONNECTING && (!request || request.signal.aborted)) {
                 clearTimeout(timer);
                 timer = setTimeout(() => void connect(), 0);
             }
         };
         document.addEventListener('visibilitychange', resume);
         window.addEventListener('online', resume);
-        window.addEventListener('focus', resume);
         window.addEventListener('pageshow', resume);
         void connect();
         return () => {
             document.removeEventListener('visibilitychange', resume);
             window.removeEventListener('online', resume);
-            window.removeEventListener('focus', resume);
             window.removeEventListener('pageshow', resume);
             run.controller.abort();
             run.pageRequest?.abort();

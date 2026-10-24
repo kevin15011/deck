@@ -25,10 +25,14 @@ export interface SessionService {
   /** Derive current unresolved attention from durable evidence; reading never resolves it. */
   pushAttentionItems?(sessionId: string): import("./push-attention").AttentionItem[];
   pushAttentionSessions?(): string[];
+  /** Optional display name for device-local grouped reply notifications. */
+  pushSessionName?(sessionId: string): string | undefined;
   canNotifyReplies?(sessionId:string):boolean;
   isPushAttentionCurrent?(attention: PushAttention): boolean;
   /** True while any task runs: keeps the daemon alive and blocks version-skew restarts. */
   hasRunningWork(): boolean;
+  /** Sessions still owning runner resources, even between turns. */
+  hasActiveSessions?(): boolean;
   /** Read-only/admin queries from clients (`sessions.list`, `sessions.prune`, `drivers.status`, ...). Optional. */
   query?(name: string, args: unknown): Promise<CommandOutcome> | CommandOutcome;
   /** View of a task for the bridge's `deck_status` tool. Optional: the daemon falls back to the grant itself. */
@@ -47,4 +51,5 @@ export class UnavailableSessionService implements SessionService {
   }
   openLog(): undefined { return undefined; }
   hasRunningWork(): boolean { return false; }
+  hasActiveSessions(): boolean { return false; }
 }

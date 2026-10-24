@@ -38,14 +38,14 @@ import { boundRaw, SESSION_EVENT_KINDS, type SessionEvent, type SessionEventKind
 import { continuityContext } from "./continuity";
 import { CROSS_RUNNER_LEAD_CONTINUITY_GUIDANCE, validTaskIntegration, computeChildMcpSet, validateCapabilityAvailability, CODEBASE_DISCOVERY_FALLBACK, type CapabilityAvailability } from "@deck/core/session/mcp";
 import { redactText } from "@deck/core/session/redaction";
-import { sanitizeTurnFailure } from "@deck/core/session/failure";
+import { DriverStartupCleanupError, sanitizeTurnFailure } from "@deck/core/session/failure";
 import type { ApprovalBroker } from "./approval-broker";
 import { SESSION_MCP_SERVER_ID, sessionMcpServerSpec } from "./bridge-config";
 import { systemClock, type Clock } from "./clock";
 import type { CredentialGrant, CredentialRegistry } from "./credentials";
 import { createDriverSpawn } from "./driver-spawn";
 import { EventLog, type EventDraft } from "./event-log";
-import { Ledger, loadLedger, saveLedgerSnapshot, TERMINAL_TASK_STATES, type SessionHandoff, type TaskState, type UserPrompt } from "./ledger";
+import { Ledger, loadLedger, promptEndDrafts, saveLedgerSnapshot, TERMINAL_TASK_STATES, type SessionHandoff, type TaskState, type UserPrompt } from "./ledger";
 import { ProjectStore, projectIdentity } from "./project-store";
 import type { DaemonLogger } from "./daemon-logger";
 import { assertPrivateFile, assertOutsideProject, assertSafeSegment, ensurePrivateDir, sessionPaths, writePrivateFile, type SessionPaths, type StatePaths } from "./paths";
@@ -88,6 +88,7 @@ export type ChildMcpResolver = {
   runnerPackages(runnerId: string): readonly string[];
   memoryProviderIds?: readonly string[];
   webSearch?: { enabled: boolean; serverId?: string };
+  searchDiagnostics?: readonly string[];
   /** Launch spec for a non-session server id; undefined means it cannot be launched (skipped with a diagnostic). */
   envOverlay?: Readonly<Record<string, string>>;
   resolveServer(id: string): ChildMcpServerSpec | undefined;
@@ -98,6 +99,7 @@ export type ChildMcpResolver = {
 const CHILD_MCP_PREPARATION_STEPS = ["native-memory", "native-mcp-config", "capability-policy", "memory-transport", "codebase-readiness", "cleanup"] as const;
 type ChildMcpPreparationStep = typeof CHILD_MCP_PREPARATION_STEPS[number];
 export type ChildMcpContext = {
+  modelId?: string; providerId?: string; runnerVersion?: string; projectConfigTrusted?: boolean;
   projectRoot: string; sessionId: string; taskId: string; signal: AbortSignal;
   /** Optional metadata-only stage boundary; never pass paths, configuration or payloads. */
   preparationStep?: (step: ChildMcpPreparationStep) => void;
@@ -175,6 +177,7 @@ type Turn = {
   noticeSnapshot?: Array<{ taskId: string; attempt: number; text: string }>;
   noticeContext?: string;
   admissionSeq?: number;
+  gatedInput?: boolean; inputClaimed?: boolean; deliveryDrafts?: EventDraft[];
   nativeEnded?: boolean; steeringAllowed?: boolean; steeringPublished?: boolean;
   done: Promise<void>;
   resolveDone: () => void;
@@ -261,7 +264,7 @@ export class SessionManager implements SessionService {
           if (prompt.state !== "dispatched" || !prompt.taskId) continue;
           const attempt = live.ledger.task(prompt.taskId)?.attempts.find(attempt => attempt.attempt === prompt.attempt);
           if (attempt && (TERMINAL_TASK_STATES.includes(attempt.state) || attempt.state === "ownership-unsettled")) {
-            this.append(live, [{ kind: "prompt.state", data: { promptId: prompt.promptId, state: attempt.state } }, ...(["failed", "interrupted", "ownership-unsettled"].includes(attempt.state) ? [{ kind: "prompt.queue" as const, data: { paused: true, reason: attempt.state } }] : [])]); this.flush(live);
+            this.append(live, [...promptEndDrafts(prompt, attempt.state, "daemon-restart"), ...(["failed", "interrupted", "ownership-unsettled"].includes(attempt.state) ? [{ kind: "prompt.queue" as const, data: { paused: true, reason: attempt.state } }] : [])]); this.flush(live);
           }
         }
       }
@@ -408,6 +411,7 @@ export class SessionManager implements SessionService {
   }
 
   pushAttentionSessions(): string[] { return this.sessionIds(); }
+  pushSessionName(sessionId: string): string | undefined { return this.load(sessionId)?.ledger.session.title; }
 
   canNotifyReplies(sessionId:string):boolean {
     const live=this.load(sessionId);if(!live)return false;
@@ -439,6 +443,13 @@ export class SessionManager implements SessionService {
     return !live.ledger.session.released && latest?.state === "completed" && latest.startedSeq <= attention.seq
       && live.turns.size === 0 && live.queue.length === 0 && !live.wakeTimer && !live.notices.size && !this.waitingPrompts(live).length
       && !live.ledger.pendingQuestions().length && !live.ledger.pendingApprovals().length;
+  }
+
+  hasActiveSessions(): boolean {
+    return this.sessionIds().some(id => {
+      const live=this.sessions.get(id);
+      return !live || live.broken || !live.ledger.session.released && !live.ledger.session.removed && live.ledger.session.state !== "ended";
+    });
   }
 
   hasRunningWork(): boolean {
@@ -537,9 +548,11 @@ export class SessionManager implements SessionService {
     this.questionBroker.dispose(this.shutdownReason.startsWith("web-restart-forced:")?this.shutdownReason:"shutdown");
     for (const live of this.sessions.values()) {
       if(this.shutdownReason.startsWith("web-restart-forced:")){
-        const cancelled=live.ledger.prompts().filter(p=>p.state==="queued").map(p=>({kind:"prompt.state" as const,data:{promptId:p.promptId,state:"cancelled",reason:this.shutdownReason}}));
-        this.append(live,[...cancelled,{kind:"prompt.queue",data:{paused:true,reason:this.shutdownReason}}]);this.flush(live);
+        const cancelled=live.ledger.prompts().filter(p=>p.state==="queued" && !p.gated).map(p=>({kind:"prompt.state" as const,data:{promptId:p.promptId,state:"cancelled",reason:this.shutdownReason}}));
+        if (cancelled.length) { this.append(live,[...cancelled,{kind:"prompt.queue",data:{paused:true,reason:this.shutdownReason}}]);this.flush(live); }
       }
+      const retained = live.ledger.prompts().filter(p=>p.state==='queued' && p.gated);
+      if (retained.length) { this.append(live,retained.reverse().flatMap(p=>promptEndDrafts(p,'interrupted','daemon-restart'))); this.flush(live); }
       if (live.wakeTimer !== undefined) this.clock.clearTimeout(live.wakeTimer);
       live.wakeTimer = undefined; live.notices.clear(); this.cancelQueued(live);
       live.preparation?.controller.abort();
@@ -1041,11 +1054,11 @@ export class SessionManager implements SessionService {
       decisionReply = { ...prompt.decisionTarget, promptId: prompt.promptId, taskId: turn.taskId, attempt: turn.attempt, admittedSeq: live.log.lastSeq + 1, ...(prompt.targetQuestionRevision ? {questionRevision:prompt.targetQuestionRevision} : {}), stale: !decision || !["pending", "deferred"].includes(decision.state) || prompt.targetQuestionRevision !== decision.questionRevision };
     }
     if (prompt) {
-      drafts.push({ kind: "prompt.dispatched", data: { promptId: prompt.promptId, taskId: turn.taskId, attempt: turn.attempt, ...(turn.reseeded ? { reseeded: true } : {}), ...(decisionReply ? {decisionReply} : {}) } });
-      if (decisionReply) drafts.push({kind:"decision.reply",data:{...decisionReply}});
-      if (!prompt.dispatchedSeq) drafts.push({ kind: "message.completed", source: { taskId: turn.taskId, memberId: LEAD_MEMBER_ID }, data: { role: "user", text: turn.prompt, by: prompt.by, promptId: prompt.promptId, ...(decisionReply ? {decisionReply} : {}), ...(prompt.attachments?.length ? {attachments:prompt.attachments} : {}) } });
+      drafts.push({ kind: "prompt.dispatched", data: { promptId: prompt.promptId, taskId: turn.taskId, attempt: turn.attempt, ...(turn.gatedInput ? {handoff:"gated",text:prompt.text??"",attachments:prompt.attachments??[]} : {}), ...(turn.reseeded ? { reseeded: true } : {}), ...(!turn.gatedInput && decisionReply ? {decisionReply} : {}) } });
+      if (decisionReply && !turn.gatedInput) drafts.push({kind:"decision.reply",data:{...decisionReply}});
+      if (!prompt.dispatchedSeq) drafts.push({ kind: "message.completed", source: { taskId: turn.taskId, memberId: LEAD_MEMBER_ID }, data: { role: "user", text: turn.prompt, by: prompt.by, promptId: prompt.promptId, ...(turn.gatedInput ? {handoff:"pending"} : {}), ...(decisionReply ? {decisionReply} : {}), ...(prompt.attachments?.length ? {attachments:prompt.attachments} : {}) } });
     }
-    // Commit admission first: every retained JSONL prefix identifies the genuine block.
+    // Commit the attempt binding first. Gated inputs become authority only on delivery.
     if (drafts.length) { this.append(live, drafts); this.flush(live); drafts.length = 0; }
     this.refreshNotices(live);
     const targetNotice = decisionReply ? `Decision reply target ${decisionReply.decisionId}, selected revision ${decisionReply.revision}: ${decisionReply.stale ? "STALE target/question; preserve the user text and do not apply it to the current question. Ask for clarification." : "Admitted reply; decision remains unresolved until explicit Lead resolution."}` : "";
@@ -1065,8 +1078,42 @@ export class SessionManager implements SessionService {
     else { turn.prompt = context || turn.prompt; turn.noticeContext = undefined; }
     for (const notice of turn.noticeSnapshot) drafts.push({ kind: "task.delivery", source: { taskId: turn.taskId, memberId: LEAD_MEMBER_ID }, data: { taskId: notice.taskId, attempt: notice.attempt, leadTaskId: turn.taskId, leadAttempt: turn.attempt, ...(turn.promptId ? { promptId: turn.promptId } : {}) } });
     if (turn.noticeSnapshot.length) drafts.push({ kind: "diagnostic", source: { taskId: turn.taskId }, data: { code: "lead.notices-delivered", leadAttempt: turn.attempt, notices: turn.noticeSnapshot.map(({ taskId, attempt }) => ({ taskId, attempt })), ...(turn.promptId ? { promptId: turn.promptId } : {}) } });
+    if (turn.gatedInput) {
+      turn.deliveryDrafts = [...(decisionReply ? [{kind:"decision.reply" as const,data:{...decisionReply}}] : []), ...drafts];
+      drafts.length = 0;
+    }
     const events = drafts.length ? this.append(live, drafts) : [];
     this.flush(live); turn.admissionSeq = events.at(-1)?.seq ?? live.log.lastSeq;
+    this.refreshNotices(live);
+  }
+
+  private claimInput(live: Live, turn: Turn): boolean {
+    if (live.broken || this.closing || live.stopping || live.ledger.session.released || turn.kind || turn.nativeEnded || turn.controller.signal.aborted || live.turns.get(turn.taskId) !== turn) return false;
+    if (turn.inputClaimed) return false;
+    const prompt = turn.promptId ? live.ledger.prompt(turn.promptId) : undefined;
+    if (prompt?.handoff) {
+      if (prompt.state !== 'dispatched' || prompt.handoff.state !== 'pending' || prompt.attempt !== turn.attempt) return false;
+      this.append(live,{kind:'prompt.handoff',data:{promptId:prompt.promptId,taskId:turn.taskId,attempt:turn.attempt,state:'sending'}});
+      this.flush(live);
+    } else if (turn.promptId && prompt?.state !== 'dispatched') return false;
+    turn.inputClaimed = true;
+    return true;
+  }
+
+  private inputDelivered(live: Live, turn: Turn, evidence: string): void {
+    if (!turn.gatedInput || !turn.inputClaimed) return;
+    const prompt = turn.promptId ? live.ledger.prompt(turn.promptId) : undefined;
+    const drafts: EventDraft[] = [];
+    if (prompt?.handoff?.state === 'sending') drafts.push({kind:'prompt.handoff',data:{promptId:prompt.promptId,taskId:turn.taskId,attempt:turn.attempt,state:'delivered',evidence}});
+    if (turn.deliveryDrafts?.length) {
+      for (const draft of turn.deliveryDrafts) if (draft.kind === 'decision.reply') {
+        const decision = live.ledger.decision(String(draft.data?.decisionId));
+        draft.data = {...draft.data,admittedSeq:live.log.lastSeq+1,stale:draft.data?.stale===true || !decision || !['pending','deferred'].includes(decision.state) || draft.data?.questionRevision !== decision.questionRevision};
+      }
+      drafts.push(...turn.deliveryDrafts);
+    }
+    if (!drafts.length) return;
+    this.append(live,drafts); this.flush(live); turn.deliveryDrafts = undefined;
     this.refreshNotices(live);
   }
 
@@ -1288,7 +1335,7 @@ export class SessionManager implements SessionService {
       update({ phase: "preparing-tools" });
       failureCode = "preparation-tools-failed";
       if (typeof this.options.childMcp === "function") {
-        const pending = this.options.childMcp(assignment.runnerId, { projectRoot: live.meta.projectRoot, sessionId: live.sessionId, taskId: this.leadTaskId(live), signal });
+        const pending = this.options.childMcp(assignment.runnerId, { projectRoot: live.meta.projectRoot, sessionId: live.sessionId, taskId: this.leadTaskId(live), signal, modelId: assignment.modelId, runnerVersion: probe.version, projectConfigTrusted: this.projectStore().projectTrust(live.meta.projectId ?? projectIdentity(live.meta.projectRoot)).trusted });
         // The resolver owns its abortable helper operations. Await its result so a
         // cancellation cannot outlive the binding whose release we must drain.
         resolver = await pending;
@@ -1320,6 +1367,10 @@ export class SessionManager implements SessionService {
         }
       }
       update(completion);
+      if (completion.status === "ready" && !signal.aborted && live.preparation === job && job.epoch === (live.ledger.session.releaseEpoch ?? 0)) {
+        const repair = live.ledger.restartQueueRepair("restart-prepared");
+        if (repair) { this.append(live, repair); this.flush(live); }
+      }
     }
   }
   private async cancelPreparation(live: Live, command: Extract<SessionCommand, { type: "session.prepare.cancel" }>): Promise<ExecuteOutcome> {
@@ -1443,8 +1494,8 @@ export class SessionManager implements SessionService {
       steeringRunnerId: this.steeringTarget(live)?.turn.assignment.runnerId,
       omittedDeliveries: Math.max(0,live.ledger.prompts().filter(p=>p.steering && !(p.steering.state==="not-accepted"&&p.steering.queueFallback)).length-16),
       deliveries: live.ledger.prompts().filter(p=>p.steering && !(p.steering.state==="not-accepted"&&p.steering.queueFallback)).slice(-16).map(p=>({promptId:p.promptId,text:p.text??p.steering!.text.slice(0,p.steering!.text.lastIndexOf("\n\n[Deck genuine user input reference:")),state:p.steering!.state=== "pending" ? "sending" : p.steering!.state,runnerId:p.steering!.runnerId??live.ledger.task(p.steering!.taskId)?.attempts.find(a=>a.attempt===p.steering!.attempt)?.runnerId??'codex', historical:!p.steering!.eligible})),
-      queued: this.waitingPrompts(live).map((prompt, index) => ({ promptId: prompt.promptId, text: prompt.text ?? "", ...(prompt.decisionTarget ? {decisionTarget:prompt.decisionTarget} : {}), ...(prompt.attachments?.length ? {attachments:prompt.attachments} : {}), createdAt: prompt.createdAt, position: index + 1 })),
-      ...(active ? { active: { promptId: active.promptId, taskId: active.taskId, attempt: active.attempt, state: "dispatched" } } : {}),
+      queued: this.waitingPrompts(live).map((prompt, index) => ({ promptId: prompt.promptId, text: prompt.text ?? "", ...(prompt.decisionTarget ? {decisionTarget:prompt.decisionTarget} : {}), ...(prompt.attachments?.length ? {attachments:prompt.attachments} : {}), ...(prompt.requeuedSeq ? {requeued:true,reason:prompt.reason} : {}), createdAt: prompt.createdAt, position: index + 1 })),
+      ...(active ? { active: { promptId: active.promptId, taskId: active.taskId, attempt: active.attempt, state: "dispatched", ...(active.handoff ? {handoff:active.handoff.state} : {}), ...(active.handoff?.state === "pending" ? {text:active.text??"",attachments:active.attachments??[]} : {}) } } : {}),
       limits: { maxPending: MAX_PENDING_PROMPTS, maxBytes: MAX_PENDING_PROMPT_BYTES },
     };
   }
@@ -1475,7 +1526,7 @@ export class SessionManager implements SessionService {
     const requestedSteering=requested ? {taskId:requested.turn.taskId,attempt:requested.turn.attempt,...requested.target} : undefined;
     const outcome = { ok: true as const, data: { promptId: command.commandId, state: "queued", position: queued.length + 1 } };
     // The first record is self-sufficient if recovery retains a JSONL batch prefix.
-    this.append(live, [{ kind: "prompt.queued", data: { ...outcome.data, text: command.text, textHash, ...(requestedSteering?{requestedSteering}:{}), ...(command.delivery ? {delivery:command.delivery} : {}), ...(command.decisionTarget ? {decisionTarget:command.decisionTarget, ...(targetQuestionRevision ? {targetQuestionRevision} : {})} : {}), ...(attachments.length ? {attachments} : {}), by: clientId, generation: live.ledger.session.generation ?? 0, createdAt: new Date(this.clock.now()).toISOString() } }, this.receiptDraft(command, outcome)]);
+    this.append(live, [{ kind: "prompt.queued", data: { ...outcome.data, text: command.text, textHash, ...(this.options.drivers.get(this.effectiveMembers(live.meta,live.ledger)[LEAD_MEMBER_ID]!.runnerId)?.supportsInputClaim ? {gated:true} : {}), ...(requestedSteering?{requestedSteering}:{}), ...(command.delivery ? {delivery:command.delivery} : {}), ...(command.decisionTarget ? {decisionTarget:command.decisionTarget, ...(targetQuestionRevision ? {targetQuestionRevision} : {})} : {}), ...(attachments.length ? {attachments} : {}), by: clientId, generation: live.ledger.session.generation ?? 0, createdAt: new Date(this.clock.now()).toISOString() } }, this.receiptDraft(command, outcome)]);
     this.flush(live);
     this.pumpSteering(live);this.pumpPrompts(live);
     return outcome;
@@ -1563,7 +1614,7 @@ export class SessionManager implements SessionService {
   private cancelPrompt(live: Live, command: Extract<SessionCommand, { type: "prompt.cancel" }>): ExecuteOutcome {
     const prompt = live.ledger.prompt(command.promptId);
     if (!prompt) return fail("prompt-unknown");
-    if (prompt.state !== "queued") {
+    if (prompt.state !== "queued" && !(prompt.state === "dispatched" && prompt.handoff?.state === "pending")) {
       if (prompt.state !== "cancelled") return fail("prompt-already-started");
       const outcome = { ok: true as const, data: { promptId: prompt.promptId, state: "cancelled" } };
       this.append(live, this.receiptDraft(command, outcome)); this.flush(live); return outcome;
@@ -1571,7 +1622,7 @@ export class SessionManager implements SessionService {
     const outcome = { ok: true as const, data: { promptId: prompt.promptId, state: "cancelled" } };
     this.append(live, [{ kind: "prompt.state", data: outcome.data }, this.receiptDraft(command, outcome)]); this.flush(live);
     for (const turn of [...live.queue]) if (turn.promptId === prompt.promptId) this.cancelQueued(live, turn.taskId);
-    for (const turn of live.turns.values()) if (turn.promptId === prompt.promptId) { turn.kind = "cancel"; turn.controller.abort(); }
+    for (const turn of live.turns.values()) if (turn.promptId === prompt.promptId) { turn.kind = "cancel"; turn.controller.abort(); void turn.handle?.interrupt().catch(() => {}); }
     this.pumpSteering(live);this.pumpPrompts(live); this.scheduleWake(live);
     return outcome;
   }
@@ -1668,6 +1719,8 @@ export class SessionManager implements SessionService {
     live: Live, turn: Turn, driver: RunnerSessionDriver, assignment: RunnerQualifiedAssignment, prompt: string,
     nativeSessionId: string | undefined, resume: { nativeSessionId: string } | undefined,
   ): Promise<void> {
+    turn.gatedInput = driver.supportsInputClaim === true;
+    turn.inputClaimed = false; turn.deliveryDrafts = undefined;
     let outcome: TurnOutcome;
     let resolver: ChildMcpResolver | undefined;
     const preparationStartedAt = this.clock.now();
@@ -1710,7 +1763,7 @@ export class SessionManager implements SessionService {
         };
         try {
           resolver = await this.options.childMcp(assignment.runnerId, {
-            projectRoot: live.meta.projectRoot, sessionId: live.sessionId, taskId: turn.taskId, signal: turn.controller.signal,
+            projectRoot: live.meta.projectRoot, sessionId: live.sessionId, taskId: turn.taskId, signal: turn.controller.signal, modelId: assignment.modelId, runnerVersion: probe.version, projectConfigTrusted: this.projectStore().projectTrust(live.meta.projectId ?? projectIdentity(live.meta.projectRoot)).trusted,
             preparationStep: next => {
               if (finished || !CHILD_MCP_PREPARATION_STEPS.includes(next)) return;
               const now = this.clock.now(); finishStep(now); step = next; stepStartedAt = now;
@@ -1730,6 +1783,7 @@ export class SessionManager implements SessionService {
         }
       } else resolver = this.options.childMcp;
       if (turn.controller.signal.aborted) throw new Error("turn-cancelled");
+      for (const code of resolver?.searchDiagnostics ?? []) this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: { code } });
       const capabilityAvailability = reviewedCapabilityAvailability(resolver, assignment.runnerId);
       const personalMcpAvailability = validatePersonalMcpAvailability(resolver?.personalMcpAvailability);
       this.publishMcpAvailability(live, turn.memberId, assignment.runnerId, personalMcpAvailability);
@@ -1772,6 +1826,7 @@ export class SessionManager implements SessionService {
       const spawn = createDriverSpawn(this.options.supervisor, { lease: { file: live.paths.taskLeaseFile(turn.taskId), taskId: turn.taskId } });
       const launchedAttempt=turn.attempt;
       const io: DriverHostIo = {
+        claimInput: () => turn.attempt === launchedAttempt && this.claimInput(live, turn),
         spawn: (command, args, options) => {
           if(turn.attempt!==launchedAttempt || live.turns.get(turn.taskId)!==turn || turn.nativeEnded || turn.controller.signal.aborted || turn.kind)return Promise.reject(new Error('driver-attempt-ended'));
           if (assignment.runnerId === "opencode") {
@@ -1784,6 +1839,8 @@ export class SessionManager implements SessionService {
         },
         emit: (event) => {
           if(turn.attempt!==launchedAttempt || live.turns.get(turn.taskId)!==turn || turn.nativeEnded)return;
+          if (event.kind === 'diagnostic' && event.data.code === 'input.delivered' || !event.data.internal && event.data.role !== 'user' && event.data.role !== 'system' && ['message.delta','message.completed','reasoning.delta','tool.started','usage'].includes(event.kind))
+            this.inputDelivered(live, turn, event.kind === 'diagnostic' ? String(event.data.evidence ?? 'native-receipt') : event.kind);
           if (!this.driverEvent(live, turn, assignment.runnerId, event)) return;
           if (turn.nativeEnded) { this.publishSteering(live); return; }
           // This is the driver's observed turn boundary, not uniform model readiness:
@@ -1848,6 +1905,12 @@ export class SessionManager implements SessionService {
       turn.nativeEnded=true;this.publishSteering(live);
       if(live.steering?.turn===turn)await live.steering.barrier;
     } catch (error) {
+      if (error instanceof DriverStartupCleanupError) {
+        // No task handle was returned. Keep the adapter's failed drain barrier
+        // so startup cannot release its lease as though there were no process.
+        turn.closeHandle ??= Promise.resolve().then(() => error.close());
+        void turn.closeHandle.catch(() => {});
+      }
       if (!turn.controller.signal.aborted && error instanceof PersonalMcpPreparationError) this.publishMcpAvailability(live, turn.memberId, assignment.runnerId, validatePersonalMcpAvailability(error.availability));
       outcome = turn.controller.signal.aborted ? { status: "interrupted" } : { status: "failed", error: `Unable to start the turn: ${bounded((error as Error).message)}`, failure: sanitizeTurnFailure((error as {failure?: unknown})?.failure) ?? { category: "unknown", origin: "unknown", certainty: "inferred" }, ...((error as {reasonCode?: string}).reasonCode === "native-session-not-found" ? { reasonCode: "native-session-not-found" as const } : {}) };
     }
@@ -1856,7 +1919,7 @@ export class SessionManager implements SessionService {
     catch (error) {
       drained = false;
       turn.ownershipUnsettled = true;
-      outcome = { status: "failed", error: `Unable to close the turn: ${bounded((error as Error).message)}` };
+      outcome = { status: "failed", error: `Unable to close the turn: ${bounded((error as Error).message)}`, failure: sanitizeTurnFailure(outcome.failure) };
       this.options.logger?.warn("session.mcp-binding-retained", { sessionId: live.sessionId, taskId: turn.taskId, reason: "native-close-failed" });
     }
     try { if (drained) await resolver?.release?.(); }
@@ -1888,6 +1951,7 @@ export class SessionManager implements SessionService {
   }
 
   private closeTurnHandle(turn: Turn): Promise<void> {
+    if (turn.closeHandle) return turn.closeHandle;
     if (!turn.handle) return Promise.resolve();
     // Shutdown and natural completion may race. Share the actual drain promise even when
     // a driver's own close method returns early on a repeated call.
@@ -2029,8 +2093,12 @@ export class SessionManager implements SessionService {
       drafts.push({ kind: "task.state", source, data: { taskId: turn.taskId, state: task.state, ...(task.reason ? { reason: task.reason } : {}), ...(turn.stop?{stop:turn.stop}:{}) } });
       if (!live.stopping && live.turns.size === 1) drafts.push({ kind: "session.state", data: { state: "idle" } });
       for(const input of live.ledger.prompts())if(input.promptId!==turn.promptId&&input.taskId===turn.taskId&&input.attempt===turn.attempt&&input.state==="accepted")drafts.push({kind:"prompt.state",data:{promptId:input.promptId,state:task.state,...(task.reason?{reason:task.reason}:{})}});
-      if (turn.promptId && !(turn.kind==="release" && live.ledger.prompt(turn.promptId)?.state==="queued")) drafts.push({ kind: "prompt.state", data: { promptId: turn.promptId, state: task.state, ...(task.reason ? { reason: task.reason } : {}) } });
-      if (turn.memberId === LEAD_MEMBER_ID && ["failed", "interrupted", "ownership-unsettled"].includes(task.state) && !(task.state === "interrupted" && (live.ledger.promptQueue.lastResumeSeq ?? 0) > (turn.admissionSeq ?? 0))) drafts.push({ kind: "prompt.queue", data: { paused: true, reason: task.reason ?? task.state } });
+      if (turn.promptId && !(turn.kind==="release" && !turn.gatedInput && live.ledger.prompt(turn.promptId)?.state==="queued")) {
+        const prompt = live.ledger.prompt(turn.promptId);
+        if (turn.gatedInput && prompt) drafts.push(...promptEndDrafts(prompt, task.state, this.closing ? 'daemon-restart' : task.reason));
+        else drafts.push({ kind: "prompt.state", data: { promptId: turn.promptId, state: task.state, ...(task.reason ? { reason: task.reason } : {}) } });
+      }
+      if (!drafts.some(d=>d.kind==="prompt.requeued") && turn.memberId === LEAD_MEMBER_ID && ["failed", "interrupted", "ownership-unsettled"].includes(task.state) && !(task.state === "interrupted" && (live.ledger.promptQueue.lastResumeSeq ?? 0) > (turn.admissionSeq ?? 0))) drafts.push({ kind: "prompt.queue", data: { paused: true, reason: task.reason ?? task.state } });
       this.append(live, drafts); this.flush(live);
     } catch (error) {
       this.options.logger?.error("turn.finish-failed", { sessionId: live.sessionId, error: (error as Error).message });
@@ -2094,7 +2162,7 @@ export class SessionManager implements SessionService {
   private approvalRespond(live: Live, command: Extract<SessionCommand, { type: "approval.respond" }>, clientId: string): ExecuteOutcome {
     const pending = this.options.broker.pending().find((p) => p.approvalId === command.approvalId);
     if (pending && pending.sessionId !== live.sessionId) return fail("unknown-approval");
-    const result = this.options.broker.respond({ approvalId: command.approvalId, decision: command.decision, scope: command.scope, grant: command.grant, confirmed: command.confirmed, by: clientId });
+    const result = this.options.broker.respond({ approvalId: command.approvalId, decision: command.decision, scope: command.scope, grant: command.grant, confirmed: command.confirmed, origin: command.origin, by: clientId });
     if (!result.ok) return fail(result.code);
     try { this.append(live, this.receiptDraft(command, { ok: true })); } catch { /* the decision already took effect */ }
     return ok();

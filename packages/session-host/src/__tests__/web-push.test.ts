@@ -225,7 +225,8 @@ test('generic live attention only: any-agent questions/approvals, no delegated r
   for (const call of sent) {
     expect(JSON.stringify(call[1])).not.toContain('secret');
     expect(call[1].sessionId).toBe('s');
-    expect(Object.keys(call[1]).sort()).toEqual(['kind','seq','sessionId']);
+    expect(Object.keys(call[1]).sort()).toEqual(call[1].kind==='approval'?['approvalId','kind','risk','seq','sessionId','tool']:['kind','seq','sessionId']);
+    if(call[1].kind==='approval')expect(call[1]).toMatchObject({approvalId:'a',tool:'Tool',risk:'high'});
   }
 });
 test('stale queued attention, revoked/expired devices and active viewing are suppressed', async () => {
@@ -601,4 +602,15 @@ test('reply pages recover later independent occurrences beyond already-sent hist
  f.p.evaluate();for(let n=0;n<200&&f.sent.length<count;n++)await Bun.sleep(20);
  expect(f.sent).toHaveLength(count);expect(new Set(f.sent.map(s=>s[1].replyId)).size).toBe(count);expect(pages).toBeGreaterThan(3);
  f.p.evaluate();await drain();expect(f.sent).toHaveLength(count);
+});
+
+test('grouped notification session names are optional, redacted and refreshed before transport',async()=>{
+ await withPushClock(async(clock,advance)=>{
+  let name='Original';
+  const {p,sent}=fixture({now:clock.now,sessionName:()=>name});
+  p.accept(event(1));name='Latest name';await advance(80);
+  expect(sent[0][1].sessionName).toBe('Latest name');
+  name='password=SUPERPRIVATE';p.accept(event(2));await advance(80);
+  expect(sent[1][1].sessionName).not.toContain('SUPERPRIVATE');
+ });
 });

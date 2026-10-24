@@ -1,3 +1,4 @@
+import { useDismissLayer } from './dismiss-layer';
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { StatusIndicator, indicatorLabel, type ReadMarkers } from './status-indicator';
 import { sessionIdOf, sessionName, type Project, type WorkspaceSession } from './workspace-types';
@@ -25,7 +26,8 @@ export function NavigationIcon({ kind, expanded }: { kind: 'chevron' | 'panel' |
 function NavigationActions({ label, menuName, busy, renameDisabled = false, renameLabel, removeLabel, removeDescription, onRename, onRemove }: { label: string; menuName: string; busy: boolean; renameDisabled?: boolean; renameLabel: string; removeLabel: string; removeDescription: string; onRename: () => void; onRemove: () => void }) {
     const id = useId(), trigger = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null), initialItem = useRef(0);
     const [position, setPosition] = useState<{top:number;left:number}>();
-    useOpenAnimation(menu, !!position, 'pop');
+    useOpenAnimation(menu, !!position, 'fade');
+    useDismissLayer({open:!!position,roots:[menu,trigger],onDismiss:reason=>close(reason==='escape')});
     function close(restore = true) { setPosition(undefined); if (restore) trigger.current?.focus({preventScroll:true}); }
     function open(last = false) {
         const bounds = trigger.current?.getBoundingClientRect(); if (!bounds) return;
@@ -36,11 +38,10 @@ function NavigationActions({ label, menuName, busy, renameDisabled = false, rena
     useLayoutEffect(() => { if(position) {const items=menu.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');items?.[initialItem.current ? items.length-1 : 0]?.focus({preventScroll:true});} }, [position]);
     useEffect(() => {
         if(!position) return;
-        const outside = (event:PointerEvent) => { if(!menu.current?.contains(event.target as Node) && !trigger.current?.contains(event.target as Node)) close(false); };
         const resized = () => close();
         const scrolled = (event:Event) => { if(!menu.current?.contains(event.target as Node)) close(false); };
-        document.addEventListener('pointerdown',outside); window.addEventListener('resize',resized); document.addEventListener('scroll',scrolled,true);
-        return () => {document.removeEventListener('pointerdown',outside);window.removeEventListener('resize',resized);document.removeEventListener('scroll',scrolled,true);};
+        window.addEventListener('resize',resized); document.addEventListener('scroll',scrolled,true);
+        return () => {window.removeEventListener('resize',resized);document.removeEventListener('scroll',scrolled,true);};
     }, [position]);
     return <span className="project-actions"><button ref={trigger} type="button" className="project-more quiet" disabled={busy} aria-label={`More options for ${label}`} title="More options" aria-haspopup="menu" aria-expanded={!!position} aria-controls={position ? id : undefined} onClick={() => position ? close() : open()} onKeyDown={event => { if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();open(event.key==='ArrowUp');} }}><NavigationIcon kind="more"/></button>{position && <div ref={menu} id={id} className="project-menu" role="menu" aria-label={menuName} style={position} onKeyDown={event => {
         if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();return;}

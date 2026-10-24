@@ -26,7 +26,7 @@ export const SESSION_EVENT_KINDS = [
   /** Durable idempotency receipt: a command was accepted and its outcome is recorded (XR-1.5, survives daemon restart). */
   "command.accepted",
   "decision.command", "decision.opened", "decision.revised", "decision.state", "decision.reply",
-  "prompt.steering", "prompt.steered", "prompt.queued", "prompt.dispatched", "prompt.state", "prompt.queue",
+  "prompt.steering", "prompt.steered", "prompt.queued", "prompt.dispatched", "prompt.handoff", "prompt.requeued", "prompt.state", "prompt.queue",
 ] as const;
 export type SessionEventKind = (typeof SESSION_EVENT_KINDS)[number];
 

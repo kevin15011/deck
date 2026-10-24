@@ -145,3 +145,18 @@ test('compaction survives real history hydration, live projection and reconnect 
  index.apply(append('turn.completed', { status: 'completed' }));
  expect(leadProgress(new ChatHistory(log).page().events, { sessionId: 's' })).toBeUndefined();
 });
+
+test('delivery receipts and requeued image input survive paging and index rebuild',()=>{
+  const {log,append}=fixture(),image={attachmentId:'image',name:'photo.png',mimeType:'image/png',sizeBytes:10};
+  append('prompt.queued',{promptId:'p',text:'keep',attachments:[image]});append('prompt.dispatched',{promptId:'p',taskId:'lead',attempt:1,handoff:'gated',text:'keep',attachments:[image]});
+  const bubble=append('message.completed',{role:'user',promptId:'p',text:'keep',handoff:'pending',attachments:[image]});
+  append('prompt.requeued',{promptId:'p',taskId:'lead',attempt:1,text:'keep',attachments:[image],reason:'startup'});
+  for(let i=0;i<125;i++)append('message.completed',{role:'assistant',text:`answer ${i}`});
+  const index=new ChatHistory(log),page=index.page({before:bubble.seq+1});
+  expect(page.messages.find(e=>e.seq===bubble.seq)?.data.attachments).toEqual([image]);
+  expect(index.current.values().find(e=>e.kind==='prompt.requeued')?.data).toMatchObject({text:'keep',attachments:[image]});
+  const dispatch=append('prompt.dispatched',{promptId:'p',taskId:'lead',attempt:2,handoff:'gated',text:'keep',attachments:[image]});index.apply(dispatch);
+  const receipt=append('prompt.handoff',{promptId:'p',taskId:'lead',attempt:2,state:'unknown'});index.apply(receipt);
+  expect(index.current.values().find(e=>e.kind==='prompt.handoff')?.data.state).toBe('unknown');
+  expect(new ChatHistory(log).current.values()).toEqual(index.current.values());
+});

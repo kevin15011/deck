@@ -402,3 +402,46 @@ test('v14 snapshot rebuild restores public streaming evidence and stop provenanc
  const rebuilt=loadLedger(log,file);expect(rebuilt.source).toBe('rebuilt');expect(rebuilt.ledger.latest('work')).toMatchObject({stopSeq:5,lastAgentMessage:{text:'Streaming public progress',streaming:true,seq:3}});
  saveLedgerSnapshot(rebuilt.ledger,log,file);const restored=loadLedger(log,file);expect(restored.source).toBe('snapshot');expect(restored.ledger.toState()).toEqual(rebuilt.ledger.toState());log.close();
 });
+
+test('restart repair is explicit, replayable, and preserves queued, cancelled and unsafe Lead work',()=>{
+ for(const reason of ['daemon-stopped','daemon-restart','web-restart-forced:test']) {
+  const pause:EventDraft={kind:'prompt.queue',data:{paused:true,reason}};
+  for(const blocked of ['none','queued','cancelled','failed','interrupted','ownership-unsettled']) {
+   const drafts:EventDraft[]=[];
+   if(blocked==='queued'||blocked==='cancelled') {
+    drafts.push({kind:'prompt.queued',data:{promptId:'p',text:'wait',textHash:'h',by:'user'}});
+    if(blocked==='cancelled')drafts.push({kind:'prompt.state',data:{promptId:'p',state:'cancelled',reason}});
+   } else if(blocked!=='none')drafts.push(created('lead',{memberId:'lead'}),state('lead','running'),state('lead',blocked));
+   drafts.push(pause,{kind:'session.recovered',data:{interrupted:[],unsettled:[]}});
+   const ledger=replay(drafts),repair=ledger.restartQueueRepair('restart-recovered');
+   if(blocked!=='none'){expect(repair).toBeUndefined();expect(ledger.promptQueue.paused).toBe(true);}
+   else {expect(ledger.promptQueue.paused).toBe(true);expect(repair).toEqual({kind:'prompt.queue',data:{paused:false,reason:'restart-recovered'}});expect(replay([...drafts,repair!]).promptQueue.paused).toBe(false);}
+  }
+ }
+});
+
+test('gated delivery replay and snapshot tails preserve exact text/images; legacy dispatch remains conservative',()=>{
+  const image={attachmentId:'image',name:'photo.png',mimeType:'image/png',sizeBytes:10};
+  const initial:EventDraft[]=[{kind:'prompt.queued',data:{promptId:'p',text:'unread',textHash:'hash',by:'web',attachments:[image],createdAt:'now',position:1}},{kind:'prompt.dispatched',data:{promptId:'p',taskId:'lead',attempt:1,handoff:'gated'}}];
+  let ledger=replay(initial);expect(ledger.prompt('p')?.handoff?.state).toBe('pending');expect(ledger.continuityBlock).toBeUndefined();
+  const tail:EventDraft[]=[{kind:'prompt.requeued',data:{promptId:'p',taskId:'lead',attempt:1,reason:'daemon-restart'}}];
+  ledger=replay([...initial,...tail]);expect(ledger.prompt('p')).toMatchObject({state:'queued',text:'unread',attachments:[image]});expect(ledger.promptQueue.paused).toBe(true);
+  expect(Ledger.fromState(ledger.toState()).prompt('p')).toEqual(ledger.prompt('p'));
+  ledger=replay([...initial,{kind:'prompt.handoff',data:{promptId:'p',taskId:'lead',attempt:1,state:'sending'}},{kind:'prompt.handoff',data:{promptId:'p',taskId:'lead',attempt:1,state:'delivered'}}]);
+  expect(ledger.continuityBlock?.promptId).toBe('p');expect(ledger.prompt('p')?.firstAdmissionSeq).toBe(4);
+  const legacy=replay([initial[0]!,{kind:'prompt.dispatched',data:{promptId:'p',taskId:'lead',attempt:1}}]);expect(legacy.prompt('p')?.handoff).toBeUndefined();expect(legacy.continuityBlock?.promptId).toBe('p');
+});
+
+test('gated pending, claim, requeue and delivery replay through real snapshot plus tail at every prefix',()=>{
+  const drafts:EventDraft[]=[{kind:'prompt.queued',data:{promptId:'p',text:'kept',textHash:'hash',by:'web'}},{kind:'prompt.dispatched',data:{promptId:'p',taskId:'lead',attempt:1,handoff:'gated'}},{kind:'prompt.requeued',data:{promptId:'p',taskId:'lead',attempt:1,reason:'startup'}},{kind:'prompt.dispatched',data:{promptId:'p',taskId:'lead',attempt:2,handoff:'gated'}},{kind:'prompt.handoff',data:{promptId:'p',taskId:'lead',attempt:2,state:'sending'}},{kind:'prompt.handoff',data:{promptId:'p',taskId:'lead',attempt:2,state:'delivered'}}];
+  for(let prefix=1;prefix<=drafts.length;prefix++){
+    const dir=tempDir(),log=openLog(dir),events=log.appendMany(drafts),ledger=Ledger.empty('s-1');
+    for(const event of events.slice(0,prefix))ledger.apply(event);const file=join(dir,'snapshot');saveLedgerSnapshot(ledger,log,file);
+    for(const event of events.slice(prefix))ledger.apply(event);const loaded=loadLedger(log,file);expect(loaded.source).toBe('snapshot');expect(loaded.ledger.toState()).toEqual(ledger.toState());log.close();
+  }
+});
+
+ test('delivered handoff follows terminal task state without leaving dispatched prompts',()=>{
+  const drafts:EventDraft[]=[created('lead',{memberId:'lead'}),state('lead','running'),{kind:'prompt.queued',data:{promptId:'p',text:'read',textHash:'h',by:'web'}},{kind:'prompt.dispatched',data:{promptId:'p',taskId:'lead',attempt:1,handoff:'gated'}},{kind:'prompt.handoff',data:{promptId:'p',taskId:'lead',attempt:1,state:'sending'}},{kind:'prompt.handoff',data:{promptId:'p',taskId:'lead',attempt:1,state:'delivered'}},state('lead','completed')];
+  const ledger=replay(drafts);expect(ledger.prompt('p')?.state).toBe('completed');expect(ledger.promptQueue.paused).toBe(false);
+ });

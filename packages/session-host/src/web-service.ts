@@ -160,6 +160,7 @@ export class WebService {
             },
             isReplyDisplayed:(deviceId,sessionId,replyId)=>this.replies?.isDisplayed(deviceId,sessionId,replyId)??false,
             attentionSessions:this.options.service.pushAttentionSessions ? ()=>this.options.service.pushAttentionSessions!() : undefined,
+            sessionName:id=>this.options.service.pushSessionName?.(id),
             isCurrent:attention=>this.options.service.isPushAttentionCurrent?.(attention)??false,
             ...this.options.push});
           this.unsubscribePush = this.options.service.subscribeEvents?.(event=>{

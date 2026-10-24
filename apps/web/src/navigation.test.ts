@@ -34,7 +34,7 @@ test('owned overlay predecessor is an actual recorded push edge, never depth or 
 });
 test('Back/Forward restores exact entries and cached anchors without adding entries or leaking drafts',()=>{
  const f=fixture();f.navigation.navigate({project:'p',session:'s',tab:'chat'},'replace');f.navigation.anchor({id:2,seq:8,offset:-30});
- f.navigation.navigate({...f.navigation.current.route,overlay:{kind:'unread'}});
+ f.navigation.navigate({...f.navigation.current.route,overlay:{kind:'drawer'}});
  f.navigation.navigate({project:'p2',session:'other',tab:'chat',reply:'reply-20-18'},'replace');
  f.back();expect(f.navigation.current.route.session).toBe('s');expect(f.navigation.current.route.anchor).toEqual({id:2,seq:8,offset:-30});f.forward();expect(f.navigation.current.route.reply).toBe('reply-20-18');expect(f.entries.length).toBe(2);
  const length=f.entries.length;f.navigation.navigate({...f.navigation.current.route});expect(f.entries.length).toBe(length);
@@ -122,4 +122,20 @@ test('reload of an owned dismissed marker cleans up only that base and unknown m
  const reload=new DeckHistory(f.adapter);const stop=reload.subscribe(()=>{});expect(f.position()).toBe(0);reload.pop();expect(reload.generation).toBe(0);stop();
  const unknown={...marker.deck,key:crypto.randomUUID()};f.adapter.push({deck:unknown,deckSecondary:{owner:unknown.owner,key:unknown.key,panelId:'context',dismissed:true}},f.adapter.url);
  const position=f.position();new DeckHistory(f.adapter).subscribe(()=>{});expect(f.position()).toBe(position);
+});
+
+test('outside dismissal followed by a session click waits for overlay Back without losing the click',()=>{
+ const f=fixture(false,true);f.navigation.navigate({project:'p',session:'s',tab:'chat'},'replace');
+ f.navigation.navigate({...f.navigation.current.route,overlay:{kind:'drawer'}});
+ f.navigation.closeOverlay();f.navigation.navigate({project:'p',session:'other',tab:'chat'});
+ expect(f.navigation.current.route.session).toBe('s');f.flushBack();
+ expect(f.navigation.current.route.session).toBe('other');expect(f.navigation.current.route.overlay).toBeUndefined();
+ f.back();expect(f.navigation.current.route.session).toBe('s');expect(f.navigation.current.route.overlay).toBeUndefined();
+});
+
+
+test('queued overlay navigation is discarded when Back reaches a foreign entry',()=>{
+ const f=fixture(false,true);f.navigation.navigate({project:'p',session:'s',tab:'chat'},'replace');f.navigation.navigate({...f.navigation.current.route,overlay:{kind:'drawer'}});
+ f.navigation.closeOverlay();f.navigation.navigate({project:'p',session:'other',tab:'chat'});
+ f.entries[0]!.state={foreign:true};f.flushBack();expect(f.navigation.current.route.session).toBe('s');
 });

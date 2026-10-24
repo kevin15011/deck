@@ -7,8 +7,9 @@ import { isIP } from 'node:net';
 import { request } from 'node:https';
 import webPush from 'web-push';
 import { PushAttentionStore, attentionExpires } from './push-attention-store';
-import type { AttentionItem, AttentionKind } from './push-attention';
+import { approvalPushFields, type AttentionItem, type AttentionKind } from './push-attention';
 import type { SessionEvent } from '@deck/core/session/events';
+import { redactText } from '@deck/core/session/redaction';
 import { assertPrivateFile, writePrivateFile, type StatePaths } from './paths';
 
 export type BrowserSubscription = {
@@ -18,10 +19,12 @@ export type BrowserSubscription = {
 };
 export type PushAttention = {
   sessionId: string;
+  sessionName?: string;
   seq: number;
   kind: 'finished' | 'failure' | 'question' | 'approval';
   replyId?: string;
   attention?: AttentionKind; summary?: string; othersActive?: boolean; tagId?: string;
+  approvalId?: string; tool?: string; risk?: 'normal' | 'high';
 };
 type RecordEntry = {
   deviceId: string;
@@ -192,7 +195,7 @@ export function pushAttention(event: SessionEvent): PushAttention | undefined {
     event.kind === 'approval.requested' &&
     typeof event.data.approvalId === 'string'
   )
-    return { ...base, kind: 'approval' };
+    return { ...base, kind: 'approval', ...approvalPushFields(event.data) };
   if (event.kind === 'turn.completed' && lead) {
     if (event.data.status === 'completed') return { ...base, kind: 'finished' };
     if (event.data.status === 'failed') return { ...base, kind: 'failure' };
@@ -250,6 +253,7 @@ export type WebPushOptions = {
   replyAttentionItem?: (sessionId:string,replyId:string)=>AttentionItem|undefined;
   isReplyDisplayed?: (deviceId:string,sessionId:string,replyId:string)=>boolean;
   attentionSessions?: () => string[];
+  sessionName?: (sessionId: string) => string | undefined;
   send?: (
     details: PushRequest,
     payload: PushAttention,
@@ -337,6 +341,7 @@ export class WebPush {
     if(this.queue.size>=256){this.record(record,'queueFull','queue-full');return;}
     const kind=item.kind==='decision'?'question':item.kind==='result'?'finished':item.kind;
     const attention: PushAttention={sessionId:item.sessionId,seq:item.seq,kind,attention:item.kind,
+      ...(item.kind==='approval'?approvalPushFields(item):{}),
       ...(item.summary?{summary:item.summary}:{}),...(item.replyId?{replyId:item.replyId}:{}),...(item.othersActive?{othersActive:true}:{}),
       ...(item.kind==='decision'?{tagId:createHash('sha256').update(item.key).digest('base64url').slice(0,16)}:{})};
     this.record(record,'eligible');
@@ -685,6 +690,8 @@ export class WebPush {
         continue;
       }
       if(current){a.summary=current.summary;a.othersActive=current.othersActive;}
+      const sessionName = this.options.sessionName?.(a.sessionId);
+      if (sessionName) a.sessionName = redactText(sessionName, 160);
       const sentSubscription=r.subscription, sentGeneration=r.generation;
       const authorizedEpoch=r.epoch;
       const stillAuthorized=()=>!this.closed && controller.signal.reason!=='session-removed' && this.store?.subscriptions.includes(r) && r.epoch===authorizedEpoch && this.options.isDeviceActive(r.deviceId);

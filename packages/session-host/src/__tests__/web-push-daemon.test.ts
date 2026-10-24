@@ -156,18 +156,56 @@ async function fixture(send?: (signal:AbortSignal)=>Promise<number>) {
 async function tick() {
   await Bun.sleep(80);
 }
+test('notification approval HTTP path enforces authoritative risk/scope and broadcasts resolution',async()=>{
+  const f=await fixture();
+  await f.call('/api/push','POST',{subscription:sub()});
+  await f.run({type:'prompt.send',text:'start'},f.id);
+  await waitFor(()=>f.driver.turns.length===1);
+  const turn=f.driver.turns[0]!;
+  const respond=async(approvalId:string,extra:Record<string,unknown>={})=>(await f.call('/api/commands','POST',{sessionId:f.id,command:{v:1,commandId:randomUUID(),type:'approval.respond',approvalId,decision:'allow',scope:'once',origin:'notification',...extra}})).json();
+  for(const risk of ['normal','high',undefined] as const){
+    const resolution=turn.io.approval({approvalId:'native',tool:'Bash',risk,summary:'SECRET',input:{command:'SECRET /private/path'}} as any);
+    await waitFor(()=>[...f.manager.openLog(f.id)!.readAfter(0)].some(e=>e.kind==='approval.requested' && ![...f.manager.openLog(f.id)!.readAfter(e.seq)].some(r=>r.kind==='approval.resolved'&&r.data.approvalId===e.data.approvalId)));
+    const request=[...f.manager.openLog(f.id)!.readAfter(0)].filter(e=>e.kind==='approval.requested').at(-1)!;
+    const approvalId=request.data.approvalId as string;
+    await waitFor(()=>f.sent.some(s=>s.payload.approvalId===approvalId));
+    const push=f.sent.find(s=>s.payload.approvalId===approvalId)!.payload;
+    expect(push).toMatchObject({kind:'approval',approvalId,tool:'Bash',risk:risk==='normal'?'normal':'high'});
+    expect(JSON.stringify(push)).not.toMatch(/SECRET|private|command|input|summary/);
+    if(risk==='normal'){
+      expect(await respond(approvalId,{scope:'session',grant:'tool'})).toMatchObject({ok:false,code:'approval-notification-scope'});
+      expect(await respond(approvalId)).toMatchObject({ok:true});
+      expect(await resolution).toMatchObject({decision:'allow',scope:'once'});
+      expect(await respond(approvalId)).toMatchObject({ok:false,code:'already-resolved'});
+    }else{
+      expect(await respond(approvalId)).toMatchObject({ok:false,code:'approval-notification-risk'});
+      expect(await respond(approvalId,{decision:'deny'})).toMatchObject({ok:false,code:'approval-notification-risk'});
+      expect(await respond(approvalId,{origin:undefined,decision:'deny'})).toMatchObject({ok:true});
+      await resolution;
+    }
+    const snapshot=await f.call(`/api/sessions/${f.id}/events?after=0`);
+    // The same event stream used by the approvals card receives the resolution.
+    expect(await snapshot.text()).toContain('approval.resolved');
+    expect([...f.manager.openLog(f.id)!.readAfter(0)].some(e=>e.kind==='approval.resolved'&&e.data.approvalId===approvalId)).toBe(true);
+  }
+  expect(await respond('missing')).toMatchObject({ok:false,code:'unknown-approval'});
+  const unauth=await fetch(`${f.base}/api/commands`,{method:'POST',headers:{Origin:f.base,'Content-Type':'application/json'},body:JSON.stringify({})});
+  expect(unauth.status).toBe(401);
+  turn.finish();
+},15000);
 test('production daemon fanout delivers without any browser/WS, survives reload without replay, revokes subscriptions', async () => {
   const f = await fixture();
   const { call, run, id, driver, sent } = f;
   expect(
     (await call('/api/push', 'POST', { subscription: sub() })).status,
   ).toBe(200);
+  await run({ type: 'session.rename', title: 'Delivery work' }, id);
   await run({ type: 'prompt.send', text: 'secret prompt' }, id);
   await waitFor(() => driver.turns.length === 1);
   driver.turns[0]!.say('secret answer');
   driver.turns[0]!.finish();
   await waitFor(() => sent.length === 1);
-  expect(sent[0].payload).toMatchObject({ sessionId: id, kind: 'finished' });
+  expect(sent[0].payload).toMatchObject({ sessionId: id, kind: 'finished', sessionName:'Delivery work' });
   expect(sent[0].details.headers['Content-Encoding']).toBe('aes128gcm');
   expect(sent[0].details.headers.Authorization).toStartWith('vapid ');
   expect(Buffer.from(sent[0].details.body).toString()).not.toContain('secret');

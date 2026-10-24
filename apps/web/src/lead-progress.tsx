@@ -88,5 +88,5 @@ export function leadProgress(events: SessionEvent[], { sessionId, pending, conne
 
 export function LeadProgress({ progress, mobile = false, events, sessionId = '', contexts }: { progress?: LeadProgressState; mobile?: boolean; events?: SessionEvent[]; sessionId?: string; contexts?: ContextWindowIndex }) {
     const index = useMemo(() => events && sessionId ? contextIndexForEvents(events, sessionId, contexts) : undefined, [events, sessionId, contexts]);
-    return <div className={`lead-progress${mobile ? ' mobile-progress' : ''}`} data-phase={progress?.phase ?? 'idle'}><span className="lead-progress-status" role="status" aria-live="polite" aria-atomic="true"><span className="lead-progress-dot" aria-hidden="true"/>{progress?.label ?? ''}</span>{index && <ContextWindowIndicator observation={index.get()} owner="Lead"/>}</div>;
+    return <div className={`lead-progress${mobile ? ' mobile-progress' : ''}`} data-phase={progress?.phase ?? 'idle'}><span className="lead-progress-status" role="status" aria-live="polite" aria-atomic="true"><span className="lead-progress-dot" aria-hidden="true"/><span className="lead-progress-label">{progress?.label ?? ''}</span></span>{index && <ContextWindowIndicator observation={index.get()} owner="Lead"/>}</div>;
 }

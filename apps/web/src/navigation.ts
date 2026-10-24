@@ -2,7 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {validReplyId} from '../../../packages/core/src/session/lead-replies';
 export type ChatAnchor={id:number;seq:number;offset:number};
-export type DeckOverlay={kind:'drawer'|'unread'|'install'|'restart'}|{kind:'origin';decisionId:string}|{kind:'image';attachmentId:string};
+export type DeckOverlay={kind:'drawer'|'install'|'restart'}|{kind:'origin';decisionId:string}|{kind:'image';attachmentId:string};
 export type DeckRoute={project:string;session?:string;tab:'chat'|'activity'|'subagents'|'openspec';overlay?:DeckOverlay;reply?:string;anchor?:ChatAnchor};
 export type DeckEntry={v:1;owner:string;key:string;parent?:string;slot:number;route:DeckRoute};
 type RecordEntry={entry:DeckEntry;from?:{key:string;slot:number;signature:string}};
@@ -20,7 +20,7 @@ export function parseRoute(v:unknown):DeckRoute|undefined{
  if(!object(v)||!keys(v,['project','session','tab','overlay','reply','anchor'])||v.project!==''&&!id(v.project,128)||v.session!==undefined&&!id(v.session)||typeof(v.tab??'chat')!=='string'||!['chat','activity','subagents','openspec'].includes(String(v.tab??'chat'))||v.reply!==undefined&&(!validReplyId(v.reply)||!v.session))return;
  let overlay:DeckOverlay|undefined;
  if(v.overlay!==undefined){const o=v.overlay;if(!object(o)||typeof o.kind!=='string'||!keys(o,['kind','decisionId','attachmentId']))return;
-  if(['drawer','unread','install','restart'].includes(String(o.kind))&&Object.keys(o).length===1)overlay={kind:o.kind as 'drawer'|'unread'|'install'|'restart'};
+  if(['drawer','install','restart'].includes(String(o.kind))&&Object.keys(o).length===1)overlay={kind:o.kind as 'drawer'|'install'|'restart'};
   else if(o.kind==='origin'&&v.session&&id(o.decisionId,128)&&Object.keys(o).length===2)overlay={kind:'origin',decisionId:o.decisionId};
   else if(o.kind==='image'&&v.session&&uuid(o.attachmentId)&&Object.keys(o).length===2)overlay={kind:'image',attachmentId:o.attachmentId};else return;
  }
@@ -46,6 +46,7 @@ export class DeckHistory{
  private journal:Journal;
  private storage=true;
  private closingKey?:string;
+ private overlayNavigation?:{base:string;route:DeckRoute;mode:'push'|'replace'};
  private listeners=new Set<()=>void>();
  constructor(private adapter:HistoryAdapter){
   this.journal={v:1,owner:crypto.randomUUID(),records:[]};
@@ -130,6 +131,7 @@ export class DeckHistory{
   // A browser Back already in flight cannot be cancelled. Commit only the
   // latest requested route after it reaches this exact owned base entry.
   if(this.secondaryClosing){this.secondaryNavigation={route:clean,mode};return;}
+  if(this.closingKey&&this.current.parent){this.overlayNavigation={base:this.current.parent,route:clean,mode};return;}
   this.closingKey=undefined;
   const transient=this.readOwned()?.key===this.current.key&&!!this.readSecondary();
   if(transient&&mode==='replace'){this.secondaryNavigation={route:clean,mode};this.closeSecondary(true);return;}
@@ -168,11 +170,13 @@ export class DeckHistory{
   }
   this.secondary=undefined;this.secondaryClosing=false;this.secondaryNavigation=undefined;this.secondaryOpening=undefined;
   this.closingKey=undefined;
+  const overlayRequest=this.overlayNavigation;this.overlayNavigation=undefined;
   // The DOM still shows the departing view at this point. Keep its last anchor in
   // the bounded journal; never rewrite the newly active browser entry with it.
   const saved=this.capture?.();if(saved&&this.current.route.session){const clean=parseAnchor(saved);if(clean)this.remember({...this.current,route:{...this.current.route,anchor:clean}});}
   const next=this.readOwned();this.current=next??this.fresh(this.fallbackRoute());
   if(!next)this.write(this.current,'replace');this.notify();
+  if(overlayRequest&&overlayRequest.base===next?.key)this.navigate(overlayRequest.route,overlayRequest.mode);
  }
 }
 export function useDeckHistory(){

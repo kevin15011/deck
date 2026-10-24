@@ -9,6 +9,7 @@ import { resolve } from "node:path";
 import type { DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
 import { redactText } from "@deck/core/session/redaction";
 import type { TurnFailure } from "@deck/core/session/failure";
+import { runnerTransportFailure } from '@deck/core/session/failure';
 import { classifyCodexFailure, codexNotificationFailure } from "./failure";
 import { CODEX_PROTOCOL, codexTurnStatus, mapCodexNotification } from "./mapper";
 import { buildCodexLaunch, matchesCodexMemoryGroups, codexThreadMcpConfig, isAdmittedCodexMemoryHook, nativeCodexMcpId, verifyCodexConfig, type CodexHookMetadata, type CodexLaunchOptions } from "./launch";
@@ -63,6 +64,7 @@ class CodexTask {
   private child?: SupervisedChild;
   private spawning?: Promise<SupervisedChild>;
   private rpc?: CodexRpc;
+  private transportFailure?: TurnFailure;
   private threadId?: string;
   private readonly admittedNativeMcp = new Set<string>();
   private steeringHistoryVerified=false;
@@ -120,7 +122,7 @@ class CodexTask {
     this.child = child;
     const rpc = new CodexRpc((text) => child.writeStdin(text), (message) => this.onMessage(message), { timeoutMs: this.options.rpcTimeoutMs });
     this.rpc = rpc;
-    child.onStdout((chunk) => { try { rpc.push(chunk); } catch (error) { void this.fail(error instanceof CodexRpcFrameError ? error.code : "codex-rpc-invalid-frame"); } });
+    child.onStdout((chunk) => { try { rpc.push(chunk); } catch (error) { void this.fail(error instanceof CodexRpcFrameError ? error.code : "codex-rpc-invalid-frame", error instanceof CodexRpcFrameError ? error.size : undefined); } });
     child.onStderr(() => {}); // Native diagnostics can contain credential-bearing config: never persist stderr.
     void child.exited.then(() => {
       rpc.close(new Error("codex-process-exited"));
@@ -138,15 +140,19 @@ class CodexTask {
     rpc.notify("initialized");
     return rpc;
   }
-  private fail(code: string): Promise<void> {
+  private fail(code: string, frameSize?: CodexRpcFrameError["size"]): Promise<void> {
     if (this.failure) return this.failure;
     this.failed = true;
-    this.rejectId(new Error(code));
-    this.emit({ kind: "diagnostic", data: { code } });
+    if (this.turn?.escalation) clearTimeout(this.turn.escalation);
+    const failure = runnerTransportFailure(code);
+    this.transportFailure ??= failure;
+    this.rejectId(Object.assign(new Error(code), {failure}));
+    this.emit({ kind: "diagnostic", data: { code, ...frameSize } });
     // Do not settle before the process group is drained: the host can relinquish ownership on done.
     this.failure = (async () => {
-      try { await this.stopChild(); } finally { this.finish({ status: "failed", error: code }); }
+      try { await this.stopChild(); } finally { this.finish({ status: "failed", error: code, ...(failure ? {failure} : {}) }); }
     })();
+    void this.failure.catch(() => {});
     return this.failure;
   }
   async initialize(): Promise<void> {
@@ -222,7 +228,7 @@ class CodexTask {
       this.resolveId(this.threadId!);
       return await done;
     } catch (error) {
-      return this.startupInterrupted ? { status: "interrupted-forced" } : { status: "failed", error: startupErrorCode(error), ...(error instanceof Error && error.message === "codex-native-session-not-found" ? { reasonCode: "native-session-not-found" as const } : {}) };
+      return this.startupInterrupted && !this.transportFailure ? { status: "interrupted-forced" } : { status: "failed", error: this.transportFailure?.code ?? startupErrorCode(error), ...(this.transportFailure ? {failure:this.transportFailure} : {}), ...(error instanceof Error && error.message === "codex-native-session-not-found" ? { reasonCode: "native-session-not-found" as const } : {}) };
     }
   }
   private async verifyRuntimeMcp(rpc: CodexRpc, deadline: number): Promise<void> {
@@ -462,9 +468,11 @@ class CodexTask {
     const state: Turn = { resolve, interrupted: false }; this.turn = state;
     void (async () => {
       try {
+        if (this.startupInterrupted || this.io.claimInput?.() === false) { this.finish({ status: "interrupted" }); return; }
         const result = object(await this.rpc!.call("turn/start", { threadId: this.threadId, input: [...(prompt || !nativeImages.length ? [{ type: "text", text: prompt }] : []), ...nativeImages], ...(this.input.assignment.thinking ? { effort: this.input.assignment.thinking } : {}) }));
         if (typeof object(result.turn).id !== "string") throw new Error("codex-turn-id-missing");
         state.id = object(result.turn).id as string;state.confirmedId=state.id;
+        this.emit({kind:"diagnostic",data:{code:"input.delivered",evidence:"codex-turn-start-reply"}});
         if(this.input.steeringVersion)this.emit({kind:"diagnostic",data:{code:"codex-steering-ready"}});
         if (state.interrupted && this.turn === state) this.deliverInterrupt(state);
       } catch { await this.fail("codex-turn-start-failed"); }
@@ -494,7 +502,7 @@ class CodexTask {
   }
   async interrupt(): Promise<void> {
     const state = this.turn;
-    if (!state && !this.threadId && !this.closed) {
+    if (!state && !this.closed) {
       this.startupInterrupted = true;
       await this.close();
       return;
@@ -503,7 +511,14 @@ class CodexTask {
     state.interrupted = true;
     state.nativeFailure = undefined;
     state.escalation = setTimeout(() => {
-      void (async () => { this.closed = true; try { await this.stopChild(); } finally { this.finish({ status: "interrupted-forced" }); } })();
+      if (this.failed || this.turn !== state) return;
+      this.closed = true;
+      const escalation = (async () => {
+        try { await this.stopChild(); }
+        finally { if (!this.failed && this.turn === state) this.finish({ status: "interrupted-forced" }); }
+      })();
+      // Observe this callback's promise independently; close() retains the rejecting drain barrier.
+      void escalation.catch(() => {});
     }, this.options.escalationMs ?? 10_000);
     this.deliverInterrupt(state);
   }
@@ -520,7 +535,7 @@ class CodexTask {
 
 export function createCodexSessionDriver(options: CodexSessionDriverOptions = {}): RunnerSessionDriver {
   return {
-    runnerId: "codex", protocol: CODEX_PROTOCOL, testedVersions: CODEX_TESTED_VERSIONS,
+    runnerId: "codex", supportsInputClaim: true, protocol: CODEX_PROTOCOL, testedVersions: CODEX_TESTED_VERSIONS,
     async probe(ctx): Promise<DriverProbe> {
       const capabilities = ["native-resume", "approval-relay", "interrupt-rpc", "native-mcp-additions", "native-customizations"];
       try {

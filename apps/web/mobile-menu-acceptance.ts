@@ -1,3 +1,4 @@
+import { selectTheme } from './acceptance-theme';
 /** Opt-in mobile menu visual/interaction acceptance. Local HTTP + fake native effects only. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -50,7 +51,7 @@ try{
  }
  await page.goto(host.pair().url);await page.locator('.app-header').waitFor();
  for(const width of [390,320]){
-  await page.setViewportSize({width,height:844});await page.getByRole('combobox',{name:'Theme',exact:true}).selectOption('cyberpunk');
+  await page.setViewportSize({width,height:844});await selectTheme(page,'cyberpunk');
   await open();await drawer.locator('.navigation-scroll').evaluate(el=>el.scrollTop=0);await settle();
   const expanded=drawer.getByRole('button',{name:/^Sessions in Deck workspace /});
   if(await expanded.getAttribute('aria-expanded')==='true')await expanded.click();
@@ -86,14 +87,14 @@ try{
   checks.push(`visual-menu-states-${width}`);
  }
  // Desktop keeps its existing sidebar/menu composition.
- await page.setViewportSize({width:1440,height:1000});await page.getByRole('combobox',{name:'Theme',exact:true}).selectOption('light');
+ await page.setViewportSize({width:1440,height:1000});await selectTheme(page,'light');
  await page.getByRole('navigation',{name:'Sessions',exact:true}).waitFor();await screenshot('desktop-1440');checks.push('desktop-visual');
  const sidebar=page.getByRole('navigation',{name:'Sessions',exact:true});assert.equal(Math.round((await sidebar.boundingBox())!.width),224);
  await sidebar.getByRole('button',{name:'Deck menu',exact:true}).click();await sidebar.getByRole('menuitem',{name:'Install Deck',exact:true}).click();
  await page.getByRole('dialog',{name:'Install Deck',exact:true}).waitFor();await screenshot('desktop-install-1440');await page.keyboard.press('Escape');
  await sidebar.getByRole('button',{name:'Deck menu',exact:true}).evaluate(el=>{if(el!==document.activeElement)throw Error('Desktop menu focus was not restored');});checks.push('desktop-menu-install-focus');
  if(phase==='after'){
-  await page.setViewportSize({width:390,height:844});await page.getByRole('combobox',{name:'Theme',exact:true}).selectOption('dark');await open();await drawer.locator('.navigation-scroll').evaluate(el=>el.scrollTop=0);await settle();await screenshot('menu-390-dark');await close();
+  await page.setViewportSize({width:390,height:844});await selectTheme(page,'dark');await open();await drawer.locator('.navigation-scroll').evaluate(el=>el.scrollTop=0);await settle();await screenshot('menu-390-dark');await close();
   await open();const current=drawer.getByRole('button',{name:'Current conversation',exact:true});await current.scrollIntoViewIfNeeded();await settle();await current.click();await drawer.waitFor({state:'hidden'});
   await open();assert.equal(await drawer.getByRole('button',{name:'Current conversation',exact:true}).getAttribute('aria-current'),'page');await screenshot('menu-390-selected');await close();checks.push('dark-theme-and-current-session');
  }

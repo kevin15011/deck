@@ -160,6 +160,14 @@ export class CurrentEvents {
                 this.entries.delete(failureKey);
             }
         }
+        if (kind === 'prompt.dispatched' && data.handoff === 'gated') put(`delivery-dispatch:${data.promptId}`);
+        if (kind === 'prompt.handoff') put(`delivery-handoff:${data.promptId}`);
+        if (kind === 'prompt.requeued') {
+            put(`delivery-state:${data.promptId}`);
+            this.entries.delete('prompt:active');
+            this.entries.set(promptKey, event);
+        }
+        if (kind === 'prompt.state') put(`delivery-state:${data.promptId}`);
         if(kind==='prompt.queue')put('prompt:queue');
         // Keep the complete current queue projection as well as a refresh cursor.
         if (kind.startsWith('prompt.'))

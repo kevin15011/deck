@@ -11,6 +11,12 @@ test('paused inbox has one explicit resume action and can still remove waiting m
  const html=renderToStaticMarkup(<PromptQueue items={[{promptId:'p',text:'Next',position:1}]} paused pauseReason="interrupted" connected busy={false} onCancel={()=>{}} onResume={()=>{}}/>);
  expect(html).toContain('Queue paused');expect(html.match(/>Resume queue</g)).toHaveLength(1);expect(html).toContain('Remove queued message 1');expect(html).not.toContain('role="dialog"');
 });
+test('queued text and images have an explicit Edit action gated by connectivity and request state',()=>{
+ const props={items:[{promptId:'p',text:'Full text',attachments:[{attachmentId:'image',name:'kept.png',mimeType:'image/png',sizeBytes:12}]}],paused:true,onCancel:()=>{},onEdit:()=>{},onResume:()=>{}};
+ const html=renderToStaticMarkup(<PromptQueue {...props} connected busy={false}/>);
+ expect(html).toContain('Edit queued message 1');expect(html).toContain('View image 1: kept.png');expect(html).not.toMatch(/disabled=""[^>]*aria-label="Edit/);
+ for(const status of [{connected:false,busy:false},{connected:true,busy:true}])expect(renderToStaticMarkup(<PromptQueue {...props} {...status}/>)).toMatch(/disabled=""[^>]*aria-label="Edit/);
+});
 
 const event=(seq:number,kind:SessionEvent['kind'],data:Record<string,unknown>):SessionEvent=>({v:1,sessionId:'s',seq,kind,data,source:{},ts:'2026-01-01T00:00:00Z'});
 test('delivery runner comes from its immutable fence and survives later capability changes',()=>{
@@ -53,4 +59,12 @@ test('image-only acceptance and pre-admission failure replay retain compact prev
  expect(failed).toEqual([{promptId:'image-prompt',text:'',attachments:[attachment],reason:'Runner unavailable'}]);
  const html=renderToStaticMarkup(<PromptQueue items={[]} failed={failed} paused connected busy={false} onCancel={()=>{}} onResume={()=>{}}/>);
  expect(html).toContain('Image message');expect(html).toContain('View image 1: clipboard.png');expect(html).toContain('Runner unavailable');
+});
+test('empty restart pause is hidden while queued and failed input keep resume visible',()=>{
+ for(const pauseReason of ['daemon-stopped','web-restart-forced:restart']) {
+  const render=(items:any[]=[],failed:any[]=[])=>renderToStaticMarkup(<PromptQueue items={items} failed={failed} paused pauseReason={pauseReason} connected busy={false} onCancel={()=>{}} onResume={()=>{}}/>);
+  expect(render()).toBe('');
+  expect(render([{promptId:'q',text:'Waiting'}])).toContain('Resume queue');
+  expect(render([],[{promptId:'f',text:'Failed',reason:'failed'}])).toContain('Resume queue');
+ }
 });

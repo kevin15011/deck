@@ -100,6 +100,8 @@ export type SupervisedChild = {
 export type SupervisedSpawn = (command: string, args: readonly string[], options?: { cwd?: string; env?: Record<string, string> }) => Promise<SupervisedChild>;
 
 export type DriverHostIo = {
+  /** Synchronous durable handoff fence. A false result forbids writing input. */
+  claimInput?(): boolean;
   spawn: SupervisedSpawn;
   emit(e: DriverEvent): void;
   /** Absent on older hosts: drivers treat this as dismissed. */
@@ -127,6 +129,8 @@ export type DriverTaskHandle = {
 
 export interface RunnerSessionDriver {
   readonly runnerId: string;
+  /** The driver calls claimInput immediately before the native input write. */
+  readonly supportsInputClaim?: true;
   readonly protocol: DriverProtocol;
   readonly testedVersions: { min: string; maxTested: string };
   /** Present when the runner lets the caller assign the native session id (Claude `--session-id`): the host persists it before spawn (XR-4.5). */

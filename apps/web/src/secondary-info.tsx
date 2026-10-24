@@ -1,3 +1,4 @@
+import { useDismissLayer } from './dismiss-layer';
 import React, { createContext, useCallback, useContext, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DeckHistory } from './navigation';
@@ -57,6 +58,8 @@ function InfoTrigger({title,label,children,resetKey='',className='',accessibleLa
 function InfoSurface({id,title,trigger,controls,children}:{id:string;title:string;trigger:HTMLButtonElement;controls:Controls;children:React.ReactNode}) {
     const dialog=useRef<HTMLDialogElement>(null),closeButton=useRef<HTMLButtonElement>(null),latest=useRef(controls);latest.current=controls;
     const [modal,setModal]=useState(()=>window.matchMedia('(max-width: 1000px)').matches||!('showPopover' in HTMLElement.prototype));
+    const opener=useRef<HTMLElement|null>(trigger);opener.current=trigger;
+    useDismissLayer({open:!modal,roots:[dialog,opener],onDismiss:()=>latest.current.close()});
     useLayoutEffect(()=>{const media=window.matchMedia('(max-width: 1000px)'),change=()=>setModal(media.matches||!('showPopover' in HTMLElement.prototype));media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
     useLayoutEffect(()=>{
         const panel=dialog.current!;
@@ -73,6 +76,7 @@ function InfoSurface({id,title,trigger,controls,children}:{id:string;title:strin
         let releaseClick:undefined|(()=>void);
         const consume=(event:Event)=>{event.preventDefault();event.stopImmediatePropagation();};
         const outside=(event:PointerEvent)=>{
+            if(!modal)return;
             const target=event.target as Element,rect=panel.getBoundingClientRect();
             const backdrop=target===panel&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom);
             if(!backdrop&&panel.contains(target)||target.closest('[data-secondary-trigger]'))return;
@@ -85,12 +89,12 @@ function InfoSurface({id,title,trigger,controls,children}:{id:string;title:strin
             latest.current.close();
         };
         const key=(event:KeyboardEvent)=>{
-            if(event.key==='Escape'){consume(event);latest.current.close();return;}
+            if(modal&&event.key==='Escape'){consume(event);latest.current.close();return;}
             if(modal&&event.key==='Tab'){
                 const items=[...panel.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),[tabindex="0"]')].filter(e=>e.getClientRects().length);
                 const first=items[0],last=items.at(-1);
                 if(event.shiftKey&&document.activeElement===first||!event.shiftKey&&document.activeElement===last){consume(event);(event.shiftKey?last:first)?.focus({preventScroll:true});}
-            }else if((event.key==='Enter'||event.key===' ')&&!panel.contains(event.target as Node)&&!(event.target as Element).closest('[data-secondary-trigger]')){consume(event);latest.current.close();}
+            }
         };
         const wheel=(event:WheelEvent|TouchEvent)=>{if(modal&&!panel.contains(event.target as Node))consume(event);};
         document.addEventListener('pointerdown',outside,true);window.addEventListener('keydown',key,true);document.addEventListener('wheel',wheel,{capture:true,passive:false});document.addEventListener('touchmove',wheel,{capture:true,passive:false});

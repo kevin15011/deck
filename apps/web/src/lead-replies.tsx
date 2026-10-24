@@ -1,27 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import type { LeadReply, LeadReplyPage, LeadReplyDisplay } from '../../../packages/core/src/session/lead-replies';
+import type { LeadReply, LeadReplyDisplay } from '../../../packages/core/src/session/lead-replies';
 import { validReplyId } from '../../../packages/core/src/session/lead-replies';
 import type { Api } from './workspace';
 export { validReplyId };
-export function replyFromURL(url:string):string {const value=new URL(url).searchParams.get('reply');return validReplyId(value)?value:'';}
-
-/** Queries are device-authenticated; neither query nor navigation acknowledges a reply. */
-export function useLeadReplies(api:Api,enabled:boolean,sessionId:string,messageSeqs:number[],revision:number){
-  const [page,setPage]=useState<LeadReplyPage>({replies:[],total:0}),[visibleReplies,setVisibleReplies]=useState<LeadReplyDisplay[]>([]),[error,setError]=useState(''),[ready,setReady]=useState(false),[refresh,setRefresh]=useState(0),[cursor,setCursor]=useState(0);
+/** Exact display receipts suppress push alerts for replies already seen on this device.
+ * No global unread inbox is fetched or presented. Navigation alone is not a receipt. */
+export function useDisplayedReplies(api:Api,enabled:boolean,sessionId:string,messageSeqs:number[],revision:number){
+  const [visibleReplies,setVisibleReplies]=useState<LeadReplyDisplay[]>([]),[refresh,setRefresh]=useState(0);
   const seqKey=messageSeqs.join(','),owner=useRef(sessionId);owner.current=sessionId;
-  useEffect(()=>{
-    if(!enabled){setPage({replies:[],total:0});setVisibleReplies([]);setReady(false);return;}
-    const controller=new AbortController();let busy=false;
-    const load=async()=>{
-      if(busy||document.visibilityState!=='visible')return;busy=true;
-      try {
-        const data=await api(`/api/replies${cursor?`?cursor=${cursor}`:''}`,{signal:controller.signal});
-        if(controller.signal.aborted)return;setPage(data);setError('');setReady(true);
-      }catch(cause){if(!controller.signal.aborted){setError((cause as Error).message);setReady(true);}}finally{busy=false;}
-    };
-    void load();const timer=setInterval(load,3000);window.addEventListener('focus',load);document.addEventListener('visibilitychange',load);
-    return()=>{controller.abort();clearInterval(timer);window.removeEventListener('focus',load);document.removeEventListener('visibilitychange',load);};
-  },[api,enabled,refresh,cursor,revision]);
   useEffect(()=>{
     setVisibleReplies([]);if(!enabled||!sessionId||!messageSeqs.length)return;
     const controller=new AbortController();let busy=false;
@@ -29,7 +15,7 @@ export function useLeadReplies(api:Api,enabled:boolean,sessionId:string,messageS
       const query=new URLSearchParams();messageSeqs.slice(0,120).forEach(seq=>query.append('messageSeq',String(seq)));
       const data=await api(`/api/sessions/${encodeURIComponent(sessionId)}/replies?${query}`,{signal:controller.signal});
       if(!controller.signal.aborted&&owner.current===sessionId)setVisibleReplies(data.replies);
-    }catch{/* Inbox query reports availability; never infer a receipt from errors. */}finally{busy=false;}};
+    }catch{/* Never infer a receipt from errors; retry on the next poll. */}finally{busy=false;}};
     void load();const timer=setInterval(load,1500);window.addEventListener('focus',load);
     return()=>{controller.abort();clearInterval(timer);window.removeEventListener('focus',load);};
   },[api,enabled,sessionId,seqKey,refresh,revision]);
@@ -37,15 +23,7 @@ export function useLeadReplies(api:Api,enabled:boolean,sessionId:string,messageS
     await api(`/api/sessions/${encodeURIComponent(reply.sessionId)}/replies/${encodeURIComponent(reply.replyId)}`,{method:'POST',body:JSON.stringify({displayed:true})});
     setRefresh(x=>x+1);
   };
-  return{page,error,loading:!ready,visibleReplies:visibleReplies.filter(reply=>reply.sessionId===sessionId),displayed,refresh:()=>setRefresh(x=>x+1),more:()=>{if(page.nextCursor)setCursor(page.nextCursor);},first:()=>setCursor(0),cursor};
-}
-
-export function UnreadReplies({page,error,onOpen,onMore,onFirst,cursor,onRefresh,sessionLabel,open=false,loading=false,onToggle=()=>{}}:{page:LeadReplyPage;error:string;onOpen:(reply:LeadReply)=>void;onMore:()=>void;onFirst:()=>void;cursor:number;onRefresh:()=>void;sessionLabel?:(id:string)=>string;open?:boolean;loading?:boolean;onToggle?:(open:boolean)=>void}){
-  const button=useRef<HTMLButtonElement>(null),details=useRef<HTMLDivElement>(null);
-  useEffect(()=>{if(open&&!loading&&!page.total&&!error){if((details.current?.contains(document.activeElement)||button.current===document.activeElement))document.getElementById('conversation')?.focus({preventScroll:true});onToggle(false);}},[page.total,error,open,loading]);
-  useEffect(()=>{if(!open)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();onToggle(false);button.current?.focus();}};document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close);},[open]);
-  if(!page.total&&!error)return null;
-  return <div className="unread-replies"><button ref={button} type="button" className="quiet unread-replies-toggle" aria-expanded={open} aria-controls="unread-replies-list" onClick={()=>onToggle(!open)}>{error?'Replies unavailable':`${page.total} unread ${page.total===1?'reply':'replies'}`}</button>{open&&<div ref={details} id="unread-replies-list" className="unread-replies-list" aria-label="Unread Lead replies"><p className="decision-note">Displayed on this browser device. Reading never answers a question or approves work.</p>{error&&<p role="alert">{error} <button type="button" onClick={onRefresh}>Retry</button></p>}{page.syncing&&<p role="status">Updating reply history…</p>}<ul>{page.replies.map(reply=><li key={`${reply.sessionId}:${reply.replyId}`}><button type="button" onClick={()=>onOpen(reply)}><span>{reply.summary}</span><small>{sessionLabel?.(reply.sessionId)??reply.sessionId} · {new Date(reply.ts).toLocaleString()}</small></button></li>)}</ul>{cursor>0&&<button type="button" className="quiet" onClick={onFirst}>First replies</button>}{page.nextCursor&&<button type="button" className="quiet" onClick={onMore}>More replies</button>}</div>}</div>;
+  return{visibleReplies:visibleReplies.filter(reply=>reply.sessionId===sessionId),displayed};
 }
 
 /** Any meaningful visible slice of exact reply content qualifies. No whole-message

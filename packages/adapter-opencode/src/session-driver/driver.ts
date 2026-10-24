@@ -9,6 +9,8 @@ import { redactText } from "@deck/core/session/redaction";
 import { conflictingOpenCodeMcp, buildOpenCodeLaunch, type OpenCodeLaunchOptions } from "./launch";
 import { OpenCodeEventMapper, OpenCodeSseParser, OPENCODE_PROTOCOL, record } from "./mapper";
 import { classifyOpenCodeFailure } from "./failure";
+import { OpenCodeTransportError, readOpenCodeBody } from './transport';
+import { DriverStartupCleanupError } from '@deck/core/session/failure';
 
 export const OPENCODE_TESTED_VERSIONS = { min: "1.18.31", maxTested: "1.18.31" } as const;
 export type OpenCodeSessionDriverOptions = OpenCodeLaunchOptions & {
@@ -29,8 +31,11 @@ class OpenCodeTask {
   private current?: Turn;
   private readonly lifetime = new AbortController();
   private closed = false;
+  private closing?: Promise<void>;
   private serverDead = false;
   private termination?: Promise<void>;
+  private transportFailure?: OpenCodeTransportError;
+  private transportCleanup?: Promise<void>;
   private readonly seenPermissions = new Set<string>();
   private readonly seenQuestions = new Set<string>();
   private stream?: Promise<void>;
@@ -48,6 +53,33 @@ class OpenCodeTask {
     this.current = undefined; if (turn.timer) clearTimeout(turn.timer); turn.controller.abort(); turn.settle(outcome);
   }
 
+  private failTransport(error: OpenCodeTransportError, releaseReader?: () => Promise<void>): Promise<void> {
+    if (this.transportCleanup) return this.transportCleanup;
+    this.transportFailure = error; this.serverDead = true;
+    this.emit({ kind: 'diagnostic', data: { code: error.code, ...error.size } });
+    this.lifetime.abort(error); this.current?.controller.abort(error);
+    if (this.current?.timer) { clearTimeout(this.current.timer); this.current.timer = undefined; }
+    // Keep ownership until the server group has drained; its exit must not
+    // overwrite the local transport cause or allow another turn to start.
+    this.transportCleanup = (async () => {
+      // An SSE caller releases its own reader here; HTTP failures also wait
+      // for the lifetime abort to release the separately owned SSE reader.
+      try {
+        if (releaseReader) await releaseReader(); else await this.stream;
+        await this.terminate();
+      } catch (cleanupError) {
+        this.emit({kind:'diagnostic',data:{code:'opencode-transport-cleanup-failed'}});
+        throw cleanupError;
+      } finally {
+        this.finish({ status: 'failed', error: error.code, failure: error.failure });
+      }
+    })();
+    // Retain rejection for close()/host ownership; observe it immediately even
+    // when the stream or a background HTTP caller owns the failure path.
+    void this.transportCleanup.catch(() => {});
+    return this.transportCleanup;
+  }
+
   async initialize(): Promise<void> {
     const launch = buildOpenCodeLaunch(this.input, this.io, this.options);
     this.authorization = `Basic ${Buffer.from(`opencode:${launch.env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`;
@@ -61,7 +93,7 @@ class OpenCodeTask {
       if (match && Number(match[1]) > 0 && Number(match[1]) <= 65535) endpointResolve(`http://127.0.0.1:${match[1]}`);
     };
     this.child.onStdout(onOutput); this.child.onStderr(onOutput); this.child.endStdin();
-    void this.child.exited.then(exit => { this.serverDead = true; endpointReject(new Error("OpenCode server exited before readiness")); this.lifetime.abort(); if (!this.current?.forced) this.finish({ status: "failed", error: "OpenCode server exited", failure: exit.anchorLost ? { category: "unknown", origin: "unknown", certainty: "inferred" } : { category: "runner-process", origin: "runner", certainty: "reported" } }); }, () => { this.serverDead = true; endpointReject(new Error("OpenCode anchor lost")); this.lifetime.abort(); if (!this.current?.forced) this.finish({ status: "failed", error: "OpenCode anchor lost", failure: { category: "unknown", origin: "unknown", certainty: "inferred" } }); });
+    void this.child.exited.then(exit => { this.serverDead = true; endpointReject(new Error("OpenCode server exited before readiness")); this.lifetime.abort(); if (!this.transportFailure && !this.current?.forced) this.finish({ status: "failed", error: "OpenCode server exited", failure: exit.anchorLost ? { category: "unknown", origin: "unknown", certainty: "inferred" } : { category: "runner-process", origin: "runner", certainty: "reported" } }); }, () => { this.serverDead = true; endpointReject(new Error("OpenCode anchor lost")); this.lifetime.abort(); if (!this.transportFailure && !this.current?.forced) this.finish({ status: "failed", error: "OpenCode anchor lost", failure: { category: "unknown", origin: "unknown", certainty: "inferred" } }); });
     const startup = new AbortController();
     const startupSignal = AbortSignal.any([this.lifetime.signal, startup.signal]);
     const startupFailure = new Promise<never>((_resolve, reject) => {
@@ -125,7 +157,11 @@ class OpenCodeTask {
       for (const question of Array.isArray(questions) ? questions : []) this.question(question);
     };
     try { await Promise.race([setup(), startupFailure]);
-    } catch (error) { await this.close(); throw error; } finally { clearTimeout(timeout); }
+    } catch (error) {
+      try { await this.close(); }
+      catch { throw new DriverStartupCleanupError(() => this.close(), this.transportFailure?.failure); }
+      throw error;
+    } finally { clearTimeout(timeout); }
   }
 
   /** One bounded local metadata request, independent of readiness/turn latency.
@@ -159,28 +195,51 @@ class OpenCodeTask {
   }
 
   private async request(path: string, body?: unknown, signal?: AbortSignal, method?: "PATCH"): Promise<unknown> {
+    const requestSignal = AbortSignal.any([this.lifetime.signal, signal ?? AbortSignal.timeout(5000)]);
+    try {
     const response = await fetch(this.base + path, {
       method: method ?? (body === undefined ? "GET" : "POST"), headers: { authorization: this.authorization, "content-type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: signal ?? AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(5000)]),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: requestSignal,
     });
-    if (!response.ok) throw new Error(`OpenCode HTTP ${response.status} for ${path}`);
-    const text = await response.text(); if (!text) return undefined;
-    try { return JSON.parse(text); } catch { throw new Error(`OpenCode invalid JSON for ${path}`); }
+    if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new Error(`OpenCode HTTP ${response.status} for ${path}`); }
+    const text = await readOpenCodeBody(response, requestSignal); if (!text) return undefined;
+    try { return JSON.parse(text); } catch { throw new OpenCodeTransportError('opencode-http-invalid-body'); }
+    } catch (error) { if (error instanceof OpenCodeTransportError) await this.failTransport(error).catch(() => {}); throw error; }
   }
 
   private async readStream(body: ReadableStream<Uint8Array>): Promise<void> {
-    const reader = body.getReader(), decoder = new TextDecoder(), parser = new OpenCodeSseParser();
+    const reader = body.getReader(), decoder = new TextDecoder('utf-8', { fatal: true }), parser = new OpenCodeSseParser();
+    const cancel = () => { void reader.cancel().catch(() => {}); };
+    this.lifetime.signal.addEventListener('abort', cancel, { once: true });
+    let cleanup: Promise<void> | undefined;
+    const releaseReader = () => cleanup ??= (async () => { this.lifetime.signal.removeEventListener('abort', cancel); await reader.cancel().catch(() => {}); reader.releaseLock(); })();
     try {
-      while (!this.closed) {
-        const chunk = await reader.read(); if (chunk.done) throw new Error("OpenCode SSE ended");
-        for (const event of parser.push(decoder.decode(chunk.value, { stream: true }))) this.event(event);
+      while (!this.closed && !this.serverDead) {
+        const chunk = await reader.read();
+        const decode = (bytes?: Uint8Array) => {
+          let text: string;
+          try { text = bytes ? decoder.decode(bytes, { stream: true }) : decoder.decode(); } catch { throw new OpenCodeTransportError('opencode-sse-invalid-frame'); }
+          parser.push(text, event => this.event(event));
+        };
+        if (chunk.done) { decode(); throw new Error("OpenCode SSE ended"); }
+        // Decode through one wire line at a time: fatal UTF-8 later in a
+        // coalesced read must not erase already complete, valid SSE frames.
+        for (let start = 0; start < chunk.value.length;) {
+          const newline = chunk.value.indexOf(10, start);
+          const end = newline < 0 ? chunk.value.length : newline + 1;
+          decode(chunk.value.subarray(start, end)); start = end;
+        }
       }
     } catch (error) {
-      if (!this.closed && !this.serverDead) { this.serverDead = true; this.finish({ status: "failed", error: redactText((error as Error).message, 400), failure: { category: "network", origin: "unknown", certainty: "inferred" } }); void this.terminate().catch(() => {}); }
-    } finally { reader.releaseLock(); }
+      if (!this.closed && !this.serverDead) {
+        if (error instanceof OpenCodeTransportError) await this.failTransport(error, releaseReader).catch(() => {});
+        else { this.serverDead = true; this.finish({ status: "failed", error: redactText((error as Error).message, 400), failure: { category: "network", origin: "unknown", certainty: "inferred" } }); void this.terminate().catch(() => {}); }
+      }
+    } finally { await releaseReader(); }
   }
 
   private event(raw: unknown) {
+    if (this.closed || this.serverDead) return;
     raw = redactImagePayload(raw);
     const p = record(raw) && record(raw.properties) ? raw.properties : {};
     const sid = p.sessionID ?? (record(p.part) ? p.part.sessionID : undefined) ?? (record(p.info) ? p.info.sessionID : undefined);
@@ -234,11 +293,11 @@ Patterns: ${raw.always.join("\n")}`,
           });
         } catch { /* Broker failure denies. */ }
       }
-      if (this.closed) return;
+      if (this.closed || this.serverDead) return;
       if (!turn || this.current !== turn || turn.interrupted || turn.controller.signal.aborted) decision = { decision: "deny" };
       const reply = decision.decision === "allow" ? (decision.scope === "always" && supportsAlways ? "always" : "once") : "reject";
       await this.request(`/permission/${encodeURIComponent(raw.id)}/reply`, { reply });
-    })().catch(error => { this.emit({ kind: "diagnostic", data: { code: "opencode-permission-reply-failed", message: redactText((error as Error).message, 300) } }); if (turn && this.current === turn) this.finish({ status: "failed", error: "OpenCode permission reply failed" }); });
+    })().catch(error => { if (this.transportFailure) return; this.emit({ kind: "diagnostic", data: { code: "opencode-permission-reply-failed", message: redactText((error as Error).message, 300) } }); if (turn && this.current === turn) this.finish({ status: "failed", error: "OpenCode permission reply failed" }); });
   }
 
   private question(raw: unknown) {
@@ -259,7 +318,7 @@ Patterns: ${raw.always.join("\n")}`,
           if (answer.outcome === "answered" && !validateQuestionAnswers(questions, answer.answers).ok) answer = { outcome: "dismissed" };
         }
       } catch { answer = { outcome: "dismissed" }; }
-      if (this.closed) return;
+      if (this.closed || this.serverDead) return;
       if (!turn || this.current !== turn || turn.interrupted || turn.controller.signal.aborted) answer = { outcome: "cancelled" };
       const path = `/question/${encodeURIComponent(raw.id)}`;
       if (answer.outcome === "answered") {
@@ -274,7 +333,7 @@ Patterns: ${raw.always.join("\n")}`,
         }
       }
       await this.request(path + "/reject", {});
-    })().catch(error => { this.emit({ kind: "diagnostic", data: { code: "opencode-question-reply-failed", message: redactText((error as Error).message, 300) } }); if (turn && this.current === turn) this.finish({ status: "failed", error: "OpenCode question reply failed" }); });
+    })().catch(error => { if (this.transportFailure) return; this.emit({ kind: "diagnostic", data: { code: "opencode-question-reply-failed", message: redactText((error as Error).message, 300) } }); if (turn && this.current === turn) this.finish({ status: "failed", error: "OpenCode question reply failed" }); });
   }
 
   send(prompt: string, images?: readonly DriverImageInput[]): Promise<TurnOutcome> {
@@ -288,12 +347,13 @@ Patterns: ${raw.always.join("\n")}`,
     if (split <= 0) return Promise.resolve({ status: "failed", error: "OpenCode model must be provider/model" });
     const done = new Promise<TurnOutcome>(settle => { this.current = { settle, interrupted: false, controller: new AbortController() }; });
     const turn = this.current!;
+    if (this.io.claimInput?.() === false) { this.finish({ status: "interrupted" }); return done; }
     this.emit({ kind: "turn.started", data: { nativeSessionId: this.nativeId, nativeThreadId: this.nativeId, model: this.input.assignment.modelId } });
     void this.request(`/session/${encodeURIComponent(this.nativeId)}/message`, {
       system: this.input.rolePrompt, model: { providerID: modelId.slice(0, split), modelID: modelId.slice(split + 1) },
       ...(this.input.assignment.thinking && this.input.assignment.thinking !== "off" ? { variant: this.input.assignment.thinking } : {}), parts: [...(prompt || !nativeImages.length ? [{ type: "text", text: prompt }] : []), ...nativeImages.map(image => ({ type: "file", mime: image.mimeType, filename: image.name, url: `data:${image.mimeType};base64,${image.data}` }))],
     }, AbortSignal.any([turn.controller.signal, this.lifetime.signal])).then(result => {
-      if (this.current !== turn) return;
+      if (this.current !== turn || this.serverDead) return;
       if (turn.interrupted && record(result) && record(result.info) && record(result.info.error) && result.info.error.name === "MessageAbortedError") return this.finish({ status: "interrupted" });
       if (!record(result) || !record(result.info) || result.info.error) return this.finish({ status: "failed", error: "OpenCode message failed", failure: classifyOpenCodeFailure(record(result) && record(result.info) ? result.info.error : undefined) });
       if (result.info.sessionID === this.nativeId && !turn.interrupted) {
@@ -309,33 +369,41 @@ Patterns: ${raw.always.join("\n")}`,
       if(!turn.interrupted && result.info.sessionID===this.nativeId)for(const event of correlatedOpenCodeEdits(result,this.nativeId))this.emit(event);
       for (const part of Array.isArray(result.parts) ? result.parts : []) if (record(part) && part.type === "text" && typeof part.text === "string") this.emit({ kind: "message.completed", data: { text: part.text, messageId: result.info.id }, raw: part });
       this.finish({ status: turn.interrupted ? "interrupted" : "completed" });
-    }, error => { if (this.current === turn && !turn.interrupted) this.finish({ status: "failed", error: redactText((error as Error).message, 400) }); });
+    }, error => { if (this.current === turn && !turn.interrupted && !this.serverDead) this.finish({ status: "failed", error: redactText((error as Error).message, 400) }); });
     return done;
   }
 
   async interrupt(): Promise<void> {
-    const turn = this.current; if (!turn || turn.interrupted) return;
+    const turn = this.current; if (!turn || turn.interrupted || this.serverDead) return;
     turn.interrupted = true;
     turn.timer = setTimeout(() => {
       if (this.current !== turn) return;
       turn.forced = true;
-      void this.terminate().then(() => this.finish({ status: "interrupted-forced" }), () => this.finish({ status: "failed", error: "OpenCode forced interruption cleanup failed" }));
+      void this.terminate().then(() => {
+        if (this.current === turn && !this.transportFailure) this.finish({ status: "interrupted-forced" });
+      }, () => {
+        if (this.current === turn && !this.transportFailure) this.finish({ status: "failed", error: "OpenCode forced interruption cleanup failed" });
+      });
     }, this.options.escalationMs ?? 10_000);
     try { await this.request(`/session/${encodeURIComponent(this.nativeId)}/abort`, {}); } catch { /* Wait for native terminal event or escalation. */ }
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return; this.closed = true;
-    this.finish({ status: "interrupted-forced" }); this.lifetime.abort();
-    if (this.child) await this.terminate().catch(() => {});
-    await this.stream;
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    this.closed = true;
+    return this.closing = (async () => {
+      if (this.transportCleanup) { await this.transportCleanup; await this.stream; return; }
+      this.finish({ status: "interrupted-forced" }); this.lifetime.abort();
+      if (this.child) await this.terminate();
+      await this.stream;
+    })();
   }
   get id() { return this.nativeId; }
 }
 
 export function createOpenCodeSessionDriver(options: OpenCodeSessionDriverOptions = {}): RunnerSessionDriver {
   return {
-    runnerId: "opencode", protocol: OPENCODE_PROTOCOL, testedVersions: { ...OPENCODE_TESTED_VERSIONS },
+    runnerId: "opencode", supportsInputClaim: true, protocol: OPENCODE_PROTOCOL, testedVersions: { ...OPENCODE_TESTED_VERSIONS },
     async probe(ctx): Promise<DriverProbe> {
       let text: string;
       try { const result = await (options.exec ?? nativeExec)(ctx.executablePath ?? options.executable ?? "opencode", ["--version"], { cwd: ctx.cwd, timeoutMs: 5000 }); if (result.code !== 0) throw Error("probe failed"); text = result.stdout; } catch { return { status: "blocked", reasonCode: "opencode-not-installed", capabilities: [] }; }
