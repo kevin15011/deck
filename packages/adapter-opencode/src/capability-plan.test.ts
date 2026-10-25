@@ -60,43 +60,9 @@ describe("buildOpenCodeRunnerReviewPlan Serena authorization", () => {
     }
   });
 
-  test("orders missing Serena installation before its config write", () => {
-    const plan = buildOpenCodeRunnerReviewPlan(state(), inventory(),);
-    const install = plan.groups.automaticInstalls.find((action) => action.capabilityId === "serena");
-    const config = plan.groups.configWrites.find((action) => action.capabilityId === "serena");
+  test("does not schedule retired Serena even with matching operation authorization", () => { const plan = buildOpenCodeRunnerReviewPlan(state(), inventory()); expect(plan.groups.automaticInstalls.some(action => action.capabilityId === 'serena')).toBe(false); expect(plan.groups.configWrites.some(action => action.capabilityId === 'serena')).toBe(false); });
 
-    expect(install).toMatchObject({
-      id: "capability.serena.install",
-      kind: "install-opencode-plugin",
-      source: "serena-agent",
-      status: "ready",
-    });
-    expect(config).toMatchObject({
-      id: "capability.serena.mcp-config",
-      kind: "write-mcp-config",
-      status: "ready",
-      dependencies: ["capability.serena.install"],
-    });
-    expect(plan.groups.automaticInstalls.indexOf(install!)).toBeGreaterThanOrEqual(0);
-    expect(plan.groups.configWrites.indexOf(config!)).toBeGreaterThanOrEqual(0);
-  });
-
-  test("routes a ready Serena reuse path through readiness before config", () => {
-    const plan = buildOpenCodeRunnerReviewPlan(
-      state(),
-      inventory({ status: "ready", installed: true }),
-    );
-
-    expect(plan.groups.automaticInstalls).toContainEqual(expect.objectContaining({
-      id: "capability.serena.install",
-      title: "Validate Serena readiness",
-    }));
-    expect(plan.groups.configWrites).toContainEqual(expect.objectContaining({
-      id: "capability.serena.mcp-config",
-      capabilityId: "serena",
-      dependencies: ["capability.serena.install"],
-    }));
-  });
+  test("does not revalidate or configure a retired ready Serena", () => { const plan = buildOpenCodeRunnerReviewPlan(state(), inventory({ status: 'ready', installed: true })); expect(plan.groups.automaticInstalls.some(action => action.capabilityId === 'serena')).toBe(false); expect(plan.groups.configWrites.some(action => action.capabilityId === 'serena')).toBe(false); });
 
   test("does not manufacture Serena readiness for blocked or failed inventory", () => {
     for (const status of ["blocked", "pending", "manual", "failed"] as const) {
@@ -108,23 +74,23 @@ describe("buildOpenCodeRunnerReviewPlan Serena authorization", () => {
 
   test("continues unrelated selected capability planning", () => {
     const plan = buildOpenCodeRunnerReviewPlan(
-      state({ selectedCapabilities: { serena: true, context7: true } }),
+      state({ selectedCapabilities: { serena: true, rtk: true } }),
       {
         ...inventory(),
-        context7: {
-          capabilityId: "context7",
+        rtk: {
+          capabilityId: "rtk",
           status: "missing",
           runnerScope: "opencode",
           installed: false,
-          toolId: "context7",
-          source: "@upstash/context7-mcp",
+          toolId: "rtk",
+          source: "@upstash/rtk-mcp",
           diagnostics: [],
         },
       },
     );
 
-    expect(plan.groups.automaticInstalls).toContainEqual(expect.objectContaining({ capabilityId: "context7" }));
-    expect(plan.groups.automaticInstalls).toContainEqual(expect.objectContaining({ capabilityId: "serena" }));
+    expect(plan.groups.automaticInstalls).toContainEqual(expect.objectContaining({ capabilityId: "rtk" }));
+    expect(plan.groups.automaticInstalls.some(action => action.capabilityId === "serena")).toBe(false);
   });
 });
 

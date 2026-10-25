@@ -216,7 +216,7 @@ function validate(server: CodexMcpServer): void {
     }
   }
   const serialized = JSON.stringify(server);
-  if (/(?:sk-|Bearer\s+)[A-Za-z0-9._-]{8,}/i.test(serialized)) throw new Error(`Inline credentials are forbidden for ${server.id}.`);
+  if (/\b(?:sk-|Bearer\s+)[A-Za-z0-9._-]{8,}/i.test(serialized)) throw new Error(`Inline credentials are forbidden for ${server.id}.`);
 }
 
 function render(server: CodexMcpServer): string {
@@ -310,7 +310,7 @@ function repairSelectedToolServers(source: string, desired: readonly CodexMcpSer
   return source;
 }
 
-export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpServer[], options: { repairSelectedToolIds?: readonly string[] } = {}): CodexMcpMergeResult {
+export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpServer[], options: { repairSelectedToolIds?: readonly string[]; ownedServerIds?: readonly string[] } = {}): CodexMcpMergeResult {
   const originalSource = source;
   let existing: Map<string, object>;
   for (const server of desired) {
@@ -319,19 +319,20 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
     }
   }
   try {
-    if (options.repairSelectedToolIds?.length) source = repairSelectedToolServers(source, desired, options.repairSelectedToolIds);
+    if (options.repairSelectedToolIds?.length) source = repairSelectedToolServers(source, desired, options.repairSelectedToolIds.filter(id => options.ownedServerIds?.includes(id)));
     existing = existingServers(source);
   } catch { return { status: "blocked", content: originalSource, collisions: [], diagnostics: ["Malformed TOML cannot be changed safely."] }; }
   const managed = managedServerIds(source);
   const desiredIds = new Set<string>(desired.map((server) => server.id));
-  const replaceManaged = new Set<string>([...managed].filter((id) => !desiredIds.has(id)));
+  const proven = new Set(options.ownedServerIds ?? []);
+  const replaceManaged = new Set<string>([...managed].filter((id) => !desiredIds.has(id) && proven.has(id)));
   const collisions: CodexMcpServerId[] = [];
   const missing: CodexMcpServer[] = [];
   for (const server of desired) {
     const present = existing.get(server.id);
     if (!present) missing.push(server);
     else if (JSON.stringify(canonical(present)) !== JSON.stringify(canonical(normalized(server)))) {
-      if (managed.has(server.id)) { replaceManaged.add(server.id); missing.push(server); }
+      if (managed.has(server.id) && proven.has(server.id)) { replaceManaged.add(server.id); missing.push(server); }
       else collisions.push(server.id);
     }
   }
@@ -385,7 +386,7 @@ export function buildCodexMcpServers(input: {
   /** Absolute resolved executable for the provider command; a bare PATH name is used only when absent. */
   webSearchCommand?: string;
 }): { servers: readonly CodexMcpServer[]; gaps: readonly string[] } {
-  const selected = new Set(input.packageIds);
+  const selected = new Set(input.packageIds.filter(id => id !== "context-mode" && id !== "serena"));
   const servers: CodexMcpServer[] = [];
   const gaps: string[] = [];
   if (selected.has("context-mode")) {
@@ -393,7 +394,12 @@ export function buildCodexMcpServers(input: {
     else gaps.push("context-mode-not-ready");
   }
   if (selected.has("codebase-memory")) {
-    if (isAbsolutePinnedCommand(input.codebaseMemoryCommand)) servers.push({ id: "codebase-memory", transport: "stdio", command: input.codebaseMemoryCommand });
+    if (isAbsolutePinnedCommand(input.codebaseMemoryCommand)) servers.push({
+      id: "codebase-memory",
+      transport: "stdio",
+      command: input.codebaseMemoryCommand,
+      envVars: ["CBM_RUNTIME_DIR", "CBM_CACHE_DIR", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "TMPDIR"],
+    });
     else gaps.push("codebase-memory-not-ready");
   }
   if (selected.has("serena")) {

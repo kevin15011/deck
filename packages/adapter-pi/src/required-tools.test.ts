@@ -34,7 +34,7 @@ describe("reviewPiRequiredTools", () => {
     const names = result.requiredTools.map((tool) => tool.name);
     expect(names).not.toContain("sub-agents");
     expect(names).not.toContain("MCP packages");
-    expect(names).toEqual(["context-mode", "codebase-memory", "RTK", "Context7"]);
+    expect(names).toEqual(["codebase-memory", "RTK", "Context7"]);
   });
 
   test("an installed pi-subagents / pi-mcp-adapter is not reported as a satisfied or missing requirement", () => {

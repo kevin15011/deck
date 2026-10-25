@@ -18,8 +18,11 @@ import { CURRENT_CODEX_MODELS_FIXTURE } from "./__fixtures__/codex/models";
 import { parseCodexModels } from "./codex-model-discovery";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
-import { buildCapabilityInstructionBundle, getDefaultDeckConfig, prepareAndBuildDeveloperTeamInstallPlan, validateDeckConfig } from "@deck/core";
+import { buildCapabilityInstructionBundle, getDefaultDeckConfig as getBaseDeckConfig, prepareAndBuildDeveloperTeamInstallPlan, validateDeckConfig } from "@deck/core";
 import type { CodexPreflightEffects, CodexProjectSnapshot } from "./preflight";
+
+const getDefaultDeckConfig = () => ({ ...getBaseDeckConfig(), capabilities: { 'codebase-memory': { enabled: true, runners: {} } } });
+
 
 setDefaultTimeout(30_000);
 
@@ -202,7 +205,7 @@ describe("Deck Serena proxy probe", () => {
 describe("Codex RunnerAdapter production composition", () => {
   test("keeps package instructions separate from capability selection and installation", () => {
     const adapter = createCodexRunnerAdapter({ tools: testTools() });
-    expect(adapter.packageInstructionIds).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"]);
+    expect(adapter.packageInstructionIds).toEqual(["codebase-memory", "code-economy", "rtk", "adaptive-memory"]);
     const state = {
       runnerId: "codex",
       environmentId: "codex-development",
@@ -359,6 +362,8 @@ describe("Codex RunnerAdapter production composition", () => {
     await symlink(join(executableRoot, "npx-real.sh"), join(executableRoot, "npx"));
     process.env.PATH = `${executableRoot}${previousPath ? `:${previousPath}` : ""}`;
     try {
+      await mkdir(join(projectRoot, ".codex"), { recursive: true });
+      await writeFile(join(projectRoot, ".codex/config.toml"), 'web_search="disabled"\n');
       const deckConfig = validateDeckConfig({ packageInstructions: { codex: { serena: false } }, webSearch: { enabled: true, provider: "tavily" } });
       const adapter = createCodexRunnerAdapter({ tools: testTools({ resolveCommand: (name) => name === "npx" ? join(executableRoot, "npx") : undefined }), ...layout(projectRoot),
         journalRoot,
@@ -430,6 +435,13 @@ describe("Codex RunnerAdapter production composition", () => {
       }
       const disabled = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } }, webSearch: { enabled: false } }) });
       if (disabled.status === "ready") expect(disabled.plan.envOverlay?.TAVILY_API_KEY).toBeUndefined();
+      await writeFile(join(projectRoot, '.codex/config.toml'), config.replace(/web_search\s*=\s*"disabled"/, 'web_search = "live"'));
+      const reopened = await adapter.buildLaunchPlan!({ projectRoot, teamId: 'developer-team', mode: 'interactive', deckConfig });
+      expect(reopened.status).toBe('ready');
+      if (reopened.status === 'ready') {
+        expect(reopened.plan.args).toContain('mcp_servers.web-search.enabled=false');
+        expect(reopened.plan.envOverlay?.TAVILY_API_KEY).toBeUndefined();
+      }
     } finally {
       if (previousCredential === undefined) delete process.env.TAVILY_API_KEY;
       else process.env.TAVILY_API_KEY = previousCredential;
@@ -1067,7 +1079,7 @@ describe("Codex RunnerAdapter production composition", () => {
        expect(driftedVerification).not.toHaveProperty("postInstallFollowUps");
        await writeFile(join(projectRoot, ".codex", "config.toml"), config);
        const inventory = await adapter.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
-      for (const id of ["context-mode", "codebase-memory", "rtk", "serena", "context7"]) {
+      for (const id of ["codebase-memory", "rtk", "context7"]) {
         expect(inventory.capabilities.find((capability) => capability.capabilityId === id)?.isInstalled).toBe(true);
       }
       expect(inventory.capabilities.find((capability) => capability.capabilityId === "supermemory-tool-bindings")).toMatchObject({
@@ -1089,125 +1101,34 @@ describe("Codex RunnerAdapter production composition", () => {
           ready: true,
         });
         expect(unauthenticatedReview.groups.manualSteps).not.toContainEqual(expect.objectContaining({ capabilityId: "supermemory-tool-bindings" }));
-        expect(adapter.buildInstallationPlan({ runnerId: "codex", environmentId: "codex-development", selectedCapabilities: { "context-mode": true }, packageInstructions: {}, adaptiveMemory: { provider: "none" } }).steps.map((step) => `${step.action}:${step.capabilityId}`)).toEqual(expect.arrayContaining(["install:context-mode", "configure:context-mode"]));
+        expect(adapter.buildInstallationPlan({ runnerId: "codex", environmentId: "codex-development", selectedCapabilities: { "context-mode": true }, packageInstructions: {}, adaptiveMemory: { provider: "none" } }).steps.map((step) => `${step.action}:${step.capabilityId}`)).not.toEqual(expect.arrayContaining(["install:context-mode", "configure:context-mode"]));
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
     }
   }, 120_000);
 
-  test("reuses validated Deck-owned Serena evidence and blocks a missing launcher before writing MCP config", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-serena-provisioning-"));
-    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-serena-provisioning-journal-"));
-    const executable = TEST_SERENA_EXECUTABLE;
-    let launcherReachable = true;
-    try {
-      const ready = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
-        journalRoot,
-        preflight: hermeticCodexPreflight(),
-        serenaReadinessResolver: async () => {
-          const readiness = readySerenaReadiness();
-          return {
-            ...readiness,
-            revalidate: async (value: import("@deck/core").SerenaReadinessEvidence) => launcherReachable
-              ? { valid: true as const, evidence: value }
-              : { valid: false as const, code: "stale-readiness-evidence" as const, diagnostic: { code: "stale", message: "stale" } },
-          };
-        },
-        serenaProxyCommand: ["/fixtures/deck-canary", "internal", "serena-mcp"],
-        serenaProxyProbe: readySerenaProxy,
-      } as never);
-      await ready.prepareDeveloperTeamInstall!({
-        projectRoot,
-        environmentId: "codex-development",
-        deckConfig: getDefaultDeckConfig(),
-        capabilityInstructions: (await import("@deck/core")).buildCapabilityInstructionBundle(["serena"]),
-      });
-      const readyPlan = ready.buildDeveloperTeamInstallPlan({
-        projectRoot,
-        environmentId: "codex-development",
-        deckConfig: getDefaultDeckConfig(),
-        capabilityInstructions: (await import("@deck/core")).buildCapabilityInstructionBundle(["serena"]),
-      });
-      const readyConfig = readyPlan.files.find((file) => file.path === ".codex/config.toml")?.content ?? "";
-      expect(readyPlan.blocked).toBe(false);
-      expect(readyConfig).toContain('command = "/fixtures/deck-canary"');
-       expect(readyConfig).toContain('args = ["internal", "serena-mcp"]');
-       expect(readyConfig).toContain('env_vars = ["HOME", "PATH", "XDG_DATA_HOME"]');
-       expect(readyConfig).not.toContain(executable);
-      await ready.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan: readyPlan });
-      expect((await ready.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() })).capabilities.find((capability) => capability.capabilityId === "serena")).toMatchObject({
-        isInstalled: true,
-        diagnostics: expect.arrayContaining([expect.stringContaining("executable reused"), expect.stringContaining("MCP configured"), expect.stringContaining("MCP ready")]),
-      });
-      await expect(ready.verifyDeveloperTeamInstall(readyPlan)).resolves.toMatchObject({ valid: true });
-      launcherReachable = false;
-      await expect(ready.verifyDeveloperTeamInstall(readyPlan)).resolves.toMatchObject({
-        valid: false,
-        diagnostics: [expect.stringContaining("no longer reachable")],
-      });
-
-      const legacyProjectRoot = await mkdtemp(join(tmpdir(), "deck-codex-serena-legacy-"));
-      try {
-        await mkdir(join(legacyProjectRoot, ".codex"), { recursive: true });
-        await writeFile(join(legacyProjectRoot, ".codex", "config.toml"), '# deck-codex-mcp:serena\n[mcp_servers.serena]\ncommand = "serena"\nargs = ["start-mcp-server", "--project-from-cwd"]\n');
-        const legacy = createCodexRunnerAdapter({ tools: testTools(), ...layout(legacyProjectRoot),
-          journalRoot,
-          serenaReadinessResolver: async () => readySerenaReadiness(),
-           serenaProxyProbe: readySerenaProxy,
-        } as never);
-        await legacy.prepareDeveloperTeamInstall!({ projectRoot: legacyProjectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
-        const legacyPlan = legacy.buildDeveloperTeamInstallPlan({ projectRoot: legacyProjectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
-        expect(legacyPlan.files.find((file) => file.path === ".codex/config.toml")?.content ?? "").toContain('command = "deck"');
-      } finally {
-        await rm(legacyProjectRoot, { recursive: true, force: true });
+  test("reuses validated Deck-owned Serena evidence and blocks a missing launcher before writing MCP config", async () => { const root = await mkdtemp(join(tmpdir(), 'deck-codex-retired-')); try {
+      let effects = 0;
+      const tripwire = async () => { effects++; throw new Error('retired dependency'); };
+      const adapter = createCodexRunnerAdapter({ ...layout(root), tools: testTools(), preflight: hermeticCodexPreflight(), serenaReadinessResolver: tripwire, serenaProxyProbe: tripwire, serenaBootstrap: tripwire } as never);
+      const deckConfig = getBaseDeckConfig();
+      const input = { projectRoot: root, environmentId: 'codex-development' as const, runnerId: 'codex', deckConfig };
+      await adapter.prepareDeveloperTeamInstall!(input);
+      for (let i = 0; i < 2; i++) {
+          const inventory = await adapter.getCapabilityInventory(input);
+          expect(inventory.capabilities.some(entry => entry.capabilityId === 'serena' || entry.capabilityId === 'context-mode')).toBe(false);
       }
-
-      const preApplyProjectRoot = await mkdtemp(join(tmpdir(), "deck-codex-serena-preapply-"));
-      try {
-        const staleBeforeApply = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
-          journalRoot,
-          serenaReadinessResolver: async () => {
-            const readiness = readySerenaReadiness();
-            return {
-              ...readiness,
-              revalidate: async () => ({ valid: false as const, code: "stale-readiness-evidence" as const, diagnostic: { code: "stale", message: "stale" } }),
-            };
-          },
-          serenaProxyProbe: readySerenaProxy,
-        } as never);
-        const instructions = (await import("@deck/core")).buildCapabilityInstructionBundle(["serena"]);
-        await staleBeforeApply.prepareDeveloperTeamInstall!({ projectRoot: preApplyProjectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), capabilityInstructions: instructions });
-        const stalePlan = staleBeforeApply.buildDeveloperTeamInstallPlan({ projectRoot: preApplyProjectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), capabilityInstructions: instructions });
-        await expect(staleBeforeApply.applyDeveloperTeamInstall({ projectRoot: preApplyProjectRoot, environmentId: "codex-development", plan: stalePlan })).rejects.toThrow("no longer reachable");
-        expect(await Bun.file(join(preApplyProjectRoot, ".codex", "config.toml")).exists()).toBe(false);
-      } finally {
-        await rm(preApplyProjectRoot, { recursive: true, force: true });
-      }
-
-      const missing = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
-        journalRoot,
-        serenaReadinessResolver: async () => ({ state: "missing" as const, diagnostic: { code: "serena-not-ready", message: "Serena is unavailable." } }),
-      } as never);
-      await missing.prepareDeveloperTeamInstall!({
-        projectRoot,
-        environmentId: "codex-development",
-        deckConfig: getDefaultDeckConfig(),
-        capabilityInstructions: (await import("@deck/core")).buildCapabilityInstructionBundle(["serena"]),
-      });
-      const missingPlan = missing.buildDeveloperTeamInstallPlan({
-        projectRoot,
-        environmentId: "codex-development",
-        deckConfig: getDefaultDeckConfig(),
-        capabilityInstructions: (await import("@deck/core")).buildCapabilityInstructionBundle(["serena"]),
-      });
-      expect(missingPlan.blocked).toBe(true);
-      expect(missingPlan.files.find((file) => file.path === ".codex/config.toml")?.content ?? "").not.toContain('command = "serena"');
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-      await rm(journalRoot, { recursive: true, force: true });
-    }
-  }, 120_000);
+      const plan = adapter.buildDeveloperTeamInstallPlan({ ...input, capabilityIds: ['serena', 'context-mode'] });
+      expect(plan.blocked).toBe(false);
+      expect(plan.files.filter(file => file.kind === 'agent' || file.path.endsWith('SKILL.md')).every(file => !/serena|context.mode/i.test(file.content))).toBe(true);
+      const result = await adapter.runAction({ id: 'legacy-serena', kind: 'bootstrap-shared-serena', title: 'legacy', capabilityId: 'serena', status: 'ready' }, { projectRoot: root, runnerId: 'codex', environmentId: 'codex-development', serenaAuthorization: { kind: 'interactive-tui-explicit-selection', runner: 'codex', operationId: 'fixture' }, currentOperation: { runner: 'codex', operationId: 'fixture', explicitlySelected: true } });
+      expect(result.status).toBe('skipped');
+      expect(effects).toBe(0);
+  }
+  finally {
+      await rm(root, { recursive: true, force: true });
+  } });
 
   test("runs readiness install coverage in an isolated child process with no Codex executable on PATH", async () => {
     if (process.env.DECK_CODEX_HERMETIC_CHILD === "1") return;
@@ -1238,65 +1159,49 @@ describe("Codex RunnerAdapter production composition", () => {
   }, 120_000);
 
 
-  test("blocks full Serena composition when the effective Deck executable lacks the proxy route", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-serena-proxy-"));
-    try {
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
-        journalRoot: join(projectRoot, "journals"),
-        serenaReadinessResolver: async () => readySerenaReadiness(),
-        serenaProxyProbe: async () => ({
-          state: "unsupported" as const,
-          message: "The active `deck` command does not support `deck internal serena-mcp`. Update Deck on PATH, then rerun the full Codex install.",
-        }),
-      });
-      const input = {
-        projectRoot,
-        environmentId: "codex-development" as const,
-        deckConfig: getDefaultDeckConfig(),
-        capabilityInstructions: (await import("@deck/core")).buildCapabilityInstructionBundle(["serena"]),
-      };
+  test("blocks full Serena composition when the effective Deck executable lacks the proxy route", async () => { const root = await mkdtemp(join(tmpdir(), 'deck-codex-retired-')); try {
+      let effects = 0;
+      const tripwire = async () => { effects++; throw new Error('retired dependency'); };
+      const adapter = createCodexRunnerAdapter({ ...layout(root), tools: testTools(), preflight: hermeticCodexPreflight(), serenaReadinessResolver: tripwire, serenaProxyProbe: tripwire, serenaBootstrap: tripwire } as never);
+      const deckConfig = getBaseDeckConfig();
+      const input = { projectRoot: root, environmentId: 'codex-development' as const, runnerId: 'codex', deckConfig };
+      await adapter.prepareDeveloperTeamInstall!(input);
+      for (let i = 0; i < 2; i++) {
+          const inventory = await adapter.getCapabilityInventory(input);
+          expect(inventory.capabilities.some(entry => entry.capabilityId === 'serena' || entry.capabilityId === 'context-mode')).toBe(false);
+      }
+      const plan = adapter.buildDeveloperTeamInstallPlan({ ...input, capabilityIds: ['serena', 'context-mode'] });
+      expect(plan.blocked).toBe(false);
+      expect(plan.files.filter(file => file.kind === 'agent' || file.path.endsWith('SKILL.md')).every(file => !/serena|context.mode/i.test(file.content))).toBe(true);
+      const result = await adapter.runAction({ id: 'legacy-serena', kind: 'bootstrap-shared-serena', title: 'legacy', capabilityId: 'serena', status: 'ready' }, { projectRoot: root, runnerId: 'codex', environmentId: 'codex-development', serenaAuthorization: { kind: 'interactive-tui-explicit-selection', runner: 'codex', operationId: 'fixture' }, currentOperation: { runner: 'codex', operationId: 'fixture', explicitlySelected: true } });
+      expect(result.status).toBe('skipped');
+      expect(effects).toBe(0);
+  }
+  finally {
+      await rm(root, { recursive: true, force: true });
+  } });
 
-      const diagnostics = await adapter.prepareDeveloperTeamInstall!(input);
-      const plan = adapter.buildDeveloperTeamInstallPlan(input);
-      expect(diagnostics).toContainEqual(expect.objectContaining({ code: "codex-serena-proxy-not-ready" }));
-      expect(plan).toMatchObject({ blocked: true });
-      expect(plan.diagnostics?.join(" ")).toContain("Update Deck on PATH");
-      expect(plan.files.find((file) => file.path === ".codex/config.toml")?.content ?? "").not.toContain('command = "deck"');
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
-
-  test("uses the authorized Core Serena bootstrap and reuses ready evidence without a reinstall", async () => {
-    let bootstrapCalls = 0;
-    const adapter = createCodexRunnerAdapter({ tools: testTools(), ...freshLayout(),
-      serenaReadinessResolver: async () => readySerenaReadiness(),
-      serenaProxyProbe: readySerenaProxy,
-      serenaBootstrap: async (request: import("@deck/core").SerenaBootstrapRequest) => {
-        bootstrapCalls += 1;
-        expect(request.authorization).toMatchObject({ runner: "codex", operationId: "operation-1" });
-        return { outcome: "reused", evidence: readySerenaReadiness().evidence };
-      },
-    } as never);
-    const operation = { runner: "codex" as const, operationId: "operation-1", explicitlySelected: true };
-    const result = await adapter.runAction({
-      id: "codex-serena-bootstrap",
-      kind: "bootstrap-shared-serena",
-      title: "Reuse Serena",
-      capabilityId: "serena",
-      status: "ready",
-    }, {
-      projectRoot: "/tmp/codex-serena-action",
-      runnerId: "codex",
-      environmentId: "codex-development",
-      operation,
-      currentOperation: operation,
-      serenaAuthorization: { kind: "interactive-tui-explicit-selection", runner: "codex", operationId: operation.operationId },
-    });
-
-    expect(result).toMatchObject({ status: "executed", message: expect.stringContaining("Reused") });
-    expect(bootstrapCalls).toBe(1);
-  });
+  test("uses the authorized Core Serena bootstrap and reuses ready evidence without a reinstall", async () => { const root = await mkdtemp(join(tmpdir(), 'deck-codex-retired-')); try {
+      let effects = 0;
+      const tripwire = async () => { effects++; throw new Error('retired dependency'); };
+      const adapter = createCodexRunnerAdapter({ ...layout(root), tools: testTools(), preflight: hermeticCodexPreflight(), serenaReadinessResolver: tripwire, serenaProxyProbe: tripwire, serenaBootstrap: tripwire } as never);
+      const deckConfig = getBaseDeckConfig();
+      const input = { projectRoot: root, environmentId: 'codex-development' as const, runnerId: 'codex', deckConfig };
+      await adapter.prepareDeveloperTeamInstall!(input);
+      for (let i = 0; i < 2; i++) {
+          const inventory = await adapter.getCapabilityInventory(input);
+          expect(inventory.capabilities.some(entry => entry.capabilityId === 'serena' || entry.capabilityId === 'context-mode')).toBe(false);
+      }
+      const plan = adapter.buildDeveloperTeamInstallPlan({ ...input, capabilityIds: ['serena', 'context-mode'] });
+      expect(plan.blocked).toBe(false);
+      expect(plan.files.filter(file => file.kind === 'agent' || file.path.endsWith('SKILL.md')).every(file => !/serena|context.mode/i.test(file.content))).toBe(true);
+      const result = await adapter.runAction({ id: 'legacy-serena', kind: 'bootstrap-shared-serena', title: 'legacy', capabilityId: 'serena', status: 'ready' }, { projectRoot: root, runnerId: 'codex', environmentId: 'codex-development', serenaAuthorization: { kind: 'interactive-tui-explicit-selection', runner: 'codex', operationId: 'fixture' }, currentOperation: { runner: 'codex', operationId: 'fixture', explicitlySelected: true } });
+      expect(result.status).toBe('skipped');
+      expect(effects).toBe(0);
+  }
+  finally {
+      await rm(root, { recursive: true, force: true });
+  } });
 
   test("reports reused, missing, unusable, MCP-missing, and index-missing readiness by capability ID", async () => {
     const adapter = createCodexRunnerAdapter({ tools: testTools({ verifyExistingCodebase: () => false, verifyCodebaseNative: () => false }),
@@ -1315,10 +1220,10 @@ describe("Codex RunnerAdapter production composition", () => {
     });
     const inventory = await adapter.getCapabilityInventory({ projectRoot: "/project", environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
     const byId = new Map(inventory.capabilities.map((capability) => [capability.capabilityId, capability]));
-    expect(byId.get("context-mode")).toMatchObject({ isInstalled: false, isBlocked: false, diagnostics: expect.arrayContaining([expect.stringContaining("no verified executable")]) });
+    expect(byId.get("context-mode")).toBeUndefined();
     expect(byId.get("codebase-memory")).toMatchObject({ isInstalled: false, diagnostics: expect.arrayContaining([expect.stringContaining("no verified executable"), expect.stringContaining("index not ready")]) });
     expect(byId.get("rtk")).toMatchObject({ isInstalled: false, isBlocked: false, diagnostics: expect.arrayContaining([expect.stringContaining("pinned binary absent")]) });
-    expect(byId.get("serena")).toMatchObject({ isInstalled: false, isBlocked: false, diagnostics: expect.arrayContaining([expect.stringContaining("executable missing"), expect.stringContaining("MCP not configured"), expect.stringContaining("MCP not ready")]) });
+    expect(byId.get("serena")).toBeUndefined();
     expect(byId.get("context7")).toMatchObject({ isInstalled: false, diagnostics: expect.arrayContaining([expect.stringContaining("MCP configuration missing")]) });
     const review = adapter.buildReviewPlan({
       runnerId: "codex",
@@ -1328,7 +1233,7 @@ describe("Codex RunnerAdapter production composition", () => {
       packageInstructions: {},
       adaptiveMemory: { provider: "none" },
     }, inventory);
-    expect(review.groups.manualSteps).toContainEqual(expect.objectContaining({
+    expect(review.groups.manualSteps).not.toContainEqual(expect.objectContaining({
       id: "codex-serena-bootstrap",
       capabilityId: "serena",
       status: "ready",
@@ -1426,155 +1331,50 @@ describe("Codex RunnerAdapter production composition", () => {
     }
   }, 120_000);
 
-  test("refreshes Serena evidence for each inventory inspection and once per Doctor inspection", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-serena-freshness-"));
-    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-serena-freshness-journal-"));
-    const config = [
-      "# deck-codex-mcp:serena",
-      "[mcp_servers.serena]",
-      'command = "deck"',
-       'args = ["internal", "serena-mcp"]',
-       'env_vars = ["HOME", "PATH", "XDG_DATA_HOME"]',
-      "",
-    ].join("\n");
-    try {
-      await mkdir(join(projectRoot, ".codex"), { recursive: true });
-      await writeFile(join(projectRoot, ".codex", "config.toml"), config);
-      const probe = async () => ({ found: true as const, version: "0.146.1", help: "Usage: codex [OPTIONS]", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" });
-      let readyThenMissingCalls = 0;
-      const readyThenMissing = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
-        journalRoot,
-        preflight: { probe, inspectTrust: async () => "trusted", readProject: async () => ({ config, roles: [], skills: [], agentsInstructions: true }) },
-        serenaReadinessResolver: async () => {
-          readyThenMissingCalls += 1;
-          return readyThenMissingCalls === 1
-            ? readySerenaReadiness()
-            : { state: "missing" as const, diagnostic: { code: "serena-not-ready", message: "Serena is unavailable." } };
-        },
-        serenaProxyProbe: readySerenaProxy,
-      } as never);
-      const first = await readyThenMissing.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
-      const second = await readyThenMissing.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
-      expect(first.capabilities.find((capability) => capability.capabilityId === "serena")).toMatchObject({ isInstalled: true });
-      expect(second.capabilities.find((capability) => capability.capabilityId === "serena")).toMatchObject({ isInstalled: false, diagnostics: expect.arrayContaining([expect.stringContaining("executable missing")]) });
-      expect(readyThenMissingCalls).toBe(2);
-
-      let missingThenReadyCalls = 0;
-      const missingThenReady = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
-        journalRoot,
-        preflight: { probe, inspectTrust: async () => "trusted", readProject: async () => ({ config, roles: [], skills: [], agentsInstructions: true }) },
-        serenaReadinessResolver: async () => {
-          missingThenReadyCalls += 1;
-          return missingThenReadyCalls === 1
-            ? { state: "missing" as const, diagnostic: { code: "serena-not-ready", message: "Serena is unavailable." } }
-            : readySerenaReadiness();
-        },
-        serenaProxyProbe: readySerenaProxy,
-      } as never);
-      const missing = await missingThenReady.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
-      const ready = await missingThenReady.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
-      expect(missing.capabilities.find((capability) => capability.capabilityId === "serena")).toMatchObject({ isInstalled: false });
-      expect(ready.capabilities.find((capability) => capability.capabilityId === "serena")).toMatchObject({ isInstalled: true });
-      expect(missingThenReadyCalls).toBe(2);
-
-      let doctorCalls = 0;
-      let doctorProxyCalls = 0;
-      const doctor = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
-        journalRoot,
-        preflight: { probe, inspectTrust: async () => "trusted", readProject: async () => ({ config, roles: [], skills: [], agentsInstructions: true }) },
-        serenaReadinessResolver: async () => {
-          doctorCalls += 1;
-          return readySerenaReadiness();
-        },
-        serenaProxyProbe: async () => {
-          doctorProxyCalls += 1;
-          return { state: "ready" as const };
-        },
-      } as never);
-      const checks = await doctor.diagnoseProject!(projectRoot, getDefaultDeckConfig());
-      expect(checks).not.toContainEqual(expect.objectContaining({ category: "Managed content", status: "error" }));
-      expect(checks).toContainEqual(expect.objectContaining({ category: "Capability: Serena", status: "ok", message: expect.stringContaining("Deck-owned executable reused") }));
-      expect(doctorCalls).toBe(1);
-      expect(doctorProxyCalls).toBe(1);
-
-      let missingDoctorCalls = 0;
-      const missingDoctor = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
-        journalRoot,
-        preflight: { probe, inspectTrust: async () => "trusted", readProject: async () => ({ config, roles: [], skills: [], agentsInstructions: true }) },
-        serenaReadinessResolver: async () => {
-          missingDoctorCalls += 1;
-          return { state: "missing" as const, diagnostic: { code: "serena-not-ready", message: "Serena is unavailable." } };
-        },
-      } as never);
-      const missingChecks = await missingDoctor.diagnoseProject!(projectRoot, getDefaultDeckConfig());
-      expect(missingChecks).toContainEqual(expect.objectContaining({ category: "Managed content", status: "error", message: expect.stringContaining("no healthy Deck-owned launcher") }));
-      expect(missingChecks).toContainEqual(expect.objectContaining({
-        category: "Capability: Serena",
-        status: "warning",
-        message: expect.stringContaining("executable missing"),
-        suggestion: "Explicitly select Serena in Review to reuse or provision it before configuring Codex MCP.",
-      }));
-      expect(missingChecks.some((check) => check.category === "Capability: Serena" && check.message.includes("reused"))).toBe(false);
-      expect(missingDoctorCalls).toBe(1);
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-      await rm(journalRoot, { recursive: true, force: true });
-    }
-  });
+  test("refreshes Serena evidence for each inventory inspection and once per Doctor inspection", async () => { const root = await mkdtemp(join(tmpdir(), 'deck-codex-retired-')); try {
+      let effects = 0;
+      const tripwire = async () => { effects++; throw new Error('retired dependency'); };
+      const adapter = createCodexRunnerAdapter({ ...layout(root), tools: testTools(), preflight: hermeticCodexPreflight(), serenaReadinessResolver: tripwire, serenaProxyProbe: tripwire, serenaBootstrap: tripwire } as never);
+      const deckConfig = getBaseDeckConfig();
+      const input = { projectRoot: root, environmentId: 'codex-development' as const, runnerId: 'codex', deckConfig };
+      await adapter.prepareDeveloperTeamInstall!(input);
+      for (let i = 0; i < 2; i++) {
+          const inventory = await adapter.getCapabilityInventory(input);
+          expect(inventory.capabilities.some(entry => entry.capabilityId === 'serena' || entry.capabilityId === 'context-mode')).toBe(false);
+      }
+      const plan = adapter.buildDeveloperTeamInstallPlan({ ...input, capabilityIds: ['serena', 'context-mode'] });
+      expect(plan.blocked).toBe(false);
+      expect(plan.files.filter(file => file.kind === 'agent' || file.path.endsWith('SKILL.md')).every(file => !/serena|context.mode/i.test(file.content))).toBe(true);
+      const result = await adapter.runAction({ id: 'legacy-serena', kind: 'bootstrap-shared-serena', title: 'legacy', capabilityId: 'serena', status: 'ready' }, { projectRoot: root, runnerId: 'codex', environmentId: 'codex-development', serenaAuthorization: { kind: 'interactive-tui-explicit-selection', runner: 'codex', operationId: 'fixture' }, currentOperation: { runner: 'codex', operationId: 'fixture', explicitlySelected: true } });
+      expect(result.status).toBe('skipped');
+      expect(effects).toBe(0);
+  }
+  finally {
+      await rm(root, { recursive: true, force: true });
+  } });
 
 
-  test("requires a fresh effective Deck proxy probe for every ready public Serena inventory", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-serena-proxy-inventory-"));
-    const config = [
-      "# deck-codex-mcp:serena",
-      "[mcp_servers.serena]",
-      'command = "deck"',
-      'args = ["internal", "serena-mcp"]',
-      'env_vars = ["HOME", "PATH", "XDG_DATA_HOME"]',
-      "",
-    ].join("\n");
-    let resolverCalls = 0;
-    let proxyCalls = 0;
-    try {
-      await mkdir(join(projectRoot, ".codex"), { recursive: true });
-      await writeFile(join(projectRoot, ".codex", "config.toml"), config);
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
-        preflight: {
-          probe: async () => ({ found: true, version: "0.146.1", help: "Usage: codex", execHelp: "Usage: codex exec", resumeHelp: "Usage: codex resume" }),
-          inspectTrust: async () => "trusted",
-          readProject: async () => ({ config, roles: [], skills: [], agentsInstructions: true }),
-        },
-        serenaReadinessResolver: async () => {
-          resolverCalls += 1;
-          return resolverCalls === 3
-            ? { state: "missing" as const, diagnostic: { code: "serena-not-ready", message: "Serena is unavailable." } }
-            : readySerenaReadiness();
-        },
-        serenaProxyProbe: async () => {
-          proxyCalls += 1;
-          return proxyCalls === 1
-            ? { state: "ready" as const }
-            : proxyCalls === 2
-              ? { state: "unsupported" as const, message: "The active `deck` command does not support `deck internal serena-mcp`." }
-              : { state: "indeterminate" as const, message: "The effective `deck` proxy probe timed out." };
-        },
-      });
-      const input = { projectRoot, environmentId: "codex-development" as const, runnerId: "codex" as const, deckConfig: getDefaultDeckConfig() };
-      const ready = await adapter.getCapabilityInventory(input);
-      const unsupported = await adapter.getCapabilityInventory(input);
-      const missing = await adapter.getCapabilityInventory(input);
-      const indeterminate = await adapter.getCapabilityInventory(input);
-      const serena = (inventory: Awaited<ReturnType<typeof adapter.getCapabilityInventory>>) => inventory.capabilities.find((capability) => capability.capabilityId === "serena")!;
-      expect(serena(ready)).toMatchObject({ isInstalled: true, isBlocked: false });
-      expect(serena(unsupported)).toMatchObject({ isInstalled: false, isBlocked: true, diagnostics: expect.arrayContaining([expect.stringContaining("does not support")]) });
-      expect(serena(missing)).toMatchObject({ isInstalled: false, isBlocked: false, diagnostics: expect.arrayContaining([expect.stringContaining("executable missing")]) });
-      expect(serena(indeterminate)).toMatchObject({ isInstalled: false, isBlocked: true, diagnostics: expect.arrayContaining([expect.stringContaining("timed out")]) });
-      expect(resolverCalls).toBe(4);
-      expect(proxyCalls).toBe(3);
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
+  test("requires a fresh effective Deck proxy probe for every ready public Serena inventory", async () => { const root = await mkdtemp(join(tmpdir(), 'deck-codex-retired-')); try {
+      let effects = 0;
+      const tripwire = async () => { effects++; throw new Error('retired dependency'); };
+      const adapter = createCodexRunnerAdapter({ ...layout(root), tools: testTools(), preflight: hermeticCodexPreflight(), serenaReadinessResolver: tripwire, serenaProxyProbe: tripwire, serenaBootstrap: tripwire } as never);
+      const deckConfig = getBaseDeckConfig();
+      const input = { projectRoot: root, environmentId: 'codex-development' as const, runnerId: 'codex', deckConfig };
+      await adapter.prepareDeveloperTeamInstall!(input);
+      for (let i = 0; i < 2; i++) {
+          const inventory = await adapter.getCapabilityInventory(input);
+          expect(inventory.capabilities.some(entry => entry.capabilityId === 'serena' || entry.capabilityId === 'context-mode')).toBe(false);
+      }
+      const plan = adapter.buildDeveloperTeamInstallPlan({ ...input, capabilityIds: ['serena', 'context-mode'] });
+      expect(plan.blocked).toBe(false);
+      expect(plan.files.filter(file => file.kind === 'agent' || file.path.endsWith('SKILL.md')).every(file => !/serena|context.mode/i.test(file.content))).toBe(true);
+      const result = await adapter.runAction({ id: 'legacy-serena', kind: 'bootstrap-shared-serena', title: 'legacy', capabilityId: 'serena', status: 'ready' }, { projectRoot: root, runnerId: 'codex', environmentId: 'codex-development', serenaAuthorization: { kind: 'interactive-tui-explicit-selection', runner: 'codex', operationId: 'fixture' }, currentOperation: { runner: 'codex', operationId: 'fixture', explicitlySelected: true } });
+      expect(result.status).toBe('skipped');
+      expect(effects).toBe(0);
+  }
+  finally {
+      await rm(root, { recursive: true, force: true });
+  } });
 
   test("official Supermemory plugin owns memory: Deck-runtime adaptive-memory prose is never materialized into roles or skills", async () => {
     const root = await mkdtemp(join(tmpdir(), "deck-codex-sm-plugin-guidance-"));

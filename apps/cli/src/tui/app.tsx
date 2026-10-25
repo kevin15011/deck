@@ -2807,20 +2807,16 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     // REQ-RBK-002: user-initiated rollback enter handling.
     if (screen === "rollback-confirm") {
       if (rollbackCursor === 0) {
-        // Apply — fire the rollback library. The library call is
-        // synchronous and mutates the filesystem, so we set the
-        // running state synchronously and resolve the result on the
-        // same tick. The "running" frame is brief by design; the
-        // terminal `completed` / `failed` frame is what the user
-        // will actually see.
+        // Show progress while coordinated idle admission and restoration run.
         if (!rollbackManifest) {
           setRollbackStatus({ mode: "failed", reason: "No backup available." });
           resetCursor("rollback-progress");
           return;
         }
         setRollbackStatus({ mode: "running" });
+        resetCursor("rollback-progress");
         try {
-          const result = rollbackLatest(rollbackManifest.deckVersionBefore);
+          const result = await rollbackLatest(rollbackManifest.deckVersionBefore);
           setRollbackStatus({ mode: "completed", restoredCount: result.restoredCount });
           addLog(
             `Rollback to v${result.rolledBackTo} complete (${result.restoredCount} files restored).`,

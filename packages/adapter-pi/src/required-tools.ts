@@ -37,7 +37,6 @@ type ReviewPiRequiredToolsOptions = {
 
 const REQUIRED_TOOLS = [
   // Deck owns subagents and MCP configuration; `pi-subagents` / `pi-mcp-adapter` are not requirements.
-  { name: "context-mode", packageNames: ["context-mode"], capabilityId: "context-mode" as const },
   { name: "codebase-memory", packageNames: ["codebase-memory", "codebase-memory-mcp"], capabilityId: "codebase-memory-mcp" as const },
   { name: "RTK", packageNames: ["rtk"], capabilityId: "rtk" as const },
   { name: "Context7", packageNames: ["context7", "pi-context7", "@dreki-gg/pi-context7"] },

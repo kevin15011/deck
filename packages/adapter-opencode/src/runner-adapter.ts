@@ -1,3 +1,7 @@
+import { backupOpenCodeInstall, rollbackOpenCodeInstall, type OpenCodeInstallRollback } from './install-rollback';
+import { inspectOpenCodeNativeSearch } from "./native-search";
+import { beginRunnerContributions, sharedJsonContributionTargets, contributionHash, selectContributionContent, selectSearchRoute, readRunnerContributions } from "@deck/core";
+import { parseJsonc } from "./model-discovery-context";
 import { createOpenCodeCodebaseTools } from "./codebase-tools";
 /**
  * OpenCode RunnerAdapter — TUI-facing facade for the OpenCode runner.
@@ -17,7 +21,7 @@ import { createHash } from "node:crypto";
 const LOG = "/tmp/deck-tui.log";
 function _ts() { return new Date().toISOString().slice(11, 23); }
 function log(msg: string) { if (!process.env.DECK_DEBUG) return; try { appendFileSync(LOG, `${_ts()} [opencode-adapter] ${msg}\n`); } catch {} }
-import { join, relative, resolve } from "node:path";
+import { join, relative, resolve, isAbsolute } from "node:path";
 import { mergeConfig } from "./config-merge";
 import { INTERNAL_OPENCODE_PACKAGE_IDS } from "./internal-opencode-packages";
 import { DEVELOPER_TEAM_LEGACY_AGENT_IDS } from "@deck/core/teams/developer/catalog";
@@ -199,6 +203,7 @@ export type OpenCodeRunnerAdapterOptions = {
   webSearchProvider?: WebSearchProviderDescriptorV1;
   /** Resolve the selected provider without putting provider metadata in Core. */
   webSearchProviderResolver?: (provider: string | undefined) => WebSearchProviderDescriptorV1 | undefined;
+  webSearchCredential?: () => string | undefined;
 };
 
 export type DiscoveryTimers = { setTimeout(callback: () => void, delay: number): ReturnType<typeof setTimeout>; clearTimeout(timer: ReturnType<typeof setTimeout>): void };
@@ -313,6 +318,13 @@ export function createOpenCodeRunnerAdapter(options?: OpenCodeRunnerAdapterOptio
 // ---------------------------------------------------------------------------
 
 class OpenCodeRunnerAdapterImpl {
+  readonly #rollbackStates = new WeakMap<object, OpenCodeInstallRollback>();
+  readonly #issuedRollbacks = new WeakSet<object>();
+  async inspectNativeSearch(input: import("@deck/core").NativeSearchInspectionInput) {
+    const environment = input.environment ?? this.#sessionDriver?.baseEnv ?? process.env;
+    const root = (environment.XDG_CONFIG_HOME && isAbsolute(environment.XDG_CONFIG_HOME) ? join(environment.XDG_CONFIG_HOME, 'opencode') : this.#developerTeamConfigDir) || join(environment.HOME ?? homedir(), '.config', 'opencode');
+    return inspectOpenCodeNativeSearch({ ...input, environment }, root);
+  }
   getSessionDriver() { return createOpenCodeSessionDriver(this.#sessionDriver); }
 
   async readSessionMcpServers() {
@@ -375,11 +387,14 @@ class OpenCodeRunnerAdapterImpl {
   #serenaStage?: InstallOpenCodeToolsOptions["onStage"];
   #webSearchProvider?: WebSearchProviderDescriptorV1;
   #webSearchProviderResolver?: OpenCodeRunnerAdapterOptions["webSearchProviderResolver"];
+  #webSearchCredential?: OpenCodeRunnerAdapterOptions["webSearchCredential"];
   #supermemoryRegistrationConflicts: readonly string[] = [];
   #serenaEvidenceByOperation = new Map<string, { authorization: SerenaBootstrapAuthorization; operation: SerenaOperationIdentity; evidence: SerenaReadinessEvidence }>();
 
   constructor(options?: OpenCodeRunnerAdapterOptions) {
-    this.#developerTeamConfigDir = options?.developerTeamConfigDir;
+    const environment = options?.sessionDriver?.baseEnv ?? process.env;
+    this.#developerTeamConfigDir = options?.developerTeamConfigDir || environment.OPENCODE_CONFIG_DIR
+      || (environment.XDG_CONFIG_HOME && isAbsolute(environment.XDG_CONFIG_HOME) ? join(environment.XDG_CONFIG_HOME, 'opencode') : undefined);
     this.#sessionHomeDir = options?.skillDiscoveryHomeDir;
     this.#sessionDriver = options?.sessionDriver;
     this.#toolsReview = options?.toolsReview;
@@ -396,6 +411,7 @@ class OpenCodeRunnerAdapterImpl {
     this.#serenaStage = options?.serenaStage;
     this.#webSearchProvider = options?.webSearchProvider;
     this.#webSearchProviderResolver = options?.webSearchProviderResolver;
+    this.#webSearchCredential = options?.webSearchCredential;
     this.#inventoryDiscovery = options?.inventoryDiscovery ?? createDefaultOpenCodeInventoryDiscovery(options?.productionDiscoveryDependencies);
     const configDir = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
     this.skillDiscovery = createOpenCodeSkillDiscoveryProvider({
@@ -495,7 +511,9 @@ class OpenCodeRunnerAdapterImpl {
     const webSearchConfigPath = join(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), "opencode.json");
     const webSearchMcp = inspectOpenCodeWebSearchMcpConfig(webSearchConfigPath, webSearchProvider);
     const webSearchExecutableAvailable = webSearchProvider ? commandAvailable(webSearchProvider.command[0]!) : false;
+    const nativeSearch = await this.inspectNativeSearch({ projectRoot: input.projectRoot });
     const webSearchReadiness = resolveOpenCodeWebSearchReadiness({
+      nativeSearch,
       enabled: deckConfig.webSearch.enabled,
       provider: webSearchProvider,
       credentialEnvironment: process.env,
@@ -510,6 +528,7 @@ class OpenCodeRunnerAdapterImpl {
       webSearch: {
         readiness: webSearchReadiness.readiness,
         evidence: {
+          nativeSearch,
           enabled: deckConfig.webSearch.enabled,
           runnerSupported: true,
           providerConfigured: isWebSearchProviderDescriptor(webSearchProvider),
@@ -747,6 +766,11 @@ class OpenCodeRunnerAdapterImpl {
   // -------------------------------------------------------------------------
 
   async runAction(action: RunnerAction, context: RunnerActionContext): Promise<RunnerActionRunResult> {
+    if ([action.capabilityId, action.toolId].some(id => id === "serena" || id === "context-mode")) return { actionId: action.id, status: "skipped", message: "Retired capability is disabled; no action performed.", diagnostics: [] };
+    if (action.capabilityId === "web-search") {
+      const search = await this.inspectNativeSearch({ projectRoot: context.projectRoot });
+      if (search.availability === "available" || search.webAllowed === false) return { actionId: action.id, status: "skipped", message: search.webAllowed === false ? "Web access is denied by the effective runner policy." : "Native search is available; no Deck provider was installed or configured.", diagnostics: [] };
+    }
     switch (action.kind) {
       case "install-opencode-plugin": {
         if (isSerenaAction(action)) {
@@ -1153,7 +1177,7 @@ class OpenCodeRunnerAdapterImpl {
     return getTeamsForEnvironment(environmentId);
   }
 
-  buildLaunchPlan(input: import("@deck/core").RunnerLaunchInput): import("@deck/core").RunnerLaunchResult {
+  async buildLaunchPlan(input: import("@deck/core").RunnerLaunchInput): Promise<import("@deck/core").RunnerLaunchResult> {
     if (input.mode !== "interactive") {
       return {
         status: "unsupported",
@@ -1161,16 +1185,45 @@ class OpenCodeRunnerAdapterImpl {
         diagnostics: [{ code: "unsupported-launch-mode", severity: "error", message: "OpenCode compatibility launch currently supports interactive mode only." }],
       };
     }
+    const environment = this.#sessionDriver?.baseEnv ?? process.env;
+    const search = await this.inspectNativeSearch({ projectRoot: input.projectRoot, modelId: input.modelId, environment });
+    const provider = this.resolveWebSearchProvider(input.deckConfig.webSearch.provider);
+    const credential = provider ? (this.#webSearchCredential?.() ?? environment[provider.credentialEnvVar])?.trim() : undefined;
+    let selection: ReturnType<typeof selectSearchRoute>;
+    try { selection = selectSearchRoute(input.deckConfig.webSearch.enabled, search, !!provider && !!credential); }
+    catch { return { status: "blocked", code: "web-search-fallback-unavailable", diagnostics: [{ code: "web-search-fallback-unavailable", severity: "error", message: "Configure a supported Deck search provider and credential before opening OpenCode." }] }; }
+    const diagnostics: import("@deck/core").RunnerDiagnostic[] = selection.diagnostics.map(code => ({ code, severity: "warning", message: "Native search availability is unknown; the configured fallback is selected and may duplicate an existing search tool." }));
+    if (search.unresolvedFallbackServerIds?.length) diagnostics.push({ code: "web-search-unresolved-existing-route-preserved", severity: "warning", message: "An existing search entry has no current Deck ownership proof; it is preserved and may duplicate the selected route. Review it individually with runner-cleanup." });
+    const mcp: Record<string, unknown> = Object.fromEntries((search.ownedFallbackServerIds ?? []).map(id => [id, { enabled: false }]));
+    if (selection.route === "fallback" && provider) {
+      // A colliding user entry stays untouched. Use a separate process-local Deck name.
+      const id = search.unresolvedFallbackServerIds?.includes(provider.semanticServerId) ? "deck-interactive-web-search" : provider.semanticServerId;
+      const configPath = join(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), "opencode.json");
+      try {
+        if (id !== provider.semanticServerId && existsSync(configPath) && (parseJsonc(readFileSync(configPath, "utf8")) as any)?.mcp?.[id]) throw new Error("collision");
+        mcp[id] = { type: "local", command: [...provider.command], enabled: true };
+      } catch { return { status: "blocked", code: "web-search-fallback-conflict", diagnostics: [{ code: "web-search-fallback-conflict", severity: "error", message: "The process-local Deck fallback name conflicts with existing configuration; review that entry before launch." }] }; }
+    }
+    let content: string | undefined;
+    if (Object.keys(mcp).length || environment.OPENCODE_CONFIG_CONTENT) {
+      try {
+        const overlay = environment.OPENCODE_CONFIG_CONTENT ? parseJsonc(environment.OPENCODE_CONFIG_CONTENT) as Record<string, any> : {};
+        if (!overlay || typeof overlay !== "object" || Array.isArray(overlay)) throw new Error("invalid overlay");
+        content = JSON.stringify({ ...overlay, ...(Object.keys(mcp).length ? { mcp: { ...overlay.mcp, ...mcp } } : {}) });
+      } catch { return { status: "blocked", code: "web-search-effective-config-unreadable", diagnostics: [{ code: "web-search-effective-config-unreadable", severity: "error", message: "OpenCode process configuration could not be safely merged for search selection." }] }; }
+    }
     return {
       status: "ready",
       plan: {
         command: "opencode",
-        args: [input.projectRoot],
+        args: [input.projectRoot, ...(input.modelId ? ["--model", input.modelId] : [])],
         cwd: input.projectRoot,
         stdio: "inherit",
         stdin: "inherit",
+        ...(content ? { envOverlay: { OPENCODE_CONFIG_CONTENT: { value: content }, ...(selection.route === "fallback" && provider && credential ? { [provider.credentialEnvVar]: { value: credential, sensitive: true } } : {}) } } : {}),
+        ...(selection.route === "fallback" && provider ? { sensitiveEnvAuthorization: { binding: "deck-opencode-web-search-v1", keys: [provider.credentialEnvVar] } } : {}),
       },
-      diagnostics: [],
+      diagnostics,
     };
   }
 
@@ -1183,12 +1236,12 @@ class OpenCodeRunnerAdapterImpl {
   }
 
   readModelAssignments(projectRoot: string): DeveloperTeamModelAssignments {
-    const config = readOpenCodeDeveloperTeamModelConfigAssignments();
+    const config = readOpenCodeDeveloperTeamModelConfigAssignments(this.#developerTeamConfigDir);
     return config.modelAssignments;
   }
 
   readThinkingAssignments(projectRoot: string): DeveloperTeamThinkingAssignments {
-    const config = readOpenCodeDeveloperTeamModelConfigAssignments();
+    const config = readOpenCodeDeveloperTeamModelConfigAssignments(this.#developerTeamConfigDir);
     // thinkingAssignments are stored as OpenCodeThinkingLevel, which is a string
     return config.thinkingAssignments as DeveloperTeamThinkingAssignments;
   }
@@ -1279,13 +1332,21 @@ class OpenCodeRunnerAdapterImpl {
     ];
     const digest = (content: string) => createHash("sha256").update(content).digest("hex");
     const files: import("@deck/core").DeveloperTeamInstallFile[] = plannedFiles.map(({ absolutePath: _absolutePath, ...file }) => file);
-    const mutationPreview = plannedFiles.filter((file) => !existsSync(file.absolutePath) || readFileSync(file.absolutePath, "utf8") !== file.content).map((file) => ({
+    const mutationPreview: NonNullable<RunnerDeveloperTeamInstallPlan['mutationPreview']>[number][] = plannedFiles.filter((file) => !existsSync(file.absolutePath) || readFileSync(file.absolutePath, "utf8") !== file.content).map((file) => ({
       action: existsSync(file.absolutePath) ? "update" as const : "create" as const,
       path: file.absolutePath,
       preimage: existsSync(file.absolutePath) ? digest(readFileSync(file.absolutePath, "utf8")) : "absent",
       postimage: digest(file.content),
       ownership: "opencode-native-plan",
     }));
+    // The native apply also quarantines legacy active files. Its existing backup
+    // inventory supplies their physical targets; keep those deletions recoverable.
+    const plannedPaths = new Set(plannedFiles.map(file=>file.absolutePath));
+    for (const entry of backupDeveloperTeamFiles(nativePlan).entries) {
+      if (!plannedPaths.has(entry.absolutePath) && entry.previousContent !== null) mutationPreview.push({
+        action: 'delete', path: entry.absolutePath, preimage: digest(entry.previousContent), postimage: 'absent', ownership: 'opencode-native-plan',
+      });
+    }
     const plan: RunnerDeveloperTeamInstallPlan = { files, mutationPreview, blocked, diagnostics };
     this.#planBindings.set(plan, {
       nativePlan,
@@ -1316,8 +1377,19 @@ class OpenCodeRunnerAdapterImpl {
     }
     const configDir = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
     const nativePlan: OpenCodeDeveloperTeamInstallPlan = { ...binding.nativePlan, projectRoot: input.projectRoot };
-    const result: OpenCodeDeveloperTeamApplyResult = applyOpenCodeDeveloperTeamInstall(nativePlan, { configDir });
+    const targets = input.plan.files.flatMap(file => file.path === "opencode.json"
+      ? sharedJsonContributionTargets(join(configDir, file.path), JSON.parse(file.content)).map(target => ({ ...target, expectedHash: contributionHash(selectContributionContent(file.content, target.selector)!) }))
+      : [{ path: join(configDir, file.path), selector: { kind: "file" as const }, expectedHash: contributionHash(file.content) }]);
+    const contributionManifestPath = join(configDir, "deck", "manifest.json");
+    const accounting = beginRunnerContributions({ runnerId: "opencode", root: configDir, manifestPath: contributionManifestPath,
+      deckVersion: "0.13.0", targets, dedicatedRoots: [join(configDir, "deck")], beforeMetadataWrite: input.beforeMetadataWrite });
+    let result: OpenCodeDeveloperTeamApplyResult;
+    let contributions: ReturnType<typeof accounting.commit>;
+    try { result = applyOpenCodeDeveloperTeamInstall(nativePlan, { configDir }); contributions = accounting.commit();
+      const rollback = this.#rollbackStates.get(input.plan); if (rollback) rollback.after = readRunnerContributions(contributionManifestPath); }
+    catch (error) { accounting.abandon(); throw error; }
     return {
+      contributions, contributionManifestPath,
       results: result.results.map((item) => ({ agentId: item.agentId, kind: item.kind, status: item.status })),
       changedCount: result.changedCount,
       unchangedCount: result.unchangedCount,
@@ -1488,13 +1560,16 @@ class OpenCodeRunnerAdapterImpl {
   backupDeveloperTeamFiles(plan: unknown): import("@deck/core").RunnerBackupResult {
     const binding = this.#planBindings.get(plan as RunnerDeveloperTeamInstallPlan);
     if (!binding) throw new Error("The supplied developer-team plan was not built by this adapter instance.");
-    return { payload: backupDeveloperTeamFiles(binding.nativePlan), diagnostics: [] };
+    const root = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
+    const state = backupOpenCodeInstall(root, (plan as RunnerDeveloperTeamInstallPlan).files, backupDeveloperTeamFiles(binding.nativePlan).entries);
+    this.#rollbackStates.set(plan as object, state); this.#issuedRollbacks.add(state);
+    return { payload: state, diagnostics: [] };
   }
 
   async rollbackDeveloperTeamFiles(backup: unknown): Promise<import("@deck/core").RunnerRollbackResult> {
     const payload = (backup as import("@deck/core").RunnerBackupResult).payload;
-    rollbackDeveloperTeamFiles(payload as Parameters<typeof rollbackDeveloperTeamFiles>[0]);
-    return { status: "rolled-back", conflicts: [], diagnostics: [] };
+    if (!payload || typeof payload !== 'object' || !this.#issuedRollbacks.has(payload)) return { status: "conflict", conflicts: [], diagnostics: ["Unknown OpenCode rollback receipt; no files were changed."] };
+    return rollbackOpenCodeInstall(payload as OpenCodeInstallRollback);
   }
 
   // -------------------------------------------------------------------------
@@ -1576,6 +1651,7 @@ class OpenCodeRunnerAdapterImpl {
     // is not set (which on Linux/Unix reads passwd via getpwuid_r, so we
     // still get a sensible default).
     const configRoots: string[] = [];
+    if (this.#developerTeamConfigDir) configRoots.push(this.#developerTeamConfigDir);
     if (input?.projectRoot) {
       configRoots.push(join(input.projectRoot, ".config", "opencode"));
     }
@@ -1592,7 +1668,7 @@ class OpenCodeRunnerAdapterImpl {
     const managedPaths: string[] = [];
     const diagnostics: string[] = [];
 
-    for (const root of configRoots) {
+    for (const root of new Set(configRoots)) {
       if (!existsSync(root)) {
         diagnostics.push(`OpenCode config root not found: ${root}`);
         continue;

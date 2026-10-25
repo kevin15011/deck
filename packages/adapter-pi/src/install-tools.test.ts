@@ -62,18 +62,7 @@ describe("installPiTools with installKind dispatch", () => {
     expect(results[0].message).toContain("Reusing existing");
   });
 
-  test("shared-binary-plus-mcp: returns reused when context-mode binary is ready", async () => {
-    const results = await installPiTools(
-      "pi",
-      [{ id: "context-mode", name: "context-mode", source: "context-mode (shared binary)", required: false, installKind: "shared-binary-plus-mcp" }],
-      () => {},
-      {
-        checkSharedBinaryUsability: async (command) => ({ status: "ready", command, resolvedPath: "/fixture/context-mode", version: "1.0.0" }),
-      },
-    );
-
-    expect(results).toEqual([expect.objectContaining({ status: "reused", success: true, installKind: "shared-binary-plus-mcp" })]);
-  });
+  test("retired Context Mode never probes or reuses a shared binary", async () => { let probes = 0; const [result] = await installPiTools('pi', [{ id: 'context-mode', name: 'context-mode', source: 'context-mode', required: false, installKind: 'shared-binary-plus-mcp' }], () => { }, { checkSharedBinaryUsability: async () => { probes++; throw new Error('retired probe'); } }); expect(probes).toBe(0); expect(result).toMatchObject({ status: 'failed', success: false }); });
 
   test("shared-binary-plus-mcp: returns reused when codebase-memory-mcp binary is ready", async () => {
     const results = await installPiTools(
@@ -88,37 +77,7 @@ describe("installPiTools with installKind dispatch", () => {
     expect(results).toEqual([expect.objectContaining({ status: "reused", success: true, installKind: "shared-binary-plus-mcp" })]);
   });
 
-  test("Serena delegates to the Core bootstrap and carries typed readiness evidence", async () => {
-    const requests: SerenaBootstrapRequest[] = [];
-    const results = await installPiTools(
-      undefined,
-      [SERENA_TOOL],
-      () => {},
-      {
-        bootstrapSerena: async (request) => {
-          requests.push(request);
-          return { outcome: "installed", evidence: SERENA_EVIDENCE };
-        },
-        serenaAuthorization: SERENA_AUTHORIZATION,
-        serenaOperation: SERENA_OPERATION,
-      },
-    );
-
-    expect(results).toEqual([
-      expect.objectContaining({
-        status: "installed",
-        success: true,
-        installKind: "shared-binary-plus-mcp",
-        serenaReadiness: SERENA_EVIDENCE,
-      }),
-    ]);
-    expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({
-      authorization: SERENA_AUTHORIZATION,
-      operation: SERENA_OPERATION,
-      currentOperation: SERENA_OPERATION,
-    });
-  });
+  test("retired Serena rejects even an authorized request before Core effects", async () => { let effects = 0; const [result] = await installPiTools(undefined, [SERENA_TOOL], () => { }, { serenaAuthorization: SERENA_AUTHORIZATION, serenaOperation: SERENA_OPERATION, bootstrapSerena: async () => { effects++; return { outcome: 'installed' as const, evidence: SERENA_EVIDENCE }; } }); expect(effects).toBe(0); expect(result).toMatchObject({ status: 'failed', success: false }); expect(result.serenaReadiness).toBeUndefined(); });
 
   test("Serena rejects missing or mismatched current-operation authorization without legacy manual success", async () => {
     const bootstrapCalls: SerenaBootstrapRequest[] = [];
@@ -139,7 +98,7 @@ describe("installPiTools with installKind dispatch", () => {
       },
     );
 
-    expect(results[0]).toMatchObject({ status: "blocked", success: false });
+    expect(results[0]).toMatchObject({ status: "failed", success: false });
     expect(bootstrapCalls).toHaveLength(0);
     expect(commandCalls).toHaveLength(0);
   });
@@ -166,7 +125,7 @@ describe("installPiTools with installKind dispatch", () => {
     const calls: string[][] = [];
     const results = await installPiTools(
       "pi",
-      [{ id: "context-mode", name: "internal-package", source: "npm:some-internal-package", required: true, installKind: "pi-package" }],
+      [{ id: "context7", name: "internal-package", source: "npm:some-internal-package", required: true, installKind: "pi-package" }],
       () => {},
       async (command, args) => {
         calls.push([command, ...args]);
@@ -280,36 +239,7 @@ describe("installPiTools with installKind dispatch", () => {
     expect(results).toEqual([expect.objectContaining({ status: "blocked", success: false, message: "fixture unusable" })]);
   });
 
-  test("maps failed, cancelled, and partial Core outcomes without readiness evidence", async () => {
-    const outcomes: SerenaBootstrapResult[] = [
-      {
-        outcome: "failed",
-        stage: "validating-serena",
-        code: "serena-not-ready",
-        diagnostic: { code: "serena-not-ready", message: "Serena is not ready." },
-      },
-      { outcome: "cancelled", stage: "installing-serena", mutationStarted: true },
-      { outcome: "partial", stage: "installing-serena", code: "termination-unknown" },
-    ];
-
-    for (const outcome of outcomes) {
-      const [result] = await installPiTools(
-        undefined,
-        [SERENA_TOOL],
-        () => {},
-        {
-          bootstrapSerena: async () => outcome,
-          serenaAuthorization: SERENA_AUTHORIZATION,
-          serenaOperation: SERENA_OPERATION,
-        },
-      );
-
-      expect(result.success).toBe(false);
-      expect(result.serenaReadiness).toBeUndefined();
-      expect(result.status).toBe(outcome.outcome === "failed" ? "failed" : outcome.outcome);
-      expect(result.message).not.toContain("/fixtures");
-    }
-  });
+  test("retired Serena cannot request bootstrap outcomes or claim readiness", async () => { let effects = 0; const [result] = await installPiTools(undefined, [SERENA_TOOL], () => { }, { serenaAuthorization: SERENA_AUTHORIZATION, serenaOperation: SERENA_OPERATION, bootstrapSerena: async () => { effects++; throw new Error('retired Core outcome must not be requested'); } }); expect(effects).toBe(0); expect(result.success).toBe(false); expect(result.serenaReadiness).toBeUndefined(); });
 });
 
 // ---------------------------------------------------------------------------
@@ -317,7 +247,7 @@ describe("installPiTools with installKind dispatch", () => {
 // ---------------------------------------------------------------------------
 
 const plan: InstallablePiTool[] = [
-  { id: "context-mode", name: "context-mode", source: "npm:context-mode", required: false, installKind: "pi-package" },
+  { id: "context7", name: "context7", source: "npm:context7", required: false, installKind: "pi-package" },
   { id: "codebase-memory-mcp", name: "codebase-memory", source: "npm:codebase-memory", required: false, installKind: "pi-package" },
 ];
 
@@ -337,10 +267,10 @@ describe("installPiTools", () => {
     );
 
     expect(calls).toEqual([
-      ["pi", "install", "npm:context-mode"],
+      ["pi", "install", "npm:context7"],
       ["pi", "install", "npm:codebase-memory"],
     ]);
-    expect(emitted).toEqual(["context-mode", "codebase-memory"]);
+    expect(emitted).toEqual(["context7", "codebase-memory"]);
     expect(results.every((result) => result.success)).toBe(true);
     expect(results.every((result) => result.actionKind === "install-pi-package" && result.status === "installed")).toBe(true);
   });
@@ -353,7 +283,7 @@ describe("installPiTools", () => {
       async () => ({ exitCode: 1, stdout: "", stderr: "failed" }),
     );
 
-    expect(result.tool).toBe("context-mode");
+    expect(result.tool).toBe("context7");
     expect(result.success).toBe(false);
     expect(result.actionKind).toBe("install-pi-package");
     expect(result.status).toBe("failed");
@@ -389,7 +319,7 @@ describe("installPiTools", () => {
       undefined,
       [
         { id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "external" },
-        { id: "context-mode", name: "context-mode", source: "npm:context-mode", required: false, installKind: "pi-package" },
+        { id: "context7", name: "context7", source: "npm:context7", required: false, installKind: "pi-package" },
       ],
       (result) => emitted.push(result.tool),
       async () => {
@@ -397,7 +327,7 @@ describe("installPiTools", () => {
       },
     );
 
-    expect(emitted).toEqual(["RTK", "context-mode"]);
+    expect(emitted).toEqual(["RTK", "context7"]);
 
     // First result: external install - should succeed (manual)
     expect(results[0].tool).toBe("RTK");
@@ -407,7 +337,7 @@ describe("installPiTools", () => {
     expect(results[0].installKind).toBe("external");
 
     // Second result: pi-package without command - should fail
-    expect(results[1].tool).toBe("context-mode");
+    expect(results[1].tool).toBe("context7");
     expect(results[1].success).toBe(false);
     expect(results[1].actionKind).toBe("install-pi-package");
     expect(results[1].status).toBe("failed");

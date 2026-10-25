@@ -263,7 +263,7 @@ describe("MCP-aware role content (direct-exposure tool names)", () => {
       const content = file(desired, path);
       expect(content).toContain("## Pi MCP Tool Names");
       expect(content).toContain("mcp__codebase_memory__search_graph");
-      expect(content).toContain("mcp__context_mode__ctx_search");
+      expect(content).not.toContain("mcp__context_mode__ctx_search");
     }
   });
 
@@ -279,7 +279,7 @@ describe("MCP-aware role content (direct-exposure tool names)", () => {
       const tools = frontmatterTools(file(desired, `deck/package/agents/${role}.md`)).split(",");
       expect(tools.slice(0, 4)).toEqual(["read", "grep", "find", "ls"]);
       expect(tools).toContain("mcp__codebase_memory__search_graph");
-      expect(tools).toContain("mcp__serena__find_symbol");
+      expect(tools).not.toContain("mcp__serena__find_symbol");
       expect(tools).not.toContain("mcp__serena__replace_symbol_body");
       for (const forbidden of ["bash", "edit", "write"]) expect(tools).not.toContain(forbidden);
     }

@@ -102,16 +102,6 @@ export type ParityRuntimeHints = {
 
 const CORE_CAPABILITIES: readonly CanonicalRunnerCapability[] = Object.freeze([
   {
-    id: "context-mode",
-    label: "Context Mode",
-    category: "shared-binaries",
-    requirement: "configurable",
-    userFacing: true,
-    instructionBundleId: "context-mode",
-    requiredSurfaces: ["install", "mcp", "session"],
-    sharedBinary: { command: "context-mode", usabilityCheck: ["--version", "--help"], mcpServerName: "context-mode" },
-  },
-  {
     id: "codebase-memory",
     label: "Codebase Memory",
     category: "shared-binaries",
@@ -139,16 +129,6 @@ const CORE_CAPABILITIES: readonly CanonicalRunnerCapability[] = Object.freeze([
     instructionBundleId: "rtk",
     requiredSurfaces: ["install", "session"],
     sharedBinary: { command: "rtk", usabilityCheck: ["--help"] },
-  },
-  {
-    id: "serena",
-    label: "Serena",
-    category: "mcps",
-    requirement: "configurable",
-    userFacing: true,
-    instructionBundleId: "serena",
-    requiredSurfaces: ["install", "mcp", "session"],
-    sharedBinary: { command: "serena", usabilityCheck: ["--version", "--help"], mcpServerName: "serena" },
   },
   {
     id: "web-search",
@@ -226,7 +206,7 @@ export function defineRunnerCapabilityContribution(contribution: RunnerCapabilit
   return Object.freeze({
     runnerId: contribution.runnerId,
     capabilities: Object.freeze((contribution.capabilities ?? []).map(freezeCapability)),
-    mappings: Object.freeze(contribution.mappings.map(freezeMapping)),
+    mappings: Object.freeze(contribution.mappings.filter(mapping => !["context-mode", "serena"].includes(mapping.capabilityId)).map(freezeMapping)),
   });
 }
 

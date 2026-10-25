@@ -162,26 +162,26 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
 // ---------------------------------------------------------------------------
 
 export const OPENCODE_RUNNER_CAPABILITY_CATALOG: Record<
-  Exclude<OpenCodeCapabilityId, "opencode-mermaid">,
+  Exclude<OpenCodeCapabilityId, "opencode-mermaid" | "context-mode" | "serena">,
   OpenCodeCapabilityToolMapping
 > = {
-  "context-mode": FULL_OPENCODE_CAPABILITY_CATALOG["context-mode"] as OpenCodeCapabilityToolMapping,
   "codebase-memory": FULL_OPENCODE_CAPABILITY_CATALOG["codebase-memory"] as OpenCodeCapabilityToolMapping,
   rtk: FULL_OPENCODE_CAPABILITY_CATALOG.rtk as OpenCodeCapabilityToolMapping,
-  serena: FULL_OPENCODE_CAPABILITY_CATALOG.serena as OpenCodeCapabilityToolMapping,
   context7: FULL_OPENCODE_CAPABILITY_CATALOG.context7 as OpenCodeCapabilityToolMapping,
   "web-search": FULL_OPENCODE_CAPABILITY_CATALOG["web-search"] as OpenCodeCapabilityToolMapping,
-} as const satisfies Record<Exclude<OpenCodeCapabilityId, "opencode-mermaid">, OpenCodeCapabilityToolMapping>;
+} as const satisfies Record<Exclude<OpenCodeCapabilityId, "opencode-mermaid" | "context-mode" | "serena">, OpenCodeCapabilityToolMapping>;
 
-export const OPENCODE_RUNNER_CAPABILITY_IDS = Object.keys(OPENCODE_RUNNER_CAPABILITY_CATALOG) as Exclude<OpenCodeCapabilityId, "opencode-mermaid">[];
+export const OPENCODE_RUNNER_CAPABILITY_IDS = Object.keys(OPENCODE_RUNNER_CAPABILITY_CATALOG) as Exclude<OpenCodeCapabilityId, "opencode-mermaid" | "context-mode" | "serena">[];
 
-export const ALL_OPENCODE_RUNNER_CAPABILITY_IDS = Object.keys(FULL_OPENCODE_CAPABILITY_CATALOG) as OpenCodeCapabilityId[];
+export const ALL_OPENCODE_RUNNER_CAPABILITY_IDS = Object.keys(FULL_OPENCODE_CAPABILITY_CATALOG).filter(id => id !== "serena" && id !== "context-mode") as OpenCodeCapabilityId[];
 
 export function getOpenCodeRunnerCapability(capabilityId: OpenCodeCapabilityId): OpenCodeCapabilityToolMapping | undefined {
+  if (capabilityId === "serena" || capabilityId === "context-mode") return undefined;
   return FULL_OPENCODE_CAPABILITY_CATALOG[capabilityId];
 }
 
 export function getUserFacingOpenCodeCapability(capabilityId: OpenCodeCapabilityId): OpenCodeCapabilityToolMapping | undefined {
+  if (capabilityId === "serena" || capabilityId === "context-mode") return undefined;
   const entry = FULL_OPENCODE_CAPABILITY_CATALOG[capabilityId];
   if (entry && !entry.isInternal) {
     return entry;
@@ -208,6 +208,7 @@ export function validateOpenCodeCatalogAgainstRegistry(): readonly string[] {
   const warnings: string[] = [];
 
   for (const [id, entry] of Object.entries(FULL_OPENCODE_CAPABILITY_CATALOG) as [OpenCodeCapabilityId, OpenCodeCapabilityToolMapping][]) {
+    if (id === "serena" || id === "context-mode") continue;
     const canonicalId = entry.canonicalCapabilityId;
     if (!canonicalId) {
       warnings.push(`OpenCode capability '${id}' has no canonicalCapabilityId defined`);
@@ -236,6 +237,7 @@ export function validateOpenCodeCatalogAgainstRegistry(): readonly string[] {
  * Returns undefined if no mapping exists.
  */
 export function getCanonicalCapabilityId(capabilityId: OpenCodeCapabilityId): CanonicalCapabilityId | undefined {
+  if (capabilityId === "serena" || capabilityId === "context-mode") return undefined;
   const entry = FULL_OPENCODE_CAPABILITY_CATALOG[capabilityId];
   return entry?.canonicalCapabilityId;
 }
@@ -266,11 +268,9 @@ export const OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION = defineRunnerCapabilityCon
   mappings: [
     ...protectedControlMappings,
     { capabilityId: "code-economy", runnerId: "opencode", status: "supported", adapterSource: "@deck/adapter-opencode", installKind: "native-instruction-composition", provisionMode: "native-instruction-composition", parityChecks: ["instruction-bundle-present"] },
-    { capabilityId: "context-mode", runnerId: "opencode", status: "supported", adapterSource: "opencode-mcp-config", installKind: "npm-package-plus-mcp", provisionMode: "npm-package-plus-mcp", detectors: { commands: ["context-mode"], mcpServerNames: ["context-mode"] }, parityChecks: ["binary-usable", "mcp-config-present", "instruction-bundle-present"] },
     { capabilityId: "codebase-memory", runnerId: "opencode", status: "supported", adapterSource: "codebase-memory-mcp", installKind: "shared-binary-plus-mcp", provisionMode: "shared-binary-plus-mcp", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present", "instruction-bundle-present"] },
     { capabilityId: "codebase-memory-mcp", runnerId: "opencode", status: "supported", adapterSource: "codebase-memory-mcp", installKind: "shared-binary-plus-mcp", provisionMode: "shared-binary-plus-mcp", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present"] },
     { capabilityId: "rtk", runnerId: "opencode", status: "shared", adapterSource: "rtk", installKind: "shared-binary", provisionMode: "shared-binary", detectors: { commands: ["rtk"] }, parityChecks: ["binary-usable", "no-unnecessary-reinstall"] },
-    { capabilityId: "serena", runnerId: "opencode", status: "supported", adapterSource: "serena", installKind: "python-tool", provisionMode: "python-tool", detectors: { commands: ["serena"], mcpServerNames: ["serena"] }, parityChecks: ["binary-usable", "mcp-config-present", "instruction-bundle-present"] },
     { capabilityId: "context7", runnerId: "opencode", status: "supported", adapterSource: "@upstash/context7-mcp", installKind: "mcp-server", provisionMode: "mcp-server", detectors: { mcpServerNames: ["context7"] }, parityChecks: ["mcp-config-present"] },
     { capabilityId: "web-search", runnerId: "opencode", status: "supported", adapterSource: "@deck/provider-tavily", installKind: "native-mcp", provisionMode: "native-mcp", implementationId: TAVILY_IMPLEMENTATION_ID, detectors: { mcpServerNames: [TAVILY_MCP_SERVER_ID] }, parityChecks: ["mcp-config-present", "instruction-bundle-present"] },
     { capabilityId: "supermemory-tool-bindings", runnerId: "opencode", status: "runner-specific", adapterSource: "opencode-supermemory@2.0.15", installKind: "opencode-plugin", provisionMode: "process-local-plugin" },

@@ -4,8 +4,8 @@ import { safeClaudeModelId } from "./model-discovery";
 
 export type ClaudeAssignments = Readonly<Record<string, string>>;
 export type ClaudeEfforts = Readonly<Record<string, string>>;
-export const CLAUDE_CAPABILITY_IDS = ["context-mode", "codebase-memory", "rtk", "serena", "context7", "web-search"] as const;
-export type ClaudeCapabilityId = (typeof CLAUDE_CAPABILITY_IDS)[number];
+export const CLAUDE_CAPABILITY_IDS = ["codebase-memory", "rtk", "context7", "web-search"] as const;
+export type ClaudeCapabilityId = (typeof CLAUDE_CAPABILITY_IDS)[number] | "context-mode" | "serena";
 const roles = new Set(getDeveloperTeamCatalog().map((agent) => agent.id));
 
 export function normalizeClaudeAssignments(value: unknown): ClaudeAssignments {
@@ -19,7 +19,8 @@ export function normalizeClaudeAssignments(value: unknown): ClaudeAssignments {
 }
 
 export function normalizeClaudeCapabilities(value: unknown): readonly ClaudeCapabilityId[] {
-  if (!Array.isArray(value) || value.some((entry) => !CLAUDE_CAPABILITY_IDS.includes(entry as ClaudeCapabilityId))) throw new Error("Unrecognized Claude capability selection.");
+  if (Array.isArray(value)) value = value.filter(entry => entry !== "context-mode" && entry !== "serena");
+  if (!Array.isArray(value) || value.some((entry) => !(CLAUDE_CAPABILITY_IDS as readonly string[]).includes(entry as string))) throw new Error("Unrecognized Claude capability selection.");
   return Object.freeze([...new Set(value as ClaudeCapabilityId[])].sort());
 }
 

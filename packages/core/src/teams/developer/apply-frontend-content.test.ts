@@ -115,31 +115,14 @@ test("references apply-progress artifact under OpenSpec", () => {
   });
 });
 
-// REQ-SAE-001 to REQ-SAE-007: Serena enforcement tests
-describe("Serena enforcement rules", () => {
-  test("contains Serena enforcement section when package selected", () => {
-    expect(APPLY_FRONTEND_SKILL_BODY).toContain("Serena Enforcement");
-  });
-
-  test("mention find_symbol for symbolic operations", () => {
-    expect(APPLY_FRONTEND_SKILL_BODY).toContain("find_symbol");
-  });
-
-  test("mention replace_symbol_body for replacement", () => {
-    expect(APPLY_FRONTEND_SKILL_BODY).toContain("replace_symbol_body");
-  });
-
-  test("mention coexistance with codebase-memory", () => {
-    expect(APPLY_FRONTEND_SKILL_BODY).toContain("codebase-memory");
-  });
-
-  test("mention fallback reporting", () => {
-    expect(APPLY_FRONTEND_SKILL_BODY).toMatch(/Fallback|report/i);
-  });
-
-test("does NOT validate CLI existence", () => {
-    expect(APPLY_FRONTEND_SKILL_BODY).toContain("No CLI validation");
-  });
+// A1: retired symbolic-tool guidance must not reach executing content.
+describe("Retired package instructions", () => {
+  for (const retired of ["Serena", "context-mode", "find_symbol", "replace_symbol_body", "No CLI validation"]) {
+    test(`does not emit ${retired} in agent or skill content`, () => {
+      expect(APPLY_FRONTEND_AGENT_BODY).not.toContain(retired);
+      expect(APPLY_FRONTEND_SKILL_BODY).not.toContain(retired);
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -257,9 +240,9 @@ describe("Canonical line replacement", () => {
   });
 });
 
-describe("Serena Enforcement preserved", () => {
-  test("SKILL_BODY contains ## Serena Enforcement section", () => {
-    expect(APPLY_FRONTEND_SKILL_BODY).toContain("## Serena Enforcement");
+describe("Serena Enforcement retired", () => {
+  test("SKILL_BODY omits ## Serena Enforcement section", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).not.toContain("## Serena Enforcement");
   });
 });
 

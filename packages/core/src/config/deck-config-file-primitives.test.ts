@@ -71,7 +71,7 @@ describe("path-parameterized Deck config file primitives", () => {
 
     expect(patched.webSearch).toEqual({ enabled: true, provider: "tavily" });
     expect(patched.adaptiveMemory.supermemory).toEqual({ mcpServerName: "custom-sm", searchMode: "documents" });
-    expect(patched.packageInstructions.opencode["context-mode"]).toBe(true);
+    expect(patched.packageInstructions.opencode).not.toHaveProperty("context-mode");
     expect(patched.orchestratorPersonality).toBe("guia");
     expect(patched.activeProfile).toBe("legacy-local");
   });

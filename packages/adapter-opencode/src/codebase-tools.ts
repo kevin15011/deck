@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
-import { OWNED_CODEBASE_VERSION, inspectOwnedCodebase, installOwnedCodebase, isCompatibleCodebaseExecutable, pinnedOwnedCodebaseRelease, resolveDefaultDeckDataRoot, type CodebaseNativeRelease } from "@deck/core";
+import { recordOwnedRunnerArtifactTree, OWNED_CODEBASE_VERSION, inspectOwnedCodebase, installOwnedCodebase, isCompatibleCodebaseExecutable, pinnedOwnedCodebaseRelease, resolveDefaultDeckDataRoot, type CodebaseNativeRelease } from "@deck/core";
 import { assertTrustedAncestors, ensurePrivatePath } from "./codebase-private-path";
 
 export type OpenCodeCodebaseOptions = {
@@ -39,7 +39,10 @@ export function createOpenCodeCodebaseTools(options: OpenCodeCodebaseOptions = {
       if (!release) throw new Error("No pinned Codebase Memory native release exists for this platform.");
       await ensurePrivatePath(resolve(root, ".."), home);
       signal?.throwIfAborted();
-      return installOwnedCodebase(root, release, { ...options.artifactEffects, signal });
+      const result = await installOwnedCodebase(root, release, { ...options.artifactEffects, signal });
+      const configRoot = join(env.XDG_CONFIG_HOME ?? join(home, ".config"), "opencode");
+      recordOwnedRunnerArtifactTree({ runnerId: "opencode", root: configRoot, manifestPath: join(configRoot, "deck/manifest.json"), artifactRoot: root, sourceItemId: "package:codebase-memory" });
+      return result;
     },
   };
 }

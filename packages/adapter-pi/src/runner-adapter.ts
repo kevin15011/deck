@@ -1,5 +1,7 @@
+import { inspectPiNativeSearch } from "./native-search";
 import { buildCodebaseGuardEntry, parseCodebaseGuardEntry, type CodebaseGuardInvocation } from "./pi-codebase-guard-command";
-import { hashJsonValue } from "./pi-manifest";
+import { hashJsonValue, matchesOwnedHash } from "./pi-manifest";
+import { assertNoContributionSymlink } from "@deck/core";
 /**
  * Pi RunnerAdapter — implements the RunnerAdapter interface for the Pi runner.
  *
@@ -575,6 +577,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   readonly runnerId: string = PI_RUNNER_ID;
   readonly displayName: string = PI_DISPLAY_NAME;
   readonly environmentIds: readonly string[] = PI_ENVIRONMENT_IDS;
+  async inspectNativeSearch(input: import("@deck/core").NativeSearchInspectionInput) { return inspectPiNativeSearch(input, this.#readAgentDir()); }
   readonly packageInstructionIds = PACKAGE_INSTRUCTION_PACKAGE_IDS;
   readonly ui = {
     environmentLabels: { "pi-development": "Pi" },
@@ -899,6 +902,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // -------------------------------------------------------------------------
 
   async runAction(action: RunnerAction, context: RunnerActionContext): Promise<RunnerActionRunResult> {
+    if ([action.capabilityId, action.toolId].some(id => id === "serena" || id === "context-mode")) return { actionId: action.id, status: "skipped", message: "Retired capability is disabled; no action performed.", diagnostics: [] };
     // Handle internal runner package installs
     if (action.internalPackageId) {
       const installResult = await installInternalRunnerPackages(
@@ -1402,6 +1406,22 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     };
   }
 
+  async detectDeckInstall() {
+    const root = this.#readAgentDir();
+    try {
+      assertNoContributionSymlink(piAgentPaths(root).manifest);
+      const manifest = readPiManifest(this.#fileIO, root);
+      if (!manifest) return {installed:false,managedPaths:[]};
+      const managedPaths = Object.entries(manifest.files).flatMap(([path,hash])=>{
+        if (isAbsolute(path) || path.split(/[\\/]/).includes('..')) return [];
+        const absolute = join(root,path); assertNoContributionSymlink(absolute);
+        const text = this.#fileIO.readText(absolute);
+        return text !== undefined && matchesOwnedHash(path,hash,text) ? [absolute] : [];
+      });
+      return {installed:managedPaths.length > 0,managedPaths,diagnostics:managedPaths.length ? [] : ['Pi manifest has no unchanged owned artifacts; review installation conflicts.']};
+    } catch {return {installed:false,managedPaths:[],diagnostics:['Pi installation ownership could not be established; nothing was adopted.']};}
+  }
+
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
     // Blocking prerequisites: a valid agent dir and a supported Pi. Nothing is planned (or written) otherwise.
     const diagnosticEntries: { code: string; severity: "info" | "warning" | "error"; message: string }[] = [];
@@ -1426,7 +1446,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     {
       const resolved = resolveDeckPiMcpServers({
         selected: selectDeckPiMcpServerIds({
-          capabilityIds: input.capabilityIds,
+          capabilityIds: input.capabilityIds?.filter(id => id !== "web-search" || inspectPiNativeSearch({ projectRoot: input.projectRoot }, agentDir).availability !== "available"),
           instructionPackageIds: capabilityInstructions?.instructions.map((fragment) => fragment.packageId) ?? [],
           webSearchEnabled: deckConfig.webSearch.enabled === true,
           ownedServers: ownedMcp,
@@ -1438,14 +1458,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       });
       availableMcpServers = resolved.servers;
       mcpServers = { ...resolved.servers };
-      // Preserve the owned selection on disk so restoration needs no manual reconfiguration.
-      // The reviewed native connector filters this selection before connection; persistence is not an execution grant.
-      const existing = readPiMcpServers(this.#fileIO, agentDir)["codebase-memory"];
-      if (!resolved.servers["codebase-memory"] && ownedMcp.includes("codebase-memory") && existing &&
-          hashJsonValue(existing) === readPiManifest(this.#fileIO, agentDir)?.mcp.servers["codebase-memory"] &&
-          (input.capabilityIds === undefined || input.capabilityIds.some(id => id === "codebase-memory" || id === "codebase-memory-mcp"))) {
-        mcpServers["codebase-memory"] = existing as Record<string, unknown>;
-      }
+      const existingCodebase = readPiMcpServers(this.#fileIO, agentDir)["codebase-memory"];
+      if (!mcpServers["codebase-memory"] && existingCodebase && getEnabledCapabilityInstructionIds(deckConfig, "pi").includes("codebase-memory") &&
+          hashJsonValue(existingCodebase) === readPiManifest(this.#fileIO, agentDir)?.mcp.servers["codebase-memory"]) mcpServers["codebase-memory"] = existingCodebase as Record<string, unknown>;
       if (this.#codebaseGuardInvocation && mcpServers["codebase-memory"]) {
         const current = mcpServers["codebase-memory"]!;
         const binary = parseCodebaseGuardEntry(current, agentDir)?.binary ?? current.command;
@@ -1520,6 +1535,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     }));
     return {
       results,
+      contributionManifestPath: join(this.#readAgentDir(), "deck", "manifest.json"),
       changedCount: applied.changedCount,
       unchangedCount: results.filter((result) => result.status === "unchanged").length,
     };

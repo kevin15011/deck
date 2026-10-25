@@ -1,3 +1,4 @@
+import type { RunnerContribution } from "@deck/core";
 import { createHash } from "node:crypto";
 
 /**
@@ -8,6 +9,7 @@ export const PI_MANIFEST_SCHEMA = "deck-pi-manifest-v1" as const;
 
 export type PiManifestV1 = {
   schema: typeof PI_MANIFEST_SCHEMA;
+  contributions?: RunnerContribution[];
   /** Files written by Deck, keyed by POSIX path relative to the agent directory. Value: sha256 hex. */
   files: Record<string, string>;
   settings: {
@@ -121,7 +123,7 @@ export function parsePiManifest(text: string): ParsedPiManifest {
   if (!isRecord(mcp)) return { ok: false, reason: "Deck Pi manifest `mcp` must be an object." };
   const servers = stringRecord(mcp.servers);
   if (!servers) return { ok: false, reason: "Deck Pi manifest MCP servers must map names to hashes." };
-  return { ok: true, manifest: { schema: PI_MANIFEST_SCHEMA, files, settings: { packages, addedPackages, skillExclusions }, mcp: { servers } } };
+  return { ok: true, manifest: { schema: PI_MANIFEST_SCHEMA, ...(Array.isArray(raw.contributions) ? { contributions: raw.contributions as RunnerContribution[] } : {}), files, settings: { packages, addedPackages, skillExclusions }, mcp: { servers } } };
 }
 
 export function serializePiManifest(manifest: PiManifestV1): string {
@@ -129,6 +131,7 @@ export function serializePiManifest(manifest: PiManifestV1): string {
   const sortedServers = Object.fromEntries(Object.entries(manifest.mcp.servers).sort(([left], [right]) => (left < right ? -1 : 1)));
   return `${JSON.stringify({
     schema: PI_MANIFEST_SCHEMA,
+    ...(manifest.contributions ? { contributions: manifest.contributions } : {}),
     files: sortedFiles,
     settings: { packages: [...manifest.settings.packages], addedPackages: [...manifest.settings.addedPackages], skillExclusions: [...manifest.settings.skillExclusions] },
     mcp: { servers: sortedServers },

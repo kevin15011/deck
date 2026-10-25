@@ -1,7 +1,7 @@
 import { createOpenCodeCodebaseTools, type OpenCodeCodebaseTools } from "./codebase-tools";
 import { spawn as nodeSpawn } from "node:child_process";
 import { accessSync, constants, existsSync } from "node:fs";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import type { InstallableOpenCodeTool } from "./installation-plan";
@@ -24,6 +24,9 @@ import {
   type SerenaOperationIdentity,
   type SerenaReadinessEvidence,
   type SerenaBootstrapRequest,
+  beginRunnerContributions,
+  assertNoContributionSymlink,
+  hasRunnerContributionProof,
 } from "@deck/core";
 import {
   installOwnedOpenCodeSupermemory,
@@ -180,6 +183,7 @@ export async function installOpenCodeTools(
   };
 
   for (const tool of plan) {
+    if (tool.id === "context-mode" || tool.id === "serena") { emit(createInstallResult(tool, "skipped", false, "Retired capability is disabled.")); continue; }
     if (options.signal?.aborted) {
       emit(createInstallResult(tool, "skipped", false, `${tool.name} installation skipped because cancellation was requested.`));
       continue;
@@ -479,14 +483,39 @@ async function executeShellTool(
     if (second.state === "indeterminate") return evidenceFailure(tool, "evidence", "evidence-indeterminate");
   }
 
-  const shellResult = options.runShellScript
-    ? await options.runShellScript(downloaded, tool, options.signal)
-    : await runDefaultShellScript(downloaded);
-  if (shellResult.exitCode !== 0) return failureFromCommand(tool, "install", "installer-failed", shellResult, true, context);
-
-  const postInstall = await runPostInstall(tool, runInstallCommand, context);
-  if (postInstall) return postInstall;
-  return completeMutation(tool, resolver, context, "executed");
+  const environment: NodeJS.ProcessEnv = { ...(context?.env ?? process.env), HOME: options.homeDirectory ?? context?.homeDirectory ?? process.env.HOME };
+  const home = environment.HOME;
+  let accounting: ReturnType<typeof beginRunnerContributions> | undefined;
+  if (tool.id === "rtk") {
+    if (!home || !isAbsolute(home)) return evidenceFailure(tool, "evidence", "rtk-home-unavailable");
+    const configRoot = environment.OPENCODE_CONFIG_DIR || join(environment.XDG_CONFIG_HOME ?? join(home, ".config"), "opencode");
+    const manifestPath = join(configRoot, "deck/manifest.json");
+    // These are RTK's existing installer/init outputs. Never adopt a discovered
+    // binary or overwrite an independent plugin while recording a new install.
+    const targets = [join(environment.RTK_INSTALL_DIR ?? join(home, ".local/bin"), "rtk"), join(home, ".config/opencode/plugins/rtk.ts")]
+      .map(path => ({ path, selector: { kind: "file" as const }, sourceItemId: "package:rtk" }));
+    for (const target of targets) {
+      assertNoContributionSymlink(target.path);
+      if (existsSync(target.path) && !hasRunnerContributionProof(manifestPath, target)) return evidenceFailure(tool, "evidence", "rtk-unowned-installation-conflict");
+    }
+    accounting = beginRunnerContributions({ runnerId: "opencode", root: configRoot, manifestPath, deckVersion: "0.13.0", targets });
+  }
+  try {
+    const shellResult = options.runShellScript
+      ? await options.runShellScript(downloaded, tool, options.signal)
+      : await runDefaultShellScript(downloaded, environment);
+    if (shellResult.exitCode !== 0) return failureFromCommand(tool, "install", "installer-failed", shellResult, true, context);
+    const execute = runInstallCommand === runDefaultInstallCommand
+      ? (command: string, args: string[]) => runDefaultInstallCommand(command, args, environment)
+      : runInstallCommand;
+    const postInstall = await runPostInstall(tool, execute, context);
+    if (postInstall) return postInstall;
+    return completeMutation(tool, resolver, context, "executed");
+  } finally {
+    // Failed external commands can leave partial outputs. Account their actual
+    // bytes as well, without promoting the failed installation to ready.
+    try { accounting?.commit(); } catch (error) { accounting?.abandon(); throw error; }
+  }
 }
 
 async function executeCommandTool(
@@ -792,9 +821,9 @@ function stageLabel(stage: OpenCodeRawInstallDiagnostic["stage"]): string {
   return stage === "post-install" ? "Post-install" : stage.charAt(0).toUpperCase() + stage.slice(1);
 }
 
-function runDefaultInstallCommand(command: string, args: string[]): Promise<InstallCommandResult> {
+function runDefaultInstallCommand(command: string, args: string[], env?: NodeJS.ProcessEnv): Promise<InstallCommandResult> {
   return new Promise((resolveResult) => {
-    const child = nodeSpawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = nodeSpawn(command, args, { env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
@@ -804,10 +833,10 @@ function runDefaultInstallCommand(command: string, args: string[]): Promise<Inst
   });
 }
 
-function runDefaultShellScript(script: string): Promise<InstallCommandResult> {
+function runDefaultShellScript(script: string, env?: NodeJS.ProcessEnv): Promise<InstallCommandResult> {
   return new Promise((resolveResult) => {
     const shell = process.platform === "darwin" ? "sh" : existsSync("/bin/bash") ? "/bin/bash" : "sh";
-    const child = nodeSpawn(shell, ["-s"], { stdio: ["pipe", "pipe", "pipe"] });
+    const child = nodeSpawn(shell, ["-s"], { env, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });

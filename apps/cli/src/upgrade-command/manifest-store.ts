@@ -53,7 +53,7 @@ export const SUPPORTED_MANIFEST_SCHEMA_VERSIONS = [1, 2] as const;
 export type SupportedManifestSchemaVersion =
   (typeof SUPPORTED_MANIFEST_SCHEMA_VERSIONS)[number];
 
-const Sha256ValueSchema = z.string().regex(/^[a-f0-9]{64}$/);
+const Sha256ValueSchema = z.string().regex(/^[a-f0-9]{64}$/).refine(value => !/^0+$/.test(value), "Placeholder hash is not ownership evidence");
 
 export const ManifestOwnerSchema = z.union([
   z.enum(["deck", "runner:pi", "runner:opencode"]),
@@ -96,6 +96,8 @@ export const ManifestJsonV2Schema = z.object({
   generatedAt: z.string().datetime(),
   deckVersion: z.string().min(1),
   files: z.array(ManifestFileSchema),
+  /** Legacy unknown hashes retain location diagnostics, never ownership. */
+  unverifiedFiles: z.array(z.object({ path: z.string(), reason: z.string() })).optional(),
 });
 export type ManifestJsonV2 = z.infer<typeof ManifestJsonV2Schema>;
 
@@ -194,10 +196,13 @@ export function migrateManifestV1ToV2(
   migrationTime: Date = new Date(),
 ): ManifestJsonV2 {
   const v2Files: ManifestFile[] = [];
+  const unverifiedFiles: Array<{ path: string; reason: string }> = [];
   for (const entry of v1.files) {
-    const checksum = entry.checksum?.value && /^[a-f0-9]{64}$/.test(entry.checksum.value)
-      ? { algorithm: "sha256" as const, value: entry.checksum.value }
-      : { algorithm: "sha256" as const, value: "0".repeat(64) };
+    if (!entry.checksum?.value || !/^[a-f0-9]{64}$/.test(entry.checksum.value) || /^0+$/.test(entry.checksum.value)) {
+      unverifiedFiles.push({ path: entry.path, reason: "Legacy missing or placeholder hash; no ownership evidence" });
+      continue;
+    }
+    const checksum = { algorithm: "sha256" as const, value: entry.checksum.value };
     const owner: ManifestOwner = (entry.owner && /^runner:|^deck$/.test(entry.owner))
       ? (entry.owner as ManifestOwner)
       : "deck";
@@ -230,6 +235,7 @@ export function migrateManifestV1ToV2(
     generatedAt: migrationTime.toISOString(),
     deckVersion: v1.deckVersion ?? v1.files[0]?.deck_version ?? v1.files[0]?.deckVersion ?? "unknown",
     files: v2Files,
+    ...(unverifiedFiles.length ? { unverifiedFiles } : {}),
   };
 }
 
@@ -306,6 +312,11 @@ export function readManifest(deckVersion: string): ManifestJsonV2 {
   }
 
   if (version === 2) {
+    const legacy = raw as { files?: Array<{ path: string; checksum?: { value?: string } }>; unverifiedFiles?: Array<{ path: string; reason: string }> };
+    if (Array.isArray(legacy.files)) {
+      const unknown = legacy.files.filter(file => /^0+$/.test(file.checksum?.value ?? ""));
+      if (unknown.length) raw = { ...raw, files: legacy.files.filter(file => !unknown.includes(file)), unverifiedFiles: [...(legacy.unverifiedFiles ?? []), ...unknown.map(file => ({ path: file.path, reason: "Legacy placeholder hash; no ownership evidence" }))] };
+    }
     const result = ManifestJsonV2Schema.safeParse(raw);
     if (!result.success) {
       throw new ManifestStoreError(

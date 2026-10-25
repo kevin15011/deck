@@ -35,7 +35,7 @@ test("session additions read only guarded Codebase; ordinary native packages are
     webSearchCredential: () => { throw new Error("must not read web credentials"); },
     installSharedTool: async () => { throw new Error("must not install"); },
   });
-  const servers = await adapter.readSessionMcpServers();
+  const servers = await adapter.readSessionMcpServers({ capabilities: { "codebase-memory": { enabled: true, runners: {} } }, webSearch: { enabled: false } } as never);
   expect(Object.keys(servers).sort()).toEqual(["codebase-memory"]);
   expect(servers["context-mode"]).toBeUndefined();
 });

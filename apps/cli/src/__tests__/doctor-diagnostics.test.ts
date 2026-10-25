@@ -22,6 +22,16 @@ const mockDetectSelectedRuntimes = vi.fn();
 
 import { runDoctorDiagnostics } from "../doctor-command/doctor-diagnostics";
 
+test('doctor publishes the read-only interactive reopen review as a warning', async () => {
+  const dependencies = fabDependencies();
+  const review = vi.fn(async (_config: unknown, _projectRoot?: string) => [{ code: 'interactive-search-reopen-required', severity: 'warning' as const, message: 'Please reopen any existing Codex CLI session.' }]);
+  mockDetectSelectedRuntimes.mockReturnValue([]);
+  const result = await runDoctorDiagnostics({ ...dependencies, reviewInteractiveSearchSessions: review }, '/review-project');
+  expect(review).toHaveBeenCalledTimes(1);
+  expect(review.mock.calls[0]?.[1]).toBe('/review-project');
+  expect(result.runnerConfig).toContainEqual({ category: 'Interactive Search', status: 'warning', items: [{ status: 'warning', message: 'Please reopen any existing Codex CLI session.' }] });
+});
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -79,6 +89,7 @@ function fabDependencies() {
   const configStore = createDeckConfigStore({ homeDir: join(root, "home"), xdgConfigHome: join(root, "xdg"), projectRoot: join(root, "repo") });
   configStore.write({});
   return {
+    reviewRunnerCleanup: async () => ({category:"Runner Migration",status:"ok" as const,items:[]}),
     detectSelectedRuntimes: mockDetectSelectedRuntimes,
     inspectPiEnvironment: mockInspectPiEnvironment,
     reviewPiRequiredTools: mockReviewPiRequiredTools,
@@ -711,6 +722,7 @@ describe("runDoctorDiagnostics dependency seam", () => {
       "readSupermemorySecret",
       "reviewOpenCodeTools",
       "reviewPiRequiredTools",
+      "reviewRunnerCleanup",
       "runDeckChecks",
       "validateSupermemoryOpenCodeMcpConfig",
       "validateSupermemoryPiMcpConfig",

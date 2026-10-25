@@ -116,12 +116,15 @@ export function authorizeOpenCodeSupermemoryLaunch(
   effects: OpenCodeSupermemoryLaunchEffects = {},
 ): RunnerLaunchPlan {
   const overlay = buildOpenCodeSupermemoryLaunchOverlay(input, effects);
+  const searchOverlay = plan.envOverlay?.OPENCODE_CONFIG_CONTENT;
+  const content = searchOverlay ? JSON.parse(searchOverlay.value) : {};
+  const memoryContent = JSON.parse(overlay.OPENCODE_CONFIG_CONTENT!.value);
   return {
     ...plan,
-    envOverlay: { ...(plan.envOverlay ?? {}), ...overlay },
+    envOverlay: { ...(plan.envOverlay ?? {}), ...overlay, OPENCODE_CONFIG_CONTENT: { value: JSON.stringify({ ...content, ...memoryContent, plugin: [...new Set([...(content.plugin ?? []), ...memoryContent.plugin])] }) } },
     sensitiveEnvAuthorization: {
       binding: VERIFIED_OPENCODE_SUPERMEMORY_BINDING,
-      keys: [SUPERMEMORY_CREDENTIAL_ENV_KEY],
+      keys: [SUPERMEMORY_CREDENTIAL_ENV_KEY, ...(plan.sensitiveEnvAuthorization?.binding === "deck-opencode-web-search-v1" ? plan.sensitiveEnvAuthorization.keys.filter(key => key === "TAVILY_API_KEY") : [])],
     },
   };
 }

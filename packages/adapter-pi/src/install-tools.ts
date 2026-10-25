@@ -177,12 +177,11 @@ async function dispatchInstallByKind(
   dependencies: PiToolInstallDependencies,
 ): Promise<PiToolInstallResult> {
   const { id: toolId, name, source, installKind } = tool;
+  if (toolId === "context-mode" || toolId === "serena") return { tool: name, success: false, actionKind: "manual-external-install", status: "failed", message: "Retired capability is disabled." };
 
   // Serena is the only Pi capability projected into Core's controlled bootstrap.
   // It must never fall through to the legacy command/manual paths.
-  if (toolId === "serena" || tool.capabilityId === "serena") {
-    return installSerenaProjection(tool, dependencies);
-  }
+
 
   if (dependencies.piTools && (toolId === "rtk" || toolId === "codebase-memory-mcp")) {
     return installOwnedTool(tool, dependencies.piTools);

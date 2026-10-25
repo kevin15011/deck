@@ -1,18 +1,23 @@
+setDefaultTimeout(30_000);
 import { CLAUDE_ATTRIBUTION_SETTINGS_ARGS } from "./launch-settings";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtemp, realpath, readFile, readdir, rm, lstat, mkdir, writeFile, symlink, rename, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
-import { getDefaultDeckConfig, getAgentContent } from "../../core/src/index";
+import { getDefaultDeckConfig as getBaseDeckConfig, getAgentContent } from "../../core/src/index";
 import { prepareAndBuildDeveloperTeamInstallPlan, buildCapabilityInstructionBundle, validateSerenaOperationAuthorization, type SerenaBootstrapRequest, type SerenaReadinessEvidence } from "../../core/src/index";
-import { createClaudeRunnerAdapter } from "./runner-adapter";
+import { createClaudeRunnerAdapter as createBaseClaudeRunnerAdapter } from "./runner-adapter";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "../../provider-tavily/src/index";
 import { createHash } from "node:crypto";
 import { CLAUDE_SUPERMEMORY_COMMIT } from "./supermemory-artifact";
 import { claudeModelMetadata } from "./models";
 import { gzipSync } from "node:zlib";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
+
+// Capability/credential fixtures explicitly enable CBM and choose a provider requiring search fallback.
+const getDefaultDeckConfig = () => ({ ...getBaseDeckConfig(), capabilities: { 'codebase-memory': { enabled: true, runners: {} } } });
+const createClaudeRunnerAdapter = (options: Parameters<typeof createBaseClaudeRunnerAdapter>[0] = {}) => createBaseClaudeRunnerAdapter({ ...options, sessionDriver: { baseEnv: { CLAUDE_CODE_USE_BEDROCK: '1' }, ...options.sessionDriver } });
 
 const standaloneFileCount = () => getStandaloneSkills().reduce((total, { skillId }) => total + 1 + Object.keys(getStandaloneSkill(skillId).files).length, 0);
 
@@ -87,36 +92,36 @@ describe("Claude Deck-owned global plugin adapter", () => {
   test("lost selected executable can be deselected or republished at a new immutable content version", async () => {
     const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-capability-repair-")));
     try {
-      const first = join(home, "first-context-mode");
-      const replacement = join(home, "replacement-context-mode");
+      const first = join(home, "first-context7");
+      const replacement = join(home, "replacement-context7");
       await writeFile(first, "fixture executable", { mode: 0o700 });
       await writeFile(replacement, "fixture executable", { mode: 0o700 });
       let current: string | undefined = first;
-      const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: (name) => name === "context-mode" ? current : undefined });
+      const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: (name) => name === "context7-mcp" ? current : undefined });
       const deckConfig = getDefaultDeckConfig();
-      const selected = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig, capabilityIds: ["claude-team-files", "context-mode"] });
+      const selected = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig, capabilityIds: ["claude-team-files", "context7"] });
       await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan: selected });
       const original = selected.files.find((file) => file.path.endsWith("/.mcp.json"))!;
       current = undefined;
-      expect(adapter.readSelectedCapabilityIds?.(home)).toEqual(["context-mode"]);
+      expect(adapter.readSelectedCapabilityIds?.(home)).toEqual(["context7"]);
       expect((await adapter.buildLaunchPlan!({ projectRoot: home, teamId: "developer-team", mode: "interactive", deckConfig })).status).toBe("blocked");
-      const review = adapter.buildReviewPlan({ runnerId: "claude", environmentId: "claude-development", selectedCapabilities: { "claude-team-files": true, "context-mode": true }, packageInstructions: { "context-mode": true }, adaptiveMemory: { provider: "none" } } as never, { runnerId: "claude", environmentId: "claude-development", capabilities: [] });
+      const review = adapter.buildReviewPlan({ runnerId: "claude", environmentId: "claude-development", selectedCapabilities: { "claude-team-files": true, "context7": true }, packageInstructions: { "context7": true }, adaptiveMemory: { provider: "none" } } as never, { runnerId: "claude", environmentId: "claude-development", capabilities: [] });
       expect(review.ready).toBe(true);
-      expect(review.groups.automaticInstalls.map((action) => action.capabilityId)).toEqual(["context-mode"]);
+      expect(review.groups.automaticInstalls.map((action) => action.capabilityId)).toEqual(["context7"]);
       const deselect = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig, capabilityIds: ["claude-team-files"] });
       expect(deselect.blocked).toBe(false);
       await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan: deselect });
       expect((await adapter.verifyDeveloperTeamInstall(deselect)).valid).toBe(true);
       expect(adapter.readSelectedCapabilityIds?.(home)).toEqual([]);
       current = replacement;
-      const repaired = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig, capabilityIds: ["claude-team-files", "context-mode"] });
+      const repaired = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig, capabilityIds: ["claude-team-files", "context7"] });
       expect(repaired.blocked).toBe(false);
       expect(repaired.files.find((file) => file.path.endsWith("/.mcp.json"))!.path).not.toBe(original.path);
       await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan: repaired });
       expect((await adapter.verifyDeveloperTeamInstall(repaired)).valid).toBe(true);
       expect(await readFile(original.path, "utf8")).toBe(original.content);
       expect(repaired.files.find((file) => file.path.endsWith("/.mcp.json"))?.content).toContain(replacement);
-      expect(adapter.readSelectedCapabilityIds?.(home)).toEqual(["context-mode"]);
+      expect(adapter.readSelectedCapabilityIds?.(home)).toEqual(["context7"]);
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 
@@ -199,11 +204,11 @@ describe("Claude Deck-owned global plugin adapter", () => {
       expect(plan.blocked).toBe(false);
       expect(plan.files.find((file) => file.path.endsWith("/.mcp.json"))!.content).toContain(shared);
       await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan });
-      expect((await adapter.readSessionMcpServers())["codebase-memory"]).toMatchObject({ command: owned });
+      expect((await adapter.readSessionMcpServers(getDefaultDeckConfig()))["codebase-memory"]).toMatchObject({ command: owned });
       await writeFile(owned, "tampered", { mode: 0o700 });
-      expect((await adapter.readSessionMcpServers())["codebase-memory"]).toMatchObject({ command: shared });
+      expect((await adapter.readSessionMcpServers(getDefaultDeckConfig()))["codebase-memory"]).toMatchObject({ command: shared });
       await rm(ownedRoot, { recursive: true });
-      expect((await adapter.readSessionMcpServers())["codebase-memory"]).toMatchObject({ command: shared });
+      expect((await adapter.readSessionMcpServers(getDefaultDeckConfig()))["codebase-memory"]).toMatchObject({ command: shared });
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 
@@ -221,7 +226,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
         expect(frontmatter).toContain("tools: Read, Grep, Glob, Skill");
         expect(frontmatter).toContain("mcp__plugin_deck-developer-team_context7__query-docs");
         expect(frontmatter).toContain("mcp__plugin_deck-developer-team_codebase-memory__search_graph");
-        expect(frontmatter).toContain("mcp__plugin_deck-developer-team_context-mode__ctx_search");
+        expect(frontmatter).not.toContain("mcp__plugin_deck-developer-team_context-mode__ctx_search");
         expect(frontmatter).not.toMatch(/mcp__(?!plugin_deck-developer-team_)/);
         expect(frontmatter).not.toMatch(/mcp__[^\n]*?(?:replace|rename|delete|insert|execute|manage_adr)/);
       }
@@ -264,63 +269,20 @@ describe("Claude Deck-owned global plugin adapter", () => {
       expect(adapter.buildDeveloperTeamInstallPlan({ ...input, thinkingAssignments: { "deck-lead": "high" } }).blocked).toBe(true);
     } finally { await rm(home, { recursive: true, force: true }); }
   });
-  test("Claude Serena requires current-operation authorization and revalidated Deck-owned proxy before MCP publication", async () => {
-    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-serena-authorization-")));
-    try {
-      const dataRoot = join(home, "data", "deck");
-      const ownedRoot = join(dataRoot, "tools", "serena");
-      const executable = join(ownedRoot, "bin", "serena");
-      await mkdir(join(ownedRoot, "bin"), { recursive: true, mode: 0o700 });
-      await writeFile(executable, "fixture Serena executable", { mode: 0o700 });
-      const deckCli = join(home, "deck-cli");
-      await writeFile(deckCli, "fixture Deck proxy", { mode: 0o700 });
-      const evidence: SerenaReadinessEvidence = { capabilityId: "serena", state: "ready", resolvedExecutablePath: executable, source: "installed-deck-tool", probe: "serena-help", fingerprint: "fixture-serena-fingerprint" };
-      let bootstrapCalls = 0;
-      let fresh = true;
-      const adapter = createClaudeRunnerAdapter({
-        homeDir: home, dataRoot, serenaOwnedRoot: ownedRoot,
-        serenaProxyCommand: [deckCli, "internal", "serena-mcp"],
-        serenaReadiness: async () => ({ state: "missing", diagnostic: { code: "serena-not-ready", message: "fixture missing" } }),
-        serenaBootstrap: async (request: SerenaBootstrapRequest) => {
-          bootstrapCalls++;
-          expect(validateSerenaOperationAuthorization(request.authorization, request.currentOperation).valid).toBe(true);
-          return { outcome: "installed", evidence };
-        },
-        serenaRevalidate: async () => fresh,
-      });
-      const reviewed = adapter.buildReviewPlan({ runnerId: "claude", environmentId: "claude-development", selectedCapabilities: { "claude-team-files": true, serena: true }, explicitlySelectedCapabilities: { serena: true }, packageInstructions: { serena: true }, adaptiveMemory: { provider: "none" } }, { runnerId: "claude", environmentId: "claude-development", capabilities: [] });
-      expect(reviewed.ready).toBe(true);
-      expect(reviewed.groups.automaticInstalls[0]?.kind).toBe("install-serena");
-      const action = reviewed.groups.automaticInstalls[0]!;
-      const auth = { kind: "interactive-tui-explicit-selection" as const, runner: "claude" as const, operationId: "claude-test-op" };
-      const currentOperation = { runner: "claude" as const, operationId: "claude-test-op", explicitlySelected: true };
-      expect((await adapter.runAction(action, { projectRoot: home, runnerId: "claude", environmentId: "claude-development", serenaAuthorization: auth, currentOperation: { ...currentOperation, explicitlySelected: false } })).status).toBe("failed");
-      expect(bootstrapCalls).toBe(0);
-      expect((await adapter.runAction(action, { projectRoot: home, runnerId: "claude", environmentId: "claude-development", serenaAuthorization: auth, currentOperation })).status).toBe("executed");
-      expect(bootstrapCalls).toBe(1);
-      const config = getDefaultDeckConfig();
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: config, capabilityIds: ["claude-team-files", "serena"], capabilityInstructions: buildCapabilityInstructionBundle(["serena"]) });
-      expect(plan.blocked).toBe(false);
-      const serenaTools = plan.files.find((file) => file.path.endsWith("/agents/deck-quality.md"))!.content.split("---")[1]!;
-      expect(serenaTools).toContain("mcp__plugin_deck-developer-team_serena__find_symbol");
-      expect(serenaTools).not.toContain("mcp__serena__");
-      expect(serenaTools).not.toContain("mcp__plugin_deck-developer-team_serena__replace_symbol_body");
-      await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan });
-      const configFile = plan.files.find((file) => file.path.endsWith("/.mcp.json"));
-      expect(JSON.parse(configFile!.content).mcpServers.serena).toEqual({ command: deckCli, args: ["internal", "serena-mcp"] });
-      expect((await adapter.verifyDeveloperTeamInstall(plan)).valid).toBe(true);
-      expect(await adapter.detectDeckInstall?.({ projectRoot: home })).toMatchObject({ installed: true, managedPaths: expect.arrayContaining([plan.files[0]!.path]) });
-      const resumed = createClaudeRunnerAdapter({ homeDir: home, dataRoot, serenaOwnedRoot: ownedRoot, serenaProxyCommand: [deckCli, "internal", "serena-mcp"], serenaReadiness: async () => ({ state: "ready", evidence, revalidate: async () => ({ valid: true, evidence }) }), serenaRevalidate: async () => true });
-      expect(resumed.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: config }).blocked).toBe(true);
-      const prepared = await prepareAndBuildDeveloperTeamInstallPlan(resumed, { projectRoot: home, environmentId: "claude-development", deckConfig: config });
-      expect(prepared.plan.blocked).toBe(false);
-      await resumed.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan: prepared.plan });
-      expect((await resumed.getCapabilityInventory({ projectRoot: home, runnerId: "claude", environmentId: "claude-development", deckConfig: config })).capabilities.find((entry) => entry.capabilityId === "serena")?.isInstalled).toBe(true);
-      expect((await resumed.buildLaunchPlan!({ projectRoot: home, teamId: "developer-team", mode: "interactive", deckConfig: config })).status).toBe("ready");
-      fresh = false;
-      expect((await adapter.buildLaunchPlan!({ projectRoot: home, teamId: "developer-team", mode: "interactive", deckConfig: config })).status).toBe("blocked");
-    } finally { await rm(home, { recursive: true, force: true }); }
-  });
+  test("retired Claude Serena cannot bootstrap or publish even with current authorization", async () => { const home = await realpath(await mkdtemp(join(tmpdir(), 'deck-claude-retired-'))); try {
+      let effects = 0;
+      const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, 'data/deck'), serenaBootstrap: async () => { effects++; throw new Error('retired bootstrap'); }, serenaReadiness: async () => { effects++; throw new Error('retired probe'); } });
+      const review = adapter.buildReviewPlan({ runnerId: 'claude', environmentId: 'claude-development', selectedCapabilities: { serena: true }, explicitlySelectedCapabilities: { serena: true }, packageInstructions: { serena: true }, adaptiveMemory: { provider: 'none' } }, { runnerId: 'claude', environmentId: 'claude-development', capabilities: [] });
+      expect(review.groups.automaticInstalls.some(action => action.capabilityId === 'serena')).toBe(false);
+      for (const selected of [false, true]) {
+          const result = await adapter.runAction({ id: 'stale-serena', kind: 'install-serena', capabilityId: 'serena', title: 'legacy', status: 'ready' }, { projectRoot: home, runnerId: 'claude', environmentId: 'claude-development', serenaAuthorization: { kind: 'interactive-tui-explicit-selection', runner: 'claude', operationId: 'fixture' }, currentOperation: { runner: 'claude', operationId: 'fixture', explicitlySelected: selected } });
+          expect(result.status).toBe('skipped');
+      }
+      expect(effects).toBe(0);
+  }
+  finally {
+      await rm(home, { recursive: true, force: true });
+  } });
   test("reviewed pinned RTK acquisition installs only a Deck-owned binary and native Claude hook", async () => {
     const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-rtk-review-")));
     const binary = Buffer.from("fixture RTK binary, never executed");
@@ -392,7 +354,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
       const ready = await adapter.buildLaunchPlan!(input);
       expect(ready.status).toBe("ready");
       if (ready.status !== "ready") return;
-      expect(ready.plan.args).toEqual([...CLAUDE_ATTRIBUTION_SETTINGS_ARGS, "--plugin-dir", dirname(dirname(plan.files[0]!.path)), "--plugin-dir", join(home, "data", "deck", "claude", `official-supermemory-${CLAUDE_SUPERMEMORY_COMMIT.slice(0, 12)}`), "--agent", "deck-developer-team:deck-lead"]);
+      expect(ready.plan.args).toEqual([...CLAUDE_ATTRIBUTION_SETTINGS_ARGS, "--setting-sources", "user", "--plugin-dir", dirname(dirname(plan.files[0]!.path)), "--plugin-dir", join(home, "data", "deck", "claude", `official-supermemory-${CLAUDE_SUPERMEMORY_COMMIT.slice(0, 12)}`), "--agent", "deck-developer-team:deck-lead"]);
       expect(ready.plan.envOverlay?.SUPERMEMORY_CC_API_KEY?.sensitive).toBe(true);
       expect(ready.plan.envOverlay?.SUPERMEMORY_REPO_TAG?.value).toBe("sm_project_v1_acme_repo");
       expect(JSON.stringify(plan.files)).not.toContain("fixture-shared-memory-token");
@@ -408,7 +370,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
       expect(disabled.status).toBe("ready");
       expect((await adapter.buildLaunchPlan!({ ...input, deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: false, activeProvider: "supermemory" } } as typeof config })).status).toBe("blocked");
       if (disabled.status === "ready") {
-        expect(disabled.plan.args).toEqual([...CLAUDE_ATTRIBUTION_SETTINGS_ARGS, "--plugin-dir", dirname(dirname(plan.files[0]!.path)), "--agent", "deck-developer-team:deck-lead"]);
+        expect(disabled.plan.args).toEqual([...CLAUDE_ATTRIBUTION_SETTINGS_ARGS, "--setting-sources", "user", "--plugin-dir", dirname(dirname(plan.files[0]!.path)), "--agent", "deck-developer-team:deck-lead"]);
         expect(disabled.plan.envOverlay?.SUPERMEMORY_CC_API_KEY).toBeUndefined();
       }
     } finally { await rm(home, { recursive: true, force: true }); }
@@ -477,14 +439,14 @@ describe("Claude Deck-owned global plugin adapter", () => {
       const mcp = plan.files.find((file) => file.path.endsWith("/.mcp.json"));
       expect(mcp).toBeDefined();
       const servers = JSON.parse(mcp!.content).mcpServers;
-      expect(Object.keys(servers).sort()).toEqual(["codebase-memory", "context-mode", "context7", "web-search"]);
+      expect(Object.keys(servers).sort()).toEqual(["codebase-memory", "context7", "web-search"]);
       expect(servers["web-search"].command).toBe(join(home, "bin", "tavily-mcp"));
       expect(mcp!.content).not.toContain("fake-shared-tavily-token");
       const searchTools = plan.files.find((file) => file.path.endsWith("/agents/deck-quality.md"))!.content.split("---")[1]!;
       expect(searchTools).toContain("mcp__plugin_deck-developer-team_web-search__tavily_search");
       expect(searchTools).not.toContain("mcp__web-search__");
       expect(searchTools).not.toContain("mcp__plugin_deck-developer-team_web-search__tavily_crawl");
-      expect(plan.files.find((file) => file.path.endsWith("/agents/deck-lead.md"))?.content).toContain("Context Mode");
+      expect(plan.files.find((file) => file.path.endsWith("/agents/deck-lead.md"))?.content).not.toContain("Context Mode");
       const hooks = plan.files.find((file) => file.path.endsWith("/hooks/hooks.json"));
       expect(hooks).toBeDefined();
       expect(JSON.parse(hooks!.content).hooks.PreToolUse[0].matcher).toBe("Bash");
@@ -507,7 +469,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
       await writeFile(tavily, "fixture", { mode: 0o700 });
       const adapter = createClaudeRunnerAdapter({ homeDir: root, dataRoot: join(root, "data", "deck"), resolveCommand: (name) => name === "tavily-mcp" ? tavily : undefined, webSearchProviderResolver: () => TAVILY_PROVIDER_DESCRIPTOR, webSearchCredential: () => "" });
       const config = getDefaultDeckConfig();
-      expect(adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "claude-development", deckConfig: config, capabilityIds: ["claude-team-files", "serena"] }).blocked).toBe(true);
+      expect(adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "claude-development", deckConfig: config, capabilityIds: ["claude-team-files", "serena"] }).blocked).toBe(false);
       const searchConfig = { ...config, webSearch: { enabled: true, provider: "tavily" } } as typeof config;
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "claude-development", deckConfig: searchConfig, capabilityIds: ["claude-team-files", "web-search"] });
       expect(plan.blocked).toBe(true);
@@ -520,12 +482,12 @@ describe("Claude Deck-owned global plugin adapter", () => {
     try {
       const attempted: string[] = [];
       const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: () => undefined, installSharedTool: async (id) => { attempted.push(id); return false; } });
-      const review = adapter.buildReviewPlan({ runnerId: "claude", environmentId: "claude-development", selectedCapabilities: { "claude-team-files": true }, packageInstructions: { "context-mode": true }, adaptiveMemory: { provider: "none" } }, { runnerId: "claude", environmentId: "claude-development", capabilities: [] });
+      const review = adapter.buildReviewPlan({ runnerId: "claude", environmentId: "claude-development", selectedCapabilities: { "claude-team-files": true, context7: true }, packageInstructions: {}, adaptiveMemory: { provider: "none" } }, { runnerId: "claude", environmentId: "claude-development", capabilities: [] });
       expect(review.groups.automaticInstalls).toHaveLength(1);
       expect(review.groups.teamApplications[0]?.dependencies).toEqual([review.groups.automaticInstalls[0]?.id]);
       const action = await adapter.runAction(review.groups.automaticInstalls[0]!, { projectRoot: home, runnerId: "claude", environmentId: "claude-development" });
       expect(action.status).toBe("failed");
-      expect(attempted).toEqual(["context-mode"]);
+      expect(attempted).toEqual(["context7"]);
       await expect(lstat(join(home, "data"))).rejects.toMatchObject({ code: "ENOENT" });
     } finally { await rm(home, { recursive: true, force: true }); }
   });

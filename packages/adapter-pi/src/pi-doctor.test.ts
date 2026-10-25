@@ -38,7 +38,7 @@ const tools = () => ({
 const envOf = () => ({ PI_CODING_AGENT_DIR: agentDir });
 const installFull = async () => {
   const pi = createPiRunnerAdapter({ homeDirectory: home, env: envOf(), piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0\n" }), piTools: tools() } as never);
-  const plan = pi.buildDeveloperTeamInstallPlan({ projectRoot: project, environmentId: "pi-development", deckConfig: validateDeckConfig({}), capabilityIds: ["context-mode", "codebase-memory-mcp", "context7", "rtk"] });
+  const plan = pi.buildDeveloperTeamInstallPlan({ projectRoot: project, environmentId: "pi-development", deckConfig: validateDeckConfig({ capabilities: { "codebase-memory": { enabled: true } } }), capabilityIds: ["context-mode", "codebase-memory-mcp", "context7", "rtk"] });
   expect(plan.blocked).toBeFalsy();
   await pi.applyDeveloperTeamInstall({ projectRoot: project, environmentId: "pi-development", plan });
 };
@@ -145,7 +145,7 @@ describe("deck doctor Pi coverage (7.3)", () => {
     const mcp = JSON.parse(readFileSync(mcpPath, "utf-8"));
     mcp.mcpServers["codebase-memory"].command = "codebase-memory-mcp";
     mcp.mcpServers["context7"].exposure = "codemode";
-    delete mcp.mcpServers["context-mode"].env;
+    delete mcp.mcpServers["context7"].env;
     writeFileSync(mcpPath, JSON.stringify(mcp));
     const found = problems(inspect()).map((item) => item.message).join("\n");
     expect(found).toContain("not an absolute path");

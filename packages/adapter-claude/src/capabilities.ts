@@ -42,6 +42,7 @@ export function claudeCapabilityFiles(
   effects: ClaudeCapabilityOptions,
   providerId?: string,
 ): readonly { path: string; content: string; kind: "other" }[] {
+  ids = ids.filter(id => id !== "context-mode" && id !== "serena");
   const servers: Record<string, { command: string; args?: string[] }> = {};
   const files: { path: string; content: string; kind: "other" }[] = [];
   if (ids.includes("context-mode")) servers["context-mode"] = { command: verifyClaudeExecutable("context-mode", effects) };
@@ -65,6 +66,6 @@ export function claudeCapabilityFiles(
     files.push({ path: join(root, "hooks", "rtk-hook.cjs"), content: claudeRtkHookScript(binary), kind: "other" });
     files.push({ path: join(root, "hooks", "hooks.json"), content: JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command }] }] } }, null, 2) + "\n", kind: "other" });
   }
-  if (ids.some((id) => !CLAUDE_CAPABILITY_IDS.includes(id))) throw new Error("Unknown Claude capability.");
+  if (ids.some((id) => !(CLAUDE_CAPABILITY_IDS as readonly string[]).includes(id))) throw new Error("Unknown Claude capability.");
   return files;
 }

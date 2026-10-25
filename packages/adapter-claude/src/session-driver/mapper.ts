@@ -17,7 +17,13 @@ export const CLAUDE_PROTOCOL = "claude-stream-json";
 const TOOL_INPUT_LIMIT = 8192;
 const TOOL_OUTPUT_LIMIT = 8192;
 const DIAGNOSTIC_TEXT_LIMIT = 500;
-const MAX_LINE_BYTES = 8 * 1024 * 1024;
+// Finite serialized capacity, including JSON escaping; not a heap bound. Keep
+// downstream output limits. A record may carry terminal/control data: never skip it.
+export const CLAUDE_MAX_LINE_BYTES = 16 * 1024 * 1024;
+export class ClaudeLineError extends Error {
+  readonly code = 'claude-line-too-long';
+  constructor(readonly size: { frameBytes: number; frameBytesKind: 'exact' | 'lower-bound'; maxFrameBytes: number }) { super('claude-line-too-long'); }
+}
 
 export type ClaudeInit = {
   sessionId: string; model?: string; version?: string;
@@ -46,32 +52,43 @@ export function parseClaudeLine(line: string): { ok: true; message: Record<strin
   } catch { return { ok: false }; }
 }
 
-/** Reassembles stdout chunks into lines; a runaway line is dropped (flagged) instead of exhausting memory. */
+/** Reassembles bounded UTF-8 records. Overflow poisons this process's stream. */
 export class ClaudeLineSplitter {
   private buffer = "";
-  private discarding = false;
-  overflowed = false;
-  constructor(private readonly maxBytes = MAX_LINE_BYTES) {}
+  private bytes = 0;
+  private highSurrogate = false;
+  private failed = false;
+  constructor(private readonly maxBytes = CLAUDE_MAX_LINE_BYTES) {}
 
-  push(chunk: string): string[] {
-    this.buffer += chunk;
+  /** Dispatch completed lines before inspecting a potentially rejected successor. */
+  push(chunk: string, dispatch?: (line: string) => void): string[] {
+    if (this.failed) return [];
     const lines: string[] = [];
-    let at: number;
-    while ((at = this.buffer.indexOf("\n")) !== -1) {
-      const line = this.buffer.slice(0, at);
-      this.buffer = this.buffer.slice(at + 1);
-      if (this.discarding) { this.discarding = false; continue; }
-      if (line.length > this.maxBytes) { this.overflowed = true; continue; }
-      if (line.trim().length > 0) lines.push(line);
+    let start = 0;
+    while (start < chunk.length) {
+      const at = chunk.indexOf('\n', start);
+      const fragment = chunk.slice(start, at < 0 ? undefined : at);
+      // Host stdout is decoded text; a surrogate pair split across callbacks
+      // still represents one four-byte UTF-8 character.
+      const paired = this.highSurrogate && /^[\uDC00-\uDFFF]/.test(fragment);
+      const bytes = this.bytes + Buffer.byteLength(fragment, 'utf8') - (paired ? 2 : 0);
+      if (bytes > this.maxBytes) {
+        this.failed = true; this.buffer = ''; this.bytes = 0; this.highSurrogate = false;
+        throw new ClaudeLineError({ frameBytes: bytes, frameBytesKind: at < 0 ? 'lower-bound' : 'exact', maxFrameBytes: this.maxBytes });
+      }
+      this.buffer += fragment; this.bytes = bytes;
+      if (fragment.length) this.highSurrogate = /[\uD800-\uDBFF]$/.test(fragment);
+      if (at < 0) break;
+      const line = this.buffer; this.buffer = ''; this.bytes = 0; this.highSurrogate = false;
+      if (line.trim().length > 0) { if (dispatch) dispatch(line); else lines.push(line); }
+      start = at + 1;
     }
-    if (this.buffer.length > this.maxBytes) { this.overflowed = true; this.discarding = true; this.buffer = ""; }
     return lines;
   }
 
   flush(): string[] {
-    const rest = this.discarding ? "" : this.buffer;
-    this.buffer = "";
-    this.discarding = false;
+    const rest = this.failed ? "" : this.buffer;
+    this.buffer = ""; this.bytes = 0; this.highSurrogate = false;
     return rest.trim().length > 0 ? [rest] : [];
   }
 }

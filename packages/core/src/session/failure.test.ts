@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { sanitizeTurnFailure } from "./failure";
 
 describe("terminal failure metadata", () => {
+  test.each(['codex-rpc-frame-too-large','codex-rpc-invalid-frame','claude-line-too-long','opencode-sse-frame-too-large','opencode-sse-invalid-frame','opencode-http-body-too-large','opencode-http-invalid-body'])('retains exact transport code without arbitrary native fields: %s', code => {
+    expect(sanitizeTurnFailure({category:'deck',origin:'deck',certainty:'reported',code,payload:'PRIVATE'})).toEqual({category:'deck',origin:'deck',certainty:'reported',code});
+  });
   const reported = { category: "provider-overloaded", origin: "provider", certainty: "reported" } as const;
   test("retains bounded structured evidence and strips payloads instead of copying native prose", () => {
     expect(sanitizeTurnFailure({ ...reported, code: "serverOverloaded", provider: "openai", httpStatus: 503,

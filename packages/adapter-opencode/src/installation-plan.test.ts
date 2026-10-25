@@ -49,19 +49,13 @@ describe("buildOpenCodeInstallationPlan", () => {
     expect(getSelectableOpenCodeTools().map((tool) => tool.id)).not.toContain("opencode-supermemory");
   });
 
-  test("uses serena-agent as Serena's installable source identity", () => {
+  test("ignores retired Serena selection", () => {
     const plan = buildOpenCodeInstallationPlan({
       tools: [{ name: "Serena", installed: false }],
       selectedToolIds: ["serena"],
     });
 
-    expect(plan).toEqual([{
-      id: "serena",
-      name: "Serena",
-      module: "serena-agent",
-      required: false,
-      installKind: "serena-agent",
-      capabilityId: "serena",
-    }]);
+    expect(plan).toEqual([]);
+    expect(getSelectableOpenCodeTools().some(tool => tool.id === "serena" || tool.id === "context-mode")).toBe(false);
   });
 });

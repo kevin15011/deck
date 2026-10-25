@@ -31,13 +31,13 @@ const withoutSerena = (config: ReturnType<typeof getDefaultDeckConfig>) => ({
   ...config,
   packageInstructions: { ...config.packageInstructions, codex: { ...config.packageInstructions.codex, serena: false } },
 });
-const deckConfig = () => withoutSerena(getDefaultDeckConfig());
+const deckConfig = () => withoutSerena(validateDeckConfig({ capabilities: { "codebase-memory": { enabled: true } } }));
 /** Default config enables every package instruction; this one selects none so only explicit capability ids apply. */
 const noPackagesConfig = () => {
   const base = getDefaultDeckConfig();
   return { ...base, packageInstructions: { ...base.packageInstructions, codex: Object.fromEntries(Object.keys(base.packageInstructions.codex).map((id) => [id, false])) } } as unknown as typeof base;
 };
-const supermemoryConfig = () => withoutSerena(validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }));
+const supermemoryConfig = () => withoutSerena(validateDeckConfig({ capabilities: { "codebase-memory": { enabled: true } }, adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }));
 
 async function withProject<T>(fn: (root: string, journalRoot: string) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), "deck-codex-tools-project-"));
@@ -48,6 +48,8 @@ async function withProject<T>(fn: (root: string, journalRoot: string) => Promise
     await mkdir(join(root, ".git", "refs", "heads"), { recursive: true });
     await writeFile(join(root, ".git", "HEAD"), "ref: refs/heads/main\n");
     await writeFile(join(root, ".git", "config"), "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = git@github.com:kevin15011/deck.git\n");
+    await mkdir(join(root, ".codex"), { recursive: true });
+    await writeFile(join(root, ".codex/config.toml"), 'web_search = "disabled"\n');
     return await fn(root, journalRoot);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -78,13 +80,12 @@ describe("Codex shared tool installation through the reviewed plan", () => {
       const installs = review.groups.automaticInstalls;
       expect(installs.map((action) => [action.kind, action.capabilityId])).toEqual(expect.arrayContaining([
         ["install-codex-rtk", "rtk"],
-        ["install-codex-tool", "context-mode"],
         ["install-codex-codebase", "codebase-memory"],
         ["install-codex-supermemory", "adaptive-memory"],
       ]));
       expect(installs.every((action) => action.status === "ready" && action.required === true)).toBe(true);
       expect(new Set(installs.map((action) => action.id)).size).toBe(installs.length);
-      expect(review.groups.configWrites.map((action) => action.capabilityId)).toEqual(expect.arrayContaining(["rtk", "context-mode", "codebase-memory", "supermemory-tool-bindings"]));
+      expect(review.groups.configWrites.map((action) => action.capabilityId)).toEqual(expect.arrayContaining(["rtk", "codebase-memory", "supermemory-tool-bindings"]));
     });
   });
 
@@ -141,19 +142,7 @@ describe("Codex shared tool installation through the reviewed plan", () => {
     });
   });
 
-  test("installs Context Mode through the reviewed seam, reuses a ready one, and reports failures", async () => {
-    await withProject(async (_root, journalRoot) => {
-      let calls = 0;
-      const missing = createCodexRunnerAdapter({ tools: testTools({ installContextMode: async () => { calls += 1; return true; } }), journalRoot, preflight: preflight() });
-      const action = { id: "codex.tool.context-mode.install", kind: "install-codex-tool", title: "Install Context Mode", capabilityId: "context-mode", status: "ready" } as const;
-      expect(await missing.runAction(action, {} as never)).toMatchObject({ status: "executed" });
-      expect(calls).toBe(1);
-      const failing = createCodexRunnerAdapter({ tools: testTools({ installContextMode: async () => false }), journalRoot, preflight: preflight() });
-      expect(await failing.runAction(action, {} as never)).toMatchObject({ status: "failed" });
-      const ready = createCodexRunnerAdapter({ tools: readyTestTools({ installContextMode: async () => { throw new Error("must not reinstall"); } }), journalRoot, preflight: preflight() });
-      expect(await ready.runAction(action, {} as never)).toMatchObject({ status: "executed", message: expect.stringContaining("already available") });
-    });
-  });
+  test("retired Context Mode cannot invoke the reviewed installer seam", async () => { await withProject(async (root, journalRoot) => { let calls = 0; const adapter = createCodexRunnerAdapter({ ...layout(root), tools: testTools({ installContextMode: async () => { calls++; throw new Error('retired installer'); } }), journalRoot, preflight: preflight() }); expect(await adapter.runAction({ id: 'legacy-context-mode', kind: 'install-codex-tool', title: 'legacy', capabilityId: 'context-mode', status: 'ready' }, {} as never)).toMatchObject({ status: 'skipped' }); expect(calls).toBe(0); }); });
 
   test("an existing shared Codebase Memory executable is reused instead of installing a duplicate native release", async () => {
     await withProject(async (_root, journalRoot) => {
@@ -181,7 +170,7 @@ describe("Codex materialization pins tools and hooks to verified executables", (
       expect(await adapter.verifyDeveloperTeamInstall(plan)).toMatchObject({ valid: true });
 
       const config = await readFile(join(root, ".codex", "config.toml"), "utf8");
-      expect(config).toMatch(/\[mcp_servers\.context-mode\]\ncommand = "\//);
+      expect(config).not.toContain("mcp_servers.context-mode");
       expect(config).toMatch(/\[mcp_servers\.codebase-memory\]\ncommand = "\//);
       expect(config).toContain("# deck-codex-hook:rtk:start");
       expect(config).toContain("# deck-codex-hook:supermemory:start");
@@ -259,7 +248,7 @@ describe("Codex materialization pins tools and hooks to verified executables", (
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan });
       const config = await readFile(join(codexHome, "config.toml"), "utf8");
       expect(config).not.toContain("mcp_servers.codebase-memory]");
-      expect(config).toContain("[mcp_servers.context-mode]");
+      expect(config).not.toContain("[mcp_servers.context-mode]");
       expect(config).toContain("# >>> codebase-memory-mcp MCP >>>\n[mcp_servers.codebase-memory-mcp]\ncommand = ");
       expect(config).toContain("# <<< codebase-memory-mcp MCP <<<\n");
       const inventory = await adapter.getCapabilityInventory({ projectRoot: root, environmentId: "codex-development", runnerId: "codex", deckConfig: deckConfig() });
@@ -269,36 +258,7 @@ describe("Codex materialization pins tools and hooks to verified executables", (
 });
 
 describe("Codex global install", () => {
-  test("reviewed tool selection repairs legacy MCP paths, preserves tool approvals, and can roll back", async () => {
-    await withProject(async (root, journalRoot) => {
-      const tools = readyTestTools();
-      const { codexHome } = layout(root);
-      await mkdir(codexHome, { recursive: true });
-      const source = '[mcp_servers.context-mode]\ncommand = "context-mode"\n[mcp_servers.codebase-memory]\ncommand = "/old/bin/codebase-memory-mcp"\n[mcp_servers.codebase-memory.tools.search_code]\napproval_mode = "approve"\n';
-      const configPath = join(codexHome, "config.toml");
-      await writeFile(configPath, source);
-      const adapter = createCodexRunnerAdapter({ tools, ...layout(root), journalRoot, preflight: preflight(), ...noSerena });
-      const input = { projectRoot: root, environmentId: "codex-development", deckConfig: deckConfig() };
-      expect(adapter.buildDeveloperTeamInstallPlan(input).blocked).toBe(true);
-      // Package instructions also select these tools in Review, even without capability toggles.
-      expect(adapter.buildDeveloperTeamInstallPlan({ ...input, capabilityIds: [] }).blocked).toBe(false);
-      const selected = { ...input, capabilityIds: ["context-mode", "codebase-memory"] };
-      const plan = adapter.buildDeveloperTeamInstallPlan(selected);
-      expect(plan.blocked).toBe(false);
-      expect(await readFile(configPath, "utf8")).toBe(source);
-      const backup = adapter.backupDeveloperTeamFiles(plan);
-      await adapter.applyDeveloperTeamInstall({ ...input, plan });
-      expect(await adapter.verifyDeveloperTeamInstall(plan)).toMatchObject({ valid: true });
-      const installed = await readFile(configPath, "utf8");
-      expect(installed).not.toContain('command = "context-mode"');
-      expect(installed).not.toContain("/old/bin/codebase-memory-mcp");
-      expect(installed).toContain('args = ["mcp"]');
-      expect(installed).toContain('[mcp_servers.codebase-memory.tools.search_code]\napproval_mode = "approve"');
-      expect(adapter.buildDeveloperTeamInstallPlan(selected).mutationPreview).toEqual([]);
-      await adapter.rollbackDeveloperTeamFiles(backup);
-      expect(await readFile(configPath, "utf8")).toBe(source);
-    });
-  }, 120_000);
+  test("reviewed selection preserves unproven legacy paths and tool approvals", async () => { await withProject(async (root, journalRoot) => { const configPath = join(root, '.codex/config.toml'); const before = '[mcp_servers.codebase-memory]\ncommand="/old/codebase-memory-mcp"\n[mcp_servers.codebase-memory.tools.search_code]\napproval_mode="approve"\n'; await writeFile(configPath, before); const adapter = createCodexRunnerAdapter({ ...layout(root), tools: readyTestTools(), journalRoot, preflight: preflight() }); const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: 'codex-development', deckConfig: deckConfig(), capabilityIds: ['codebase-memory'] }); expect(plan.blocked).toBe(true); await expect(adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: 'codex-development', plan })).rejects.toThrow(); expect(await readFile(configPath, 'utf8')).toBe(before); }); });
 
   test("planning and applying from a huge project directory neither scans nor writes anything in the project", async () => {
     await withProject(async (root, journalRoot) => {
@@ -342,38 +302,12 @@ describe("Upgrade from the previous Deck version", () => {
   });
   const webSearchConfig = () => withoutSerena(validateDeckConfig({ webSearch: { enabled: true, provider: "tavily" } }));
 
-  test("a Deck-marked web-search block with the old bare npx is upgraded in place with nothing blocked, through inventory, review and plan", async () => {
-    await withProject(async (root, journalRoot) => {
-      await mkdir(join(root, ".codex"), { recursive: true });
-      await writeFile(join(root, ".codex", "config.toml"), `[features]\nmulti_agent = true\n${OLD_SUPERMEMORY_MCP}\n${OLD_WEB_SEARCH}\n${OLD_V1_HOOKS}`);
-      const adapter = webSearchAdapter(root, journalRoot);
-      const inventory = await adapter.getCapabilityInventory({ projectRoot: root, environmentId: "codex-development", runnerId: "codex", deckConfig: webSearchConfig() });
-      const entry = inventory.capabilities.find((capability) => capability.capabilityId === "web-search");
-      expect(entry).toMatchObject({ isBlocked: false, isInstalled: false, webSearchReadiness: expect.objectContaining({ code: "mcp-not-materialized" }) });
-      const review = adapter.buildReviewPlan({ runnerId: "codex", environmentId: "codex-development", selectedCapabilities: { "web-search": true }, webSearchProviderDescriptor: TAVILY_PROVIDER_DESCRIPTOR, packageInstructions: {}, adaptiveMemory: { provider: "none" } }, inventory);
-      expect(review.groups.manualSteps.filter((action) => action.status === "blocked")).toEqual([]);
-      expect(review.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
-      expect(review.groups.configWrites).toContainEqual(expect.objectContaining({ capabilityId: "web-search" }));
-
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: webSearchConfig(), capabilityIds: ["web-search"] });
-      expect(plan.blocked).toBe(false);
-      await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan });
-      const config = await readFile(join(root, ".codex", "config.toml"), "utf8");
-      expect(config).toContain(`command = ${JSON.stringify(process.execPath)}`);
-      expect(config).not.toContain('command = "npx"');
-      expect(config).not.toContain("mcp.supermemory.ai");
-      expect(config).not.toContain("deck-codex-hook-v1");
-      expect(config.match(/\[mcp_servers\.web-search\]/g)).toHaveLength(1);
-      const after = await adapter.getCapabilityInventory({ projectRoot: root, environmentId: "codex-development", runnerId: "codex", deckConfig: webSearchConfig() });
-      expect(after.capabilities.find((capability) => capability.capabilityId === "web-search")).toMatchObject({ isInstalled: true, isBlocked: false });
-      expect(adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: webSearchConfig(), capabilityIds: ["web-search"] }).mutationPreview).toEqual([]);
-    });
-  }, 120_000);
+  test("legacy Web Search markers alone cannot authorize replacing a command", async () => { await withProject(async (root, journalRoot) => { const before = 'web_search="disabled"\n' + OLD_WEB_SEARCH; const configPath = join(root, '.codex/config.toml'); await writeFile(configPath, before); const adapter = webSearchAdapter(root, journalRoot); const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: 'codex-development', deckConfig: webSearchConfig(), capabilityIds: ['web-search'] }); expect(plan.blocked).toBe(true); await expect(adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: 'codex-development', plan })).rejects.toThrow(); expect(await readFile(configPath, 'utf8')).toBe(before); }); });
 
   test("an unmarked same-name web-search entry is still a blocking conflict and is never overwritten", async () => {
     await withProject(async (root, journalRoot) => {
       await mkdir(join(root, ".codex"), { recursive: true });
-      const foreign = '[mcp_servers.web-search]\ncommand = "npx"\nargs = ["-y", "tavily-mcp@0.2.22"]\nenv_vars = ["TAVILY_API_KEY"]\n';
+      const foreign = 'web_search="disabled"\n[mcp_servers.web-search]\ncommand = "npx"\nargs = ["-y", "tavily-mcp@0.2.22"]\nenv_vars = ["TAVILY_API_KEY"]\n';
       await writeFile(join(root, ".codex", "config.toml"), foreign);
       const adapter = webSearchAdapter(root, journalRoot);
       const inventory = await adapter.getCapabilityInventory({ projectRoot: root, environmentId: "codex-development", runnerId: "codex", deckConfig: webSearchConfig() });
@@ -383,21 +317,7 @@ describe("Upgrade from the previous Deck version", () => {
     });
   });
 
-  test("old Deck-owned context-mode, codebase-memory and serena blocks with bare commands are replaced without blocking", async () => {
-    await withProject(async (root, journalRoot) => {
-      await mkdir(join(root, ".codex"), { recursive: true });
-      await writeFile(join(root, ".codex", "config.toml"), '[features]\nmulti_agent = true\n# deck-codex-mcp:context-mode\n[mcp_servers.context-mode]\ncommand = "context-mode"\nargs = ["mcp"]\n\n# deck-codex-mcp:codebase-memory\n[mcp_servers.codebase-memory]\ncommand = "codebase-memory-mcp"\n');
-      const tools = testTools({ resolveCommand: (name) => name === "context-mode" ? process.execPath : name === "codebase-memory-mcp" ? "/bin/sh" : undefined });
-      const adapter = createCodexRunnerAdapter({ tools, ...layout(root), journalRoot, preflight: preflight(), ...noSerena });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: deckConfig(), capabilityIds: ["context-mode", "codebase-memory"] });
-      expect(plan.blocked).toBe(false);
-      await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan });
-      const config = await readFile(join(root, ".codex", "config.toml"), "utf8");
-      expect(config).toContain(`command = ${JSON.stringify(process.execPath)}`);
-      expect(config).toContain('command = "/bin/sh"');
-      expect(config).not.toMatch(/command = "(context-mode|codebase-memory-mcp)"/);
-    });
-  }, 120_000);
+  test("legacy marker-only packages remain preserved pending entry review", async () => { await withProject(async (root, journalRoot) => { const before = '# deck-codex-mcp:context-mode\n[mcp_servers.context-mode]\ncommand="context-mode"\n# deck-codex-mcp:codebase-memory\n[mcp_servers.codebase-memory]\ncommand="codebase-memory-mcp"\n'; const configPath = join(root, '.codex/config.toml'); await writeFile(configPath, before); const adapter = createCodexRunnerAdapter({ ...layout(root), tools: readyTestTools(), journalRoot, preflight: preflight() }); const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: 'codex-development', deckConfig: deckConfig(), capabilityIds: ['context-mode', 'codebase-memory', 'serena'] }); expect(plan.blocked).toBe(true); expect(await readFile(configPath, 'utf8')).toBe(before); }); });
 });
 
 describe("Codex global ownership and migration", () => {
@@ -504,16 +424,16 @@ describe("Codex global ownership and migration", () => {
       expect(await readFile(join(cwd, ".codex", "agents", "deck-lead.toml"), "utf8")).toBe(files[".codex/agents/deck-lead.toml"]);
 
       const result = await adapter.cleanupLegacyInstall!(cwd, { deckConfig: deckConfig() });
-      expect(result.removed).toEqual(expect.arrayContaining([".codex/agents/deck-lead.toml", ".agents/skills/deck-lead/SKILL.md", ".codex/deck-manifest.json"]));
-      expect(result.preserved).toEqual([".agents/skills/deck-modified/SKILL.md"]);
+      expect(result.removed).toEqual(expect.arrayContaining([".codex/agents/deck-lead.toml", ".agents/skills/deck-lead/SKILL.md"]));
+      expect(result.preserved).toEqual(expect.arrayContaining([".agents/skills/deck-modified/SKILL.md", ".codex/config.toml", ".codex/deck-manifest.json"]));
       await expect(stat(join(cwd, ".codex", "agents", "deck-lead.toml"))).rejects.toThrow();
-      await expect(stat(join(cwd, ".codex", "deck-manifest.json"))).rejects.toThrow();
+      expect((await stat(join(cwd, ".codex", "deck-manifest.json"))).isFile()).toBe(true);
       expect(await readFile(join(cwd, ".agents", "skills", "deck-modified", "SKILL.md"), "utf8")).toBe(files[".agents/skills/deck-modified/SKILL.md"]);
       const config = await readFile(join(cwd, ".codex", "config.toml"), "utf8");
       expect(config).toContain("[profiles.mine]");
-      expect(config).not.toContain("mcp_servers.context7");
+      expect(config).toContain("mcp_servers.context7");
       expect(await readFile(join(cwd, "unrelated.txt"), "utf8")).toBe("keep");
-      expect((await adapter.cleanupLegacyInstall!(cwd, { deckConfig: deckConfig() })).diagnostics).toEqual(["No legacy per-project Deck install was found."]);
+      expect((await adapter.cleanupLegacyInstall!(cwd, { deckConfig: deckConfig() })).removed).toEqual([]);
     });
   });
 

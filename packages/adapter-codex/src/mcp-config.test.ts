@@ -3,21 +3,7 @@ import { buildCodexMcpServers, isCodexDeckMemoryMcpConfigured,
   isCodexSerenaMcpConfigured, inspectCodexMcpServerCommand, inspectCodexSupermemoryMcpState, mergeCodexMcpServers, redactCodexMcpDiagnostic } from "./mcp-config";
 
 describe("Codex MCP semantic configuration", () => {
-  test("repairs selected standard tool entries without taking ownership or changing tool policies", () => {
-    const source = '# personal config\n[mcp_servers.context-mode]\ncommand = "context-mode" # keep comment\n[mcp_servers.codebase-memory]\ncommand = "/home/user/.local/bin/codebase-memory-mcp"\n\n[mcp_servers.codebase-memory.tools.search_code]\napproval_mode = "approve"\n\n[mcp_servers.other]\ncommand = "custom"\n';
-    const desired = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory"], memoryProvider: "none", contextModeCommand: "/opt/bin/context-mode", codebaseMemoryCommand: "/opt/deck/codebase-memory-mcp" }).servers;
-    expect(mergeCodexMcpServers(source, desired)).toMatchObject({ status: "blocked", content: source });
-    const repaired = mergeCodexMcpServers(source, desired, { repairSelectedToolIds: ["context-mode", "codebase-memory"] });
-    expect(repaired.status).toBe("updated");
-    expect(repaired.content).toContain('command = "/opt/bin/context-mode" # keep comment');
-    expect(repaired.content).toContain('args = ["mcp"]');
-    expect(repaired.content).toContain('command = "/opt/deck/codebase-memory-mcp"');
-    expect(repaired.content).toContain('[mcp_servers.codebase-memory.tools.search_code]\napproval_mode = "approve"');
-    expect(repaired.content).toContain('[mcp_servers.other]\ncommand = "custom"');
-    expect(repaired.content).not.toContain("# deck-codex-mcp:");
-    expect(mergeCodexMcpServers(repaired.content, desired)).toMatchObject({ status: "unchanged", content: repaired.content });
-    expect(mergeCodexMcpServers(repaired.content, desired, { repairSelectedToolIds: ["context-mode", "codebase-memory"] })).toMatchObject({ status: "unchanged", content: repaired.content });
-  });
+  test("selected repair preserves unowned standard entries and their tool policies", () => { const source = '# personal config\n[mcp_servers.codebase-memory]\ncommand="codebase-memory-mcp"\n[mcp_servers.codebase-memory.tools.search_code]\napproval_mode="approve"\n[mcp_servers.other]\ncommand="custom"\n'; const desired = buildCodexMcpServers({ packageIds: ['codebase-memory'], memoryProvider: 'none', codebaseMemoryCommand: '/verified/codebase-memory-mcp' }).servers; expect(mergeCodexMcpServers(source, desired, { repairSelectedToolIds: ['codebase-memory'] })).toMatchObject({ status: 'blocked', content: source }); });
 
   test("selected repair preserves custom invocations and returns original bytes if any collision remains", () => {
     const desired = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory"], memoryProvider: "none", contextModeCommand: "/opt/bin/context-mode", codebaseMemoryCommand: "/opt/deck/codebase-memory-mcp" }).servers;
@@ -35,7 +21,7 @@ describe("Codex MCP semantic configuration", () => {
     const desired = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory", "serena", "context7"], memoryProvider: "supermemory", supermemoryProjectScope: "sm_project_v1_kevin15011_deck", contextModeCommand: "/opt/deck/context-mode", codebaseMemoryCommand: "/opt/deck/codebase-memory-mcp" });
     const merged = mergeCodexMcpServers("[mcp_servers.user]\ncommand = \"user-mcp\"\n", desired.servers);
     expect(desired.gaps).toContain("supermemory-raw-mcp-disabled");
-    expect(merged.content).toContain("[mcp_servers.context-mode]");
+    expect(merged.content).not.toContain("[mcp_servers.context-mode]");
     expect(merged.content).not.toContain("mcp.supermemory.ai");
     expect(merged.content).not.toContain("sm_project_v1_kevin15011_deck");
     expect(merged.content).not.toContain("bearer_token_env_var");
@@ -47,7 +33,7 @@ describe("Codex MCP semantic configuration", () => {
   test("retires only marker-owned stale Supermemory blocks and preserves unmarked external entries", () => {
     const desired = buildCodexMcpServers({ packageIds: [], memoryProvider: "supermemory", supermemoryProjectScope: "sm_project_v1_kevin15011_deck" });
     const stale = '# deck-codex-mcp:supermemory\n[mcp_servers.supermemory]\nurl = "https://mcp.supermemory.ai/mcp"\nhttp_headers = { "x-sm-project" = "sm_project_v1_kevin15011_deck" }\n';
-    const retired = mergeCodexMcpServers(stale, desired.servers);
+    const retired = mergeCodexMcpServers(stale, desired.servers, { ownedServerIds: ["supermemory"] });
     expect(retired).toMatchObject({ status: "updated" });
     expect(retired.content).not.toContain("mcp_servers.supermemory");
 
@@ -58,80 +44,18 @@ describe("Codex MCP semantic configuration", () => {
     expect(inspectCodexSupermemoryMcpState(external)).toMatchObject({ ok: false, code: "supermemory-mcp-unmanaged" });
   });
 
-  test("serializes the portable Deck Serena proxy without user-specific paths or shell", () => {
-    const desired = buildCodexMcpServers({ packageIds: ["serena"], memoryProvider: "none", serenaLauncherAvailable: true, serenaProxyAvailable: true });
-    const merged = mergeCodexMcpServers("", desired.servers);
-
-    expect(desired.gaps).toEqual([]);
-    expect(merged).toMatchObject({ status: "updated" });
-    expect(merged.content).toContain('command = "deck"');
-    expect(merged.content).toContain('args = ["internal", "serena-mcp"]');
-    expect(merged.content).toContain('env_vars = ["HOME", "PATH", "XDG_DATA_HOME"]');
-    expect(merged.content).not.toMatch(/\/home\/dev|serena\/bin|\$\{|sh -c/);
-  });
+  test("retired Serena cannot serialize a proxy", () => { const desired = buildCodexMcpServers({ packageIds: ['context-mode', 'serena'], memoryProvider: 'none', contextModeCommand: '/verified/context-mode', serenaLauncherAvailable: true, serenaProxyAvailable: true }); expect(desired).toEqual({ servers: [], gaps: [] }); const source = '# deck-codex-mcp:serena\n[mcp_servers.serena]\ncommand="user-or-legacy"\n'; expect(mergeCodexMcpServers(source, desired.servers)).toMatchObject({ status: 'unchanged', content: source }); });
 
 
-  test("migrates marker-owned bare and absolute Serena entries but blocks unmanaged collisions", () => {
-    const desired = buildCodexMcpServers({
-      packageIds: ["serena"],
-      memoryProvider: "none",
-      serenaLauncherAvailable: true,
-      serenaProxyAvailable: true,
-    });
-    const legacySources = [
-      '# deck-codex-mcp:serena\n[mcp_servers.serena]\ncommand = "serena"\nargs = ["start-mcp-server", "--context", "ide", "--project-from-cwd"]\n',
-      '# deck-codex-mcp:serena\n[mcp_servers.serena]\ncommand = "/legacy/user/tools/serena/bin/serena"\nargs = ["start-mcp-server", "--context", "ide", "--project-from-cwd"]\n',
-    ];
+  test("legacy Serena markers alone never authorize migration", () => { const desired = buildCodexMcpServers({ packageIds: ['context-mode', 'serena'], memoryProvider: 'none', contextModeCommand: '/verified/context-mode', serenaLauncherAvailable: true, serenaProxyAvailable: true }); expect(desired).toEqual({ servers: [], gaps: [] }); const source = '# deck-codex-mcp:serena\n[mcp_servers.serena]\ncommand="user-or-legacy"\n'; expect(mergeCodexMcpServers(source, desired.servers)).toMatchObject({ status: 'unchanged', content: source }); });
 
-    for (const source of legacySources) {
-      const migrated = mergeCodexMcpServers(source, desired.servers);
-      expect(migrated).toMatchObject({ status: "updated" });
-      expect(migrated.content).toContain('command = "deck"');
-      expect(migrated.content).not.toContain("/legacy/user");
-    }
+  test("is semantically idempotent and blocks same-ID collisions", () => { const desired = buildCodexMcpServers({ packageIds: ['context7'], memoryProvider: 'none' }); const first = mergeCodexMcpServers('', desired.servers); expect(first.status).toBe('updated'); expect(mergeCodexMcpServers(first.content, desired.servers).status).toBe('unchanged'); expect(mergeCodexMcpServers(first.content, [], { ownedServerIds: ['context7'] }).content).not.toContain('mcp_servers.context7'); const source = '[mcp_servers.context7]\ncommand="user"\n'; expect(mergeCodexMcpServers(source, desired.servers)).toMatchObject({ status: 'blocked', content: source, collisions: ['context7'] }); });
 
-    const unmanaged = mergeCodexMcpServers(
-      '[mcp_servers.serena]\ncommand = "/user-owned/serena"\nargs = ["serve"]\n',
-      desired.servers,
-    );
-    expect(unmanaged).toMatchObject({ status: "blocked", collisions: ["serena"] });
-  });
-
-  test("is semantically idempotent and blocks same-ID collisions", () => {
-    const desired = buildCodexMcpServers({ packageIds: ["context-mode"], memoryProvider: "none", contextModeCommand: "/opt/deck/context-mode" });
-    const first = mergeCodexMcpServers("", desired.servers);
-    expect(first.status).toBe("updated");
-    expect(mergeCodexMcpServers(first.content, desired.servers).status).toBe("unchanged");
-    const removed = mergeCodexMcpServers(first.content, []);
-    expect(removed.status).toBe("updated");
-    expect(removed.content).not.toContain("mcp_servers.context-mode");
-    const collision = mergeCodexMcpServers('[mcp_servers.context-mode]\ncommand = "other"\n', desired.servers);
-    expect(collision).toMatchObject({ status: "blocked", collisions: ["context-mode"] });
-  });
-
-  test("pins Context Mode and Codebase Memory to verified absolute commands and never writes bare PATH names", () => {
-    const pinned = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory"], memoryProvider: "none", contextModeCommand: "/opt/deck/context-mode", codebaseMemoryCommand: "/opt/deck/codebase-memory-mcp" });
-    expect(pinned.gaps).toEqual([]);
-    const merged = mergeCodexMcpServers("", pinned.servers);
-    expect(merged.content).toContain('command = "/opt/deck/context-mode"');
-    expect(merged.content).toContain('command = "/opt/deck/codebase-memory-mcp"');
-    expect(inspectCodexMcpServerCommand(merged.content, "context-mode")).toBe("/opt/deck/context-mode");
-
-    const missing = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory"], memoryProvider: "none", contextModeCommand: "context-mode", codebaseMemoryCommand: undefined });
-    expect(missing.servers).toEqual([]);
-    expect(missing.gaps).toEqual(["context-mode-not-ready", "codebase-memory-not-ready"]);
-
-    // A previously written bare Deck-owned entry is replaced by the pinned one; a user entry is a collision.
-    const legacy = '# deck-codex-mcp:context-mode\n[mcp_servers.context-mode]\ncommand = "context-mode"\nargs = ["mcp"]\n';
-    const upgraded = mergeCodexMcpServers(legacy, pinned.servers.filter((server) => server.id === "context-mode"));
-    expect(upgraded.status).toBe("updated");
-    expect(upgraded.content).toContain('command = "/opt/deck/context-mode"');
-    expect(upgraded.content).not.toContain('command = "context-mode"');
-  });
+  test("pins explicit Codebase while ignoring retired Context Mode", () => { const pinned = buildCodexMcpServers({ packageIds: ['context-mode', 'codebase-memory'], memoryProvider: 'none', contextModeCommand: '/verified/context-mode', codebaseMemoryCommand: '/verified/codebase-memory-mcp' }); expect(pinned.gaps).toEqual([]); expect(pinned.servers.map(server => server.id)).toEqual(['codebase-memory']); const merged = mergeCodexMcpServers('', pinned.servers); expect(merged.content).toContain('command = "/verified/codebase-memory-mcp"'); expect(merged.content).not.toContain('context-mode'); expect(buildCodexMcpServers({ packageIds: ['context-mode', 'codebase-memory'], memoryProvider: 'none' })).toEqual({ servers: [], gaps: ['codebase-memory-not-ready'] }); });
 
   test("retiring a managed MCP block never swallows the ownership marker of the hook block that follows it", () => {
     const source = '# deck-codex-mcp:context7\n[mcp_servers.context7]\nurl = "https://mcp.context7.com/mcp"\n\n# deck-codex-hook:rtk:start\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n# deck-codex-hook:rtk:end\n';
-    const retired = mergeCodexMcpServers(source, []);
+    const retired = mergeCodexMcpServers(source, [], { ownedServerIds: ["context7"] });
     expect(retired.status).toBe("updated");
     expect(retired.content).not.toContain("mcp_servers.context7");
     expect(retired.content).toContain("# deck-codex-hook:rtk:start");
@@ -183,19 +107,7 @@ url = "https://mcp.supermemory.ai/mcp"
   });
 });
 
- test("pins Serena to the reviewed invocation and migrates only owned configs", () => {
-  const route = ["/opt/Deck Canary/deck-canary", "internal", "serena-mcp"];
-  const desired = buildCodexMcpServers({ packageIds: ["serena"], memoryProvider: "none", serenaLauncherAvailable: true, serenaProxyAvailable: true, serenaProxyCommand: route });
-  const merged = mergeCodexMcpServers("", desired.servers);
-  expect(merged.content).toContain('command = "/opt/Deck Canary/deck-canary"');
-  expect(isCodexSerenaMcpConfigured(merged.content, route)).toBe(true);
-  expect(isCodexSerenaMcpConfigured(merged.content)).toBe(false);
-  const old = mergeCodexMcpServers("", buildCodexMcpServers({ packageIds: ["serena"], memoryProvider: "none", serenaLauncherAvailable: true, serenaProxyAvailable: true }).servers).content;
-  expect(mergeCodexMcpServers(old, desired.servers)).toMatchObject({ status: "updated", content: merged.content });
-  const unmanaged = old.replace("# deck-codex-mcp:serena\n", "");
-  expect(mergeCodexMcpServers(unmanaged, desired.servers)).toMatchObject({ status: "blocked", content: unmanaged });
-
-});
+ test("retired Serena ignores reviewed proxy invocations", () => { const desired = buildCodexMcpServers({ packageIds: ['context-mode', 'serena'], memoryProvider: 'none', contextModeCommand: '/verified/context-mode', serenaLauncherAvailable: true, serenaProxyAvailable: true }); expect(desired).toEqual({ servers: [], gaps: [] }); const source = '# deck-codex-mcp:serena\n[mcp_servers.serena]\ncommand="user-or-legacy"\n'; expect(mergeCodexMcpServers(source, desired.servers)).toMatchObject({ status: 'unchanged', content: source }); });
 
 describe("Codex Deck memory MCP entry", () => {
   test("registers the Deck-owned memory MCP server only for Supermemory with names-only env forwarding", () => {
@@ -220,11 +132,58 @@ describe("Codex Deck memory MCP entry", () => {
 
   test("retires the marker-owned memory entry when memory is switched off and preserves a user entry of the same name", () => {
     const withMemory = mergeCodexMcpServers("", buildCodexMcpServers({ packageIds: [], memoryProvider: "supermemory", deckMemoryCommand: ["/opt/deck/bin/deck", "internal", "memory-mcp"] }).servers);
-    const retired = mergeCodexMcpServers(withMemory.content, buildCodexMcpServers({ packageIds: [], memoryProvider: "none" }).servers);
+    const retired = mergeCodexMcpServers(withMemory.content, buildCodexMcpServers({ packageIds: [], memoryProvider: "none" }).servers, { ownedServerIds: ["deck-memory"] });
     expect(retired.content).not.toContain("deck-memory");
 
     const user = '[mcp_servers.deck-memory]\ncommand = "mine"\n';
     const collision = mergeCodexMcpServers(user, buildCodexMcpServers({ packageIds: [], memoryProvider: "supermemory", deckMemoryCommand: ["/opt/deck/bin/deck", "internal", "memory-mcp"] }).servers);
     expect(collision.status).toBe("blocked");
+  });
+});
+
+test('legacy retired selections cannot materialize MCP servers or readiness gaps', () => {
+  expect(buildCodexMcpServers({ packageIds: ['context-mode', 'serena'], memoryProvider: 'none', contextModeCommand: '/verified/context-mode', serenaLauncherAvailable: true, serenaProxyAvailable: true })).toEqual({ servers: [], gaps: [] });
+});
+
+
+test("task-directory commands do not resemble inline credentials", () => {
+  const command = "/private/tasks/task-c8ce6be1-3c47-402b-a4ac-d47799b81b69/tools/codebase-memory-mcp";
+  const result = mergeCodexMcpServers("", [{ id: "codebase-memory", transport: "stdio", command }]);
+  expect(result.status).not.toBe("blocked");
+  expect(result.content).toContain(command);
+  for (const credential of ["sk-synthetic12345678", "Bearer synthetic12345678"]) {
+    expect(mergeCodexMcpServers("", [{ id: "codebase-memory", transport: "stdio", command: "/safe/codebase-memory-mcp", args: [credential] }]).status).toBe("blocked");
+  }
+});
+
+test("explicit Codebase forwards private runtime environment names through generated TOML", () => {
+  const desired = buildCodexMcpServers({
+    packageIds: ["codebase-memory"],
+    memoryProvider: "none",
+    codebaseMemoryCommand: "/verified/codebase-memory-mcp",
+  });
+  const merged = mergeCodexMcpServers("", desired.servers);
+  expect(merged.status).toBe("updated");
+  const config = Bun.TOML.parse(merged.content) as {
+    mcp_servers: Record<string, { command: string; env_vars: string[]; env?: unknown }>;
+  };
+  expect(config.mcp_servers["codebase-memory"]).toEqual({
+    command: "/verified/codebase-memory-mcp",
+    env_vars: ["CBM_RUNTIME_DIR", "CBM_CACHE_DIR", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "TMPDIR"],
+  });
+  expect(mergeCodexMcpServers(merged.content, desired.servers)).toMatchObject({
+    status: "unchanged", content: merged.content,
+  });
+});
+
+test("available Codebase executable does not opt default selection into MCP preparation", () => {
+  const desired = buildCodexMcpServers({
+    packageIds: [],
+    memoryProvider: "none",
+    codebaseMemoryCommand: "/verified/codebase-memory-mcp",
+  });
+  expect(desired).toEqual({ servers: [], gaps: [] });
+  expect(mergeCodexMcpServers("", desired.servers)).toMatchObject({
+    status: "unchanged", content: "",
   });
 });

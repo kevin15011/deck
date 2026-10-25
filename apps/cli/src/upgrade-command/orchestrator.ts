@@ -63,6 +63,8 @@ import {
 } from "./state-store.js";
 import {
   computeFileSha256,
+  prepareBackupPostimages,
+  recordBackupInventoryChanges,
   createBackup,
   findLatestBackup,
   getBackupRoot,
@@ -103,6 +105,8 @@ import {
 export const ORCHESTRATOR_ERROR_CODES = {
   /** Lock is held by another live process. */
   UPGRADE_LOCKED: "UPGRADE_LOCKED",
+  /** A previous operation still owns a recovery backup. */
+  RECOVERY_REQUIRED: "UPGRADE_RECOVERY_REQUIRED",
   /** Release descriptor was rejected by the parser. */
   DESCRIPTOR_INVALID: "DESCRIPTOR_INVALID",
   /** Backup creation failed. */
@@ -308,7 +312,7 @@ export type OrchestratorResult = {
   backupId?: string;
   /** Per-kind item outcomes. */
   binary: { status: "skipped" | "completed" | "skipped-homebrew" | "skipped_external" | "no-item-for-platform"; itemId?: string };
-  content: { status: "skipped" | "completed" | "partial_failure"; outcomes?: RunnerSyncResult["outcomes"] };
+  content: { status: "skipped" | "completed" | "partial_failure"; outcomes?: RunnerSyncResult["outcomes"]; recoveryError?: RunnerSyncResult["recoveryError"] };
   migration: { status: "skipped" | "completed"; itemIds: string[] };
   advisory: { items: AdvisoryReleaseItem[] };
   channelEol: { items: ChannelEolReleaseItem[] };
@@ -572,6 +576,19 @@ export async function runUpgradeOrchestrator(
     throw err;
   }
 
+  // A retained backup belongs to unresolved work, even after its lock was
+  // released or became stale. Refuse before any descriptor/backup/finalizer
+  // path can replace that operation or prune its evidence. Idle admission and
+  // force do not authorize replay; explicit rollback resolves this state.
+  if (state.activeOperation?.backupId) {
+    const { id, backupId } = state.activeOperation;
+    throw new OrchestratorError(
+      ORCHESTRATOR_ERROR_CODES.RECOVERY_REQUIRED,
+      `Upgrade deferred: operation ${id} still requires recovery from backup ${backupId}. Preserve its results and backups; review deck doctor and docs/runners.md#offline-runner-mutation-guard-recovery. When idle, deck rollback --backup ${backupId} --force can recover matching recorded postimages; force never overrides later edits, missing evidence or changed paths. Resolve any conflicts individually before retrying.`,
+      { backupId },
+    );
+  }
+
   // --- Parse descriptor -----------------------------------------------
   let descriptor: ReleaseJson;
   try {
@@ -599,36 +616,17 @@ export async function runUpgradeOrchestrator(
 
     // Collect backup targets: binary + content + runner files
     const baseTargets = collectBackupTargets(binaryItem, contentItems, deps, descriptor.version);
-    let runnerTargets: Array<{
-      id: string;
-      sourcePath: string;
-      owner: `runner:${string}`;
-      kind: "config" | "prompt" | "skill" | "subagent" | "mcp" | "state" | "manifest";
-    }> = [];
-    let runnerBackupError: string | undefined;
-    if (contentItems.length > 0) {
-      try {
-        runnerTargets = await collectRunnerBackupTargets(deps);
-      } catch (err) {
-        // Log error but continue - runner backup is best-effort
-        runnerBackupError = (err as Error).message;
-        console.error(`Warning: Failed to collect runner backup targets: ${runnerBackupError}`);
-        runnerTargets = [];
-      }
-
-      // If we couldn't collect runner targets, log a warning but proceed
-      // The sync will still work but without per-runner rollback capability
-      if (runnerTargets.length === 0 && !runnerBackupError) {
-        console.warn("Warning: No runner backup targets collected - skipping runner rollback capability");
-      }
-    }
+    // Runner targets are snapshotted inside the admitted, freshly built plan,
+    // after ownership-verified retirement. Retirement retains its own backups;
+    // reusing a pre-retirement plan here would restore retired defaults or
+    // mistake a legitimate cleanup for later user drift.
 
     const backupInput: CreateBackupInput = {
       operationId,
       deckVersionBefore: options.currentVersion,
       ...(descriptor.version ? { targetVersion: descriptor.version } : {}),
       reason: "upgrade",
-      files: [...baseTargets, ...runnerTargets],
+      files: baseTargets,
     };
     backup = createBackup(backupInput);
     state = setActiveOperation(state, {
@@ -656,11 +654,14 @@ export async function runUpgradeOrchestrator(
   let binaryOutcome: OrchestratorResult["binary"] = { status: "skipped" };
   type ContentOutcome = {
     status: "skipped" | "completed" | "partial_failure";
+    backupRecoveryRequired?: boolean;
+    recoveryError?: RunnerSyncResult["recoveryError"];
     outcomes?: readonly { runnerId: string; status: string; filesWritten: readonly string[]; diagnostics: readonly string[]; adapterBackup: unknown; skippedReason?: string }[];
     manifest?: ManifestJsonV2;
   };
   let contentOutcome: ContentOutcome = { status: "skipped" };
   let manifest: ManifestJsonV2 = readOrDefaultManifest(options.currentVersion);
+  const manifestBefore = structuredClone(manifest);
   let replaceResultForCleanup: ReplaceBinaryResult | undefined;
 
   try {
@@ -718,17 +719,15 @@ export async function runUpgradeOrchestrator(
         if (contentResult.manifest) {
           manifest = contentResult.manifest;
         }
+        if (contentResult.recoveryError || contentResult.backupRecoveryRequired) break;
       }
     }
   } catch (err) {
     // Auto-rollback from backup.
-    const rolled = tryRollback(backup?.backupId, state, options.currentVersion);
-    const finalStatus: OrchestratorResult["status"] = rolled
-      ? "rolled_back"
-      : "rolled_back";
-    state = rolled.nextState;
-    writeState(state);
+    const rolled = await tryRollback(backup?.backupId, options.currentVersion);
     if (!rolled.success) {
+      // Keep the persisted operation, backup reference and lock for recovery.
+      // In particular, deferral must not replace them with a stale local state.
       throw new OrchestratorError(
         ORCHESTRATOR_ERROR_CODES.ROLLBACK_FAILED,
         `Auto-rollback failed: ${rolled.reason}`,
@@ -751,7 +750,13 @@ export async function runUpgradeOrchestrator(
     startedAt: state.activeOperation?.startedAt ?? new Date().toISOString(),
   });
   state.currentVersion = descriptor.version;
-  state = releaseLock(clearActiveOperation(state));
+  const recoveryRequired = !!contentOutcome.recoveryError || !!contentOutcome.backupRecoveryRequired;
+  // Keep exact per-entry evidence before publishing inventory or clearing its
+  // operation. Rollback can merge this delta without adopting arbitrary hashes.
+  if (backup) recordBackupInventoryChanges(backup.backupId, manifestBefore, manifest);
+  // Keep the recovery/backup reference after post-effect reservation failure.
+  // The runner marker still excludes writes; do not roll back or replay here.
+  state = releaseLock(recoveryRequired ? state : clearActiveOperation(state));
   writeState(state);
 
   try {
@@ -763,7 +768,7 @@ export async function runUpgradeOrchestrator(
   try {
     appendHistory(state, {
       operationId,
-      result: "completed",
+      result: recoveryRequired ? "partial_failure" : "completed",
       targetVersion: descriptor.version,
       backupId: backup?.backupId,
     });
@@ -772,7 +777,7 @@ export async function runUpgradeOrchestrator(
   }
 
   // Apply retention: keep the new backup, prune older ones.
-  if (backup) {
+  if (backup && !recoveryRequired) {
     try {
       applyRetention([backup.backupId]);
     } catch {
@@ -782,7 +787,7 @@ export async function runUpgradeOrchestrator(
 
   // Cleanup inline backup after successful verification
   // This is safe because we have the backup-store copy for rollback
-  if (deps.cleanupBinaryBackup) {
+  if (deps.cleanupBinaryBackup && !recoveryRequired) {
     if (replaceResultForCleanup?.backupPath) {
       try {
         await deps.cleanupBinaryBackup(replaceResultForCleanup.backupPath);
@@ -794,12 +799,13 @@ export async function runUpgradeOrchestrator(
 
   // Compute content status: partial_failure when at least one runner
   // sync reported failure, completed when all sync'd or skipped cleanly.
-  const hasFailures = (contentOutcome.outcomes ?? []).some((o) => o.status === "failed");
+  const hasFailures = recoveryRequired || (contentOutcome.outcomes ?? []).some((o) => o.status === "failed" || o.status === "deferred");
   const finalStatus: OrchestratorResult["status"] = hasFailures ? "partial_failure" : "completed";
 
   // Map the wider local ContentOutcome to the public OrchestratorResult shape.
   const publicContent: OrchestratorResult["content"] = {
     status: contentOutcome.status,
+    ...(contentOutcome.recoveryError ? {recoveryError:contentOutcome.recoveryError} : {}),
     ...(contentOutcome.outcomes
       ? {
           outcomes: contentOutcome.outcomes.map(
@@ -1037,7 +1043,18 @@ async function runBinaryItem(
           replaceInput.verifiedArchivePath = staged;
           replaceInput.verifiedArchiveSha256 = item.sha256;
         }
-        const replaceResult = await deps.replaceBinary(replaceInput);
+        const account = state.activeOperation?.backupId ? prepareBackupPostimages(state.activeOperation.backupId,[{
+          sourcePath:deps.currentBinaryPath,sha256:computeFileSha256(extracted.binaryPath),owner:'deck',kind:'binary',
+        }]) : undefined;
+        let replaceResult: ReplaceBinaryResult;
+        try { replaceResult = await deps.replaceBinary(replaceInput); }
+        catch (replaceError) {
+          try { account?.(); } catch (accountError) {
+            throw new AggregateError([replaceError,accountError],`Replace failed: ${String(replaceError)}; backup accounting failed: ${String(accountError)}`);
+          }
+          throw replaceError;
+        }
+        account?.();
         // Store replace result for cleanup after verify
         state = setActiveOperation(state, {
           ...(state.activeOperation ?? {
@@ -1079,6 +1096,8 @@ async function runContentItem(
   manifest: ManifestJsonV2,
 ): Promise<{
   status: "skipped" | "completed" | "partial_failure";
+  backupRecoveryRequired?: boolean;
+  recoveryError?: RunnerSyncResult["recoveryError"];
   outcomes?: readonly { runnerId: string; status: string; filesWritten: readonly string[]; diagnostics: readonly string[]; adapterBackup: unknown; skippedReason?: string }[];
   manifest: ManifestJsonV2;
 }> {
@@ -1095,6 +1114,7 @@ async function runContentItem(
 
   const config = deps.readGlobalDeckConfig();
   const syncResult = await runRunnerSync({
+    backupId: state.activeOperation?.backupId,
     config,
     registry: deps.adapterRegistry,
     projectRoot: deps.projectRoot,
@@ -1102,10 +1122,12 @@ async function runContentItem(
   });
   const nextManifest = applyRunnerSyncToManifest(manifest, syncResult, targetVersion);
   return {
-    status: syncResult.outcomes.some((o) => o.status === "failed")
+    status: syncResult.recoveryError || syncResult.backupRecoveryRequired || syncResult.outcomes.some((o) => o.status === "failed" || o.status === "deferred")
       ? "partial_failure"
       : "completed",
     outcomes: syncResult.outcomes,
+    ...(syncResult.recoveryError ? {recoveryError:syncResult.recoveryError} : {}),
+    ...(syncResult.backupRecoveryRequired ? {backupRecoveryRequired:true} : {}),
     manifest: nextManifest,
   };
 }
@@ -1296,20 +1318,19 @@ function classifyFileKind(
   return "config";
 }
 
-function tryRollback(
+async function tryRollback(
   backupId: string | undefined,
-  state: DeckUpdateState,
   currentVersion: string,
-): { success: boolean; nextState: DeckUpdateState; reason: string } {
+): Promise<{ success: boolean; reason: string }> {
   if (!backupId) {
-    return { success: false, nextState: state, reason: "no backup id recorded" };
+    return { success: false, reason: "no backup id recorded" };
   }
   try {
     const manifest = readBackupManifest(backupId);
-    const result = rollbackBackup(manifest, currentVersion, { force: true });
-    return { success: true, nextState: readOrDefaultState(result.rolledBackTo, "binary"), reason: "ok" };
+    await rollbackBackup(manifest, currentVersion, { force: true });
+    return { success: true, reason: "ok" };
   } catch (err) {
-    return { success: false, nextState: state, reason: (err as Error).message };
+    return { success: false, reason: (err as Error).message };
   }
 }
 

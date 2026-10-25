@@ -1,3 +1,4 @@
+import { recordOwnedRunnerArtifactTree } from "@deck/core";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -32,6 +33,7 @@ export type CodexOwnedState = "absent" | "ready" | "conflict" | "unusable" | "un
 
 export type CodexToolOptions = {
   homeDir?: string;
+  codexHome?: string;
   dataRoot?: string;
   /** Privileged test seam replacing PATH lookups of shared executables. */
   resolveCommand?: (name: string) => string | undefined;
@@ -201,6 +203,7 @@ export function createCodexTools(options: CodexToolOptions = {}) {
         await ensurePrivatePath(resolve(ownedRtkRoot, ".."), home);
         const result = await installOwnedRtk(ownedRtkRoot, rtkRelease, options.rtkArtifactEffects);
         if (rtkState() !== "ready") throw new Error("RTK verification failed.");
+        recordOwnedRunnerArtifactTree({ runnerId: "codex", root: options.codexHome ?? join(home, ".codex"), manifestPath: join(options.codexHome ?? join(home, ".codex"), "deck", "manifest.json"), artifactRoot: ownedRtkRoot, sourceItemId: "package:rtk" });
         return result;
       },
     }),
@@ -214,6 +217,7 @@ export function createCodexTools(options: CodexToolOptions = {}) {
         await ensurePrivatePath(resolve(ownedCodebaseRoot, ".."), home);
         const result = await installOwnedCodebase(ownedCodebaseRoot, codebaseRelease, options.codebaseArtifactEffects);
         if (codebaseState() !== "ready") throw new Error("Codebase Memory native verification failed.");
+        recordOwnedRunnerArtifactTree({ runnerId: "codex", root: options.codexHome ?? join(home, ".codex"), manifestPath: join(options.codexHome ?? join(home, ".codex"), "deck", "manifest.json"), artifactRoot: ownedCodebaseRoot, sourceItemId: "package:codebase-memory" });
         return result;
       },
     }),
@@ -227,6 +231,7 @@ export function createCodexTools(options: CodexToolOptions = {}) {
         await ensurePrivatePath(toolRoot, home);
         const result = await installCodexSupermemoryArtifact(supermemoryRoot, options.supermemoryArtifactEffects, options.supermemoryManifest);
         if (supermemoryState() !== "ready") throw new Error("Official artifact verification failed.");
+        recordOwnedRunnerArtifactTree({ runnerId: "codex", root: options.codexHome ?? join(home, ".codex"), manifestPath: join(options.codexHome ?? join(home, ".codex"), "deck", "manifest.json"), artifactRoot: supermemoryRoot, sourceItemId: "package:supermemory" });
         return result;
       },
     }),

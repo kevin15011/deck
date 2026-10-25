@@ -304,11 +304,12 @@ describe("mcp.json ownership", () => {
     expect(readJson(paths().mcp).mcpServers.context7.command).toBe("/opt/custom-context7");
   });
 
-  test("a legacy Deck-written entry (bare command) is adopted and replaced", () => {
-    writeFileSync(paths().mcp, JSON.stringify({ mcpServers: { "context-mode": { command: "context-mode", args: [], env: {}, transport: "process" } } }));
-    const { plan } = install(desired({ mcpServers: { "context-mode": server("/usr/local/bin/context-mode") } }));
-    expect(plan.blocked).toBe(false);
-    expect(readJson(paths().mcp).mcpServers["context-mode"]).toEqual(server("/usr/local/bin/context-mode"));
+  test("a legacy same-name entry is preserved without ownership proof", () => {
+    const original = JSON.stringify({ mcpServers: { "context-mode": { command: "context-mode", args: [], env: {}, transport: "process" } } });
+    writeFileSync(paths().mcp, original);
+    const plan = planPiGlobalInstall(desired({ mcpServers: { "context-mode": server("/usr/local/bin/context-mode") } }), io());
+    expect(plan.blocked).toBe(true);
+    expect(readFileSync(paths().mcp, 'utf8')).toBe(original);
   });
 
   test("an owned server modified by the user is a conflict", () => {

@@ -36,7 +36,7 @@ describe("OpenCode Registry Consumption", () => {
 
     it("should return canonical ID for context-mode", () => {
       const canonicalId = getCanonicalCapabilityId("context-mode");
-      expect(canonicalId).toBe("context-mode");
+      expect(canonicalId).toBeUndefined();
     });
 
     it("should return canonical ID for codebase-memory", () => {
@@ -46,7 +46,7 @@ describe("OpenCode Registry Consumption", () => {
 
     it("should return canonical ID for serena", () => {
       const canonicalId = getCanonicalCapabilityId("serena");
-      expect(canonicalId).toBe("serena");
+      expect(canonicalId).toBeUndefined();
     });
 
     it("should return canonical ID for context7", () => {
@@ -62,9 +62,9 @@ describe("OpenCode Registry Consumption", () => {
 
   describe("OPENCODE_RUNNER_CAPABILITY_IDS", () => {
     it("should contain all expected capability IDs", () => {
-      const expectedIds = ["context-mode", "codebase-memory", "rtk", "serena", "context7"];
+      const expectedIds = ["codebase-memory", "rtk", "context7"];
       expect(OPENCODE_RUNNER_CAPABILITY_IDS).toEqual(expect.arrayContaining(expectedIds));
-      expect(OPENCODE_RUNNER_CAPABILITY_IDS).toHaveLength(6);
+      expect(OPENCODE_RUNNER_CAPABILITY_IDS).toHaveLength(4);
     });
   });
 

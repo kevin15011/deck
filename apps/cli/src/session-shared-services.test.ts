@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { getDefaultDeckConfig, type RunnerAdapter } from "@deck/core";
+import { getDefaultDeckConfig as getBaseDeckConfig, type RunnerAdapter } from "@deck/core";
 import { createSessionMemoryPort, resolveSessionChildMcp } from "./session-shared-services";
 import type { SupermemoryRuntimeHost } from "./supermemory-runtime-host";
 import { createSupermemoryRuntimeHost } from "./supermemory-runtime-host";
@@ -8,6 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
+// These lifetime/readiness contracts explicitly exercise a selected Codebase integration.
+const getDefaultDeckConfig = () => { const config = getBaseDeckConfig(); config.capabilities!["codebase-memory"].enabled = true; return config; };
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
@@ -101,15 +103,17 @@ describe("cross-session shared services", () => {
 
   test("missing provider credentials fail before driver launch with a value-free diagnostic", async () => {
     const config = getDefaultDeckConfig(); config.webSearch = { enabled: true, provider: "tavily" };
-    await expect(resolveSessionChildMcp({ runnerId: "codex" } as RunnerAdapter, config, {})).rejects.toThrow("web-search-credential-missing");
+    await expect(resolveSessionChildMcp({ runnerId: "codex" } as RunnerAdapter, config, {})).rejects.toThrow("web-search-fallback-unavailable");
     config.webSearch.provider = "unknown";
-    await expect(resolveSessionChildMcp({ runnerId: "codex" } as RunnerAdapter, config, {})).rejects.toThrow("web-search-provider-unconfigured");
+    await expect(resolveSessionChildMcp({ runnerId: "codex" } as RunnerAdapter, config, {})).rejects.toThrow("web-search-fallback-unavailable");
   });
 
-  test("global disable and explicit runner deselection omit web search without requiring a credential", async () => {
+  test("global policy controls fallback independently of an old native-only install receipt", async () => {
     const config = getDefaultDeckConfig();
     expect((await resolveSessionChildMcp({ runnerId: "codex" } as RunnerAdapter, config, {})).webSearch).toEqual({ enabled: false });
     config.webSearch = { enabled: true, provider: "tavily" };
+    await expect(resolveSessionChildMcp({ runnerId: "claude", readSelectedCapabilityIds: () => ["context7"] } as unknown as RunnerAdapter, config, {})).rejects.toThrow("web-search-fallback-unavailable");
+    config.webSearch.enabled = false;
     const resolver = await resolveSessionChildMcp({ runnerId: "claude", readSelectedCapabilityIds: () => ["context7"] } as unknown as RunnerAdapter, config, {});
     expect(resolver.webSearch).toEqual({ enabled: false });
     expect(resolver.envOverlay).toBeUndefined();

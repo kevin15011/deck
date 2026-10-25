@@ -16,7 +16,7 @@ const GATE_STALE_MS = 10_000;
 const GATE_RETRY_MS = 10;
 const GATE_ATTEMPTS = 100;
 
-export type LockHolder = { v: 1; pid: number; nonce: string; startedAt: number };
+export type LockHolder = { v: 1; pid: number; nonce: string; startedAt: number; role?: "runner-mutation" };
 export type LockDeps = {
   clock: Clock;
   /** `kill(pid, 0)` classification. */
@@ -24,7 +24,7 @@ export type LockDeps = {
   /** True when the holder's daemon answers on its socket with the holder's nonce. */
   ping: (holder: LockHolder) => Promise<boolean>;
 };
-export type AcquireOptions = LockDeps & { pid?: number; nonce?: string };
+export type AcquireOptions = LockDeps & { pid?: number; nonce?: string; role?: "runner-mutation" };
 export type AcquireResult =
   | { ok: true; nonce: string; release(): void }
   | { ok: false; reason: "already-running"; holder?: LockHolder }
@@ -62,6 +62,7 @@ function tryCreate(file: string, holder: LockHolder): boolean {
 
 async function holderIsLive(holder: LockHolder, deps: LockDeps): Promise<boolean> {
   if (deps.presence(holder.pid) === "absent") return false;
+  if (holder.role === "runner-mutation") return true;
   if (await deps.ping(holder)) return true;
   return deps.clock.now() - holder.startedAt < STARTUP_GRACE_MS; // still starting up
 }
@@ -70,7 +71,7 @@ export async function acquireDaemonLock(paths: StatePaths, options: AcquireOptio
   ensurePrivateDir(paths.daemonDir);
   const pid = options.pid ?? process.pid;
   const nonce = options.nonce ?? randomUUID();
-  const mine: LockHolder = { v: 1, pid, nonce, startedAt: options.clock.now() };
+  const mine: LockHolder = { v: 1, pid, nonce, startedAt: options.clock.now(), ...(options.role ? {role:options.role} : {}) };
   const gate = `${paths.lockFile}.gate`;
 
   for (let attempt = 0; attempt < GATE_ATTEMPTS; attempt++) {

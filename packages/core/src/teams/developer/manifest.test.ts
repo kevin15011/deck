@@ -329,7 +329,7 @@ describe("DeveloperTeamManifest", () => {
     });
 
     test("multiple packages produce multiple instruction sections in manifest", () => {
-      const bundle = buildCapabilityInstructionBundle(["codebase-memory", "context-mode"]);
+      const bundle = buildCapabilityInstructionBundle(["codebase-memory", "rtk"]);
       const result = buildDeveloperTeamManifest({
         team: { id: "developer-team", displayName: "Developer Team" },
         capabilityInstructions: bundle,
@@ -337,7 +337,7 @@ describe("DeveloperTeamManifest", () => {
 
       const explorer = result.manifest.agents.find((a) => a.agentId === "deck-investigate");
       expect(explorer!.instruction).toContain("Codebase Memory");
-      expect(explorer!.instruction).toContain("Context Mode");
+      expect(explorer!.instruction).toContain("RTK");
     });
 
     test("memoryBundle and capabilityInstructions coexist in manifest output", () => {

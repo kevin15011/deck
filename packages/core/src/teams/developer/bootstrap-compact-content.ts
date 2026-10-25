@@ -13,7 +13,6 @@ ${DECK_PREPARATION_AUTHORITY_BOUNDARY_V1}
 2. **OpenSpec** — inspect \`openspec/config.yaml\` and safely merge with existing behavior; \`initialized: true\` is unchanged, never a global return.
 3. **Skill Registry** — consume cached bounded context and reuse existing validate/discover/refresh lifecycle plus sole writer; ready is unchanged, missing selects migration, and stale/invalid/indeterminate select regeneration.
 4. **Codebase index** — use only active-runner-exposed \`index_repository\` when enabled and needed, then inspect its postcondition.
-5. **Serena project state** — use only the active runner's declared project onboarding operation when enabled and needed; preserve shareable project config.
 6. **Analogous configured capabilities** — initialize only enabled, exposed, bounded project-local operations with declared owned outputs; detector-only or instruction-only tools are skipped.
 7. **Owned ignore contributions** — reuse registry-writer coverage and append only exact proven machine-local/non-versionable owned rules with tracked/shareable, UTF-8 regular-file, symlink, containment, and compare-and-swap guards.
 
@@ -34,7 +33,6 @@ ${DECK_PREPARATION_AUTHORITY_BOUNDARY_V1}
 2. **OpenSpec** — inspect \`openspec/config.yaml\` and safely reuse existing stack/testing/monorepo merge behavior; verify reparse before \`initialized: true\`; initialized is unchanged, not a global return.
 3. **Skill Registry** — reuse cached context and existing validate/discover/refresh services, lifecycle selection, exact writer authority/targets, complete-before-persist validation, safe coverage, atomic CAS replacement, and prior-valid bytes.
 4. **Codebase index** — when enabled and exposed, inspect then call only \`index_repository\` if absent/stale and verify the postcondition.
-5. **Serena project state** — when enabled and exposed, inspect then call only the active runner's declared project onboarding operation if needed; preserve shareable configuration.
 6. **Analogous configured capabilities** — use only enabled, active-runner-exposed, bounded project-local operations with declared outputs and no install/global effect.
 7. **Owned ignore contributions** — add only missing exact declared machine-local/non-versionable rules after containment, tracked/shareable, ownership, regular UTF-8 non-symlink, and compare-and-swap proof; preserve every existing byte and never broaden or invoke Git.
 

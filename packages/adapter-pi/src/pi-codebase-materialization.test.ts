@@ -1,3 +1,4 @@
+import { explicitCodebaseConfig, writeExplicitCodebaseConfig } from "./__fixtures__/explicit-codebase";
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
@@ -21,7 +22,7 @@ for (const action of ["missing-old-payload", "custom-conflict", "rollback"] as c
   const oldScript=join(root,"old-main.ts"),newScript=join(root,"new-main.ts");writeFileSync(oldScript,"// old guard fixture");writeFileSync(newScript,"// new guard fixture");
   const oldInvocation=createCodebaseGuardInvocation(process.execPath,oldScript),newInvocation=createCodebaseGuardInvocation(process.execPath,newScript);
   const options={homeDirectory:root,env:{PI_CODING_AGENT_DIR:agentDir},piTools:tools,piVersionProbe:()=>({exitCode:0,stdout:"1.0.0\n"})};
-  const input={projectRoot,environmentId:"pi-development" as const,deckConfig:validateDeckConfig({}),capabilityIds:["codebase-memory-mcp"]};
+  const input={projectRoot,environmentId:"pi-development" as const,deckConfig:explicitCodebaseConfig(),capabilityIds:["codebase-memory-mcp"]};
   const old=createPiRunnerAdapter({...options,...(action==="missing-old-payload"?{codebaseGuardInvocation:()=>oldInvocation}:{})});
   await old.applyDeveloperTeamInstall({projectRoot,environmentId:"pi-development",plan:old.buildDeveloperTeamInstallPlan(input)});
   const configPath=join(agentDir,"mcp.json"),manifestPath=join(agentDir,"deck/manifest.json");

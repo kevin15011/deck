@@ -1,3 +1,4 @@
+import { explicitCodebaseConfig, writeExplicitCodebaseConfig } from "./__fixtures__/explicit-codebase";
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -16,7 +17,7 @@ test("rejected same-size build still speaks MCP but must be excluded from effect
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
   const shared = join(root, "codebase-memory-mcp");
-  const prior = { PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, DECK_PI_SESSION: process.env.DECK_PI_SESSION };
+  const prior = { HOME: process.env.HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, DECK_PI_SESSION: process.env.DECK_PI_SESSION };
   const script = `#!/usr/bin/env node
 // build A
 require('node:fs').appendFileSync(${JSON.stringify(join(root, 'executions'))}, 'started\\n');
@@ -34,7 +35,8 @@ rl.on('line', line => {
   const release = { asset: "fixture.tar.gz", archiveBytes: 1, archiveSha256: "0".repeat(64), binaryBytes: Buffer.byteLength(script), binarySha256: createHash("sha256").update(script).digest("hex") };
   try {
     mkdirSync(projectRoot);
-    process.env.PI_CODING_AGENT_DIR = agentDir;
+    process.env.HOME = root; process.env.XDG_CONFIG_HOME = join(root, ".config"); writeExplicitCodebaseConfig(root);
+      process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.DECK_PI_SESSION = "1";
     writeFileSync(shared, script, { mode: 0o700 });
     const tools = createPiTools({ homeDir: root, dataRoot: join(root, "deck"), env: {}, resolveCommand: () => shared, codebaseReleaseOverride: release });
@@ -45,7 +47,7 @@ const args=parseCodebaseGuardArgs(process.argv.slice(4));if(!args)process.exit(6
 process.exit(await runPiCodebaseGuard(args,{release:${JSON.stringify(release)}}));`);
     const invocation = createCodebaseGuardInvocation(process.execPath, guardScript);
     const adapter = createPiRunnerAdapter({ codebaseGuardInvocation: () => invocation, homeDirectory: root, env: { PI_CODING_AGENT_DIR: agentDir }, piTools: tools, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0\n" }) });
-    const input = { projectRoot, environmentId: "pi-development" as const, deckConfig: validateDeckConfig({}), capabilityIds: ["codebase-memory-mcp"] };
+    const input = { projectRoot, environmentId: "pi-development" as const, deckConfig: explicitCodebaseConfig(), capabilityIds: ["codebase-memory-mcp"] };
     const initial = adapter.buildDeveloperTeamInstallPlan(input);
     expect(initial.blocked).toBeFalsy();
     await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan: initial });

@@ -85,6 +85,6 @@ describe("adaptive Developer Team installed content", () => {
     expect(body).toContain("indeterminate");
     expect(body).toContain(".atl/skill-registry.md");
     expect(body).toContain("Codebase Memory");
-    expect(body).toContain("Serena");
+    expect(body).not.toMatch(/serena|context.mode/i);
   });
 });

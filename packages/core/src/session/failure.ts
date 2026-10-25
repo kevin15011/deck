@@ -14,8 +14,31 @@ export type TurnFailure = {
   resetAt?: string;
 };
 
+/** Exact local transport evidence only. Never classify arbitrary error prose. */
+export const RUNNER_TRANSPORT_FAILURES = {
+  'codex-rpc-frame-too-large': 'oversized',
+  'codex-rpc-invalid-frame': 'malformed',
+  'claude-line-too-long': 'oversized',
+  'opencode-sse-frame-too-large': 'oversized',
+  'opencode-sse-invalid-frame': 'malformed',
+  'opencode-http-body-too-large': 'oversized',
+  'opencode-http-invalid-body': 'malformed',
+} as const;
+export function runnerTransportFailure(code: unknown): TurnFailure | undefined {
+  return typeof code === 'string' && Object.hasOwn(RUNNER_TRANSPORT_FAILURES, code)
+    ? {category:'deck',origin:'deck',certainty:'reported',code} : undefined;
+}
+
+/** Startup failed before a handle could be returned, and native drain is unproven.
+ * The host must retain ownership until this explicit cleanup barrier succeeds.
+ * The callback is local adapter state, never native input or serialized metadata. */
+export class DriverStartupCleanupError extends Error {
+  constructor(readonly close: () => Promise<void>, readonly failure?: TurnFailure) { super('runner-startup-cleanup-failed'); }
+}
+
 // This is a serialization allowlist, not a native protocol classifier. Adapters own interpretation.
 const CODES = new Set([
+  ...Object.keys(RUNNER_TRANSPORT_FAILURES),
   "serverOverloaded", "flexUnavailable", "usageLimitExceeded", "rateLimitExceeded", "contextWindowExceeded", "sessionBudgetExceeded", "unauthorized", "badRequest",
   "httpConnectionFailed", "responseStreamConnectionFailed", "responseStreamDisconnected", "responseTooManyFailedAttempts",
   "rate_limit", "usage_limit_reached", "ProviderAuthError", "ContextOverflowError", "ContentFilterError", "APIError",

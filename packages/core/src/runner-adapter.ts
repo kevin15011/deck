@@ -210,6 +210,10 @@ export type RunnerLaunchInput =
   | (RunnerLaunchBase & { mode: "resume-latest" });
 
 export type RunnerLaunchPlan = {
+  /** CLI runtime review receipt; excludes configuration contents and credentials. */
+  interactiveSearchReview?: Readonly<{ path: string; runnerId: string; projectRoot: string; modelId?: string; fingerprint: string }>;
+  /** Hold immutable content through native process exit; revalidate selection before spawning. */
+  generationReference?: import("./runner-generation-references").RunnerGenerationReference;
   command: string;
   args: readonly string[];
   cwd: string;
@@ -832,7 +836,9 @@ export interface RunnerAdapter {
   getSessionDriver?(): RunnerSessionDriver;
 
   /** Resolve the selected managed Codebase identity for task-scoped readiness. Ordinary customizations stay native. */
-  readSessionMcpServers?(): Promise<Record<string, ChildMcpServerSpec>>;
+  readSessionMcpServers?(config?: NormalizedDeckConfig): Promise<Record<string, ChildMcpServerSpec>>;
+  /** Read fresh effective member facts at every turn; no model calls or cross-member cache. */
+  inspectNativeSearch?(input: import("./native-search").NativeSearchInspectionInput): Promise<import("./native-search").NativeSearchEvidence>;
 
   /**
    * Read current thinking level assignments for the developer team from project config.
@@ -1056,6 +1062,8 @@ export async function prepareAndBuildDeveloperTeamInstallPlan(
  * to filter which runners receive a sync update.
  */
 export type RunnerDeckInstallStatus = {
+  /** Verified dedicated selection exists but needs a newly published generation. Existing generation stays intact. */
+  replacementRequired?: boolean;
   /** True if Deck-managed artifacts were found for this runner. */
   installed: boolean;
   /**

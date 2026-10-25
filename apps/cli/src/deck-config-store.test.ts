@@ -82,7 +82,7 @@ describe("DeckConfigStore", () => {
     writeJson(join(home, ".config", ".deck", "config.json"), value);
 
     const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
-    expect(store.read().packageInstructions.opencode.serena).toBe(true);
+    expect(store.read().packageInstructions.opencode.serena).toBeUndefined();
   });
 
   test("blocks mutation on distinct valid projections with redacted candidate metadata", () => {

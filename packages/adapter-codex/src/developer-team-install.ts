@@ -1,6 +1,7 @@
+import { contributionId, selectContributionContent, validContributionHash, type RunnerContribution, type ContributionSelector } from "@deck/core";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
-import { posix } from "node:path";
+import { posix, join, relative } from "node:path";
 import executionHookAssetPath from "../assets/codex/hooks/developer-team-execution.generated.js" with { type: "file" };
 
 import {
@@ -165,11 +166,13 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
   let blocked = diagnostics.some((diagnostic) => diagnostic.severity === "error");
   const priorManifestSource = input.existingFiles.get(manifestPath);
   let priorHashes: Record<string, string> = {};
+  let priorContributions: RunnerContribution[] = [];
   let hasPendingAgentsOwnershipRelease = false;
   if (priorManifestSource !== undefined) {
     try {
-      const parsed = JSON.parse(priorManifestSource) as { version?: unknown; files?: unknown; releases?: unknown };
+      const parsed = JSON.parse(priorManifestSource) as { version?: unknown; files?: unknown; releases?: unknown; contributions?: RunnerContribution[] };
       if (parsed.version !== 1 || !parsed.files || typeof parsed.files !== "object" || Array.isArray(parsed.files)) throw new Error("invalid manifest");
+      priorContributions = Array.isArray(parsed.contributions) ? parsed.contributions.filter(entry => validContributionHash(entry.hash)) : [];
       priorHashes = Object.fromEntries(Object.entries(parsed.files).map(([path, value]) => {
         if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) throw new Error("invalid manifest hash");
         return [safeRelativePath(path), value];
@@ -433,7 +436,8 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
           diagnostics.push({ code: gap, severity: "warning", message: "Optional provider configuration remains deferred because no verified Codex provider contract is available." });
         }
       }
-      const mcp = mergeCodexMcpServers(config.content, desiredMcp.servers, { repairSelectedToolIds: input.repairSelectedToolIds });
+      const ownedServerIds = priorContributions.filter(entry => entry.selector.kind === "toml" && entry.selector.header.startsWith("mcp_servers.") && selectContributionContent(config.content, entry.selector) !== undefined && hash(selectContributionContent(config.content, entry.selector)!) === entry.hash).map(entry => (entry.selector as { header: string }).header.slice("mcp_servers.".length));
+      const mcp = mergeCodexMcpServers(config.content, desiredMcp.servers, { repairSelectedToolIds: input.repairSelectedToolIds, ownedServerIds });
       if (mcp.status === "blocked") {
         blocked = true;
         diagnostics.push(...mcp.diagnostics.map((message) => ({ code: "mcp-config-collision", severity: "error" as const, message })));
@@ -519,9 +523,33 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
   const ownedFiles = Object.fromEntries([
     ...Object.entries(preservedRuntimeHashes),
     ...(retainedLegacyAgentsHash ? [["AGENTS.md", retainedLegacyAgentsHash] as const] : []),
-    ...[...expected.values()].filter((file) => file.relativePath !== "AGENTS.md").map((file) => [file.relativePath, file.hash] as const),
+    ...[...expected.values()].filter((file) => file.relativePath !== "AGENTS.md" && file.relativePath !== ".codex/config.toml").map((file) => [file.relativePath, file.hash] as const),
   ].sort(([left], [right]) => left.localeCompare(right)));
+  const runtimeConfigPath = join(input.codexHome ?? join(input.projectRoot, ".codex"), "config.toml");
+  const contributions: RunnerContribution[] = priorContributions.filter(entry => entry.sourceItemId?.startsWith("package:") || (materializationScope === "content-only" && isPreservedRuntimePath(`.codex/${relative(input.codexHome ?? join(input.projectRoot, ".codex"), entry.path).split("\\").join("/")}`)));
+  for (const file of expected.values()) {
+    if (file.relativePath === "AGENTS.md") continue;
+    const path = file.relativePath.startsWith(".codex/") ? join(input.codexHome ?? join(input.projectRoot, ".codex"), file.relativePath.slice(7)) : join(input.projectRoot, file.relativePath);
+    const before = input.existingFiles.get(file.relativePath);
+    const selectors: ContributionSelector[] = file.relativePath === ".codex/config.toml"
+      ? [
+        { kind: "toml-key" as const, table: "features", key: "multi_agent" },
+        ...[...file.content.matchAll(/^\[(mcp_servers\.[^\]]+|agents\.[^\]]+)\]$/gm)].map(match => ({ kind: "toml" as const, header: match[1]! })),
+        ...[...file.content.matchAll(/^# deck-codex-hook:([a-z0-9-]+):start$/gm)].map(match => ({ kind: "text" as const, start: match[0], end: `# deck-codex-hook:${match[1]}:end` })),
+      ] : [{ kind: "file" }];
+    for (const selector of selectors) {
+      const target = { path, selector }; const id = contributionId(target);
+      const old = before === undefined ? undefined : selectContributionContent(before, selector);
+      const prior = priorContributions.find(entry => entry.id === id);
+      const dedicated = file.relativePath.startsWith(".codex/deck/");
+      const provenFile = selector.kind === "file" && priorHashes[file.relativePath] === (before === undefined ? undefined : hash(before));
+      if (old !== undefined && !dedicated && !provenFile && (!prior || prior.hash !== hash(old))) continue;
+      const value = selectContributionContent(file.content, selector); if (value === undefined) continue;
+      contributions.push({ ...target, id, hash: hash(value), encoding: selector.kind === "toml-key" ? "canonical-json-v1" : "bytes", ownership: prior?.ownership ?? (old === undefined ? "new-write" : dedicated ? "dedicated-location" : "prior-record"), scope: "global" });
+    }
+  }
   const manifestContent = `${JSON.stringify({
+    runnerId: "codex", root: input.codexHome ?? join(input.projectRoot, ".codex"), contributions: contributions.sort((a, b) => a.id.localeCompare(b.id)),
     version: 1,
     files: ownedFiles,
     ...(ownershipReleases.includes(AGENTS_OWNERSHIP_RELEASE) ? { releases: [AGENTS_OWNERSHIP_RELEASE] } : {}),

@@ -190,9 +190,16 @@ describe("parseClaudeLine / ClaudeLineSplitter", () => {
   });
   test("splitter bounds a runaway line", () => {
     const s = new ClaudeLineSplitter(100);
-    const lines = s.push("x".repeat(500));
-    expect(lines).toEqual([]);
-    expect(s.overflowed).toBe(true);
+    expect(() => s.push("x".repeat(500))).toThrow("claude-line-too-long");
+    expect(s.push('{"type":"result"}\n')).toEqual([]);
+    expect(s.flush()).toEqual([]);
+  });
+  test("splitter counts UTF-8 across split surrogate pairs and fails closed at the byte boundary", () => {
+    const s = new ClaudeLineSplitter(7);
+    expect(s.push('€\ud83d')).toEqual([]);
+    expect(s.push('\ude00\n{}\n')).toEqual(['€😀', '{}']);
+    expect(() => s.push('€😀x\n')).toThrow('claude-line-too-long');
+    expect(s.push('{}\n')).toEqual([]);
   });
   test("a non-JSON line maps to a bounded diagnostic", () => {
     const events = new ClaudeStreamMapper().unparsable("Error: something\u001b[31m went wrong " + "y".repeat(2000));

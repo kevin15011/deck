@@ -1,3 +1,4 @@
+import { prepareClaudeInteractiveLaunch } from "./claude-interactive-launch";
 import { formatLaunchDiagnostic, formatPlainDiagnostic, isQuietDiagnostic, shouldColorStderr } from "./launch-diagnostic-format";
 import React from "react";
 import { render, renderToString } from "ink";
@@ -25,6 +26,11 @@ const getAdapterRegistry = () => adapterRegistry ??= createDefaultAdapterRegistr
 const userArgs = process.argv.slice(2);
 const parsed = parseArgs(userArgs);
 const configStore = createDeckConfigStoreFromEnvironment({ projectRoot: resolveProjectRoot() ?? process.cwd() });
+
+if (parsed.command === "runner-cleanup") {
+  const { runRunnerCleanupCommand } = await import("./runner-cleanup-command");
+  process.exit(await runRunnerCleanupCommand(parsed));
+}
 
 if (parsed.command === "error") {
   console.error(parsed.message);
@@ -209,7 +215,7 @@ if (parsed.command === "rollback") {
     const currentVersion = getBuildInfo().version;
     if (flags.backupId) {
       const manifest = readBackupManifest(flags.backupId);
-      const result = rollbackBackup(manifest, currentVersion, {
+      const result = await rollbackBackup(manifest, currentVersion, {
         force: flags.force === true,
       });
       console.log(
@@ -223,7 +229,7 @@ if (parsed.command === "rollback") {
       console.error("No backup available to roll back to.");
       process.exit(1);
     }
-    const result = rollbackLatest(currentVersion, {
+    const result = await rollbackLatest(currentVersion, {
       force: flags.force === true,
     });
     console.log(
@@ -302,7 +308,7 @@ if (parsed.command === "claude-native-launch") {
 if (parsed.command === "claude-team-launch") {
   try {
     const adapter = getAdapterRegistry().get("claude");
-    const launch = await adapter.buildLaunchPlan!({ mode: "interactive", projectRoot: resolveProjectRoot() ?? process.cwd(), teamId: "developer-team", deckConfig: configStore.readRequired() });
+    const launch = await prepareClaudeInteractiveLaunch(adapter, { mode: "interactive", projectRoot: resolveProjectRoot() ?? process.cwd(), teamId: "developer-team", deckConfig: configStore.readRequired() });
     if (launch.status !== "ready") {
       console.error(launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "));
       process.exit(launch.status === "blocked" ? 1 : 2);

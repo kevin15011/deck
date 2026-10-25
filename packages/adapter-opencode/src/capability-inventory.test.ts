@@ -57,7 +57,7 @@ describe("buildOpenCodeRunnerCapabilityInventory", () => {
 
     expect(inventory["codebase-memory"]?.installed).toBe(true);
     expect(inventory["codebase-memory"]?.status).toBe("ready");
-    expect(inventory["context-mode"]?.installed).toBe(false);
+    expect(inventory["context-mode"]).toBeUndefined();
     expect(inventory._internal?.["opencode-mermaid"]?.status).toBe("ready");
   });
 

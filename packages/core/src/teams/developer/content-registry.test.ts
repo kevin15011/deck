@@ -432,11 +432,11 @@ describe("getAgentContent with capabilityInstructions", () => {
   });
 
   test("multiple packages produce both instruction sections in agent body", () => {
-    const bundle = buildCapabilityInstructionBundle(["codebase-memory", "context-mode"]);
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory", "rtk"]);
     const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
 
     expect(content!.agentBody).toContain("Codebase Memory");
-    expect(content!.agentBody).toContain("Context Mode");
+    expect(content!.agentBody).toContain("RTK");
   });
 
   test("both memory bundle and capability bundle coexist (independent injection)", () => {

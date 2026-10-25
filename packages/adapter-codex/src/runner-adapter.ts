@@ -1,3 +1,4 @@
+import { inspectCodexNativeSearch } from "./native-search";
 import { CODEX_MCP_SERVER_IDS } from "./mcp-config";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, type Stats } from "node:fs";
 import { homedir } from "node:os";
@@ -664,7 +665,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     this.#inventoryDiscovery = options.inventoryDiscovery
       ?? createDefaultCodexModelInventoryDiscovery(options.productionModelDiscoveryDependencies);
     this.#codebaseIndexReadiness = options.codebaseIndexReadiness ?? ((projectRoot) => existsSync(join(projectRoot, ".codebase-memory", "graph.db")) || existsSync(join(projectRoot, ".codebase-memory", "graph.db.zst")));
-    this.#toolOptions = options.tools ?? {};
+    this.#toolOptions = { ...options.tools, codexHome: options.codexHome ?? join(options.tools?.homeDir ?? process.env.HOME ?? "/nonexistent", ".codex") };
     this.#codexHome = options.codexHome;
     this.#serenaBootstrapEffects = options.serenaBootstrapEffects;
     this.#serenaProxyCommand = [...(options.serenaProxyCommand ?? ["deck", "internal", "serena-mcp"])];
@@ -680,9 +681,16 @@ class CodexRunnerAdapter implements RunnerAdapter {
   }
 
   /** Real install roots: CODEX_HOME (default ~/.codex) and the user's home. Nothing is ever written under a project. */
+  async inspectNativeSearch(input: import("@deck/core").NativeSearchInspectionInput) {
+    const environment = input.environment ?? this.#sessionDriverOptions?.baseEnv ?? process.env;
+    const effectiveHome = (input.environment ?? this.#sessionDriverOptions?.baseEnv)?.CODEX_HOME;
+    const root = effectiveHome && isAbsolute(effectiveHome) ? effectiveHome : this.#roots.codexHome;
+    return inspectCodexNativeSearch({ ...input, environment }, root);
+  }
   getSessionDriver() { return createCodexSessionDriver(this.#sessionDriverOptions); }
 
-  async readSessionMcpServers(): Promise<Record<string, ChildMcpServerSpec>> {
+  async readSessionMcpServers(deckConfig?: NormalizedDeckConfig): Promise<Record<string, ChildMcpServerSpec>> {
+    if (deckConfig && !getEnabledCapabilityInstructionIds(deckConfig, "codex").includes("codebase-memory")) return {};
     const source = readGlobalConfigSource(this.#roots) ?? "";
     const ids = ["codebase-memory"].filter((id) => isDeckManagedCodexMcpServer(source, id as CodexMcpServerId));
     if (!ids.length) return {};
@@ -806,14 +814,16 @@ class CodexRunnerAdapter implements RunnerAdapter {
     webSearchEnabled = false,
   ): readonly string[] {
     const ids = new Set(codexMcpCapabilityIds(capabilityInstructions, this.#mcpCapabilityIds, input.capabilityIds));
-    if (isDeckManagedCodexMcpServer(configSource, "serena")) ids.add("serena");
+
     // A launch-time plan carries no explicit TUI selection: keep what the reviewed install already put in the global
     // config instead of silently dropping it (a TUI-only choice such as Context7 must survive `deck codex developer`).
     if (input.capabilityIds === undefined) {
-      for (const id of ["context7", "context-mode", "codebase-memory"] as const) if (isDeckManagedCodexMcpServer(configSource, id)) ids.add(id);
+      for (const id of ["context7"] as const) if (isDeckManagedCodexMcpServer(configSource, id)) ids.add(id);
     }
-    if (webSearchEnabled) ids.add("web-search");
-    return [...ids];
+    const search = inspectCodexNativeSearch({ projectRoot: input.projectRoot, environment: this.#sessionDriverOptions?.baseEnv }, this.#roots.codexHome);
+    if (webSearchEnabled && search.availability !== "available" && search.webAllowed !== false) ids.add("web-search");
+    else ids.delete("web-search");
+    return [...ids].filter(id => id !== "context-mode" && id !== "serena" && (id !== "codebase-memory" || getEnabledCapabilityInstructionIds(requireDeckConfig(input.deckConfig, "capability selection"), "codex").includes("codebase-memory")));
   }
 
   async inspectProject(projectRoot: string): Promise<RunnerProjectInspection> {
@@ -835,28 +845,34 @@ class CodexRunnerAdapter implements RunnerAdapter {
    * Deck-owned MCP entry will read it through `env_vars`. The value is marked sensitive and never reaches config files.
    */
   #withWebSearchCredential(launch: RunnerLaunchResult, input: RunnerLaunchInput): RunnerLaunchResult {
-    if (launch.status !== "ready" || input.deckConfig?.webSearch?.enabled !== true) return launch;
+    if (launch.status !== "ready") return launch;
+    const search = inspectCodexNativeSearch({ projectRoot: input.projectRoot,
+      modelId: input.modelId ?? this.readModelAssignments(input.projectRoot)["deck-lead"], flags: launch.plan.args,
+      environment: this.#sessionDriverOptions?.baseEnv }, this.#roots.codexHome);
+    const enabled = input.deckConfig.webSearch.enabled;
+    const diagnostics: RunnerDiagnostic[] = [...launch.diagnostics];
+    if (search.unresolvedFallbackServerIds?.length) diagnostics.push({ code: "web-search-unresolved-existing-route-preserved", severity: "warning", message: "An existing search entry has no current Deck ownership proof; it is preserved and may duplicate the selected route. Review it individually with runner-cleanup." });
+    const overrides = (search.ownedFallbackServerIds ?? []).flatMap(id => ["-c", `mcp_servers.${id}.enabled=false`]);
+    if (!enabled || search.webAllowed === false || search.availability === "available") return { ...launch,
+      plan: { ...launch.plan, args: [...overrides, ...launch.plan.args] }, diagnostics };
     const provider = this.resolveWebSearchProvider(input.deckConfig.webSearch.provider);
-    if (!isWebSearchProviderDescriptor(provider)) return launch;
     let token: string | undefined;
-    try { token = this.#webSearchCredential()?.trim(); } catch { token = undefined; }
-    if (!token) return launch;
-    try {
-      const source = readGlobalConfigSource(this.#roots);
-      if (source === null || !isCodexWebSearchMcpConfigured(source, provider, this.#webSearchCommand(provider))) return launch;
-    } catch { return launch; }
-    return {
-      ...launch,
-      plan: {
-        ...launch.plan,
-        envOverlay: { ...(launch.plan.envOverlay ?? {}), [provider.credentialEnvVar]: { value: token, sensitive: true } },
-        sensitiveEnvAuthorization: {
-          binding: CODEX_LAUNCH_ENV_BINDING,
-          keys: [...new Set([...(launch.plan.sensitiveEnvAuthorization?.keys ?? []), provider.credentialEnvVar])],
-        },
-      },
-    };
+    try { token = this.#webSearchCredential()?.trim(); } catch { /* actionable below */ }
+    if (!isWebSearchProviderDescriptor(provider) || !token || /[\0\r\n]/.test(token)) return { status: "blocked", code: "web-search-fallback-unavailable", diagnostics: [{ code: "web-search-fallback-unavailable", severity: "error", message: "Configure a supported Deck search provider and credential before opening Codex." }] };
+    if (search.availability === "unknown") diagnostics.push(...["native-search-detection-defect", "native-search-possible-duplicate"].map(code => ({ code, severity: "warning" as const, message: "Native search availability is unknown; the configured fallback is selected and may duplicate an existing search tool." })));
+    const id = search.unresolvedFallbackServerIds?.includes(provider.semanticServerId) ? "deck-interactive-web-search" : provider.semanticServerId;
+    const source = readGlobalConfigSource(this.#roots);
+    if (id !== provider.semanticServerId && source && (Bun.TOML.parse(source) as any).mcp_servers?.[id]) return { status: "blocked", code: "web-search-fallback-conflict", diagnostics: [{ code: "web-search-fallback-conflict", severity: "error", message: "The process-local Deck fallback name conflicts with existing configuration; review that entry before launch." }] };
+    const command = this.#webSearchCommand(provider) ?? provider.command[0]!;
+    const args = provider.command.slice(1);
+    const settings = { command, args, env_vars: [provider.credentialEnvVar], enabled: true };
+    const fallback = Object.entries(settings).flatMap(([key, value]) => ["-c", `mcp_servers.${id}.${key}=${JSON.stringify(value)}`]);
+    return { ...launch, diagnostics, plan: { ...launch.plan, args: [...overrides, ...fallback, ...launch.plan.args],
+      envOverlay: { ...(launch.plan.envOverlay ?? {}), [provider.credentialEnvVar]: { value: token, sensitive: true } },
+      sensitiveEnvAuthorization: { binding: CODEX_LAUNCH_ENV_BINDING, keys: [...new Set([...(launch.plan.sensitiveEnvAuthorization?.keys ?? []), provider.credentialEnvVar])] },
+    } };
   }
+
   async #buildBaseLaunchPlan(input: RunnerLaunchInput): Promise<RunnerLaunchResult> {
     const inspection = await this.inspectProject(input.projectRoot);
     if (inspection.state === "unsupported") return { status: "unsupported", code: "codex-version-unsupported", diagnostics: inspection.diagnostics };
@@ -921,33 +937,21 @@ class CodexRunnerAdapter implements RunnerAdapter {
     return [{ runtimeId: "codex", displayName: this.displayName, isAvailable: inspection.evidence.binary === true, version: typeof inspection.evidence.version === "string" ? inspection.evidence.version : undefined, diagnostics: inspection.diagnostics.map((diagnostic) => diagnostic.message) }];
   }
   async getCapabilityInventory(input: CapabilityInventoryInput): Promise<CapabilityInventory> {
-    const serenaReadiness = await this.#resolveSerenaReadiness();
-    const serenaProxy = serenaReadiness.state === "ready"
-      ? await this.#serenaProxyProbe()
-      : undefined;
-    return this.#getCapabilityInventory(input, serenaReadiness, serenaProxy);
+    return this.#getCapabilityInventory(input);
   }
-  async #getCapabilityInventory(
-    input: CapabilityInventoryInput,
-    serenaReadiness: SerenaExistingReadinessResult,
-    serenaProxy?: DeckSerenaProxyReadiness,
-  ): Promise<CapabilityInventory> {
+  async #getCapabilityInventory(input: CapabilityInventoryInput): Promise<CapabilityInventory> {
     const inspection = await this.inspectProject(input.projectRoot);
     const config = readGlobalConfigSource(this.#roots) ?? "";
     const deckConfig = requireDeckConfig(input.deckConfig, "operation");
     const webSearchProvider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
     const mcp = new Set(inspectCodexMcpServerIds(config));
     const hookIds = new Set(inspectCodexOwnedHookIds(config));
-    const serenaConfigured = mcp.has("serena");
-    const serenaMcpReady = serenaReadiness.state === "ready"
-      && serenaProxy?.state === "ready"
-      && isCodexSerenaMcpConfigured(config, this.#serenaProxyCommand);
     const supportStatusFor = (capabilityId: string) => CODEX_CAPABILITY_CATALOG.find((entry) => entry.capabilityId === capabilityId)?.status
       ?? getRunnerCapabilityMapping(capabilityId, this.runnerId, [CODEX_RUNNER_CAPABILITY_CONTRIBUTION])?.status
       ?? "supported";
     const tools = this.#tools;
-    const contextModeCommand = tools.contextMode.command();
-    const codebaseCommand = tools.codebase.command();
+    const codebaseEnabled = getEnabledCapabilityInstructionIds(deckConfig, "codex").includes("codebase-memory");
+    const codebaseCommand = codebaseEnabled ? tools.codebase.command() : undefined;
     const rtkState = tools.rtk.state();
     const nodeReady = tools.node.command() !== undefined;
     const base = (capabilityId: string, label: string) => ({
@@ -963,28 +967,14 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const canon = (path: string) => { try { return realpathSync(path); } catch { return path; } };
     const foreignOwner = (id: string, command: string | undefined) => command === undefined ? undefined : [...foreign].find(([name, other]) => name !== id && canon(other) === canon(command))?.[0];
     const mcpPinned = (id: string, command: string | undefined) => command !== undefined && (inspectCodexMcpServerCommand(config, id) === command || foreignOwner(id, command) !== undefined);
-    const contextMode = (() => {
-      const configured = mcp.has("context-mode") || foreignOwner("context-mode", contextModeCommand) !== undefined;
-      const pinned = mcpPinned("context-mode", contextModeCommand);
-      return {
-        ...base("context-mode", "Context Mode"),
-        isInstalled: contextModeCommand !== undefined && pinned,
-        isBlocked: false,
-        diagnostics: [
-          ...(contextModeCommand === undefined ? ["context-mode: no verified executable (install through Review & Install)"] : []),
-          ...(configured && contextModeCommand !== undefined && !pinned ? ["context-mode: MCP command is not pinned to the verified executable"] : []),
-          ...(!configured ? ["context-mode: MCP configuration missing"] : []),
-        ],
-      };
-    })();
-    const indexReady = await this.#codebaseIndexReadiness(input.projectRoot);
+    const indexReady = codebaseEnabled && await this.#codebaseIndexReadiness(input.projectRoot);
     const codebase = (() => {
       const configured = mcp.has("codebase-memory") || foreignOwner("codebase-memory", codebaseCommand) !== undefined;
       const pinned = mcpPinned("codebase-memory", codebaseCommand);
       return {
         ...base("codebase-memory", "Codebase Memory"),
         isInstalled: codebaseCommand !== undefined && pinned && indexReady,
-        isBlocked: tools.codebase.state() === "conflict" || tools.codebase.state() === "unusable" && codebaseCommand === undefined,
+        isBlocked: codebaseEnabled && (tools.codebase.state() === "conflict" || tools.codebase.state() === "unusable" && codebaseCommand === undefined),
         diagnostics: [
           ...(codebaseCommand === undefined ? ["codebase-memory: no verified executable (install through Review & Install)"] : []),
           ...(configured && codebaseCommand !== undefined && !pinned ? ["codebase-memory: MCP command is not pinned to the verified executable"] : []),
@@ -1017,6 +1007,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       ],
     };
     const webSearchEvidence = {
+      nativeSearch: inspectCodexNativeSearch({ projectRoot: input.projectRoot }, this.#roots.codexHome),
       enabled: deckConfig.webSearch.enabled,
       runnerSupported: true,
       providerConfigured: isWebSearchProviderDescriptor(webSearchProvider),
@@ -1042,37 +1033,10 @@ class CodexRunnerAdapter implements RunnerAdapter {
        webSearchEvidence,
        webSearchProvider,
     };
-    const serena = {
-      capabilityId: "serena",
-      label: "Serena",
-      description: "Serena Codex readiness",
-      section: "tools",
-      requirementLevel: "optional" as const,
-      installKind: "runner-native" as const,
-      supportStatus: supportStatusFor("serena"),
-      isInstalled: serenaMcpReady,
-      isBlocked: serenaReadiness.state === "unusable"
-         || serenaReadiness.state === "indeterminate"
-         || (serenaReadiness.state === "ready" && serenaProxy?.state !== "ready"),
-      diagnostics: [
-        ...(serenaReadiness.state === "ready"
-          ? [`serena: Deck-owned executable ${serenaReadiness.evidence.source === "existing-deck-tool" ? "reused" : "installed"}`]
-          : [`serena: executable ${serenaReadiness.state}`]),
-        ...(serenaReadiness.state === "ready" && serenaProxy?.state !== "ready"
-          ? [serenaProxy === undefined
-            ? "serena: the effective `deck internal serena-mcp --probe` capability could not be confirmed."
-            : serenaProxy.message]
-          : []),
-        `serena: MCP ${serenaConfigured ? "configured" : "not configured"}`,
-        `serena: MCP ${serenaMcpReady ? "ready" : "not ready"}`,
-      ],
-    };
     const capabilities: CapabilityInventory["capabilities"][number][] = [
       { capabilityId: "codex-runtime", label: "Codex runtime", description: "Native roles, skills, materialization, and CLI launch", section: "runtime", requirementLevel: "required", installKind: "runner-native", supportStatus: "supported", isInstalled: inspection.evidence.binary === true, isBlocked: inspection.state === "blocked" || inspection.state === "unsupported", diagnostics: inspection.diagnostics.map((diagnostic) => diagnostic.message) },
-      contextMode,
       codebase,
       rtk,
-      serena,
       { ...base("context7", "Context7"), isInstalled: mcp.has("context7"), isBlocked: false, diagnostics: mcp.has("context7") ? [] : ["context7: MCP configuration missing"] },
       webSearch,
       supermemory,
@@ -1252,7 +1216,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     }
   }
   buildInstallationPlan(state: DashboardState): InstallationPlan {
-    const selected = Object.entries(state.selectedCapabilities).filter(([, enabled]) => enabled).map(([id]) => id);
+    const selected = Object.entries(state.selectedCapabilities).filter(([id, enabled]) => enabled && id !== "context-mode" && id !== "serena").map(([id]) => id);
     return {
       steps: [
         { action: "configure", tool: "codex", capabilityId: "developer-team", reason: "Materialize project-scoped Developer Team roles, skills, bootstrap content, and instructions" },
@@ -1265,35 +1229,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
   }
   async prepareDeveloperTeamInstall(input: DeveloperTeamAdapterInstallInput) {
     const assignmentEvidence = await this.#confirmModelAssignmentEvidence(input);
-    if (input.materializationScope === "content-only") return assignmentEvidence;
-    const config = requireDeckConfig(input.deckConfig, "operation");
-    const existingConfig = readGlobalConfigSource(this.#roots) ?? "";
-    const derivedSupermemoryProjectScope = (() => {
-      const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
-      return resolved.ok ? resolved.scope : undefined;
-    })();
-    const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(input.capabilityInstructions
-      ?? buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config, "codex"), {
-        supermemoryProjectScope: derivedSupermemoryProjectScope,
-      }), {
-      supermemoryProjectScope: derivedSupermemoryProjectScope,
-    });
-    if (!this.#selectedMcpCapabilityIds(input, capabilityInstructions, existingConfig, config.webSearch.enabled).includes("serena")) return assignmentEvidence;
-    const preparation = await this.#prepareSerena(input.projectRoot);
-    if (preparation.readiness.state !== "ready") {
-      return [...assignmentEvidence, {
-        code: "codex-serena-launcher-not-ready",
-        severity: "error" as const,
-        message: "Serena is selected but no healthy Deck-owned launcher is ready. Use the explicitly authorized Serena action in Review; Deck will not write a bare MCP command.",
-      }];
-    }
-    if (preparation.proxy.state !== "ready") {
-      return [...assignmentEvidence, {
-        code: "codex-serena-proxy-not-ready",
-        severity: "error" as const,
-        message: preparation.proxy.message,
-      }];
-    }
     return assignmentEvidence;
   }
 
@@ -1322,6 +1257,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     }];
   }
   async runAction(action: RunnerAction, context: RunnerActionContext): Promise<RunnerActionRunResult> {
+    if ([action.capabilityId, action.toolId].some(id => id === "serena" || id === "context-mode")) return { actionId: action.id, status: "skipped", message: "Retired capability is disabled; no action performed.", diagnostics: [] };
     const toolResult = await this.#runToolInstallAction(action);
     if (toolResult) return toolResult;
     if (action.capabilityId !== "serena") {
@@ -1634,6 +1570,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     // Fail closed at the mutation boundary: a blocked plan (for example one that would erase a configured model
     // assignment without catalog confirmation) is never written, even when a caller skips its own blocked check.
     if (native.blocked) throw new Error("Codex installation plan is blocked and was not applied.");
+    const contributionManifestPath = join(this.#roots.codexHome, "deck", "manifest.json");
     operation.state = "applying";
     const serenaReadiness = this.#serenaReadinessByPlan.get(input.plan as object);
     if (serenaReadiness) {
@@ -1682,6 +1619,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
         changedCount: native.mutations.length,
         unchangedCount: results.filter((result) => result.status === "unchanged").length,
         operation: operation.receipt,
+        contributionManifestPath,
       };
     } catch (error) {
       operation.state = "failed";
@@ -1759,35 +1697,23 @@ class CodexRunnerAdapter implements RunnerAdapter {
       const mode = lstatSync(absolute).mode & 0o777;
       mutations.push({ operation: "delete", relativePath, expected: { kind: "file", hash: sha256(content), mode }, postimageHash: sha256(""), postimageMode: mode, ownership: { kind: "deck-file", marker: `legacy:${relativePath}` }, rollback: "restore", content: "" });
     }
-    // A project config keeps everything outside Deck's marker-owned MCP and hook blocks, whether or not the user edited it.
-    const configIndex = preserved.indexOf(".codex/config.toml");
-    if (configIndex >= 0) preserved.splice(configIndex, 1);
-    const configPath = join(projectRoot, ".codex", "config.toml");
-    if (inspectSafeProjectPath(projectRoot, configPath)?.isFile() && (legacy.unmodified.includes(".codex/config.toml") || legacy.modified.includes(".codex/config.toml"))) {
-      const source = readFileSync(configPath, "utf8");
-      const withoutHooks = mergeCodexOwnedHooks(source, []);
-      const withoutMcp = withoutHooks.status === "blocked" ? undefined : mergeCodexMcpServers(withoutHooks.content, []);
-      if (!withoutMcp || withoutMcp.status === "blocked") {
-        preserved.push(".codex/config.toml");
-        diagnostics.push("The project's .codex/config.toml could not be edited safely and was kept; remove Deck's marked blocks yourself.");
-      } else if (withoutMcp.content !== source) {
-        const mode = lstatSync(configPath).mode & 0o777;
-        const remaining = withoutMcp.content.trim();
-        if (remaining === "" || remaining === "[features]\nmulti_agent = true") {
-          mutations.push({ operation: "delete", relativePath: ".codex/config.toml", expected: { kind: "file", hash: sha256(source), mode }, postimageHash: sha256(""), postimageMode: mode, ownership: { kind: "toml-key", marker: "legacy:deck-only-config" }, rollback: "restore", content: "" });
-        } else {
-          mutations.push({ relativePath: ".codex/config.toml", expected: { kind: "file", hash: sha256(source), mode }, postimageHash: sha256(withoutMcp.content), postimageMode: mode, ownership: { kind: "toml-key", marker: "legacy:deck-marked-blocks" }, rollback: "restore", content: withoutMcp.content });
-          diagnostics.push("Removed only Deck's marker-owned blocks from the project's .codex/config.toml; the rest of the file is yours and was kept.");
-        }
-      }
+    // Legacy whole-file receipts and comment markers do not prove ownership of shared entries.
+    const configPath = join(projectRoot, '.codex/config.toml');
+    if (inspectSafeProjectPath(projectRoot, configPath)?.isFile() && (legacy.unmodified.includes('.codex/config.toml') || legacy.modified.includes('.codex/config.toml'))) {
+      if (!preserved.includes('.codex/config.toml')) preserved.push('.codex/config.toml');
+      diagnostics.push('Preserved shared legacy MCP/hook configuration without granular proof; review individual entries before removal.');
     }
-    mutations.push(...(() => {
-      const absolute = legacy.manifestPath;
-      const content = readFileSync(absolute, "utf8");
-      const mode = lstatSync(absolute).mode & 0o777;
-      return [{ operation: "delete" as const, relativePath: ".codex/deck-manifest.json", expected: { kind: "file" as const, hash: sha256(content), mode }, postimageHash: sha256(""), postimageMode: mode, ownership: { kind: "deck-manifest" as const, marker: "legacy:manifest" }, rollback: "restore" as const, content: "" }];
-    })());
-    void manifest;
+    const source = readFileSync(legacy.manifestPath, 'utf8');
+    const mode = lstatSync(legacy.manifestPath).mode & 0o777;
+    const deleted = new Set(mutations.filter(mutation => mutation.operation === 'delete').map(mutation => mutation.relativePath));
+    const retained = Object.fromEntries(Object.entries(manifest.files).filter(([path]) => !deleted.has(path)));
+    if (preserved.length > 0) {
+      preserved.push('.codex/deck-manifest.json');
+      const content = `${JSON.stringify({ ...manifest, files: retained }, null, 2)}\n`;
+      if (source !== content) mutations.push({ relativePath: '.codex/deck-manifest.json', expected: { kind: 'file', hash: sha256(source), mode }, postimageHash: sha256(content), postimageMode: mode, ownership: { kind: 'deck-manifest', marker: 'legacy:manifest' }, rollback: 'restore', content });
+    } else {
+      mutations.push({ operation: 'delete', relativePath: '.codex/deck-manifest.json', expected: { kind: 'file', hash: sha256(source), mode }, postimageHash: sha256(''), postimageMode: mode, ownership: { kind: 'deck-manifest', marker: 'legacy:manifest' }, rollback: 'restore', content: '' });
+    }
     if (mutations.length > 0) {
       const effects = this.#fileEffects ?? createNodeCodexFileEffects({ journalRoot: this.#journalRoot });
       await applyCodexMutationPlan({
@@ -1799,7 +1725,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
         blocked: false,
       }, effects, { operationKind: "legacy-cleanup" });
     }
-    if (preserved.length > 0) diagnostics.push(`Kept ${preserved.length} file(s) that no longer match Deck's recorded bytes: ${preserved.join(", ")}. Review them yourself.`);
+    if (preserved.length > 0) diagnostics.push(`Kept ${preserved.length} file(s) with unresolved ownership or changed recorded bytes: ${preserved.join(", ")}. Review them yourself.`);
     return { removed: mutations.filter((mutation) => mutation.operation === "delete").map((mutation) => mutation.relativePath), preserved, diagnostics };
   }
 
@@ -1809,15 +1735,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const install = await this.detectDeckInstall({ projectRoot });
     const installInput = { projectRoot, environmentId: "codex-development" as const, deckConfig };
     await this.prepareDeveloperTeamInstall(installInput);
-    const preparedSerena = this.#pendingSerenaPreparationByProject.get(resolve(projectRoot));
     const plan = this.buildDeveloperTeamInstallPlan(installInput);
-    const freshReadiness = preparedSerena?.readiness ?? await this.#resolveSerenaReadiness();
-    const freshProxy = preparedSerena?.proxy ?? (freshReadiness.state === "ready" ? await this.#serenaProxyProbe() : undefined);
-    const inventory = await this.#getCapabilityInventory(
-      { projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig },
-      freshReadiness,
-      freshProxy,
-    );
+    const inventory = await this.#getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig });
     const roleAssignmentRead = readCodexRoleAssignments(this.#roots.codexHome);
     const effects = this.#fileEffects ?? createNodeCodexFileEffects({ journalRoot: this.#journalRoot });
     const journals = await effects.listJournals();

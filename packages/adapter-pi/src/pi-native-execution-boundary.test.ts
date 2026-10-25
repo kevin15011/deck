@@ -1,3 +1,4 @@
+import { writeExplicitCodebaseConfig } from "./__fixtures__/explicit-codebase";
 import { expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,8 +16,8 @@ async function fixture(fault: Fault, extra: native.ExtensionFactory[] = []) {
   const agentDir = join(root, "agent"), cwd = join(root, "project");
   mkdirSync(join(agentDir, "deck"), { recursive: true });
   mkdirSync(cwd);
-  const saved = { HOME: process.env.HOME, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, DECK_PI_SESSION: process.env.DECK_PI_SESSION };
-  process.env.HOME = root;
+  const saved = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, HOME: process.env.HOME, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, DECK_PI_SESSION: process.env.DECK_PI_SESSION };
+  process.env.HOME = root; process.env.XDG_CONFIG_HOME = join(root, ".config"); writeExplicitCodebaseConfig(root);
   process.env.PI_CODING_AGENT_DIR = agentDir;
   process.env.DECK_PI_SESSION = "1";
   const ownedRoot = join(root, "codebase-native-v0.11.0", `${process.platform}-${process.arch}`);

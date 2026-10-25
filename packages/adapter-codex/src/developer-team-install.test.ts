@@ -329,7 +329,7 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     });
     expect(plan.blocked).toBe(false);
     const config = plan.expectedFiles.find((file) => file.relativePath === ".codex/config.toml")!.content;
-    expect(config).toContain('command = "/deck/tools/context-mode"');
+    expect(config).not.toContain("mcp_servers.context-mode");
     expect(config).toContain('command = "/deck/tools/codebase-memory-mcp"');
     expect(config).not.toMatch(/command = "(context-mode|codebase-memory-mcp)"/);
     expect(config).toContain("# deck-codex-hook:memory-bridge:start");
@@ -351,7 +351,7 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(config).not.toContain("mcp_servers.codebase-memory");
     expect(config).not.toContain("deck-codex-hook:rtk");
     expect(plan.expectedFiles.some((file) => file.relativePath === ".codex/deck/hooks/deck-rtk-hook.cjs")).toBe(false);
-    expect(plan.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(expect.arrayContaining(["context-mode-not-ready", "codebase-memory-not-ready"]));
+    expect(plan.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(expect.arrayContaining(["codebase-memory-not-ready"]));
   });
 
   test("official Supermemory plugin route also registers the Deck memory MCP server with names-only env forwarding", () => {
@@ -396,7 +396,7 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(installed).toContain("echo user");
     expect(installed).toContain("deck-codex-hook:rtk:start");
 
-    const off = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map([[".codex/config.toml", installed]]) });
+    const off = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map(first.expectedFiles.map(file => [file.relativePath, file.content])) });
     expect(off.blocked).toBe(false);
     const offConfig = off.expectedFiles.find((file) => file.relativePath === ".codex/config.toml")!.content;
     expect(offConfig).toContain("echo user");
@@ -415,7 +415,7 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     const first = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map(), mcpCapabilityIds: ["context7", "rtk"], rtkHook });
     const installed = first.expectedFiles.find((file) => file.relativePath === ".codex/config.toml")!.content;
     expect(installed).toContain("# deck-codex-mcp:context7");
-    const second = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map([[".codex/config.toml", installed]]), mcpCapabilityIds: ["rtk"], rtkHook });
+    const second = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map(first.expectedFiles.map(file => [file.relativePath, file.content])), mcpCapabilityIds: ["rtk"], rtkHook });
     expect(second.blocked).toBe(false);
     const next = second.expectedFiles.find((file) => file.relativePath === ".codex/config.toml")!.content;
     expect(next).not.toContain("mcp_servers.context7");
@@ -423,15 +423,15 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(next).toContain("# deck-codex-hook:rtk:end");
   });
 
-  test("upgrade retires the pre-parity Deck-owned Supermemory MCP block but leaves an unmarked user entry alone", () => {
+  test("upgrade preserves unproven legacy Supermemory MCP blocks and user entries", () => {
     const stale = '# deck-codex-mcp:supermemory\n[mcp_servers.supermemory]\nurl = "https://mcp.supermemory.ai/mcp"\nhttp_headers = { "x-sm-project" = "sm_project_v1_kevin15011_deck" }\n\n';
     const hooks = { nodeCommand: "/usr/bin/node", recallScript: "/deck/sm/recall.js", flushScript: "/deck/sm/flush.js" };
     for (const memoryProvider of ["none", "supermemory"] as const) {
       const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map([[".codex/config.toml", `[features]\nmulti_agent = true\n${stale}`]]), memoryProvider, supermemoryProjectScope: "sm_project_v1_kevin15011_deck", supermemoryHooks: hooks });
       expect(plan.blocked).toBe(false);
       const config = plan.expectedFiles.find((file) => file.relativePath === ".codex/config.toml")!.content;
-      expect(config).not.toContain("mcp.supermemory.ai");
-      expect(config).not.toContain("deck-codex-mcp:supermemory");
+      expect(config).toContain("mcp.supermemory.ai");
+      expect(config).toContain("deck-codex-mcp:supermemory");
     }
     const user = '[mcp_servers.supermemory]\nurl = "https://mcp.supermemory.ai/mcp"\n';
     const kept = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map([[".codex/config.toml", user]]), memoryProvider: "none" });

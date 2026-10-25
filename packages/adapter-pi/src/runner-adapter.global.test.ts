@@ -213,7 +213,7 @@ describe("Deck MCP servers in the global mcp.json", () => {
     codebase: { command: () => ("codebase" in overrides ? overrides.codebase : "/opt/fake/tools/codebase-memory-mcp") },
     rtk: { command: () => undefined, state: () => "absent", supported: () => true, install: async () => "installed", root: "/opt/fake/rtk" },
   });
-  const input = (capabilityIds?: string[]) => ({ ...planInput(), ...(capabilityIds ? { capabilityIds } : {}) });
+  const input = (capabilityIds?: string[]) => ({ ...planInput(), deckConfig: validateDeckConfig({ capabilities: { "codebase-memory": { enabled: true } } }), ...(capabilityIds ? { capabilityIds } : {}) });
   const readMcp = () => JSON.parse(readFileSync(piAgentPaths(agentDir).mcp, "utf-8")).mcpServers as Record<string, Record<string, any>>;
 
   test("writes the selected servers with absolute commands, direct exposure and blanked memory env, owned by the manifest", async () => {
@@ -223,14 +223,14 @@ describe("Deck MCP servers in the global mcp.json", () => {
     await pi.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan });
 
     const servers = readMcp();
-    expect(Object.keys(servers).sort()).toEqual(["codebase-memory", "context-mode", "context7"]);
+    expect(Object.keys(servers).sort()).toEqual(["codebase-memory", "context7"]);
     for (const entry of Object.values(servers)) {
       expect(entry.command.startsWith("/")).toBe(true);
       expect(entry.exposure).toBe("direct");
       expect(entry.env).toEqual({ DECK_RUNNER_MEMORY_ENDPOINT: "", DECK_RUNNER_MEMORY_TOKEN: "", DECK_RUNNER_MEMORY_TOKEN_FILE: "" });
     }
     const manifest = JSON.parse(readFileSync(piAgentPaths(agentDir).manifest, "utf-8"));
-    expect(Object.keys(manifest.mcp.servers).sort()).toEqual(["codebase-memory", "context-mode", "context7"]);
+    expect(Object.keys(manifest.mcp.servers).sort()).toEqual(["codebase-memory", "context7"]);
     expect(existsSync(join(projectRoot, ".pi"))).toBe(false);
     expect(await pi.verifyDeveloperTeamInstall(plan)).toMatchObject({ valid: true });
   });
@@ -247,11 +247,11 @@ describe("Deck MCP servers in the global mcp.json", () => {
     mkdirSync(agentDir, { recursive: true });
     writeFileSync(piAgentPaths(agentDir).mcp, JSON.stringify({ mcpServers: { "my-tools": { command: "/usr/bin/x", exposure: "codemode" } } }));
     const pi = adapter({ piTools: fakeTools() });
-    await pi.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan: pi.buildDeveloperTeamInstallPlan(input(["context-mode", "context7"])) });
-    expect(Object.keys(readMcp()).sort()).toEqual(["context-mode", "context7", "my-tools"]);
+    await pi.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan: pi.buildDeveloperTeamInstallPlan(input(["codebase-memory-mcp", "context7"])) });
+    expect(Object.keys(readMcp()).sort()).toEqual(["codebase-memory", "context7", "my-tools"]);
 
     const next = adapter({ piTools: fakeTools() });
-    await next.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan: next.buildDeveloperTeamInstallPlan(input(["context7"])) });
+    await next.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan: next.buildDeveloperTeamInstallPlan({ ...input(["context7"]), deckConfig: validateDeckConfig({ capabilities: { "codebase-memory": { enabled: false } } }) }) });
     expect(Object.keys(readMcp()).sort()).toEqual(["context7", "my-tools"]);
     expect(readMcp()["my-tools"]).toEqual({ command: "/usr/bin/x", exposure: "codemode" });
   });
@@ -266,7 +266,7 @@ describe("Deck MCP servers in the global mcp.json", () => {
     const next = adapter({ piTools: fakeTools() });
     const launchPlan = next.buildDeveloperTeamInstallPlan(input());
     await next.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan: launchPlan });
-    expect(Object.keys(readMcp()).sort()).toEqual(["codebase-memory", "context-mode", "context7"]);
+    expect(Object.keys(readMcp()).sort()).toEqual(["codebase-memory", "context7"]);
 
     const again = adapter({ piTools: fakeTools() }).buildDeveloperTeamInstallPlan(input());
     expect(again.mutationPreview).toEqual([]);
@@ -343,7 +343,7 @@ describe("Deck MCP servers in the global mcp.json", () => {
   test("a user-installed pi-mcp-adapter blocks MCP configuration with a remediation hint and is kept", () => {
     mkdirSync(agentDir, { recursive: true });
     writeFileSync(piAgentPaths(agentDir).settings, JSON.stringify({ packages: ["npm:pi-mcp-adapter"] }));
-    const plan = adapter({ piTools: fakeTools() }).buildDeveloperTeamInstallPlan(input(["context-mode"]));
+    const plan = adapter({ piTools: fakeTools() }).buildDeveloperTeamInstallPlan(input(["context7"]));
     expect(plan.blocked).toBe(true);
     expect(plan.diagnostics?.join(" ")).toContain("pi remove");
     expect(JSON.parse(readFileSync(piAgentPaths(agentDir).settings, "utf-8")).packages).toEqual(["npm:pi-mcp-adapter"]);
@@ -354,7 +354,7 @@ describe("Deck MCP servers in the global mcp.json", () => {
     writeFileSync(join(agentDir, "agents", "deck-lead.md"), "legacy deck lead\n");
     writeFileSync(piAgentPaths(agentDir).settings, JSON.stringify({ packages: ["npm:pi-subagents", "npm:pi-mcp-adapter", "npm:user-pkg"], defaultModel: "keep" }));
     const pi = adapter({ piTools: fakeTools() });
-    const plan = pi.buildDeveloperTeamInstallPlan(input(["context-mode"]));
+    const plan = pi.buildDeveloperTeamInstallPlan(input(["context7"]));
     expect(plan.blocked).toBeFalsy();
     await pi.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan });
 
@@ -362,7 +362,7 @@ describe("Deck MCP servers in the global mcp.json", () => {
     expect(settings.packages).toEqual(["npm:user-pkg", "deck/package"]);
     expect(settings.defaultModel).toBe("keep");
     expect(existsSync(join(agentDir, "deck", "backups"))).toBe(true);
-    expect(Object.keys(readMcp())).toEqual(["context-mode"]);
+    expect(Object.keys(readMcp())).toEqual(["context7"]);
   });
 });
 
@@ -430,7 +430,7 @@ describe("review-plan actions on the global layout", () => {
 
   test("an MCP config action validates readiness but never writes mcp.json itself", async () => {
     const pi = adapter({ piTools: tools() });
-    for (const capabilityId of ["context-mode", "context7", "codebase-memory-mcp"]) {
+    for (const capabilityId of ["context7", "codebase-memory-mcp"]) {
       const result = await pi.runAction({ id: `capability.${capabilityId}.mcp-config`, kind: "write-pi-mcp-config", title: capabilityId, capabilityId, status: "ready" }, context());
       expect(result.status).toBe("executed");
       expect(result.message).toMatch(/Deck package|applied/i);
@@ -441,9 +441,9 @@ describe("review-plan actions on the global layout", () => {
 
   test("an MCP config action fails clearly when the server cannot be resolved", async () => {
     const pi = adapter({ piTools: tools({ resolveExecutable: () => undefined, codebase: { command: () => undefined } }) });
-    const result = await pi.runAction({ id: "capability.context-mode.mcp-config", kind: "write-pi-mcp-config", title: "context-mode", capabilityId: "context-mode", status: "ready" }, context());
+    const result = await pi.runAction({ id: "capability.context7.mcp-config", kind: "write-pi-mcp-config", title: "context7", capabilityId: "context7", status: "ready" }, context());
     expect(result.status).toBe("failed");
-    expect(result.diagnostics.join(" ")).toMatch(/context-mode/);
+    expect(result.diagnostics.join(" ")).toMatch(/Context7|context7/);
   });
 
   test("tool installation no longer edits settings.json packages (the manifest transaction owns them)", async () => {
@@ -482,8 +482,8 @@ describe("tool-policy configuration from the production adapter", () => {
     codebase: { command: () => "/opt/fake/tools/codebase-memory-mcp", existing: () => undefined, state: () => "ready", supported: () => true, install: async () => "unchanged", root: "/x/cb" },
     rtk: { command: () => command, state: () => (command ? "ready" : "absent"), supported: () => true, install: async () => "unchanged", root: "/x/rtk" },
   });
-  const configFor = (pi: ReturnType<typeof adapter>, capabilityIds?: string[]) => {
-    const plan = pi.buildDeveloperTeamInstallPlan({ ...planInput(), ...(capabilityIds ? { capabilityIds } : {}) } as never);
+  const configFor = (pi: ReturnType<typeof adapter>, capabilityIds?: string[], codebaseEnabled = false) => {
+    const plan = pi.buildDeveloperTeamInstallPlan({ ...planInput(), deckConfig: validateDeckConfig({ capabilities: { "codebase-memory": { enabled: codebaseEnabled } } }), ...(capabilityIds ? { capabilityIds } : {}) } as never);
     const file = plan.files.find((entry) => entry.path.endsWith("extensions/deck-tool-policy/config.json"));
     return JSON.parse(file!.content);
   };
@@ -501,7 +501,8 @@ describe("tool-policy configuration from the production adapter", () => {
 
   test("graph redirection follows the codebase-memory server selection", () => {
     const pi = adapter({ piTools: rtkTools(undefined) });
-    expect(configFor(pi, ["codebase-memory-mcp"]).graphRedirect).toBe(true);
+    expect(configFor(pi, ["codebase-memory-mcp"], true).graphRedirect).toBe(true);
+    expect(configFor(pi, ["codebase-memory-mcp"]).graphRedirect).toBe(false);
     expect(configFor(pi, ["context7"]).graphRedirect).toBe(false);
   });
 });

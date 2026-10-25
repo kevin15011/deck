@@ -9,13 +9,20 @@ function read(file: string): Record<string, any> {
   catch { throw new PersonalMcpPreparationError("claude-native-configuration-invalid", [{id:"configuration",source:"native",status:"unavailable",reason:"unreadable"}]); }
 }
 
+/** Read native consent without changing trust or executing project content. */
+export function claudeProjectConfigTrusted(home: string, cwd: string, env: Readonly<Record<string, string | undefined>>): boolean {
+  const configDir = env.CLAUDE_CONFIG_DIR ?? join(home, ".claude");
+  const user = read(env.CLAUDE_CONFIG_DIR ? join(configDir, ".claude.json") : join(home, ".claude.json"));
+  return record(record(user.projects)[resolve(cwd)]).hasTrustDialogAccepted === true;
+}
+
 /** Only trust, prior project approvals and protected-name collisions are inspected here.
  * The native loader owns declarations, plugins, interpolation, credentials and transports. */
 export function claudeNativePolicy(home: string, cwd: string, env: Readonly<Record<string, string | undefined>>) {
   const configDir = env.CLAUDE_CONFIG_DIR ?? join(home, ".claude");
   const user = read(env.CLAUDE_CONFIG_DIR ? join(configDir, ".claude.json") : join(home, ".claude.json"));
   const project = record(record(user.projects)[resolve(cwd)]);
-  const trusted = project.hasTrustDialogAccepted === true;
+  const trusted = claudeProjectConfigTrusted(home, cwd, env);
   const sources = trusted ? "user,project,local" : "user";
   const settings = [read(join(configDir, "settings.json")), ...(trusted ? [read(join(cwd, ".claude", "settings.json")), read(join(cwd, ".claude", "settings.local.json"))] : [])];
   const local = record(project.mcpServers);

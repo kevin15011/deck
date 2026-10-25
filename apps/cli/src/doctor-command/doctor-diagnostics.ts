@@ -1,3 +1,4 @@
+import { reviewRunnerCleanup } from "../runner-cleanup-doctor";
 /**
  * Doctor diagnostics orchestrator.
  *
@@ -47,6 +48,7 @@ import { createOwnerOnlyFileSecretStore, redactSecretDiagnostic } from "@deck/co
 import { createSupermemoryRuntime, createSupermemoryHttpTransport } from "@deck/adapter-supermemory/runtime";
 import { checkSupermemoryObservabilitySink } from "../supermemory-observability";
 import { checkSessionWeb } from "../session-web-doctor";
+import { reviewInteractiveSearchSessions } from "../interactive-search-review";
 import { formatSessionRuntimeReadiness, resolveSessionRuntimeReadiness } from "../session-runtime-readiness";
 import type {
   DoctorCategoryResult,
@@ -696,6 +698,8 @@ export function checkSupermemoryProjectScopeAgreement(input: {
  * Uses decideReleaseAvailability for commit-aware comparison.
  */
 type DoctorDiagnosticsDependencies = Readonly<{
+  reviewRunnerCleanup: typeof reviewRunnerCleanup;
+  reviewInteractiveSearchSessions: typeof reviewInteractiveSearchSessions;
   detectSelectedRuntimes: typeof detectSelectedRuntimes;
   inspectPiEnvironment: typeof inspectPiEnvironment;
   reviewPiRequiredTools: typeof reviewPiRequiredTools;
@@ -716,6 +720,8 @@ type DoctorDiagnosticsDependencies = Readonly<{
 }>;
 
 const defaultDoctorDiagnosticsDependencies: DoctorDiagnosticsDependencies = {
+  reviewRunnerCleanup,
+  reviewInteractiveSearchSessions,
   detectSelectedRuntimes,
   inspectPiEnvironment,
   reviewPiRequiredTools,
@@ -923,6 +929,8 @@ export async function runDoctorDiagnostics(
   projectRoot?: string,
 ): Promise<DoctorDiagnosticsResult> {
   const dependencies: DoctorDiagnosticsDependencies = {
+    reviewRunnerCleanup: overrides.reviewRunnerCleanup ?? defaultDoctorDiagnosticsDependencies.reviewRunnerCleanup,
+    reviewInteractiveSearchSessions: overrides.reviewInteractiveSearchSessions ?? defaultDoctorDiagnosticsDependencies.reviewInteractiveSearchSessions,
     detectSelectedRuntimes: overrides.detectSelectedRuntimes ?? defaultDoctorDiagnosticsDependencies.detectSelectedRuntimes,
     inspectPiEnvironment: overrides.inspectPiEnvironment ?? defaultDoctorDiagnosticsDependencies.inspectPiEnvironment,
     reviewPiRequiredTools: overrides.reviewPiRequiredTools ?? defaultDoctorDiagnosticsDependencies.reviewPiRequiredTools,
@@ -1110,6 +1118,20 @@ export async function runDoctorDiagnostics(
       reason: `Error checking upgrade availability: ${redact(String(err))}`,
     };
   }
+
+  // Review receipts without acknowledging changed settings or touching an open CLI.
+  if (globalConfigCheck.config) {
+    try {
+      const diagnostics = await dependencies.reviewInteractiveSearchSessions(globalConfigCheck.config, projectRoot);
+      if (diagnostics.length) runnerConfigResults.push({ category: "Interactive Search", status: "warning",
+        items: diagnostics.map(item => ({ status: "warning", message: item.message })) });
+    } catch {
+      runnerConfigResults.push({ category: "Interactive Search", status: "warning", items: [{ status: "warning",
+        message: "Interactive search configuration could not be reviewed. Reopen existing CLI sessions after configuration changes." }] });
+    }
+  }
+
+  try {runnerConfigResults.push(await dependencies.reviewRunnerCleanup());} catch {runnerConfigResults.push({category:"Runner Migration",status:"warning",items:[{status:"warning",message:"Runner migration/recovery could not be inspected. Use deck runner cleanup --plan; activity unknown means deferred."}]});}
 
   // 7. Calculate summary
   const summary = calculateSummary(

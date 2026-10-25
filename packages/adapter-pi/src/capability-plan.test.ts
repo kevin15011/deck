@@ -96,56 +96,7 @@ describe("buildPiRunnerReviewPlan", () => {
     expect(plan.groups.configWrites.some((action) => action.capabilityId === "serena")).toBe(false);
   });
 
-  test("emits named Serena install and config actions only for the matching current Pi operation", () => {
-    const toolsReview = review(["sub-agents", "MCP packages"]);
-    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
-    const plan = buildPiRunnerReviewPlan(
-      baseState({
-        selectedCapabilities: { serena: true },
-        explicitlySelectedCapabilities: { serena: true },
-        operationId: "pi-operation-1",
-        currentOperation: {
-          runner: "pi",
-          operationId: "pi-operation-1",
-          explicitlySelected: true,
-        },
-        runtime: { toolsReview },
-      }),
-      inventory,
-    );
-
-    expect(plan.groups.automaticInstalls).toContainEqual(
-      expect.objectContaining({
-        id: "capability.serena.install",
-        capabilityId: "serena",
-        source: "serena-agent",
-      }),
-    );
-    expect(plan.groups.configWrites).toContainEqual(
-      expect.objectContaining({
-        id: "capability.serena.mcp-config",
-        capabilityId: "serena",
-        kind: "write-pi-mcp-config",
-      }),
-    );
-
-    const stalePlan = buildPiRunnerReviewPlan(
-      baseState({
-        selectedCapabilities: { serena: true },
-        explicitlySelectedCapabilities: { serena: true },
-        operationId: "pi-operation-1",
-        currentOperation: {
-          runner: "pi",
-          operationId: "pi-operation-2",
-          explicitlySelected: true,
-        },
-        runtime: { toolsReview },
-      }),
-      inventory,
-    );
-    expect(stalePlan.groups.automaticInstalls.some((action) => action.capabilityId === "serena")).toBe(false);
-    expect(stalePlan.groups.configWrites.some((action) => action.capabilityId === "serena")).toBe(false);
-  });
+  test("retired Serena produces no actions even for a matching explicit operation", () => { const toolsReview = review(['sub-agents', 'MCP packages']); const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: 'pi' }); const plan = buildPiRunnerReviewPlan(baseState({ selectedCapabilities: { serena: true }, explicitlySelectedCapabilities: { serena: true }, operationId: 'pi-operation-1', currentOperation: { runner: 'pi', operationId: 'pi-operation-1', explicitlySelected: true }, runtime: { toolsReview } }), inventory); expect(plan.groups.automaticInstalls.some(action => action.capabilityId === 'serena')).toBe(false); expect(plan.groups.configWrites.some(action => action.capabilityId === 'serena')).toBe(false); });
 
   test("rejects a runner-mismatched current operation without affecting unrelated capabilities", () => {
     const toolsReview = review(["sub-agents", "MCP packages"]);
@@ -223,13 +174,13 @@ describe("buildPiRunnerReviewPlan", () => {
     );
 
     // context-mode, rtk, codebase-memory-mcp are now auto-installable when missing (not manual)
-    expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "context-mode")).toBe(true);
+    expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "context-mode")).toBe(false);
     expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "rtk")).toBe(true);
     expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "codebase-memory-mcp")).toBe(true);
     // pi-hud still pending-source (not installable) - makes plan not ready
     expect(plan.groups.manualSteps.some((action) => action.capabilityId === "pi-hud" && action.status === "pending")).toBe(true);
     // Serena is a Core-managed capability and remains an automatic install when explicitly authorized.
-    expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "serena")).toBe(true);
+    expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "serena")).toBe(false);
     // Plan not ready because pi-hud is pending
     expect(plan.ready).toBe(false);
   });
@@ -237,10 +188,10 @@ describe("buildPiRunnerReviewPlan", () => {
   test("missing selected pi-package capability becomes automatic install", () => {
     const toolsReview = review(["sub-agents", "MCP packages"]);
     const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
-    const plan = buildPiRunnerReviewPlan(baseState({ selectedCapabilities: { "context-mode": true }, runtime: { toolsReview } }), inventory);
+    const plan = buildPiRunnerReviewPlan(baseState({ selectedCapabilities: { "rtk": true }, runtime: { toolsReview } }), inventory);
 
     expect(plan.groups.automaticInstalls).toContainEqual(
-      expect.objectContaining({ capabilityId: "context-mode", toolId: "context-mode", kind: "install-pi-package", status: "ready" }),
+      expect.objectContaining({ capabilityId: "rtk", toolId: "rtk", kind: "install-pi-package", status: "ready" }),
     );
   });
 
@@ -308,18 +259,18 @@ describe("Repair #22: MCP config writes for selected capabilities", () => {
     const configWriteKinds = plan.groups.configWrites.map((a) => a.kind);
     
     // Should have write-pi-mcp-config for context-mode
-    expect(configWriteIds).toContain("capability.context-mode.mcp-config");
+    expect(configWriteIds).not.toContain("capability.context-mode.mcp-config");
     // Should have write-pi-mcp-config for codebase-memory-mcp
     expect(configWriteIds).toContain("capability.codebase-memory-mcp.mcp-config");
     // Should have write-pi-mcp-config for serena
-    expect(configWriteIds).toContain("capability.serena.mcp-config");
+    expect(configWriteIds).not.toContain("capability.serena.mcp-config");
     // Should have write-pi-mcp-config for context7 (was filtered by EXCLUDED_PLAN_TERMS)
     expect(configWriteIds).toContain("capability.context7.mcp-config");
     
     // Total configWrites should include these + supermemory deck-config + supermemory pi-mcp-config
     // = 5 write-pi-mcp-config/write-deck-config actions minimum
     const mcpConfigWrites = configWriteKinds.filter((k) => k === "write-pi-mcp-config");
-    expect(mcpConfigWrites.length).toBeGreaterThanOrEqual(4); // context-mode, cbm, serena, context7 + supermemory
+    expect(mcpConfigWrites.length).toBeGreaterThanOrEqual(2); // context-mode, cbm, serena, context7 + supermemory
   });
 
   test("configWrites should not filter out context7 by EXCLUDED_PLAN_TERMS", () => {
@@ -642,7 +593,7 @@ describe("buildPiRunnerReviewPlan security and structural regressions", () => {
     );
 
     // context-mode, rtk, codebase-memory-mcp are now in automaticInstalls (not manual)
-    expect(plan.groups.automaticInstalls).toContainEqual(
+    expect(plan.groups.automaticInstalls).not.toContainEqual(
       expect.objectContaining({ capabilityId: "context-mode", toolId: "context-mode", kind: "install-pi-package" }),
     );
     expect(plan.groups.automaticInstalls).toContainEqual(

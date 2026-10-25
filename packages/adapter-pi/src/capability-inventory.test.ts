@@ -30,8 +30,8 @@ describe("buildPiRunnerCapabilityInventory — user-facing capabilities", () => 
       runnerScope: "pi",
     });
 
-    expect(inventory["context-mode"]?.status).toBe("ready");
-    expect(inventory["context-mode"]?.installed).toBe(true);
+    expect(inventory["context-mode"]).toBeUndefined();
+
     expect(inventory.rtk?.status).toBe("manual");
     expect(inventory.rtk?.installed).toBe(false);
     // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity

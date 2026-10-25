@@ -10,8 +10,42 @@ import { createDefaultAdapterRegistry } from "./runner-adapters";
 import { executeRunnerLaunchPlan } from "./runner-launch-command";
 import { writeTavilyCredentialToActiveShellProfile } from "./web-search-shell-profile";
 import { createHash } from "node:crypto";
+import { prepareClaudeInteractiveLaunch } from './claude-interactive-launch';
 
-test("default Claude composition requires verified global plugin and passes only --plugin-dir to supervised interactive child", async () => {
+test('Claude reopen republishes search selection using current provider without mutating the old generation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'deck-claude-search-reopen-'));
+  const environment: Record<string, string | undefined> = {};
+  try {
+    const executable = join(root, 'tavily-mcp'); await writeFile(executable, 'fixture', { mode: 0o700 });
+    const adapter = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot: join(root, 'data/deck'),
+      sessionDriver: { baseEnv: environment }, resolveCommand: name => name === 'tavily-mcp' ? executable : undefined,
+      webSearchCredential: () => 'fixture-only' } }).get('claude');
+    const deckConfig = getDefaultDeckConfig(); deckConfig.webSearch = { enabled: true, provider: 'tavily' };
+    const input = { projectRoot: root, teamId: 'developer-team', mode: 'interactive' as const, deckConfig };
+    const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: 'claude-development', deckConfig });
+    await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: 'claude-development', plan });
+    const first = await adapter.buildLaunchPlan!(input);
+    if (first.status !== 'ready') throw new Error('first launch');
+    const previousGeneration = first.plan.generationReference!.root;
+    environment.CLAUDE_CODE_USE_BEDROCK = '1';
+    const fallback = await prepareClaudeInteractiveLaunch(adapter, input);
+    expect(fallback.status).toBe('ready');
+    if (fallback.status !== 'ready') throw new Error('fallback launch');
+    expect(fallback.plan.envOverlay?.TAVILY_API_KEY?.value).toBe('fixture-only');
+    expect(fallback.plan.generationReference!.root).not.toBe(previousGeneration);
+    expect(await import('node:fs').then(fs => fs.existsSync(previousGeneration))).toBe(true);
+    environment.CLAUDE_CODE_USE_BEDROCK = '0';
+    const native = await prepareClaudeInteractiveLaunch(adapter, input);
+    expect(native.status).toBe('ready');
+    if (native.status === 'ready') expect(native.plan.envOverlay?.TAVILY_API_KEY).toBeUndefined();
+    environment.ANTHROPIC_BASE_URL = 'https://unrecognized-provider.example.test';
+    const unknown = await prepareClaudeInteractiveLaunch(adapter, input);
+    expect(unknown.status).toBe('ready');
+    expect(unknown.diagnostics.some(item => item.code === 'native-search-possible-duplicate')).toBe(true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+}, 20_000);
+
+test("default Claude composition requires verified global plugin and excludes untrusted project settings from the supervised child", async () => {
   const root = await mkdtemp(join(tmpdir(), "deck-claude-team-launch-"));
   const dataRoot = join(root, "data", "deck");
   const project = join(root, "repo");
@@ -26,7 +60,7 @@ test("default Claude composition requires verified global plugin and passes only
     const ready = await adapter.buildLaunchPlan!(input);
     expect(ready.status).toBe("ready");
     if (ready.status !== "ready") return;
-    expect(ready.plan.args).toEqual([...CLAUDE_ATTRIBUTION_SETTINGS_ARGS, "--plugin-dir", dirname(dirname(plan.files[0]!.path)), "--agent", "deck-developer-team:deck-lead"]);
+    expect(ready.plan.args).toEqual([...CLAUDE_ATTRIBUTION_SETTINGS_ARGS, "--setting-sources", "user", "--plugin-dir", dirname(dirname(plan.files[0]!.path)), "--agent", "deck-developer-team:deck-lead"]);
     expect(ready.plan.args).not.toContain("--safe-mode");
     let called = false;
     const outcome = await executeRunnerLaunchPlan(ready.plan, { inheritedEnv: { PATH: "/usr/bin", SUPERMEMORY_CC_API_KEY: "fake-inherited", SUPERMEMORY_REPO_TAG: "wrong" }, spawn: async (command, args, options) => {
@@ -64,7 +98,7 @@ test("Claude shared Tavily credential is child-only, redacted, and absent when W
     const bin = join(root, "bin");
     await mkdir(bin);
     await writeFile(join(bin, "tavily-mcp"), "fixture", { mode: 0o700 });
-    const adapter = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot, resolveCommand: (name) => name === "tavily-mcp" ? join(bin, "tavily-mcp") : undefined, webSearchCredential: () => token } }).get("claude");
+    const adapter = createDefaultAdapterRegistry({ claude: { sessionDriver: { baseEnv: { CLAUDE_CODE_USE_BEDROCK: "1" } }, homeDir: root, dataRoot, resolveCommand: (name) => name === "tavily-mcp" ? join(bin, "tavily-mcp") : undefined, webSearchCredential: () => token } }).get("claude");
     const config = { ...getDefaultDeckConfig(), webSearch: { enabled: true, provider: "tavily" } } as ReturnType<typeof getDefaultDeckConfig>;
     const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "claude-development", deckConfig: config, capabilityIds: ["claude-team-files", "web-search"] });
     expect(plan.blocked).toBe(false);
@@ -98,7 +132,7 @@ test("Claude reuses the previously enrolled shell-profile Tavily key without ano
     expect(writeTavilyCredentialToActiveShellProfile(token, { home: root, shell: "/bin/bash" }).ok).toBe(true);
     const bin = join(root, "tavily-mcp");
     await writeFile(bin, "fixture", { mode: 0o700 });
-    const adapter = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot: join(root, "data", "deck"), resolveCommand: (name) => name === "tavily-mcp" ? bin : undefined } }).get("claude");
+    const adapter = createDefaultAdapterRegistry({ claude: { sessionDriver: { baseEnv: { CLAUDE_CODE_USE_BEDROCK: "1" } }, homeDir: root, dataRoot: join(root, "data", "deck"), resolveCommand: (name) => name === "tavily-mcp" ? bin : undefined } }).get("claude");
     const config = { ...getDefaultDeckConfig(), webSearch: { enabled: true, provider: "tavily" } } as ReturnType<typeof getDefaultDeckConfig>;
     const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "claude-development", deckConfig: config, capabilityIds: ["claude-team-files", "web-search"] });
     expect(plan.blocked).toBe(false);
@@ -133,6 +167,7 @@ test("official memory plus shared Web Search bind only selected secrets to the C
       resolveMemoryCredential: () => ({ token: memoryToken, profile: "default", canonicalRepoTag: "sm_project_v1_acme_repo" }),
       resolveCommand: (name) => name === "tavily-mcp" ? tavily : undefined,
       webSearchCredential: () => searchToken,
+      sessionDriver: { baseEnv: { CLAUDE_CODE_USE_BEDROCK: "1" } },
     } }).get("claude");
     const config = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const }, webSearch: { enabled: true, provider: "tavily" } } as ReturnType<typeof getDefaultDeckConfig>;
     const official = await adapter.runAction({ id: "official", kind: "install-claude-supermemory", capabilityId: "adaptive-memory", title: "Official memory", status: "ready" }, { projectRoot: home, runnerId: "claude", environmentId: "claude-development" });
@@ -197,4 +232,48 @@ for (const noOrigin of [false, true]) test(`standalone Claude skips memory for p
       expect(credentialReads).toBe(0);
     }
   } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test('native search permits the selected plugin without fallback files or credentials', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'deck-claude-native-search-launch-'));
+  try {
+    const adapter = createDefaultAdapterRegistry({ claude: { homeDir: home, dataRoot: join(home, 'data/deck'), sessionDriver: { baseEnv: {} } } }).get('claude');
+    const deckConfig = { ...getDefaultDeckConfig(), webSearch: { enabled: true, provider: 'tavily' } } as ReturnType<typeof getDefaultDeckConfig>;
+    const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: 'claude-development', deckConfig, capabilityIds: ['claude-team-files', 'web-search'] });
+    expect(plan.files.some(file => file.path.endsWith('/.mcp.json') && file.content.includes('web-search'))).toBe(false);
+    await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: 'claude-development', plan });
+    const launch = await adapter.buildLaunchPlan!({ projectRoot: home, teamId: 'developer-team', mode: 'interactive', deckConfig });
+    expect(launch.status).toBe('ready');
+    if (launch.status === 'ready') expect(launch.plan.envOverlay?.TAVILY_API_KEY).toBeUndefined();
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+for (const runnerOverride of [false, true]) test(`Claude preparation blocks a published CBM plugin after ${runnerOverride ? 'runner' : 'global'} opt-out`, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'deck-claude-cbm-optout-'));
+  const fs = await import('node:fs');
+  const { acquireRunnerGenerationReference } = await import('@deck/core');
+  const executable = join(root, 'external-codebase');
+  await writeFile(executable, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+  const adapter = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot: join(root, 'data/deck'),
+    sessionDriver: { baseEnv: {} }, verifyExistingCodebase: () => true,
+    resolveCommand: name => name === 'codebase-memory-mcp' ? executable : undefined } }).get('claude');
+  const deckConfig = getDefaultDeckConfig(); deckConfig.capabilities!['codebase-memory'].enabled = true;
+  const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: 'claude-development', deckConfig, capabilityIds: ['codebase-memory'] });
+  await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: 'claude-development', plan });
+  const input = { projectRoot: root, teamId: 'developer-team', mode: 'interactive' as const, deckConfig };
+  const first = await adapter.buildLaunchPlan!(input);
+  if (first.status !== 'ready') throw new Error('opt-in launch');
+  const generation = first.plan.generationReference!;
+  const before = fs.readFileSync(join(generation.root, '.mcp.json'), 'utf8');
+  const release = acquireRunnerGenerationReference(generation);
+  try {
+    if (runnerOverride) deckConfig.capabilities!['codebase-memory'].runners = { claude: false };
+    else deckConfig.capabilities!['codebase-memory'].enabled = false;
+    const launch = await prepareClaudeInteractiveLaunch(adapter, input);
+    expect(launch.status).toBe('blocked');
+    if (launch.status === 'blocked') expect(launch.code).toBe('claude-codebase-memory-selection-stale');
+    expect(launch.diagnostics[0]?.message).toContain('replacement');
+    expect(fs.readFileSync(join(generation.root, '.mcp.json'), 'utf8')).toBe(before);
+    expect(fs.existsSync(executable)).toBe(true);
+  } finally { release(); await rm(root, { recursive: true, force: true }); }
 });

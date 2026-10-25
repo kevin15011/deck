@@ -73,15 +73,15 @@ describe("installPiTools with Deck-owned tools", () => {
     expect(result).toMatchObject({ status: "installed", success: true });
   });
 
-  test("Context Mode keeps the shared-binary check", async () => {
+  test("Context Mode cannot trigger even a shared-binary probe", async () => {
     const probes: string[] = [];
     const { tools } = fakeTools();
     const [result] = await installPiTools("pi", [{ id: "context-mode", name: "context-mode", source: "context-mode (shared binary)", required: false, installKind: "shared-binary-plus-mcp", capabilityId: "context-mode" }], () => {}, {
       piTools: tools,
       checkSharedBinaryUsability: async (command) => { probes.push(command); return { status: "ready", command, resolvedPath: "/usr/bin/context-mode", version: "1" }; },
     });
-    expect(probes).toEqual(["context-mode"]);
-    expect(result!.status).toBe("reused");
+    expect(probes).toEqual([]);
+    expect(result!.status).toBe("failed");
   });
 
   test("Web Search needs only npx and never touches a credential", async () => {

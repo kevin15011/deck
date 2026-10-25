@@ -1,3 +1,5 @@
+import { recordOwnedRunnerArtifactTree } from "@deck/core";
+import { requirePiAgentDir } from "./agent-dir";
 import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -131,6 +133,7 @@ export function createPiTools(options: PiToolOptions = {}) {
         ensurePrivate(dirname(ownedRtkRoot));
         const result = await installOwnedRtk(ownedRtkRoot, rtkRelease, options.rtkArtifactEffects);
         if (rtkState() !== "ready") throw new Error("RTK verification failed.");
+        recordOwnedRunnerArtifactTree({ runnerId: "pi", root: requirePiAgentDir(env, home), manifestPath: join(requirePiAgentDir(env, home), "deck/manifest.json"), artifactRoot: ownedRtkRoot, sourceItemId: "package:rtk" });
         return result;
       },
     }),
@@ -151,6 +154,7 @@ export function createPiTools(options: PiToolOptions = {}) {
         ensurePrivate(dirname(ownedCodebaseRoot));
         const result = await installOwnedCodebase(ownedCodebaseRoot, codebaseRelease, options.codebaseArtifactEffects);
         if (codebaseState() !== "ready") throw new Error("Codebase Memory native verification failed.");
+        recordOwnedRunnerArtifactTree({ runnerId: "pi", root: requirePiAgentDir(env, home), manifestPath: join(requirePiAgentDir(env, home), "deck/manifest.json"), artifactRoot: ownedCodebaseRoot, sourceItemId: "package:codebase-memory" });
         return result;
       },
     }),

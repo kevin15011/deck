@@ -1417,7 +1417,7 @@ describe("dynamic tool resolution", () => {
     }
   });
 
-  test("with serena selected: apply agents get base + serena tools", () => {
+  test("legacy Serena selection adds no tools to Apply agents", () => {
     const projectRoot = createTempProject();
     try {
       const configDir = createTempConfigDir(projectRoot);
@@ -1434,10 +1434,10 @@ describe("dynamic tool resolution", () => {
       // Apply agents should have base + serena tools
       const applyBackendEntry = plan.agentEntries["deck-apply-deep"];
       if (!applyBackendEntry || !applyBackendEntry.tools) throw new Error("applyBackendEntry or tools is undefined");
-      expect(applyBackendEntry.tools.find_symbol).toBe(true);
-      expect(applyBackendEntry.tools.replace_symbol_body).toBe(true);
-      expect(applyBackendEntry.tools.rename_symbol).toBe(true);
-      expect(applyBackendEntry.tools.get_diagnostics_for_file).toBe(true);
+      expect(applyBackendEntry.tools.find_symbol).toBeUndefined();
+      expect(applyBackendEntry.tools.replace_symbol_body).toBeUndefined();
+      expect(applyBackendEntry.tools.rename_symbol).toBeUndefined();
+      expect(applyBackendEntry.tools.get_diagnostics_for_file).toBeUndefined();
 
       // Base tools still present
       expect(applyBackendEntry.tools.bash).toBe(true);
@@ -1447,7 +1447,7 @@ describe("dynamic tool resolution", () => {
     }
   });
 
-  test("non-apply subagents receive read-only serena tools only", () => {
+  test("legacy Serena selection adds no tools to non-Apply agents", () => {
     const projectRoot = createTempProject();
     try {
       const configDir = createTempConfigDir(projectRoot);
@@ -1464,9 +1464,9 @@ describe("dynamic tool resolution", () => {
       const explorerEntry = plan.agentEntries["deck-investigate"];
       if (!explorerEntry || !explorerEntry.tools) throw new Error("explorerEntry or tools is undefined");
       // Read-only tools: find_symbol, find_referencing_symbols, get_diagnostics_for_file
-      expect(explorerEntry.tools.find_symbol).toBe(true);
-      expect(explorerEntry.tools.find_referencing_symbols).toBe(true);
-      expect(explorerEntry.tools.get_diagnostics_for_file).toBe(true);
+      expect(explorerEntry.tools.find_symbol).toBeUndefined();
+      expect(explorerEntry.tools.find_referencing_symbols).toBeUndefined();
+      expect(explorerEntry.tools.get_diagnostics_for_file).toBeUndefined();
       // Write tools should NOT be present for non-apply
       expect(explorerEntry.tools.replace_symbol_body).toBeUndefined();
       expect(explorerEntry.tools.rename_symbol).toBeUndefined();

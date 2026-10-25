@@ -21,8 +21,11 @@ import { _resetDeckPathCache } from "../../runtime/paths.js";
 import {
   BackupStoreError,
   createBackup,
+  prepareBackupPostimages,
+  recordBackupInventoryChanges,
   BACKUP_ERROR_CODES,
 } from "../backup-store.js";
+import { createHash } from 'node:crypto';
 import {
   rollbackBackup,
   rollbackLatest,
@@ -34,10 +37,16 @@ import {
   loadBackupManifest,
 } from "../rollback.js";
 import { getStateStorePaths, readState } from "../state-store.js";
+import { buildDefaultManifest, readManifest, removeManifestFile, upsertManifestFile, writeManifest } from '../manifest-store.js';
 
 describe("rollback", () => {
   let workDir: string;
   const saved: Record<string, string | undefined> = {};
+  function applyFixture(backupId:string, files:readonly [string,string][]) {
+    const account=prepareBackupPostimages(backupId,files.map(([sourcePath,content])=>({sourcePath,sha256:createHash('sha256').update(content).digest('hex'),owner:'deck',kind:'config'})));
+    for (const [path,content] of files) writeFileSync(path,content);
+    account();
+  }
 
   function setXdg(
     name: "XDG_CONFIG_HOME" | "XDG_STATE_HOME" | "XDG_CACHE_HOME",
@@ -70,7 +79,7 @@ describe("rollback", () => {
   // --- Happy path ----------------------------------------------------
 
   describe("rollbackLatest (happy path)", () => {
-    it("restores the binary and runner file from the most recent backup", () => {
+    it("restores the binary and runner file from the most recent backup", async () => {
       const binary = join(workDir, "deck");
       const config = join(workDir, "config.json");
       writeFileSync(binary, "v1-binary");
@@ -88,10 +97,9 @@ describe("rollback", () => {
       });
 
       // Simulate the operation mutating files.
-      writeFileSync(binary, "v2-binary");
-      writeFileSync(config, '{"version":2}');
+      applyFixture(backup.backupId,[[binary,'v2-binary'],[config,'{"version":2}']]);
 
-      const result = rollbackLatest("2.0.0");
+      const result = await rollbackLatest("2.0.0");
 
       expect(result.backupId).toBe(backup.backupId);
       expect(result.rolledBackTo).toBe("1.0.0");
@@ -99,24 +107,24 @@ describe("rollback", () => {
       expect(readFileSync(config, "utf-8")).toBe('{"version":1}');
     });
 
-    it("updates state.yaml so currentVersion reflects the rolled-back version", () => {
+    it("updates state.yaml so currentVersion reflects the rolled-back version", async () => {
       const binary = join(workDir, "deck");
       writeFileSync(binary, "v1-binary");
-      createBackup({
+      const backup=createBackup({
         operationId: "op-1",
         deckVersionBefore: "1.0.0",
         targetVersion: "2.0.0",
         reason: "upgrade",
         files: [{ id: "binary", sourcePath: binary, owner: "deck", kind: "binary" }],
       });
-      writeFileSync(binary, "v2-binary");
+      applyFixture(backup.backupId,[[binary,'v2-binary']]);
 
-      rollbackLatest("2.0.0");
+      await rollbackLatest("2.0.0");
       const state = readState("placeholder");
       expect(state.currentVersion).toBe("1.0.0");
     });
 
-    it("clears the active operation and lock in state.yaml", () => {
+    it("clears the active operation and lock in state.yaml", async () => {
       const binary = join(workDir, "deck");
       writeFileSync(binary, "v1");
       createBackup({
@@ -149,7 +157,7 @@ describe("rollback", () => {
         }),
       );
 
-      rollbackLatest("2.0.0");
+      await rollbackLatest("2.0.0");
       const after = readState("placeholder");
       expect(after.activeOperation).toBeUndefined();
     });
@@ -158,9 +166,9 @@ describe("rollback", () => {
   // --- Edge cases ---------------------------------------------------
 
   describe("rollbackLatest (edge cases)", () => {
-    it("throws NOT_FOUND when no backups exist", () => {
+    it("throws NOT_FOUND when no backups exist", async () => {
       try {
-        rollbackLatest("1.0.0");
+        await rollbackLatest("1.0.0");
         throw new Error("expected throw");
       } catch (err) {
         expect(err).toBeInstanceOf(RollbackError);
@@ -168,7 +176,7 @@ describe("rollback", () => {
       }
     });
 
-    it("refuses to roll back a backup that is referenced by the active operation", () => {
+    it("refuses to roll back a backup that is referenced by the active operation", async () => {
       const binary = join(workDir, "deck");
       writeFileSync(binary, "v1");
       const { backupId } = createBackup({
@@ -201,7 +209,7 @@ describe("rollback", () => {
       );
 
       try {
-        rollbackLatest("2.0.0");
+        await rollbackLatest("2.0.0");
         throw new Error("expected throw");
       } catch (err) {
         expect(err).toBeInstanceOf(RollbackError);
@@ -209,7 +217,7 @@ describe("rollback", () => {
       }
     });
 
-    it("honors force=true to roll back a protected backup", () => {
+    it("honors force=true to roll back a protected backup", async () => {
       const binary = join(workDir, "deck");
       writeFileSync(binary, "v1");
       const { backupId } = createBackup({
@@ -240,9 +248,9 @@ describe("rollback", () => {
           },
         }),
       );
-      writeFileSync(binary, "v2");
+      applyFixture(backupId,[[binary,'v2']]);
 
-      const result = rollbackLatest("2.0.0", { force: true });
+      const result = await rollbackLatest("2.0.0", { force: true });
       expect(result.backupId).toBe(backupId);
       expect(readFileSync(binary, "utf-8")).toBe("v1");
     });
@@ -323,7 +331,40 @@ describe("rollback", () => {
   // --- Direct backup id -----------------------------------------------
 
   describe("rollbackBackup", () => {
-    it("rolls back the specified backup even when newer backups exist", () => {
+    it('restores an inventory entry removed by the transaction without adopting unrelated drift', async () => {
+      const target = join(workDir,'receipt'), unrelated = join(workDir,'unrelated');
+      writeFileSync(target,'original receipt'); writeFileSync(unrelated,'original tool');
+      let before = upsertManifestFile(buildDefaultManifest('1'),{path:target,owner:'deck',deck_version:'1',kind:'state'},'1');
+      before = upsertManifestFile(before,{path:unrelated,owner:'deck',deck_version:'1',kind:'content'},'1');
+      const backup = createBackup({operationId:'remove-receipt',deckVersionBefore:'1',targetVersion:'2',reason:'upgrade',files:[{id:'receipt',sourcePath:target,owner:'deck',kind:'state'}]});
+      const account = prepareBackupPostimages(backup.backupId,[{sourcePath:target,sha256:null,owner:'deck',kind:'state'}]);
+      rmSync(target); account();
+      const after = removeManifestFile(before,target);
+      recordBackupInventoryChanges(backup.backupId,before,after); writeManifest(after);
+      writeFileSync(unrelated,'later user edit');
+      await rollbackBackup(backup.manifest,'2');
+      expect(readFileSync(target,'utf8')).toBe('original receipt');
+      expect(readManifest('1').files).toContainEqual(before.files[0]!);
+      expect(readManifest('1').files).toContainEqual(before.files[1]!);
+      expect(readFileSync(unrelated,'utf8')).toBe('later user edit');
+    });
+
+    it('retains recovery when old inventory evidence cannot prove the applied hash', async () => {
+      const target = join(workDir,'receipt'); writeFileSync(target,'original receipt');
+      const backup = createBackup({operationId:'missing-inventory-proof',deckVersionBefore:'1',targetVersion:'2',reason:'upgrade',files:[{id:'receipt',sourcePath:target,owner:'deck',kind:'state'}]});
+      applyFixture(backup.backupId,[[target,'upgraded receipt']]);
+      writeManifest(upsertManifestFile(buildDefaultManifest('2'),{path:target,owner:'deck',deck_version:'2',kind:'state'},'2'));
+      const inventory = readManifest('2');
+      const recorded = JSON.parse(readFileSync(backup.manifestPath,'utf8'));
+      delete recorded.entries[0].postimage;
+      writeFileSync(backup.manifestPath,JSON.stringify(recorded));
+      await expect(rollbackBackup(backup.manifest,'2')).rejects.toMatchObject({code:ROLLBACK_ERROR_CODES.INVALID});
+      expect(readFileSync(target,'utf8')).toBe('upgraded receipt');
+      expect(readManifest('2')).toEqual(inventory);
+      expect(readState('2').activeOperation?.backupId).toBe(backup.backupId);
+    });
+
+    it("rolls back the specified backup even when newer backups exist", async () => {
       const binary = join(workDir, "deck");
       writeFileSync(binary, "v1");
       const first = createBackup({
@@ -338,17 +379,15 @@ describe("rollback", () => {
         reason: "upgrade",
         files: [{ id: "binary", sourcePath: binary, owner: "deck", kind: "binary" }],
       });
-      writeFileSync(binary, "v2");
+      applyFixture(second.backupId,[[binary,'v2']]);
 
-      const result = rollbackBackup(second.manifest, "2.0.0");
+      const result = await rollbackBackup(second.manifest, "2.0.0");
       expect(result.backupId).toBe(second.backupId);
 
-      // Re-creating an op-1 backup with current state so we can verify a
-      // direct rollback to the first manifest restores correctly.
+      // A later edit is outside op-1; selecting an older backup must preserve it.
       writeFileSync(binary, "v1.5");
-      const result1 = rollbackBackup(first.manifest, "1.5.0");
-      expect(result1.backupId).toBe(first.backupId);
-      expect(existsSync(binary)).toBe(true);
+      await expect(rollbackBackup(first.manifest, "1.5.0")).rejects.toMatchObject({code:BACKUP_ERROR_CODES.RESTORE_FAILED});
+      expect(readFileSync(binary,'utf8')).toBe('v1.5');
     });
   });
 });

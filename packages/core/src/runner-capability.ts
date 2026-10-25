@@ -232,6 +232,9 @@ export type DeveloperTeamApplyInput = {
   projectRoot: string;
   plan: RunnerDeveloperTeamInstallPlan;
   environmentId: RunnerEnvironmentId;
+  /** Enlist adapter metadata in the caller's existing backup before writing it.
+   * The returned accountant verifies the known bytes at the write boundary. */
+  beforeMetadataWrite?: (path: string, sha256: string | null) => () => void;
 };
 
 export type RunnerDeveloperTeamApplyResult = {
@@ -457,6 +460,8 @@ export type BackupFileEntry = {
 };
 
 export type DeveloperTeamApplyResult = {
+  contributions?: readonly import("./runner-contributions").RunnerContribution[];
+  contributionManifestPath?: string;
   results: readonly DeveloperTeamApplyAgentResult[];
   changedCount: number;
   unchangedCount: number;

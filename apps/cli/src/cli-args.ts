@@ -32,6 +32,7 @@ export type SessionSubcommand =
   | { action: "prune"; dryRun: boolean; json: boolean; maxAgeDays?: number; keep?: number };
 
 export type ParsedArgs =
+  | { command: "runner-cleanup"; runner?: string; review: boolean; json: boolean; output?: string }
   | { command: "tui" }
   | { command: "doctor" }
   | { command: "claude-native-launch"; launch: { mode: "interactive" } | { mode: "resume-by-id"; sessionId: string } | { mode: "resume-latest" } }
@@ -312,6 +313,20 @@ function parseSessionArgs(rest: string[]): ParsedArgs {
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
+  if (argv[0] === "runner" && argv[1] === "cleanup") {
+    let runner: string | undefined, output: string | undefined; let review = false, json = false;
+    for (let i = 2; i < argv.length; i++) {
+      const arg = argv[i];
+      if (arg === "--runner" && argv[i + 1] && !argv[i + 1]!.startsWith("--")) runner = argv[++i];
+      else if (arg === "--output" && argv[i + 1] && !argv[i + 1]!.startsWith("--")) output = argv[++i];
+      else if (arg === "--review") review = true;
+      else if (arg === "--plan") { /* planning is the default */ }
+      else if (arg === "--json") json = true;
+      else return { command: "error", message: "Usage: deck runner cleanup [--runner codex|claude|opencode|pi] [--plan|--review] [--json] [--output path]. Bulk confirmation is not supported." };
+    }
+    if (runner && !["codex", "claude", "opencode", "pi"].includes(runner)) return { command: "error", message: "Unsupported cleanup runner." };
+    return { command: "runner-cleanup", runner, review, json, output };
+  }
   // argv[0] is typically the runtime, argv[1] is the script
   // We skip those — the caller should pass only the user args
   const args = argv.slice(0);

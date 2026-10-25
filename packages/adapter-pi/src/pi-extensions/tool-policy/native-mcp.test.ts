@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { writeExplicitCodebaseConfig } from "../../__fixtures__/explicit-codebase";
+import { beforeEach, afterEach, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,6 +8,21 @@ import { createReviewedPiMcp, installReviewedPiMcp } from "./native-mcp";
 import { classifyNativeCodebase } from "../../pi-native-codebase-readiness";
 import { loadMcpConfig } from "./native-config.pinned";
 import { renderPiNativeConfig } from "../../../../../scripts/generate-pi-native-config";
+
+// These ownership/integrity cases require explicit activation; absence has separate coverage.
+let intentHome: string;
+let savedIntentEnvironment: { HOME?: string; XDG_CONFIG_HOME?: string };
+beforeEach(() => {
+  savedIntentEnvironment = { HOME: process.env.HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME };
+  intentHome = mkdtempSync(join(tmpdir(), 'deck-native-mcp-intent-'));
+  process.env.HOME = intentHome;
+  process.env.XDG_CONFIG_HOME = join(intentHome, '.config');
+  writeExplicitCodebaseConfig(intentHome);
+});
+afterEach(() => {
+  for (const [key, value] of Object.entries(savedIntentEnvironment)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  rmSync(intentHome, { recursive: true, force: true });
+});
 
 test("generated read-only loader matches the installed pinned native contract", async () => {
   const sdk = dirname(import.meta.resolve("@earendil-works/pi-coding-agent").replace("file://", ""));
@@ -126,7 +142,7 @@ test("verification and invalid ownership failures are never optional availabilit
    const registered = [{ name: "codebase_memory", config: { command: "/custom" } }, { name: "personal", config: { command: "/personal" } }];
    const ctx = { cwd: root, isProjectTrusted: () => false, signal: new AbortController().signal } as never;
    try {
-     const api = { getMcpServers: () => registered };
+     const api = { on() {}, getMcpServers: () => registered };
      installReviewedPiMcp(api as never, { getAgentDir: () => root, createMcpExtension: options => proxied => {
        expect(options?.loadConfig?.(ctx).servers).toEqual([]);
        expect(proxied.getMcpServers().map(server => server.name)).toEqual(["personal"]);
@@ -139,7 +155,7 @@ test("verification and invalid ownership failures are never optional availabilit
    const root = mkdtempSync(join(tmpdir(), "deck-pi-existing-registration-"));
    try {
      const registered = [{ name: "codebase-memory", config: { command: "/personal" }, extensionPath: "/personal-extension" }];
-     const pi = { getMcpServers: () => registered };
+     const pi = { on() {}, getMcpServers: () => registered };
      const reviewed = installReviewedPiMcp(pi as never, { getAgentDir: () => root, createMcpExtension: options => () => {
        options?.loadConfig?.({ cwd: root, isProjectTrusted: () => false } as never);
      } });
@@ -147,3 +163,15 @@ test("verification and invalid ownership failures are never optional availabilit
      expect(pi.getMcpServers()).toBe(registered);
    } finally { rmSync(root, { recursive: true, force: true }); }
  });
+
+test('search preparation observes the native connector first-prompt readiness barrier',async()=>{
+ const home=mkdtempSync(join(tmpdir(),'deck-search-order-'));const saved={HOME:process.env.HOME,XDG_CONFIG_HOME:process.env.XDG_CONFIG_HOME};
+ try{
+  process.env.HOME=home;process.env.XDG_CONFIG_HOME=join(home,'.config');mkdirSync(join(home,'.config/deck'),{recursive:true});writeFileSync(join(home,'.config/deck/config.json'),JSON.stringify({webSearch:{enabled:true,provider:'tavily'}}));
+  const handlers:Record<string,Function[]>={};let tools:any[]=[];
+  const pi={on:(name:string,handler:Function)=>(handlers[name]??=[]).push(handler),getActiveTools:()=>tools.map(t=>t.name),getAllTools:()=>tools,getMcpServers:()=>[],setActiveTools:()=>{}};
+  installReviewedPiMcp(pi as never,{getAgentDir:()=>join(home,'.pi/agent'),createMcpExtension:()=>native=>{native.on('before_agent_start',async()=>{await Promise.resolve();tools=[{name:'mcp__web_search__tavily_search'}];});}});
+  for(const handler of handlers.before_agent_start)await handler({systemPrompt:'Prompt'},{ui:{setStatus(){}}});
+  expect(tools).toHaveLength(1);
+ }finally{for(const[key,value]of Object.entries(saved)){if(value===undefined)delete process.env[key];else process.env[key]=value;}rmSync(home,{recursive:true,force:true});}
+});

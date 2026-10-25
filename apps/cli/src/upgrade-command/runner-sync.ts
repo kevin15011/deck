@@ -1,3 +1,11 @@
+import { withIdleRunnerMutation, RunnerMutationDeferredError, RunnerMutationCleanupError } from "@deck/session-host";
+import { createInterface } from "node:readline/promises";
+import { cleanupRoots, planRunnerCleanup, runRunnerCleanupUpdate, type CleanupRoots } from "../runner-cleanup-command";
+import type { RunnerMutationAdmission } from "../runner-mutation-admission";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { isAbsolute } from 'node:path';
+import { prepareBackupPostimages, readBackupManifest } from './backup-store.js';
 /**
  * Runner sync — content-only re-application of Deck files to installed
  * runners, driven by user selections in `config.json`.
@@ -62,7 +70,7 @@ import {
  */
 export type RunnerSyncOutcome = {
   runnerId: string;
-  status: "synced" | "skipped" | "failed";
+  status: "synced" | "skipped" | "failed" | "deferred";
   /** Files the sync wrote, in the order they were applied. */
   filesWritten: readonly string[];
   /** Diagnostics surfaced by the adapter or this module. */
@@ -77,6 +85,10 @@ export type RunnerSyncOutcome = {
  * Full result returned by `runRunnerSync`.
  */
 export type RunnerSyncResult = {
+  /** An unrecognized/unsafe apply output has no verified postimage. */
+  backupRecoveryRequired?: boolean;
+  /** Post-admission failure, retaining the callback outcome and original errors. Never replay automatically. */
+  recoveryError?: RunnerMutationCleanupError;
   outcomes: readonly RunnerSyncOutcome[];
   /** Updated manifest entries (paths + metadata) per file written. */
   manifestEntries: readonly ManifestFile[];
@@ -100,6 +112,10 @@ export type RunnerSyncAdapterRegistry = {
  * Inputs to `runRunnerSync`.
  */
 export type RunnerSyncInput = {
+  /** Existing upgrade backup; receipts are captured at this plan's apply boundary. */
+  backupId?: string;
+  mutationAdmission?: RunnerMutationAdmission;
+  retirement?: false | {roots: CleanupRoots; ask?: (question:string)=>Promise<string>};
   /** The current Deck config (source of truth for selections). */
   config: NormalizedDeckConfig;
   /** The adapter registry to drive each runner sync. */
@@ -129,11 +145,42 @@ export type RunnerSyncInput = {
 export async function runRunnerSync(
   input: RunnerSyncInput,
 ): Promise<RunnerSyncResult> {
+  const progress = {outcomes:[] as RunnerSyncOutcome[],manifestEntries:[] as ManifestFile[],manifestRemovals:[] as Array<{path:string;owner:`runner:${string}`}>};
+  try { return await (input.mutationAdmission ?? withIdleRunnerMutation)(async()=>{
+    const result = await runAdmittedRunnerSync(input,progress);
+    const entries = input.backupId ? readBackupManifest(input.backupId).entries : [];
+    const unresolved = entries.filter(entry=>!entry.postimage);
+    for (const outcome of result.outcomes) if (unresolved.some(entry=>entry.owner === `runner:${outcome.runnerId}`)) {
+      outcome.status = 'failed';
+      outcome.diagnostics = [...outcome.diagnostics,'Applied backup postimage is unknown; preserve files, receipts and unresolved recovery before retrying.'];
+    }
+    const incompleteWrites = entries.some(entry=>result.outcomes.some(outcome=>outcome.status === 'failed' && entry.owner === `runner:${outcome.runnerId}`)
+      && entry.postimage?.sha256 !== (entry.checksumBefore?.value ?? null));
+    return {...result,...(unresolved.length || incompleteWrites ? {backupRecoveryRequired:true} : {})};
+  }); }
+  catch (error) {
+    if (error instanceof RunnerMutationCleanupError) {
+      const diagnostic = error.operation.status === 'rejected'
+        ? `${error.message} Original operation error: ${String(error.operation.reason)}` : error.message;
+      // Keep completed receipts, removals, file lists and adapter backups even if
+      // a later runner/manifest step threw. Cleanup failure is never a deferral.
+      for (const outcome of progress.outcomes) {
+        if (outcome.status !== 'skipped') outcome.status = 'failed';
+        outcome.diagnostics = [...outcome.diagnostics,diagnostic];
+      }
+      for (const runnerId of input.runnerIds ?? input.registry.list().map(adapter=>adapter.runnerId)) {
+        if (!progress.outcomes.some(outcome=>outcome.runnerId===runnerId)) progress.outcomes.push({runnerId,status:'failed',filesWritten:[],diagnostics:[diagnostic],adapterBackup:undefined});
+      }
+      return {...progress,recoveryError:error};
+    }
+    if (!(error instanceof RunnerMutationDeferredError)) throw error;
+    return {outcomes:(input.runnerIds ?? input.registry.list().map(adapter=>adapter.runnerId)).map(runnerId=>({runnerId,status:'deferred',filesWritten:[],diagnostics:[error.message],adapterBackup:undefined})),manifestEntries:[]};
+  }
+}
+async function runAdmittedRunnerSync(input: RunnerSyncInput, progress: {outcomes:RunnerSyncOutcome[];manifestEntries:ManifestFile[];manifestRemovals:Array<{path:string;owner:`runner:${string}`}>}): Promise<RunnerSyncResult> {
   const { config, registry, projectRoot, deckVersion } = input;
   const ids = input.runnerIds ?? registry.list().map((a) => a.runnerId);
-  const outcomes: RunnerSyncOutcome[] = [];
-  const manifestEntries: ManifestFile[] = [];
-  const manifestRemovals: Array<{ path: string; owner: `runner:${string}` }> = [];
+  const {outcomes,manifestEntries,manifestRemovals} = progress;
 
   for (const runnerId of ids) {
     if (!registry.has(runnerId)) {
@@ -152,7 +199,7 @@ export async function runRunnerSync(
 
     // 1. Detect Deck-managed artifacts.
     const detection = await safeDetect(adapter, projectRoot);
-    if (!detection.installed) {
+    if (!detection.installed && !detection.replacementRequired) {
       outcomes.push({
         runnerId,
         status: "skipped",
@@ -164,6 +211,23 @@ export async function runRunnerSync(
         skippedReason: "not-detected",
       });
       continue;
+    }
+
+    let retirementDiagnostics: string[] = [];
+    if (input.retirement !== false) {
+      const roots = input.retirement?.roots ?? cleanupRoots();
+      const preview = planRunnerCleanup(roots,[runnerId]);
+      let rl: ReturnType<typeof createInterface> | undefined;
+      const ask = input.retirement?.ask ?? (process.stdin.isTTY && process.stdout.isTTY
+        ? (rl = createInterface({input:process.stdin,output:process.stdout}), (question:string)=>rl!.question(question)) : undefined);
+      try {
+        if (ask && preview.plans.some(plan=>plan.entries.length)) console.log(JSON.stringify(preview,null,2));
+        const cleanup = await runRunnerCleanupUpdate(roots,[runnerId],{ask,admission:effect=>Promise.resolve(effect())});
+        retirementDiagnostics = cleanup.flatMap(result=>result.status === 'complete' ? [] : [`Retirement ${result.status}: ${result.remaining} retained entries. ${result.diagnostic}`]);
+        if (cleanup.some(result=>result.status === 'recovery-required' || result.status === 'deferred')) {
+          outcomes.push({runnerId,status:'failed',filesWritten:[],diagnostics:retirementDiagnostics,adapterBackup:undefined});continue;
+        }
+      } finally {rl?.close();}
     }
 
     // 2. Read the user's package selections for this runner.
@@ -185,24 +249,50 @@ export async function runRunnerSync(
     });
 
     const adapterBackup = safeBackup(adapter, plan);
+    // Retain recovery evidence before apply; subsequent accounting can fail too.
+    const outcome: RunnerSyncOutcome = {runnerId,status:'failed',filesWritten:[],diagnostics:[],adapterBackup};
+    outcomes.push(outcome);
     let applyResult: DeveloperTeamApplyResult;
+    let account: (()=>void) | undefined;
     try {
-      applyResult = await safeApply(adapter, {
+      // Previews use physical adapter targets and include selection, settings and
+      // ownership writes absent from the display files (which may be virtual).
+      const changes = plan.mutationPreview?.map(m=>({sourcePath:m.path,sha256:m.postimage === 'absent' ? null : m.postimage}))
+        ?? plan.files.map(file=>({sourcePath:file.path,sha256:createHash('sha256').update(file.content).digest('hex')}));
+      if (input.backupId && changes.some(change=>!isAbsolute(change.sourcePath))) throw new Error('Backup requires absolute physical adapter targets; relative display paths cannot authorize recovery.');
+      const accounts: Array<()=>void> = [];
+      const beforeMetadataWrite: DeveloperTeamApplyInput['beforeMetadataWrite'] = input.backupId ? (path,sha256)=>{
+        const next = prepareBackupPostimages(input.backupId!,[{sourcePath:path,sha256,owner:`runner:${runnerId}`,kind:'state'}]);
+        accounts.push(next); return next;
+      } : undefined;
+      if (input.backupId) {
+        accounts.push(prepareBackupPostimages(input.backupId,changes.map(change=>({...change,owner:`runner:${runnerId}` as const,kind:'config' as const}))));
+        account = ()=>{ for (const next of accounts) next(); };
+      }
+      try { applyResult = await safeApply(adapter, {
         projectRoot,
         plan,
         environmentId: (adapter.environmentIds[0] ?? "opencode-development") as never,
-      });
+        beforeMetadataWrite,
+      }); } catch (applyError) {
+        try { account?.(); } catch (accountError) {
+          throw new AggregateError([applyError,accountError],`Apply failed: ${String(applyError)}; backup accounting failed: ${String(accountError)}`);
+        }
+        throw applyError;
+      }
+      account?.();
     } catch (err) {
       const diagnostics = [`applyDeveloperTeamInstall failed: ${(err as Error).message}`];
       if (adapterBackup !== undefined) {
         try {
           const rollback = await adapter.rollbackDeveloperTeamFiles(adapterBackup);
+          account?.();
           if (rollback.status === "conflict") diagnostics.push(rollback.diagnostics.join("; ") || `Rollback conflicts: ${rollback.conflicts.join(", ")}`);
         } catch (rollbackError) {
           diagnostics.push(`rollbackDeveloperTeamFiles failed: ${(rollbackError as Error).message}`);
         }
       }
-      outcomes.push({
+      Object.assign(outcome,{
         runnerId,
         status: "failed",
         filesWritten: [],
@@ -227,9 +317,10 @@ export async function runRunnerSync(
       if (adapterBackup !== undefined) {
         try {
           const rollback = await adapter.rollbackDeveloperTeamFiles(adapterBackup);
+          account?.();
           if (rollback.status === "conflict") throw new Error(rollback.diagnostics.join("; ") || `Rollback conflicts: ${rollback.conflicts.join(", ")}`);
         } catch (err) {
-          outcomes.push({
+          Object.assign(outcome,{
             runnerId,
             status: "failed",
             filesWritten: [],
@@ -241,7 +332,7 @@ export async function runRunnerSync(
           continue;
         }
       }
-      outcomes.push({
+      Object.assign(outcome,{
         runnerId,
         status: "failed",
         filesWritten: [],
@@ -257,28 +348,24 @@ export async function runRunnerSync(
     // 5. Record files in the manifest.
     const releasedPaths = new Set(plan.ownershipReleases ?? []);
     for (const path of releasedPaths) manifestRemovals.push({ path, owner: `runner:${runnerId}` });
-    const filePaths: string[] = [];
-    for (const file of plan.files) {
-      if (releasedPaths.has(file.path)) continue;
-      manifestEntries.push({
-        path: file.path,
-        owner: `runner:${runnerId}` as const,
-        checksum: { algorithm: "sha256", value: "0".repeat(64) },
-        deck_version: deckVersion,
-        kind: classifyFile(file.path),
-        lastWrittenAt: new Date().toISOString(),
-      });
-      filePaths.push(file.path);
+    const filePaths: string[] = plan.files.filter(file => !releasedPaths.has(file.path)).map(file => file.path);
+    outcome.filesWritten = filePaths;
+    // The per-runner manifest owns granular contributions. The upgrade inventory only references
+    // that verified manifest; shared user files must never become whole-file ownership records.
+    if (applyResult.contributionManifestPath) {
+      const path = applyResult.contributionManifestPath;
+      manifestEntries.push({ path, owner: `runner:${runnerId}`, checksum: { algorithm: "sha256", value: createHash("sha256").update(readFileSync(path)).digest("hex") },
+        deck_version: deckVersion, kind: "state", lastWrittenAt: new Date().toISOString() });
     }
     for (const mutation of plan.mutationPreview ?? []) {
       if (mutation.action === "delete") manifestRemovals.push({ path: mutation.path, owner: `runner:${runnerId}` });
     }
 
-    outcomes.push({
+    Object.assign(outcome,{
       runnerId,
       status: "synced",
       filesWritten: filePaths,
-      diagnostics: verify.diagnostics ?? [],
+      diagnostics: [...(verify.diagnostics ?? []), ...retirementDiagnostics],
       adapterBackup,
     });
   }

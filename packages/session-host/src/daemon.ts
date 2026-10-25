@@ -1,3 +1,4 @@
+import { runnerMutationActive, acquireRunnerMutationMarker, releaseRunnerMutationMarker } from "./runner-mutation";
 import {WebRestart,type RestartIdentity,type RestartLauncher} from "./web-restart";
 import {createHash} from "node:crypto";
 import { QuestionBroker } from "./question-broker";
@@ -92,6 +93,8 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     return lock.reason === "already-running" ? { ok: false, reason: "already-running", holder: lock.holder } : { ok: false, reason: "contended" };
   }
 
+  if (runnerMutationActive(paths, probe)) {lock.release();return {ok:false,reason:"contended"};}
+
   let server: ControlServer | undefined;
   let service: SessionService | undefined;
   let web: WebService | undefined;
@@ -119,6 +122,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     // including commands already admitted before the service reports a running native turn.
     const admit = async (effect: () => CommandOutcome | Promise<CommandOutcome>): Promise<CommandOutcome> => {
       if (draining) return { ok: false, code: "daemon-stopping", message: "The daemon is shutting down" };
+      if (runnerMutationActive(paths, probe)) return {ok:false,code:"runner-mutation-active",message:"Runner maintenance is in progress; retry when it finishes."};
       admitted++;
       try { return await effect(); } finally { admitted--; }
     };
@@ -127,6 +131,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       query: (name, args) => admit(() => svc.query?.(name, args) ?? { ok: false, code: "query-unknown" }),
       uploadAttachment: (input) => {
         if (draining) return { ok: false, code: "daemon-stopping" };
+        if (runnerMutationActive(paths, probe)) return {ok:false,code:"runner-mutation-active"};
         admitted++;
         try { return svc.uploadAttachment?.(input) ?? { ok: false, code: "attachment-unavailable" }; }
         finally { admitted--; }
@@ -139,13 +144,16 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     };
     const transportService: SessionService = {
       execute: (input) => guardedService.execute(input), openLog: (id) => svc.openLog(id), hasRunningWork: () => svc.hasRunningWork(),
-      query: (name, args) => name.startsWith("web.") ? admit(() => web?.query(name, args) ?? { ok: false, code: "web-unavailable" }) : guardedService.query!(name, args),
+      query: (name, args) => name === "runner-mutation.acquire"
+        ? Promise.resolve(!draining && !isBusy() && svc.hasActiveSessions?.() === false && acquireRunnerMutationMarker(paths,args) ? {ok:true} : {ok:false,code:"runner-mutation-deferred"})
+        : name === "runner-mutation.release" ? Promise.resolve({ok:releaseRunnerMutationMarker(paths,args)} as CommandOutcome)
+        : name.startsWith("web.") ? admit(() => web?.query(name, args) ?? { ok: false, code: "web-unavailable" }) : guardedService.query!(name, args),
     };
 
     const startedAt = clock.now();
     const nonce = lock.nonce;
     let stopRequested: ((reason: StopReason) => Promise<void>) | undefined;
-    const isBusy = () => admitted > 0 || svc.hasRunningWork() || broker.pending().length > 0 || questionBroker.pending().length > 0;
+    const isBusy = () => runnerMutationActive(paths, probe) || admitted > 0 || svc.hasRunningWork() || broker.pending().length > 0 || questionBroker.pending().length > 0;
     const bridge = new BridgeService({
       credentials, broker, questionBroker,
       status: (grant) => svc.taskStatus?.(grant) ?? { sessionId: grant.sessionId, taskId: grant.taskId, memberId: grant.memberId },
@@ -169,7 +177,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
         version: options.version, pid, nonce,
         status: () => ({
           pid, nonce, version: options.version, startedAt: new Date(startedAt).toISOString(), uptimeMs: clock.now() - startedAt,
-          clients: server!.clientCount + (web?.clientCount ?? 0), web: web?.status(), runningWork: svc.hasRunningWork(), pendingApprovals: broker.pending().length, pendingQuestions: questionBroker.pending().length, socketPath: paths.socket.path, stopping: draining, ...(options.restart?{executable:options.restart.identity}:{}),
+          clients: server!.clientCount + (web?.clientCount ?? 0), web: web?.status(), runningWork: svc.hasRunningWork(), activeSessions: svc.hasActiveSessions?.() ?? false, pendingApprovals: broker.pending().length, pendingQuestions: questionBroker.pending().length, socketPath: paths.socket.path, stopping: draining, ...(options.restart?{executable:options.restart.identity}:{}),
         }),
         requestRestart: () => {
           if (draining) return { ok: true as const };

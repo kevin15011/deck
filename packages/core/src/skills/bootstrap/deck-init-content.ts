@@ -72,10 +72,6 @@ Consume the cached \`SkillDiscoveryContextV1\` and use only the active-runner-bo
 
 When codebase-memory is enabled and the active runner exposes a usable tool, inspect project-index evidence. When absent or stale, call only \`index_repository\` with the canonical root, the valid existing mode or \`full\`, and persistence enabled; then re-inspect. Directory presence alone is insufficient. Enabled but absent/unusable exposure is \`unavailable\`, not an installation request.
 
-### 5. Serena project state
-
-When Serena is enabled and the active runner exposes a usable project-local operation, inspect project evidence and invoke only the active runner's declared project onboarding operation when needed; then re-inspect. Preserve valid shareable \`.serena/project.yml\` and \`.serena/.gitignore\`. Never guess a Serena executable or command, alter MCP/global configuration, install a language server, create memory, or write user-home state. Enabled but absent/unusable exposure is \`unavailable\`.
-
 ### 6. Analogous configured capabilities
 
 A capability is eligible only when current runner configuration enables it, the active runner exposes a usable tool, the tool declares a bounded project-local operation and exact owned outputs, and no installer, network, or global effect is reachable. Invoke that declared operation at most once and re-inspect. Treat detector-only or instruction-only capabilities, non-enabled/non-applicable capabilities, and capabilities with no project initializer as \`skipped\`; enabled unusable surfaces are \`unavailable\`.
@@ -84,7 +80,7 @@ A capability is eligible only when current runner configuration enables it, the 
 
 The existing Skill Registry writer alone owns \`/.atl/skill-registry.md\` coverage. For another capability artifact, contribute a rule only after proving immediately before commit: the component declares the exact normalized root-contained artifact and exact root-anchored or component-local rule; it is machine-local/non-versionable and not shareable; artifact and rule are not tracked and cannot match a declared shareable path; ownership is unambiguous; the ignore file is an existing regular UTF-8 file, not a symlink; and the read digest still matches at compare-and-swap commit time.
 
-Existing exact or owner-permitted broader coverage is \`unchanged\`. Otherwise append only the missing exact rule, preserving all existing bytes, comments, blank lines, and ordering and adding only the minimum newline separator/final newline. Never remove, reorder, normalize, broaden, untrack, or invoke Git. Never add broad rules for \`.serena/\`, \`.codebase-memory/\`, mixed runner directories, memories, or unknown output. Missing/unreadable root \`.gitignore\`, conflicting ownership, tracked/shareable matches, symlinks, non-UTF-8, CAS conflict, or uncertain containment is \`blocked\`; do not create a second policy.
+Existing exact or owner-permitted broader coverage is \`unchanged\`. Otherwise append only the missing exact rule, preserving all existing bytes, comments, blank lines, and ordering and adding only the minimum newline separator/final newline. Never remove, reorder, normalize, broaden, untrack, or invoke Git. Never add broad rules for \`.codebase-memory/\`, mixed runner directories, memories, or unknown output. Missing/unreadable root \`.gitignore\`, conflicting ownership, tracked/shareable matches, symlinks, non-UTF-8, CAS conflict, or uncertain containment is \`blocked\`; do not create a second policy.
 
 ## Idempotency and Aggregation
 

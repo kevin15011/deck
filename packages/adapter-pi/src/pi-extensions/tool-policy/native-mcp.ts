@@ -1,3 +1,7 @@
+import { readExplicitPiCapabilities } from "../shared/explicit-capabilities";
+import { hasRunnerContributionProof } from "../../../../core/src/runner-contributions";
+import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { isReservedPersonalMcp, type PersonalMcpAvailability } from "@deck/core/session/personal-mcp";
 import { DECK_PI_MCP_SERVER_IDS } from "../../pi-mcp-catalog";
 import { personalPiToolNames } from "../pi-personal-mcp";
@@ -26,7 +30,7 @@ export function createReviewedPiMcp(input: { agentDir: string; compatible?: (com
     selected = loaded.servers.find(server => server.name === "codebase-memory");
     try {
       if (loaded.errors.length) throw new Error("pi-codebase-configuration-invalid");
-      const result = classifyNativeCodebase({ ...input, entry: loaded.servers.find(server => server.name === "codebase-memory") ?? null, signal: ctx.signal });
+      const result = classifyNativeCodebase({ ...input, compatible: readExplicitPiCapabilities().codebase ? input.compatible : () => false, entry: loaded.servers.find(server => server.name === "codebase-memory") ?? null, signal: ctx.signal });
       status = result.status;
       failure = undefined;
       rejectedOwned = result.owned && result.status === "unavailable";
@@ -54,7 +58,7 @@ export function createReviewedPiMcp(input: { agentDir: string; compatible?: (com
       if (status === "custom" || !selected || selected.scope !== "global" || !("args" in selected.config) || !selected.config.args?.includes("codebase-mcp-guard-v1")) return "custom";
       try {
         const current = readNativeCodebaseSelection(input.agentDir);
-        const result = classifyNativeCodebase({ ...input, entry: current });
+        const result = classifyNativeCodebase({ ...input, compatible: readExplicitPiCapabilities().codebase ? input.compatible : () => false, entry: current });
         if (!current || hashJsonValue(current.config) !== hashJsonValue(selected.config) || !result.owned || !result.guarded || result.status !== "ready") return "unavailable";
         return "ready";
       } catch (error) {
@@ -71,6 +75,7 @@ export function createReviewedPiMcp(input: { agentDir: string; compatible?: (com
     },
     toolBlock(ctx: ExtensionContext): string | undefined {
       inspect(ctx);
+      if (!readExplicitPiCapabilities().codebase && status !== "custom") return "Codebase Memory is disabled for this execution.";
       if (failure) return nativeCodebaseProtectedDiagnostic(failure.error);
       return status === "unavailable" ? "Codebase Memory is unavailable for this execution. Use file search and focused reads." : undefined;
     },
@@ -79,6 +84,41 @@ export function createReviewedPiMcp(input: { agentDir: string; compatible?: (com
 
 export function installReviewedPiMcp(pi: ExtensionAPI, native: NativeShell, options: { compatible?: (command: string) => boolean } = {}) {
   const reviewed = createReviewedPiMcp({ agentDir: native.getAgentDir(), ...options });
+  const deactivatedSearch = new Set<string>();
+  const observedSearchBindings = new Set<string>();
+  const prepareSearch = (_event: unknown, ctx: ExtensionContext) => {
+    const selection = readExplicitPiCapabilities();
+    const agentDir = native.getAgentDir();
+    const ownsFallback = hasRunnerContributionProof(join(agentDir, "deck/manifest.json"), { path: join(agentDir, "mcp.json"), selector: { kind: "json", keys: ["mcpServers", "web-search"] } });
+    const active = pi.getActiveTools();
+    const toolsIndex = process.argv.findIndex(arg => arg === "--tools");
+    let allowedTools: string[] | undefined = toolsIndex >= 0 ? (process.argv[toolsIndex + 1] ?? "").split(/[, ]+/) : undefined;
+    try {
+      const defaults = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).defaultTools;
+      if (!allowedTools && Array.isArray(defaults)) allowedTools = defaults;
+    } catch { /* No configured tool restriction. */ }
+    const inventory = pi.getAllTools();
+    const nativeSearch = active.some(name => (name === "web_search" || name === "websearch") && inventory.some(tool => tool.name === name && (tool.parameters as { properties?: Record<string, unknown> }).properties?.query));
+    const fallback = pi.getAllTools().filter(tool => tool.name.startsWith("mcp__web_search__")).map(tool => tool.name);
+    if (ownsFallback) {
+      if (!selection.search || nativeSearch) {
+        for (const name of fallback.filter(name => active.includes(name))) deactivatedSearch.add(name);
+        pi.setActiveTools(active.filter(name => !fallback.includes(name)));
+      }
+      else {
+        if (selection.provider !== "tavily" || !process.env.TAVILY_API_KEY?.trim()) throw new Error("web-search-fallback-unavailable: configure the selected provider credential");
+        if (!fallback.length) throw new Error("web-search-fallback-unavailable: configured connector is not loaded");
+        // Restore only exposure Deck itself suppressed; never override an independent tool allowlist.
+        const additions = fallback.filter(name => (!allowedTools || allowedTools.includes(name)) && (deactivatedSearch.has(name) || !observedSearchBindings.has(name)));
+        pi.setActiveTools([...new Set([...active, ...additions])]);
+        for (const name of [...fallback.filter(name => active.includes(name)), ...additions]) observedSearchBindings.add(name);
+        deactivatedSearch.clear();
+        if (!pi.getActiveTools().some(name => fallback.includes(name))) throw new Error("web-search-fallback-excluded-by-tool-policy");
+      }
+    } else if (selection.search && !nativeSearch && !fallback.length) throw new Error("web-search-fallback-unavailable: review the configured Deck provider");
+    ctx.ui?.setStatus?.("deck-web-search", !selection.search ? undefined : nativeSearch ? "Search: native" : "Search: configured fallback");
+    if (selection.search && _event && typeof _event === "object" && "systemPrompt" in _event && typeof _event.systemPrompt === "string") return { systemPrompt: `${_event.systemPrompt}\n\nSearch selection for this turn: ${nativeSearch ? "Use the currently exposed native search tool; Deck fallback tools are suppressed." : "Use the currently exposed configured search provider."}` };
+  };
   native.createMcpExtension({ loadConfig: reviewed.loadConfig })(new Proxy(pi, {
     get(target, property, receiver) {
       if (property === "registerTool") return (tool: Parameters<ExtensionAPI["registerTool"]>[0]) => {
@@ -99,6 +139,10 @@ export function installReviewedPiMcp(pi: ExtensionAPI, native: NativeShell, opti
       return () => reviewed.filterPersonalRegistrations(target.getMcpServers()).filter(server => !reviewed.rejectsOwnedRegistration() || !codebaseName(server.name));
     },
   }));
+  // The native connector's first-prompt hook awaits direct tool registration. Inspect only after
+  // that barrier, and after its turn hook refreshes sign-ins, so a starting connector is not absent.
+  pi.on("before_agent_start", prepareSearch);
+  pi.on("turn_start", (event, ctx) => { prepareSearch(event, ctx); });
   return {
     ...reviewed,
     status: (): NativeCodebaseStatus => reviewed.status() === "unavailable" && !reviewed.rejectsOwnedRegistration() &&

@@ -23,48 +23,18 @@ import {
 
 function makeConfig(overrides: Partial<NormalizedDeckConfig["packageInstructions"]> = {}): NormalizedDeckConfig {
   return {
-    version: 1,
-    adaptiveMemory: { activeProvider: "none" },
-    webSearch: { enabled: false },
-    packageInstructions: {
-      pi: {
-        "codebase-memory": overrides.pi?.["codebase-memory"] ?? false,
-        "code-economy": overrides.pi?.["code-economy"] ?? false,
-        "context-mode": overrides.pi?.["context-mode"] ?? false,
-        rtk: overrides.pi?.rtk ?? false,
-        "adaptive-memory": overrides.pi?.["adaptive-memory"] ?? false,
-        serena: overrides.pi?.serena ?? false,
-      },
-      opencode: {
-        "codebase-memory": overrides.opencode?.["codebase-memory"] ?? false,
-        "code-economy": overrides.opencode?.["code-economy"] ?? false,
-        "context-mode": overrides.opencode?.["context-mode"] ?? false,
-        rtk: overrides.opencode?.rtk ?? false,
-        "adaptive-memory": overrides.opencode?.["adaptive-memory"] ?? false,
-        serena: overrides.opencode?.serena ?? false,
-      },
-      codex: {
-        "codebase-memory": overrides.codex?.["codebase-memory"] ?? false,
-        "code-economy": overrides.codex?.["code-economy"] ?? true,
-        "context-mode": overrides.codex?.["context-mode"] ?? false,
-        rtk: overrides.codex?.rtk ?? false,
-        "adaptive-memory": overrides.codex?.["adaptive-memory"] ?? false,
-        serena: overrides.codex?.serena ?? false,
-      },
-    },
-    orchestratorPersonality: DEFAULT_ORCHESTRATOR_PERSONALITY,
-    developerTeamExecution: getDefaultDeckConfig().developerTeamExecution,
-    profiles: [],
-    activeProfile: "default",
-  };
+    ...getDefaultDeckConfig(),
+    capabilities: { 'codebase-memory': { enabled: false, runners: Object.fromEntries(Object.entries(overrides).map(([runner, selection]) => [runner, selection?.['codebase-memory'] === true])) } },
+    packageInstructions: Object.fromEntries(Object.entries(getDefaultDeckConfig().packageInstructions).map(([runner, selection]) => [runner, { ...selection, 'code-economy': false, rtk: false, 'adaptive-memory': false, ...overrides[runner as keyof typeof overrides] }])),
+  } as NormalizedDeckConfig;
 }
 
-test("Codex defaults preserve canonical six-package order and valid surface metadata", () => {
+test("Codex defaults preserve continuing package order and valid surface metadata", () => {
   const config = getDefaultDeckConfig();
-  expect(Object.keys(config.packageInstructions.codex)).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"]);
-  expect(getEnabledPackageInstructionIds(config, "codex")).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"]);
+  expect(Object.keys(config.packageInstructions.codex)).toEqual(["codebase-memory", "code-economy", "rtk", "adaptive-memory"]);
+  expect(getEnabledPackageInstructionIds(config, "codex")).toEqual(["code-economy", "rtk", "adaptive-memory"]);
   const bundle = buildCapabilityInstructionBundle(["serena", "code-economy", "context-mode", "code-economy"]);
-  expect([...new Set(bundle.instructions.map((fragment) => fragment.packageId))]).toEqual(["code-economy", "context-mode", "serena"]);
+  expect([...new Set(bundle.instructions.map((fragment) => fragment.packageId))]).toEqual(["code-economy"]);
   expect(validateCapabilityInstructionMetadata(bundle)).toEqual([]);
 });
 
@@ -82,14 +52,8 @@ test("instruction metadata validation rejects canonical surface and tool-policy 
   };
   expect(validateCapabilityInstructionMetadata(changedSurface)).toContainEqual(expect.stringContaining("canonical instruction metadata mismatch"));
 
-  const policy = buildCapabilityToolPolicyBundle(["serena"]);
-  const mismatchedPolicy = {
-    policies: {
-      ...policy.policies,
-      serena: { ...policy.policies.serena!, enabledTools: policy.policies.serena!.enabledTools.slice(1) },
-    },
-  };
-  expect(validateCapabilityInstructionMetadata(buildCapabilityInstructionBundle(["serena"]), mismatchedPolicy)).toContainEqual(expect.stringContaining("canonical tool policy mismatch"));
+  const mismatchedPolicy = { policies: { 'codebase-memory': { packageId: 'codebase-memory' as const, enabledTools: ['injected'], disabledTools: [], targetAgents: ['deck-apply-fast', 'deck-apply-deep'] as const } } };
+  expect(validateCapabilityInstructionMetadata(canonical, mismatchedPolicy)).toContainEqual(expect.stringContaining("canonical tool policy mismatch"));
 });
 
 // ---------------------------------------------------------------------------
@@ -114,7 +78,7 @@ describe("buildCapabilityInstructionBundle", () => {
   test("multiple packages produce fragments from each package in deterministic order", () => {
     const bundle = buildCapabilityInstructionBundle(["codebase-memory", "context-mode", "rtk"]);
 
-    expect(bundle.instructions.length).toBe(6); // 2 per package
+    expect(bundle.instructions.length).toBe(4); // retired package contributes nothing
 
     // First 2 should be codebase-memory (agent, skill)
     expect(bundle.instructions[0].packageId).toBe("codebase-memory");
@@ -122,17 +86,11 @@ describe("buildCapabilityInstructionBundle", () => {
     expect(bundle.instructions[1].packageId).toBe("codebase-memory");
     expect(bundle.instructions[1].surface).toBe("skill");
 
-    // Next 2 should be context-mode
-    expect(bundle.instructions[2].packageId).toBe("context-mode");
+    expect(bundle.instructions[2].packageId).toBe("rtk");
     expect(bundle.instructions[2].surface).toBe("agent");
-    expect(bundle.instructions[3].packageId).toBe("context-mode");
+    expect(bundle.instructions[3].packageId).toBe("rtk");
     expect(bundle.instructions[3].surface).toBe("skill");
-
-    // Last 2 should be rtk
-    expect(bundle.instructions[4].packageId).toBe("rtk");
-    expect(bundle.instructions[4].surface).toBe("agent");
-    expect(bundle.instructions[5].packageId).toBe("rtk");
-    expect(bundle.instructions[5].surface).toBe("skill");
+    expect(bundle.instructions.some(fragment => fragment.packageId === 'context-mode')).toBe(false);
   });
 
   test("deduplicates duplicate package IDs", () => {
@@ -248,7 +206,7 @@ describe("getEnabledPackageInstructionIds", () => {
     });
 
     const ids = getEnabledPackageInstructionIds(config, "opencode");
-    expect(ids).toEqual(["code-economy", "context-mode"]);
+    expect(ids).toEqual(["code-economy"]);
   });
 
   test("returns empty for unknown runner", () => {
@@ -264,7 +222,7 @@ describe("getEnabledPackageInstructionIds", () => {
 
     const ids = getEnabledPackageInstructionIds(config, "pi");
     // Order should be canonical: codebase-memory, code-economy, context-mode, rtk
-    expect(ids).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk"]);
+    expect(ids).toEqual(["codebase-memory", "code-economy", "rtk"]);
   });
 });
 
@@ -364,7 +322,7 @@ describe("composeCapabilityInstructions", () => {
 
     // Should contain both package instruction section headings
     expect(result).toContain("Codebase Memory");
-    expect(result).toContain("Context Mode");
+    expect(result).not.toContain("Context Mode");
   });
 
   test("base content is preserved before instruction section", () => {
@@ -394,27 +352,9 @@ describe("buildCapabilityToolPolicyBundle", () => {
     expect(bundle.policies.serena).toBeUndefined();
   });
 
-  test("returns policy when serena is in packageIds", () => {
-    const bundle = buildCapabilityToolPolicyBundle(["serena"]);
-    expect(bundle.policies.serena).toBeDefined();
-    const policy = bundle.policies.serena!;
-    expect(policy.packageId).toBe("serena");
-    expect(policy.enabledTools).toHaveLength(11);
-    expect(policy.readOnlyTools).toHaveLength(6);
-    expect(policy.writeTools).toHaveLength(5);
-  });
-
-  test("apply agents are target agents", () => {
-    const bundle = buildCapabilityToolPolicyBundle(["serena"]);
-    const policy = bundle.policies.serena!;
-
-    expect(policy.targetAgents).toEqual(["deck-apply-fast", "deck-apply-deep"]);
-  });
-
-  test("deduplicates packages", () => {
-    const bundle = buildCapabilityToolPolicyBundle(["serena", "serena", "codebase-memory"]);
-
-    // Should only have one serena policy
-    expect(Object.keys(bundle.policies).filter((k) => k === "serena")).toHaveLength(1);
+  test("retired selection never creates tool grants, including duplicate legacy IDs", () => {
+    for (const ids of [["serena"], ["serena", "serena", "codebase-memory"]] as const) {
+      expect(buildCapabilityToolPolicyBundle(ids).policies).toEqual({});
+    }
   });
 });

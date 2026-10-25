@@ -30,7 +30,7 @@ function listSources(directory: string): string[] {
 }
 
 /** Files outside `pi-extensions/` that the bundles import; included in the digest so the staleness test sees them. */
-const EXTERNAL_SOURCES = ["packages/core/src/session/personal-mcp.ts", "packages/adapter-pi/src/pi-mcp-catalog.ts", "packages/core/src/owned-tools/rtk-hook.ts", "packages/core/src/session/mcp.ts", "packages/core/src/owned-tools/codebase-native-artifact.ts", "packages/adapter-pi/src/pi-manifest.ts", "packages/adapter-pi/src/pi-native-codebase-readiness.ts", "packages/adapter-pi/src/pi-codebase-guard-command.ts", "packages/adapter-pi/src/pi-mcp-env.ts"] as const;
+const EXTERNAL_SOURCES = ["packages/core/src/runner-contributions.ts", "packages/core/src/session/personal-mcp.ts", "packages/adapter-pi/src/pi-mcp-catalog.ts", "packages/core/src/owned-tools/rtk-hook.ts", "packages/core/src/session/mcp.ts", "packages/core/src/owned-tools/codebase-native-artifact.ts", "packages/adapter-pi/src/pi-manifest.ts", "packages/adapter-pi/src/pi-native-codebase-readiness.ts", "packages/adapter-pi/src/pi-codebase-guard-command.ts", "packages/adapter-pi/src/pi-mcp-env.ts"] as const;
 
 export function computePiExtensionSourceDigest(projectRoot = root): string {
   const sourceRoot = resolve(projectRoot, SOURCE_DIR);

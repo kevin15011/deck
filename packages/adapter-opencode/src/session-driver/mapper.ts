@@ -1,6 +1,7 @@
 import type { DriverEvent } from "@deck/core/session/driver";
 import { boundRaw, sanitizeContextObservation, contextTokenSum, contextTokens } from "@deck/core/session/events";
 import { redactText } from "@deck/core/session/redaction";
+import { OPENCODE_MAX_FRAME_BYTES, OpenCodeTransportError } from './transport';
 export const OPENCODE_PROTOCOL = "opencode-serve-sse";
 export const record = (v: unknown): v is Record<string, any> => typeof v === "object" && v !== null && !Array.isArray(v);
 const bounded = (value: unknown): unknown => value === undefined ? undefined : boundRaw({ runnerId: "opencode", protocol: OPENCODE_PROTOCOL, payload: value }, 8192).payload;
@@ -17,21 +18,36 @@ export class OpenCodeSseParser {
   private buffer = "";
   private data: string[] = [];
   private size = 0;
-  constructor(private readonly maxBytes = 1024 * 1024) {}
-  push(chunk: string): unknown[] {
-    this.buffer += chunk;
+  private highSurrogate = false;
+  private failed = false;
+  constructor(private readonly maxBytes = OPENCODE_MAX_FRAME_BYTES) {}
+  /** Production consumers dispatch immediately so a rejected successor cannot erase earlier frames. */
+  push(chunk: string, dispatch?: (event: unknown) => void): unknown[] {
+    if (this.failed) return [];
     const events: unknown[] = [];
-    let at: number;
-    while ((at = this.buffer.indexOf("\n")) >= 0) {
-      const line = this.buffer.slice(0, at).replace(/\r$/, ""); this.buffer = this.buffer.slice(at + 1);
-      this.size += Buffer.byteLength(line);
-      if (this.size > this.maxBytes) throw new Error("OpenCode SSE frame too large");
+    let start = 0;
+    try { while (start < chunk.length) {
+      const at = chunk.indexOf('\n', start);
+      const fragment = chunk.slice(start, at < 0 ? undefined : at);
+      const paired = this.highSurrogate && /^[\uDC00-\uDFFF]/.test(fragment);
+      const terminal = at >= 0 && this.buffer.length + fragment.length <= 1 && /^\r?$/.test(this.buffer + fragment);
+      // Include wire field names, comments, CRLF and the terminating separator.
+      this.size += Buffer.byteLength(fragment, 'utf8') - (paired ? 2 : 0) + (at < 0 ? 0 : 1);
+      if (this.size > this.maxBytes) throw new OpenCodeTransportError('opencode-sse-frame-too-large', { frameBytes: this.size, frameBytesKind: terminal ? 'exact' : 'lower-bound', maxFrameBytes: this.maxBytes });
+      this.buffer += fragment;
+      if (fragment.length) this.highSurrogate = /[\uD800-\uDBFF]$/.test(fragment);
+      if (at < 0) break;
+      const line = this.buffer.replace(/\r$/, ''); this.buffer = ''; this.highSurrogate = false;
       if (line === "") {
-        if (this.data.length) { try { events.push(JSON.parse(this.data.join("\n"))); } catch { events.push({ type: "invalid-sse-json", data: this.data.join("\n") }); } }
+        if (this.data.length) {
+          let event: unknown;
+          try { event = JSON.parse(this.data.join("\n")); } catch { throw new OpenCodeTransportError('opencode-sse-invalid-frame'); }
+          if (dispatch) dispatch(event); else events.push(event);
+        }
         this.data = []; this.size = 0;
       } else if (line.startsWith("data:")) this.data.push(line.slice(5).replace(/^ /, ""));
-    }
-    if (this.size + Buffer.byteLength(this.buffer) > this.maxBytes) throw new Error("OpenCode SSE frame too large");
+      start = at + 1;
+    } } catch (error) { this.failed = true; this.buffer = ''; this.data = []; this.size = 0; this.highSurrogate = false; throw error; }
     return events;
   }
 }

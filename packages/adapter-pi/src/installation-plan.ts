@@ -33,14 +33,6 @@ export const PI_INSTALLABLE_TOOLS: InstallablePiTool[] = [
   // `pi-subagents` and `pi-mcp-adapter` packages are intentionally not installable here (the adapter even
   // disables Pi's built-in MCP).
   {
-    id: "context-mode",
-    name: "context-mode",
-    source: "context-mode (shared binary)",
-    required: false,
-    installKind: "shared-binary-plus-mcp",
-    capabilityId: "context-mode",
-  },
-  {
     id: "codebase-memory-mcp",
     name: "codebase-memory-mcp",
     source: "DeusData/codebase-memory-mcp",
@@ -55,14 +47,6 @@ export const PI_INSTALLABLE_TOOLS: InstallablePiTool[] = [
     required: false,
     installKind: "shared-binary",
     capabilityId: "rtk",
-  },
-  {
-    id: "serena",
-    name: "Serena",
-    source: "serena-agent",
-    required: false,
-    installKind: "shared-binary-plus-mcp",
-    capabilityId: "serena",
   },
   {
     id: "context7",

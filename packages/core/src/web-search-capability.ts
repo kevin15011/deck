@@ -31,6 +31,7 @@ export type WebSearchReadinessCode =
 
 /** Safe, boolean-only readiness evidence. Never add credential values here. */
 export type WebSearchReadinessEvidence = Readonly<{
+  nativeSearch?: import("./native-search").NativeSearchEvidence;
   enabled: boolean;
   runnerSupported?: boolean;
   providerConfigured: boolean;
@@ -117,6 +118,10 @@ export function resolveWebSearchReadiness(
       code: "disabled",
       diagnostics: ["Web Search is disabled; no provider or runner setup is required."],
     };
+  }
+
+  if (evidence.nativeSearch?.availability === "available" && evidence.nativeSearch.webAllowed !== false) {
+    return { capabilityId: WEB_SEARCH_CAPABILITY_ID, enabled: true, state: "ready", code: "ready", diagnostics: ["Native search is available; no Deck provider is required."] };
   }
 
   if (evidence.runnerSupported === false) {

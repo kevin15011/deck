@@ -241,6 +241,7 @@ describe("runRunnerLaunch consent and status", () => {
       runnerId: "fake",
       displayName: "Fake",
       environmentIds: ["fake-development"],
+      readModelAssignments: () => ({}),
       buildDeveloperTeamInstallPlan: () => ({
         files: [{ path: "managed", content: "secret", kind: "other" }],
         mutationPreview: [{ action: "create", path: "managed", preimage: "absent", postimage: "abc", ownership: "deck-file" }],

@@ -368,6 +368,7 @@ function projectGlobalFields(value: unknown, omitProfiles: boolean): DeckConfig 
   for (const key of [
     "adaptiveMemory",
     "webSearch",
+    "capabilities",
     "packageInstructions",
     "orchestratorPersonality",
     "developerTeamExecution",

@@ -19,9 +19,9 @@ describe("Pi RunnerCapabilities factory", () => {
       projectIndexVerified: false,
     });
 
-    expect(report.capabilities.find((entry) => entry.capabilityId === "context-mode")?.code).toBe("pi-context-mode-mcp-missing");
+    expect(report.capabilities.find(entry => entry.capabilityId === "context-mode")).toBeUndefined();
     expect(report.capabilities.find((entry) => entry.capabilityId === "rtk")?.code).toBe("shared-binary-not-usable");
-    expect(report.capabilities.find((entry) => entry.capabilityId === "serena")?.code).toBe("shared-binary-not-usable");
+    expect(report.capabilities.find(entry => entry.capabilityId === "serena")).toBeUndefined();
     expect(report.capabilities.find((entry) => entry.capabilityId === "codebase-memory")?.code).toBe("codebase-memory-index-unverified");
 
     const missingMcp = resolvePiRunnerParity({

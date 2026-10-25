@@ -1,3 +1,4 @@
+import { writeExplicitCodebaseConfig } from "./__fixtures__/explicit-codebase";
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -10,6 +11,7 @@ for (const fault of ["ownership", "integrity", "missing"] as const) {
   test(`stock Pi 1.0.0 startup: ${fault}`, async () => {
     expect(Bun.spawnSync([...command, "--version"]).stdout.toString().trim()).toBe("1.0.0");
     const h = createPiHarness({}, { command });
+    writeExplicitCodebaseConfig(h.home);
     try {
       const ownedRoot = join(h.root, "codebase-native-v0.11.0", `${process.platform}-${process.arch}`);
       const marker = join(h.root, "binary-executed");

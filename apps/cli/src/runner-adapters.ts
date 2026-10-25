@@ -1,3 +1,4 @@
+import { guardRunnerAdapter } from "./runner-mutation-admission";
 /**
  * CLI adapter registry composition root.
  *
@@ -66,31 +67,32 @@ export function deckCodebaseGuardInvocation() {
 
 export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOptions = {}): AdapterRegistry {
   const registry = createAdapterRegistry();
-  registry.register("pi", createPiRunnerAdapter({
+  registry.register("pi", guardRunnerAdapter(createPiRunnerAdapter({
     codebaseGuardInvocation: deckCodebaseGuardInvocation,
     legacyBackupRoot: () => join(getDeckStateDir(), "backups", "pi-legacy"),
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     ...options.pi,
-  }));
-  registry.register("opencode", createOpenCodeRunnerAdapter({
+  })));
+  registry.register("opencode", guardRunnerAdapter(createOpenCodeRunnerAdapter({
     webSearchProviderResolver: getWebSearchProviderDescriptor,
+    webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     ...options.opencode,
-  }));
-  registry.register("codex", createCodexRunnerAdapter({
+  })));
+  registry.register("codex", guardRunnerAdapter(createCodexRunnerAdapter({
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     serenaProxyCommand: deckInternalCommand("serena-mcp"),
     deckMemoryMcpCommand: deckInternalCommand("memory-mcp"),
     ...options.codex,
-  }));
-  registry.register("claude", createClaudeRunnerAdapter({
+  })));
+  registry.register("claude", guardRunnerAdapter(createClaudeRunnerAdapter({
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     resolveMemoryCredential: resolveClaudeSupermemoryLaunchCredential,
     serenaProxyCommand: deckInternalCommand("serena-mcp"),
     ...options.claude,
-  }));
+  })));
   return registry;
 }
 

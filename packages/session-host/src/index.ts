@@ -67,3 +67,5 @@ export {WebRestart,readRestartIntent,writeRestartIntent,restartIntentPath,type R
 export {buildTaskHandoff, type ScopedDiff, type ScopedDiffProvider} from "./task-handoff";
 
 export {projectTaskContinuityMetrics} from "./task-continuity-metrics";
+
+export { withIdleRunnerMutation, RunnerMutationDeferredError, RunnerMutationCleanupError, runnerMutationActive } from "./runner-mutation";

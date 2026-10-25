@@ -1,3 +1,4 @@
+import { isCodebaseMemoryEnabled, nativeSearchEvidence, selectSearchRoute } from "@deck/core";
 import { type PersonalMcpAvailability } from "@deck/core/session/personal-mcp";
 import type { CapabilityAvailability } from "@deck/core/session/mcp";
 /** Shared provider composition; credentials remain in host memory and spawn environment only. */
@@ -48,7 +49,10 @@ export async function resolveSessionChildMcp(
   step("native-memory");
   const memory = managed ? prepareSessionNativeMemory(adapter?.runnerId ?? "", managed.context.projectRoot, config, environment, nativeMemoryEffects) : undefined;
   step("native-mcp-config");
-  const configured = { ...await adapter?.readSessionMcpServers?.() };
+  const configured = { ...await adapter?.readSessionMcpServers?.(config) };
+  // Deck participation follows new explicit intent. Independent native integrations stay in the native loader.
+  if (!isCodebaseMemoryEnabled(config, adapter?.runnerId ?? "")) delete configured["codebase-memory"];
+  delete configured["context-mode"]; delete configured.serena;
   step("capability-policy");
   // Ordinary servers, skills and plugins stay in the native loader. Only Codebase
   // needs a task binding prepared by the managed recovery service.
@@ -59,15 +63,21 @@ export async function resolveSessionChildMcp(
   const memoryProviderIds = [...new Set(["supermemory", "adaptive-memory", ...(config.adaptiveMemory.supermemory?.mcpServerName ? [config.adaptiveMemory.supermemory.mcpServerName] : [])])];
   // Claude persists an explicit trusted selection. Codex and OpenCode use the global web
   // policy in their native install plans; their absent optional selection seam is intentional.
-  const selected = adapter?.readSelectedCapabilityIds?.();
-  const enabled = config.webSearch.enabled && (selected === undefined || selected.includes("web-search"));
+  const enabled = config.webSearch.enabled;
   let envOverlay: Record<string, string> | undefined = memory?.envOverlay;
   let webSearch: ChildMcpResolver["webSearch"] = { enabled: false };
-  if (enabled) {
-    const provider = getWebSearchProviderDescriptor(config.webSearch.provider);
-    if (!provider) throw new Error("web-search-provider-unconfigured: select a supported Deck provider");
-    const credential = environment[provider.credentialEnvVar]?.trim();
-    if (!credential) throw new Error("web-search-credential-missing: configured provider credential is unavailable");
+  const nativeSearch = await adapter?.inspectNativeSearch?.({ projectRoot: managed?.context.projectRoot ?? process.cwd(),
+    modelId: managed?.context.modelId, providerId: managed?.context.providerId, runnerVersion: managed?.context.runnerVersion,
+    projectConfigTrusted: managed?.context.projectConfigTrusted, environment,
+  }) ?? nativeSearchEvidence("unknown", "effective-config", { runner: adapter?.runnerId }, "native-search-detector-unavailable");
+  const provider = enabled ? getWebSearchProviderDescriptor(config.webSearch.provider) : undefined;
+  const credential = provider ? environment[provider.credentialEnvVar]?.trim() : undefined;
+  const selection = selectSearchRoute(enabled, nativeSearch, !!provider && !!credential);
+  const searchDiagnostics = [...selection.diagnostics];
+  suppressedMcpServers.push(...(nativeSearch.ownedFallbackServerIds ?? []));
+  if (nativeSearch.unresolvedFallbackServerIds?.length) searchDiagnostics.push("web-search-unresolved-existing-route-preserved");
+  if (selection.route !== "fallback") delete servers["web-search"];
+  if (selection.route === "fallback" && provider && credential) {
     const [command, ...args] = provider.command;
     servers[provider.semanticServerId] = { command, args, env: {} };
     envOverlay = { ...envOverlay, [provider.credentialEnvVar]: credential };
@@ -124,7 +134,7 @@ export async function resolveSessionChildMcp(
   return {
     ...(managed ? { capabilityAvailability, personalMcpAvailability, suppressedMcpServers } : {}),
     ...(memory ? { nativeMemory: memory.nativeMemory } : {}),
-    runnerPackages: () => Object.keys(servers), memoryProviderIds, webSearch,
+    runnerPackages: () => Object.keys(servers), memoryProviderIds, webSearch, searchDiagnostics,
     ...(envOverlay ? { envOverlay } : {}), resolveServer: (id) => servers[id],
     ...(release ? { release } : {}),
   };

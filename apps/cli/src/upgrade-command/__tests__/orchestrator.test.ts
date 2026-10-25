@@ -935,7 +935,7 @@ describe("orchestrator", () => {
           currentVersion: "1.0.0",
           deps: makeDeps({
             replaceBinary: async () => {
-              writeFileSync(binaryPath, "BROKEN");
+              writeFileSync(binaryPath, binaryContent);
               createBackup({
                 operationId: "unrelated-newer-op",
                 deckVersionBefore: "9.0.0",

@@ -1,3 +1,4 @@
+import { writeExplicitCodebaseConfig } from "../../__fixtures__/explicit-codebase";
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { copyFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -28,6 +29,7 @@ const probeLog = (path: string) => (existsSync(path) ? readFileSync(path, "utf8"
 /** Real production classifier/guard, with exact fixture receipts replacing only the reviewed release metadata. */
 function reviewedGraphHarness(): PiHarness {
   const h = nativeHarness({ availableMcpServers: { "codebase-memory": {} } });
+  writeExplicitCodebaseConfig(h.home);
   const binary = join(h.root, "codebase-memory-mcp"), guardScript = join(h.root, "guard-main.ts");
   const bytes = readFileSync(fileURLToPath(new URL("../../__fixtures__/tiny-mcp-graph-server.mjs", import.meta.url)));
   writeFileSync(binary, bytes, { mode: 0o700 });
@@ -137,8 +139,8 @@ describe("deck-tool-policy in the real Pi 1.0 runtime (faux provider)", () => {
   },120000);
 
   realTest("6.4 coexists with the execution extension: delegation to an apply role is not blocked and evidence hooks stay inert", async () => {
-    harness = nativeHarness();
-    const run = await harness.run(["go"], { ...lead, FAUX_SCRIPT: "delegate", FAUX_DELEGATE: JSON.stringify({ agent: "deck-apply-fast", task: "do the change" }), FAUX_PARENT_DELAY_MS: "1500" }, { persistSession: true });
+    harness = nativeHarness({ installOptions: { modelAssignments: { "deck-apply-fast": "faux/faux-1" }, thinkingAssignments: { "deck-apply-fast": "off" } } });
+    const run = await harness.run(["go"], { ...lead, FAUX_SCRIPT: "delegate", FAUX_DELEGATE: JSON.stringify({ agent: "deck-apply-fast", task: "do the change" }), FAUX_PARENT_DELAY_MS: "5000" }, { persistSession: true });
     const end = endOf(run.events, "subagent");
     expect(end?.isError).toBe(false);
     expect(resultText(end)).toContain("Background delegation accepted");

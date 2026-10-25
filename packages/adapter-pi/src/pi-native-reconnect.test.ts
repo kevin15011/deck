@@ -1,3 +1,4 @@
+import { explicitCodebaseConfig, writeExplicitCodebaseConfig } from "./__fixtures__/explicit-codebase";
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -15,7 +16,7 @@ for (const fault of ["wrong-hash", "ownership-and-wrong-hash"] as const) for (co
     const root = mkdtempSync(join(tmpdir(), "deck-pi-reconnect-"));
     const agentDir = join(root, "agent"), projectRoot = join(root, "project"), executable = join(root, "codebase-memory-mcp");
     const marker = join(root, "executions.jsonl");
-    const saved = { PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, DECK_PI_SESSION: process.env.DECK_PI_SESSION };
+    const saved = { HOME: process.env.HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, DECK_PI_SESSION: process.env.DECK_PI_SESSION };
     const script = `#!/usr/bin/env node
 const build = 'A';
 require('node:fs').appendFileSync(${JSON.stringify(marker)}, JSON.stringify({build,pid:process.pid})+'\\n');
@@ -49,6 +50,7 @@ rl.on('line', line => {
     const executions = (): Array<{ build: string; pid: number }> => existsSync(marker) ? readFileSync(marker, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
     try {
       mkdirSync(projectRoot);
+      process.env.HOME = root; process.env.XDG_CONFIG_HOME = join(root, ".config"); writeExplicitCodebaseConfig(root);
       process.env.PI_CODING_AGENT_DIR = agentDir;
       process.env.DECK_PI_SESSION = "1";
       writeFileSync(executable, script, { mode: 0o700 });
@@ -66,11 +68,11 @@ process.exit(code);
       const adapter = createPiRunnerAdapter({ codebaseGuardInvocation: () => invocation, homeDirectory: root, env: { PI_CODING_AGENT_DIR: agentDir }, piTools: tools, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0\n" }) });
       // Existing users migrate the owned direct entry through the normal transactional planner.
       const legacy = createPiRunnerAdapter({ homeDirectory: root, env: { PI_CODING_AGENT_DIR: agentDir }, piTools: tools, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0\n" }) });
-      const legacyInput = { projectRoot, environmentId: "pi-development" as const, deckConfig: validateDeckConfig({}), capabilityIds: ["codebase-memory-mcp"] };
+      const legacyInput = { projectRoot, environmentId: "pi-development" as const, deckConfig: explicitCodebaseConfig(), capabilityIds: ["codebase-memory-mcp"] };
       await legacy.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan: legacy.buildDeveloperTeamInstallPlan(legacyInput) });
       const direct = readFileSync(join(agentDir, "mcp.json"));
       expect(JSON.parse(direct.toString()).mcpServers["codebase-memory"].command).toBe(executable);
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "pi-development", deckConfig: validateDeckConfig({}), capabilityIds: ["codebase-memory-mcp"] });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "pi-development", deckConfig: explicitCodebaseConfig(), capabilityIds: ["codebase-memory-mcp"] });
       expect(plan.blocked).toBeFalsy();
       expect(readFileSync(join(agentDir, "mcp.json"))).toEqual(direct);
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan });
@@ -132,11 +134,11 @@ test("stock native dispatcher restores direct tools only after reviewed reconnec
   const { buildCodebaseGuardEntry } = await import("./pi-codebase-guard-command");
   const { createEmptyPiManifest, hashJsonValue } = await import("./pi-manifest");
   const root=mkdtempSync(join(tmpdir(),"deck-guard-native-session-")), agentDir=join(root,"agent"), cwd=join(root,"project"), binary=join(root,"codebase-memory-mcp"), marker=join(root,"starts");
-  const saved={HOME:process.env.HOME,PI_CODING_AGENT_DIR:process.env.PI_CODING_AGENT_DIR,DECK_PI_SESSION:process.env.DECK_PI_SESSION};
+  const saved={HOME:process.env.HOME,XDG_CONFIG_HOME:process.env.XDG_CONFIG_HOME,PI_CODING_AGENT_DIR:process.env.PI_CODING_AGENT_DIR,DECK_PI_SESSION:process.env.DECK_PI_SESSION};
   let session: import("@earendil-works/pi-coding-agent").AgentSession | undefined;
   try {
     mkdirSync(join(agentDir,"deck"),{recursive:true});mkdirSync(cwd);
-    process.env.HOME=root;process.env.PI_CODING_AGENT_DIR=agentDir;process.env.DECK_PI_SESSION="1";
+    process.env.HOME=root;process.env.XDG_CONFIG_HOME=join(root,".config");writeExplicitCodebaseConfig(root);process.env.PI_CODING_AGENT_DIR=agentDir;process.env.DECK_PI_SESSION="1";
     const script=`#!/usr/bin/env node
 const build='A';require('node:fs').appendFileSync(${JSON.stringify(marker)},JSON.stringify({build,pid:process.pid})+'\\n');
 require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'fixture',version:'0.11.0'}}:m.method==='tools/list'?{tools:['search_graph','trace_path','get_code_snippet','search_code'].map(name=>({name,inputSchema:{type:'object'}}))}:{};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`;

@@ -301,16 +301,6 @@ Follow the api-and-interface-design skill for stable API and interface design gu
 Follow the \`documentation-and-adrs\` skill for comment guidance (why-vs-what, gotchas, no commented-out code) and ADR-style rationale capture.
 Follow the test-driven-development skill for RED-GREEN-REFACTOR, Prove-It testing, test pyramid, and real-over-mocks guidance when authoring or changing tests.
 
-## Serena Enforcement
-
-When Serena is available:
-
-- **Symbolic editing priority**: Use Serena edit tools as first preference for symbol-level editing and refactoring operations (e.g., replace_symbol_body, rename_symbol, insert_after_symbol, insert_before_symbol).
-- **Symbolic search priority**: Use Serena read-only tools for symbol search and diagnostics (e.g., find_symbol, find_referencing_symbols, get_diagnostics_for_file).
-- **Coexistence**: Use codebase-memory for architecture and impact analysis; use Serena for symbol-level operations.
-- **Fallback reporting**: If Serena tools are unavailable, report explicitly: "Serena tools unavailable. Using fallback: [tool]."
-- **No CLI validation**: Do not validate CLI existence — tool availability is the source of truth.
-- **Delegation requirement**: When delegated by Orchestrator for symbolic editing tasks, use Serena edit tools or report fallback explicitly.
 `;
 
 export const APPLY_BACKEND_COMPACT_AGENT_BODY = `# Backend Apply Agent

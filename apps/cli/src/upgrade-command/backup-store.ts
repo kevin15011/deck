@@ -12,12 +12,17 @@
  * ("Backup schemas — `backup-manifest.json`").
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { assertNoContributionSymlink } from "@deck/core";
 
 import { z } from "zod";
+import { withIdleRunnerMutation } from "@deck/session-host";
 
 import { getDeckXdgPaths } from "../runtime/paths.js";
+import { ManifestFileSchema, type ManifestJsonV2 } from './manifest-store.js';
+import { isDeepStrictEqual } from 'node:util';
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -47,6 +52,13 @@ export const ChecksumSchema = z.object({
   value: z.string().regex(/^[a-f0-9]{64}$/),
 });
 
+// Optional only for reading older backups. Missing evidence never authorizes restore.
+const PostimageSchema = z.object({
+  sha256: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+  paths: z.array(z.object({path:z.string(), dev:z.string(), ino:z.string()})),
+});
+type Postimage = z.infer<typeof PostimageSchema>;
+
 export const BackupEntrySchema = z.object({
   id: z.string(),
   sourcePath: z.string(),
@@ -56,6 +68,7 @@ export const BackupEntrySchema = z.object({
   existed: z.boolean(),
   checksumBefore: ChecksumSchema.optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
+  postimage: PostimageSchema.optional(),
 });
 export type BackupEntry = z.infer<typeof BackupEntrySchema>;
 
@@ -68,6 +81,13 @@ export const BackupManifestSchema = z.object({
   targetVersion: z.string().optional(),
   reason: z.enum(["upgrade", "migration", "rollback-test"]),
   entries: z.array(BackupEntrySchema),
+  // Exact inventory writes, separate from mutable physical restore progress.
+  // Optional for older backups; absence never authorizes guessing ownership.
+  inventoryChanges: z.array(z.object({
+    path: z.string(),
+    before: ManifestFileSchema.optional(),
+    after: ManifestFileSchema.optional(),
+  })).optional(),
   retention: z.object({
     keepLatest: z.literal(5),
     maxAgeDays: z.literal(30),
@@ -189,7 +209,8 @@ export function createBackup(input: CreateBackupInput): CreateBackupResult {
   for (const file of input.files) {
     const backupRelPath = sanitizeBackupPath(file.id, file.sourcePath);
     const backupPath = join(backupDir, backupRelPath);
-    const existed = existsSync(file.sourcePath);
+    const postimage = inspectPostimage(file.sourcePath);
+    const existed = postimage.sha256 !== null;
 
     let checksumBefore: BackupEntry["checksumBefore"];
     let sizeBytes: number | undefined;
@@ -201,6 +222,7 @@ export function createBackup(input: CreateBackupInput): CreateBackupResult {
         const stat = statSync(backupPath);
         sizeBytes = stat.size;
         checksumBefore = { algorithm: "sha256", value: computeFileSha256(backupPath) };
+        if (checksumBefore.value !== postimage.sha256 || !samePostimage(inspectPostimage(file.sourcePath),postimage)) throw new Error('Source changed during backup');
       } catch (err) {
         throw new BackupStoreError(
           BACKUP_ERROR_CODES.CREATE_FAILED,
@@ -212,13 +234,14 @@ export function createBackup(input: CreateBackupInput): CreateBackupResult {
 
     entries.push({
       id: file.id,
-      sourcePath: file.sourcePath,
+      sourcePath: resolve(file.sourcePath),
       backupPath,
       owner: file.owner,
       kind: file.kind,
       existed,
       ...(checksumBefore ? { checksumBefore } : {}),
       ...(sizeBytes !== undefined ? { sizeBytes } : {}),
+      postimage,
     });
   }
 
@@ -249,6 +272,106 @@ export function createBackup(input: CreateBackupInput): CreateBackupResult {
   }
 
   return { backupId, backupDir, manifestPath, manifest };
+}
+
+function inspectPostimage(path: string): Postimage {
+  path = resolve(path);
+  assertNoContributionSymlink(path);
+  const paths: Postimage['paths'] = [];
+  for (let cursor = path;; cursor = dirname(cursor)) {
+    try {
+      const stat = lstatSync(cursor);
+      if (cursor === path && !stat.isFile()) throw new Error(`Recovery target is not a regular file: ${path}`);
+      if (cursor !== path && !stat.isDirectory()) throw new Error(`Recovery ancestor is not a directory: ${cursor}`);
+      paths.push({path:cursor, dev:String(stat.dev), ino:String(stat.ino)});
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    if (dirname(cursor) === cursor) break;
+  }
+  return {sha256:existsSync(path) ? computeFileSha256(path) : null, paths};
+}
+
+function samePostimage(a: Postimage, b: Postimage): boolean {
+  return a.sha256 === b.sha256 && JSON.stringify(a.paths) === JSON.stringify(b.paths);
+}
+
+function sameAncestors(before: Postimage, after: Postimage, path: string): boolean {
+  return before.paths.filter(p=>p.path !== resolve(path)).every(p=>
+    after.paths.some(a=>a.path === p.path && a.dev === p.dev && a.ino === p.ino));
+}
+
+function writeBackupManifest(manifest: BackupManifest): void {
+  const path = join(getBackupDir(manifest.backupId), 'backup-manifest.json');
+  assertNoContributionSymlink(path);
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, JSON.stringify(manifest,null,2)+'\n', {flag:'wx',mode:0o600});
+    assertNoContributionSymlink(path);
+    renameSync(temporary,path);
+  } finally { if (existsSync(temporary)) unlinkSync(temporary); }
+}
+
+/** Persist only inventory changes whose physical targets belong to this backup,
+ * before the central inventory writer runs. Whole-file snapshots would overwrite
+ * unrelated/later inventory contributions during recovery.
+ */
+export function recordBackupInventoryChanges(backupId: string, before: ManifestJsonV2, after: ManifestJsonV2): void {
+  const backup = readBackupManifest(backupId);
+  const paths = new Set([...before.files, ...after.files].map(file => file.path));
+  backup.inventoryChanges = [...paths].flatMap(path => {
+    const previous = before.files.find(file => file.path === path);
+    const next = after.files.find(file => file.path === path);
+    if (isDeepStrictEqual(previous, next)) return [];
+    if (!backup.entries.some(entry => entry.sourcePath === path && entry.owner === (next ?? previous)?.owner)) return [];
+    return [{ path, before: previous, after: next }];
+  });
+  writeBackupManifest(backup);
+}
+
+/** Prepare at the actual writer boundary, then account known outputs immediately
+ * after apply (also on partial failure), before verification can run user code.
+ * Expected bytes come from the plan/staged binary, never from rollback-time reads.
+ * New plan targets join the same backup, before their first mutation.
+ */
+export function prepareBackupPostimages(backupId: string, changes: ReadonlyArray<{
+  sourcePath: string; sha256: string | null; owner: BackupOwner; kind: BackupKind;
+}>): () => void {
+  const manifest = readBackupManifest(backupId);
+  const selected = changes.map(change => {
+    let entry = manifest.entries.find(entry => resolve(entry.sourcePath) === resolve(change.sourcePath));
+    if (!entry) {
+      const sourcePath = resolve(change.sourcePath), postimage = inspectPostimage(sourcePath);
+      const backupPath = join(getBackupDir(backupId),`additional-${randomUUID()}`);
+      if (postimage.sha256 !== null) {
+        copyFileSync(sourcePath,backupPath);
+        if (computeFileSha256(backupPath) !== postimage.sha256 || !samePostimage(inspectPostimage(sourcePath),postimage)) throw new Error('Source changed during backup');
+      }
+      entry = {id:`${change.owner}:${sourcePath}`,sourcePath,backupPath,owner:change.owner,kind:change.kind,
+        existed:postimage.sha256 !== null,postimage,
+        ...(postimage.sha256 !== null ? {checksumBefore:{algorithm:'sha256' as const,value:postimage.sha256}} : {})};
+      manifest.entries.push(entry);
+    }
+    const before = inspectPostimage(entry.sourcePath);
+    if (!entry.postimage || !samePostimage(before,entry.postimage)) throw new Error(`Recovery postimage changed before apply: ${entry.sourcePath}`);
+    return {entry,change,before};
+  });
+  writeBackupManifest(manifest);
+  return () => {
+    // Adapter side writes can enlist more targets between preparation and
+    // accounting. Merge only our selected entries into the latest ledger.
+    const latest = readBackupManifest(backupId);
+    for (const {entry,change,before} of selected) {
+      // Unknown/unsafe output stays unresolved; never bless arbitrary current bytes.
+      entry.postimage = undefined;
+      try {
+        const after = inspectPostimage(entry.sourcePath);
+        if (sameAncestors(before,after,entry.sourcePath) && (after.sha256 === change.sha256 || after.sha256 === before.sha256)) entry.postimage = after;
+      } catch { /* Preserve unknown postimage for explicit recovery. */ }
+      const current = latest.entries.find(candidate=>candidate.sourcePath === entry.sourcePath);
+      if (!current) throw new Error(`Recovery entry disappeared: ${entry.sourcePath}`);
+      current.postimage = entry.postimage;
+    }
+    writeBackupManifest(latest);
+  };
 }
 
 /**
@@ -298,63 +421,88 @@ export function computeFileSha256(filePath: string): string {
 /**
  * Restore every entry in a backup manifest. The restore proceeds in reverse
  * order, so files created during the operation are removed and original
- * files overwritten. Missing backup copies (the original did not exist) are
- * treated as "delete the new file" operations.
+ * files restored only while their recorded postimages and paths still match.
+ * Missing or changed evidence is a conflict, including a missing original copy.
  *
  * Per spec REQ-ATM-012, a partial restore is a critical error: the caller
  * MUST surface `ROLLBACK_FAILED` so the user can recover from `backupPath`.
  */
-export function restoreBackup(backupId: string): {
+export async function restoreBackup(backupId: string): Promise<{
   restored: number;
   deleted: number;
   failed: { entryId: string; sourcePath: string; reason: string }[];
-} {
-  const manifest = readBackupManifest(backupId);
+}> {
+  // Guard the lowest public restore entry point, including direct recovery users.
+  // The manifest is reread after admission and the reservation covers every write.
+  return withIdleRunnerMutation(() => {
+    const manifest = readBackupManifest(backupId);
 
-  let restored = 0;
-  let deleted = 0;
-  const failed: { entryId: string; sourcePath: string; reason: string }[] = [];
+    let restored = 0;
+    let deleted = 0;
+    const failed: { entryId: string; sourcePath: string; reason: string }[] = [];
 
-  // Reverse so newer changes get unwound first.
-  const reversed = [...manifest.entries].reverse();
-  for (const entry of reversed) {
-    try {
-      if (entry.existed && existsSync(entry.backupPath)) {
-        mkdirSync(dirname(entry.sourcePath), { recursive: true });
-        copyFileSync(entry.backupPath, entry.sourcePath);
-        restored += 1;
-      } else {
-        // Original didn't exist before the operation → delete what the
-        // operation created.
-        if (existsSync(entry.sourcePath)) {
-          rmSync(entry.sourcePath, { force: true, recursive: false });
-          deleted += 1;
+    // Reverse so newer changes get unwound first.
+    const reversed = [...manifest.entries].reverse();
+    for (const entry of reversed) {
+      try {
+        if (!entry.postimage) throw new Error('Applied postimage is unknown or missing; preserve this entry for explicit recovery');
+        // Validate originals even on an already-restored retry. Missing originals
+        // must never turn into deletion or successful recovery finalization.
+        if (entry.existed) {
+          assertNoContributionSymlink(entry.backupPath);
+          if (!entry.checksumBefore || !lstatSync(entry.backupPath).isFile() || computeFileSha256(entry.backupPath) !== entry.checksumBefore.value) {
+            throw new Error('Original backup is missing or changed');
+          }
         }
+        const observed = inspectPostimage(entry.sourcePath);
+        if (!samePostimage(observed,entry.postimage)) throw new Error('Applied postimage or path changed; newer content preserved');
+        const originalHash = entry.existed ? entry.checksumBefore!.value : null;
+        if (observed.sha256 === originalHash) continue; // untouched or durable completed restore
+        if (entry.existed) {
+          const temporary = `${entry.sourcePath}.${randomUUID()}.rollback`;
+          try {
+            // No recursive mkdir: disappearance/replacement of an ancestor is a conflict.
+            copyFileSync(entry.backupPath,temporary,constants.COPYFILE_EXCL);
+            if (computeFileSha256(temporary) !== originalHash || !samePostimage(inspectPostimage(entry.sourcePath),observed)) throw new Error('Recovery postimage changed before restore');
+            renameSync(temporary,entry.sourcePath);
+          } finally { if (existsSync(temporary)) unlinkSync(temporary); }
+          restored++;
+        } else {
+          if (!samePostimage(inspectPostimage(entry.sourcePath),observed)) throw new Error('Recovery postimage changed before delete');
+          unlinkSync(entry.sourcePath);
+          deleted++;
+        }
+        // Persist each completed restore before another entry can fail. Retrying
+        // checks these bytes/identities too, and never replays completed writes.
+        const after = inspectPostimage(entry.sourcePath);
+        entry.postimage = after.sha256 === originalHash && sameAncestors(observed,after,entry.sourcePath) ? after : undefined;
+        writeBackupManifest(manifest);
+        if (!entry.postimage) throw new Error('Recovery postimage changed during restore; preserve unresolved recovery');
+      } catch (err) {
+        failed.push({
+          entryId: entry.id,
+          sourcePath: entry.sourcePath,
+          reason: (err as Error).message,
+        });
       }
-    } catch (err) {
-      failed.push({
-        entryId: entry.id,
-        sourcePath: entry.sourcePath,
-        reason: (err as Error).message,
-      });
     }
-  }
 
-  if (failed.length > 0) {
-    const details = failed
-      .slice(0, 5)
-      .map((entry) => `${entry.entryId} (${entry.sourcePath}): ${entry.reason}`)
-      .join("; ");
-    const suffix = failed.length > 5 ? `; plus ${failed.length - 5} more` : "";
-    throw new BackupStoreError(
-      BACKUP_ERROR_CODES.RESTORE_FAILED,
-      `Restore partially failed: ${failed.length} of ${reversed.length} entries. ` +
-        `Failures: ${details}${suffix}. See the backup at ${manifest.backupId}.`,
-      { backupId, failedEntries: failed },
-    );
-  }
+    if (failed.length > 0) {
+      const details = failed
+        .slice(0, 5)
+        .map((entry) => `${entry.entryId} (${entry.sourcePath}): ${entry.reason}`)
+        .join("; ");
+      const suffix = failed.length > 5 ? `; plus ${failed.length - 5} more` : "";
+      throw new BackupStoreError(
+        BACKUP_ERROR_CODES.RESTORE_FAILED,
+        `Restore partially failed: ${failed.length} of ${reversed.length} entries. ` +
+          `Failures: ${details}${suffix}. See the backup at ${manifest.backupId}.`,
+        { backupId, failedEntries: failed },
+      );
+    }
 
-  return { restored, deleted, failed };
+    return { restored, deleted, failed };
+  });
 }
 
 /**
@@ -362,6 +510,7 @@ export function restoreBackup(backupId: string): {
  */
 export function readBackupManifest(backupId: string): BackupManifest {
   const manifestPath = join(getBackupDir(backupId), "backup-manifest.json");
+  assertNoContributionSymlink(manifestPath);
   if (!existsSync(manifestPath)) {
     throw new BackupStoreError(
       BACKUP_ERROR_CODES.NOT_FOUND,

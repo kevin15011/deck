@@ -16,5 +16,5 @@ test('native trust, transports/exposure/OAuth remain intact; control namespaces 
 });
 test('member schemas include personal native tools without changing deny-by-default read-only permissions',()=>{
  const tools=personalPiToolNames([{name:'mcp__docs__lookup',exposure:'deferred'},{name:'mcp__serena__rename_symbol',exposure:'direct'},{name:'mcp__deck__deck_delegate',exposure:'direct'},{name:'mcp__hidden__tool',exposure:'hidden'}] as any);
- expect(tools).toEqual(['mcp__docs__lookup']);expect(evaluateRolePolicy('investigate',tools[0]!)).toMatchObject({block:true});expect(evaluateRolePolicy('apply-deep',tools[0]!)).toBeUndefined();
+ expect(tools).toEqual(['mcp__docs__lookup', 'mcp__serena__rename_symbol']);expect(evaluateRolePolicy('investigate', tools[1]!)).toMatchObject({block:true});expect(evaluateRolePolicy('investigate',tools[0]!)).toMatchObject({block:true});expect(evaluateRolePolicy('apply-deep',tools[0]!)).toBeUndefined();
 });

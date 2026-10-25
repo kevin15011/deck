@@ -41,12 +41,12 @@ function toolsReviewFor(toolId: "codebase-memory", installed: boolean): OpenCode
 describe("OpenCode package instruction boundary", () => {
   test("supports the canonical package metadata without treating baseline or capability IDs as toggles", () => {
     const adapter = createOpenCodeRunnerAdapter();
-    expect(adapter.packageInstructionIds).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk", "serena"]);
+    expect(adapter.packageInstructionIds).toEqual(["codebase-memory", "code-economy", "rtk"]);
     const inventory = { runnerId: "opencode", environmentId: "opencode-development", capabilities: [] } as any;
     const base = { runnerId: "opencode", environmentId: "opencode-development", selectedCapabilities: {}, adaptiveMemory: { provider: "none" } } as const;
 
     const enabled = adapter.buildReviewPlan({ ...base, packageInstructions: { "context-mode": true, serena: true, "code-economy": true, context7: true } } as any, inventory);
-    expect(enabled.groups.configWrites).toContainEqual(expect.objectContaining({ id: "package-instructions.opencode.deck-config", kind: "write-deck-config" }));
+    expect(enabled.groups.configWrites).not.toContainEqual(expect.objectContaining({ id: "package-instructions.opencode.deck-config", kind: "write-deck-config" }));
 
     const baselineOnly = adapter.buildReviewPlan({ ...base, packageInstructions: { "code-economy": true, context7: true } } as any, inventory);
     expect(baselineOnly.groups.configWrites).not.toContainEqual(expect.objectContaining({ id: "package-instructions.opencode.deck-config" }));
@@ -615,90 +615,17 @@ describe("OpenCode Serena evidence handoff", () => {
     };
   }
 
-  test("composes the Serena owned root and revalidator when production options omit them", async () => {
-    const writerInputs: unknown[] = [];
-    const effects: SerenaBootstrapEffects = {
-      resolveDeckDataRoot: () => "/fixtures/deck-data",
-      canonicalizePath: (path) => path,
-      isUserOwnedPath: () => true,
-      ensureDirectory: () => undefined,
-      inspectPath: (path) => ({ state: "ready", resolvedPath: path, fingerprint: evidence.fingerprint }),
-      fetchInstaller: async () => ({ status: 500, body: new Uint8Array() }),
-      spawn: async () => { throw new Error("not expected"); },
-      supportsControlledBootstrap: () => true,
-      probeExecutable: (request) => ({
-        state: "ready",
-        resolvedPath: request.executablePath,
-        fingerprint: evidence.fingerprint,
-      }),
-    };
-    const adapter = createOpenCodeRunnerAdapter({
-      serenaBootstrapEffects: effects,
-      installTools: async () => [{
-        toolId: "serena",
-        tool: "Serena",
-        outcome: "executed",
-        success: true,
-        installerInvoked: true,
-        message: "Serena installation completed.",
-        serenaBootstrapOutcome: "installed",
-        serenaReadiness: evidence,
-      }] as never,
-      serenaMcpWriter: (input: unknown) => {
-        writerInputs.push(input);
-        return { ok: true as const, status: "created" as const };
-      },
-    } as never);
+  test("retired Serena never constructs roots or revalidators", async () => { let effects = 0; const tripwire = () => { effects++; throw new Error('retired side effect'); }; const adapter = createOpenCodeRunnerAdapter({ installTools: tripwire, serenaReadinessResolver: tripwire, serenaRevalidator: tripwire, serenaMcpWriter: tripwire } as never); for (const action of [installAction, configAction]) {
+      const result = await adapter.runAction(action, context());
+      expect(result.status).toBe('skipped');
+      expect(result.raw).toBeUndefined();
+  } expect(effects).toBe(0); });
 
-    const installResult = await adapter.runAction(installAction, context());
-    const configResult = await adapter.runAction(configAction, context());
-
-    expect(installResult.status).toBe("executed");
-    expect(configResult.status).toBe("executed");
-    expect(writerInputs).toHaveLength(1);
-  });
-
-  test("runs plan install, retains private evidence, revalidates, and writes once", async () => {
-    const writerInputs: unknown[] = [];
-    const installCalls: unknown[] = [];
-    const adapter = createOpenCodeRunnerAdapter({
-      installTools: async (...args: unknown[]) => {
-        installCalls.push(args);
-        return [{
-          toolId: "serena",
-          tool: "Serena",
-          outcome: "executed",
-          success: true,
-          installerInvoked: true,
-          message: "Serena installation completed.",
-          serenaBootstrapOutcome: "installed",
-          serenaReadiness: evidence,
-        }] as never;
-      },
-      serenaOwnedRoot: ownedRoot,
-      serenaRevalidator: async (received: SerenaReadinessEvidence) => ({ valid: true as const, evidence: received }),
-      serenaMcpWriter: (input: unknown) => {
-        writerInputs.push(input);
-        return { ok: true as const, status: "created" as const };
-      },
-    } as never);
-
-    const installResult = await adapter.runAction(installAction, context());
-    const configResult = await adapter.runAction(configAction, context());
-
-    expect(installResult.status).toBe("executed");
-    expect(installResult.raw).not.toHaveProperty("serenaReadiness");
-    expect(installCalls).toHaveLength(1);
-    expect(configResult).toMatchObject({ actionId: configAction.id, status: "executed" });
-    expect(writerInputs).toHaveLength(1);
-    expect(writerInputs[0]).toMatchObject({
-      authorization,
-      operation,
-      readiness: evidence,
-      command: executable,
-      args: ["start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false"],
-    });
-  });
+  test("retired stale Serena actions cannot install or publish evidence", async () => { let effects = 0; const tripwire = () => { effects++; throw new Error('retired side effect'); }; const adapter = createOpenCodeRunnerAdapter({ installTools: tripwire, serenaReadinessResolver: tripwire, serenaRevalidator: tripwire, serenaMcpWriter: tripwire } as never); for (const action of [installAction, configAction]) {
+      const result = await adapter.runAction(action, context());
+      expect(result.status).toBe('skipped');
+      expect(result.raw).toBeUndefined();
+  } expect(effects).toBe(0); });
 
   test("never calls the writer for missing authorization, failed install, cancellation, invalid evidence, or stale revalidation", async () => {
     const writerCalls: unknown[] = [];
@@ -744,91 +671,22 @@ describe("OpenCode Serena evidence handoff", () => {
     expect(writerCalls).toHaveLength(0);
   });
 
-  test("does not use a bare PATH Serena gate for a direct Serena action", async () => {
-    let installerCalled = false;
-    const adapter = createOpenCodeRunnerAdapter({
-      toolsReview: () => { throw new Error("PATH inventory must not authorize Serena"); },
-      serenaOwnedRoot: ownedRoot,
-      installTools: async () => {
-        installerCalled = true;
-        return [{
-          toolId: "serena",
-          tool: "Serena",
-          outcome: "already-present",
-          success: true,
-          installerInvoked: false,
-          message: "Serena reused.",
-          serenaBootstrapOutcome: "reused",
-          serenaReadiness: evidence,
-        }] as never;
-      },
-    } as never);
+  test("retired direct Serena actions perform no PATH check", async () => { let effects = 0; const tripwire = () => { effects++; throw new Error('retired side effect'); }; const adapter = createOpenCodeRunnerAdapter({ installTools: tripwire, serenaReadinessResolver: tripwire, serenaRevalidator: tripwire, serenaMcpWriter: tripwire } as never); for (const action of [installAction, configAction]) {
+      const result = await adapter.runAction(action, context());
+      expect(result.status).toBe('skipped');
+      expect(result.raw).toBeUndefined();
+  } expect(effects).toBe(0); });
 
-    const result = await adapter.runAction(installAction, context());
-
-    expect(result.status).toBe("skipped");
-    expect(installerCalled).toBe(true);
-  });
-
-  test("reuses Serena and replaces a legacy bare OpenCode command through one adapter flow", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "deck-opencode-serena-"));
-    const operationRoot = join(directory, "deck-data", "tools", "serena");
-    const operationExecutable = join(operationRoot, "bin", "serena");
-    const configPath = join(directory, "opencode.json");
-    const operationEvidence: SerenaReadinessEvidence = {
-      ...evidence,
-      resolvedExecutablePath: operationExecutable,
-    };
-
-    try {
-      await mkdir(join(operationRoot, "bin"), { recursive: true });
-      await writeFile(configPath, JSON.stringify({
-        mcp: {
-          unrelated: { type: "remote", url: "https://example.test/mcp" },
-          serena: {
-            type: "local",
-            enabled: true,
-            command: ["serena", "start-mcp-server", "--context", "ide", "--project-from-cwd"],
-          },
-        },
-      }));
-
-      const adapter = createOpenCodeRunnerAdapter({
-        serenaOwnedRoot: operationRoot,
-        serenaConfigPath: configPath,
-        serenaRevalidator: async (received: SerenaReadinessEvidence) => ({ valid: true as const, evidence: received }),
-        installTools: async () => [{
-          toolId: "serena",
-          tool: "Serena",
-          outcome: "already-present",
-          success: true,
-          installerInvoked: false,
-          message: "Serena reused.",
-          serenaBootstrapOutcome: "reused",
-          serenaReadiness: operationEvidence,
-        }] as never,
-      } as never);
-
-      const installResult = await adapter.runAction(installAction, context());
-      const configResult = await adapter.runAction(configAction, context());
-      const written = JSON.parse(await readFile(configPath, "utf8"));
-
-      expect(installResult.status).toBe("skipped");
-      expect(configResult.status).toBe("executed");
-      expect(written.mcp.serena.command).toEqual([
-        operationExecutable,
-        "start-mcp-server",
-        "--context",
-        "ide",
-        "--project-from-cwd",
-        "--open-web-dashboard",
-        "false",
-      ]);
-      expect(written.mcp.unrelated).toEqual({ type: "remote", url: "https://example.test/mcp" });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
+  test("retired direct actions preserve ambiguous shared Serena entries", async () => { const root = await mkdtemp(join(tmpdir(), 'deck-retired-legacy-serena-')); const configPath = join(root, 'opencode.json'); const before = JSON.stringify({ mcp: { serena: { command: ['serena'] }, user: { command: ['user'] } } }); try {
+      await writeFile(configPath, before);
+      const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: root });
+      for (const action of [installAction, configAction])
+          expect((await adapter.runAction(action, context())).status).toBe('skipped');
+      expect(await readFile(configPath, 'utf8')).toBe(before);
+  }
+  finally {
+      await rm(root, { recursive: true, force: true });
+  } });
 
   test("does not put default or package-instruction Serena into the generic install plan", () => {
     const adapter = createOpenCodeRunnerAdapter({

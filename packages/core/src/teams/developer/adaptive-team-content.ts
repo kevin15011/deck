@@ -63,7 +63,7 @@ For new substantive work, briefly state the understood objective and scope. Iden
 
 export const INVESTIGATE_AGENT_BODY = `# Investigate (deck-investigate)
 
-Resolve real uncertainty without modifying the product by default. Use Codebase Memory for structural discovery, Serena for symbols and diagnostics, Context Mode for large evidence, and the minimum other configured capabilities relevant to the question.
+Resolve real uncertainty without modifying the product by default. Use the minimum configured capabilities relevant to the question, including Codebase Memory for structural discovery only when explicitly enabled.
 
 Trace the real production path when factories, dependency injection, adapters, runtime composition, effects, or public boundaries are involved. Do not freeze an exhaustive path allowlist before the trace. Stop when the unknown that blocks implementation or planning is resolved.
 
@@ -116,7 +116,7 @@ export const SETUP_AGENT_BODY = `${deckSetupAgentContent}
 
 ## Adaptive activation reminder
 
-The deterministic preflight runs once per session and caches its ready result. A ready project does not launch Setup or cause writes. Repair only the degraded component or components reported by that preflight. Project readiness covers OpenSpec, the Skill Registry, Codebase Memory, Serena, Context Mode, RTK, configured adaptive memory, and every active-runner project capability that exposes a bounded initializer.`;
+The deterministic preflight runs once per session and caches its ready result. A ready project does not launch Setup or cause writes. Repair only the degraded component or components reported by that preflight. Project readiness covers OpenSpec, the Skill Registry, explicitly enabled Codebase Memory, RTK, configured adaptive memory, and every active-runner project capability that exposes a bounded initializer.`;
 
 function skillBody(name: string, body: string): string {
   return body.replace(/^# .+$/m, `# ${name} Skill`);

@@ -306,11 +306,9 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
   runnerScope: "pi",
   runnerDisplayName: "Pi",
   selectedCapabilities: {
-    "context-mode": true,
     "codebase-memory-mcp": true,
-    "codebase-memory": true,
+    "codebase-memory": false,
     rtk: true,
-    serena: true,
     context7: true,
   },
   explicitlySelectedCapabilities: {},
@@ -336,12 +334,10 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
   },
   runtime: {},
   packageInstructions: {
-    "codebase-memory": true,
+    "codebase-memory": false,
     "code-economy": true,
-    "context-mode": true,
     rtk: true,
     "adaptive-memory": true,
-    serena: true,
   },
   plan: undefined,
   planRevision: 0,
@@ -368,7 +364,8 @@ export function createDefaultRunnerDashboardState(
     selectedCapabilities: {
       ...DEFAULT_RUNNER_DASHBOARD_STATE.selectedCapabilities,
       ...overrides.selectedCapabilities,
-      serena: overrides.packageInstructions?.serena ?? overrides.selectedCapabilities?.serena ?? true,
+      "codebase-memory": overrides.packageInstructions?.["codebase-memory"] ?? false,
+      "codebase-memory-mcp": overrides.packageInstructions?.["codebase-memory"] ?? false,
     },
     explicitlySelectedCapabilities: {
       ...DEFAULT_RUNNER_DASHBOARD_STATE.explicitlySelectedCapabilities,

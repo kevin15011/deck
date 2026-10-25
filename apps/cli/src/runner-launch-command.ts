@@ -6,7 +6,7 @@ import type {
   RunnerLaunchPlan,
   RunnerLaunchResult,
 } from "@deck/core";
-import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, prepareAndBuildDeveloperTeamInstallPlan, RUNNER_ENV_ALLOWLIST, isSensitiveRunnerEnv, sanitizeRunnerEnv, resolveCanonicalSupermemoryProjectScope, createOwnerOnlyFileSecretStore, readLogicalGitOriginRemote } from "@deck/core";
+import { acquireRunnerGenerationReference, MAX_RUNNER_STDIN_PAYLOAD_BYTES, prepareAndBuildDeveloperTeamInstallPlan, RUNNER_ENV_ALLOWLIST, isSensitiveRunnerEnv, sanitizeRunnerEnv, resolveCanonicalSupermemoryProjectScope, createOwnerOnlyFileSecretStore, readLogicalGitOriginRemote } from "@deck/core";
 import { discoverLiteralSshHostAliasesFromHome, resolveOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
 import { spawn as nodeSpawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -23,6 +23,7 @@ import { authorizeOpenCodeSupermemoryLaunch, VERIFIED_OPENCODE_SUPERMEMORY_BINDI
 import { createPiMemoryTokenHandoff, withCodexMemoryToolsLoopback, withPiMemoryLoopback, type PiMemoryTokenHandoff } from "./pi-memory-token-handoff";
 import { getDeckStateDir } from "./runtime/paths";
 import { isQuietDiagnostic } from "./launch-diagnostic-format";
+import { buildReviewedInteractiveLaunch, recordInteractiveSearchLaunch } from "./interactive-search-review";
 import { isCodexMemoryToolsRegistered, authorizeCodexSupermemoryLaunch, resolveCodexSupermemoryLaunchCredential, VERIFIED_CODEX_SUPERMEMORY_BINDING, type CodexSupermemoryLaunchEffects } from "./codex-supermemory-launch";
 
 export type SpawnedRunnerResult = {
@@ -96,10 +97,12 @@ export async function executeRunnerLaunchPlan(
   }
   const secrets: string[] = [];
   const authorizedSensitiveKeys = plan.sensitiveEnvAuthorization?.binding === VERIFIED_OPENCODE_SUPERMEMORY_BINDING
-    ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_API_KEY"))
+    ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_API_KEY" || key === "TAVILY_API_KEY"))
     : plan.sensitiveEnvAuthorization?.binding === VERIFIED_CODEX_SUPERMEMORY_BINDING
       ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_CODEX_API_KEY" || key === "TAVILY_API_KEY"))
     : plan.sensitiveEnvAuthorization?.binding === "deck-pi-web-search-v1"
+      ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "TAVILY_API_KEY"))
+    : plan.sensitiveEnvAuthorization?.binding === "deck-opencode-web-search-v1"
       ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "TAVILY_API_KEY"))
     : plan.sensitiveEnvAuthorization?.binding === "deck-claude-web-search-v1" || plan.sensitiveEnvAuthorization?.binding === "deck-claude-official-memory-v1"
       ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "TAVILY_API_KEY" || plan.sensitiveEnvAuthorization?.binding === "deck-claude-official-memory-v1" && key === "SUPERMEMORY_CC_API_KEY"))
@@ -124,7 +127,12 @@ export async function executeRunnerLaunchPlan(
     }
   }
   signal?.throwIfAborted();
-  const raw = await effects.spawn(plan.command, plan.args, {
+  const releaseGeneration = plan.generationReference ? acquireRunnerGenerationReference(plan.generationReference) : undefined;
+  let releaseSearchReview: (() => void) | undefined;
+  let raw: SpawnedRunnerResult;
+  try {
+    if (plan.interactiveSearchReview) releaseSearchReview = recordInteractiveSearchLaunch(plan.interactiveSearchReview);
+    raw = await effects.spawn(plan.command, plan.args, {
     cwd: plan.cwd,
     env,
     stdio: plan.stdio,
@@ -132,7 +140,7 @@ export async function executeRunnerLaunchPlan(
     stdinPayload: plan.stdinPayload,
     captureLimitBytes: plan.captureLimitBytes,
     sensitiveValues: secrets,
-  });
+  }); } finally { try { releaseSearchReview?.(); } finally { releaseGeneration?.(); } }
   const limit = plan.captureLimitBytes ?? 1024 * 1024;
   const stdout = bounded(redact(raw.stdout, secrets), limit);
   const stderr = bounded(redact(raw.stderr, secrets), limit);
@@ -552,7 +560,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   let launch: RunnerLaunchResult | undefined;
   if (!input.installOnly) {
     if (!input.adapter.buildLaunchPlan) return { status: "blocked", message: `${input.adapter.displayName} does not expose launch planning.` };
-    launch = await input.adapter.buildLaunchPlan(baseLaunch);
+    launch = await buildReviewedInteractiveLaunch(input.adapter, baseLaunch);
   }
   const safeMutations = plan.mutationPreview ?? [];
   const previewIncomplete = plan.files.length > 0 && plan.mutationPreview === undefined;
@@ -642,7 +650,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
 
   if (officialPluginMemory) {
     // The official Supermemory plugin owns memory alone: Deck's legacy runtime host and loopback are never started beside it.
-    launch = await input.adapter.buildLaunchPlan!(baseLaunch);
+    launch = await buildReviewedInteractiveLaunch(input.adapter, baseLaunch);
     if (launch.status === "unsupported") return { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
     if (launch.status === "blocked") return { status: "blocked", message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
     let executablePlan: RunnerLaunchPlan;
@@ -696,7 +704,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   }
 
   if (input.adapter.runnerId === "opencode") {
-    launch = await input.adapter.buildLaunchPlan!(baseLaunch);
+    launch = await buildReviewedInteractiveLaunch(input.adapter, baseLaunch);
     if (launch.status === "unsupported") return { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
     if (launch.status === "blocked") return { status: "blocked", message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
 
@@ -796,7 +804,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     }
     const launchInput = applyExplicitRecallAdvisory(baseLaunch, explicitRecallAdvisory);
     if (!result) {
-      launch = await input.adapter.buildLaunchPlan!(launchInput);
+      launch = await buildReviewedInteractiveLaunch(input.adapter, launchInput);
       if (launch.status === "unsupported") {
         closeReason = "blocked";
         result = { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: [readinessDiagnostic, ...launch.diagnostics] };
