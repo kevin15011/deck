@@ -13,6 +13,7 @@
     "./team-catalog": "./src/team-catalog.ts",
     "./explorer-prompt": "./src/explorer-prompt.ts",
     "./orchestrator-prompt": "./src/orchestrator-prompt.ts",
+    "./session/quota": "./src/session/quota.ts",
     "./session/daemon-restart": "./src/session/daemon-restart.ts",
     "./session/lead-replies": "./src/session/lead-replies.ts",
     "./session/chat-history": "./src/session/chat-history.ts",
