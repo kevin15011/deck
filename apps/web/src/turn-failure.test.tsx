@@ -10,6 +10,15 @@ const failed: HistoryMessage = { v: 1, sessionId: 's', seq: 3, ts: '2026-10-22T0
   source: { taskId: 'lead', runnerId: 'codex' }, data: { status: 'failed', error: 'PRIVATE_NATIVE_PROSE', failure: { category: 'provider-overloaded', origin: 'provider', certainty: 'reported', code: 'serverOverloaded', message: 'PRIVATE_SENTINEL', headers: { authorization: 'PRIVATE_SENTINEL' } } } };
 const render = (row: HistoryMessage) => renderToStaticMarkup(<TurnFailureMessage data={row.data}/>);
 
+test.each(['codex-rpc-frame-too-large','codex-rpc-invalid-frame','claude-line-too-long','opencode-sse-frame-too-large','opencode-sse-invalid-frame','opencode-http-body-too-large','opencode-http-invalid-body'])('transport evidence renders fixed wording in live and reloaded history: %s', code => {
+  const row={...failed,data:{status:'failed',error:'PRIVATE_NATIVE_PAYLOAD',failure:{category:'deck',origin:'deck',certainty:'reported',code,message:'PRIVATE_NATIVE_PAYLOAD'}}};
+  const html=render(row);
+  expect(html).toContain(code.includes('too-large')||code==='claude-line-too-long'?'Runner message exceeded the size limit':'Runner message was malformed');
+  expect(html).toContain('Partial work may remain');expect(html).toContain('Review it before you manually retry');
+  expect(html).not.toContain('PRIVATE');expect(html).not.toContain(code);
+  expect(render(JSON.parse(JSON.stringify(row)))).toBe(html);
+});
+
 test('live and reloaded failure rows render the same safe provider explanation with a manual next step', () => {
   const live = mergeHistory([], [failed], 'live')[0]!;
   const reloaded = mergeHistory([], JSON.parse(JSON.stringify([failed])), 'newer')[0]!;

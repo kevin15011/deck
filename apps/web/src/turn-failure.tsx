@@ -1,5 +1,5 @@
 import React from 'react';
-import { sanitizeTurnFailure, type TurnFailure } from '../../../packages/core/src/session/failure';
+import { RUNNER_TRANSPORT_FAILURES, sanitizeTurnFailure, type TurnFailure } from '../../../packages/core/src/session/failure';
 
 const explanations: Record<TurnFailure['category'], { title: string; next: string }> = {
   'provider-overloaded': { title: 'Model provider at capacity', next: 'Wait before you manually retry, or choose another configured model.' },
@@ -44,6 +44,14 @@ const possibleTitles: Record<TurnFailure['category'], string> = {
 export function TurnFailureMessage({ data }: { data: Record<string, unknown> }) {
   const failure = sanitizeTurnFailure(data.failure);
   if (!failure) return <article className="message failed-message" role="alert"><p className="message-meta">Turn failed</p><p>{typeof data.error === 'string' && data.error ? data.error : 'The runner could not complete this turn. Try again.'}</p></article>;
+  if (failure.category === 'deck' && failure.origin === 'deck' && failure.certainty === 'reported' && failure.code && Object.hasOwn(RUNNER_TRANSPORT_FAILURES, failure.code)) {
+    const oversized = RUNNER_TRANSPORT_FAILURES[failure.code as keyof typeof RUNNER_TRANSPORT_FAILURES] === 'oversized';
+    return <article className="message failed-message" role="alert">
+      <p className="message-meta">{oversized ? 'Runner message exceeded the size limit' : 'Runner message was malformed'}</p>
+      <p>{oversized ? 'Deck stopped this turn because a runner message exceeded the transport size limit.' : 'Deck stopped this turn because a runner message could not be decoded or parsed.'}</p>
+      <p>Partial work may remain. Review it before you manually retry.</p>
+    </article>;
+  }
   const explanation = explanations[failure.category];
   const title = failure.origin === 'unknown' ? 'Turn failed' : failure.certainty === 'inferred' ? possibleTitles[failure.category] : explanation.title;
   return <article className="message failed-message" role="alert">
