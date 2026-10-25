@@ -51,9 +51,27 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
         shell: bash
 
+  fresh-retirement:
+    name: Fresh runner retirement contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.12"
+      - run: bun install --frozen-lockfile
+      - name: Isolated fresh install, preparation, launch and safety contracts
+        run: bun run scripts/verify-retirement-fresh.ts "${{ runner.temp }}/retirement-fresh"
+      - name: Retain fresh contract evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retirement-fresh-contracts
+          path: ${{ runner.temp }}/retirement-fresh
+
   release-verification:
     name: Release verification gates
-    needs: metadata
+    needs: [metadata, fresh-retirement]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

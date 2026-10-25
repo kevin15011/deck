@@ -49,7 +49,7 @@ Pi and OpenCode are operational Deck runners. Codex and Claude carry the full te
 | Model discovery and per-role assignment | Supported | Supported | Supported | Supported |
 | Adaptive-memory runner configuration | Runner-specific; Deck loopback memory through the `deck-memory` extension (see below) | Runner-specific | Runner-specific; the pinned official plugin hooks receive the stored profile credential in the started process only | Runner-specific; official Supermemory plugin |
 | Explicit memory tools (on-demand search and save) | Supported; `memory_search` and `memory_save` tools registered by `deck-memory` over the Deck loopback host (read-only roles get search only; no Supermemory credential in Pi) | Supported; the official plugin's `supermemory` tool | Limited to the pinned official plugin's exposed capabilities; Deck does not add a competing memory MCP or loopback beside its recall/flush hooks | Supported; the official plugin's Supermemory MCP tools |
-| Shared tool installs (RTK, Codebase Memory, Context Mode) | Supported; Deck-owned pinned binaries, MCP commands pinned to absolute paths | Supported | Supported; Deck-owned pinned binaries, MCP and hooks pinned to verified absolute paths | Supported; pinned shared tools |
+| Shared tool installs (RTK, explicitly enabled Codebase Memory) | Supported; Deck-owned pinned binaries, MCP commands pinned to absolute paths | Supported | Supported; Deck-owned pinned binaries, MCP and hooks pinned to verified absolute paths | Supported; pinned shared tools |
 | Tool interception: RTK command rewrite | Supported in Deck sessions; the `deck-tool-policy` extension rewrites `bash` commands in `tool_call`, pinned to the owned RTK binary | Runner-specific; OpenCode hook | Runner-specific; marker-owned `PreToolUse` hook | Runner-specific; plugin `PreToolUse` hook |
 | Tool interception: Grep/Glob graph guidance | Advisory; the search always runs and one concise Codebase Memory note is appended to its result, at most once per session (code-structure searches only) | Not shipped | Not shipped | Advisory; the Codebase Memory integration adds graph context and the search still runs |
 | Tool interception: read-only role enforcement | Enforced for Investigate and Quality children (`tool_call` block plus a `--tools` allowlist); these roles have no shell | Not documented as enforced | Instruction-level only (no sandbox override) | Not documented as enforced |
@@ -82,10 +82,8 @@ Project-local discovery is always scoped to the active runner. Pi and OpenCode c
 
 | Capability | Product status | Boundary |
 |---|---|---|
-| Context Mode | Supported | Shared binary and MCP capability; effect and persistence are runner-specific. |
-| Codebase Memory | Supported | Shared binary/MCP integration where the active runner exposes the required surface. |
+| Codebase Memory | Explicit opt-in | Shared binary/MCP integration where the active runner exposes the required surface. |
 | RTK | Supported | Optional shared binary; OpenCode uses its hook integration, Pi uses a Deck-owned pinned binary through a `tool_call` rewrite, and Codex uses a Deck-owned pinned binary with a `PreToolUse` rewrite hook. |
-| Serena | Supported | MCP and symbol-editing capability; Pi can require manual verification when automatic installation is unavailable. |
 | Context7 | Supported | MCP server configuration is validated by the active adapter. |
 | Supermemory | Supported with route limits | OpenCode, Claude, and Codex use the pinned official plugin with a profile credential injected into the started process only; Pi uses Deck's loopback memory runtime through the `deck-memory` extension (no Supermemory credential in Pi configuration, no raw MCP entry). A raw Supermemory MCP entry is never registered beside a plugin. |
 | Developer Team | Supported | Seven canonical roles plus separate Onboard and Archive lifecycle skills. |

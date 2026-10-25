@@ -60,7 +60,7 @@ The Deck extensions do nothing unless a Deck launch sets `DECK_PI_SESSION=1` (an
 
 Pi-specific setup can include:
 
-- tool review and the shared `context-mode`, Codebase Memory, RTK, Context7, Serena and Web Search capabilities (Deck-owned pinned binaries where applicable);
+- tool review and the shared explicitly enabled Codebase Memory, RTK, Context7 and Web Search capabilities (Deck-owned pinned binaries where applicable);
 - model/provider discovery from Pi settings, `pi --list-models`, and configured environment variables;
 - per-agent model and thinking assignments;
 - global Developer Team materialization (the review plan lists every path under the agent directory).
@@ -103,7 +103,7 @@ OpenCode preflight reads the runner version, searches the supported configuratio
 OpenCode-specific setup can include:
 
 - package and MCP configuration review;
-- `context-mode`, Codebase Memory, RTK, Context7, and Serena evidence;
+- explicitly enabled Codebase Memory, RTK and Context7 evidence;
 - runner-native model discovery and model-specific reasoning variants;
 - Developer Team installation through OpenCode's native surfaces;
 - runner-exposed skill inventory discovery.
@@ -118,14 +118,12 @@ Before the first launch, sign in with `codex login`. Because the configuration i
 
 Ownership is strict: automatic reconciliation writes only files recorded in Deck's manifest (with their hashes) and its own marker blocks in `config.toml`. Your `hooks.json`, `AGENTS.md`, other agents and skills remain untouched; a file or skill that already uses a Deck name blocks the plan with a clear message instead of being overwritten. If you already registered the same executable as one of Deck's MCP servers (for example `codebase-memory-mcp`), Deck leaves yours in place and does not add a second server.
 
-Review & Install can also repair the standard `context-mode` and `codebase-memory` MCP entries when those tools are selected: it replaces an old or bare executable path with the verified path and supplies Context Mode's `mcp` argument. This uses the normal configuration backup and rollback, preserves comments and per-tool approvals, and does not take ownership of the entry. Custom commands, arguments, environment settings, and other same-name MCP conflicts still block the plan. A normal launch without an explicit install selection never performs this repair.
+Review & Install records continuing configuration contributions with actual content hashes. Unproven or modified entries require review and are preserved until their individual deletion is confirmed.
 
 Review & Install for Codex can include:
 
 - **RTK**: a Deck-owned pinned binary (the same reviewed release Claude uses) under the Deck data root, plus a Deck-owned `PreToolUse` hook for `Bash` that asks `rtk hook codex` for a rewrite and returns it through `updatedInput`, with the executable word pinned to the owned binary. The hook needs a Node.js 18+ runtime.
 - **Codebase Memory**: an existing shared executable is reused (the per-user daemon must match the client version); otherwise the pinned native release is installed into the Deck data root. The MCP entry always stores the resolved absolute path.
-- **Context Mode**: a usable shared executable is reused; otherwise the pinned npm release is installed into the Deck data root. The MCP entry stores the resolved absolute path. Context Mode's own Codex hooks are not installed: they would compete with the RTK `PreToolUse` rewrite and are not part of the Claude or OpenCode routes.
-- **Serena**: Deck's owned launcher through Deck's hidden Serena MCP proxy, after explicit selection.
 - **Supermemory**: only the official `supermemoryai/codex-supermemory` plugin, pinned to one npm release and limited to its two documented lifecycle hooks (`UserPromptSubmit` recall and `Stop` flush). The profile credential entered in the TUI is stored in Deck's protected profile store and injected into the Codex process Deck starts, and nowhere else (`SUPERMEMORY_CODEX_API_KEY`); it is never written to Codex configuration. Deck does not register the Supermemory MCP server or its own memory loopback beside the plugin, and a launch is blocked if another Supermemory plugin or MCP registration exists in your Codex configuration.
 
 Deck adds and removes only its own marker-delimited hook blocks (`# deck-codex-hook:<id>:start` … `:end`) in the global `config.toml`, so your inline hooks and `hooks.json` entries keep working beside them. Codex requires review of non-managed hooks; the Deck CLI launch passes `--dangerously-bypass-hook-trust` when Deck-owned hooks are present, so they run without per-hook review for that process. When you start `codex` directly instead, open `/hooks` and trust Deck's entries. The launch continues to pass `--dangerously-bypass-approvals-and-sandbox`.
@@ -158,7 +156,6 @@ Deck owns only entries recorded in `$CODEX_HOME/deck/manifest.json` and its mark
 ### Known limits (Codex)
 
 - Deck does not set `sandbox_mode = "read-only"` on the Investigate and Quality agents: the launch runs with the sandbox bypass, and Deck could not verify that a per-agent sandbox setting is honored under it, so read-only behavior remains guidance in the agent instructions, not enforcement.
-- Serena resolves the project from the working directory of the Codex process, so one global entry serves every project.
 - Trusted-host, invocation-authorization, dossier, controlled-effect, registry and bound-verification controls are explicit Codex gaps.
 - Deck's Codex hook assets fail open when no Deck loopback endpoint and token are present: Deck-supervised launches provide them, plain `codex` launches do not.
 - Node and Bun cannot provide `openat`/`renameat2` pathname guarantees. Deck revalidates ancestors and targets immediately before each atomic rename, but a privileged concurrent actor can still race pathname resolution.
@@ -166,7 +163,7 @@ Deck owns only entries recorded in `$CODEX_HOME/deck/manifest.json` and its mark
 
 ## Claude
 
-Deck delivers the Developer Team to Claude Code as a Deck-owned global plugin: the seven roles as plugin agents, skills, pinned shared tools (RTK through a plugin `PreToolUse` hook, Codebase Memory, Context Mode, Serena, and optional Context7 and Web Search) and, when selected in Review & Install, the pinned official Supermemory plugin. Preflight looks for Claude Code 2.1.218 or newer; model choices come from runtime-reported metadata, so account entitlement is not guaranteed.
+Deck delivers the Developer Team to Claude Code as a Deck-owned global plugin: the seven roles as plugin agents, skills, pinned shared tools (RTK through a plugin `PreToolUse` hook, explicitly enabled Codebase Memory, and optional Context7 and Web Search) and, when selected in Review & Install, the pinned official Supermemory plugin. Preflight looks for Claude Code 2.1.218 or newer; model choices come from runtime-reported metadata, so account entitlement is not guaranteed.
 
 ```sh
 deck claude developer
@@ -208,8 +205,7 @@ The capability registry uses scoped statuses such as `supported`, `shared`, `run
 | Capability | Pi | OpenCode | Codex | Claude | Interpretation |
 |---|---|---|---|---|---|
 | RTK | Deck-owned pinned binary through a `tool_call` rewrite | Shared binary through the OpenCode hook | Deck-owned pinned binary plus a `PreToolUse` rewrite hook | Pinned binary through a plugin `PreToolUse` hook | Reuse is checked instead of blindly reinstalling a usable binary. |
-| Context Mode / Codebase Memory | Shared binary or Deck-owned pinned install; built-in MCP with direct exposure | Shared binary and MCP | Shared binary reused, otherwise a Deck-owned pinned install; MCP pinned to the absolute path | Pinned shared tools in the plugin | A bare `PATH` name is never persisted for Codex. |
-| Serena | Shared MCP capability with manual-verification fallback | Configured MCP capability | Deck-owned launcher through the Deck proxy | Plugin MCP entry after explicit selection | The adapter owns the runner-specific configuration and readiness evidence. |
+| Explicitly enabled Codebase Memory | Shared binary or Deck-owned pinned install; built-in MCP with direct exposure | Shared binary and MCP | Shared binary reused, otherwise a Deck-owned pinned install; MCP pinned to the absolute path | Pinned shared tools in the plugin | A bare `PATH` name is never persisted for Codex. |
 | Supermemory | Deck loopback memory through the `deck-memory` extension | Official plugin | Official plugin hooks | Official plugin | One memory integration per runner; no raw MCP beside a plugin. |
 | Context7 | Shared MCP capability | Configured MCP capability | Configured MCP capability | Optional verified shared binary | The server entry is validated in the active runner's configuration. |
 | Mermaid package | Pi-specific | OpenCode-specific | Not applicable | Not applicable | Internal runner packages, not a universal product package. |
@@ -222,3 +218,30 @@ Read [Configuration](configuration.md) before changing a package selection and [
 Discovery is scoped to the active runner. Generic project roots can be combined with the selected runner's declared sources, but exclusive roots belonging to another runner are not aggregated. Validation and direct discovery are read-only; refresh is a separate explicitly authorized operation.
 
 This local discovery index is separate from Deck's bundled external-skill distribution catalog and from OpenSpec. See [Skills](skills.md) and [Developer Team](developer-team.md#project-workflows).
+
+## Retired package review and search
+
+This delivery targets clean new installations on all four runners. Existing installations receive operator-assisted cleanup; universal legacy migration is not certified. Required release CI exercises fresh adapter writes, repeat sync, ownership hashes, preparation and search/launch contracts, while retaining migration/recovery safety checks. The manually dispatched `Historical retirement diagnostic` workflow preserves historical coverage as optional evidence. Deterministic fixtures do not replace real-session tool/search/RTK acceptance.
+
+Context Mode and Serena are retired Deck packages. Use `deck runner cleanup --plan --json` before applying migration; see [configuration and cleanup](configuration.md#review-legacy-package-cleanup). Legacy marker names are not deletion authority. Per-runner manifests record file hashes and individually selected shared entries, while Pi and Codex retain their existing ownership history.
+
+Codebase Memory is disabled unless `capabilities.codebase-memory.enabled` or a runner exception is explicitly true. Old persisted package toggles are ignored and reported by Doctor. Existing independent native integrations remain under the runner's control.
+
+After opting out, a historical Claude Codebase executable remains protected while an old plugin binding still refers to it. Publish and verify the replacement, release active/recovery references, and retire the old binding before replanning executable collection. Knowledge databases and neighboring user files are preserved.
+
+Managed turn preparation reevaluates the member's effective runner, model/provider, configuration and tool exposure. Confirmed native search omits Deck fallback injection; unavailable native search uses the configured provider. Unknown detection uses that fallback with a possible-duplicate diagnostic. A missing fallback credential is an explicit preparation failure. Native/user tool permissions remain binding. RTK and official Supermemory keep their existing execution paths.
+
+### Offline runner mutation guard recovery
+
+`deck doctor` reports the exact `runner-mutation.json.gate` directory and sibling `runner-mutation.json` reservation for the selected state root. The default directory is `$XDG_STATE_HOME/deck/daemon/runner-mutation.json.gate`, or `~/.local/state/deck/daemon/runner-mutation.json.gate` when `XDG_STATE_HOME` is unset. A guard can belong to a paused daemon starter even when there is no reservation or reachable daemon. Its age, an absent reservation PID, a missing lock or a failed ping cannot establish that it is orphaned. Deck never expires or automatically removes this guard.
+
+If an operation completed but reservation cleanup failed, keep its reported files, contribution manifests and backup references. This is a recovery-required partial failure, and retrying the original callback can repeat completed effects. If the callback also failed, the original error remains attached to the cleanup error. Review actual postimages and existing recovery receipts before deciding which work remains.
+
+After coordination recovery, `deck rollback --backup <id> --force` can explicitly recover the referenced update when idle. `--force` permits selecting a backup protected by that same operation; it does not override content or path checks. Deck restores or removes a file only while its recorded applied bytes and filesystem identity still match. Later edits, missing or changed originals, symlinks, replaced paths and older backups without postimage evidence remain conflicts. Partial recovery keeps the operation and backup; completed file restores are recorded so retry does not replay them. Preserve conflicting files and receipts for individual manual reconciliation rather than deleting recovery evidence or forcing an overwrite. Runner replacement snapshots are taken after retirement; retirement's own backups and contribution receipts remain the recovery source for retired entries.
+
+Use this manual procedure only during an independently established offline maintenance window:
+
+1. Let active work finish. Prevent every source of new Deck activity against this state root: terminals, IDE integrations, service managers, scheduled jobs and other hosts sharing it. Independently inspect the process inventory and known launch sources to establish that no daemon, daemon starter or runner mutation process is running, paused, or able to resume. A reservation PID alone does not cover starters. If quiescence cannot be established, leave the guard intact.
+2. Preserve a private copy of the daemon coordination evidence and the affected operation's backups, contribution manifests and pending transaction receipts. Record the exact guard path from doctor. Inspect the directory without changing it; an unexpected owner, symlink, nonempty directory or unexplained evidence requires investigation.
+3. Only after that proof, manually remove **only the empty guard directory** at the reported path, using `rmdir` with the literal path quoted as one argument. Do not recursively delete it, and do not remove the sibling reservation, daemon locks, session history, backups or pending receipts. This is an operator action; doctor does not perform it.
+4. Keep launch sources blocked while reviewing `deck doctor` and `deck runner cleanup --plan --json` again. The existing admission machinery can reclaim a reservation only when its owner is verifiably absent. A live, unknown or corrupt reservation remains blocked; do not erase it to force admission. Pending contribution recovery or offline session evidence may independently block mutation and must be resolved through the existing recovery path. Verify existing postimages and use the retained backup/receipt to recover unchanged transaction-owned files; preserve later user edits. Replan the remaining work before explicitly retrying, then restore normal launch sources when recovery is complete.

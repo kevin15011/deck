@@ -27,7 +27,8 @@ The supported top-level fields are:
 - `version` — currently `1`.
 - `adaptiveMemory` — active provider and non-secret Supermemory options.
 - `webSearch` — `enabled` and the selected `provider` (for example Tavily); the provider credential stays in its environment variable.
-- `packageInstructions` — per-runner toggles for `codebase-memory`, `code-economy`, `context-mode`, `rtk`, `adaptive-memory`, and `serena`.
+- `capabilities.codebase-memory` — explicit global activation (default false), with optional boolean `runners` exceptions. A runner exception overrides the global value.
+- `packageInstructions` — per-runner guidance for Code Economy, RTK and Adaptive Memory. The Codebase Memory view derives from explicit activation.
 - `orchestratorPersonality` — `guia` or `pragmatica`; the default is `pragmatica`.
 - `developerTeamExecution` — advanced execution-contract, routing, authorization, prompt, telemetry, and cohort controls.
 - `profiles` and `activeProfile` — named configuration profiles.
@@ -41,15 +42,18 @@ A minimal, credential-free example is:
   "adaptiveMemory": {
     "enabled": false
   },
+  "capabilities": {
+    "codebase-memory": { "enabled": false, "runners": {} }
+  },
   "orchestratorPersonality": "pragmatica",
   "packageInstructions": {
     "pi": {
       "code-economy": true,
-      "serena": false
+      "rtk": true
     },
     "opencode": {
       "code-economy": true,
-      "context-mode": true
+      "rtk": true
     }
   }
 }
@@ -61,7 +65,7 @@ Unknown fields, unsupported versions, invalid enum values, malformed JSON, and c
 
 The runner dashboard shows package evidence and lets you toggle configurable or optional capabilities. Required or internal runner packages are not treated as ordinary toggles. Deck checks whether a binary is usable and whether an MCP entry is configured; a package declaration by itself is not proof of a working tool.
 
-The shared capability set includes Context Mode, Codebase Memory, RTK, Serena, Context7, and Supermemory tool bindings. The exact install/configuration action is runner-specific. Use [Runners](runners.md) when the same capability has different effects on each runner.
+The shared capability set includes explicitly activated Codebase Memory, RTK, Context7, and Supermemory tool bindings. Legacy Context Mode and Serena keys are ignored and omitted from canonical writes; legacy Codebase Memory package toggles do not enable the capability. The exact install/configuration action is runner-specific. Use [Runners](runners.md) when the same capability has different effects on each runner.
 
 Package instructions are separate from adaptive-memory context. Enabled package instructions are official configured prompt content; memory is auxiliary context injected by the selected provider.
 
@@ -121,3 +125,17 @@ The safe default keeps execution in observe/shadow mode with no cohort rollout a
 3. Keep the Supermemory credential in Deck's protected secret store (a shared profile for OpenCode, Claude, and Codex; the Deck runtime key for Pi). Do not place bearer tokens in runner MCP or hook config.
 4. Run `deck doctor` after changing runner configuration.
 5. Use [Troubleshooting](troubleshooting.md) when a value is rejected or a runner remains indeterminate.
+
+## Review legacy package cleanup
+
+Run `deck runner cleanup --plan --json` to inspect exact proposed removals without writing configuration, manifests or backups. Add `--runner codex|claude|opencode|pi` to limit the report. `--output /path/to/plan.json` explicitly saves the report.
+
+`deck runner cleanup --review` displays each entry, its surrounding keys, ownership and exact proposed deletion. Ambiguous entries require individual confirmation; Enter/EOF keeps them. A changed file invalidates the confirmation and requires a new preview. Dedicated Deck installation locations and matching granular manifest records establish ownership; names and legacy marker comments alone do not. Independent integrations and unrecorded data remain preserved.
+
+Review the concrete plan before applying it to an existing installation. Planning never calls the migrating upgrade-manifest reader or prepares packages.
+
+Updates apply proven-owned removals automatically when daemon admission establishes an idle boundary. Interactive updates present the safe plan and ask separately about every ambiguous entry; unattended updates keep those entries. `--yes` is not consent to remove ambiguity. `deck doctor` reports retained contributions, active-work deferral and pending contribution recovery. Planning is available during active work. Unknown activity, an older daemon without mutation admission, or offline session history defers mutation; retry explicitly after an authoritative current daemon can establish idle. Deck does not interrupt work or schedule a delayed apply.
+
+Retirement preserves exact preimages in each runner's existing backup directory as `<sha256>.pre-retirement`. Update rollback uses the existing upgrade/adapter recovery paths; pending `manifest.json.pending` receipts must be inspected before retry. Restore only a reviewed preimage after checking for subsequent user edits. Planning creates neither backups nor recovery receipts.
+
+For Claude, content update must publish and verify a replacement plugin and update its selection before new launches use it. Old processes, launch receipts, selected generations and pending recovery retain references. Replan after those references are released to collect retired MCP contributions. Binary installation alone does not prove replacement, and cleanup does not promise to remove whole old generations, user data or backups.

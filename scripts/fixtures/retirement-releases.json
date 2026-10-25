@@ -1,0 +1,2388 @@
+{
+  "schema": "deck-retirement-published-matrix-v1",
+  "repository": "kevin15011/deck",
+  "verifiedAt": "2026-10-23",
+  "verification": "GitHub release and tag API compared with local tag commit; source pinned to commit and Git tree/blob object IDs.",
+  "rows": [
+    {
+      "version": "v0.13.0",
+      "runner": "codex",
+      "publishedAt": "2026-10-21T13:42:22Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.13.0",
+      "commit": "fc667aadbb052e2e4515889e425848762769c838",
+      "sourceTree": "4d7b7e6457c8a3760b58849ac9633f5ed0b8cb66",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "222c158cc1260540f73cb2e52e4a5310449b726b",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.13.0/deck_v0.13.0_linux-x64.tar.gz",
+        "digest": "sha256:3a396fc5c2cc56672d7e8129b67980ea3b2245d5d1cb6430ba36227d939d048e",
+        "name": "deck_v0.13.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.13.0",
+      "runner": "claude",
+      "publishedAt": "2026-10-21T13:42:22Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.13.0",
+      "commit": "fc667aadbb052e2e4515889e425848762769c838",
+      "sourceTree": "4d7b7e6457c8a3760b58849ac9633f5ed0b8cb66",
+      "installerPath": "packages/adapter-claude/src/runner-adapter.ts",
+      "installerBlob": "e3ef4e36ce4af5a2a96d27e19e00724c60c663e7",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.13.0/deck_v0.13.0_linux-x64.tar.gz",
+        "digest": "sha256:3a396fc5c2cc56672d7e8129b67980ea3b2245d5d1cb6430ba36227d939d048e",
+        "name": "deck_v0.13.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.13.0",
+      "runner": "opencode",
+      "publishedAt": "2026-10-21T13:42:22Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.13.0",
+      "commit": "fc667aadbb052e2e4515889e425848762769c838",
+      "sourceTree": "4d7b7e6457c8a3760b58849ac9633f5ed0b8cb66",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "696cf5757bcef749b1363375557b818f0baa4e59",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.13.0/deck_v0.13.0_linux-x64.tar.gz",
+        "digest": "sha256:3a396fc5c2cc56672d7e8129b67980ea3b2245d5d1cb6430ba36227d939d048e",
+        "name": "deck_v0.13.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.13.0",
+      "runner": "pi",
+      "publishedAt": "2026-10-21T13:42:22Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.13.0",
+      "commit": "fc667aadbb052e2e4515889e425848762769c838",
+      "sourceTree": "4d7b7e6457c8a3760b58849ac9633f5ed0b8cb66",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "43745f588fc40b6b46da7a2563bc11c50c4a9906",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.13.0/deck_v0.13.0_linux-x64.tar.gz",
+        "digest": "sha256:3a396fc5c2cc56672d7e8129b67980ea3b2245d5d1cb6430ba36227d939d048e",
+        "name": "deck_v0.13.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.12.0",
+      "runner": "codex",
+      "publishedAt": "2026-10-17T15:44:16Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.12.0",
+      "commit": "531e4b37ec774a1a2f215e703fa2381664ec1eed",
+      "sourceTree": "e6df6aa656ad3a2e24ccd1e2bc0cf99115c77703",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "052ac2f31ab0cb9018a28a5173925dcb6446ca39",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.12.0/deck_v0.12.0_linux-x64.tar.gz",
+        "digest": "sha256:fbd10c111a54df3a70908fe738acef9568192da5653855a00d221a2675c04edf",
+        "name": "deck_v0.12.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.12.0",
+      "runner": "claude",
+      "publishedAt": "2026-10-17T15:44:16Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.12.0",
+      "commit": "531e4b37ec774a1a2f215e703fa2381664ec1eed",
+      "sourceTree": "e6df6aa656ad3a2e24ccd1e2bc0cf99115c77703",
+      "installerPath": "packages/adapter-claude/src/runner-adapter.ts",
+      "installerBlob": "bf366f5ca640dba457e6e740c32cb86b1007b011",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.12.0/deck_v0.12.0_linux-x64.tar.gz",
+        "digest": "sha256:fbd10c111a54df3a70908fe738acef9568192da5653855a00d221a2675c04edf",
+        "name": "deck_v0.12.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.12.0",
+      "runner": "opencode",
+      "publishedAt": "2026-10-17T15:44:16Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.12.0",
+      "commit": "531e4b37ec774a1a2f215e703fa2381664ec1eed",
+      "sourceTree": "e6df6aa656ad3a2e24ccd1e2bc0cf99115c77703",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "d57271aab85e16be813a8dae8c3d384fa0015d8e",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.12.0/deck_v0.12.0_linux-x64.tar.gz",
+        "digest": "sha256:fbd10c111a54df3a70908fe738acef9568192da5653855a00d221a2675c04edf",
+        "name": "deck_v0.12.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.12.0",
+      "runner": "pi",
+      "publishedAt": "2026-10-17T15:44:16Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.12.0",
+      "commit": "531e4b37ec774a1a2f215e703fa2381664ec1eed",
+      "sourceTree": "e6df6aa656ad3a2e24ccd1e2bc0cf99115c77703",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "ed2c5039296860083a9fbd81e525f9d3b8bd35cb",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.12.0/deck_v0.12.0_linux-x64.tar.gz",
+        "digest": "sha256:fbd10c111a54df3a70908fe738acef9568192da5653855a00d221a2675c04edf",
+        "name": "deck_v0.12.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.11.3",
+      "runner": "codex",
+      "publishedAt": "2026-10-15T22:29:46Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.11.3",
+      "commit": "77f358df04db8a5114c13fd6980fa7451f1f2ed6",
+      "sourceTree": "cc1c33e048bccc703598f3b8618f370ef817393d",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "052ac2f31ab0cb9018a28a5173925dcb6446ca39",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.11.3/deck_v0.11.3_linux-x64.tar.gz",
+        "digest": "sha256:44d1a858a29f86ddfe118cea09b55435c9ceeee304fe6f978155ceb4378eb818",
+        "name": "deck_v0.11.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.11.3",
+      "runner": "claude",
+      "publishedAt": "2026-10-15T22:29:46Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.11.3",
+      "commit": "77f358df04db8a5114c13fd6980fa7451f1f2ed6",
+      "sourceTree": "cc1c33e048bccc703598f3b8618f370ef817393d",
+      "installerPath": "packages/adapter-claude/src/runner-adapter.ts",
+      "installerBlob": "cd42a506796e3574c5f7457485d39305439718ab",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.11.3/deck_v0.11.3_linux-x64.tar.gz",
+        "digest": "sha256:44d1a858a29f86ddfe118cea09b55435c9ceeee304fe6f978155ceb4378eb818",
+        "name": "deck_v0.11.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.11.3",
+      "runner": "opencode",
+      "publishedAt": "2026-10-15T22:29:46Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.11.3",
+      "commit": "77f358df04db8a5114c13fd6980fa7451f1f2ed6",
+      "sourceTree": "cc1c33e048bccc703598f3b8618f370ef817393d",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "d57271aab85e16be813a8dae8c3d384fa0015d8e",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.11.3/deck_v0.11.3_linux-x64.tar.gz",
+        "digest": "sha256:44d1a858a29f86ddfe118cea09b55435c9ceeee304fe6f978155ceb4378eb818",
+        "name": "deck_v0.11.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.11.3",
+      "runner": "pi",
+      "publishedAt": "2026-10-15T22:29:46Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.11.3",
+      "commit": "77f358df04db8a5114c13fd6980fa7451f1f2ed6",
+      "sourceTree": "cc1c33e048bccc703598f3b8618f370ef817393d",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "ed2c5039296860083a9fbd81e525f9d3b8bd35cb",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.11.3/deck_v0.11.3_linux-x64.tar.gz",
+        "digest": "sha256:44d1a858a29f86ddfe118cea09b55435c9ceeee304fe6f978155ceb4378eb818",
+        "name": "deck_v0.11.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.11.2",
+      "runner": "codex",
+      "publishedAt": "2026-10-15T20:08:38Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.11.2",
+      "commit": "43d1e8844c3cc0d5bd07854a86a4a3471646af23",
+      "sourceTree": "612dac814d625a3a0d5bf54a9c4913415c9c3dc2",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "052ac2f31ab0cb9018a28a5173925dcb6446ca39",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.11.2/deck_v0.11.2_linux-x64.tar.gz",
+        "digest": "sha256:c8a7b14b1ce0d9cd63920a5d02b3ff27eccec6aa26e08aaef12f5dabb930f62d",
+        "name": "deck_v0.11.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.11.2",
+      "runner": "claude",
+      "publishedAt": "2026-10-15T20:08:38Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.11.2",
+      "commit": "43d1e8844c3cc0d5bd07854a86a4a3471646af23",
+      "sourceTree": "612dac814d625a3a0d5bf54a9c4913415c9c3dc2",
+      "installerPath": "packages/adapter-claude/src/runner-adapter.ts",
+      "installerBlob": "017c53813f09b3d918a7f9b10b920f1d3546ea92",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.11.2/deck_v0.11.2_linux-x64.tar.gz",
+        "digest": "sha256:c8a7b14b1ce0d9cd63920a5d02b3ff27eccec6aa26e08aaef12f5dabb930f62d",
+        "name": "deck_v0.11.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.11.2",
+      "runner": "opencode",
+      "publishedAt": "2026-10-15T20:08:38Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.11.2",
+      "commit": "43d1e8844c3cc0d5bd07854a86a4a3471646af23",
+      "sourceTree": "612dac814d625a3a0d5bf54a9c4913415c9c3dc2",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "d57271aab85e16be813a8dae8c3d384fa0015d8e",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.11.2/deck_v0.11.2_linux-x64.tar.gz",
+        "digest": "sha256:c8a7b14b1ce0d9cd63920a5d02b3ff27eccec6aa26e08aaef12f5dabb930f62d",
+        "name": "deck_v0.11.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.11.2",
+      "runner": "pi",
+      "publishedAt": "2026-10-15T20:08:38Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.11.2",
+      "commit": "43d1e8844c3cc0d5bd07854a86a4a3471646af23",
+      "sourceTree": "612dac814d625a3a0d5bf54a9c4913415c9c3dc2",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "ed2c5039296860083a9fbd81e525f9d3b8bd35cb",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.11.2/deck_v0.11.2_linux-x64.tar.gz",
+        "digest": "sha256:c8a7b14b1ce0d9cd63920a5d02b3ff27eccec6aa26e08aaef12f5dabb930f62d",
+        "name": "deck_v0.11.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.10.0",
+      "runner": "codex",
+      "publishedAt": "2026-10-04T17:52:13Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.10.0",
+      "commit": "9f0cf5c4135803d5e1da1c523e3eb38378097b1c",
+      "sourceTree": "2c690080f16e2e5bda65197fca29349e99f3f258",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "94f9e1e7e073e3f0a08aa8177b208e1ce2fe0d07",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.10.0/deck_v0.10.0_linux-x64.tar.gz",
+        "digest": "sha256:5f33f17843204dae1a23c10e8f73e13f87503f2686ac946b5ba675ae519b2220",
+        "name": "deck_v0.10.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.10.0",
+      "runner": "claude",
+      "publishedAt": "2026-10-04T17:52:13Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.10.0",
+      "commit": "9f0cf5c4135803d5e1da1c523e3eb38378097b1c",
+      "sourceTree": "2c690080f16e2e5bda65197fca29349e99f3f258",
+      "installerPath": "packages/adapter-claude/src/runner-adapter.ts",
+      "installerBlob": "f9dc5891731cdf104704ce480ba0383ca625be8a",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.10.0/deck_v0.10.0_linux-x64.tar.gz",
+        "digest": "sha256:5f33f17843204dae1a23c10e8f73e13f87503f2686ac946b5ba675ae519b2220",
+        "name": "deck_v0.10.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.10.0",
+      "runner": "opencode",
+      "publishedAt": "2026-10-04T17:52:13Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.10.0",
+      "commit": "9f0cf5c4135803d5e1da1c523e3eb38378097b1c",
+      "sourceTree": "2c690080f16e2e5bda65197fca29349e99f3f258",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "d27bdec4e6494230ee64c6a6e171834351775f0e",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.10.0/deck_v0.10.0_linux-x64.tar.gz",
+        "digest": "sha256:5f33f17843204dae1a23c10e8f73e13f87503f2686ac946b5ba675ae519b2220",
+        "name": "deck_v0.10.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.10.0",
+      "runner": "pi",
+      "publishedAt": "2026-10-04T17:52:13Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.10.0",
+      "commit": "9f0cf5c4135803d5e1da1c523e3eb38378097b1c",
+      "sourceTree": "2c690080f16e2e5bda65197fca29349e99f3f258",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "f4e85e77dc36c393886f9bee9a06b098fdaa6f94",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.10.0/deck_v0.10.0_linux-x64.tar.gz",
+        "digest": "sha256:5f33f17843204dae1a23c10e8f73e13f87503f2686ac946b5ba675ae519b2220",
+        "name": "deck_v0.10.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.9.0",
+      "runner": "codex",
+      "publishedAt": "2026-10-02T14:44:16Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.9.0",
+      "commit": "a8660ae8e294bb47c9edb30feb61375014b8b3fb",
+      "sourceTree": "052646e35b98affef80eff7ea1481f960d33afe4",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "96cd78d286c692ff91245acf9082baaef08695c2",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.9.0/deck_v0.9.0_linux-x64.tar.gz",
+        "digest": "sha256:ac3bbe02b8b53f59d83f76709605fd7bb849ea238639bde52dd11687034d6e4b",
+        "name": "deck_v0.9.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.9.0",
+      "runner": "claude",
+      "publishedAt": "2026-10-02T14:44:16Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.9.0",
+      "commit": "a8660ae8e294bb47c9edb30feb61375014b8b3fb",
+      "sourceTree": "052646e35b98affef80eff7ea1481f960d33afe4",
+      "installerPath": "packages/adapter-claude/src/runner-adapter.ts",
+      "installerBlob": "cf760e834393dd3dc0fd4e47d40a257f1d4c7111",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.9.0/deck_v0.9.0_linux-x64.tar.gz",
+        "digest": "sha256:ac3bbe02b8b53f59d83f76709605fd7bb849ea238639bde52dd11687034d6e4b",
+        "name": "deck_v0.9.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.9.0",
+      "runner": "opencode",
+      "publishedAt": "2026-10-02T14:44:16Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.9.0",
+      "commit": "a8660ae8e294bb47c9edb30feb61375014b8b3fb",
+      "sourceTree": "052646e35b98affef80eff7ea1481f960d33afe4",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "d27bdec4e6494230ee64c6a6e171834351775f0e",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.9.0/deck_v0.9.0_linux-x64.tar.gz",
+        "digest": "sha256:ac3bbe02b8b53f59d83f76709605fd7bb849ea238639bde52dd11687034d6e4b",
+        "name": "deck_v0.9.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.9.0",
+      "runner": "pi",
+      "publishedAt": "2026-10-02T14:44:16Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.9.0",
+      "commit": "a8660ae8e294bb47c9edb30feb61375014b8b3fb",
+      "sourceTree": "052646e35b98affef80eff7ea1481f960d33afe4",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "cbd29b5325d490acc48851eef7f47b880ef0c0e1",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.9.0/deck_v0.9.0_linux-x64.tar.gz",
+        "digest": "sha256:ac3bbe02b8b53f59d83f76709605fd7bb849ea238639bde52dd11687034d6e4b",
+        "name": "deck_v0.9.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.8.0",
+      "runner": "codex",
+      "publishedAt": "2026-10-02T00:06:45Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.8.0",
+      "commit": "df3f0c1b4e2bc6d9871eecd89701132f3280042d",
+      "sourceTree": "15c70a0bb2c466f4b27558f6df43e48eebaff2ff",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "18718f6f256142b36fb49490fd102acf071ed52c",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.8.0/deck_v0.8.0_linux-x64.tar.gz",
+        "digest": "sha256:644cabc2da20fdf41859b12b2fa6c7a3eff3e95e18c562399b2368a2a68f846f",
+        "name": "deck_v0.8.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.8.0",
+      "runner": "claude",
+      "publishedAt": "2026-10-02T00:06:45Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.8.0",
+      "commit": "df3f0c1b4e2bc6d9871eecd89701132f3280042d",
+      "sourceTree": "15c70a0bb2c466f4b27558f6df43e48eebaff2ff",
+      "installerPath": "packages/adapter-claude/src/runner-adapter.ts",
+      "installerBlob": "85cc4a2a1c16a4ef0fc684c91bd630d36db077e2",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.8.0/deck_v0.8.0_linux-x64.tar.gz",
+        "digest": "sha256:644cabc2da20fdf41859b12b2fa6c7a3eff3e95e18c562399b2368a2a68f846f",
+        "name": "deck_v0.8.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.8.0",
+      "runner": "opencode",
+      "publishedAt": "2026-10-02T00:06:45Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.8.0",
+      "commit": "df3f0c1b4e2bc6d9871eecd89701132f3280042d",
+      "sourceTree": "15c70a0bb2c466f4b27558f6df43e48eebaff2ff",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "d97389229561adc4372787f7f426ebbdb623cfdb",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.8.0/deck_v0.8.0_linux-x64.tar.gz",
+        "digest": "sha256:644cabc2da20fdf41859b12b2fa6c7a3eff3e95e18c562399b2368a2a68f846f",
+        "name": "deck_v0.8.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.8.0",
+      "runner": "pi",
+      "publishedAt": "2026-10-02T00:06:45Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.8.0",
+      "commit": "df3f0c1b4e2bc6d9871eecd89701132f3280042d",
+      "sourceTree": "15c70a0bb2c466f4b27558f6df43e48eebaff2ff",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "93113c21a02cdf489a84a4de0a972ea1002e9c47",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.8.0/deck_v0.8.0_linux-x64.tar.gz",
+        "digest": "sha256:644cabc2da20fdf41859b12b2fa6c7a3eff3e95e18c562399b2368a2a68f846f",
+        "name": "deck_v0.8.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.7.1",
+      "runner": "codex",
+      "publishedAt": "2026-10-01T04:25:32Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.7.1",
+      "commit": "3bddc0cc7423fd20e3e7e825954acd0d646ba3aa",
+      "sourceTree": "65bd8c1c880eff767d64d24f34b115f4bbbd91cc",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "41ab21688d229e48de455c68be741b88f6404a8d",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.7.1/deck_v0.7.1_linux-x64.tar.gz",
+        "digest": "sha256:18e4dcb82f41dcf351a4996b97139e0dae6af9883bab9e4112039721951a1b9b",
+        "name": "deck_v0.7.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.7.1",
+      "runner": "claude",
+      "publishedAt": "2026-10-01T04:25:32Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.7.1",
+      "commit": "3bddc0cc7423fd20e3e7e825954acd0d646ba3aa",
+      "sourceTree": "65bd8c1c880eff767d64d24f34b115f4bbbd91cc",
+      "installerPath": "packages/adapter-claude/src/runner-adapter.ts",
+      "installerBlob": "85cc4a2a1c16a4ef0fc684c91bd630d36db077e2",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.7.1/deck_v0.7.1_linux-x64.tar.gz",
+        "digest": "sha256:18e4dcb82f41dcf351a4996b97139e0dae6af9883bab9e4112039721951a1b9b",
+        "name": "deck_v0.7.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.7.1",
+      "runner": "opencode",
+      "publishedAt": "2026-10-01T04:25:32Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.7.1",
+      "commit": "3bddc0cc7423fd20e3e7e825954acd0d646ba3aa",
+      "sourceTree": "65bd8c1c880eff767d64d24f34b115f4bbbd91cc",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "d97389229561adc4372787f7f426ebbdb623cfdb",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.7.1/deck_v0.7.1_linux-x64.tar.gz",
+        "digest": "sha256:18e4dcb82f41dcf351a4996b97139e0dae6af9883bab9e4112039721951a1b9b",
+        "name": "deck_v0.7.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.7.1",
+      "runner": "pi",
+      "publishedAt": "2026-10-01T04:25:32Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.7.1",
+      "commit": "3bddc0cc7423fd20e3e7e825954acd0d646ba3aa",
+      "sourceTree": "65bd8c1c880eff767d64d24f34b115f4bbbd91cc",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "93113c21a02cdf489a84a4de0a972ea1002e9c47",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.7.1/deck_v0.7.1_linux-x64.tar.gz",
+        "digest": "sha256:18e4dcb82f41dcf351a4996b97139e0dae6af9883bab9e4112039721951a1b9b",
+        "name": "deck_v0.7.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.6.0",
+      "runner": "codex",
+      "publishedAt": "2026-09-29T17:47:39Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.6.0",
+      "commit": "8666619715f0c279e0e7c493575eb93e5f5a24a7",
+      "sourceTree": "80040c178eaecf3f39e4ad1e14ade09e54ee0763",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "41ab21688d229e48de455c68be741b88f6404a8d",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.6.0/deck_v0.6.0_linux-x64.tar.gz",
+        "digest": "sha256:613d00fdb6bcca59958c33d66ca3188a112b18aa50fdac283855b3b0944c7233",
+        "name": "deck_v0.6.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.6.0",
+      "runner": "claude",
+      "publishedAt": "2026-09-29T17:47:39Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.6.0",
+      "commit": "8666619715f0c279e0e7c493575eb93e5f5a24a7",
+      "sourceTree": "80040c178eaecf3f39e4ad1e14ade09e54ee0763",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.6.0/deck_v0.6.0_linux-x64.tar.gz",
+        "digest": "sha256:613d00fdb6bcca59958c33d66ca3188a112b18aa50fdac283855b3b0944c7233",
+        "name": "deck_v0.6.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.6.0",
+      "runner": "opencode",
+      "publishedAt": "2026-09-29T17:47:39Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.6.0",
+      "commit": "8666619715f0c279e0e7c493575eb93e5f5a24a7",
+      "sourceTree": "80040c178eaecf3f39e4ad1e14ade09e54ee0763",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "d97389229561adc4372787f7f426ebbdb623cfdb",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.6.0/deck_v0.6.0_linux-x64.tar.gz",
+        "digest": "sha256:613d00fdb6bcca59958c33d66ca3188a112b18aa50fdac283855b3b0944c7233",
+        "name": "deck_v0.6.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.6.0",
+      "runner": "pi",
+      "publishedAt": "2026-09-29T17:47:39Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.6.0",
+      "commit": "8666619715f0c279e0e7c493575eb93e5f5a24a7",
+      "sourceTree": "80040c178eaecf3f39e4ad1e14ade09e54ee0763",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "93113c21a02cdf489a84a4de0a972ea1002e9c47",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.6.0/deck_v0.6.0_linux-x64.tar.gz",
+        "digest": "sha256:613d00fdb6bcca59958c33d66ca3188a112b18aa50fdac283855b3b0944c7233",
+        "name": "deck_v0.6.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.5.0",
+      "runner": "codex",
+      "publishedAt": "2026-09-23T03:47:49Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.5.0",
+      "commit": "b67e35c97762e93bc7f74f33a6faf20b1de4a17e",
+      "sourceTree": "7b160b4e69786a6b65b5f4f9e3280135fcb4286f",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "41ab21688d229e48de455c68be741b88f6404a8d",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.5.0/deck_v0.5.0_linux-x64.tar.gz",
+        "digest": "sha256:50a0c28d2eafebdb7a9a53eccf0e4c05b3771c32ce9a078bd5b7abd66130e4a6",
+        "name": "deck_v0.5.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.5.0",
+      "runner": "claude",
+      "publishedAt": "2026-09-23T03:47:49Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.5.0",
+      "commit": "b67e35c97762e93bc7f74f33a6faf20b1de4a17e",
+      "sourceTree": "7b160b4e69786a6b65b5f4f9e3280135fcb4286f",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.5.0/deck_v0.5.0_linux-x64.tar.gz",
+        "digest": "sha256:50a0c28d2eafebdb7a9a53eccf0e4c05b3771c32ce9a078bd5b7abd66130e4a6",
+        "name": "deck_v0.5.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.5.0",
+      "runner": "opencode",
+      "publishedAt": "2026-09-23T03:47:49Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.5.0",
+      "commit": "b67e35c97762e93bc7f74f33a6faf20b1de4a17e",
+      "sourceTree": "7b160b4e69786a6b65b5f4f9e3280135fcb4286f",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "433c26443071b24976c59b93efb2958795475e0b",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.5.0/deck_v0.5.0_linux-x64.tar.gz",
+        "digest": "sha256:50a0c28d2eafebdb7a9a53eccf0e4c05b3771c32ce9a078bd5b7abd66130e4a6",
+        "name": "deck_v0.5.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.5.0",
+      "runner": "pi",
+      "publishedAt": "2026-09-23T03:47:49Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.5.0",
+      "commit": "b67e35c97762e93bc7f74f33a6faf20b1de4a17e",
+      "sourceTree": "7b160b4e69786a6b65b5f4f9e3280135fcb4286f",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "93113c21a02cdf489a84a4de0a972ea1002e9c47",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.5.0/deck_v0.5.0_linux-x64.tar.gz",
+        "digest": "sha256:50a0c28d2eafebdb7a9a53eccf0e4c05b3771c32ce9a078bd5b7abd66130e4a6",
+        "name": "deck_v0.5.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.3",
+      "runner": "codex",
+      "publishedAt": "2026-09-22T05:03:26Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.3",
+      "commit": "b15bb6b5aa5251eed86c3af39e1aede9b16dcf38",
+      "sourceTree": "48e9b29b46ae39cb7770abde5afbfeb085b57a2e",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "41ab21688d229e48de455c68be741b88f6404a8d",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.3/deck_v0.4.3_linux-x64.tar.gz",
+        "digest": "sha256:068a34c8d25a979a76ca270b4be630f77732b3f8657367fcb836f9b96d9df984",
+        "name": "deck_v0.4.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.3",
+      "runner": "claude",
+      "publishedAt": "2026-09-22T05:03:26Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.3",
+      "commit": "b15bb6b5aa5251eed86c3af39e1aede9b16dcf38",
+      "sourceTree": "48e9b29b46ae39cb7770abde5afbfeb085b57a2e",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.3/deck_v0.4.3_linux-x64.tar.gz",
+        "digest": "sha256:068a34c8d25a979a76ca270b4be630f77732b3f8657367fcb836f9b96d9df984",
+        "name": "deck_v0.4.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.3",
+      "runner": "opencode",
+      "publishedAt": "2026-09-22T05:03:26Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.3",
+      "commit": "b15bb6b5aa5251eed86c3af39e1aede9b16dcf38",
+      "sourceTree": "48e9b29b46ae39cb7770abde5afbfeb085b57a2e",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "daf1a8855624224362958edcd84d2e78e8bbf029",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.3/deck_v0.4.3_linux-x64.tar.gz",
+        "digest": "sha256:068a34c8d25a979a76ca270b4be630f77732b3f8657367fcb836f9b96d9df984",
+        "name": "deck_v0.4.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.3",
+      "runner": "pi",
+      "publishedAt": "2026-09-22T05:03:26Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.3",
+      "commit": "b15bb6b5aa5251eed86c3af39e1aede9b16dcf38",
+      "sourceTree": "48e9b29b46ae39cb7770abde5afbfeb085b57a2e",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "93113c21a02cdf489a84a4de0a972ea1002e9c47",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.3/deck_v0.4.3_linux-x64.tar.gz",
+        "digest": "sha256:068a34c8d25a979a76ca270b4be630f77732b3f8657367fcb836f9b96d9df984",
+        "name": "deck_v0.4.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.2",
+      "runner": "codex",
+      "publishedAt": "2026-09-21T23:03:53Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.2",
+      "commit": "cf5c04892c1df69fdbf10b74faa0aaa374a1e8ce",
+      "sourceTree": "b92f4ae71ba9482695d335ebf96bfa04db16363f",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "88f425b7e784f7fe2e4cecd801274f46c0c5400a",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.2/deck_v0.4.2_linux-x64.tar.gz",
+        "digest": "sha256:e52f58fe4cb0647989400102dccbdee7d208b22615d268c293a102a444718b8a",
+        "name": "deck_v0.4.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.2",
+      "runner": "claude",
+      "publishedAt": "2026-09-21T23:03:53Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.2",
+      "commit": "cf5c04892c1df69fdbf10b74faa0aaa374a1e8ce",
+      "sourceTree": "b92f4ae71ba9482695d335ebf96bfa04db16363f",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.2/deck_v0.4.2_linux-x64.tar.gz",
+        "digest": "sha256:e52f58fe4cb0647989400102dccbdee7d208b22615d268c293a102a444718b8a",
+        "name": "deck_v0.4.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.2",
+      "runner": "opencode",
+      "publishedAt": "2026-09-21T23:03:53Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.2",
+      "commit": "cf5c04892c1df69fdbf10b74faa0aaa374a1e8ce",
+      "sourceTree": "b92f4ae71ba9482695d335ebf96bfa04db16363f",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "daf1a8855624224362958edcd84d2e78e8bbf029",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.2/deck_v0.4.2_linux-x64.tar.gz",
+        "digest": "sha256:e52f58fe4cb0647989400102dccbdee7d208b22615d268c293a102a444718b8a",
+        "name": "deck_v0.4.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.2",
+      "runner": "pi",
+      "publishedAt": "2026-09-21T23:03:53Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.2",
+      "commit": "cf5c04892c1df69fdbf10b74faa0aaa374a1e8ce",
+      "sourceTree": "b92f4ae71ba9482695d335ebf96bfa04db16363f",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "93113c21a02cdf489a84a4de0a972ea1002e9c47",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.2/deck_v0.4.2_linux-x64.tar.gz",
+        "digest": "sha256:e52f58fe4cb0647989400102dccbdee7d208b22615d268c293a102a444718b8a",
+        "name": "deck_v0.4.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.1",
+      "runner": "codex",
+      "publishedAt": "2026-09-21T21:27:30Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.1",
+      "commit": "894858d1b6e9737fc3f023169faa99543876a06a",
+      "sourceTree": "6ac2aebc17af5ae74dbaf4afa6f5aed5c72fea8a",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "88f425b7e784f7fe2e4cecd801274f46c0c5400a",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.1/deck_v0.4.1_linux-x64.tar.gz",
+        "digest": "sha256:2424aed455192a660d9a9468d9448ac8cf7d78053877c53c587843c0f92bfc3e",
+        "name": "deck_v0.4.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.1",
+      "runner": "claude",
+      "publishedAt": "2026-09-21T21:27:30Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.1",
+      "commit": "894858d1b6e9737fc3f023169faa99543876a06a",
+      "sourceTree": "6ac2aebc17af5ae74dbaf4afa6f5aed5c72fea8a",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.1/deck_v0.4.1_linux-x64.tar.gz",
+        "digest": "sha256:2424aed455192a660d9a9468d9448ac8cf7d78053877c53c587843c0f92bfc3e",
+        "name": "deck_v0.4.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.1",
+      "runner": "opencode",
+      "publishedAt": "2026-09-21T21:27:30Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.1",
+      "commit": "894858d1b6e9737fc3f023169faa99543876a06a",
+      "sourceTree": "6ac2aebc17af5ae74dbaf4afa6f5aed5c72fea8a",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "daf1a8855624224362958edcd84d2e78e8bbf029",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.1/deck_v0.4.1_linux-x64.tar.gz",
+        "digest": "sha256:2424aed455192a660d9a9468d9448ac8cf7d78053877c53c587843c0f92bfc3e",
+        "name": "deck_v0.4.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.1",
+      "runner": "pi",
+      "publishedAt": "2026-09-21T21:27:30Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.1",
+      "commit": "894858d1b6e9737fc3f023169faa99543876a06a",
+      "sourceTree": "6ac2aebc17af5ae74dbaf4afa6f5aed5c72fea8a",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "93113c21a02cdf489a84a4de0a972ea1002e9c47",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.1/deck_v0.4.1_linux-x64.tar.gz",
+        "digest": "sha256:2424aed455192a660d9a9468d9448ac8cf7d78053877c53c587843c0f92bfc3e",
+        "name": "deck_v0.4.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.0",
+      "runner": "codex",
+      "publishedAt": "2026-09-08T03:33:57Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.0",
+      "commit": "7b4dfc36159328a904f661bf3bcb9e193d47e14b",
+      "sourceTree": "7c6bb93b99243fa0e78a6a980cf8c4c78c7584ac",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "88f425b7e784f7fe2e4cecd801274f46c0c5400a",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.0/deck_v0.4.0_linux-x64.tar.gz",
+        "digest": "sha256:06a4c8b9b97e21a32ab3a92d19bd3a376eeb610563f66324bf331207276fe334",
+        "name": "deck_v0.4.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.0",
+      "runner": "claude",
+      "publishedAt": "2026-09-08T03:33:57Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.0",
+      "commit": "7b4dfc36159328a904f661bf3bcb9e193d47e14b",
+      "sourceTree": "7c6bb93b99243fa0e78a6a980cf8c4c78c7584ac",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.0/deck_v0.4.0_linux-x64.tar.gz",
+        "digest": "sha256:06a4c8b9b97e21a32ab3a92d19bd3a376eeb610563f66324bf331207276fe334",
+        "name": "deck_v0.4.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.0",
+      "runner": "opencode",
+      "publishedAt": "2026-09-08T03:33:57Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.0",
+      "commit": "7b4dfc36159328a904f661bf3bcb9e193d47e14b",
+      "sourceTree": "7c6bb93b99243fa0e78a6a980cf8c4c78c7584ac",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "daf1a8855624224362958edcd84d2e78e8bbf029",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.0/deck_v0.4.0_linux-x64.tar.gz",
+        "digest": "sha256:06a4c8b9b97e21a32ab3a92d19bd3a376eeb610563f66324bf331207276fe334",
+        "name": "deck_v0.4.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.4.0",
+      "runner": "pi",
+      "publishedAt": "2026-09-08T03:33:57Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.4.0",
+      "commit": "7b4dfc36159328a904f661bf3bcb9e193d47e14b",
+      "sourceTree": "7c6bb93b99243fa0e78a6a980cf8c4c78c7584ac",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "93113c21a02cdf489a84a4de0a972ea1002e9c47",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.4.0/deck_v0.4.0_linux-x64.tar.gz",
+        "digest": "sha256:06a4c8b9b97e21a32ab3a92d19bd3a376eeb610563f66324bf331207276fe334",
+        "name": "deck_v0.4.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.3.0",
+      "runner": "codex",
+      "publishedAt": "2026-08-14T18:21:44Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.3.0",
+      "commit": "010f0fd4d5a06e00d206f3eff922ddcf33e385a8",
+      "sourceTree": "53371afcbd912c811a8e793ab148c96bbeb5d4bb",
+      "installerPath": "packages/adapter-codex/src/runner-adapter.ts",
+      "installerBlob": "599f2d8de951dd34a2b28e367ce30fe375fe54d2",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.3.0/deck_v0.3.0_linux-x64.tar.gz",
+        "digest": "sha256:23c00e4463d9cb3584dd4906263888430856ee6143613955a707be22fff450fd",
+        "name": "deck_v0.3.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.3.0",
+      "runner": "claude",
+      "publishedAt": "2026-08-14T18:21:44Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.3.0",
+      "commit": "010f0fd4d5a06e00d206f3eff922ddcf33e385a8",
+      "sourceTree": "53371afcbd912c811a8e793ab148c96bbeb5d4bb",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.3.0/deck_v0.3.0_linux-x64.tar.gz",
+        "digest": "sha256:23c00e4463d9cb3584dd4906263888430856ee6143613955a707be22fff450fd",
+        "name": "deck_v0.3.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.3.0",
+      "runner": "opencode",
+      "publishedAt": "2026-08-14T18:21:44Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.3.0",
+      "commit": "010f0fd4d5a06e00d206f3eff922ddcf33e385a8",
+      "sourceTree": "53371afcbd912c811a8e793ab148c96bbeb5d4bb",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "de54c6c5e602b25c55f81202e9fc1f22642ae04c",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.3.0/deck_v0.3.0_linux-x64.tar.gz",
+        "digest": "sha256:23c00e4463d9cb3584dd4906263888430856ee6143613955a707be22fff450fd",
+        "name": "deck_v0.3.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.3.0",
+      "runner": "pi",
+      "publishedAt": "2026-08-14T18:21:44Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.3.0",
+      "commit": "010f0fd4d5a06e00d206f3eff922ddcf33e385a8",
+      "sourceTree": "53371afcbd912c811a8e793ab148c96bbeb5d4bb",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "313e3483d66c5988dd696bddd64c654a40a89fd6",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.3.0/deck_v0.3.0_linux-x64.tar.gz",
+        "digest": "sha256:23c00e4463d9cb3584dd4906263888430856ee6143613955a707be22fff450fd",
+        "name": "deck_v0.3.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.6",
+      "runner": "codex",
+      "publishedAt": "2026-08-05T14:11:01Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.6",
+      "commit": "1ff9e0715ef772583ceba057b0fbff52d40c301b",
+      "sourceTree": "9c2ca31b41c5bb30a69e51171e03e3e070acd600",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.6/deck_v0.2.6_linux-x64.tar.gz",
+        "digest": "sha256:69f8cb13db6c7a39d34beded4e0198576c41ebd50502e0caf09663c9283c0e87",
+        "name": "deck_v0.2.6_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.6",
+      "runner": "claude",
+      "publishedAt": "2026-08-05T14:11:01Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.6",
+      "commit": "1ff9e0715ef772583ceba057b0fbff52d40c301b",
+      "sourceTree": "9c2ca31b41c5bb30a69e51171e03e3e070acd600",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.6/deck_v0.2.6_linux-x64.tar.gz",
+        "digest": "sha256:69f8cb13db6c7a39d34beded4e0198576c41ebd50502e0caf09663c9283c0e87",
+        "name": "deck_v0.2.6_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.6",
+      "runner": "opencode",
+      "publishedAt": "2026-08-05T14:11:01Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.6",
+      "commit": "1ff9e0715ef772583ceba057b0fbff52d40c301b",
+      "sourceTree": "9c2ca31b41c5bb30a69e51171e03e3e070acd600",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "a5d9b1bf246ee97bc0b73ca054571be3ecbe5136",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.6/deck_v0.2.6_linux-x64.tar.gz",
+        "digest": "sha256:69f8cb13db6c7a39d34beded4e0198576c41ebd50502e0caf09663c9283c0e87",
+        "name": "deck_v0.2.6_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.6",
+      "runner": "pi",
+      "publishedAt": "2026-08-05T14:11:01Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.6",
+      "commit": "1ff9e0715ef772583ceba057b0fbff52d40c301b",
+      "sourceTree": "9c2ca31b41c5bb30a69e51171e03e3e070acd600",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "7820ce39fd45252b5e08dfdecb37c9e891240b93",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.6/deck_v0.2.6_linux-x64.tar.gz",
+        "digest": "sha256:69f8cb13db6c7a39d34beded4e0198576c41ebd50502e0caf09663c9283c0e87",
+        "name": "deck_v0.2.6_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.5",
+      "runner": "codex",
+      "publishedAt": "2026-08-03T15:16:59Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.5",
+      "commit": "5585e98f9dab9b5de80c6a8f5c857efb5d18169a",
+      "sourceTree": "357be07e3544cf786fe3f12938d319ab19af5a76",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.5/deck_v0.2.5_linux-x64.tar.gz",
+        "digest": "sha256:90fdbcc66684158d5818199b3c815a2791584da537369d9b6fcf8d036f86a894",
+        "name": "deck_v0.2.5_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.5",
+      "runner": "claude",
+      "publishedAt": "2026-08-03T15:16:59Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.5",
+      "commit": "5585e98f9dab9b5de80c6a8f5c857efb5d18169a",
+      "sourceTree": "357be07e3544cf786fe3f12938d319ab19af5a76",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.5/deck_v0.2.5_linux-x64.tar.gz",
+        "digest": "sha256:90fdbcc66684158d5818199b3c815a2791584da537369d9b6fcf8d036f86a894",
+        "name": "deck_v0.2.5_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.5",
+      "runner": "opencode",
+      "publishedAt": "2026-08-03T15:16:59Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.5",
+      "commit": "5585e98f9dab9b5de80c6a8f5c857efb5d18169a",
+      "sourceTree": "357be07e3544cf786fe3f12938d319ab19af5a76",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "a5f2cbb4b279c8c5fb5bbf66d15b5a444a0c7bf5",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.5/deck_v0.2.5_linux-x64.tar.gz",
+        "digest": "sha256:90fdbcc66684158d5818199b3c815a2791584da537369d9b6fcf8d036f86a894",
+        "name": "deck_v0.2.5_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.5",
+      "runner": "pi",
+      "publishedAt": "2026-08-03T15:16:59Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.5",
+      "commit": "5585e98f9dab9b5de80c6a8f5c857efb5d18169a",
+      "sourceTree": "357be07e3544cf786fe3f12938d319ab19af5a76",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "44cc209d08c311576c9b0b05e26ff9a29d7a8e04",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.5/deck_v0.2.5_linux-x64.tar.gz",
+        "digest": "sha256:90fdbcc66684158d5818199b3c815a2791584da537369d9b6fcf8d036f86a894",
+        "name": "deck_v0.2.5_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.4",
+      "runner": "codex",
+      "publishedAt": "2026-07-22T20:54:39Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.4",
+      "commit": "e906b99691f5d0b446315d236e63a829025db0f2",
+      "sourceTree": "caa00b39e5d8a5b0dac2dc1e52c5412241b89b75",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.4/deck_v0.2.4_linux-x64.tar.gz",
+        "digest": "sha256:907c48cb499b6241ee131e658213e60e301bc4113c09d6f51a6ca601a40be590",
+        "name": "deck_v0.2.4_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.4",
+      "runner": "claude",
+      "publishedAt": "2026-07-22T20:54:39Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.4",
+      "commit": "e906b99691f5d0b446315d236e63a829025db0f2",
+      "sourceTree": "caa00b39e5d8a5b0dac2dc1e52c5412241b89b75",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.4/deck_v0.2.4_linux-x64.tar.gz",
+        "digest": "sha256:907c48cb499b6241ee131e658213e60e301bc4113c09d6f51a6ca601a40be590",
+        "name": "deck_v0.2.4_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.4",
+      "runner": "opencode",
+      "publishedAt": "2026-07-22T20:54:39Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.4",
+      "commit": "e906b99691f5d0b446315d236e63a829025db0f2",
+      "sourceTree": "caa00b39e5d8a5b0dac2dc1e52c5412241b89b75",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "e8285bb5f26970ed78be7e084aa5f6e5f9a3a3c2",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.4/deck_v0.2.4_linux-x64.tar.gz",
+        "digest": "sha256:907c48cb499b6241ee131e658213e60e301bc4113c09d6f51a6ca601a40be590",
+        "name": "deck_v0.2.4_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.4",
+      "runner": "pi",
+      "publishedAt": "2026-07-22T20:54:39Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.4",
+      "commit": "e906b99691f5d0b446315d236e63a829025db0f2",
+      "sourceTree": "caa00b39e5d8a5b0dac2dc1e52c5412241b89b75",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "1cef4de0c7f56eea39b115681dc8243e2ae01a5e",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.4/deck_v0.2.4_linux-x64.tar.gz",
+        "digest": "sha256:907c48cb499b6241ee131e658213e60e301bc4113c09d6f51a6ca601a40be590",
+        "name": "deck_v0.2.4_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.3",
+      "runner": "codex",
+      "publishedAt": "2026-07-15T15:44:25Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.3",
+      "commit": "652a9b0ed14efc995300b9c982950a70b7792e98",
+      "sourceTree": "957ad94af99638d285d629b08903ae2d5e5bbe43",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.3/deck_v0.2.3_linux-x64.tar.gz",
+        "digest": "sha256:c815e4fdff886ad28d6f6f656fb846134c1fa40b29167712199eb42175e00cdc",
+        "name": "deck_v0.2.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.3",
+      "runner": "claude",
+      "publishedAt": "2026-07-15T15:44:25Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.3",
+      "commit": "652a9b0ed14efc995300b9c982950a70b7792e98",
+      "sourceTree": "957ad94af99638d285d629b08903ae2d5e5bbe43",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.3/deck_v0.2.3_linux-x64.tar.gz",
+        "digest": "sha256:c815e4fdff886ad28d6f6f656fb846134c1fa40b29167712199eb42175e00cdc",
+        "name": "deck_v0.2.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.3",
+      "runner": "opencode",
+      "publishedAt": "2026-07-15T15:44:25Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.3",
+      "commit": "652a9b0ed14efc995300b9c982950a70b7792e98",
+      "sourceTree": "957ad94af99638d285d629b08903ae2d5e5bbe43",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "a06236ad50f62982da9715fd7dd723820b3b2840",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.3/deck_v0.2.3_linux-x64.tar.gz",
+        "digest": "sha256:c815e4fdff886ad28d6f6f656fb846134c1fa40b29167712199eb42175e00cdc",
+        "name": "deck_v0.2.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "v0.2.3",
+      "runner": "pi",
+      "publishedAt": "2026-07-15T15:44:25Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/v0.2.3",
+      "commit": "652a9b0ed14efc995300b9c982950a70b7792e98",
+      "sourceTree": "957ad94af99638d285d629b08903ae2d5e5bbe43",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "1cef4de0c7f56eea39b115681dc8243e2ae01a5e",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/v0.2.3/deck_v0.2.3_linux-x64.tar.gz",
+        "digest": "sha256:c815e4fdff886ad28d6f6f656fb846134c1fa40b29167712199eb42175e00cdc",
+        "name": "deck_v0.2.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.2.2",
+      "runner": "codex",
+      "publishedAt": "2026-06-24T22:11:31Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.2.2",
+      "commit": "86e95f8cbfd13a579892d6594b7f2b81dd04968f",
+      "sourceTree": "78b876c4e357b1c55ffe075b71c167a52a17075d",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.2.2/deck_v0.2.2_linux-x64.tar.gz",
+        "digest": "sha256:6b1a4108391fd0c60dc70d93e6bf0f48ca33a878f7f043491b780bdbf4299b08",
+        "name": "deck_v0.2.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.2.2",
+      "runner": "claude",
+      "publishedAt": "2026-06-24T22:11:31Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.2.2",
+      "commit": "86e95f8cbfd13a579892d6594b7f2b81dd04968f",
+      "sourceTree": "78b876c4e357b1c55ffe075b71c167a52a17075d",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.2.2/deck_v0.2.2_linux-x64.tar.gz",
+        "digest": "sha256:6b1a4108391fd0c60dc70d93e6bf0f48ca33a878f7f043491b780bdbf4299b08",
+        "name": "deck_v0.2.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.2.2",
+      "runner": "opencode",
+      "publishedAt": "2026-06-24T22:11:31Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.2.2",
+      "commit": "86e95f8cbfd13a579892d6594b7f2b81dd04968f",
+      "sourceTree": "78b876c4e357b1c55ffe075b71c167a52a17075d",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "56969b4c9f74d4a61724bbe000a9d901631f0b73",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.2.2/deck_v0.2.2_linux-x64.tar.gz",
+        "digest": "sha256:6b1a4108391fd0c60dc70d93e6bf0f48ca33a878f7f043491b780bdbf4299b08",
+        "name": "deck_v0.2.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.2.2",
+      "runner": "pi",
+      "publishedAt": "2026-06-24T22:11:31Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.2.2",
+      "commit": "86e95f8cbfd13a579892d6594b7f2b81dd04968f",
+      "sourceTree": "78b876c4e357b1c55ffe075b71c167a52a17075d",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "1cef4de0c7f56eea39b115681dc8243e2ae01a5e",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.2.2/deck_v0.2.2_linux-x64.tar.gz",
+        "digest": "sha256:6b1a4108391fd0c60dc70d93e6bf0f48ca33a878f7f043491b780bdbf4299b08",
+        "name": "deck_v0.2.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.2.1",
+      "runner": "codex",
+      "publishedAt": "2026-06-24T15:18:12Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.2.1",
+      "commit": "4aa2f0cc0a4e42dff2f225b51e60bda72671d509",
+      "sourceTree": "d053e4a863aedefb23f777783de20db0050f31aa",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.2.1/deck_v0.2.1_linux-x64.tar.gz",
+        "digest": "sha256:d5e5afe4e2282f38f1351e421d9ae8b4f975ca30e4d2de8c865155a74dce0a9c",
+        "name": "deck_v0.2.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.2.1",
+      "runner": "claude",
+      "publishedAt": "2026-06-24T15:18:12Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.2.1",
+      "commit": "4aa2f0cc0a4e42dff2f225b51e60bda72671d509",
+      "sourceTree": "d053e4a863aedefb23f777783de20db0050f31aa",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.2.1/deck_v0.2.1_linux-x64.tar.gz",
+        "digest": "sha256:d5e5afe4e2282f38f1351e421d9ae8b4f975ca30e4d2de8c865155a74dce0a9c",
+        "name": "deck_v0.2.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.2.1",
+      "runner": "opencode",
+      "publishedAt": "2026-06-24T15:18:12Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.2.1",
+      "commit": "4aa2f0cc0a4e42dff2f225b51e60bda72671d509",
+      "sourceTree": "d053e4a863aedefb23f777783de20db0050f31aa",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "56969b4c9f74d4a61724bbe000a9d901631f0b73",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.2.1/deck_v0.2.1_linux-x64.tar.gz",
+        "digest": "sha256:d5e5afe4e2282f38f1351e421d9ae8b4f975ca30e4d2de8c865155a74dce0a9c",
+        "name": "deck_v0.2.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.2.1",
+      "runner": "pi",
+      "publishedAt": "2026-06-24T15:18:12Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.2.1",
+      "commit": "4aa2f0cc0a4e42dff2f225b51e60bda72671d509",
+      "sourceTree": "d053e4a863aedefb23f777783de20db0050f31aa",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "1cef4de0c7f56eea39b115681dc8243e2ae01a5e",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.2.1/deck_v0.2.1_linux-x64.tar.gz",
+        "digest": "sha256:d5e5afe4e2282f38f1351e421d9ae8b4f975ca30e4d2de8c865155a74dce0a9c",
+        "name": "deck_v0.2.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.2.0",
+      "runner": "codex",
+      "publishedAt": "2026-06-23T17:03:04Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.2.0",
+      "commit": "ba93b1509815a00921e2ddd8ed75a2d5e87f0dfa",
+      "sourceTree": "a20421ed17fb7df69ec35c363193dede0d63a4ea",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.2.0/deck_v0.2.0_linux-x64.tar.gz",
+        "digest": "sha256:10a832fb248e9a0a8db3709dee7431df6c2deaeb07c3144f70ad54bc6d6b1a19",
+        "name": "deck_v0.2.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.2.0",
+      "runner": "claude",
+      "publishedAt": "2026-06-23T17:03:04Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.2.0",
+      "commit": "ba93b1509815a00921e2ddd8ed75a2d5e87f0dfa",
+      "sourceTree": "a20421ed17fb7df69ec35c363193dede0d63a4ea",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.2.0/deck_v0.2.0_linux-x64.tar.gz",
+        "digest": "sha256:10a832fb248e9a0a8db3709dee7431df6c2deaeb07c3144f70ad54bc6d6b1a19",
+        "name": "deck_v0.2.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.2.0",
+      "runner": "opencode",
+      "publishedAt": "2026-06-23T17:03:04Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.2.0",
+      "commit": "ba93b1509815a00921e2ddd8ed75a2d5e87f0dfa",
+      "sourceTree": "a20421ed17fb7df69ec35c363193dede0d63a4ea",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "56969b4c9f74d4a61724bbe000a9d901631f0b73",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.2.0/deck_v0.2.0_linux-x64.tar.gz",
+        "digest": "sha256:10a832fb248e9a0a8db3709dee7431df6c2deaeb07c3144f70ad54bc6d6b1a19",
+        "name": "deck_v0.2.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.2.0",
+      "runner": "pi",
+      "publishedAt": "2026-06-23T17:03:04Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.2.0",
+      "commit": "ba93b1509815a00921e2ddd8ed75a2d5e87f0dfa",
+      "sourceTree": "a20421ed17fb7df69ec35c363193dede0d63a4ea",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "1cef4de0c7f56eea39b115681dc8243e2ae01a5e",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.2.0/deck_v0.2.0_linux-x64.tar.gz",
+        "digest": "sha256:10a832fb248e9a0a8db3709dee7431df6c2deaeb07c3144f70ad54bc6d6b1a19",
+        "name": "deck_v0.2.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.9",
+      "runner": "codex",
+      "publishedAt": "2026-06-17T23:01:22Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.9",
+      "commit": "3479815aaeaa54266839e2cb50521017ae771bc7",
+      "sourceTree": "25e58483bf00fb0c7fb004f395dc210b2400bb3d",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.9/deck_v0.1.9_linux-x64.tar.gz",
+        "digest": "sha256:cadd258be6c40fa162ed8426bbd597d3af7473b7c3749e283342fe56a6ff982a",
+        "name": "deck_v0.1.9_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.9",
+      "runner": "claude",
+      "publishedAt": "2026-06-17T23:01:22Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.9",
+      "commit": "3479815aaeaa54266839e2cb50521017ae771bc7",
+      "sourceTree": "25e58483bf00fb0c7fb004f395dc210b2400bb3d",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.9/deck_v0.1.9_linux-x64.tar.gz",
+        "digest": "sha256:cadd258be6c40fa162ed8426bbd597d3af7473b7c3749e283342fe56a6ff982a",
+        "name": "deck_v0.1.9_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.9",
+      "runner": "opencode",
+      "publishedAt": "2026-06-17T23:01:22Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.9",
+      "commit": "3479815aaeaa54266839e2cb50521017ae771bc7",
+      "sourceTree": "25e58483bf00fb0c7fb004f395dc210b2400bb3d",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "3b63a063a0ecd82ec1feb90c61a2a64dfeaf4246",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.9/deck_v0.1.9_linux-x64.tar.gz",
+        "digest": "sha256:cadd258be6c40fa162ed8426bbd597d3af7473b7c3749e283342fe56a6ff982a",
+        "name": "deck_v0.1.9_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.9",
+      "runner": "pi",
+      "publishedAt": "2026-06-17T23:01:22Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.9",
+      "commit": "3479815aaeaa54266839e2cb50521017ae771bc7",
+      "sourceTree": "25e58483bf00fb0c7fb004f395dc210b2400bb3d",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "61ac7f6c5f78e934e4dcf7e7c806d71bf6b9cd2d",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.9/deck_v0.1.9_linux-x64.tar.gz",
+        "digest": "sha256:cadd258be6c40fa162ed8426bbd597d3af7473b7c3749e283342fe56a6ff982a",
+        "name": "deck_v0.1.9_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.8",
+      "runner": "codex",
+      "publishedAt": "2026-06-17T22:36:28Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.8",
+      "commit": "627aab98bcba366c9f18790e9debb6d36c9a1688",
+      "sourceTree": "86e689c57ccf5a0e1fe57148252b61e7998a4698",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.8/deck_v0.1.8_linux-x64.tar.gz",
+        "digest": "sha256:706cc3e19af976db32533345999bcf70ae48da260f646c0b1ffd4355fa0894d7",
+        "name": "deck_v0.1.8_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.8",
+      "runner": "claude",
+      "publishedAt": "2026-06-17T22:36:28Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.8",
+      "commit": "627aab98bcba366c9f18790e9debb6d36c9a1688",
+      "sourceTree": "86e689c57ccf5a0e1fe57148252b61e7998a4698",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.8/deck_v0.1.8_linux-x64.tar.gz",
+        "digest": "sha256:706cc3e19af976db32533345999bcf70ae48da260f646c0b1ffd4355fa0894d7",
+        "name": "deck_v0.1.8_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.8",
+      "runner": "opencode",
+      "publishedAt": "2026-06-17T22:36:28Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.8",
+      "commit": "627aab98bcba366c9f18790e9debb6d36c9a1688",
+      "sourceTree": "86e689c57ccf5a0e1fe57148252b61e7998a4698",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "3b63a063a0ecd82ec1feb90c61a2a64dfeaf4246",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.8/deck_v0.1.8_linux-x64.tar.gz",
+        "digest": "sha256:706cc3e19af976db32533345999bcf70ae48da260f646c0b1ffd4355fa0894d7",
+        "name": "deck_v0.1.8_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.8",
+      "runner": "pi",
+      "publishedAt": "2026-06-17T22:36:28Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.8",
+      "commit": "627aab98bcba366c9f18790e9debb6d36c9a1688",
+      "sourceTree": "86e689c57ccf5a0e1fe57148252b61e7998a4698",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "61ac7f6c5f78e934e4dcf7e7c806d71bf6b9cd2d",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.8/deck_v0.1.8_linux-x64.tar.gz",
+        "digest": "sha256:706cc3e19af976db32533345999bcf70ae48da260f646c0b1ffd4355fa0894d7",
+        "name": "deck_v0.1.8_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.7",
+      "runner": "codex",
+      "publishedAt": "2026-06-17T15:47:30Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.7",
+      "commit": "52eead79886e9f189700917fb272b01a23f75221",
+      "sourceTree": "29c9382e4e05add54eaed98e8681d5a970453204",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.7/deck_v0.1.7_linux-x64.tar.gz",
+        "digest": "sha256:e9c921d0c5d7bd8bf2753a9cf43deb3852c7eb26914b910b44f20a8a07b7d0b9",
+        "name": "deck_v0.1.7_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.7",
+      "runner": "claude",
+      "publishedAt": "2026-06-17T15:47:30Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.7",
+      "commit": "52eead79886e9f189700917fb272b01a23f75221",
+      "sourceTree": "29c9382e4e05add54eaed98e8681d5a970453204",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.7/deck_v0.1.7_linux-x64.tar.gz",
+        "digest": "sha256:e9c921d0c5d7bd8bf2753a9cf43deb3852c7eb26914b910b44f20a8a07b7d0b9",
+        "name": "deck_v0.1.7_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.7",
+      "runner": "opencode",
+      "publishedAt": "2026-06-17T15:47:30Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.7",
+      "commit": "52eead79886e9f189700917fb272b01a23f75221",
+      "sourceTree": "29c9382e4e05add54eaed98e8681d5a970453204",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "3b63a063a0ecd82ec1feb90c61a2a64dfeaf4246",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.7/deck_v0.1.7_linux-x64.tar.gz",
+        "digest": "sha256:e9c921d0c5d7bd8bf2753a9cf43deb3852c7eb26914b910b44f20a8a07b7d0b9",
+        "name": "deck_v0.1.7_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.7",
+      "runner": "pi",
+      "publishedAt": "2026-06-17T15:47:30Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.7",
+      "commit": "52eead79886e9f189700917fb272b01a23f75221",
+      "sourceTree": "29c9382e4e05add54eaed98e8681d5a970453204",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "61ac7f6c5f78e934e4dcf7e7c806d71bf6b9cd2d",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.7/deck_v0.1.7_linux-x64.tar.gz",
+        "digest": "sha256:e9c921d0c5d7bd8bf2753a9cf43deb3852c7eb26914b910b44f20a8a07b7d0b9",
+        "name": "deck_v0.1.7_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.6",
+      "runner": "codex",
+      "publishedAt": "2026-06-10T20:37:02Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.6",
+      "commit": "20057d400c7e613e0802a2943458c47e9cdd0f69",
+      "sourceTree": "e33aae18b415a1f667f896d33103804a0ef98c5e",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.6/deck_v0.1.6_linux-x64.tar.gz",
+        "digest": "sha256:330fd7b1b1005307832fbedc71f094834da2f2cc15870bc8a5f7714506d359c9",
+        "name": "deck_v0.1.6_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.6",
+      "runner": "claude",
+      "publishedAt": "2026-06-10T20:37:02Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.6",
+      "commit": "20057d400c7e613e0802a2943458c47e9cdd0f69",
+      "sourceTree": "e33aae18b415a1f667f896d33103804a0ef98c5e",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.6/deck_v0.1.6_linux-x64.tar.gz",
+        "digest": "sha256:330fd7b1b1005307832fbedc71f094834da2f2cc15870bc8a5f7714506d359c9",
+        "name": "deck_v0.1.6_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.6",
+      "runner": "opencode",
+      "publishedAt": "2026-06-10T20:37:02Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.6",
+      "commit": "20057d400c7e613e0802a2943458c47e9cdd0f69",
+      "sourceTree": "e33aae18b415a1f667f896d33103804a0ef98c5e",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "3b63a063a0ecd82ec1feb90c61a2a64dfeaf4246",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.6/deck_v0.1.6_linux-x64.tar.gz",
+        "digest": "sha256:330fd7b1b1005307832fbedc71f094834da2f2cc15870bc8a5f7714506d359c9",
+        "name": "deck_v0.1.6_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.6",
+      "runner": "pi",
+      "publishedAt": "2026-06-10T20:37:02Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.6",
+      "commit": "20057d400c7e613e0802a2943458c47e9cdd0f69",
+      "sourceTree": "e33aae18b415a1f667f896d33103804a0ef98c5e",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "61ac7f6c5f78e934e4dcf7e7c806d71bf6b9cd2d",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.6/deck_v0.1.6_linux-x64.tar.gz",
+        "digest": "sha256:330fd7b1b1005307832fbedc71f094834da2f2cc15870bc8a5f7714506d359c9",
+        "name": "deck_v0.1.6_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.4",
+      "runner": "codex",
+      "publishedAt": "2026-06-03T22:21:26Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.4",
+      "commit": "f606c83cfc503fc99d82b0e4fc15537027ccc7e4",
+      "sourceTree": "8fa7551b2efce12b02730f030d0a99f7a7ce4f9b",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.4/deck_v0.1.4_linux-x64.tar.gz",
+        "digest": "sha256:3e5becc1e2c2536f535b5d7d98f05603f4b3c93ef4deea32557480583c414eb1",
+        "name": "deck_v0.1.4_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.4",
+      "runner": "claude",
+      "publishedAt": "2026-06-03T22:21:26Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.4",
+      "commit": "f606c83cfc503fc99d82b0e4fc15537027ccc7e4",
+      "sourceTree": "8fa7551b2efce12b02730f030d0a99f7a7ce4f9b",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.4/deck_v0.1.4_linux-x64.tar.gz",
+        "digest": "sha256:3e5becc1e2c2536f535b5d7d98f05603f4b3c93ef4deea32557480583c414eb1",
+        "name": "deck_v0.1.4_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.4",
+      "runner": "opencode",
+      "publishedAt": "2026-06-03T22:21:26Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.4",
+      "commit": "f606c83cfc503fc99d82b0e4fc15537027ccc7e4",
+      "sourceTree": "8fa7551b2efce12b02730f030d0a99f7a7ce4f9b",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "3b63a063a0ecd82ec1feb90c61a2a64dfeaf4246",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.4/deck_v0.1.4_linux-x64.tar.gz",
+        "digest": "sha256:3e5becc1e2c2536f535b5d7d98f05603f4b3c93ef4deea32557480583c414eb1",
+        "name": "deck_v0.1.4_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.4",
+      "runner": "pi",
+      "publishedAt": "2026-06-03T22:21:26Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.4",
+      "commit": "f606c83cfc503fc99d82b0e4fc15537027ccc7e4",
+      "sourceTree": "8fa7551b2efce12b02730f030d0a99f7a7ce4f9b",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "f16240d0ba87eda61994d307c2070b3bbdc29f92",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.4/deck_v0.1.4_linux-x64.tar.gz",
+        "digest": "sha256:3e5becc1e2c2536f535b5d7d98f05603f4b3c93ef4deea32557480583c414eb1",
+        "name": "deck_v0.1.4_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.3",
+      "runner": "codex",
+      "publishedAt": "2026-06-03T19:58:40Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.3",
+      "commit": "721eb0c292093126bc1a017037a95c3559e42a33",
+      "sourceTree": "d35e0f10aca5ae14e94d2beafae7849da388bab8",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.3/deck_v0.1.3_linux-x64.tar.gz",
+        "digest": "sha256:117ddf1bb0b4ee2b824d272faf5eb9cfa922c01b23656f7983e4ff2f4c6d4bc6",
+        "name": "deck_v0.1.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.3",
+      "runner": "claude",
+      "publishedAt": "2026-06-03T19:58:40Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.3",
+      "commit": "721eb0c292093126bc1a017037a95c3559e42a33",
+      "sourceTree": "d35e0f10aca5ae14e94d2beafae7849da388bab8",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.3/deck_v0.1.3_linux-x64.tar.gz",
+        "digest": "sha256:117ddf1bb0b4ee2b824d272faf5eb9cfa922c01b23656f7983e4ff2f4c6d4bc6",
+        "name": "deck_v0.1.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.3",
+      "runner": "opencode",
+      "publishedAt": "2026-06-03T19:58:40Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.3",
+      "commit": "721eb0c292093126bc1a017037a95c3559e42a33",
+      "sourceTree": "d35e0f10aca5ae14e94d2beafae7849da388bab8",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "3b63a063a0ecd82ec1feb90c61a2a64dfeaf4246",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.3/deck_v0.1.3_linux-x64.tar.gz",
+        "digest": "sha256:117ddf1bb0b4ee2b824d272faf5eb9cfa922c01b23656f7983e4ff2f4c6d4bc6",
+        "name": "deck_v0.1.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.3",
+      "runner": "pi",
+      "publishedAt": "2026-06-03T19:58:40Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.3",
+      "commit": "721eb0c292093126bc1a017037a95c3559e42a33",
+      "sourceTree": "d35e0f10aca5ae14e94d2beafae7849da388bab8",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "f16240d0ba87eda61994d307c2070b3bbdc29f92",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.3/deck_v0.1.3_linux-x64.tar.gz",
+        "digest": "sha256:117ddf1bb0b4ee2b824d272faf5eb9cfa922c01b23656f7983e4ff2f4c6d4bc6",
+        "name": "deck_v0.1.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.2",
+      "runner": "codex",
+      "publishedAt": "2026-06-03T18:08:49Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.2",
+      "commit": "1f24f7b574802c85287be0786bd12e20a0e92487",
+      "sourceTree": "fa7030e7d966d0b3750ae9e8dedead07d5a5059c",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.2/deck_v0.1.2_linux-x64.tar.gz",
+        "digest": "sha256:a39f159649fc9c247e142ab7d940e014f8bf5be20bd6d3b08c00ecd62949a4de",
+        "name": "deck_v0.1.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.2",
+      "runner": "claude",
+      "publishedAt": "2026-06-03T18:08:49Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.2",
+      "commit": "1f24f7b574802c85287be0786bd12e20a0e92487",
+      "sourceTree": "fa7030e7d966d0b3750ae9e8dedead07d5a5059c",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.2/deck_v0.1.2_linux-x64.tar.gz",
+        "digest": "sha256:a39f159649fc9c247e142ab7d940e014f8bf5be20bd6d3b08c00ecd62949a4de",
+        "name": "deck_v0.1.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.2",
+      "runner": "opencode",
+      "publishedAt": "2026-06-03T18:08:49Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.2",
+      "commit": "1f24f7b574802c85287be0786bd12e20a0e92487",
+      "sourceTree": "fa7030e7d966d0b3750ae9e8dedead07d5a5059c",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "9d5e787215719d9e48ca43cfe753228c42d9b4f7",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.2/deck_v0.1.2_linux-x64.tar.gz",
+        "digest": "sha256:a39f159649fc9c247e142ab7d940e014f8bf5be20bd6d3b08c00ecd62949a4de",
+        "name": "deck_v0.1.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.2",
+      "runner": "pi",
+      "publishedAt": "2026-06-03T18:08:49Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.2",
+      "commit": "1f24f7b574802c85287be0786bd12e20a0e92487",
+      "sourceTree": "fa7030e7d966d0b3750ae9e8dedead07d5a5059c",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "f16240d0ba87eda61994d307c2070b3bbdc29f92",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.2/deck_v0.1.2_linux-x64.tar.gz",
+        "digest": "sha256:a39f159649fc9c247e142ab7d940e014f8bf5be20bd6d3b08c00ecd62949a4de",
+        "name": "deck_v0.1.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.1",
+      "runner": "codex",
+      "publishedAt": "2026-06-03T16:30:00Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.1",
+      "commit": "5c3f5796b71d18ce5ce3075b2119b41972ce2aa7",
+      "sourceTree": "3742ef5fe2f7e40320f21ca5e32b7e79724e4e0e",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.1/deck_v0.1.1_linux-x64.tar.gz",
+        "digest": "sha256:6ea5b3eab894ccdbad3cd73bafb31ebebf679d9db97519cca07fa5a02296beae",
+        "name": "deck_v0.1.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.1",
+      "runner": "claude",
+      "publishedAt": "2026-06-03T16:30:00Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.1",
+      "commit": "5c3f5796b71d18ce5ce3075b2119b41972ce2aa7",
+      "sourceTree": "3742ef5fe2f7e40320f21ca5e32b7e79724e4e0e",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.1/deck_v0.1.1_linux-x64.tar.gz",
+        "digest": "sha256:6ea5b3eab894ccdbad3cd73bafb31ebebf679d9db97519cca07fa5a02296beae",
+        "name": "deck_v0.1.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.1",
+      "runner": "opencode",
+      "publishedAt": "2026-06-03T16:30:00Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.1",
+      "commit": "5c3f5796b71d18ce5ce3075b2119b41972ce2aa7",
+      "sourceTree": "3742ef5fe2f7e40320f21ca5e32b7e79724e4e0e",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "9d5e787215719d9e48ca43cfe753228c42d9b4f7",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.1/deck_v0.1.1_linux-x64.tar.gz",
+        "digest": "sha256:6ea5b3eab894ccdbad3cd73bafb31ebebf679d9db97519cca07fa5a02296beae",
+        "name": "deck_v0.1.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.1",
+      "runner": "pi",
+      "publishedAt": "2026-06-03T16:30:00Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.1",
+      "commit": "5c3f5796b71d18ce5ce3075b2119b41972ce2aa7",
+      "sourceTree": "3742ef5fe2f7e40320f21ca5e32b7e79724e4e0e",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "f16240d0ba87eda61994d307c2070b3bbdc29f92",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.1/deck_v0.1.1_linux-x64.tar.gz",
+        "digest": "sha256:6ea5b3eab894ccdbad3cd73bafb31ebebf679d9db97519cca07fa5a02296beae",
+        "name": "deck_v0.1.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.0",
+      "runner": "codex",
+      "publishedAt": "2026-06-02T19:53:50Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.0",
+      "commit": "64105a3ed7694b89c9b6e69c49e28c4c19a13b6d",
+      "sourceTree": "10cb6d18617668319a82414a3425adc9bec42bef",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.0/deck_v0.1.0_linux-x64.tar.gz",
+        "digest": "sha256:d0984a10a804929092959b08ebc8390a16f19ab4a1de988ed9bcbdf78ae94984",
+        "name": "deck_v0.1.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.0",
+      "runner": "claude",
+      "publishedAt": "2026-06-02T19:53:50Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.0",
+      "commit": "64105a3ed7694b89c9b6e69c49e28c4c19a13b6d",
+      "sourceTree": "10cb6d18617668319a82414a3425adc9bec42bef",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.0/deck_v0.1.0_linux-x64.tar.gz",
+        "digest": "sha256:d0984a10a804929092959b08ebc8390a16f19ab4a1de988ed9bcbdf78ae94984",
+        "name": "deck_v0.1.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.0",
+      "runner": "opencode",
+      "publishedAt": "2026-06-02T19:53:50Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.0",
+      "commit": "64105a3ed7694b89c9b6e69c49e28c4c19a13b6d",
+      "sourceTree": "10cb6d18617668319a82414a3425adc9bec42bef",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "9d5e787215719d9e48ca43cfe753228c42d9b4f7",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.0/deck_v0.1.0_linux-x64.tar.gz",
+        "digest": "sha256:d0984a10a804929092959b08ebc8390a16f19ab4a1de988ed9bcbdf78ae94984",
+        "name": "deck_v0.1.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.1.0",
+      "runner": "pi",
+      "publishedAt": "2026-06-02T19:53:50Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.1.0",
+      "commit": "64105a3ed7694b89c9b6e69c49e28c4c19a13b6d",
+      "sourceTree": "10cb6d18617668319a82414a3425adc9bec42bef",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "f16240d0ba87eda61994d307c2070b3bbdc29f92",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.1.0/deck_v0.1.0_linux-x64.tar.gz",
+        "digest": "sha256:d0984a10a804929092959b08ebc8390a16f19ab4a1de988ed9bcbdf78ae94984",
+        "name": "deck_v0.1.0_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.4",
+      "runner": "codex",
+      "publishedAt": "2026-05-28T16:43:58Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.4",
+      "commit": "f896a55791e79d8d3dae49d913ffa77bb15e5e57",
+      "sourceTree": "5177afd5511e2fb0582d3b1ec4f9aab2a410952a",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.4/deck_v0.0.4_linux-x64.tar.gz",
+        "digest": "sha256:0dee82d5e833779a2cd5857cbceacca79002a02ef586ee82a30b2b80432b51e5",
+        "name": "deck_v0.0.4_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.4",
+      "runner": "claude",
+      "publishedAt": "2026-05-28T16:43:58Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.4",
+      "commit": "f896a55791e79d8d3dae49d913ffa77bb15e5e57",
+      "sourceTree": "5177afd5511e2fb0582d3b1ec4f9aab2a410952a",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.4/deck_v0.0.4_linux-x64.tar.gz",
+        "digest": "sha256:0dee82d5e833779a2cd5857cbceacca79002a02ef586ee82a30b2b80432b51e5",
+        "name": "deck_v0.0.4_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.4",
+      "runner": "opencode",
+      "publishedAt": "2026-05-28T16:43:58Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.4",
+      "commit": "f896a55791e79d8d3dae49d913ffa77bb15e5e57",
+      "sourceTree": "5177afd5511e2fb0582d3b1ec4f9aab2a410952a",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "85e963f502b0cb9fbd2a6eb36ef59611b470ae4a",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.4/deck_v0.0.4_linux-x64.tar.gz",
+        "digest": "sha256:0dee82d5e833779a2cd5857cbceacca79002a02ef586ee82a30b2b80432b51e5",
+        "name": "deck_v0.0.4_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.4",
+      "runner": "pi",
+      "publishedAt": "2026-05-28T16:43:58Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.4",
+      "commit": "f896a55791e79d8d3dae49d913ffa77bb15e5e57",
+      "sourceTree": "5177afd5511e2fb0582d3b1ec4f9aab2a410952a",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "f16240d0ba87eda61994d307c2070b3bbdc29f92",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.4/deck_v0.0.4_linux-x64.tar.gz",
+        "digest": "sha256:0dee82d5e833779a2cd5857cbceacca79002a02ef586ee82a30b2b80432b51e5",
+        "name": "deck_v0.0.4_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.3",
+      "runner": "codex",
+      "publishedAt": "2026-05-27T05:17:56Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.3",
+      "commit": "8bd8bace05d4590314ad77ce7f7935f4b9eca749",
+      "sourceTree": "2f50ce8f3c5fe938f17382a6816aee1ea6acef0c",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.3/deck_v0.0.3_linux-x64.tar.gz",
+        "digest": "sha256:5ba59f515829bffde8fcee1da8600a57fbcbb32ebec773181ffd1afc84293b3a",
+        "name": "deck_v0.0.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.3",
+      "runner": "claude",
+      "publishedAt": "2026-05-27T05:17:56Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.3",
+      "commit": "8bd8bace05d4590314ad77ce7f7935f4b9eca749",
+      "sourceTree": "2f50ce8f3c5fe938f17382a6816aee1ea6acef0c",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.3/deck_v0.0.3_linux-x64.tar.gz",
+        "digest": "sha256:5ba59f515829bffde8fcee1da8600a57fbcbb32ebec773181ffd1afc84293b3a",
+        "name": "deck_v0.0.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.3",
+      "runner": "opencode",
+      "publishedAt": "2026-05-27T05:17:56Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.3",
+      "commit": "8bd8bace05d4590314ad77ce7f7935f4b9eca749",
+      "sourceTree": "2f50ce8f3c5fe938f17382a6816aee1ea6acef0c",
+      "installerPath": "packages/adapter-opencode/src/runner-adapter.ts",
+      "installerBlob": "61d27821eaeb8953e821de4f01e9a7792cb060d5",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.3/deck_v0.0.3_linux-x64.tar.gz",
+        "digest": "sha256:5ba59f515829bffde8fcee1da8600a57fbcbb32ebec773181ffd1afc84293b3a",
+        "name": "deck_v0.0.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.3",
+      "runner": "pi",
+      "publishedAt": "2026-05-27T05:17:56Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.3",
+      "commit": "8bd8bace05d4590314ad77ce7f7935f4b9eca749",
+      "sourceTree": "2f50ce8f3c5fe938f17382a6816aee1ea6acef0c",
+      "installerPath": "packages/adapter-pi/src/runner-adapter.ts",
+      "installerBlob": "f16240d0ba87eda61994d307c2070b3bbdc29f92",
+      "applicability": "source-installer",
+      "reason": "Every published version is retained separately; no inferred equivalent-version grouping. Latest predecessor included.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.3/deck_v0.0.3_linux-x64.tar.gz",
+        "digest": "sha256:5ba59f515829bffde8fcee1da8600a57fbcbb32ebec773181ffd1afc84293b3a",
+        "name": "deck_v0.0.3_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.2",
+      "runner": "codex",
+      "publishedAt": "2026-05-26T01:45:34Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.2",
+      "commit": "36f0103d19b4baaa6f8c8c1a1b314c24a75d908c",
+      "sourceTree": "fa862859bcf7f0232b93b66ef8d524fb6d5b99b6",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.2/deck_v0.0.2_linux-x64.tar.gz",
+        "digest": "sha256:db35f94799aaaeabe6c9bca90ff2e4efd5dfc0ee75f3f73b622d3ef443c6013e",
+        "name": "deck_v0.0.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.2",
+      "runner": "claude",
+      "publishedAt": "2026-05-26T01:45:34Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.2",
+      "commit": "36f0103d19b4baaa6f8c8c1a1b314c24a75d908c",
+      "sourceTree": "fa862859bcf7f0232b93b66ef8d524fb6d5b99b6",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.2/deck_v0.0.2_linux-x64.tar.gz",
+        "digest": "sha256:db35f94799aaaeabe6c9bca90ff2e4efd5dfc0ee75f3f73b622d3ef443c6013e",
+        "name": "deck_v0.0.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.2",
+      "runner": "opencode",
+      "publishedAt": "2026-05-26T01:45:34Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.2",
+      "commit": "36f0103d19b4baaa6f8c8c1a1b314c24a75d908c",
+      "sourceTree": "fa862859bcf7f0232b93b66ef8d524fb6d5b99b6",
+      "installerPath": "packages/adapter-opencode/src/developer-team-install.ts",
+      "installerBlob": "31e922e03396f92a88892587d6f216425fdbb32d",
+      "applicability": "legacy-source-installer",
+      "reason": "Pre-adapter epoch: invoke the published build/apply/verify exports directly; no current templates are substituted.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.2/deck_v0.0.2_linux-x64.tar.gz",
+        "digest": "sha256:db35f94799aaaeabe6c9bca90ff2e4efd5dfc0ee75f3f73b622d3ef443c6013e",
+        "name": "deck_v0.0.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.2",
+      "runner": "pi",
+      "publishedAt": "2026-05-26T01:45:34Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.2",
+      "commit": "36f0103d19b4baaa6f8c8c1a1b314c24a75d908c",
+      "sourceTree": "fa862859bcf7f0232b93b66ef8d524fb6d5b99b6",
+      "installerPath": "packages/adapter-pi/src/developer-team-install.ts",
+      "installerBlob": "47258e7ced1d10ac3509c55fdaa6f98c1e6e063d",
+      "applicability": "legacy-source-installer",
+      "reason": "Pre-adapter epoch: invoke the published build/apply/verify exports directly; no current templates are substituted.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.2/deck_v0.0.2_linux-x64.tar.gz",
+        "digest": "sha256:db35f94799aaaeabe6c9bca90ff2e4efd5dfc0ee75f3f73b622d3ef443c6013e",
+        "name": "deck_v0.0.2_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.1",
+      "runner": "codex",
+      "publishedAt": "2026-05-25T22:39:46Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.1",
+      "commit": "784db0a65ce4363e38013968a60b6ecc0efcfeda",
+      "sourceTree": "259c7d96701f5f9f14c2c0a864e7e54f638f5048",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.1/deck_v0.0.1_linux-x64.tar.gz",
+        "digest": "sha256:720f66ffb8edd7417ab3bef9127f96af531af118851f887352e3dce48f7e3569",
+        "name": "deck_v0.0.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.1",
+      "runner": "claude",
+      "publishedAt": "2026-05-25T22:39:46Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.1",
+      "commit": "784db0a65ce4363e38013968a60b6ecc0efcfeda",
+      "sourceTree": "259c7d96701f5f9f14c2c0a864e7e54f638f5048",
+      "installerPath": null,
+      "installerBlob": null,
+      "applicability": "unsupported-runner-version",
+      "reason": "This published source has no adapter package for this runner; explicitly unsupported, never counted as a migration pass.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.1/deck_v0.0.1_linux-x64.tar.gz",
+        "digest": "sha256:720f66ffb8edd7417ab3bef9127f96af531af118851f887352e3dce48f7e3569",
+        "name": "deck_v0.0.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.1",
+      "runner": "opencode",
+      "publishedAt": "2026-05-25T22:39:46Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.1",
+      "commit": "784db0a65ce4363e38013968a60b6ecc0efcfeda",
+      "sourceTree": "259c7d96701f5f9f14c2c0a864e7e54f638f5048",
+      "installerPath": "packages/adapter-opencode/src/developer-team-install.ts",
+      "installerBlob": "31e922e03396f92a88892587d6f216425fdbb32d",
+      "applicability": "legacy-source-installer",
+      "reason": "Pre-adapter epoch: invoke the published build/apply/verify exports directly; no current templates are substituted.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.1/deck_v0.0.1_linux-x64.tar.gz",
+        "digest": "sha256:720f66ffb8edd7417ab3bef9127f96af531af118851f887352e3dce48f7e3569",
+        "name": "deck_v0.0.1_linux-x64.tar.gz"
+      }
+    },
+    {
+      "version": "0.0.1",
+      "runner": "pi",
+      "publishedAt": "2026-05-25T22:39:46Z",
+      "releaseUrl": "https://github.com/kevin15011/deck/releases/tag/0.0.1",
+      "commit": "784db0a65ce4363e38013968a60b6ecc0efcfeda",
+      "sourceTree": "259c7d96701f5f9f14c2c0a864e7e54f638f5048",
+      "installerPath": "packages/adapter-pi/src/developer-team-install.ts",
+      "installerBlob": "47258e7ced1d10ac3509c55fdaa6f98c1e6e063d",
+      "applicability": "legacy-source-installer",
+      "reason": "Pre-adapter epoch: invoke the published build/apply/verify exports directly; no current templates are substituted.",
+      "linuxArtifact": {
+        "browser_download_url": "https://github.com/kevin15011/deck/releases/download/0.0.1/deck_v0.0.1_linux-x64.tar.gz",
+        "digest": "sha256:720f66ffb8edd7417ab3bef9127f96af531af118851f887352e3dce48f7e3569",
+        "name": "deck_v0.0.1_linux-x64.tar.gz"
+      }
+    }
+  ]
+}
