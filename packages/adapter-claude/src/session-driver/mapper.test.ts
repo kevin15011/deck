@@ -287,3 +287,10 @@ test('a delayed older request snapshot cannot establish continuity input after a
  expect(mapper.map(assistant('r1',10)).events.find(e=>e.kind==='usage')?.data.requestInput).toBeNull();
  expect(mapper.map({type:'result',session_id:'s',subtype:'success'}).events.some(e=>e.data.code==='request.input-finalized')).toBe(false);
 });
+
+
+test('quota mapping preserves only valid unified windows and overage status',()=>{
+ const mapped=new ClaudeStreamMapper().map({type:'rate_limit_event',rate_limit_info:{status:'allowed',unifiedWindows:{five_hour:{utilization:.2,resetsAt:1900000000,secret:'hidden'},seven_day:{utilization:.7,resetsAt:1900010000}},overageStatus:'allowed',overageUtilization:.4}}).events[0];
+ expect(mapped.data.unifiedWindows).toEqual({five_hour:{utilization:.2,resetsAt:1900000000},seven_day:{utilization:.7,resetsAt:1900010000}});
+ expect(mapped.data.overageStatus).toBe('allowed');
+});

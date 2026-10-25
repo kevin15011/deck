@@ -11,6 +11,7 @@ const assets = new Map(build.outputs.map(output=>[output.path.split('/').at(-1)!
 const project = {projectId:'project',name:'Layout audit',path:'/tmp/deck-layout-fixture',available:true};
 const sessions = ['one','two','unprepared'].map((sessionId,index)=>({sessionId,projectId:project.projectId,title:index===0?'First session':index===1?'Second session with a longer name':'Unprepared session',state:'idle',generation:0,preparationStatus:index===2?'unprepared':'ready',lastSeq:41,grants:index===0?[{grantId:'grant',kind:'exact',toolKey:'codex:Read',exactKey:'README.md',risk:'normal',createdAt:'2026-01-01T00:00:00Z'}]:[],members:index===0?{lead:{runnerId:'codex',modelId:'fixture-model'}}:{}}));
 let historyRequests = 0, sockets = 0, offline = false, sent = 0, approvalVisible = false, summaryDelay = 0, inboxRequests = 0, pushEnabled=false;
+let quotaRefreshes=0,claudeQuotaRefreshes=0;
 let promptEffect: ((text:string)=>Promise<void>)|undefined;
 const history = (sessionId:string) => {
     const events: any[] = [{v:1,sessionId,seq:1,ts:'2026-01-01T00:00:00Z',kind:'task.created',source:{taskId:'lead',memberId:'lead',runnerId:'codex',nativeSessionId:'fixture-thread'},data:{taskId:'lead',attempt:1,state:'idle',runnerId:'codex',modelId:'fixture-model'}}];
@@ -28,6 +29,10 @@ const server = Bun.serve({port:0,hostname:'127.0.0.1',fetch: async (request,serv
     if(path.endsWith('/history')){historyRequests++;await Bun.sleep(160);return json(history(sessionId));}
     if(path.endsWith('/summary')){if(summaryDelay)await Bun.sleep(summaryDelay);return json({ok:true,data:{session:sessions.find(s=>s.sessionId===sessionId)}});}
     if(path.endsWith('/readiness')){await Bun.sleep(160);return json({ok:true,data:{status:sessionId==='unprepared'?'unprepared':'ready',generation:0,personalMcpRunnerId:'codex',personalMcpAvailability:sessionId==='one'?[{id:'fixture-mcp',source:'user',status:'configured'}]:[]}});}
+    const quotaState=()=>({runners:{claude:{refreshAfter:claudeQuotaRefreshes?Date.now()+60000:0,refreshing:false,snapshot:{runnerId:'claude',updatedAt:Date.now()-120000,windows:[{id:'five-hour',usedPercent:90,resetsAt:Date.now()+3600000},{id:'seven-day',usedPercent:49,resetsAt:Date.now()+86400000}],overageStatus:'rejected'}},codex:{refreshAfter:quotaRefreshes?Date.now()+60000:0,refreshing:false,snapshot:{runnerId:'codex',updatedAt:Date.now()-60000,plan:'pro',windows:[{id:'seven-day',usedPercent:7,resetsAt:Date.now()+86400000}]}}}});
+    if(path==='/api/quota')return json({ok:true,...quotaState()});
+    if(path==='/api/quota/claude/refresh'){claudeQuotaRefreshes++;return Response.json({ok:false,code:'quota-no-data',message:'No quota event arrived. Previous snapshot kept.'},{status:503});}
+    if(path==='/api/quota/codex/refresh'){quotaRefreshes++;return json({ok:true,state:quotaState()});}
     if(path==='/api/push'){if(request.method==='DELETE')pushEnabled=false;if(request.method==='POST')pushEnabled=true;return json({enabled:pushEnabled,publicKey:'BAECAw',delivery:{eligible:1,sent:0,suppressed:0,failed:1,lastOutcome:'expired'}});}
     if(path==='/api/projects')return json({ok:true,data:{projects:[project]}});
     if(path==='/api/sessions'||path==='/api/sessions/status')return json({ok:true,data:{sessions}});
@@ -54,7 +59,7 @@ const page=await context.newPage();
 const errors:string[]=[];page.on('pageerror',error=>{errors.push(error.message);console.error(error.stack);});
 const checks:string[]=[];
 async function check(name:string,run:()=>Promise<void>){if(process.env.DECK_LAYOUT_FILTER&&!name.includes(process.env.DECK_LAYOUT_FILTER))return;await run();checks.push(name);console.log(`PASS ${name}`);}
-async function select(id:string){await page.goto(`${server.url}?session=${id}`);await page.locator('#prompt').waitFor();await page.waitForTimeout(700);}
+async function select(id:string){await page.goto('about:blank');await page.goto(`${server.url}?session=${id}`);await page.locator('#prompt').waitFor();await page.waitForTimeout(700);}
 const rect = (selector:string)=>page.locator(selector).evaluate(element=>{const r=element.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};});
 async function separate(selectors:string[]){
     const boxes=await Promise.all(selectors.map(rect));
@@ -65,6 +70,136 @@ async function separate(selectors:string[]){
 }
 try{
     await select('one');
+    await check('message copy source, hover, touch and stable geometry at 390 and 1440',async()=>{
+        const userText='  Keep my exact spaces\n\n  <tags> & **literal markdown** 😀\n';
+        const leadText='## Raw reply\n\n**Ready** [link](https://example.com)\n\n```ts\nconst x = 1;\n```\n';
+        for(const width of [390,1440]){
+            const copyContext=await browser.newContext({viewport:{width,height:844},hasTouch:width===390,permissions:['clipboard-read','clipboard-write']});
+            try{
+                const copyPage=await copyContext.newPage();
+                await copyPage.route('**/history',async route=>{
+                    const fixture=history('one');
+                    fixture.messages[38].data={role:'user',text:userText};
+                    fixture.messages[39].data={role:'assistant',text:leadText};
+                    await route.fulfill({json:fixture});
+                });
+                await copyPage.goto(`${server.url}?session=one`);
+                await copyPage.locator('#prompt').waitFor();
+                await copyPage.locator('#conversation .message').last().waitFor();
+                assert.equal(await copyPage.locator('#conversation .message-copy').count(),40);
+                assert.equal(await copyPage.evaluate(()=>isSecureContext),true,'real clipboard tested on secure localhost');
+                for(const [index,text] of [[38,userText],[39,leadText]] as const){
+                    const message=copyPage.locator('#conversation .message').nth(index),button=message.getByRole('button',{name:'Copy message',exact:true});
+                    await button.scrollIntoViewIfNeeded();await copyPage.mouse.move(0,0);await copyPage.locator('#prompt').focus();
+                    const geometry=()=>message.evaluate(el=>[el,el.querySelector('.message-meta')!,el.querySelector('.markdown')!].map(node=>{const r=node.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};}));
+                    const before=await geometry();
+                    assert.equal(await button.evaluate(el=>getComputedStyle(el).opacity),width===390?'1':'0');
+                    if(width===1440){await message.hover();assert.equal(await button.evaluate(el=>getComputedStyle(el).opacity),'1');}
+                    else {const bounds=await button.boundingBox();assert(bounds&&bounds.width>=44&&bounds.height>=44);}
+                    assert.deepEqual(await geometry(),before,'hover reveal reserves its space');
+                    await button.focus();assert.equal(await button.evaluate(el=>getComputedStyle(el).opacity),'1','keyboard focus reveals copy');
+                    await button.click();
+                    await message.getByRole('status').getByText('Copied',{exact:true}).waitFor();
+                    assert.equal(await copyPage.evaluate(()=>navigator.clipboard.readText()),text,'clipboard gets source, including whitespace and markdown');
+                    assert.equal(await button.locator('path').getAttribute('d'),'m3 8 3 3 7-7');
+                    assert.deepEqual(await geometry(),before,'copy feedback does not shift layout');
+                    await copyPage.waitForTimeout(1650);assert.equal(await message.getByRole('status').textContent(),'');
+                }
+                const lead=copyPage.locator('#conversation .message').last();
+                await lead.getByRole('button',{name:'Copy code',exact:true}).click();
+                assert.equal(await copyPage.evaluate(()=>navigator.clipboard.readText()),'const x = 1;','code blocks share the helper');
+                await copyPage.screenshot({path:`/tmp/deck-message-copy-${width}.png`});
+                // Exercise the LAN fallback in a real document, without Clipboard API.
+                await copyPage.evaluate(()=>{(window as any).__copyClipboard=navigator.clipboard;Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined});});
+                const button=lead.getByRole('button',{name:'Copy message',exact:true});
+                await button.click();await lead.getByRole('status').getByText('Copied',{exact:true}).waitFor();
+                assert.equal(await copyPage.evaluate(()=>(window as any).__copyClipboard.readText()),leadText);
+                assert.equal(await button.evaluate(el=>el===document.activeElement),true,'fallback restores focus');
+                await copyPage.evaluate(()=>{document.execCommand=()=>false;});
+                await button.click();await lead.getByRole('status').getByText('Copy failed',{exact:true}).waitFor();
+                assert.equal(await copyPage.locator('textarea[aria-hidden="true"]').count(),0,'failed fallback cleans up');
+                await copyPage.waitForTimeout(1650);assert.equal(await lead.getByRole('status').textContent(),'');
+            }finally{await copyContext.close();}
+        }
+    });
+    await check('quota dialog menus, bars, cooldown and dismissal at 390 and 1440',async()=>{
+        for(const width of [390,1440]){
+            await page.setViewportSize({width,height:844});await select('one');
+            const open=async()=>{if(width<1000)await page.getByRole('button',{name:'Open sessions',exact:true}).click();else await page.getByRole('button',{name:'Deck menu',exact:true}).click();await page.getByRole(width<1000?'button':'menuitem',{name:'Quota usage',exact:true}).click();};
+            const chat=await rect('#conversation');await open();
+            const dialog=page.getByRole('dialog',{name:'Quota usage',exact:true});await dialog.waitFor();
+            await page.getByRole('progressbar',{name:'Claude 5-hour usage',exact:true}).waitFor();
+            assert.equal(await dialog.getByRole('progressbar').count(),3);
+            assert.equal(await dialog.getByRole('progressbar',{name:'Codex 5-hour usage',exact:true}).count(),0);
+            const bounds=await dialog.boundingBox();assert(bounds&&bounds.x>=0&&bounds.x+bounds.width<=width&&bounds.y>=0&&bounds.y+bounds.height<=844,'quota dialog fits viewport');
+            const colors=await page.evaluate(themes=>{
+                const root=document.documentElement,original=root.dataset.theme,result:{theme:string;runner:string;ratio:number;color:string}[]=[];
+                const luminance=(rgb:string)=>{const c=rgb.match(/[\d.]+/g)!.slice(0,3).map(Number).map(v=>v/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return c[0]!*.2126+c[1]!*.7152+c[2]!*.0722;};
+                for(const theme of themes){root.dataset.theme=theme;for(const runner of ['claude','codex']){const bar=document.querySelector(`.quota-${runner} .quota-track`)!;const color=getComputedStyle(bar.firstElementChild!).backgroundColor,a=luminance(color),b=luminance(getComputedStyle(bar).backgroundColor);result.push({theme,runner,color,ratio:(Math.max(a,b)+.05)/(Math.min(a,b)+.05)});}}
+                root.dataset.theme=original;return result;
+            },THEMES.map(theme=>theme.id));
+            for(const value of colors)assert(value.ratio>=3,`${value.theme} ${value.runner} progress contrast ${value.ratio}`);
+            assert.equal(colors.find(value=>value.theme==='dark'&&value.runner==='claude')!.color,'rgb(237, 119, 119)');
+            assert.equal(colors.find(value=>value.theme==='light'&&value.runner==='codex')!.color,'rgb(29, 96, 196)');
+            for(const button of await dialog.getByRole('button').all()){const box=await button.boundingBox();assert(box&&box.height>=(width<1000?44:40));}
+            if(!quotaRefreshes){await dialog.getByRole('button',{name:'Refresh Codex quota',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.quota-codex button')?.textContent?.startsWith('Refresh in'));}
+            assert.equal(quotaRefreshes,1,'opening dialog never refreshes runners automatically');
+            if(!claudeQuotaRefreshes){await dialog.getByRole('button',{name:'Refresh Claude quota',exact:true}).click();await dialog.getByRole('status').getByText('No quota event arrived. Previous snapshot kept.',{exact:true}).waitFor();assert.equal(await dialog.getByRole('progressbar').count(),3);}
+            assert.equal(claudeQuotaRefreshes,1,'no automatic Claude refresh or silent retry');
+            const proof=process.env.DECK_QUOTA_EVIDENCE??'/tmp/deck-quota';mkdirSync(proof,{recursive:true});await page.screenshot({path:`${proof}/${width}.png`});
+            await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
+            assert.deepEqual(await rect('#conversation'),chat,'quota modal does not move the conversation');
+            await open();await dialog.waitFor();await page.mouse.click(2,2);await dialog.waitFor({state:'hidden'});
+            await page.waitForTimeout(30);assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),width<1000?'Open sessions':'Deck menu');
+        }
+    });
+    await check('composer floats over scroll-under conversation with measured multiline growth at 320, 390 and 1440',async()=>{
+        for(const width of [320,390,1440]){
+            await page.setViewportSize({width,height:844});await select('one');
+            const viewport=page.locator('#conversation'),input=page.locator('#prompt');
+            const bottom=()=>page.waitForFunction(()=>{const el=document.getElementById('conversation')!;return el.scrollHeight-el.scrollTop-el.clientHeight<2;},null,{timeout:3000});
+            const pane=await rect('.chat-pane'),before=await rect('#conversation'),single=await rect('.composer');
+            assert.equal(before.y+before.height,pane.y+pane.height,'conversation extends under the composer to the pane bottom');
+            assert(single.y>before.y&&single.y+single.height<=before.y+before.height,'composer overlays the conversation');
+            const last=()=>rect('.history-row:last-child');
+            const visibleTail=async()=>{const row=await last(),box=await rect('.composer');assert(row.y+row.height<=box.y,`last message is covered at ${width}: ${JSON.stringify({row,box})}`);};
+            // Establish explicit following through the same Jump action used by readers.
+            await viewport.evaluate(el=>el.scrollTop=el.scrollHeight-el.clientHeight-200);
+            await page.locator('.jump-latest').waitFor();await page.locator('.jump-latest').click();
+            await bottom();await visibleTail();
+            await input.fill('Line one\nLine two\nLine three\nLine four');await page.waitForTimeout(120);
+            const multi=await rect('.composer');assert(multi.height>single.height,'composer grows to fit four lines');
+            assert.deepEqual(await rect('#conversation'),before,'growth reserves scroll padding, not layout space');
+            assert.equal(multi.y+multi.height,single.y+single.height,'composer bottom stays attached');
+            await bottom();await visibleTail();
+            const measured=await page.locator('.composer-dock').evaluate(el=>({height:el.getBoundingClientRect().height,padding:parseFloat(getComputedStyle(document.getElementById('conversation')!).paddingBottom)}));
+            assert(measured.padding>=measured.height,'scroll padding includes measured composer and safe-area gap');
+            await separate(['.composer','.chat-pane .context-window']);
+            await input.fill('Line one\nLine two\nLine three\nLine four\nLine five\nLine six');await page.waitForTimeout(100);
+            assert(Math.abs((await rect('.composer')).height-multi.height)<1,'input caps growth at four visible lines (subpixel line rounding)');
+            await bottom();await visibleTail();
+            await page.screenshot({path:`/tmp/deck-floating-composer-multiline-${width}.png`});
+            // Scroll messages behind the box: it is an overlay, without an opaque surrounding band.
+            await viewport.evaluate(el=>el.scrollTop-=110);await page.waitForTimeout(120);
+            const underneath=await last();assert(underneath.y+underneath.height>multi.y,'history can scroll beneath the composer');
+            const reading=await viewport.evaluate(el=>{el.scrollTop=el.scrollHeight-el.clientHeight-600;return el.scrollTop;});
+            await page.waitForTimeout(120);await input.fill('Short draft');await page.waitForTimeout(120);
+            assert(Math.abs(await viewport.evaluate(el=>el.scrollTop)-reading)<2,'shrinking preserves the reading position');
+            await separate(['.composer','.jump-latest','.chat-pane .context-window']);
+            await page.locator('.jump-latest').click();await bottom();await visibleTail();
+            // Viewport contraction exercises the existing virtual-keyboard attachment.
+            if(width<1000){
+                await input.focus();await page.setViewportSize({width,height:520});await page.waitForTimeout(150);
+                const keyboardBox=await rect('.composer');assert(keyboardBox.y+keyboardBox.height<=520,'composer stays above keyboard');
+                await bottom();await visibleTail();
+                await page.setViewportSize({width,height:844});await page.waitForTimeout(150);await bottom();
+                assert.deepEqual(await rect('#conversation'),before,'keyboard dismissal restores geometry');
+                assert((await rect('.composer-actions button:last-child')).height>=44);
+            }
+            await page.screenshot({path:`/tmp/deck-floating-composer-${width}.png`});
+        }
+        await page.setViewportSize({width:1440,height:1000});await select('one');
+    });
     await check('unread reply control is removed',async()=>{
         assert.equal(await page.getByRole('button',{name:/unread repl/}).count(),0);
         assert.equal(inboxRequests,0,'removed inbox must not poll');
@@ -339,9 +474,10 @@ try{
         for(const width of [390,320,1440]){
             approvalVisible=true;await page.setViewportSize({width,height:844});await select('one');
             await page.locator('#conversation').evaluate(el=>el.scrollTop=200);await page.locator('.jump-latest').waitFor();
-            await page.locator('#prompt').fill('Keep this draft');offline=true;
+            const draft='Keep this draft\nLine two\nLine three\nLine four';
+            await page.locator('#prompt').fill(draft);offline=true;
             await page.evaluate(()=>{for(const socket of (window as any).__sockets??[])socket.close();});
-            await page.waitForTimeout(100);const before=await rect('.composer');assert.equal(await page.getByRole('button',{name:'Reconnect',exact:true}).count(),0);assert.equal(await page.locator('#prompt').inputValue(),'Keep this draft');
+            await page.waitForTimeout(100);const before=await rect('.composer');assert.equal(await page.getByRole('button',{name:'Reconnect',exact:true}).count(),0);assert.equal(await page.locator('#prompt').inputValue(),draft);
             const previous=sent;
             await page.getByRole('button',{name:'Send prompt',exact:true}).click();await page.locator('.composer-reconnect').waitFor();assert.equal(sent,previous);assert.deepEqual(await rect('.composer'),before);
             // All floating surfaces can coexist, including a pending request
@@ -351,7 +487,7 @@ try{
             assert((await rect('.approvals.pending')).y>=0,'combined floating stack stays in viewport');
             await page.screenshot({path:`/tmp/deck-floating-reconnect-${width}.png`});
             await page.waitForTimeout(1700);assert.match(await page.locator('.connection-label').innerText(),/Reconnecting|Disconnected/);assert.deepEqual(await rect('.composer'),before);
-            offline=false;await page.getByRole('button',{name:'Reconnect',exact:true}).click();await page.locator('.composer-reconnect').waitFor({state:'hidden'});assert.equal(await page.locator('#prompt').inputValue(),'Keep this draft');
+            offline=false;await page.getByRole('button',{name:'Reconnect',exact:true}).click();await page.locator('.composer-reconnect').waitFor({state:'hidden'});assert.equal(await page.locator('#prompt').inputValue(),draft);
             await page.getByRole('button',{name:'Send prompt',exact:true}).click();await page.waitForFunction(()=>document.querySelector<HTMLTextAreaElement>('#prompt')?.value==='');assert.equal(sent,previous+1);
         }
         approvalVisible=false;await page.setViewportSize({width:1440,height:1000});
@@ -394,4 +530,4 @@ try{
         for(const width of [1440,390,320]){await page.setViewportSize({width,height:844});await page.waitForTimeout(350);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:`${evidence}/layout-${width}.png`});}
     }
     assert.deepEqual(errors,[]);console.log(JSON.stringify({checks,errors}));
-}catch(error){console.error({errors,body:(await page.locator('body').innerText()).slice(0,1400)});throw error;}finally{await browser.close();server.stop(true);}
+}catch(error){console.error({geometry:await page.evaluate(()=>{const el=document.getElementById('conversation');return {url:location.href,scrollTop:el?.scrollTop,scrollHeight:el?.scrollHeight,clientHeight:el?.clientHeight,jump:document.querySelector('.jump-latest')?.getBoundingClientRect().toJSON(),dock:document.querySelector('.composer-dock')?.getBoundingClientRect().toJSON()};}),errors,body:(await page.locator('body').innerText()).slice(0,1400)});throw error;}finally{await browser.close();server.stop(true);}

@@ -8,6 +8,7 @@ export type RunSessionDaemonOptions = {
   anchorCommand: readonly string[];
   createService?: DaemonOptions["createService"];
   web?: DaemonOptions["web"];
+  quotaRefresh?: DaemonOptions["quotaRefresh"];
   restart?:DaemonOptions["restart"];
   restartChannel?:DaemonOptions["restartChannel"];
   stderr?: (text: string) => void;
@@ -24,6 +25,7 @@ export async function runSessionDaemon(options: RunSessionDaemonOptions): Promis
     anchorCommand: options.anchorCommand,
     createService: options.createService,
     web: options.web,
+    quotaRefresh: options.quotaRefresh,
     restart:options.restart,
     restartChannel:options.restartChannel,
     ...(Number.isFinite(idleOverride) && idleOverride > 0 ? { idleMs: idleOverride } : {}),

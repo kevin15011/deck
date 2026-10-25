@@ -130,6 +130,9 @@ if (parsed.command === "internal-session-daemon") {
     restartChannel:getBuildInfo().channel==="dev"?"canary":"stable",
     anchorCommand: deckInternalCommand("child-anchor"),
     web: { autoStart: Boolean(crossRunner?.enabled), config: {...webConfig,...(restart?.webPort?{port:restart.webPort}:{})}, assets: WEB_ASSETS },
+    quotaRefresh: async (runner, signal) => runner === 'claude'
+      ? (await import('../../../packages/adapter-claude/src/quota')).refreshClaudeQuota(signal)
+      : (await import('@deck/adapter-codex')).refreshCodexQuota(signal),
     createService: (services) => createCrossSessionService(services, { configStore }),
   }));
 }

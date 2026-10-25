@@ -299,7 +299,15 @@ export class ClaudeStreamMapper {
     return {
       events: [{
         kind: "rate-limit",
-        data: { status: str(info.status), rateLimitType: str(info.rateLimitType), utilization: num(info.utilization), resetsAt: num(info.resetsAt) },
+        data: {
+          status: str(info.status), rateLimitType: str(info.rateLimitType), utilization: num(info.utilization), resetsAt: num(info.resetsAt),
+          ...(isObj(info.unifiedWindows) ? { unifiedWindows: Object.fromEntries(['five_hour', 'seven_day'].flatMap(key => {
+            const window = isObj(info.unifiedWindows) ? info.unifiedWindows[key] : undefined;
+            return isObj(window) && typeof window.utilization === 'number' && Number.isFinite(window.utilization) && window.utilization >= 0 && window.utilization <= 1
+              ? [[key, { utilization: window.utilization, ...(typeof window.resetsAt === 'number' && Number.isFinite(window.resetsAt) ? { resetsAt: window.resetsAt } : {}) }]] : [];
+          })) } : {}),
+          ...(str(info.overageStatus) ? { overageStatus: str(info.overageStatus) } : {}),
+        },
         raw: m,
       }],
     };

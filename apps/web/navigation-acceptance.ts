@@ -58,7 +58,7 @@ try{
  manager.openLog(s1)!.append({kind:'message.completed',source:{taskId:'lead',memberId:'lead'},data:{role:'user',text:'Attached image fixture.',attachments:[uploaded.data.attachment]}});
  const input=page.getByLabel('Message the lead'),drawer=page.getByRole('dialog',{name:'Workspace',exact:true});
  const heading=()=>page.locator('.app-header h1').innerText();
- const ready=async()=>{await wait(async()=>{if(await input.count()&&await input.isEnabled())return true;const prepare=page.locator('.composer-gate').getByRole('button',{name:'Prepare session',exact:true});if(await prepare.isVisible()&&await prepare.isEnabled())await prepare.click({timeout:500}).catch(()=>{});return false;},'composer ready');};
+ const ready=async()=>{await wait(async()=>{if(await input.count()&&await input.isEnabled())return true;const prepare=page.locator('.composer-gate').getByRole('button',{name:'Prepare session',exact:true});if(await prepare.isVisible()&&await prepare.isEnabled({timeout:100}).catch(()=>false))await prepare.click({timeout:500}).catch(()=>{});return false;},'composer ready');};
  const current=()=>page.evaluate(()=>history.state?.deck);
  const select=async(name:string)=>{if(await page.getByRole('button',{name:'Open sessions',exact:true}).isVisible())await page.getByRole('button',{name:'Open sessions',exact:true}).click();else if(await page.getByRole('button',{name:'Expand sidebar',exact:true}).isVisible())await page.getByRole('button',{name:'Expand sidebar',exact:true}).click();
   const nav=page.getByRole('navigation',{name:await drawer.isVisible()?'Mobile sessions':'Sessions',exact:true});

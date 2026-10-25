@@ -484,3 +484,24 @@ test('held receipt still rechecks device authorization before post-body replay o
  try{await waitFor(()=>entered);f.host.revoke(f.host.devices()[0]!.id);}finally{release();}
  expect((await response).status).toBe(401);const db=new Database(join(f.paths.webDir,'lead-replies.sqlite'));try{expect((db.query('SELECT COUNT(*) AS n FROM displayed').get() as any).n).toBe(0);}finally{db.close();}
 });
+
+test('quota routes require device and same-origin access, enforce cooldown and filter event replay privacy',async()=>{
+ const {QuotaStore}=await import('../quota');let effects=0;
+ const quota=new QuotaStore({refresh:async()=>{effects++;return {primary:{usedPercent:8,windowDurationMins:300},credits:{balance:'PRIVATE'},accountId:'PRIVATE'};}});
+ const f=fixture({quota});
+ expect((await fetch(`${f.base}/api/quota`)).status).toBe(401);
+ const {cookie}=await pair(f),headers={Cookie:cookie,Origin:f.base,'Content-Type':'application/json'};
+ expect((await fetch(`${f.base}/api/quota/codex/refresh`,{method:'POST',headers:{...headers,Origin:'https://evil.test'},body:'{}'})).status).toBe(403);expect(effects).toBe(0);
+ const response=await fetch(`${f.base}/api/quota/codex/refresh`,{method:'POST',headers,body:'{}'});expect(response.status).toBe(200);expect(JSON.stringify(await response.json())).not.toContain('PRIVATE');
+ expect((await fetch(`${f.base}/api/quota/codex/refresh`,{method:'POST',headers,body:'{}'})).status).toBe(429);expect(effects).toBe(1);
+ const snapshot=await (await fetch(`${f.base}/api/quota`,{headers})).json();expect(snapshot.runners.codex.snapshot.windows[0].usedPercent).toBe(8);
+ f.log.append({kind:'rate-limit',source:{runnerId:'codex'},data:{credits:{balance:'PRIVATE'},accountId:'PRIVATE',primary:{windowDurationMins:300,usedPercent:8}},raw:{runnerId:'codex',protocol:'codex-app-server',truncated:false,payload:{secret:'PRIVATE'}}});
+ const events=await(await fetch(`${f.base}/api/sessions/s/events`,{headers})).json();expect(JSON.stringify(events)).not.toContain('PRIVATE');
+ const ws=new NativeWebSocket(`${f.base.replace('http:','ws:')}/api/sessions/s/events?after=0&view=chat`,{headers});const messages:string[]=[];ws.onmessage=e=>messages.push(String(e.data));
+ try{
+ await waitFor(()=>messages.some(m=>JSON.parse(m).event?.kind==='rate-limit'));
+ const before=messages.length;
+ f.log.append({kind:'rate-limit',source:{runnerId:'claude'},data:{unifiedWindows:{five_hour:{utilization:.4}},accountId:'PRIVATE'},raw:{runnerId:'claude',protocol:'claude-stream-json',truncated:false,payload:{accountId:'PRIVATE'}}});
+ await waitFor(()=>messages.length>before);expect(messages.join('')).not.toContain('PRIVATE');expect(messages.join('')).toContain('usedPercent');
+ }finally{ws.close();}
+});

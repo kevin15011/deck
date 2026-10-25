@@ -1,3 +1,4 @@
+import { quotaEventForWeb, type QuotaStore } from "./quota";
 /** Loopback browser transport with authenticated device actions and a CLI-injected lifecycle capability. */
 import type {WebRestart} from "./web-restart";
 import type {RestartRequest} from "@deck/core/session/daemon-restart";
@@ -53,6 +54,7 @@ export type WebServiceOptions = {
   now?: () => number;
   push?: Pick<WebPushOptions, "send">;
   restart?:WebRestart;
+  quota?:QuotaStore;
   maxReplayEvents?: number;
   maxQueuedBytes?: number;
 };
@@ -361,6 +363,15 @@ export class WebService {
         const device = this.device(r, s);
         if (!device)
           return this.response({ ok: false, code: 'device-required' }, 401);
+        if (path === '/api/quota' && r.method === 'GET') return this.options.quota ? this.response({ ok: true, ...this.options.quota.read() }) : this.response({ok:false,code:'quota-unavailable'},503);
+        const quotaRefresh = /^\/api\/quota\/(claude|codex)\/refresh$/.exec(path);
+        if (quotaRefresh && r.method === 'POST') {
+          await this.json(r);
+          if (!this.device(r,s)) return this.response({ok:false,code:'device-required'},401);
+          if (!this.options.quota) return this.response({ok:false,code:'quota-unavailable'},503);
+          const result = await this.options.quota.refresh(quotaRefresh[1] as 'claude'|'codex');
+          return this.response(result,result.ok?200:result.code==='quota-cooldown'?429:503);
+        }
         if(path==='/api/daemon/restart'&&r.method==='GET')return this.response(this.options.restart?{ok:true,...await this.options.restart.preflight(device.id)}:{ok:true,available:false,code:'restart-unavailable',recoveryCommand:'deck daemon restart'});
         if(path==='/api/daemon/restart'&&r.method==='POST'){
           const body=await this.json(r);if(!this.device(r,s))return this.response({ok:false,code:'device-required'},401);
@@ -559,7 +570,7 @@ export class WebService {
           for (const e of log.readAfter(after)) {
             if (events.length >= (this.options.maxReplayEvents ?? 1000))
               break;
-            events.push(e);
+            events.push(quotaEventForWeb(e));
           }
           const seq = events.at(-1)?.seq ?? Math.min(after, log.lastSeq);
           return this.response({ events, seq, hasMore: seq < log.lastSeq });
@@ -590,7 +601,7 @@ export class WebService {
     }
     const send = (e: SessionEvent) => { if(!this.records.some(d=>d.id===ws.data.deviceId&&this.activeDevice(d))){this.disconnectDevice(ws.data.deviceId);return false;} if (e.seq <= ws.data.after)
       return; const history=ws.data.chat?this.history(log):undefined;history?.apply(e);
-      const value = JSON.stringify({ type: 'event', event: e, ...(history ? {message:history.messageAt(e,ws.data.taskId)} : {}) }); if (ws.getBufferedAmount() + Buffer.byteLength(value) > (this.options.maxQueuedBytes ?? 1024 * 1024) || ws.send(value) === -1) {
+      const value = JSON.stringify({ type: 'event', event: quotaEventForWeb(e), ...(history ? {message:history.messageAt(e,ws.data.taskId)} : {}) }); if (ws.getBufferedAmount() + Buffer.byteLength(value) > (this.options.maxQueuedBytes ?? 1024 * 1024) || ws.send(value) === -1) {
       ws.send(JSON.stringify({ type: 'resync' }));
       ws.close(1013, 'Resync required');
       ws.data.unsubscribe?.();

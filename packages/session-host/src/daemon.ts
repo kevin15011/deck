@@ -1,3 +1,4 @@
+import { QuotaStore, type QuotaRefresh } from "./quota";
 import { runnerMutationActive, acquireRunnerMutationMarker, releaseRunnerMutationMarker } from "./runner-mutation";
 import {WebRestart,type RestartIdentity,type RestartLauncher} from "./web-restart";
 import {createHash} from "node:crypto";
@@ -56,6 +57,7 @@ export type DaemonOptions = {
   uid?: number;
   pid?: number;
   nonce?: string;
+  quotaRefresh?: QuotaRefresh;
   web?: { config: WebConfig; assets?: WebAssets; autoStart?: boolean; push?: WebServiceOptions["push"] };
 };
 
@@ -98,6 +100,8 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
   let server: ControlServer | undefined;
   let service: SessionService | undefined;
   let web: WebService | undefined;
+  let quota: QuotaStore | undefined;
+  let unsubscribeQuota: (() => void) | undefined;
   try {
     const recovery = options.recoverOnStart === false ? { sessions: [], errors: [] } : recoverAllSessions({ paths, probe });
     for (const e of recovery.errors) logger.warn("recovery.session-failed", { sessionId: e.sessionId, error: e.error });
@@ -113,6 +117,12 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     const services: DaemonServices = { broker, questionBroker: defaultQuestionBroker, credentials, supervisor, paths, clock, logger, probe };
     service = (options.createService ?? (() => new UnavailableSessionService()))(services);
     const svc = service;
+    quota = new QuotaStore({ refresh: options.quotaRefresh ? (runner, signal) => {
+      if (runnerMutationActive(paths, probe)) return Promise.reject(Error('runner-mutation-active'));
+      return options.quotaRefresh!(runner, signal);
+    } : undefined, now: () => clock.now() });
+    unsubscribeQuota = svc.subscribeEvents?.(event => quota?.observe(event));
+    await quota.seed(paths.sessionsDir);
     // Older CLI compositions construct the manager with only the approval broker.
     const questionBroker = svc.questionBroker ?? defaultQuestionBroker;
     services.questionBroker = questionBroker;
@@ -139,6 +149,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       subscribeEvents: svc.subscribeEvents ? listener => svc.subscribeEvents!(listener) : undefined,
       pushAttentionItems: svc.pushAttentionItems ? id => draining ? [] : svc.pushAttentionItems!(id) : undefined,
       pushAttentionSessions: svc.pushAttentionSessions ? () => draining ? [] : svc.pushAttentionSessions!() : undefined,
+      pushSessionName: id => svc.pushSessionName?.(id),
       isPushAttentionCurrent: attention => !draining && (svc.isPushAttentionCurrent?.(attention) ?? false),
       readAttachment: (sessionId, attachmentId) => svc.readAttachment?.(sessionId, attachmentId),
     };
@@ -153,7 +164,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     const startedAt = clock.now();
     const nonce = lock.nonce;
     let stopRequested: ((reason: StopReason) => Promise<void>) | undefined;
-    const isBusy = () => runnerMutationActive(paths, probe) || admitted > 0 || svc.hasRunningWork() || broker.pending().length > 0 || questionBroker.pending().length > 0;
+    const isBusy = () => runnerMutationActive(paths, probe) || admitted > 0 || quota?.refreshing === true || svc.hasRunningWork() || broker.pending().length > 0 || questionBroker.pending().length > 0;
     const bridge = new BridgeService({
       credentials, broker, questionBroker,
       status: (grant) => svc.taskStatus?.(grant) ?? { sessionId: grant.sessionId, taskId: grant.taskId, memberId: grant.memberId },
@@ -165,7 +176,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       webPort:()=>web?.status().port,
       drain:value=>{if(value&&draining)throw Error('restart-in-progress');draining=value;},stop:reason=>{void stopRequested?.(reason);},
     });
-    if(options.web){web=new WebService({paths,service:guardedService,...options.web,restart});if(options.web.autoStart!==false)try{web.start();}catch{logger.warn('web.listen-failed');}}
+    if(options.web){web=new WebService({paths,service:guardedService,...options.web,restart,quota});if(options.web.autoStart!==false)try{web.start();}catch{logger.warn('web.listen-failed');}}
 
     server = new ControlServer({
       socketPath: paths.socket.path,
@@ -207,6 +218,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       stopPromise ??= (async () => {
         logger.info("daemon.stopping", { reason });
         idle.stop();
+        unsubscribeQuota?.(); quota?.close();
         broker.dispose(reason.startsWith("web-restart-forced:")?reason:"shutdown");
         questionBroker.dispose(reason.startsWith("web-restart-forced:")?reason:"shutdown");
         // Let the manager abort readiness, drain native handles and release shared backend
@@ -236,6 +248,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       daemon: { info, services, server, get clientCount() { return activeServer.clientCount + (web?.clientCount ?? 0); }, stop, stopped },
     };
   } catch (error) {
+    unsubscribeQuota?.(); quota?.close();
     try { await web?.close(); } catch { /* best effort */ }
     try { await server?.close(); } catch { /* best effort */ }
     try { await service?.close?.(); } catch { /* best effort */ }
