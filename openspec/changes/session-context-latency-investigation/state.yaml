@@ -4,7 +4,7 @@ name: Session latency and context investigation
 currentPhase: apply
 status: completed
 exploration_context: sdd
-next_action: "Combined context percentage/used/max and stable MCP/context overlays approved by quality attempt9. Commit/build/install local canary, then verify activation independently. Previous13ef94f still active until checked."
+next_action: "Combined UX/nativecontext estimate canary d2eafd2 installed, expected digest 10daee171e51c200933697e2d0c00338aa819661226e0792c06527e32f2875b2. Verify /tmp/deck-context-ux-restart-iam5zxau/result.json and live daemon after idle-only restart; activation pending."
 artifacts:
   exploration: working-brief.md
   apply_progress: preparation-progress.md
