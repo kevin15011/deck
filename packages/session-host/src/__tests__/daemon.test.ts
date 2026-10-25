@@ -224,6 +224,28 @@ describe("startup recovery before serving (XR-3.7)", () => {
 });
 
 describe("idle shutdown and version-skew restart (XR-3.1, design 6.3)", () => {
+  test("idle shutdown can be disabled so the daemon stays up with no clients or work", async () => {
+    const clock = new FakeClock();
+    const { result } = await start(stateEnv().paths, { clock, idleShutdown: false });
+    if (!result.ok) throw new Error("expected start");
+    let stopped = false;
+    void result.daemon.stopped.then(() => { stopped = true; });
+    clock.advance(IDLE_SHUTDOWN_MS * 10);
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+  });
+
+  test("a running web listener keeps the daemon alive without attached clients", async () => {
+    const clock = new FakeClock();
+    const { result } = await start(stateEnv().paths, { clock, web: { config: { port: 0, trustedProxy: null, allowedOrigins: [], allowFunnel: false } } });
+    if (!result.ok) throw new Error("expected start");
+    let stopped = false;
+    void result.daemon.stopped.then(() => { stopped = true; });
+    clock.advance(IDLE_SHUTDOWN_MS * 3);
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+  });
+
   test("stops after 30 idle minutes, but not while a client is attached or work is running", async () => {
     const clock = new FakeClock();
     const { result, paths, stub } = await start(stateEnv().paths, { clock });

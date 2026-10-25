@@ -119,6 +119,8 @@ export class WebService {
     }
   }
   get clientCount() { return this.sockets.size; }
+  /** Remote web/PWA clients cannot relaunch the daemon, so a live listener must keep it running. */
+  get listening() { return this.server !== undefined; }
   private get stateFile() { return join(this.options.paths.webDir, "listener.json"); }
   start() { if (existsSync(this.stateFile)) {
     assertPrivateFile(this.stateFile);

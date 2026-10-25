@@ -49,6 +49,8 @@ export type DaemonOptions = {
   createService?: (services: DaemonServices) => SessionService;
   clock?: Clock;
   idleMs?: number;
+  /** Idle self-shutdown (XR-3.1). Production disables it: the daemon must stay reachable for remote web clients. */
+  idleShutdown?: boolean;
   idlePollMs?: number;
   recoverOnStart?: boolean;
   probe?: ProcessProbe;
@@ -209,14 +211,14 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     let resolveStopped!: (reason: StopReason) => void;
     const stopped = new Promise<StopReason>((resolve) => { resolveStopped = resolve; });
     const idle = new IdleMonitor({
-      clock, idleMs: options.idleMs, pollMs: options.idlePollMs, isBusy, clientCount: () => activeServer.clientCount + (web?.clientCount ?? 0),
+      clock, idleMs: options.idleMs, pollMs: options.idlePollMs, isBusy: () => isBusy() || web?.listening === true, clientCount: () => activeServer.clientCount + (web?.clientCount ?? 0),
       onIdle: () => { void stop("idle"); },
     });
 
     const stop = (reason: StopReason): Promise<void> => {
       draining = true;
       stopPromise ??= (async () => {
-        logger.info("daemon.stopping", { reason });
+        logger.info("daemon.stopping", { reason, clients: activeServer.clientCount + (web?.clientCount ?? 0), webListening: web?.listening === true });
         idle.stop();
         unsubscribeQuota?.(); quota?.close();
         broker.dispose(reason.startsWith("web-restart-forced:")?reason:"shutdown");
@@ -240,7 +242,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       return stopPromise.then(() => undefined);
     };
     stopRequested = stop;
-    idle.start();
+    if (options.idleShutdown !== false) idle.start();
     logger.info("daemon.started", { pid, version: options.version, socket: paths.socket.path, socketLocation: paths.socket.location });
 
     return {

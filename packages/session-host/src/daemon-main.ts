@@ -28,7 +28,8 @@ export async function runSessionDaemon(options: RunSessionDaemonOptions): Promis
     quotaRefresh: options.quotaRefresh,
     restart:options.restart,
     restartChannel:options.restartChannel,
-    ...(Number.isFinite(idleOverride) && idleOverride > 0 ? { idleMs: idleOverride } : {}),
+    // Never idle-exit by default (P-019); an explicit override re-enables it for tests/diagnostics.
+    ...(Number.isFinite(idleOverride) && idleOverride > 0 ? { idleMs: idleOverride } : { idleShutdown: false }),
   });
   if (!started.ok) {
     stderr(started.reason === "already-running"
