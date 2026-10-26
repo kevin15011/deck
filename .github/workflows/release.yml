@@ -4,6 +4,7 @@
 # Triggered on:
 #   - Push to main (automatic build, pre-release)
 #   - Version tag push v* (stable release)
+#   - Push to fix/session-pending-issues (qualification only)
 
 name: Release
 
@@ -12,6 +13,7 @@ on:
   push:
     branches:
       - main
+      - fix/session-pending-issues
     tags:
       - "v*"
 
@@ -249,7 +251,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: github.event_name == 'push' && needs.metadata.outputs.is_release == 'false'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.metadata.outputs.is_release == 'false'
     steps:
       - name: Checkout
         uses: actions/checkout@v4

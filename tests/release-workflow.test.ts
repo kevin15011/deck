@@ -58,6 +58,16 @@ describe("release workflow platform contract", () => {
     for(const job of ['release','artifacts'])expect(workflow.jobs[job]?.if).toContain("github.event_name == 'push'");
   });
 
+  test("SSH candidate pushes trigger qualification without either publishing job", () => {
+    const push=workflow.on.push as {branches:string[]};
+    expect(push.branches).toContain('fix/session-pending-issues');
+    expect(workflow.jobs.artifacts?.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.metadata.outputs.is_release == 'false'");
+    expect(workflow.jobs.release?.if).toBe("github.event_name == 'push' && needs.metadata.outputs.is_release == 'true'");
+    const metadata=workflow.jobs.metadata?.steps?.find(step=>step.name==='Extract version from tag')?.run;
+    expect(metadata).toContain('if [[ "$GITHUB_REF" == refs/tags/v* ]]');
+    expect(metadata).toContain('echo "is_release=false" >> $GITHUB_OUTPUT');
+  });
+
   test("publishes every supported archive for stable and main builds", () => {
     const expectedArchives = expectedTargets.map(
       (target) => `release-assets/deck_v*_${target}.tar.gz`,
