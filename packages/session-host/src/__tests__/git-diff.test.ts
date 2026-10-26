@@ -15,7 +15,7 @@ function fixture(commit = true) {
  if(commit) { git('add', '.'); git('commit', '-qm', 'initial'); }
  return { root, git, write };
 }
-async function data(result: ReturnType<typeof listGitChanges> | ReturnType<typeof readGitDiff>) { const out = await result; expect(out.ok).toBe(true); if(!out.ok) throw Error(out.code); return out.data as any; }
+async function data(result: ReturnType<typeof listGitChanges> | ReturnType<typeof readGitDiff>) { const out = await result; if(!out.ok) throw Error(`${out.code}: ${out.message}`); expect(out.ok).toBe(true); return out.data as any; }
 test('conventional staged, unstaged, untracked, rename, deletion and binary comparisons are read only', async () => {
  const f = fixture(); f.write('tracked.txt', 'context\nstaged\ntail\n'); f.git('add', 'tracked.txt'); f.write('tracked.txt', 'context\nworking\ntail\n');
  rmSync(join(f.root,'deleted.txt')); renameSync(join(f.root,'rename.txt'),join(f.root,'renamed.txt')); f.git('add','-A');
@@ -208,6 +208,22 @@ test('conventional linked worktrees and shared object clones support reads', asy
  writeFileSync(join(clone,'tracked.txt'),'shared change\n');expect((await data(readGitDiff(clone,'unstaged','tracked.txt'))).patch).toContain('+shared change');
 });
 
+async function diagnosePackedReader(root:string) {
+  // Only the synthetic fixture is passed to this diagnostic worker. Keep the
+  // original production-worker result authoritative; a probe cannot pass it.
+  const token='d'.repeat(64);
+  try {
+   const output=execFileSync(process.execPath,[join(import.meta.dir,'fixtures/git-reader-diagnostics.ts')],{
+    cwd:root,env:{...process.env,DECK_GIT_READER_TOKEN:token},timeout:15000,maxBuffer:64*1024,
+    input:JSON.stringify({version:1,token,projectRoot:root,selection:{section:'unstaged',path:'tracked.txt'}}),encoding:'utf8',stdio:['pipe','pipe','pipe'],
+   });
+   console.error('Packed worker diagnostic:',output);
+  }catch(error){
+   const probe=error as {stdout?:string,stderr?:string};
+   console.error('Packed worker diagnostic failed:',String(error),probe.stdout?.slice(0,64*1024),probe.stderr?.slice(0,2048));
+  }
+ }
+
 test('packed history is borrowed without copying its bytes, and selected reads skip unrelated contents', async () => {
  const f=fixture();const {randomBytes}=await import('node:crypto');
  // Historical blob is intentionally much larger than the working content limit.
@@ -217,10 +233,12 @@ test('packed history is borrowed without copying its bytes, and selected reads s
  const {spyOn}=await import('bun:test'),{SafeTree}=await import('../git-safe-tree');
  const reader=await import('../git-diff-reader');const opened:string[]=[];const original=SafeTree.prototype.entry;
  const hook=spyOn(SafeTree.prototype,'entry').mockImplementation(function(this:import('../git-safe-tree').SafeTree,name:string){opened.push(name);return original.call(this,name);});
- try{expect((await data(reader.readGitDiff(f.root,'unstaged','tracked.txt'))).patch).toContain('+selected');expect(opened).not.toContain('deleted.txt');expect(opened).not.toContain('rename.txt');}
+ try{const direct=await reader.readGitDiff(f.root,'unstaged','tracked.txt');if(!direct.ok)await diagnosePackedReader(f.root);expect((await data(Promise.resolve(direct))).patch).toContain('+selected');expect(opened).not.toContain('deleted.txt');expect(opened).not.toContain('rename.txt');}
  finally{hook.mockRestore();}
  // Exercise the same packed-object descriptor transfer through the production worker.
- expect((await data(readGitDiff(f.root,'unstaged','tracked.txt'))).patch).toContain('+selected');
+ const result=await readGitDiff(f.root,'unstaged','tracked.txt');
+ if(!result.ok) await diagnosePackedReader(f.root);
+ expect((await data(Promise.resolve(result))).patch).toContain('+selected');
 });
 
 test('ignored FIFO is never opened and a pinned object cannot be redirected to an outside symlink', async () => {

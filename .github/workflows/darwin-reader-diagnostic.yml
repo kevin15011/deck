@@ -1,0 +1,21 @@
+name: Darwin reader diagnostic
+on:
+  push:
+    branches: [ci/darwin-reader]
+permissions:
+  contents: read
+jobs:
+  reader:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15-intel, macos-15]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.12"
+      - run: bun install --frozen-lockfile
+      - name: Packed history and concurrency
+        run: bun test --timeout 30000 packages/session-host/src/__tests__/git-diff.test.ts -t 'packed history|bounded processes'
