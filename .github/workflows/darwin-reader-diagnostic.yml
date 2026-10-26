@@ -19,3 +19,5 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Packed history and concurrency
         run: bun test --timeout 30000 packages/session-host/src/__tests__/git-diff.test.ts -t 'packed history|bounded processes'
+      - name: Descriptor snapshot identity and offsets
+        run: bun test --timeout 30000 packages/session-host/src/__tests__/git-object-snapshot.test.ts

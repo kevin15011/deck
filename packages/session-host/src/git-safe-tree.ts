@@ -128,6 +128,33 @@ export class SafeTree {
 }
 export class TreeLimitError extends Error {}
 export type CopyBudget={bytes:number,entries:number,deadline:number};
+let cloner: ReturnType<typeof loadCloner> | undefined;
+function loadCloner() {
+ return dlopen('/usr/lib/libSystem.B.dylib', {
+  fclonefileat:{args:[FFIType.i32,FFIType.i32,FFIType.ptr,FFIType.i32],returns:FFIType.i32},
+ });
+}
+/** Give Git independently reopenable objects on Darwin. /dev/fd there duplicates
+ * the open-file description (including its offset); even rewinding per command
+ * cannot handle Git closing/reopening a pack within that command. fclonefileat
+ * uses the authorized fd, shares data blocks, and never resolves a live source
+ * path. Other volumes/filesystems fall back to the existing bounded copy.
+ * Takes ownership of entry.fd, just like copyRegular. */
+export function snapshotObject(entry:{fd:number,size:number,mode:number}, target:string, budget:CopyBudget) {
+ let owned=true;
+ try {
+  if(Date.now()>budget.deadline)throw new TreeLimitError('Repository copy limit exceeded');
+  if(process.platform==='darwin') {
+   cloner ??= loadCloner();
+   // AT_FDCWD is -2 on Darwin; target is absolute in our private request view.
+   if(cloner.symbols.fclonefileat(entry.fd,-2,ptr(cstr(target)),0)===0) {
+    chmodSync(target,0o600);
+    return;
+   }
+  }
+  owned=false;copyRegular(entry,target,budget);
+ }finally{if(owned)closeSync(entry.fd);}
+}
 export function copyRegular(entry:{fd:number,size:number,mode:number}, target:string, budget:CopyBudget) {
  let out:number|undefined;
  try {

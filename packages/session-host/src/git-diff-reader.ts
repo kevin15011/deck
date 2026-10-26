@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { lstatSync, closeSync, mkdtempSync, rmSync, mkdirSync, symlinkSync, writeFileSync, realpathSync, readFileSync, readSync, fstatSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
-import { SafeTree, TreeLimitError, copyRegular, type CopyBudget } from './git-safe-tree';
+import { SafeTree, TreeLimitError, copyRegular, snapshotObject, type CopyBudget } from './git-safe-tree';
 import { join, resolve } from 'node:path';
 import type { GitCatalog, GitDocument, GitContent, GitFile } from '@deck/core';
 import type { CommandOutcome } from './protocol';
@@ -115,6 +115,9 @@ async function repository(projectRoot: string, selected?:string): Promise<View> 
      try{lstatSync(destination);continue;}catch{}
      const entry=dir.entry(file);
      if(entry.kind!=='file'){if(entry.kind==='directory')entry.tree.close();throw Error('Invalid object');}
+     // Darwin /dev/fd shares offsets across opens, including repeated opens in
+     // one Git command. A descriptor-sourced COW clone has independent opens.
+     if(process.platform==='darwin'){snapshotObject(entry,destination,budget);continue;}
      // fd 0..2 are pipes. Every other fd is a captured regular object file.
      const childFd=handles.length+3;handles.push(entry.fd);
      symlinkSync(`/dev/fd/${childFd}`,destination);
