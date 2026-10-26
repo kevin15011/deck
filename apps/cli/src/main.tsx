@@ -16,6 +16,12 @@ import { HomeScreen } from "./tui/screens/home-screen";
 import { inspectStandaloneWebSearchReadiness, isStandaloneWebSearchSmokeSuccessful } from "./standalone-web-search-smoke";
 import { createDeckConfigStoreFromEnvironment } from "./deck-config-store";
 
+// Dispatch before configuration or adapter construction. The child validates its private pipe.
+if (process.argv[2] === 'internal-git-reader-v1') {
+  const { runGitReaderProcess } = await import('../../../packages/session-host/src/git-diff-process');
+  try { await runGitReaderProcess(); process.exit(0); } catch { process.exit(1); }
+}
+
 // One authoritative operational registry is shared by direct commands and the TUI.
 // Version and other standalone commands must not instantiate runner adapters:
 // release smoke checks deliberately run without HOME or runner configuration.

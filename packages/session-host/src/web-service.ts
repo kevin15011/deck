@@ -513,6 +513,14 @@ export class WebService {
           const outcome = await this.options.service.query?.('session.readiness', { sessionId: readiness[1] }) ?? { ok: false as const, code: 'query-unavailable' };
           return this.response(outcome, outcome.ok ? 200 : 404);
         }
+        const git = /^\/api\/sessions\/([^/]+)\/git(\/diff|\/content)?$/.exec(path);
+        if (git && r.method === 'GET') {
+          if (!safeId(git[1]!) || [...url.searchParams.keys()].some(key => !['section','path'].includes(key))
+            || (git[2] ? url.searchParams.getAll('section').length !== 1 || url.searchParams.getAll('path').length !== 1 : url.searchParams.size !== 0))
+            return this.response({ok:false,code:'git-invalid'},400);
+          const outcome = await this.options.service.query?.(git[2] === '/content' ? 'git.content' : git[2] ? 'git.read' : 'git.list', {sessionId:git[1], ...(git[2]?{section:url.searchParams.get('section'),path:url.searchParams.get('path')}:{})}) ?? {ok:false as const,code:'git-unavailable'};
+          return this.response(outcome, outcome.ok ? 200 : outcome.code === 'session-unknown' ? 404 : outcome.code === 'git-limit' ? 413 : outcome.code === 'git-stale' ? 409 : outcome.code === 'git-busy' ? 429 : outcome.code === 'git-unavailable' ? 503 : 400);
+        }
         const artifacts = /^\/api\/sessions\/([^/]+)\/openspec(\/artifact)?$/.exec(path);
         if (artifacts && r.method === 'GET') {
           const sessionId = artifacts[1]!;

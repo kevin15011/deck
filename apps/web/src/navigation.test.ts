@@ -139,3 +139,7 @@ test('queued overlay navigation is discarded when Back reaches a foreign entry',
  f.navigation.closeOverlay();f.navigation.navigate({project:'p',session:'other',tab:'chat'});
  f.entries[0]!.state={foreign:true};f.flushBack();expect(f.navigation.current.route.session).toBe('s');
 });
+
+test('legacy OpenSpec routes migrate to Review without losing session',()=>{
+ expect(parseRoute({project:'p',session:'s',tab:'openspec'})).toEqual({project:'p',session:'s',tab:'git'});
+});

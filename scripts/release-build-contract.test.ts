@@ -94,6 +94,7 @@ describe("release binary build contract", () => {
     });
 
     expect(command).toContain("--env=DECK_COMPILED_BUILD_*");
+    expect(command).toContain(join(ROOT,"apps/cli/src/main.tsx"));
     expect(environment.DECK_COMPILED_BUILD_VERSION).toBe("0.4.0");
     expect(environment.DECK_COMPILED_BUILD_CHANNEL).toBe("dev");
   });

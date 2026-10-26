@@ -1,9 +1,11 @@
+import * as childProcess from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import {projectTaskContinuityMetrics} from '../task-continuity-metrics';
 import { DriverStartupCleanupError } from '@deck/core/session/failure';
 import { PassThrough } from "node:stream";
 import { runSessionMcpBridge } from "../mcp-bridge";
 import type { ControlClient } from "../control-client";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CrossRunnerConfig } from "@deck/core/config/deck-config";
@@ -3621,4 +3623,64 @@ test.each(['legacy','delivered'] as const)('reload reconciles a stale dispatched
  const ledger=loadLedger(next.manager.openLog(id)!,sessionPaths(next.paths,id).ledgerSnapshotFile).ledger;
  expect(ledger.prompt('stale')?.state).toBe('completed');expect(ledger.promptQueue.paused).toBe(false);
  expect(next.events(id).filter(e=>e.kind==='prompt.queue'&&e.data.paused===true)).toHaveLength(0);
+});
+
+ test('Git queries resolve only the durable session project and never emit context events', async () => {
+  const t=setup(),sessionId=await t.create();
+  execFileSync('git',['init','-q'],{cwd:t.project});
+  writeFileSync(join(t.project,'literal [x].txt'),'session project only\n');
+  const before=t.events(sessionId).length;
+  expect(await t.manager.query('git.list',{sessionId,projectRoot:'/outside'})).toMatchObject({ok:true,data:{files:[{path:'literal [x].txt',section:'untracked'}]}});
+  expect(await t.manager.query('git.read',{sessionId,section:'untracked',path:'literal [x].txt',projectRoot:'/outside'})).toMatchObject({ok:true,data:{patch:expect.stringContaining('+session project only')}});
+  expect(await t.manager.query('git.content',{sessionId,section:'untracked',path:'literal [x].txt',projectRoot:'/outside'})).toMatchObject({ok:true,data:{content:'session project only\n',version:'working'}});
+  expect(await t.manager.query('git.list',{sessionId:'unknown'})).toMatchObject({ok:false,code:'session-unknown'});
+  expect(await t.manager.query('git.list',{})).toMatchObject({ok:false,code:'git-invalid'});
+  expect(t.events(sessionId)).toHaveLength(before);
+ });
+
+test('Git process leaves unrelated session queries responsive during traversal and cleanup', async () => {
+ const t=setup(),sessionId=await t.create(),other=await t.create();
+ execFileSync('git',['init','-q'],{cwd:t.project});
+ // Enough entries to expose a synchronous traversal stall without huge data allocations.
+ for(let i=0;i<80;i++){mkdirSync(join(t.project,String(i)));writeFileSync(join(t.project,String(i),'small'),'small\n');}
+ let complete=false,maxStall=0,ticks=0,last=performance.now();
+ const timer=setInterval(()=>{const now=performance.now();maxStall=Math.max(maxStall,now-last);last=now;ticks++;},5);
+ try {
+  const pending=t.manager.query('git.list',{sessionId}).finally(()=>{complete=true;});
+  await new Promise(resolve=>setTimeout(resolve,10));
+  expect(complete).toBe(false);
+  const start=performance.now();const unrelated=await t.manager.query('prompts.list',{sessionId:other});
+  const queryMs=performance.now()-start;expect(unrelated.ok).toBe(true);expect(queryMs).toBeLessThan(200);
+  expect(await pending).toMatchObject({ok:true});
+  expect(ticks).toBeGreaterThan(1);expect(maxStall).toBeLessThan(200);
+  console.log(JSON.stringify({probe:'Git manager responsiveness',queryMs,maxTimerGapMs:maxStall,ticks}));
+ }finally{clearInterval(timer);}
+});
+
+test('native reader abort leaves host and unrelated queries alive, cleans resources and recovers', async () => {
+ const t=setup(),sessionId=await t.create(),other=await t.create();
+ execFileSync('git',['init','-q'],{cwd:t.project});
+ writeFileSync(join(t.project,'small'),'recoverable content');
+ const original=childProcess.spawn;let temporaryRoot='',signal:string|null=null;
+ const spy=spyOn(childProcess,'spawn').mockImplementation(((...args:any[])=>{
+  const child=(original as any)(...args);
+  if(String(args[1]?.[0]).endsWith('git-diff-process.ts')){
+   temporaryRoot=args[2].env.TMPDIR;
+   // Simulate residue left by a native crash, not a caught JavaScript exception.
+   writeFileSync(join(temporaryRoot,'partial-view'),'private residue');
+   child.once('spawn',()=>process.kill(child.pid!,'SIGABRT'));
+   child.once('exit',(_code:number,received:string)=>{signal=received;});
+  }
+  return child;
+ }) as typeof childProcess.spawn);
+ try {
+  const pending=t.manager.query('git.list',{sessionId});
+  expect((await t.manager.query('prompts.list',{sessionId:other})).ok).toBe(true);
+  expect(await pending).toMatchObject({ok:false,code:'git-unavailable'});
+  expect(signal as string|null).toBe('SIGABRT');
+  expect(temporaryRoot).not.toBe('');
+  expect(existsSync(temporaryRoot)).toBe(false);
+ }finally{spy.mockRestore();}
+ expect((await t.manager.query('prompts.list',{sessionId:other})).ok).toBe(true);
+ expect(await t.manager.query('git.read',{sessionId,section:'untracked',path:'small'})).toMatchObject({ok:true,data:{patch:expect.stringContaining('+recoverable content')}});
 });

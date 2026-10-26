@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from 'react';
 import {validReplyId} from '../../../packages/core/src/session/lead-replies';
 export type ChatAnchor={id:number;seq:number;offset:number};
 export type DeckOverlay={kind:'drawer'|'install'|'restart'}|{kind:'origin';decisionId:string}|{kind:'image';attachmentId:string};
-export type DeckRoute={project:string;session?:string;tab:'chat'|'activity'|'subagents'|'openspec';overlay?:DeckOverlay;reply?:string;anchor?:ChatAnchor};
+export type DeckRoute={project:string;session?:string;tab:'chat'|'activity'|'subagents'|'git';overlay?:DeckOverlay;reply?:string;anchor?:ChatAnchor};
 export type DeckEntry={v:1;owner:string;key:string;parent?:string;slot:number;route:DeckRoute};
 type RecordEntry={entry:DeckEntry;from?:{key:string;slot:number;signature:string}};
 type Journal={v:1;owner:string;records:RecordEntry[]};
@@ -17,7 +17,7 @@ export function parseAnchor(v:unknown):ChatAnchor|undefined{
  return{id:Number(v.id),seq:Number(v.seq),offset:v.offset};
 }
 export function parseRoute(v:unknown):DeckRoute|undefined{
- if(!object(v)||!keys(v,['project','session','tab','overlay','reply','anchor'])||v.project!==''&&!id(v.project,128)||v.session!==undefined&&!id(v.session)||typeof(v.tab??'chat')!=='string'||!['chat','activity','subagents','openspec'].includes(String(v.tab??'chat'))||v.reply!==undefined&&(!validReplyId(v.reply)||!v.session))return;
+ if(!object(v)||!keys(v,['project','session','tab','overlay','reply','anchor'])||v.project!==''&&!id(v.project,128)||v.session!==undefined&&!id(v.session)||typeof(v.tab??'chat')!=='string'||!['chat','activity','subagents','openspec','git'].includes(String(v.tab??'chat'))||v.reply!==undefined&&(!validReplyId(v.reply)||!v.session))return;
  let overlay:DeckOverlay|undefined;
  if(v.overlay!==undefined){const o=v.overlay;if(!object(o)||typeof o.kind!=='string'||!keys(o,['kind','decisionId','attachmentId']))return;
   if(['drawer','install','restart'].includes(String(o.kind))&&Object.keys(o).length===1)overlay={kind:o.kind as 'drawer'|'install'|'restart'};
@@ -25,7 +25,7 @@ export function parseRoute(v:unknown):DeckRoute|undefined{
   else if(o.kind==='image'&&v.session&&uuid(o.attachmentId)&&Object.keys(o).length===2)overlay={kind:'image',attachmentId:o.attachmentId};else return;
  }
  const anchor=v.anchor===undefined?undefined:parseAnchor(v.anchor);if(v.anchor!==undefined&&(!anchor||!v.session))return;
- return{project:v.project as string,...(v.session?{session:v.session as string}:{}),tab:(v.tab??'chat') as DeckRoute['tab'],...(overlay?{overlay}:{}),...(v.reply?{reply:v.reply as string}:{}),...(anchor?{anchor}:{})};
+ return{project:v.project as string,...(v.session?{session:v.session as string}:{}),tab:(v.tab==='openspec'?'git':v.tab??'chat') as DeckRoute['tab'],...(overlay?{overlay}:{}),...(v.reply?{reply:v.reply as string}:{}),...(anchor?{anchor}:{})};
 }
 export function routeURL(route:DeckRoute,base:string){const url=new URL(base);url.search='';url.hash='';if(route.session)url.searchParams.set('session',route.session);if(route.reply)url.searchParams.set('reply',route.reply);return url.href;}
 const signature=(route:DeckRoute)=>JSON.stringify([route.project,route.session??null,route.tab,route.overlay?[route.overlay.kind,'decisionId' in route.overlay?route.overlay.decisionId:'attachmentId' in route.overlay?route.overlay.attachmentId:null]:null,route.reply??null]);

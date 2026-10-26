@@ -1,3 +1,4 @@
+import { listGitChanges, readGitDiff, readGitContent } from './git-diff';
 import { developerRoleContinuity } from "@deck/core/teams/developer/catalog";
 import { normalizeContinuityPolicy, sanitizeRequestInput, selectContinuity, type NativeCompactionBound } from "@deck/core/session/task-continuity";
 import { mergeStructuredTask, projectRelativePath, utf8Bytes, type StructuredTaskState, type FindingResolution } from "@deck/core/session/task-handoff";
@@ -517,6 +518,16 @@ export class SessionManager implements SessionService {
       }
       case "sessions.prune": return { ok: true, data: this.prune((args ?? {}) as { maxAgeDays?: number; keep?: number; dryRun?: boolean }) };
       case "drivers.status": return { ok: true, data: await this.driversStatus() };
+      case "git.list":
+      case "git.read":
+      case "git.content": {
+        const input = args as { sessionId?: unknown; section?: unknown; path?: unknown } | null;
+        if (!input || typeof input.sessionId !== 'string') return fail('git-invalid');
+        const live = this.load(input.sessionId);
+        if (!live) return fail('session-unknown');
+        const root = live.ledger.session.projectRoot ?? live.meta.projectRoot;
+        return name === 'git.list' ? listGitChanges(root) : (name === 'git.content' ? readGitContent : readGitDiff)(root, input.section, input.path);
+      }
       case "openspec.list":
       case "openspec.read": {
         const input = args as { sessionId?: unknown; changeId?: unknown; path?: unknown } | null;

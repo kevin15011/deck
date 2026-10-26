@@ -11,9 +11,9 @@ import { isLeadEvent } from './event-source';
 import { Avatar, agentProfile, FollowTranscript } from './subagent-parts';
 import { ContextWindowIndicator, contextIndexForEvents, type ContextWindowIndex } from './context-window';
 
-export type WorkspaceTab = 'chat' | 'activity' | 'subagents' | 'openspec';
+export type WorkspaceTab = 'chat' | 'activity' | 'subagents' | 'git';
 export type Api = (path: string, init?: RequestInit) => Promise<any>;
-const tabNames: Record<WorkspaceTab, string> = { chat: 'Chat', activity: 'Activity', subagents: 'Subagents', openspec: 'OpenSpec' };
+const tabNames: Record<WorkspaceTab, string> = { chat: 'Chat', activity: 'Activity', subagents: 'Subagents', git: 'Review' };
 /** Current projection only: replies/history and read markers never imply execution. */
 export function hasWorkingSubagent(view: Pick<ViewState,'tasks'|'approvals'|'questions'>): boolean {
     const owners=(events: ViewState['approvals'])=>new Set(Object.values(events).map(event=>String(event.source.taskId??event.data.taskId??'')));

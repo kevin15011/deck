@@ -505,3 +505,23 @@ test('quota routes require device and same-origin access, enforce cooldown and f
  await waitFor(()=>messages.length>before);expect(messages.join('')).not.toContain('PRIVATE');expect(messages.join('')).toContain('usedPercent');
  }finally{ws.close();}
 });
+
+ test('Git HTTP endpoints require a device, reject root overrides, and forward only session selections', async () => {
+  const queries:unknown[]=[];
+  const f=fixture({service:{execute:async()=>({ok:true}),openLog:()=>undefined,hasRunningWork:()=>false,query:async(name:string,args:any)=>{
+   queries.push({name,args});return args.sessionId==='unknown'?{ok:false,code:'session-unknown'}:{ok:true,data:{files:[]}};
+  }}});
+  expect((await fetch(`${f.base}/api/sessions/s/git`)).status).toBe(401);
+  expect((await fetch(`${f.base}/api/sessions/s/git/diff?section=unstaged&path=a`)).status).toBe(401);
+  expect((await fetch(`${f.base}/api/sessions/s/git/content?section=unstaged&path=a.md`)).status).toBe(401);
+  expect(queries).toHaveLength(0);
+  const {cookie}=await pair(f),headers={Cookie:cookie};
+  expect((await fetch(`${f.base}/api/sessions/s/git`,{headers})).status).toBe(200);
+  expect((await fetch(`${f.base}/api/sessions/s/git/diff?section=staged&path=a%20%5Bx%5D`,{headers})).status).toBe(200);
+  expect(queries).toEqual([{name:'git.list',args:{sessionId:'s'}},{name:'git.read',args:{sessionId:'s',section:'staged',path:'a [x]'}}]);
+  expect((await fetch(`${f.base}/api/sessions/s/git/content?section=staged&path=a.md`,{headers})).status).toBe(200);
+  expect(queries.at(-1)).toEqual({name:'git.content',args:{sessionId:'s',section:'staged',path:'a.md'}});
+  for(const suffix of ['/content?section=staged&path=a&projectRoot=/outside','/content?section=staged&path=a&path=b','?projectRoot=/outside','/diff?path=a','/diff?section=staged&path=a&path=b'])expect((await fetch(`${f.base}/api/sessions/s/git${suffix}`,{headers})).status).toBe(400);
+  expect((await fetch(`${f.base}/api/sessions/unknown/git`,{headers})).status).toBe(404);
+  expect((await fetch(`${f.base}/api/sessions/s/git`,{method:'POST',headers:{...headers,Origin:f.base}})).status).toBe(404);
+ });
