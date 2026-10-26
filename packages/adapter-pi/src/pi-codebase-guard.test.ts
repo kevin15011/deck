@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync, watch } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -56,12 +56,14 @@ fs.writeFileSync(${JSON.stringify(join(root,"booted"))},String(process.pid));
           const done = (failure?: Error) => {
             if (settled) return;
             settled = true;
-            watcher.close(); clearTimeout(timer); child.removeListener("close", onClose);
+            clearInterval(poll); clearTimeout(timer); child.removeListener("close", onClose);
             if (failure) reject(failure); else resolve();
           };
           const check = () => { if (observed()) done(); };
           const onClose = () => done(observed() ? undefined : new Error(`Guard closed before fixture ${name}: ${stderr}`));
-          const watcher = watch(root, check);
+          // File contents are the handshake; fs.watch notifications can coalesce
+          // around create/write and are not reliable readiness acknowledgements.
+          const poll = setInterval(check, 10);
           const timer = setTimeout(() => done(new Error(`Fixture ${name} readiness timed out: ${stderr}`)), 5000);
           child.once("close", onClose);
           if (child.exitCode !== null || child.signalCode !== null) onClose(); else check();

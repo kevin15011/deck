@@ -1,10 +1,25 @@
-import { expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { contributionHash, readRunnerContributions } from "@deck/core";
 import { installOpenCodeTools } from "./install-tools";
 import { OPENCODE_INSTALLABLE_TOOLS } from "./installation-plan";
+
+// These fixtures model the default HOME layout, independent of CI/user overrides.
+const environmentKeys = ["OPENCODE_CONFIG_DIR", "XDG_CONFIG_HOME", "RTK_INSTALL_DIR"] as const;
+let savedEnvironment: Array<string | undefined>;
+beforeEach(() => {
+  savedEnvironment = environmentKeys.map(key => process.env[key]);
+  for (const key of environmentKeys) delete process.env[key];
+});
+afterEach(() => {
+  environmentKeys.forEach((key, index) => {
+    const value = savedEnvironment[index];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  });
+});
 
 const tool = OPENCODE_INSTALLABLE_TOOLS.find(tool => tool.id === "rtk")!;
 const script = `mkdir -p "$HOME/.local/bin"
@@ -33,7 +48,10 @@ test("existing RTK shell/init path accounts actual outputs and preserves unrelat
       for (const entry of manifest.contributions) expect(entry.hash).toBe(contributionHash(readFileSync(entry.path)));
       expect(readFileSync(config, "utf8")).toBe('{"permission":{"bash":"ask"}}');
       expect((await installOpenCodeTools("opencode", [tool], () => {}, undefined, options))[0]?.success).toBe(true);
-    } finally { process.env.PATH = previousPath; }
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

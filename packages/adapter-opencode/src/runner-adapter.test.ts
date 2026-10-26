@@ -134,6 +134,8 @@ describe("OpenCode RunnerAdapter Supermemory plugin readiness mapping", () => {
   test("synthetic Supermemory MCP write without an explicit config dir does not touch a real-like OpenCode config", async () => {
     const root = await mkdtemp(join(tmpdir(), "deck-opencode-real-like-home-"));
     const previousHome = process.env.HOME;
+    const configKeys = ["OPENCODE_CONFIG_DIR", "XDG_CONFIG_HOME"] as const;
+    const previousConfig = configKeys.map(key => process.env[key]);
     const configDir = join(root, ".config", "opencode");
     const configPath = join(configDir, "opencode.json");
     try {
@@ -149,6 +151,8 @@ describe("OpenCode RunnerAdapter Supermemory plugin readiness mapping", () => {
       utimesSync(configPath, old, old);
       const before = statSync(configPath);
       process.env.HOME = root;
+      // An inherited config override is an explicit directory, outside this fixture.
+      for (const key of configKeys) delete process.env[key];
 
       const adapter = createOpenCodeRunnerAdapter();
       const result = await adapter.writeMcpConfig?.({ serverName: "supermemory", projectRoot: root });
@@ -161,6 +165,11 @@ describe("OpenCode RunnerAdapter Supermemory plugin readiness mapping", () => {
       expect(after.mtimeMs).toBe(before.mtimeMs);
       expect(after.mode & 0o777).toBe(before.mode & 0o777);
     } finally {
+      configKeys.forEach((key, index) => {
+        const value = previousConfig[index];
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      });
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
       await rm(root, { recursive: true, force: true });

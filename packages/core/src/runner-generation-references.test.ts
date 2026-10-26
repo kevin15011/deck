@@ -30,8 +30,15 @@ test('native process references cover multiple and relative plugin paths', async
   if (process.platform !== 'linux') return;
   const parent = mkdtempSync(join(tmpdir(), 'deck-native-generation-ref-'));
   const root = join(parent, 'developer-team-v2-abcdef'); mkdirSync(root);
-  const child = Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1000)', '--', '--plugin-dir', 'other-plugin', 'developer-team-v2-abcdef'], { cwd: parent, stdout: 'ignore', stderr: 'ignore' });
+  const child = Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1000); process.stdout.write("ready\\n")', '--', '--plugin-dir', 'other-plugin', 'developer-team-v2-abcdef'], { cwd: parent, stdout: 'pipe', stderr: 'ignore' });
   try {
+    // spawn may return before exec has published the child's argv/cwd in /proc.
+    const reader = child.stdout.getReader();
+    try {
+      const { value, done } = await reader.read();
+      expect(done).toBe(false);
+      expect(new TextDecoder().decode(value)).toBe('ready\n');
+    } finally { reader.releaseLock(); }
     expect(inspectRunnerGenerationReferences(root, join(parent, 'model-assignments.json')).join(' ')).toContain(`Native process ${child.pid}`);
   } finally { child.kill(); await child.exited; rmSync(parent, { recursive: true, force: true }); }
 });
