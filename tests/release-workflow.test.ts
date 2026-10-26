@@ -8,11 +8,13 @@ const root = resolve(import.meta.dir, "..");
 const workflow = parse(
   readFileSync(resolve(root, ".github/workflows/release.yml"), "utf8"),
 ) as {
+  on: Record<string, unknown>;
   jobs: Record<
     string,
     {
       "runs-on"?: string;
-      strategy?: { matrix?: { target?: string[] } };
+      if?: string;
+      strategy?: { matrix?: { include?: Array<{ target: string; runner: string }> } };
       needs?: string | string[];
       steps?: Array<{ name?: string; run?: string; with?: { files?: string } }>;
     }
@@ -31,13 +33,29 @@ function publishedArchives(jobName: "release" | "artifacts", stepName: string): 
 
 describe("release workflow platform contract", () => {
   test("builds every supported binary target", () => {
-    expect(workflow.jobs.build?.strategy?.matrix?.target).toEqual(expectedTargets);
+    expect(workflow.jobs.build?.strategy?.matrix?.include?.map(entry => entry.target)).toEqual(expectedTargets);
   });
 
-  test("uses macOS runners for both Darwin targets", () => {
-    expect(workflow.jobs.build?.["runs-on"]).toBe(
-      "${{ startsWith(matrix.target, 'darwin-') && 'macos-latest' || 'ubuntu-latest' }}",
-    );
+  test("requires matching native hosts and qualifies the extracted artifact before upload", () => {
+    expect(workflow.jobs.build?.["runs-on"]).toBe("${{ matrix.runner }}");
+    expect(workflow.jobs.build?.strategy?.matrix?.include).toEqual([
+      {target: "linux-x64", runner: "ubuntu-24.04"},
+      {target: "linux-arm64", runner: "ubuntu-24.04-arm"},
+      {target: "darwin-x64", runner: "macos-15-intel"},
+      {target: "darwin-arm64", runner: "macos-15"},
+    ]);
+    const steps=workflow.jobs.build?.steps ?? [];
+    const qualify=steps.findIndex(step=>step.name === "Verify extracted release artifact");
+    expect(steps[qualify]?.run).toContain('tar -xzf');
+    expect(steps[qualify]?.run).toContain('set -o pipefail');
+    expect(steps[qualify]?.run).toContain('verify-git-diff-runtime.ts --target "$TARGET" --artifact "$VERIFY_DIR/deck"');
+    expect(qualify).toBeLessThan(steps.findIndex(step=>step.name === "Upload artifact"));
+    for(const job of ['release','artifacts'])expect(workflow.jobs[job]?.needs).toContain('build');
+  });
+
+  test("manual qualification never publishes", () => {
+    expect(workflow.on).toHaveProperty('workflow_dispatch');
+    for(const job of ['release','artifacts'])expect(workflow.jobs[job]?.if).toContain("github.event_name == 'push'");
   });
 
   test("publishes every supported archive for stable and main builds", () => {
