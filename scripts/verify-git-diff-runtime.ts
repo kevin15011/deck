@@ -44,7 +44,7 @@ try {
  const versionText=await new Response(version.stdout).text();
  console.log(versionText.trim());
  if(await version.exited!==0 || !versionText.split(/\r?\n/).includes('deck '+JSON.parse(readFileSync(join(root,'package.json'),'utf8')).version) || !versionText.split(/\r?\n/).includes('target: '+target))throw Error('Extracted artifact version mismatch');
- await run([process.execPath,'test','--timeout','30000','packages/session-host/src/__tests__/git-diff.test.ts','packages/session-host/src/__tests__/git-diff-process.test.ts','packages/session-host/src/__tests__/project-files.test.ts']);
+ await run([process.execPath,'test','--timeout','30000','packages/session-host/src/__tests__/git-diff.test.ts','packages/session-host/src/__tests__/git-diff-process.test.ts','packages/session-host/src/__tests__/project-files.test.ts','packages/session-host/src/__tests__/git-object-snapshot.test.ts']);
  await run([process.execPath,'test','--timeout','30000','packages/session-host/src/__tests__/session-manager.test.ts','-t','Git queries|Git process|native reader abort']);
  await run([process.execPath,'build','--compile','scripts/git-diff-runtime-smoke.ts','--outfile',join(output,'probe')]);
  // Confinement is inherited by the compiled probe and its native reader descendants.
