@@ -30,3 +30,14 @@ test('folder colors include unloaded descendants, deleted paths and mixed states
  expect(statuses.has('clean')).toBe(false);
  expect(folderGitStatuses([]).size).toBe(0);
 });
+
+test('cross-directory renames color both ancestors, while copies leave source folders neutral',()=>{
+ const rename=folderGitStatuses([{path:'destination/file',previousPath:'source/deep/file',section:'staged',status:'R100'}]);
+ expect(rename.get('source')?.kind).toBe('renamed');
+ expect(rename.get('source/deep')?.kind).toBe('renamed');
+ expect(rename.get('destination')?.kind).toBe('renamed');
+ const copy=folderGitStatuses([{path:'destination/file',previousPath:'source/deep/file',section:'staged',status:'C100'}]);
+ expect(copy.has('source')).toBe(false);
+ expect(copy.has('source/deep')).toBe(false);
+ expect(copy.get('destination')?.kind).toBe('renamed');
+});

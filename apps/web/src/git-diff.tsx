@@ -72,11 +72,15 @@ export function gitStatus(file: GitFile) {
 export function folderGitStatuses(files: GitFile[]) {
  const folders=new Map<string,ReturnType<typeof gitStatus>>();
  for(const file of files) {
-  const parts=file.path.replace(/\/$/,'').split('/'),status=gitStatus(file);
+  const status=gitStatus(file);
+  const paths=file.status.startsWith('R')&&file.previousPath?[file.path,file.previousPath]:[file.path];
+  for(const changedPath of paths) {
+  const parts=changedPath.replace(/\/$/,'').split('/');
   for(let end=1;end<parts.length;end++) {
    const path=parts.slice(0,end).join('/'),previous=folders.get(path);
    const kind=!previous||previous.kind===status.kind?status.kind:previous.kind==='conflict'||status.kind==='conflict'?'conflict':'modified';
    folders.set(path,{kind,label:kind==='conflict'?'Contains conflicts':kind==='new'?'Contains new files':kind==='deleted'?'Contains deleted files':kind==='renamed'?'Contains renamed or copied files':kind==='unknown'?'Contains files with unknown status':'Contains changes'});
+  }
   }
  }
  return folders;
@@ -124,7 +128,7 @@ export function GitFileNavigator({files,selected,onSelect,onPreview,visible=true
  },[visible,selected,files,collapsed]);
 
  const groups=useMemo(()=>(['staged','unstaged','untracked'] as const).map(section=>({section,files:files.filter(file=>file.section===section)})),[files]);
- const folderStatuses=useMemo(()=>new Map(groups.flatMap(group=>[...folderGitStatuses(group.files)].map(([path,status])=>[`${group.section}:${path}`,status] as const))),[groups]);
+ const folderStatuses=useMemo(()=>new Map<string,ReturnType<typeof gitStatus>>(groups.flatMap(group=>[...folderGitStatuses(group.files)].map(([path,status])=>[`${group.section}:${path}`,status] as const))),[groups]);
  function disclosure(key:string,label:React.ReactNode,children:React.ReactNode,className?:string) {
   const open=!collapsed.has(key),folderStatus=className==='git-folder'?folderStatuses.get(key):undefined;
   return <details key={key} className={className} open={open}><summary className={folderStatus?`git-status-${folderStatus.kind}`:undefined} title={folderStatus?.label} onClick={event=>{event.preventDefault();setCollapsed(previous=>{const next=new Set(previous);if(next.has(key))next.delete(key);else next.add(key);return next;});}}><NavigationIcon kind="chevron" expanded={open}/>{label}</summary>{children}</details>;
