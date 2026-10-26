@@ -88,6 +88,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Generated asset freshness
+        run: bun test scripts/generate-pi-extension-assets.test.ts scripts/generate-runner-execution-assets.test.ts
+
       - name: Full test suite
         run: bun test --timeout 30000
 

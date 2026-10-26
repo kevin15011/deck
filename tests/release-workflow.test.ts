@@ -79,6 +79,10 @@ describe("release workflow platform contract", () => {
   test("runs release hard gates before archive build", () => {
     expect(workflow.jobs.build?.needs).toEqual(["metadata", "release-verification"]);
     const steps = workflow.jobs["release-verification"]?.steps ?? [];
+    const freshness=steps.findIndex(step=>step.name==='Generated asset freshness');
+    expect(freshness).toBeGreaterThanOrEqual(0);
+    expect(freshness).toBeLessThan(steps.findIndex(step=>step.name==='Full test suite'));
+    expect(steps[freshness]?.run).toContain('scripts/generate-pi-extension-assets.test.ts');
     const stepRuns = steps.map((step) => step.run).filter(Boolean);
     expect(stepRuns).toContain("bun test --timeout 30000");
     expect(stepRuns).toContain("bunx tsc --noEmit");
