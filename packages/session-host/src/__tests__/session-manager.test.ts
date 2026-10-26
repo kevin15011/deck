@@ -3633,6 +3633,9 @@ test.each(['legacy','delivered'] as const)('reload reconciles a stale dispatched
   expect(await t.manager.query('git.list',{sessionId,projectRoot:'/outside'})).toMatchObject({ok:true,data:{files:[{path:'literal [x].txt',section:'untracked'}]}});
   expect(await t.manager.query('git.read',{sessionId,section:'untracked',path:'literal [x].txt',projectRoot:'/outside'})).toMatchObject({ok:true,data:{patch:expect.stringContaining('+session project only')}});
   expect(await t.manager.query('git.content',{sessionId,section:'untracked',path:'literal [x].txt',projectRoot:'/outside'})).toMatchObject({ok:true,data:{content:'session project only\n',version:'working'}});
+  expect(await t.manager.query('project.files',{sessionId,path:'',showIgnored:false,projectRoot:'/outside'})).toMatchObject({ok:true,data:{entries:[{path:'literal [x].txt',kind:'file'}]}});
+  expect(await t.manager.query('project.files',{sessionId,path:'',showIgnored:false,cursor:'../outside'})).toMatchObject({ok:false,code:'git-invalid'});
+  expect(await t.manager.query('project.content',{sessionId,path:'literal [x].txt',showIgnored:false,projectRoot:'/outside'})).toMatchObject({ok:true,data:{kind:'text',content:'session project only\n'}});
   expect(await t.manager.query('git.list',{sessionId:'unknown'})).toMatchObject({ok:false,code:'session-unknown'});
   expect(await t.manager.query('git.list',{})).toMatchObject({ok:false,code:'git-invalid'});
   expect(t.events(sessionId)).toHaveLength(before);

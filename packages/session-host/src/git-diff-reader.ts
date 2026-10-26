@@ -1,6 +1,7 @@
 /** Bounded Git subprocesses. No shell, index refresh, helpers, model calls, or arbitrary file reads. */
 import { spawn } from 'node:child_process';
-import { lstatSync, closeSync, mkdtempSync, rmSync, mkdirSync, symlinkSync, writeFileSync, realpathSync, readFileSync, readSync } from 'node:fs';
+import { lstatSync, closeSync, mkdtempSync, rmSync, mkdirSync, symlinkSync, writeFileSync, realpathSync, readFileSync, readSync, fstatSync } from 'node:fs';
+import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { SafeTree, TreeLimitError, copyRegular, type CopyBudget } from './git-safe-tree';
 import { join, resolve } from 'node:path';
@@ -19,7 +20,7 @@ const active = new Set<string>();
 // Each private view owns the descriptors passed to its Git children. Paths in
 // objects/ refer only to these inherited regular-file handles, never live paths.
 const objectHandles = new Map<string, number[]>();
-function git(root: string, args: string[], maxBuffer = MAX_CATALOG, diff = false, input?:string): Promise<string> {
+export function git(root: string, args: string[], maxBuffer = MAX_CATALOG, diff = false, input?:string|{fd:number,size:number}): Promise<string> {
  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
  return new Promise((resolve, reject) => {
   const child=spawn('git', ['--no-pager', ...(args[0]==='check-ignore'?[]:['--literal-pathspecs']), '-c', 'core.fsmonitor=false', '-c', 'core.attributesFile=/dev/null', '-c', 'core.excludesFile=/dev/null', '-c', 'core.untrackedCache=false', '-c', 'diff.submodule=short', '-c', 'diff.suppressBlankEmpty=false', ...args], {
@@ -32,12 +33,18 @@ function git(root: string, args: string[], maxBuffer = MAX_CATALOG, diff = false
   child.stderr!.on('data',()=>{});
   child.once('error',()=>{clearTimeout(timer);reject(new GitError('git-unavailable'));});
   child.once('close',code=>{clearTimeout(timer);if(limited)reject(new GitError('git-limit'));else if(code!==0 && !(diff && code===1))reject(new GitError('git-unavailable'));else resolve(Buffer.concat(chunks).toString('utf8'));});
-  child.stdin!.on('error',()=>{});child.stdin!.end(input);
+  child.stdin!.on('error',()=>{});
+  if(typeof input==='object') {
+   // Stream only the captured extent, from the already authorized descriptor.
+   const source=input;
+   const stream=Readable.from((function*(){let offset=0;while(offset<source.size){const buffer=Buffer.alloc(Math.min(65536,source.size-offset));const count=readSync(source.fd,buffer,0,buffer.length,offset);if(!count)throw Error('Content changed');offset+=count;yield buffer.subarray(0,count);}})());
+   stream.on('error',()=>child.kill('SIGKILL'));child.once('close',()=>stream.destroy());stream.pipe(child.stdin!);
+  }else child.stdin!.end(input);
  });
 }
 /** Git runs only in this private, disposable request view. No session baseline
  * is stored. Live directories are traversed through openat, not Git/pathnames. */
-type View = {root:string, unavailable:Map<string,string>, large:Set<string>, dispose:()=>void};
+type View = {root:string, unavailable:Map<string,string>, large:Map<string,{binary:boolean,status?:string}>, dispose:()=>void};
 const SPECIAL = 'Special filesystem entries are not rendered.';
 function livePath(path:string) {
  // These are OS-owned Darwin aliases, not arbitrary user symlinks.
@@ -46,9 +53,10 @@ function livePath(path:string) {
 async function repository(projectRoot: string, selected?:string): Promise<View> {
  const root=realpathSync(mkdtempSync(join(tmpdir(),'deck-git-view-')));
  const handles:number[]=[];objectHandles.set(root,handles);
- const unavailable=new Map<string,string>(),large=new Set<string>();
+ const unavailable=new Map<string,string>(),large=new Map<string,{binary:boolean,status?:string}>();
  const dispose=()=>{objectHandles.delete(root);for(const fd of handles)closeSync(fd);rmSync(root,{recursive:true,force:true});};
  const budget:CopyBudget={bytes:64*1024*1024,entries:100_000,deadline:Date.now()+10_000};
+ let comparisonBytes=64*1024*1024;
  const tick=()=>{if(--budget.entries<0 || Date.now()>budget.deadline)throw new TreeLimitError('Repository read limit exceeded');};
  const trees:SafeTree[]=[];
  const own=(tree:SafeTree)=>{trees.push(tree);return tree;};
@@ -136,7 +144,7 @@ async function repository(projectRoot: string, selected?:string): Promise<View> 
   const store=common.directory('objects');try{objects(store,join(commonPath,'objects'),join(gitdir,'objects'));}finally{store.close();}
   const allowed=new Set(['core.repositoryformatversion','core.filemode','core.ignorecase','core.precomposeunicode','core.autocrlf','core.eol','core.safecrlf','core.symlinks','extensions.objectformat']);
   writeFileSync(join(gitdir,'config'),'');
-  let worktreeConfig=false;
+  let worktreeConfig=false, filemode=true;
   for(const [configTree,configName] of [[common,'config'],[metadata,'config.worktree']] as const) {
    if(configName==='config.worktree' && !worktreeConfig || !configTree.names().includes(configName))continue;
    const input=join(root,'config.input');copy(configTree,configName,input);
@@ -145,6 +153,7 @@ async function repository(projectRoot: string, selected?:string): Promise<View> 
     const at=record.indexOf('\n'),key=at<0?record:record.slice(0,at),value=at<0?'true':record.slice(at+1);
     if(key.startsWith('extensions.') && !['extensions.objectformat','extensions.worktreeconfig'].includes(key))throw Error('Unsupported Git extension');
     if(key==='extensions.worktreeconfig')worktreeConfig=['true','yes','on','1'].includes(value.toLowerCase());
+    if(key==='core.filemode')filemode=!['false','no','off','0'].includes(value.toLowerCase());
     if(allowed.has(key))await git(root,['config','--file',join(gitdir,'config'),'--',key,value]);
    }
   }
@@ -184,7 +193,32 @@ async function repository(projectRoot: string, selected?:string): Promise<View> 
     if(['.gitignore','.gitattributes'].includes(name)){try{if(lstatSync(join(destination,name)).isFile())continue;}catch{}}
     const entry=tree.entry(name),target=join(destination,name);
     if(entry.kind==='file') {
-     if(entry.size>MAX_PATCH){large.add(path);closeSync(entry.fd);writeFileSync(target,'');}
+     if(entry.size>MAX_PATCH){
+      try {
+       const sample=Buffer.alloc(Math.min(8000,entry.size));
+       const count=readSync(entry.fd,sample,0,sample.length,0);
+       const info:{binary:boolean,status?:string}={binary:sample.subarray(0,count).includes(0)};
+       large.set(path,info);
+       if(tracked.has(path)) {
+        const record=indexed.find(record=>record.endsWith('\t'+path) && record.split('\t')[0]!.endsWith(' 0'));
+        if(record && /^100(644|755) /.test(record)) {
+         if(entry.size>comparisonBytes) {
+          info.status='?';unavailable.set(path,'Working content exceeded the request read budget; this entry was not compared.');
+         }else {
+          comparisonBytes-=entry.size;
+          const before=fstatSync(entry.fd);
+          const oid=(await git(root,['hash-object','--stdin','--path='+path],128,false,entry)).trim();
+          const after=fstatSync(entry.fd);
+          if(after.size!==entry.size || after.mtimeMs!==before.mtimeMs || after.ctimeMs!==before.ctimeMs)throw Error('Repository changed during read');
+          if(!/^[0-9a-f]{40,64}$/.test(oid))throw Error('Invalid blob identity');
+          const [mode,indexOid]=record.split(' ');
+          info.status=oid!==indexOid || filemode && (mode==='100755')!==Boolean(entry.mode&0o111)?'M':' ';
+         }
+        }
+       }
+       writeFileSync(target,'',{mode:entry.mode&0o111?0o700:0o600});
+      }finally{closeSync(entry.fd);}
+     }
      else if(!tracked.has(path) && selected!==path){closeSync(entry.fd);writeFileSync(target,'');}
      else if(entry.size>budget.bytes){unavailable.set(path,'Working content exceeded the request read budget; this entry was not compared.');closeSync(entry.fd);writeFileSync(target,'');}
      else copyRegular(entry,target,budget);
@@ -207,7 +241,9 @@ async function catalog(view: View, selected?:string): Promise<GitCatalog> {
  const entries = raw.split('\0'), files: GitFile[] = [];
  for(let i=0;i<entries.length;i++) {
   const entry=entries[i]!; if(!entry) continue;
-  const xy=entry.slice(0,2), path=entry.slice(3);
+  let xy=entry.slice(0,2);const path=entry.slice(3);
+  const largeStatus=view.large.get(path)?.status;
+  if(largeStatus!==undefined && xy[1]!=='A' && !xy.includes('U') && xy!=='AA' && xy!=='DD')xy=xy[0]+largeStatus;
   const previousPath = /[RC]/.test(xy) ? entries[++i] : undefined;
   if(!validPath(path) || previousPath !== undefined && !validPath(previousPath)) throw new GitError('git-invalid');
   if(selected && path!==selected)continue;
@@ -245,10 +281,11 @@ async function catalog(view: View, selected?:string): Promise<GitCatalog> {
   const file=files.find(file=>file.path===path && file.section!=='staged');
   if(file)file.unavailableReason=reason;else files.push({path,section:trackedPath(indexed,path)?'unstaged':'untracked',status:'?',unavailableReason:reason});
  }
- for(const path of view.large) {
-  const file=files.find(file=>file.path===path && file.section!=='staged');
-  const reason='File exceeds the 256 KiB viewer limit; working content was not compared.';
-  if(file){file.unavailableReason=reason;if(file.section==='unstaged')file.status='?';}else files.push({path,section:trackedPath(indexed,path)?'unstaged':'untracked',status:'?',unavailableReason:reason});
+ // A placeholder may equal an empty index blob even when the real file differs.
+ // Only captured content identity can supply this missing working change.
+ for(const [path,info] of view.large) {
+  if(info.status && info.status!==' ' && !files.some(file=>file.path===path && file.section==='unstaged'))
+   files.push({path,section:'unstaged',status:info.status,...(view.unavailable.has(path)?{unavailableReason:view.unavailable.get(path)}:{})});
  }
  if(files.length>MAX_FILES)throw new GitError('git-limit');
  const warnings=indexed.some(record=>record.startsWith('160000 '))?['Submodule working-tree contents are not inspected. Staged gitlink changes are listed.']:[];
@@ -284,8 +321,8 @@ function readSelected(projectRoot: string, section: unknown, path: unknown, cont
   const file=(await catalog(view,path)).files.find(file=>file.section===section && file.path===path);
   if(!file) throw new GitError('git-stale');
   const document = (kind: GitDocument['kind'], message: string): GitDocument|GitContent => content ? {file,kind,content:'',message} : {file,kind,patch:'',message};
-  if(section!=='staged' && view.large.has(path))return document('limited','File exceeds the 256 KiB viewer limit.');
   if(file.unavailableReason)return document('unavailable',file.unavailableReason);
+  if(section!=='staged' && view.large.has(path))return view.large.get(path)!.binary ? document('binary','Binary file changed. Content is not rendered.') : document('limited','File exceeds the 256 KiB viewer limit.');
   if(file.status==='U') return document('conflict','Unmerged file. Resolve the conflict outside this read-only viewer.');
   const index=await git(root,['ls-files','--stage','-z','--',file.path]);
   if(index.split('\0').some(entry=>entry.startsWith('160000 ')))return document('unavailable','Submodule content is not rendered.');

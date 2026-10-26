@@ -525,3 +525,13 @@ test('quota routes require device and same-origin access, enforce cooldown and f
   expect((await fetch(`${f.base}/api/sessions/unknown/git`,{headers})).status).toBe(404);
   expect((await fetch(`${f.base}/api/sessions/s/git`,{method:'POST',headers:{...headers,Origin:f.base}})).status).toBe(404);
  });
+test('project file and image transport is authenticated and accepts only session-relative selectors',async()=>{
+ const queries:unknown[]=[];const f=fixture({service:{execute:async()=>({ok:true}),openLog:()=>undefined,hasRunningWork:()=>false,query:async(name:string,args:any)=>{queries.push({name,args});return {ok:true,data:{path:'photo.png',kind:'image',mime:'image/png',base64:'AAAA',width:1,height:1,size:3}};}}});
+ for(const route of ['/files?path=','/files?path=&cursor=abc','/files/content?path=photo.png'])expect((await fetch(`${f.base}/api/sessions/s${route}`)).status).toBe(401);
+ expect(queries).toHaveLength(0);const {cookie}=await pair(f),headers={Cookie:cookie};
+ expect((await fetch(`${f.base}/api/sessions/s/files?path=&showIgnored=true`,{headers})).status).toBe(200);
+ const response=await fetch(`${f.base}/api/sessions/s/files/content?path=photo.png`,{headers});expect(response.status).toBe(200);expect((await response.json()).data.mime).toBe('image/png');
+ expect(queries).toEqual([{name:'project.files',args:{sessionId:'s',path:'',showIgnored:true}},{name:'project.content',args:{sessionId:'s',path:'photo.png',showIgnored:false}}]);
+ expect((await fetch(`${f.base}/api/sessions/s/files?path=&cursor=abc`,{headers})).status).toBe(200);expect(queries.at(-1)).toEqual({name:'project.files',args:{sessionId:'s',path:'',showIgnored:false,cursor:'abc'}});
+ for(const suffix of ['?path=&cursor=','?path=&cursor=a&cursor=b','?path=&cursor=../outside','?path=&cursor='+ 'x'.repeat(8193),'/content?path=a&cursor=abc','?path=&root=/tmp','?path=a&path=b','?path=&showIgnored=1','/content?path=a&projectRoot=/tmp'])expect((await fetch(`${f.base}/api/sessions/s/files${suffix}`,{headers})).status).toBe(400);
+});

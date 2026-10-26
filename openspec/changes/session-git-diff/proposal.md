@@ -4,9 +4,12 @@ Status: Implemented and independently accepted locally on Linux x64 with Bun 1.3
 
 ## Intent
 
-Provide a conventional read-only Git diff viewer in the Web UI. Prioritize readable differences and a small maintenance surface. This is P-010. The user explicitly rejected session-specific baseline capture, attribution and historical comparison machinery.
+Provide a read-only project file browser and conventional Git diff viewer in the Web UI. The latest user request expands Review to unchanged project files and image previews, superseding the original changes-only scope. Prioritize readable files/differences and a small maintenance surface. This is P-010. Session-specific baseline capture, attribution and historical comparison machinery remain excluded.
 
 ## Scope and visual agreement
+
+- Latest expansion: Review defaults to a project file tree with unchanged files in neutral colors and Git status colors for changes, while keeping a Changes view/filter for staged/unstaged/deleted comparisons. Reading a clean file must not imply modification. Text, Markdown and common raster image previews are available on demand; preserve the existing Markdown controls and tree reveal behavior.
+- Hide Git administrative metadata. Hide ignored files by default to keep dependency/build folders manageable, with an explicit ignored-files visibility option if compatible with bounded lazy traversal. Never traverse outside the authorized project or execute document content. Image bytes, dimensions and unsupported formats must have explicit bounded behavior; image limits are separate from text-diff limits.
 
 - Latest approved tab order: Chat, Activity, Subagents, Review. Remove the OpenSpec tab and rename the Git diff presentation to Review. This supersedes both previous orders; desktop retains its existing separate Chat pane behavior.
 - Markdown files in the Review file tree expose an accessible SVG-icon button to render the full selected Markdown document using the existing safe Markdown renderer. Preserve diff access. Preview the index version for staged entries and working version for unstaged/untracked entries; deleted entries may preview the comparison's prior version. Content remains bounded and read-only through the authorized Git reader.
@@ -36,7 +39,7 @@ Provide a conventional read-only Git diff viewer in the Web UI. Prioritize reada
 
 ## Non-goals
 
-Session baselines/snapshots, per-session or per-agent attribution, historical comparison selectors, staging/commit/discard actions, merge resolution, a full repository browser and AI explanations. Native continuation and member steering remain separate changes.
+Session baselines/snapshots, per-session or per-agent attribution, historical comparison selectors, staging/commit/discard actions, merge resolution and AI explanations. Native continuation and member steering remain separate changes. The former exclusion of a repository browser is superseded by the user's explicit request for project-wide files and image visualization.
 
 ## Planning notes
 

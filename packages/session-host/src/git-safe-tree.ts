@@ -51,7 +51,7 @@ export class SafeTree {
   return fd;
  }
  directory(name:string) {return new SafeTree(this.open(name,true));}
- names():string[] {
+ names(limit=100_000):string[] {
   native ??= load();
   const duplicate=native.symbols.dup(this.fd);
   if(duplicate<0) throw Error('Cannot duplicate directory');
@@ -66,10 +66,40 @@ export class SafeTree {
     if(!entry){if(errno[0]!==0)throw Error('Cannot read directory');break;}
     const name=new CString(entry as Pointer,process.platform==='darwin'?21:19).toString();
     if(name!=='.' && name!=='..') {names.push(name);this.entryTypes.set(name,new Uint8Array(toArrayBuffer(entry as Pointer,process.platform==='darwin'?20:18,1))[0]!);}
-    if(names.length>100_000) throw new TreeLimitError('Repository directory limit exceeded');
+    if(names.length>limit) throw new TreeLimitError('Repository directory limit exceeded');
    }
    return names;
   } finally {native.symbols.closedir(dir);}
+ }
+ /** A lexical continuation scans directory records with bounded memory. Cursor
+  * names are comparison keys only; they are never opened or resolved. */
+ page(after='', limit=1000) {
+  native ??= load();
+  const before=fstatSync(this.fd,{bigint:true});
+  const revision=[before.dev,before.ino,before.mtimeNs,before.ctimeNs].join(':');
+  const duplicate=native.symbols.dup(this.fd);
+  if(duplicate<0)throw Error('Cannot duplicate directory');
+  const dir=native.symbols.fdopendir(duplicate);
+  if(!dir){closeSync(duplicate);throw Error('Cannot enumerate directory');}
+  native.symbols.rewinddir(dir);
+  const heap:string[]=[],present=new Set<string>();const deadline=Date.now()+20000;
+  const swap=(a:number,b:number)=>{[heap[a],heap[b]]=[heap[b]!,heap[a]!];};
+  try {
+   const errno=new Int32Array(toArrayBuffer(native.symbols.errno()! as Pointer,0,4));
+   while(true){
+    if(Date.now()>deadline)throw new TreeLimitError('Directory scan deadline exceeded');
+    errno[0]=0;const entry=native.symbols.readdir(dir);
+    if(!entry){if(errno[0]!==0)throw Error('Cannot read directory');break;}
+    const name=new CString(entry as Pointer,process.platform==='darwin'?21:19).toString();
+    if(['HEAD','objects','refs','.git','.gitignore'].includes(name))present.add(name);
+    if(name==='.'||name==='..'||name<=after)continue;
+    if(heap.length<limit+1){heap.push(name);let i=heap.length-1;while(i>0){const parent=(i-1)>>1;if(heap[parent]!>=heap[i]!)break;swap(parent,i);i=parent;}}
+    else if(name<heap[0]!){heap[0]=name;let i=0;while(i*2+1<heap.length){let child=i*2+1;if(child+1<heap.length&&heap[child+1]!>heap[child]!)child++;if(heap[i]!>=heap[child]!)break;swap(i,child);i=child;}}
+   }
+   const final=fstatSync(this.fd,{bigint:true});
+   if(revision!==[final.dev,final.ino,final.mtimeNs,final.ctimeNs].join(':'))throw Error('Directory changed; reload it');
+   heap.sort();return {names:heap.slice(0,limit),more:heap.length>limit,revision,present};
+  }finally{native.symbols.closedir(dir);}
  }
  /** lstat-equivalent classification via a no-follow open; links are read only
   * as literal targets and are never opened or followed. */

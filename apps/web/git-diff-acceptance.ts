@@ -2,7 +2,7 @@
 import { chromium, type Page } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -51,7 +51,7 @@ const wait = async (condition: () => boolean | Promise<boolean>, label: string) 
 
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }), page = await context.newPage(), errors: string[] = [];
 page.setDefaultTimeout(7000); page.on('pageerror', error => errors.push(error.message));
-const artifacts=join(homedir(),'.cache','deck-git-acceptance','reveal-reopen'); mkdirSync(artifacts,{recursive:true});
+const artifacts=join(homedir(),'.cache','deck-git-acceptance','files-repairs'); mkdirSync(artifacts,{recursive:true});
 const git=(...args:string[])=>execFileSync('git',args,{cwd:projectOne,encoding:'utf8'});
 try {
  git('init','-q');git('config','user.name','Browser');git('config','user.email','browser@example.com');
@@ -66,6 +66,8 @@ try {
  for(let i=0;i<65;i++)writeFileSync(join(projectOne,'zz reveal',`file-${String(i).padStart(3,'0')}.txt`),'before\n');
  const revealPath='zz reveal/nested/quote" [file]\\name.MD';
  writeFileSync(join(projectOne,revealPath),'# Before\n');
+ writeFileSync(join(projectOne,'photo.jpg'),readFileSync(join(import.meta.dir,'../../docs/assets/brand/deck-hero-readme-v2.jpg')));
+ writeFileSync(join(projectOne,'.gitignore'),'ignored-folder/\n');mkdirSync(join(projectOne,'ignored-folder'));writeFileSync(join(projectOne,'ignored-folder','ignored.txt'),'ignored content');
  git('add','.');git('commit','-qm','initial');
  for(let i=0;i<65;i++)writeFileSync(join(projectOne,'zz reveal',`file-${String(i).padStart(3,'0')}.txt`),'after\n');
  writeFileSync(join(projectOne,revealPath),'# Staged reveal\n'+'Staged paragraph.\n\n'.repeat(80));git('add','zz reveal');
@@ -97,6 +99,60 @@ try {
  await tab('Review').click();
  assert.deepEqual(await page.locator('[role=tab]').evaluateAll(elements=>elements.map(el=>el.getAttribute('aria-label')||el.textContent)),['Chat','Activity','Subagents','Review']);
  assert.equal(await page.locator('#panel-openspec').count(),0);
+ const reviewMode=page.getByRole('group',{name:'Review mode',exact:true});
+ assert.equal(await reviewMode.getByRole('button',{name:'Files',exact:true}).getAttribute('aria-pressed'),'true');
+ const filesPanel=page.getByRole('region',{name:'Project files',exact:true});
+ await page.locator('[data-project-path="photo.jpg"]').waitFor();
+ await wait(async()=>!!(await page.locator('[data-project-path="photo.jpg"]').getAttribute('aria-label'))?.includes('Unchanged'),'clean photo status');
+ await page.locator('[data-project-path="photo.jpg"]').click();
+ const photo=filesPanel.getByRole('img',{name:'photo.jpg',exact:true});await photo.waitFor();
+ await wait(()=>photo.evaluate((el:HTMLImageElement)=>el.complete&&el.naturalWidth>0),'real raster image decodes');
+ await page.screenshot({path:join(artifacts,'files-image-desktop-dark.png')});
+ await page.evaluate(()=>document.documentElement.dataset.theme='light');await page.screenshot({path:join(artifacts,'files-image-desktop-light.png')});await page.evaluate(()=>delete document.documentElement.dataset.theme);
+ await page.locator('[data-project-path="sample.txt"]').click();await filesPanel.locator('.project-text').waitFor();
+ assert.ok((await filesPanel.locator('.project-text').textContent())?.includes('working line'));
+ await page.locator('[data-project-path="guide.md"]').click();await filesPanel.locator('.git-document-header button').click();
+ await page.getByRole('heading',{name:'Working guide',exact:true}).waitFor();assert.equal(await filesPanel.locator('.diff-viewport img,.diff-viewport script').count(),0);
+ await filesPanel.getByRole('button',{name:'Return to text',exact:true}).click();await filesPanel.locator('.project-text').waitFor();
+ assert.equal(await filesPanel.getByText('ignored-folder',{exact:true}).count(),0);await filesPanel.getByLabel('Show ignored').check();await filesPanel.getByText('ignored-folder',{exact:true}).waitFor();await filesPanel.getByLabel('Show ignored').uncheck();
+ // Folder failures are isolated, retries are local, and pagination is keyboard accessible.
+ mkdirSync(join(projectOne,'repair-bad'));mkdirSync(join(projectOne,'repair-good'));mkdirSync(join(projectOne,'repair-pages'));
+ writeFileSync(join(projectOne,'repair-bad','before'),'before');writeFileSync(join(projectOne,'repair-good','healthy'),'healthy');
+ for(let i=0;i<1001;i++)writeFileSync(join(projectOne,'repair-pages',String(i).padStart(4,'0')),'page content');
+ await filesPanel.getByRole('button',{name:'Refresh',exact:true}).click();
+ const repairFolder=(name:string)=>filesPanel.locator('.git-folder > summary').filter({hasText:name});
+ await repairFolder('repair-bad').click();await page.locator('[data-project-path="repair-bad/before"]').waitFor();
+ rmSync(join(projectOne,'repair-bad'),{recursive:true});
+ await filesPanel.getByRole('button',{name:'Refresh',exact:true}).click();
+ await repairFolder('repair-good').click();await page.locator('[data-project-path="repair-good/healthy"]').waitFor();
+ // Fail a still-present folder through the HTTP boundary; another folder remains usable.
+ await page.route('**/files?**',async route=>{const url=new URL(route.request().url());if(url.searchParams.get('path')==='repair-good')await route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({ok:false,code:'git-unavailable',message:'Temporary folder failure'})});else await route.continue();});
+ await filesPanel.getByRole('button',{name:'Refresh',exact:true}).click();await filesPanel.getByRole('button',{name:'Reload repair-good',exact:true}).waitFor();
+ await repairFolder('repair-pages').click();await page.locator('[data-project-path="repair-pages/0999"]').waitFor();
+ const more=filesPanel.getByRole('button',{name:'Load more in repair-pages',exact:true});await more.focus();await page.keyboard.press('Enter');
+ await page.locator('[data-project-path="repair-pages/1000"]').waitFor();assert.equal(await page.locator('[data-project-path="repair-pages/1000"]').evaluate(element=>element===document.activeElement),true);await page.locator('[data-project-path="repair-pages/1000"]').focus();await page.keyboard.press('Enter');
+ await wait(async()=>await filesPanel.locator('.project-text').textContent()==='page content','last page keyboard read');
+ await page.unroute('**/files?**');await filesPanel.getByRole('button',{name:'Reload repair-good',exact:true}).focus();await page.keyboard.press('Enter');await page.locator('[data-project-path="repair-good/healthy"]').waitFor();
+ await page.screenshot({path:join(artifacts,'folder-recovery-pagination.png')});
+ await page.setViewportSize({width:390,height:844});await filesPanel.getByRole('button',{name:/^Files/}).click();
+ await filesPanel.getByRole('button',{name:'Refresh',exact:true}).click();
+ const mobileMore=filesPanel.getByRole('button',{name:'Load more in repair-pages',exact:true});await mobileMore.waitFor();await mobileMore.focus();await page.keyboard.press('Enter');await page.locator('[data-project-path="repair-pages/1000"]').waitFor();
+ await page.screenshot({path:join(artifacts,'pagination-mobile.png')});await filesPanel.getByRole('button',{name:/^Files/}).click();await page.setViewportSize({width:1440,height:1000});
+ for(const name of ['repair-good','repair-pages'])rmSync(join(projectOne,name),{recursive:true});
+ await filesPanel.getByRole('button',{name:'Refresh',exact:true}).click();await page.locator('[data-project-path="sample.txt"]').click();await filesPanel.locator('.project-text').waitFor();
+ await page.screenshot({path:join(artifacts,'files-text-desktop.png')});
+ await page.setViewportSize({width:390,height:844});await filesPanel.getByRole('button',{name:/^Files/}).click();
+ await filesPanel.locator('.git-folder > summary').filter({hasText:'zz reveal'}).click();await page.locator('[data-project-path="zz reveal/file-064.txt"]').click();
+ await filesPanel.locator('.project-text').waitFor();await filesPanel.getByRole('button',{name:/^Files/}).click();
+ const selectedProject=page.locator('[data-project-path][aria-current=true]');
+ await selectedProject.locator('xpath=ancestor::details').last().locator(':scope > summary').click();
+ await filesPanel.getByRole('button',{name:/^Files/}).click();const pageScroll=await page.evaluate(()=>window.scrollY);await filesPanel.getByRole('button',{name:/^Files/}).click();
+ await wait(()=>selectedProject.isVisible(),'files reveal expands selected ancestor');
+ assert.equal(await selectedProject.evaluate(el=>{const r=el.getBoundingClientRect(),p=el.closest('.git-navigator')!.getBoundingClientRect();return r.top>=p.top&&r.bottom<=p.bottom;}),true);
+ assert.equal(await page.evaluate(()=>window.scrollY),pageScroll);await page.screenshot({path:join(artifacts,'files-mobile-reveal.png')});
+ await page.locator('[data-project-path="photo.jpg"]').click();await photo.waitFor();await page.screenshot({path:join(artifacts,'files-image-mobile-dark.png')});await page.evaluate(()=>document.documentElement.dataset.theme='light');await page.screenshot({path:join(artifacts,'files-image-mobile-light.png')});await page.evaluate(()=>delete document.documentElement.dataset.theme);
+ await page.setViewportSize({width:1440,height:1000});
+ await reviewMode.getByRole('button',{name:'Changes',exact:true}).click();
  const selectFile=async(key:string)=>{await page.locator(`[data-file-key=${JSON.stringify(key)}]`).click();};
  const selectedFile=()=>page.locator('[data-file-key][aria-current=true]').getAttribute('data-file-key');
  await page.getByRole('navigation',{name:'Changed files',exact:true}).waitFor();await page.locator('[data-file-key]').first().waitFor();
@@ -107,7 +163,7 @@ try {
   await page.getByRole('table').waitFor();
   assert.equal(await selectedFile(),`staged:${terminal}`);
   await page.keyboard.press('Tab');
-  const disclosure=page.locator('.git-folder > summary').filter({hasText:`${terminal}/`});
+  const disclosure=page.locator('.review-panel:not([hidden]) .git-folder > summary').filter({hasText:`${terminal}/`});
   assert.equal(await disclosure.evaluate(el=>el===document.activeElement),true);
   await page.keyboard.press('Enter');
   assert.equal(await disclosure.locator('..').getAttribute('open'),null);
@@ -119,64 +175,64 @@ try {
   await page.getByRole('table').waitFor();
   assert.equal(await selectedFile(),`staged:${child}`);
   await page.keyboard.press('Tab');
-  const preview=page.locator('.git-file-tree').getByRole('button',{name:`Preview Markdown: staged: ${child}`,exact:true});
+  const preview=page.locator('.review-panel:not([hidden]) .git-file-tree').getByRole('button',{name:`Preview Markdown: staged: ${child}`,exact:true});
   assert.equal(await preview.evaluate(el=>el===document.activeElement),true);
   await page.keyboard.press('Enter');await page.getByRole('heading',{name:heading,exact:true}).waitFor();
   await page.getByText(terminal==='docs'?'Index · staged version':'HEAD · before deletion',{exact:true}).waitFor();
   await page.screenshot({path:join(artifacts,`collision-${terminal}.png`)});
   await page.getByRole('button',{name:'Return to diff',exact:true}).click();
  }
- await page.locator('.git-file-tree').getByRole('button',{name:'Preview Markdown: staged: guide.md',exact:true}).focus();await page.keyboard.press('Enter');
+ await page.locator('.review-panel:not([hidden]) .git-file-tree').getByRole('button',{name:'Preview Markdown: staged: guide.md',exact:true}).focus();await page.keyboard.press('Enter');
  await page.getByRole('heading',{name:'Staged guide',exact:true}).waitFor();
- assert.ok((await page.locator('.diff-viewport').textContent())!.includes('Untouched paragraph.'));
+ assert.ok((await page.locator('.review-panel:not([hidden]) .diff-viewport').textContent())!.includes('Untouched paragraph.'));
  await page.getByText('Index · staged version',{exact:true}).waitFor();
  await page.screenshot({path:join(artifacts,'desktop-markdown-dark.png')});
  await page.evaluate(()=>document.documentElement.dataset.theme='light');await page.screenshot({path:join(artifacts,'desktop-markdown-light.png')});await page.evaluate(()=>delete document.documentElement.dataset.theme);
- await page.locator('.git-file-tree').getByRole('button',{name:'Preview Markdown: unstaged: guide.md',exact:true}).click();
+ await page.locator('.review-panel:not([hidden]) .git-file-tree').getByRole('button',{name:'Preview Markdown: unstaged: guide.md',exact:true}).click();
  await page.getByRole('heading',{name:'Working guide',exact:true}).waitFor();
  assert.equal(await page.evaluate(()=>Boolean((window as any).previewInjected)),false);
- assert.equal(await page.locator('.diff-viewport a,.diff-viewport img,.diff-viewport script').count(),0);
+ assert.equal(await page.locator('.review-panel:not([hidden]) .diff-viewport a,.review-panel:not([hidden]) .diff-viewport img,.review-panel:not([hidden]) .diff-viewport script').count(),0);
  await page.getByRole('button',{name:'Return to diff',exact:true}).click();await page.getByRole('table').waitFor();
  async function checkHeaderPreview(layout:string) {
   const selected=await selectedFile();
-  const action=page.locator('.git-document-header').getByRole('button',{name:'Preview Markdown: unstaged: guide.md',exact:true});
+  const action=page.locator('.review-panel:not([hidden]) .git-document-header').getByRole('button',{name:'Preview Markdown: unstaged: guide.md',exact:true});
   await action.waitFor();await action.focus();await page.keyboard.press('Enter');
   await page.getByRole('heading',{name:'Working guide',exact:true}).waitFor();
-  assert.equal(await page.locator('.diff-viewport').evaluate(el=>el===document.activeElement),true,'header preview focuses document');
-  assert.equal(await page.locator('.git-document-header button').count(),0);
+  assert.equal(await page.locator('.review-panel:not([hidden]) .diff-viewport').evaluate(el=>el===document.activeElement),true,'header preview focuses document');
+  assert.equal(await page.locator('.review-panel:not([hidden]) .git-document-header button').count(),0);
   await page.getByRole('button',{name:'Return to diff',exact:true}).click();await page.getByRole('table').waitFor();
   assert.equal(await selectedFile(),selected,'header round trip preserves selection');
-  assert.equal(await page.locator('.diff-viewport').evaluate(el=>el===document.activeElement),true,'return focuses diff');
+  assert.equal(await page.locator('.review-panel:not([hidden]) .diff-viewport').evaluate(el=>el===document.activeElement),true,'return focuses diff');
   await action.waitFor();await page.screenshot({path:join(artifacts,`${layout}-header-preview.png`)});
  }
  await checkHeaderPreview('desktop');
 
  // Disclosures are native keyboard controls; groups retain distinct file identities.
- const nestedGroup=page.locator('.git-file-group').filter({has:page.locator('[data-file-key="staged:nested folder/leaf/new-name.ts"]')});
+ const nestedGroup=page.locator('.review-panel:not([hidden]) .git-file-group').filter({has:page.locator('[data-file-key="staged:nested folder/leaf/new-name.ts"]')});
  const folder=nestedGroup.locator('.git-folder > summary').first();
  await folder.focus();await page.keyboard.press('Enter');assert.equal(await folder.locator('..').getAttribute('open'),null);
  await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.waitForTimeout(400);
  assert.equal(await folder.locator('..').getAttribute('open'),null,'refresh retains collapsed folder');
  await page.keyboard.press('Tab');await folder.focus();await page.keyboard.press('Space');
  await selectFile('staged:nested folder/leaf/new-name.ts');
- await page.locator('.diff-metadata').waitFor();
+ await page.locator('.review-panel:not([hidden]) .diff-metadata').waitFor();
  assert.equal(await page.locator('[data-file-key="unstaged:sample.txt"]').count(),1);
  assert.equal(await page.locator('[data-file-key="staged:sample.txt"]').count(),1);
  await selectFile('untracked:nested-repo');await page.getByText(/Nested repository content is not inspected/).waitFor();
  await selectFile('unstaged:blank.txt');
  for(const mode of ['Inline','Side-by-side']) {
   await page.getByRole('button',{name:mode,exact:true}).click();
-  await page.locator('.diff-code.add').filter({hasText:'new'}).waitFor();
+  await page.locator('.review-panel:not([hidden]) .diff-code.add').filter({hasText:'new'}).waitFor();
   const row=page.locator('tr').filter({has:page.locator('.diff-code.add').filter({hasText:'new'})});
   assert.ok((await row.locator('.diff-number').allTextContents()).includes('3'),'changed line is numbered 3');
   const tail=page.locator('tr').filter({has:page.locator('.diff-code.context').filter({hasText:'tail'})});
   assert.deepEqual(await tail.locator('.diff-number').allTextContents(),['4','4'],'tail follows blank context');
  }
  await selectFile('staged:sample.txt');await page.getByRole('table',{name:'Side-by-side diff',exact:true}).waitFor();
- assert.equal(await page.locator('.diff-code.add').count(),23);
+ assert.equal(await page.locator('.review-panel:not([hidden]) .diff-code.add').count(),23);
  await page.getByRole('button',{name:'Inline',exact:true}).click();await page.getByRole('table',{name:'Inline diff',exact:true}).waitFor();
- assert.equal(await page.locator('.diff-code.add').count(),23);assert.equal(await selectedFile(),'staged:sample.txt');
- const viewport=page.locator('.diff-viewport'); await viewport.evaluate(el=>el.scrollTop=400); await page.waitForTimeout(80);
+ assert.equal(await page.locator('.review-panel:not([hidden]) .diff-code.add').count(),23);assert.equal(await selectedFile(),'staged:sample.txt');
+ const viewport=page.locator('.review-panel:not([hidden]) .diff-viewport'); await viewport.evaluate(el=>el.scrollTop=400); await page.waitForTimeout(80);
  const scroll=await viewport.evaluate(el=>el.scrollTop);assert.ok(scroll>0);
  await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.waitForTimeout(350);
  assert.equal(await selectedFile(),'staged:sample.txt');assert.ok(Math.abs(await viewport.evaluate(el=>el.scrollTop)-scroll)<3,'refresh preserves scroll');
@@ -205,7 +261,7 @@ try {
  await page.screenshot({path:join(artifacts,'mobile-inline.png')});
  const mobileNavigator=page.getByRole('button',{name:/Changed files ·/});await mobileNavigator.click();
  await page.screenshot({path:join(artifacts,'mobile-tree.png')});
- await page.locator('.git-file-tree').getByRole('button',{name:'Preview Markdown: unstaged: guide.md',exact:true}).click();await page.getByRole('heading',{name:'Working guide',exact:true}).waitFor();
+ await page.locator('.review-panel:not([hidden]) .git-file-tree').getByRole('button',{name:'Preview Markdown: unstaged: guide.md',exact:true}).click();await page.getByRole('heading',{name:'Working guide',exact:true}).waitFor();
  assert.equal(await mobileNavigator.getAttribute('aria-expanded'),'false');
  await page.screenshot({path:join(artifacts,'mobile-markdown-dark.png')});
  await page.evaluate(()=>document.documentElement.dataset.theme='light');await page.screenshot({path:join(artifacts,'mobile-markdown-light.png')});await page.evaluate(()=>delete document.documentElement.dataset.theme);
@@ -220,9 +276,9 @@ try {
  const ancestors=selectedReveal.locator('xpath=ancestor::details');
  for(let i=await ancestors.count()-1;i>=0;i--)await ancestors.nth(i).locator(':scope > summary').click();
  await mobileNavigator.click();
- await page.locator('.diff-viewport').evaluate(el=>{el.scrollTop=25;});
- assert.ok(await page.locator('.diff-viewport').evaluate(el=>el.scrollTop)>0,'nonzero diff reading position');
- const beforeReveal=await page.evaluate(()=>({page:window.scrollY,doc:document.querySelector('.diff-viewport')!.scrollTop}));
+ await page.locator('.review-panel:not([hidden]) .diff-viewport').evaluate(el=>{el.scrollTop=25;});
+ assert.ok(await page.locator('.review-panel:not([hidden]) .diff-viewport').evaluate(el=>el.scrollTop)>0,'nonzero diff reading position');
+ const beforeReveal=await page.evaluate(()=>({page:window.scrollY,doc:document.querySelector('.review-panel:not([hidden]) .diff-viewport')!.scrollTop}));
  await mobileNavigator.focus();await page.keyboard.press('Enter');
  await wait(async()=>await selectedReveal.isVisible(),'selected row expanded');
  const bounds=await selectedReveal.evaluate(el=>{
@@ -233,7 +289,7 @@ try {
  assert.ok(bounds.top>=bounds.min&&bounds.bottom<=bounds.max,JSON.stringify(bounds));
  assert.equal(await selectedFile(),`unstaged:${revealPath}`);
  assert.equal(await mobileNavigator.evaluate(el=>el===document.activeElement),true,'reveal retains keyboard focus');
- assert.deepEqual(await page.evaluate(()=>({page:window.scrollY,doc:document.querySelector('.diff-viewport')!.scrollTop})),beforeReveal);
+ assert.deepEqual(await page.evaluate(()=>({page:window.scrollY,doc:document.querySelector('.review-panel:not([hidden]) .diff-viewport')!.scrollTop})),beforeReveal);
  await page.screenshot({path:join(artifacts,'mobile-reveal.png')});
  // Browsing must remain free after the one-time reveal.
  await selectedReveal.locator('xpath=ancestor::details').last().locator(':scope > summary').click();
@@ -241,15 +297,15 @@ try {
  await mobileNavigator.click();await mobileNavigator.click();
  await wait(async()=>await selectedReveal.isVisible(),'second reopen expands selection');
  await mobileNavigator.click();
- const revealHeader=page.locator('.git-document-header button');
+ const revealHeader=page.locator('.review-panel:not([hidden]) .git-document-header button');
  await revealHeader.focus();await page.keyboard.press('Enter');
  await page.getByRole('heading',{name:'Working reveal',exact:true}).waitFor();
- await page.locator('.diff-viewport').evaluate(el=>{el.scrollTop=90;});
+ await page.locator('.review-panel:not([hidden]) .diff-viewport').evaluate(el=>{el.scrollTop=90;});
  await mobileNavigator.click();
- assert.equal(await page.locator('.diff-viewport').evaluate(el=>el.scrollTop),90,'reveal preserves Markdown reading position');
+ assert.equal(await page.locator('.review-panel:not([hidden]) .diff-viewport').evaluate(el=>el.scrollTop),90,'reveal preserves Markdown reading position');
  await mobileNavigator.click();
  await page.getByRole('button',{name:'Return to diff',exact:true}).click();await page.getByRole('table').waitFor();
- assert.equal(await page.locator('.diff-viewport').evaluate(el=>el.scrollTop),beforeReveal.doc,'separate diff reading position restored');
+ assert.equal(await page.locator('.review-panel:not([hidden]) .diff-viewport').evaluate(el=>el.scrollTop),beforeReveal.doc,'separate diff reading position restored');
  await page.setViewportSize({width:1440,height:1000});
  await selectedReveal.locator('xpath=ancestor::details').last().locator(':scope > summary').click();
  await tab('Activity').click();await tab('Review').click();
@@ -276,10 +332,10 @@ try {
   await route.continue().catch(()=>{});
  });
  await selectFile('untracked:new file.txt');await wait(()=>!!release,'delayed request');await selectFile('staged:sample.txt');release!();
- await page.getByRole('table').waitFor();assert.equal(await selectedFile(),'staged:sample.txt');assert.equal(await page.locator('.diff-code').filter({hasText:'window.injected'}).count(),0);
+ await page.getByRole('table').waitFor();assert.equal(await selectedFile(),'staged:sample.txt');assert.equal(await page.locator('.review-panel:not([hidden]) .diff-code').filter({hasText:'window.injected'}).count(),0);
  await page.unroute('**/git/diff?**');
  release=undefined;await page.route('**/git/content?**',async route=>{await new Promise<void>(resolve=>{release=resolve;});await route.continue().catch(()=>{});});
- await page.locator('.git-file-tree').getByRole('button',{name:'Preview Markdown: staged: guide.md',exact:true}).click();await wait(()=>!!release,'delayed preview request');
+ await page.locator('.review-panel:not([hidden]) .git-file-tree').getByRole('button',{name:'Preview Markdown: staged: guide.md',exact:true}).click();await wait(()=>!!release,'delayed preview request');
  await selectFile('staged:sample.txt');release!();await page.getByRole('table').waitFor();await page.waitForTimeout(200);
  assert.equal(await selectedFile(),'staged:sample.txt');assert.equal(await page.getByRole('heading',{name:'Staged guide',exact:true}).count(),0,'stale preview cannot replace selected diff');
  await page.unroute('**/git/content?**');
@@ -289,13 +345,16 @@ try {
  assert.equal(delegated.ok,true);const childId=(delegated as any).data.taskId;await wait(()=>claude.turns.some(turn=>turn.input.taskId===childId),'hidden child start');
  const child=claude.turns.find(turn=>turn.input.taskId===childId)!;child.say('Completed while hidden');child.finish();await wait(()=>child.closed,'hidden child completion');
  assert.equal(await layout('Chat').getAttribute('aria-pressed'),'true');await layout('Workspace').click();
+ writeFileSync(join(projectTwo,'plain.md'),'# Plain project without Git\n');
  const secondProject=(await command({type:'project.register',path:projectTwo,name:'Other project'})).project.projectId;
  const second=(await command({type:'session.create',projectId:secondProject,title:'Other session'})).sessionId;
  await page.reload();const otherProjectToggle=page.getByRole('button',{name:/^Sessions in Other project/});await otherProjectToggle.waitFor();if(await otherProjectToggle.getAttribute('aria-expanded')==='false')await otherProjectToggle.click();await page.getByRole('button',{name:'Other session',exact:true}).first().click();await tab('Review').click();
- await page.getByText('Git changes are unavailable. Open a session at a Git worktree root.').waitFor();
+ await page.locator('[data-project-path="plain.md"]').click();await page.locator('.review-panel:not([hidden]) .project-text').waitFor();assert.ok((await page.locator('.review-panel:not([hidden]) .project-text').textContent())?.includes('Plain project without Git'));
+ await reviewMode.getByRole('button',{name:'Changes',exact:true}).click();
+ await page.getByText('Git changes are unavailable. Open a session at a Git worktree root.',{exact:true}).waitFor();
  assert.equal(await page.getByRole('table').count(),0,'session change never displays prior project content');
  await page.screenshot({path:join(artifacts,'unavailable-repository.png')});
- execFileSync('git',['init','-q'],{cwd:projectTwo});await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.getByText('No working changes.').waitFor();
+ rmSync(join(projectTwo,'plain.md'));execFileSync('git',['init','-q'],{cwd:projectTwo});await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.getByText('No working changes.').waitFor();
  await page.screenshot({path:join(artifacts,'no-changes.png')});
- assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,artifacts,checks:'Header SVG diff/Markdown round trips; reveal on reopen with collapsed ancestors, duplicate section paths and unusual filename; long mobile tree; keyboard focus; unchanged page and nonzero diff/Markdown scroll; no continuous reveal; desktop tab reopen; Both file/folder collision directions; Tab/Enter/Space terminal/child selection and Markdown preview; Review tab order; full index/working Markdown; safe markup; preview keyboard and return; stale preview cancellation; folder keyboard disclosure; nested paths; rename/delete/new colors; duplicate staged/unstaged paths; unavailable directory; expansion persistence; mobile focus; dark/light; both render modes; numbered hunks; refresh selection/scroll; header modes; four workspace tabs; desktop/mobile; keyboard; inert/long/large content; draft; stale responses; no hidden polling; hidden lead/subagent execution; migration; empty/error states'}));
-} catch(error) {console.error(await page.locator('.git-view').innerText().catch(()=>''));await page.screenshot({path:join(artifacts,'failure.png')});throw error;} finally {await browser.close();await host.close();await manager.close();rmSync(root,{recursive:true,force:true});}
+ assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,artifacts,checks:'Folder removal reconciliation; isolated folder error and local retry; keyboard pagination and appended-row focus desktop/mobile; Default Files; clean committed JPEG; on-demand raster decoding; full text and safe Markdown; ignored toggle; no-Git files; mobile Files reveal; dark/light image previews; Files/Changes transitions; Header SVG diff/Markdown round trips; reveal on reopen with collapsed ancestors, duplicate section paths and unusual filename; long mobile tree; keyboard focus; unchanged page and nonzero diff/Markdown scroll; no continuous reveal; desktop tab reopen; Both file/folder collision directions; Tab/Enter/Space terminal/child selection and Markdown preview; Review tab order; full index/working Markdown; safe markup; preview keyboard and return; stale preview cancellation; folder keyboard disclosure; nested paths; rename/delete/new colors; duplicate staged/unstaged paths; unavailable directory; expansion persistence; mobile focus; dark/light; both render modes; numbered hunks; refresh selection/scroll; header modes; four workspace tabs; desktop/mobile; keyboard; inert/long/large content; draft; stale responses; no hidden polling; hidden lead/subagent execution; migration; empty/error states'}));
+} catch(error) {console.error(await page.locator('.review-panel:not([hidden]) .git-view').innerText().catch(()=>''));await page.screenshot({path:join(artifacts,'failure.png')});throw error;} finally {await browser.close();await host.close();await manager.close();rmSync(root,{recursive:true,force:true});}

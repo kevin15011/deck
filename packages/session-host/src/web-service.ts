@@ -513,6 +513,13 @@ export class WebService {
           const outcome = await this.options.service.query?.('session.readiness', { sessionId: readiness[1] }) ?? { ok: false as const, code: 'query-unavailable' };
           return this.response(outcome, outcome.ok ? 200 : 404);
         }
+        const files = /^\/api\/sessions\/([^/]+)\/files(\/content)?$/.exec(path);
+        if(files && r.method === 'GET') {
+          if(!safeId(files[1]!) || [...url.searchParams.keys()].some(key=>!['path','showIgnored','cursor'].includes(key)) || url.searchParams.getAll('path').length!==1 || url.searchParams.getAll('showIgnored').length>1 || url.searchParams.getAll('cursor').length>1 || url.searchParams.has('cursor')&&(!!files[2]||!url.searchParams.get('cursor')||url.searchParams.get('cursor')!.length>8192||!/^[A-Za-z0-9_-]+$/.test(url.searchParams.get('cursor')!)) || !['true','false',null].includes(url.searchParams.get('showIgnored')))
+            return this.response({ok:false,code:'git-invalid'},400);
+          const outcome=await this.options.service.query?.(files[2]?'project.content':'project.files',{sessionId:files[1],path:url.searchParams.get('path'),showIgnored:url.searchParams.get('showIgnored')==='true',...(url.searchParams.has('cursor')?{cursor:url.searchParams.get('cursor')}:{})}) ?? {ok:false as const,code:'git-unavailable'};
+          return this.response(outcome,outcome.ok?200:outcome.code==='session-unknown'?404:outcome.code==='git-limit'?413:outcome.code==='git-busy'?429:400);
+        }
         const git = /^\/api\/sessions\/([^/]+)\/git(\/diff|\/content)?$/.exec(path);
         if (git && r.method === 'GET') {
           if (!safeId(git[1]!) || [...url.searchParams.keys()].some(key => !['section','path'].includes(key))

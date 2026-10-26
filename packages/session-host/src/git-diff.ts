@@ -1,3 +1,4 @@
+import type {ProjectBrowse} from '../../core/src/session/project-files';
 /** Host admission and process supervision. Native reads never run in the host. */
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm, realpath } from 'node:fs/promises';
@@ -5,11 +6,11 @@ import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { GIT_READER_COMMAND, MAX_REQUEST, MAX_RESPONSE } from './git-diff-process';
+import { GIT_READER_COMMAND, MAX_REQUEST, MAX_RESPONSE, MAX_FILE_RESPONSE } from './git-diff-process';
 import type { CommandOutcome } from './protocol';
 const active=new Set<string>();
 const failed=(message:string):CommandOutcome=>({ok:false,code:'git-unavailable',message});
-async function request(projectRoot:string,selection?:{section:unknown,path:unknown,content?:boolean}):Promise<CommandOutcome> {
+async function request(projectRoot:string,selection?:{section:unknown,path:unknown,content?:boolean},browse?:ProjectBrowse):Promise<CommandOutcome> {
  const key=resolve(projectRoot);
  if(active.has(key)||active.size>=4)return {ok:false,code:'git-busy',message:'Another Git view request is running. Try again.'};
  active.add(key);
@@ -19,7 +20,7 @@ async function request(projectRoot:string,selection?:{section:unknown,path:unkno
   let input:string;
   try {
    if(selection && (typeof selection.section!=='string'||typeof selection.path!=='string'))throw Error();
-   input=JSON.stringify({version:1,token,projectRoot,selection});
+   input=JSON.stringify({version:1,token,projectRoot,selection,browse});
    if(Buffer.byteLength(input)>MAX_REQUEST)throw Error();
   }catch{return {ok:false,code:'git-invalid',message:'Invalid Git selection.'};}
   temporaryRoot=await realpath(await mkdtemp(join(tmpdir(),'deck-git-process-')));
@@ -31,8 +32,8 @@ async function request(projectRoot:string,selection?:{section:unknown,path:unkno
    let size=0,limited=false;const chunks:Buffer[]=[];
    const kill=()=>{try{if(child.pid)process.kill(-child.pid,'SIGKILL');}catch{}};
    const timer=setTimeout(()=>{limited=true;kill();},30000);
-   child.stdout.on('data',(chunk:Buffer)=>{size+=chunk.length;if(size>MAX_RESPONSE){limited=true;kill();}else chunks.push(chunk);});
-   child.stderr.on('data',(chunk:Buffer)=>{size+=chunk.length;if(size>MAX_RESPONSE){limited=true;kill();}}); // Drain crash diagnostics without exposing repository data.
+   child.stdout.on('data',(chunk:Buffer)=>{size+=chunk.length;if(size>(browse?MAX_FILE_RESPONSE:MAX_RESPONSE)){limited=true;kill();}else chunks.push(chunk);});
+   child.stderr.on('data',(chunk:Buffer)=>{size+=chunk.length;if(size>(browse?MAX_FILE_RESPONSE:MAX_RESPONSE)){limited=true;kill();}}); // Drain crash diagnostics without exposing repository data.
    child.stdin.on('error',()=>{});
    child.once('error',()=>{clearTimeout(timer);done(failed('Git reader could not start.'));});
    child.once('exit',kill); // Best effort on exit; the deadline also covers inherited pipes held by descendants.
@@ -58,3 +59,5 @@ export function listGitChanges(projectRoot:string){return request(projectRoot);}
 export function readGitDiff(projectRoot:string,section:unknown,path:unknown){return request(projectRoot,{section,path});}
 
 export function readGitContent(projectRoot:string,section:unknown,path:unknown){return request(projectRoot,{section,path,content:true});}
+
+export function browseProject(projectRoot:string,browse:ProjectBrowse){return request(projectRoot,undefined,browse);}

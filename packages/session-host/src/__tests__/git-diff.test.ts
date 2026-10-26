@@ -199,7 +199,7 @@ test('large unrelated untracked content and ignored FIFO do not prevent small re
  expect(catalog.files.some((file:any)=>file.path==='ignored-pipe')).toBe(false);
  expect(catalog.files).toContainEqual(expect.objectContaining({path:'visible-pipe',unavailableReason:expect.any(String)}));
  expect((await data(readGitDiff(f.root,'unstaged','tracked.txt'))).patch).toContain('+small change');
- expect((await data(readGitDiff(f.root,'untracked','huge'))).kind).toBe('limited');
+ expect((await data(readGitDiff(f.root,'untracked','huge'))).kind).toBe('binary');
 });
 test('conventional linked worktrees and shared object clones support reads', async () => {
  const f=fixture();const worktree=join(f.root,'linked');f.git('worktree','add','--detach',worktree);
@@ -286,4 +286,40 @@ test('Markdown content selects full index, working and deleted prior versions wi
  f.git('add','link.md');expect((await data(readGitContent(f.root,'staged','link.md'))).kind).toBe('unavailable');
  expect(await readGitContent(f.root,'untracked','../outside.md')).toMatchObject({ok:false,code:'git-invalid'});
  expect(await readGitContent(f.root,'untracked','missing.md')).toMatchObject({ok:false,code:'git-stale'});
+});
+
+test('viewer limits do not invent large changes and retain real large text and binary changes', async () => {
+ const f=fixture();
+ const text='line of text\n'.repeat(25000), binary=Buffer.alloc(300_000,1);binary[10]=0;
+ f.write('large.txt',text);f.write('photo.jpg',binary);f.git('add','.');f.git('commit','-qm','large files');
+ const index=readFileSync(join(f.root,'.git','index'));
+ expect(f.git('status','--porcelain')).toBe('');
+ expect((await data(listGitChanges(f.root))).files).toEqual([]);
+ f.write('large.txt','X'+text.slice(1));binary[20]=2;f.write('photo.jpg',binary);
+ const changed=await data(listGitChanges(f.root));
+ for(const path of ['large.txt','photo.jpg'])expect(changed.files).toContainEqual({path,section:'unstaged',status:'M'});
+ expect((await data(readGitDiff(f.root,'unstaged','large.txt'))).kind).toBe('limited');
+ expect((await data(readGitDiff(f.root,'unstaged','photo.jpg'))).kind).toBe('binary');
+ f.write('new.jpg',binary);f.write('new.txt',text);
+ expect((await data(listGitChanges(f.root))).files).toContainEqual({path:'new.jpg',section:'untracked',status:'A'});
+ expect((await data(readGitDiff(f.root,'untracked','new.jpg'))).kind).toBe('binary');
+ expect((await data(readGitDiff(f.root,'untracked','new.txt'))).kind).toBe('limited');
+ rmSync(join(f.root,'photo.jpg'));rmSync(join(f.root,'large.txt'));
+ const deleted=await data(listGitChanges(f.root));
+ for(const path of ['large.txt','photo.jpg'])expect(deleted.files).toContainEqual({path,section:'unstaged',status:'D'});
+ expect((await data(readGitDiff(f.root,'unstaged','photo.jpg'))).kind).toBe('binary');
+ expect((await data(readGitDiff(f.root,'unstaged','large.txt'))).kind).toBe('limited');
+ expect(readFileSync(join(f.root,'.git','index'))).toEqual(index);
+});
+test('large-file hashing cannot exhaust the small-file capture budget',async()=>{
+ const f=fixture();f.write('a-large.bin',Buffer.alloc(60*1024*1024));
+ for(let i=0;i<40;i++)f.write(`small-${i}.txt`,'x'.repeat(200000));f.git('add','.');f.git('commit','-qm','budget fixture');
+ expect((await data(listGitChanges(f.root))).files).toEqual([]);
+ f.write('tracked.txt','small actual change\n');expect((await data(listGitChanges(f.root))).files).toEqual([{path:'tracked.txt',section:'unstaged',status:'M'}]);
+},15000);
+
+test('large intent-to-add keeps unstaged addition status',async()=>{
+ const f=fixture();f.write('new-large','x'.repeat(300000));f.git('add','-N','new-large');
+ expect(f.git('status','--porcelain')).toContain(' A new-large');
+ expect((await data(listGitChanges(f.root))).files).toContainEqual({path:'new-large',section:'unstaged',status:'A'});
 });
