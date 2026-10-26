@@ -106,6 +106,24 @@ function isDocumentedDeckCommandShape(args: string[]): boolean {
     return new Set(rest).size === rest.length;
   }
 
+  if (first === "runner") {
+    if (rest[0] !== "cleanup") return false;
+    const seen = new Set<string>();
+    for (let index = 1; index < rest.length; index += 1) {
+      const flag = rest[index]!;
+      const key = flag === "--plan" || flag === "--review" ? "mode" : flag;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      if (flag === "--plan" || flag === "--review" || flag === "--json") continue;
+      if (flag === "--runner" || flag === "--output") {
+        if (!isNonEmptyCommandValue(rest[++index])) return false;
+        continue;
+      }
+      return false;
+    }
+    return true; // parseArgs below also validates the supported runner values.
+  }
+
   if (first === "update" || first === "upgrade") {
     return rest.length <= 1 && rest.every((flag) => flag === "--yes" || flag === "-y");
   }
@@ -276,6 +294,7 @@ function isSupportedDirectCommand(command: string): boolean {
     "claude",
     "daemon",
     "session",
+    "runner",
   ]);
   if (!supportedTopLevelCommands.has(args[0]!)) return false;
   if (!isDocumentedDeckCommandShape(args)) return false;
@@ -302,6 +321,12 @@ const directCommandExpectations = [
   ["deck", true],
   ["deck version", true],
   ["deck doctor", true],
+  ["deck runner cleanup", true],
+  ["deck runner cleanup --plan --json", true],
+  ["deck runner cleanup --runner codex --review", true],
+  ["deck runner cleanup --runner claude --plan --output cleanup.json", true],
+  ["deck runner cleanup --runner opencode --plan", true],
+  ["deck runner cleanup --runner pi --plan", true],
   ["deck web", true],
   ["deck web --no-open --json", true],
   ["deck cross developer", true],
@@ -319,12 +344,23 @@ const directCommandExpectations = [
 ] as const;
 
 const malformedDocumentedCommandFixtures = [
+  "deck runner unknown",
+  "deck runner cleanup --runner unknown",
+  "deck runner cleanup --runner",
+  "deck runner cleanup --output",
+  "deck runner cleanup --yes",
+  "deck runner cleanup --plan --review",
+  "deck runner cleanup --json --json",
+  "deck runner cleanup --runner codex --runner pi",
+  "deck runner cleanup --output one --output two",
+  "deck runner cleanup --plan --plan",
   "deck pi developer --bogus",
   "deck web --bogus",
   "deck web --json --json",
   "deck cross unknown",
   "deck pi developer --memory",
   "deck rollback --backup=",
+  "deck rollback --backup <id> --force",
   "deck openspec validate --root=",
   "deck update --yes=garbage",
   "deck skill-registry validate --runner claude",

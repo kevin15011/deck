@@ -37,13 +37,14 @@ async function nativeLaunch(input: import("../../../packages/core/src/session/dr
   }
 }
 
-function fixture(runnerId: string) {
+function fixture(runnerId: string, activation: "enabled" | "disabled" | "absent" = "enabled") {
   const home = realpathSync(mkdtempSync(join(realpathSync("/tmp"), "dca-"))); roots.push(home);
   const project = join(home, "project"); mkdirSync(project);
   const binary = join(home, "codebase-memory-mcp"); writeFileSync(binary, "wrong build", { mode: 0o700 });
   const paths = resolveStatePaths({ env: { HOME: home, XDG_STATE_HOME: join(home, "state") }, tmpdir: home }); ensureStateLayout(paths);
   const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: join(home, "config") });
-  store.write({ crossRunner: { enabled: true, members: { lead: { runnerId: runnerId as any, modelId: "fixture/model" } } }, adaptiveMemory: { enabled: false, activeProvider: "none" } });
+  // Readiness/recovery exercises require explicit activation after native package retirement.
+  store.write({ ...(activation === "absent" ? {} : { capabilities: { "codebase-memory": { enabled: activation === "enabled", runners: {} } } }), crossRunner: { enabled: true, members: { lead: { runnerId: runnerId as any, modelId: "fixture/model" } } }, adaptiveMemory: { enabled: false, activeProvider: "none" } });
   const driver = new FakeDriver(runnerId); driver.autoComplete = true;
   let healthy = false, spawns = 0, backendUnavailable = false, verificationFailure: Error | undefined, verificationGate: Promise<boolean> | undefined, verificationCalls=0;
   let verificationStarted: (() => void) | undefined;
@@ -73,6 +74,31 @@ function fixture(runnerId: string) {
     verificationGate=new Promise<boolean>(resolve=>{release=resolve;});
     return { started, release:()=>release(true) };
   }, fail(error: Error) { verificationFailure=error; }, unavailable() { healthy=true; backendUnavailable=true; }, recover() { healthy=true; backendUnavailable=false; writeFileSync(binary,"repaired build identity"); } };
+}
+
+for (const runner of ["claude", "codex", "opencode"]) for (const activation of ["absent", "disabled"] as const) {
+  test(`${runner}: ${activation} Codebase activation never verifies or starts a backend`, async () => {
+    const t = fixture(runner, activation);
+    const created = await t.run({type:"session.create",projectRoot:t.project});
+    expect(created.ok).toBe(true);
+    const id = (created as any).data.sessionId;
+    expect((await t.run({type:"session.prepare"}, id)).ok).toBe(true);
+    await until(async () => (await t.read(id)).status === "ready");
+    expect((await t.read(id)).reasonCode).toBeUndefined();
+    await t.run({type:"prompt.send",text:"Inspect without optional graph"}, id);
+    await until(() => t.driver.turns.length === 1 && t.driver.turns[0]!.closed);
+    const input = t.driver.turns[0]!.input;
+    expect(input.mcp.servers).not.toContain("codebase-memory");
+    expect(input.mcpServerSpecs["codebase-memory"]).toBeUndefined();
+    if (runner === "codex") {
+      // Opt-out leaves independent native configuration alone; only failed managed
+      // activation emits an explicit suppression override (checked below).
+      const {codexThreadMcpConfig} = await import("../../../packages/adapter-codex/src/session-driver/launch");
+      expect((codexThreadMcpConfig(input, ["codebase-memory"]).mcp_servers as Record<string, unknown>)["codebase-memory"]).toBeUndefined();
+    } else await nativeLaunch(input, false);
+    expect(t.verificationCalls()).toBe(0);
+    expect(t.spawns()).toBe(0);
+  });
 }
 
 for (const runner of ["claude", "codex", "opencode"]) for (const reason of ["unsupported", "unavailable"] as const) {
