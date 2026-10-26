@@ -1,11 +1,11 @@
 import { test, expect } from 'bun:test';
-import { closeSync, mkdtempSync, openSync, readSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdtempSync, openSync, readSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SafeTree, snapshotObject, TreeLimitError } from '../git-safe-tree';
 
 test('object snapshot uses pinned identity and independent offsets on every reopen', () => {
- const root=mkdtempSync(join(tmpdir(),'deck-object-'));
+ const root=realpathSync(mkdtempSync(join(tmpdir(),'deck-object-')));
  const tree=SafeTree.root(root);
  try {
   writeFileSync(join(root,'pack'),'PACK-pinned-content');
@@ -29,7 +29,7 @@ test('object snapshot uses pinned identity and independent offsets on every reop
 });
 
 test('object snapshot never falls back to an unbounded copy', () => {
- const root=mkdtempSync(join(tmpdir(),'deck-object-budget-')),tree=SafeTree.root(root);
+ const root=realpathSync(mkdtempSync(join(tmpdir(),'deck-object-budget-'))),tree=SafeTree.root(root);
  try {
   writeFileSync(join(root,'pack'),'PACK');
   const entry=tree.entry('pack');if(entry.kind!=='file')throw Error('fixture');
