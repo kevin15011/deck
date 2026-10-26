@@ -9,6 +9,27 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-26
+
+### Added
+
+- Review workspace with a project file tree, safe text/Markdown and raster-image previews, and a separate Git Changes view with inline and side-by-side diffs.
+- Git status colors for files and collapsed ancestor folders, bounded directory pagination, and selected-file reveal after refresh without moving the document reading position.
+- Light/dark themes, a floating chat composer, message copying and a quota-usage dialog. Workspace navigation is Chat, Activity, Subagents and Review; Lead context stays within its conversation.
+- Last-reported context estimates and confirmed compaction progress for session agents.
+
+### Fixed
+
+- Preserve accurate clean/modified/added Git status for large files and isolate read-only project access in a supervised process with bounded content and inert previews.
+- Keep the daemon available for remote web clients instead of exiting when idle.
+- Explain provider/runner failures and oversized or malformed transport frames in the Web UI.
+- Reseed delegated continuations with bounded handoffs and preserve compatible Codebase readiness connections.
+
+### Compatibility and limits
+
+- Project text previews are limited to 1 MiB and raster previews to 8 MiB, with additional pixel/frame limits. APNG and animated WebP previews are unsupported; SVG and HTML remain text.
+- Native Git/project-reader qualification is currently Linux x64 with Bun 1.3.12. Linux arm64 and Darwin x64/arm64 execution qualification remains pending; cross-compilation is not runtime qualification.
+
 ### Changed
 
 - Retire Deck's context-mode and Serena integrations in favor of the runners' native tools. RTK retains its existing automatic integrations and supported explicit commands. Codebase Memory is optional and requires a new explicit opt-in; runner overrides inherit the global setting unless explicitly true or false.
