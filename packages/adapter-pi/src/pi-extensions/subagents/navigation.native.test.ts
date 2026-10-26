@@ -1,5 +1,6 @@
+import { readChildLog } from "./child-log.test-support";
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,7 +40,7 @@ test("native tree journal survives old/root navigation and reload; veto/summary 
     ({ session } = await createAgentSession({ cwd: root, agentDir, resourceLoader: loader, model: core.models[0], thinkingLevel: "off", sessionManager: manager, settingsManager: SettingsManager.inMemory({ autoCompaction: false, retry: { enabled: false } } as any) }));
     await session.bindExtensions({ onError: () => {} });
     const call = (params: any) => tool.execute("test", params, undefined, undefined, session!.extensionRunner.createToolContext("test", undefined));
-    const childCount = () => readFileSync(log, "utf8").trim().split("\n").map(l => JSON.parse(l)).filter(r => Array.isArray(r.argv)).length;
+    const childCount = () => readChildLog(log).filter(r => Array.isArray(r.argv)).length;
     const entries = () => manager.getEntries().filter((e: any) => e.type === "custom" && e.customType === "deck-subagents-v1") as any[];
     const beforeAcceptance = manager.appendMessage({ role: "user", content: "before acceptance", timestamp: Date.now() });
     manager.appendMessage(fauxAssistantMessage("initial lead"));
@@ -105,7 +106,7 @@ test("native tree journal survives old/root navigation and reload; veto/summary 
     expect((await call({ action: "cancel", taskId: delayedId })).isError).toBeUndefined();
     const next = await call({ agent: "deck-quality", task: "after cancellation" });
     expect(next.isError).toBeUndefined(); await until(() => entries().at(-1)?.data.jobs.at(-1)?.state === "completed");
-    const children = readFileSync(log, "utf8").trim().split("\n").map(l => JSON.parse(l)).filter(r => Array.isArray(r.argv));
+    const children = readChildLog(log).filter(r => Array.isArray(r.argv));
     expect(children).toHaveLength(7);
     await session.extensionRunner.emit({ type: "session_shutdown" } as any);
   } finally { releaseSummary?.(); await session?.extensionRunner.emit({ type: "session_shutdown" } as any); await session?.abort(); session?.dispose(); rmSync(root, { recursive: true, force: true }); }
