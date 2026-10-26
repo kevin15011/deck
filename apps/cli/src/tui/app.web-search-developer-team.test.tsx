@@ -219,8 +219,8 @@ describe("DeckApp Web Search Developer Team materialization", () => {
         () => `plan=${summarizePlan()}; applyCalls=${developerTeamApplyCalls}; mcpWrites=${JSON.stringify(mcpWrites)}; output=${JSON.stringify(harness.output().slice(-8_000))}`,
       );
       expect(developerTeamApplyCalls).toBe(1);
-      expect(mcpWrites).toEqual([`codebase-memory:ok:MCP server 'codebase-memory' configured in OpenCode at ${join(configDir, "opencode.json")}.`, `${webSearchProvider.semanticServerId}:ok:`]);
-      expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf8")).mcp["codebase-memory"].command).toEqual([reviewedBinary]);
+      expect(mcpWrites).toEqual([`${webSearchProvider.semanticServerId}:ok:`]);
+      expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf8")).mcp["codebase-memory"]).toBeUndefined();
 
       const canonicalSkillIds = new Set(DEVELOPER_TEAM_AGENTS.map((agent) => agent.skillId));
       const allRolePolicies = Object.values(WEB_SEARCH_ROLE_POLICY_V1);

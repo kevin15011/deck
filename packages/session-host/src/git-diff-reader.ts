@@ -5,7 +5,7 @@ import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { SafeTree, TreeLimitError, copyRegular, type CopyBudget } from './git-safe-tree';
 import { join, resolve } from 'node:path';
-import type { GitCatalog, GitDocument, GitContent, GitFile } from '../../core/src/session/git-diff';
+import type { GitCatalog, GitDocument, GitContent, GitFile } from '@deck/core';
 import type { CommandOutcome } from './protocol';
 const MAX_PATCH = 256 * 1024, MAX_CATALOG = 1024 * 1024, MAX_FILES = 500;
 const messages = {

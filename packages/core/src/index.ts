@@ -244,3 +244,6 @@ export * from "./package-retirement";
 
 export * from "./native-search";
 export * from "./runner-generation-references";
+
+export type { GitCatalog, GitDocument, GitContent, GitFile } from "./session/git-diff";
+export type { ProjectBrowse, ProjectContent, ProjectEntry, ProjectListing } from "./session/project-files";

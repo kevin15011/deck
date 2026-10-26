@@ -179,14 +179,14 @@ describe("output handling and failure reporting", () => {
   });
 
   test("a descendant holding stdout open makes a code-0 exit a failure (drained=false), never success", async () => {
-    const started = Date.now();
+    const started = performance.now();
     const a = startAnchor(worker("exit0-orphan"));
     const info = await a.info();
     const exit = await a.exitMessage();
     expect(exit.code).toBe(0);
     expect(exit.drained).toBe(false);
     expect(exit.error).toMatch(/EOF/);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(900);
     a.send({ type: "cleanup" });
     await waitFor(() => !isAlive(info.grandchild), 4000, "orphan reaped by group cleanup");
   });

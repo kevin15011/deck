@@ -1,6 +1,6 @@
 import React from "react";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,6 +33,20 @@ import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
 import { getPackageInstructionSummaries } from "./runner-dashboard/selectors";
 
 setDefaultTimeout(120_000);
+
+// Mutation guards must never contact the developer's daemon or another test's state.
+let previousStateHome: string | undefined;
+let mutationState: string;
+beforeEach(() => {
+  previousStateHome = process.env.XDG_STATE_HOME;
+  mutationState = mkdtempSync(join(tmpdir(), "dq-tui-"));
+  process.env.XDG_STATE_HOME = mutationState;
+});
+afterEach(() => {
+  if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME;
+  else process.env.XDG_STATE_HOME = previousStateHome;
+  rmSync(mutationState, {recursive:true, force:true});
+});
 
 test("Claude model apply diagnostics preserve public causes without leaking arbitrary error text", () => {
   expect(modelConfigurationFailureMessage(new Error("Claude global plugin plan is stale or untrusted."))).toContain("stale or untrusted");
@@ -167,12 +181,12 @@ async function selectFreshClaudePackages(
   selected: readonly string[],
 ) {
   harness.input("\r"); await waitForOutput(instance, harness.output, "Package instructions");
-  const packages = ["Codebase Memory", "Context Mode", "RTK", "Serena", "Context7"];
+  const packages = ["Codebase Memory", "RTK", "Context7"];
   for (const label of packages) {
-    expect(harness.output().split("\n").filter((line) => line.includes(label)).at(-1)).toContain(`[x] ${label}`);
+    expect(harness.output().split("\n").filter((line) => line.includes(label)).at(-1)).toContain(`[${label === "Codebase Memory" ? " " : "x"}] ${label}`);
   }
   for (let i = 0; i < packages.length; i++) {
-    if (!selected.includes(packages[i]!)) { harness.input(" "); await instance.waitUntilRenderFlush(); }
+    if (selected.includes(packages[i]!) !== (packages[i] !== "Codebase Memory")) { harness.input(" "); await instance.waitUntilRenderFlush(); }
     if (i < packages.length - 1) { harness.input("j"); await instance.waitUntilRenderFlush(); }
   }
   const boundary = harness.output().length;
@@ -199,7 +213,7 @@ describe("DeckApp synthetic runner production flow", () => {
     const deselectedPlan = adapter.buildReviewPlan(state as any, inventory);
     expect(deselectedPlan.groups.automaticInstalls).not.toContainEqual(expect.objectContaining({ capabilityId: "context7" }));
   });
-  test("Claude TUI explicitly authorizes Serena bootstrap and verifies the native Deck proxy", async () => {
+  test("Claude TUI never offers or bootstraps retired Serena despite available legacy evidence", async () => {
     const root = createCanonicalTempRoot("deck-claude-tui-serena-bridge-");
     const dataRoot = join(root, "data", "deck");
     const owned = join(dataRoot, "tools", "serena");
@@ -225,18 +239,19 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
       harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
       expect(calls).toHaveLength(0);
-      await selectFreshClaudePackages(instance, harness, ["Serena"]);
+      await selectFreshClaudePackages(instance, harness, []);
+      expect(harness.output()).not.toContain("[x] Serena");
+      expect(harness.output()).not.toContain("[ ] Serena");
       expect(calls).toHaveLength(0);
       for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
       harness.input("\r"); await waitForOutput(instance, harness.output, "Run install");
       harness.input("\r");
       try { await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "Claude Serena plugin publication", 20_000); }
       catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; calls=${calls.length}; signals=${harness.output().split("\n").filter((line) => /Serena|serena|Blocked|failed|skipped|review|install|Claude/.test(line)).slice(-25).join(" | ")}`); }
-      expect(calls).toHaveLength(1);
-      expect(calls[0]?.authorization).toMatchObject({ runner: "claude", kind: "interactive-tui-explicit-selection" });
+      expect(calls).toHaveLength(0);
       const receipt = JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8"));
-      expect(receipt.capabilities).toEqual(["serena"]);
-      expect(JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8")).mcpServers.serena).toEqual({ command: deckCli, args: ["internal", "serena-mcp"] });
+      expect(receipt.capabilities ?? []).toEqual([]);
+      expect(existsSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"))).toBe(false);
       expect(existsSync(join(root, ".claude"))).toBe(false);
     } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
   });
@@ -292,7 +307,7 @@ describe("DeckApp synthetic runner production flow", () => {
       expect(JSON.stringify(configStore.readRequired())).not.toContain("fixture-profile-once-only");
     } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
   });
-  test("Claude TUI reviews missing Codebase Memory, Context Mode, pinned RTK and Context7 before native materialization", async () => {
+  test("Claude TUI reviews explicitly selected Codebase Memory, pinned RTK and Context7 before native materialization", async () => {
     const root = createCanonicalTempRoot("deck-claude-tui-tool-install-");
     const dataRoot = join(root, "data", "deck");
     const bin = join(root, "bin");
@@ -323,6 +338,8 @@ describe("DeckApp synthetic runner production flow", () => {
     configStore.write(getDefaultDeckConfig());
     const registry = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot, rtkReleaseOverride: rtkRelease, rtkArtifactEffects: { fetchArchive: async () => { rtkDownloads++; return rtkArchive; } }, verifyRtkCommand: () => true, codebaseReleaseOverride: codebaseRelease, codebaseArtifactEffects: { fetchArchive: async () => { codebaseDownloads++; return codebaseArchive; } }, verifyCodebaseNative: () => true, resolveCommand: (name) => available.get(name), installSharedTool: async (id) => {
       installations.push(id);
+      mkdirSync(join(dataRoot, "claude", "tools", "node_modules"), {recursive:true, mode:0o700});
+      writeFileSync(join(dataRoot, "claude", "tools", "node_modules", "fixture-package.json"), "{}");
       if (id !== "context-mode" && id !== "context7") return false;
       const command = id === "context7" ? "context7-mcp" : "context-mode";
       const path = join(bin, command);
@@ -344,26 +361,26 @@ describe("DeckApp synthetic runner production flow", () => {
       expect(installations).toEqual([]);
       expect(codebaseDownloads).toBe(0);
       expect(rtkDownloads).toBe(0);
-      await selectFreshClaudePackages(instance, harness, ["Codebase Memory", "Context Mode", "RTK", "Context7"]);
+      await selectFreshClaudePackages(instance, harness, ["Codebase Memory", "RTK", "Context7"]);
       for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
       harness.input("\r"); await waitForOutput(instance, harness.output, "Run install");
-      expect(harness.output().split("\n").filter((line) => line.includes("actions planned:")).at(-1)).toContain("6 actions planned: 4 automatic");
+      expect(harness.output().split("\n").filter((line) => line.includes("actions planned:")).at(-1)).toContain("5 actions planned: 3 automatic");
       expect(installations).toEqual([]);
       expect(codebaseDownloads).toBe(0);
       expect(rtkDownloads).toBe(0);
       harness.input("\r");
-      await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "Claude verified tool materialization", 20_000);
-      expect(installations).toEqual(["context-mode", "context7"]);
+      await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "Claude verified tool materialization", 20_000).catch(error=>{throw new Error(String(error)+"\n"+harness.output().slice(-10000));});
+      expect(installations).toEqual(["context7"]);
       expect(codebaseDownloads).toBe(1);
       expect(rtkDownloads).toBe(1);
       const receipt = JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8"));
-      expect(receipt.capabilities).toEqual(["codebase-memory", "context-mode", "context7", "rtk"]);
-      expect(JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8")).mcpServers["context-mode"].command).toBe(join(bin, "context-mode"));
+      expect(receipt.capabilities).toEqual(["codebase-memory", "context7", "rtk"]);
+      expect(JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8")).mcpServers["context-mode"]).toBeUndefined();
       expect(JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8")).mcpServers["codebase-memory"].command).toBe(join(dataRoot, "claude", "tools", "codebase-native-v0.11.0", `${process.platform}-${process.arch}`, "codebase-memory-mcp"));
       expect(JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8")).mcpServers.context7.command).toBe(join(bin, "context7-mcp"));
       expect(readFileSync(join(dataRoot, "claude", receipt.plugin, "hooks", "rtk-hook.cjs"), "utf8")).toContain(join(dataRoot, "claude", "tools", "rtk-v0.50.0", `${process.platform}-${process.arch}`, "rtk"));
       await waitForOutput(instance, harness.output, "plugin files setup complete");
-      expect(configStore.readRequired().packageInstructions.claude?.["context-mode"]).toBe(true);
+      expect(configStore.readRequired().packageInstructions.claude?.["context-mode"]).not.toBe(true);
       expect(existsSync(join(root, ".claude"))).toBe(false);
     } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
   });
@@ -412,15 +429,11 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
       harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
       harness.input("\r"); await waitForOutput(instance, harness.output, "Package instructions");
-      expect(harness.output().split("\n").filter((line) => line.includes("Context Mode")).at(-1)).toContain("[x] Context Mode");
-      expect(harness.output().split("\n").filter((line) => line.includes("Context7")).at(-1)).toContain("[x] Context7");
-      harness.input("j"); await instance.waitUntilRenderFlush();
-      harness.input(" "); await instance.waitUntilRenderFlush();
-      expect(harness.output().split("\n").filter((line) => line.includes("Context Mode")).at(-1)).toContain("[ ] Context Mode");
-      for (let i = 0; i < 3; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
-      harness.input(" "); await instance.waitUntilRenderFlush();
-      expect(harness.output().split("\n").filter((line) => line.includes("Context Mode")).at(-1)).toContain("[ ] Context Mode");
-      expect(harness.output().split("\n").filter((line) => line.includes("Context7")).at(-1)).toContain("[ ] Context7");
+      expect(harness.output()).not.toContain("[x] Context Mode");
+      expect(harness.output().split("\n").filter(line=>line.includes("Context7")).at(-1)).toContain("[x] Context7");
+      for(let i=0;i<2;i++){harness.input("j");await instance.waitUntilRenderFlush();}
+      harness.input(" ");await instance.waitUntilRenderFlush();
+      expect(harness.output().split("\n").filter(line=>line.includes("Context7")).at(-1)).toContain("[ ] Context7");
       const beforeReturn = harness.output().length;
       harness.input("\u001b"); await waitForFreshOutput(instance, harness.output, beforeReturn, "Claude Code Setup Dashboard");
       for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
@@ -436,7 +449,7 @@ describe("DeckApp synthetic runner production flow", () => {
       expect(existsSync(initial.files.find((file) => file.path.endsWith("/.mcp.json"))!.path)).toBe(true);
     } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
   });
-  test("Claude TUI reviews selected Context Mode, RTK hook and shared Tavily without project MCP or token file", async () => {
+  test("Claude TUI reviews selected RTK hook and shared Tavily without project MCP or token file", async () => {
     const root = createCanonicalTempRoot("deck-claude-tui-web-search-");
     const dataRoot = join(root, "data", "deck");
     const bin = join(root, "bin");
@@ -447,8 +460,10 @@ describe("DeckApp synthetic runner production flow", () => {
     expect(configStore.readRequired().webSearch.enabled).toBe(true);
     const commands = new Map(["context-mode", "rtk"].map((name) => [name, join(bin, name)]));
     const installations: string[] = [];
-    const registry = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot, resolveCommand: (name) => commands.get(name), verifyRtkCommand: () => true, webSearchCredential: () => "fixture-shared-token", installSharedTool: async (id) => {
+    const registry = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot, sessionDriver: {baseEnv:{CLAUDE_CODE_USE_BEDROCK:"1"}}, resolveCommand: (name) => commands.get(name), verifyRtkCommand: () => true, webSearchCredential: () => "fixture-shared-token", installSharedTool: async (id) => {
       installations.push(id);
+      mkdirSync(join(dataRoot, "claude", "tools", "node_modules"), {recursive:true, mode:0o700});
+      writeFileSync(join(dataRoot, "claude", "tools", "node_modules", "fixture-package.json"), "{}");
       if (id !== "web-search") return false;
       const path = join(bin, "tavily-mcp");
       writeFileSync(path, "fixture executable", { mode: 0o700 });
@@ -467,17 +482,17 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input(" "); await instance.waitUntilRenderFlush();
       harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
       harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
-      await selectFreshClaudePackages(instance, harness, ["Context Mode", "RTK"]);
+      await selectFreshClaudePackages(instance, harness, ["RTK"]);
       for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
       harness.input("\r");
       try { await waitForOutput(instance, harness.output, "Run install"); }
       catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; signals=${harness.output().split("\n").filter((line) => /Claude|Blocked|Review|Web Search|Context Mode|capabilit|missing|provider|failed/i.test(line)).slice(-24).join(" | ")}`); }
       harness.input("\r");
-      await waitForCondition(instance, () => adapter.readModelAssignments(root) !== undefined && existsSync(join(dataRoot, "claude", "model-assignments.json")), "global capability receipt", 20_000);
+      await waitForCondition(instance, () => adapter.readModelAssignments(root) !== undefined && existsSync(join(dataRoot, "claude", "model-assignments.json")), "global capability receipt", 20_000).catch(error=>{throw new Error(String(error)+"\n"+harness.output().slice(-10000));});
       const receipt = JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8"));
-      expect(receipt.capabilities).toEqual(["context-mode", "rtk", "web-search"]);
+      expect(receipt.capabilities).toEqual(["rtk", "web-search"]);
       const mcp = readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8");
-      expect(JSON.parse(mcp).mcpServers["context-mode"].command).toBe(join(bin, "context-mode"));
+      expect(JSON.parse(mcp).mcpServers["context-mode"]).toBeUndefined();
       expect(JSON.parse(mcp).mcpServers["web-search"].command).toBe(join(bin, "tavily-mcp"));
       expect(installations).toEqual(["web-search"]);
       expect(mcp).not.toContain("fixture-shared-token");
@@ -487,7 +502,7 @@ describe("DeckApp synthetic runner production flow", () => {
       expect(readFileSync(join(dataRoot, "claude", receipt.plugin, "hooks", "rtk-hook.cjs"), "utf8")).toContain(join(root, "bin", "rtk"));
       await waitForOutput(instance, harness.output, "plugin files setup complete");
       expect(configStore.readRequired().webSearch.enabled).toBe(true);
-      expect(configStore.readRequired().packageInstructions.claude?.["context-mode"]).toBe(true);
+      expect(configStore.readRequired().packageInstructions.claude?.["context-mode"]).not.toBe(true);
       expect(configStore.readRequired().packageInstructions.claude?.rtk).toBe(true);
       expect(existsSync(join(root, ".mcp.json"))).toBe(false);
       expect(existsSync(join(root, ".claude"))).toBe(false);
@@ -1529,7 +1544,6 @@ describe("DeckApp synthetic runner production flow", () => {
         atlas: {
           "codebase-memory": false,
           "code-economy": true,
-          "context-mode": true,
           rtk: true,
           "adaptive-memory": false,
           serena: true,
@@ -1553,7 +1567,7 @@ describe("DeckApp synthetic runner production flow", () => {
       runnerId: "atlas",
       displayName: "Atlas Runner",
       environmentIds: ["atlas-development"],
-      packageInstructionIds: ["code-economy", "context-mode"],
+      packageInstructionIds: ["code-economy", "rtk"],
       ui: {
         environmentLabels: { "atlas-development": "Atlas Development" },
         dashboard: { defaultSelectedTeamIds: ["developer-team"] },
@@ -1599,7 +1613,7 @@ describe("DeckApp synthetic runner production flow", () => {
       expect(calls).toEqual(["detect", `inspect:${projectRoot}`, "review-tools", "inventory"]);
       let boundary = harness.output().length;
       harness.input("\r");
-      await waitForFreshOutput(instance, harness.output, boundary, "Context Mode");
+      await waitForFreshOutput(instance, harness.output, boundary, "RTK");
       expect(harness.output().slice(boundary)).not.toContain("Atlas Tool");
       boundary = harness.output().length;
       harness.input("\u001b");
@@ -1620,15 +1634,15 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input("\r");
       await waitForFreshOutput(instance, harness.output, boundary, "Configure Packages — Atlas Runner");
       const packageOutput = harness.output().slice(boundary);
-      expect(packageOutput).toContain("[x] Context Mode");
+      expect(packageOutput).toContain("[x] RTK");
       expect(packageOutput).toContain("Code Economy is always enabled as the baseline.");
-      for (const label of ["Codebase Memory", "RTK", "Adaptive Memory", "Serena", "[ ] Code Economy"]) {
+      for (const label of ["Codebase Memory", "Context Mode", "Adaptive Memory", "Serena", "[ ] Code Economy"]) {
         expect(packageOutput).not.toContain(label);
       }
 
       harness.input(" ");
       await instance.waitUntilRenderFlush();
-      expect(harness.output()).toContain("[ ] Context Mode");
+      expect(harness.output()).toContain("[ ] RTK");
       harness.input("j");
       await instance.waitUntilRenderFlush();
       boundary = harness.output().length;
@@ -1639,9 +1653,7 @@ describe("DeckApp synthetic runner production flow", () => {
       expect(getEnabledPackageInstructionIds(persisted, "atlas")).toEqual(["code-economy"]);
       expect(persisted.packageInstructions.atlas).toMatchObject({
         "code-economy": true,
-        "context-mode": false,
         rtk: false,
-        serena: false,
       });
       expect(capturedBundle).toEqual(buildCapabilityInstructionBundle(["code-economy"]));
     } finally {
@@ -1740,7 +1752,7 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input("\r");
       await waitForCondition(instance, () => capturedBundle !== undefined, "the Atlas team bundle");
 
-      expect(getEnabledPackageInstructionIds(configStore.read(), "atlas")).toEqual(["code-economy", "rtk", "serena"]);
+      expect(getEnabledPackageInstructionIds(configStore.read(), "atlas")).toEqual(["code-economy", "rtk"]);
       expect(capturedBundle).toEqual(buildCapabilityInstructionBundle(["code-economy"]));
     } finally {
       instance.unmount();

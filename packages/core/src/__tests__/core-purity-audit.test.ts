@@ -108,6 +108,15 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /These tools are explicitly disabled because OpenCode or other packages handle them/, reason: "Serena instruction content explaining tool scope" },
 ];
 
+// Exact shared wire/schema identifiers; these do not import adapter implementations.
+const allowedContractLiterals: Record<string, readonly string[]> = {
+  'runner-contributions.ts': ['pi', 'deck-pi-manifest-v1'],
+  'package-retirement.ts': ['opencode'],
+  'session/task-continuity.ts': ['opencode-verified-input'],
+  'session/context-window.ts': ['opencode-message-input', 'opencode-assistant-context'],
+  'session/failure.ts': ['opencode-sse-frame-too-large','opencode-sse-invalid-frame','opencode-http-body-too-large','opencode-http-invalid-body'],
+};
+
 const testDir = dirname(fileURLToPath(import.meta.url));
 const coreSourceDir = join(testDir, "..");
 
@@ -180,6 +189,7 @@ function findPurityViolations(): PurityViolation[] {
     const relativeFile = relative(coreSourceDir, file);
 
     for (const literal of findStringLiterals(source)) {
+      if (allowedContractLiterals[relativeFile]?.includes(literal.value.slice(1,-1))) continue;
       // Skip allowed patterns
       if (ALLOWED_PATTERNS.some((allowed) => allowed.pattern.test(literal.value))) {
         continue;

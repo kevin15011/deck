@@ -21,7 +21,8 @@ import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runt
 /** The official-plugin route never reaches Deck's runtime transport; the stub proves it stays unused and isolated. */
 const fakeTransport = {} as unknown as SupermemoryRuntimeTransport;
 const TOKEN = "sm_codex_profile_SHOULD_NOT_LEAK_0123456789";
-setDefaultTimeout(30_000);
+// These integration cases durably install the full skill bundle (hundreds of fsynced files).
+setDefaultTimeout(120_000);
 const created: string[] = [];
 afterEach(() => { for (const path of created.splice(0)) rmSync(path, { recursive: true, force: true }); });
 
@@ -215,7 +216,7 @@ describe("official Codex Supermemory plugin launch", () => {
 
     const projectJson = fixture({ projectHooksJson: '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"supermemory flush"}]}]}}' });
     expect(await launch(projectJson)).toMatchObject({ result: { status: "blocked" } });
-  }, 120_000);
+  }, 240_000);
 
   test("readiness checks require the owned pinned artifact and project hooks", () => {
     const f = fixture();
@@ -244,7 +245,7 @@ describe("official Codex Supermemory plugin launch", () => {
   });
 
   test("Web Search and Supermemory credentials both reach the child through one narrow binding, never config files or argv", async () => {
-    const f = fixture({ webSearch: true });
+    const f = fixture({ webSearch: true, userConfig: 'web_search = "disabled"\n' });
     const deckConfig = { ...memoryConfig(), webSearch: { enabled: true, provider: "tavily" } } as DeckCfg;
     const { result, childEnv, childArgs } = await launch(f, { deckConfig, env: { TAVILY_API_KEY: "stale-parent-tavily" } });
     expect(result.status).toBe("launched");
@@ -259,7 +260,7 @@ describe("official Codex Supermemory plugin launch", () => {
 
     const off = await launch(fixture({ webSearch: true }), { env: { TAVILY_API_KEY: "stale-parent-tavily" } });
     expect(off.childEnv).not.toHaveProperty("TAVILY_API_KEY");
-  }, 120_000);
+  }, 240_000);
 
   test("dry-run explains the plugin memory route precisely, without secrets and without Deck's runtime label", async () => {
     for (const hasCredential of [true, false]) {

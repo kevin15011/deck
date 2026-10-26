@@ -41,6 +41,7 @@ describe("crossRunner config (XR-2.1, XR-2.2, D-5)", () => {
       approvals: { claude: "runner-default", opencode: "runner-default", codex: "runner-default" },
       maxConcurrentTasks: 4,
       executionBudget: { lead: 2, delegated: 4 },
+      continuity: {mode:"policy",autoNativeMaxAgeMs:300000,autoNativeMaxInputTokens:80000,nativeHardCapInputTokens:160000,handoffMaxBytes:32768},
       web: { port: 7421, trustedProxy: null, allowedOrigins: [], allowFunnel: false, tailscaleServeAccess: false },
       claudeTosAcknowledgedAt: null,
     });

@@ -22,11 +22,13 @@ test("same-version, same-size wrong bytes are rejected and shared bytes remain u
   expect(readFileSync(path, "utf8")).toBe(wrong);
 });
 
-test("verified shared reuse caches positive and negative hashes but invalidates on identity changes", () => {
+test("verified shared reuse caches positive and negative hashes but invalidates on identity changes", async () => {
   const { path, root } = fixture(); let hashes = 0;
   const inspect = createCodebaseCompatibilityInspector({ hashFile: (path) => { hashes++; return sha(readFileSync(path)); } });
+  await Bun.sleep(2100);
   expect(inspect(path, release)).toBe(true); expect(inspect(path, release)).toBe(true); expect(hashes).toBe(1);
   writeFileSync(path, binary.replace("build A", "build B"));
+  await Bun.sleep(2100);
   expect(inspect(path, release)).toBe(false); expect(inspect(path, release)).toBe(false); expect(hashes).toBe(2);
   writeFileSync(join(root, "replacement"), binary, { mode: 0o700 }); renameSync(join(root, "replacement"), path);
   expect(inspect(path, release)).toBe(true); expect(hashes).toBe(3);
@@ -57,4 +59,12 @@ test("a file changed during hashing is rejected without caching the stale succes
   const { path } = fixture();
   const inspect = createCodebaseCompatibilityInspector({ hashFile: (path) => { writeFileSync(path, binary.replace("build A", "build B")); return sha(binary); } });
   expect(inspect(path, release)).toBe(false);
+});
+
+ test("young identities never reuse a successful digest across same-size writes", () => {
+  const {path}=fixture();let hashes=0;
+  const inspect=createCodebaseCompatibilityInspector({hashFile:p=>{hashes++;return sha(readFileSync(p));}});
+  expect(inspect(path,release)).toBe(true);expect(inspect(path,release)).toBe(true);expect(hashes).toBe(2);
+  writeFileSync(path,binary.replace('build A','build B'));
+  expect(inspect(path,release)).toBe(false);expect(hashes).toBe(3);
 });

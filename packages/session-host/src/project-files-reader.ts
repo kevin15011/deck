@@ -5,7 +5,7 @@ import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {SafeTree,TreeLimitError} from './git-safe-tree';
 import {git} from './git-diff-reader';
-import type {ProjectBrowse,ProjectContent,ProjectEntry,ProjectListing} from '../../core/src/session/project-files';
+import type {ProjectBrowse,ProjectContent,ProjectEntry,ProjectListing} from '@deck/core';
 import type {CommandOutcome} from './protocol';
 const TEXT_LIMIT=1024*1024, IMAGE_LIMIT=8*1024*1024;
 const admin=(name:string)=>['.git','.svn','.hg'].includes(name.toLowerCase());

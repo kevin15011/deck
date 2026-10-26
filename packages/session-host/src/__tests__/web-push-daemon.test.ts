@@ -168,7 +168,8 @@ test('notification approval HTTP path enforces authoritative risk/scope and broa
     await waitFor(()=>[...f.manager.openLog(f.id)!.readAfter(0)].some(e=>e.kind==='approval.requested' && ![...f.manager.openLog(f.id)!.readAfter(e.seq)].some(r=>r.kind==='approval.resolved'&&r.data.approvalId===e.data.approvalId)));
     const request=[...f.manager.openLog(f.id)!.readAfter(0)].filter(e=>e.kind==='approval.requested').at(-1)!;
     const approvalId=request.data.approvalId as string;
-    await waitFor(()=>f.sent.some(s=>s.payload.approvalId===approvalId));
+    // Allow the delivery acknowledgement window plus scheduling under the full suite.
+    await waitFor(()=>f.sent.some(s=>s.payload.approvalId===approvalId),10_000,"approval push delivery");
     const push=f.sent.find(s=>s.payload.approvalId===approvalId)!.payload;
     expect(push).toMatchObject({kind:'approval',approvalId,tool:'Bash',risk:risk==='normal'?'normal':'high'});
     expect(JSON.stringify(push)).not.toMatch(/SECRET|private|command|input|summary/);
@@ -435,7 +436,8 @@ test('exact reply display suppresses that device; a broad foreground cursor cann
  await f.call(`/api/sessions/${f.id}/replies/${reply.replyId}`,'POST',{displayed:true});
  await f.call('/api/push/presence','POST',{tabId:'mobile',sessionId:f.id,revision:2,seenSeq:f.manager.openLog(f.id)!.lastSeq});await tick();
  expect((await(await f.call('/api/push')).json()).delivery.suppressed).toBe(1);expect(f.sent).toHaveLength(0);
- await f.run({type:'prompt.send',text:'two'},f.id);await waitFor(()=>f.driver.turns.length===2);f.driver.turns[1]!.say('Second unread reply.');f.driver.turns[1]!.finish();await waitFor(()=>f.sent.length===1,4000);
+ await f.run({type:'prompt.send',text:'two'},f.id);await waitFor(()=>f.driver.turns.length===2);f.driver.turns[1]!.say('Second unread reply.');f.driver.turns[1]!.finish();// Includes the 2-second view acknowledgement grace and daemon scheduling under suite load.
+ await waitFor(()=>f.sent.length===1,10000);
  const status=(await(await f.call('/api/push')).json()).delivery;expect(status.sent).toBe(1);expect(status.lastOutcome).toBe('accepted');expect(status.lastStatus).toBe(201);
 });
 

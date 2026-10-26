@@ -366,10 +366,8 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
     expect(writes[0]!.packageInstructions.codex).toEqual({
       "codebase-memory": true,
       "code-economy": true,
-      "context-mode": true,
       rtk: true,
       "adaptive-memory": true,
-      serena: true,
     });
     expect(writes[0]!.packageInstructions.codex).not.toHaveProperty("pi-hud");
   });
@@ -380,7 +378,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
       const store = testConfigStore(projectRoot);
       store.write({
         adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "custom-sm", searchMode: "documents" } },
-        packageInstructions: { opencode: { "context-mode": true } },
+        packageInstructions: { opencode: { "rtk": true } },
         orchestratorPersonality: "guia",
       });
       const state = createDefaultPiRunnerDashboardState({
@@ -398,7 +396,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
 
       const config = store.read();
       expect(config.adaptiveMemory.supermemory).toEqual(expect.objectContaining({ mcpServerName: "custom-sm", searchMode: "documents" }));
-      expect(config.packageInstructions.opencode["context-mode"]).toBe(true);
+      expect(config.packageInstructions.opencode["rtk"]).toBe(true);
       expect(config.packageInstructions.codex["codebase-memory"]).toBe(true);
       expect(config.orchestratorPersonality).toBe("guia");
     } finally {

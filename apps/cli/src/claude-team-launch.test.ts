@@ -1,5 +1,5 @@
 import { CLAUDE_ATTRIBUTION_SETTINGS_ARGS } from "../../../packages/adapter-claude/src/launch-settings";
-import { test, expect } from "bun:test";
+import { afterEach, beforeEach, test, expect } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,6 +11,20 @@ import { executeRunnerLaunchPlan } from "./runner-launch-command";
 import { writeTavilyCredentialToActiveShellProfile } from "./web-search-shell-profile";
 import { createHash } from "node:crypto";
 import { prepareClaudeInteractiveLaunch } from './claude-interactive-launch';
+
+// Exercise the production mutation guard against fixture state, never the user's daemon.
+let stateHome: string;
+let previousStateHome: string | undefined;
+beforeEach(async () => {
+  previousStateHome = process.env.XDG_STATE_HOME;
+  stateHome = await mkdtemp(join(tmpdir(), 'deck-claude-launch-state-'));
+  process.env.XDG_STATE_HOME = stateHome;
+});
+afterEach(async () => {
+  if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME;
+  else process.env.XDG_STATE_HOME = previousStateHome;
+  await rm(stateHome, { recursive: true, force: true });
+});
 
 test('Claude reopen republishes search selection using current provider without mutating the old generation', async () => {
   const root = await mkdtemp(join(tmpdir(), 'deck-claude-search-reopen-'));

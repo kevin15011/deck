@@ -21,7 +21,7 @@ import { cleanupTempDirs, FakeClock, tempDir, tempSubdir, waitFor } from "./test
 const managers: SessionManager[] = [];
 const resources: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const close of resources.splice(0).reverse()) await close(); await Promise.all(managers.splice(0).map((m) => m.close())); cleanupTempDirs(); });
-async function setup(clock?: FakeClock) {
+async function setup(clock?: FakeClock, extra: Partial<SessionManagerOptions> = {}) {
   const root = tempDir();
   const project = tempSubdir(root, "project");
   const paths = resolveStatePaths({ env: { HOME: root, XDG_STATE_HOME: join(root, "state") }, tmpdir: root });
@@ -34,6 +34,7 @@ async function setup(clock?: FakeClock) {
   const credentials = new CredentialRegistry({ socketPath: paths.socket.path });
   const options: SessionManagerOptions = { paths, broker, credentials, supervisor: new Supervisor({ anchorCommand: ["unused"] }), drivers: { get: (id) => drivers.find((d) => d.runnerId === id), list: () => drivers }, config: () => config, sessionMcpCommand: ["deck", "internal", "session-mcp"], memory: async () => ({ recall: async () => ({ ok: true, advisoryText: "advisory" }), propose: async (content) => { writes.push(content); return { ok: true }; } }) };
   if (clock) options.clock = clock;
+  Object.assign(options,extra);
   manager = new SessionManager(options);
   managers.push(manager);
   const execute = (body: any, sessionId?: string) => manager.execute({ sessionId, command: { v: 1, commandId: randomUUID(), ...body }, clientId: "test" });
@@ -325,10 +326,10 @@ test("client cancellation of queued work wakes an idle Lead while the running wo
 });
 
 test("continuation retains owner assignment and confirmed native id; only missing native sessions reseed once", async () => {
-  const t = await setup();
+  const t = await setup(undefined,{compactionBound:()=>({runnerId:"codex",modelId:"sol",version:"1.0.0",configKey:"verified",basis:"input",inputSafeExclusiveCap:170000,triggerTokens:170001,evidenceRef:"fixture"})});
   const id = (await t.call("deck_delegate", { agent: "architect", task: "first" }) as any).data.taskId;
   await waitFor(() => t.drivers[1]!.turns.length === 1);
-  const first = t.drivers[1]!.turns[0]!; first.init(); first.say("prior summary"); first.finish();
+  const first = t.drivers[1]!.turns[0]!; first.init(); first.emit("usage",{requestInput:{tokens:100,basis:"codex-last-input",nativeThreadId:first.nativeSessionId,nativeTurnId:"turn",modelId:"sol",final:true}}); first.say("prior summary"); first.finish();
   await waitFor(() => first.closed);
   expect(await t.call("deck_delegate", { agent: "implementer", task: "wrong", continueTaskId: id })).toMatchObject({ ok: false, code: "task-owner-mismatch" });
   (t.config.members.architect as any) = { runnerId: "opencode", modelId: "changed" };
@@ -361,7 +362,7 @@ test("memory proposals have one deduplicated writer across member credentials", 
   expect(t.writes).toEqual(["same"]);
 });
 
-test("crash recovery settles absent delegated groups, refuses uncertain ownership and preserves native owner on continuation", async () => {
+test("crash recovery settles absent delegated groups, refuses uncertain ownership and preserves logical owner but reseeds without verified request evidence", async () => {
   const t = await setup();
   await t.manager.close();
   const restarted = new SessionManager(t.options); managers.push(restarted);
@@ -386,5 +387,7 @@ test("crash recovery settles absent delegated groups, refuses uncertain ownershi
   expect(await restarted.callTaskTool(t.grant, "deck_delegate", { agent: "architect", task: "resume", continueTaskId: "uncertain" }, {})).toMatchObject({ ok: false, code: "ownership-unsettled" });
   expect(await restarted.callTaskTool(t.grant, "deck_delegate", { agent: "architect", task: "resume", continueTaskId: "settled" }, {})).toMatchObject({ ok: true });
   await waitFor(() => t.drivers[1]!.turns.length === 1);
-  expect(t.drivers[1]!.turns[0]!.input).toMatchObject({ assignment: { runnerId: "codex", modelId: "sol" }, resume: { nativeSessionId: "saved-settled" } });
+  expect(t.drivers[1]!.turns[0]!.input).toMatchObject({ assignment: { runnerId: "codex", modelId: "sol" } });
+  expect(t.drivers[1]!.turns[0]!.input.resume).toBeUndefined();
+  expect(t.drivers[1]!.turns[0]!.input.prompt).toContain("Current Lead instruction:");
 });

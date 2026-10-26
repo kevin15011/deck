@@ -14,6 +14,19 @@ import { OPENCODE_INSTALLABLE_TOOLS } from "../../../packages/adapter-opencode/s
 import { createOpenCodeEvidenceContext, resolveOpenCodeInstalledEvidence } from "../../../packages/adapter-opencode/src/required-tools";
 import { writeOpenCodeMcpConfig } from "../../../packages/adapter-opencode/src/opencode-mcp-config";
 
+// Availability is opt-in; executable presence alone is not activation authority.
+function codebaseConfig() {
+  const config=getDefaultDeckConfig();
+  config.capabilities={...config.capabilities,'codebase-memory':{enabled:true,runners:{}}};
+  return config;
+}
+function seedOwnedOpenCode(path:string, home:string, config:any) {
+  const entry=config.mcp['codebase-memory'];
+  const other={...config.mcp};delete other['codebase-memory'];
+  writeFileSync(path,JSON.stringify({...config,mcp:other}));
+  expect(writeOpenCodeMcpConfig({configPath:path,homeDir:home,serverName:'codebase-memory',type:'local',command:entry.command}).ok).toBe(true);
+}
+
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const sha = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
@@ -57,7 +70,7 @@ for (const runner of ["codex", "pi", "opencode"] as const) {
 test("Claude: reviewed owned install rematerializes plugin config while preserving old plugin and shared bytes", async () => {
   const f = fixture(); writeFileSync(f.shared, binary);
   const adapter = createClaudeRunnerAdapter({ homeDir: f.home, dataRoot: f.dataRoot, resolveCommand: f.resolveCommand, codebaseReleaseOverride: f.release, codebaseArtifactEffects: f.effects, verifyCodebaseNative: () => true });
-  const input = { projectRoot: f.home, environmentId: "claude-development" as const, deckConfig: getDefaultDeckConfig(), capabilityIds: ["claude-team-files", "codebase-memory"] };
+  const input = { projectRoot: f.home, environmentId: "claude-development" as const, deckConfig: codebaseConfig(), capabilityIds: ["claude-team-files", "codebase-memory"] };
   const original = adapter.buildDeveloperTeamInstallPlan(input);
   expect(original.blocked).toBe(false);
   expect(original.files.find(file => file.path.endsWith("/.mcp.json"))?.content).toContain(f.shared);
@@ -69,7 +82,7 @@ test("Claude: reviewed owned install rematerializes plugin config while preservi
   expect(repaired.blocked).toBe(false);
   expect(repaired.files.find(file => file.path.endsWith("/.mcp.json"))?.content).toContain("codebase-native-v0.11.0");
   await adapter.applyDeveloperTeamInstall({ projectRoot: f.home, environmentId: "claude-development", plan: repaired });
-  expect((await adapter.readSessionMcpServers())["codebase-memory"]).toMatchObject({ command: expect.stringContaining("codebase-native-v0.11.0") });
+  expect((await adapter.readSessionMcpServers(codebaseConfig()))["codebase-memory"]).toMatchObject({ command: expect.stringContaining("codebase-native-v0.11.0") });
   expect(readFileSync(f.shared)).toEqual(before);
   expect(readFileSync(original.files.find(file => file.path.endsWith("/.mcp.json"))!.path, "utf8")).toContain(f.shared);
 });
@@ -83,7 +96,7 @@ test("OpenCode reviewed installer bypasses legacy existence evidence and never i
   const [result] = await installOpenCodeTools("opencode", [OPENCODE_INSTALLABLE_TOOLS.find(tool => tool.id === "codebase-memory")!], () => {}, forbidden, { evidenceContext: context, downloadScript: forbidden, runShellScript: forbidden });
   expect(result?.outcome).toBe("executed"); expect(resolveOpenCodeInstalledEvidence("codebase-memory", context).state).toBe("usable");
   const configPath = join(f.home, "opencode.json");
-  writeFileSync(configPath, JSON.stringify({ model: "custom-model", mcp: { custom: { type: "remote", url: "https://example.test" }, "codebase-memory": { type: "local", command: [f.shared], enabled: true } } }));
+  seedOwnedOpenCode(configPath, f.home, { model: "custom-model", mcp: { custom: { type: "remote", url: "https://example.test" }, "codebase-memory": { type: "local", command: [f.shared], enabled: true } } });
   expect(writeOpenCodeMcpConfig({ configPath, homeDir: f.home, serverName: "codebase-memory", type: "local", command: [tools.command()!] }).ok).toBe(true);
   const config = JSON.parse(readFileSync(configPath, "utf8"));
   expect(config.model).toBe("custom-model"); expect(config.mcp.custom.url).toBe("https://example.test"); expect(config.mcp["codebase-memory"].command).toEqual([tools.command()]);
@@ -96,15 +109,17 @@ test("Codex rematerializes a stale standard command and preserves custom wrapper
   const tools = createCodexTools({ homeDir: f.home, dataRoot: f.dataRoot, resolveCommand: f.resolveCommand, codebaseReleaseOverride: f.release, codebaseArtifactEffects: f.effects, verifyCodebaseNative: () => true, nodeCommand: process.execPath, verifyNodeRuntime: () => true });
   await tools.codebase.install();
   const configPath = join(f.home, "config.toml");
-  const original = `# personal\nmodel = "custom"\n[mcp_servers.codebase-memory]\ncommand = ${JSON.stringify(f.shared)}\n[mcp_servers.other]\ncommand = "custom"\n`;
+  const unowned = `# personal\nmodel = "custom"\n[mcp_servers.codebase-memory]\ncommand = ${JSON.stringify(f.shared)}\n[mcp_servers.other]\ncommand = "custom"\n`;
+  const original = mergeCodexMcpServers('# personal\nmodel = "custom"\n[mcp_servers.other]\ncommand = "custom"\n', buildCodexMcpServers({packageIds:['codebase-memory'],memoryProvider:'none',codebaseMemoryCommand:f.shared}).servers).content;
   writeFileSync(configPath, original);
   const desired = buildCodexMcpServers({ packageIds: ["codebase-memory"], memoryProvider: "none", codebaseMemoryCommand: tools.codebase.command() }).servers;
-  const merged = mergeCodexMcpServers(readFileSync(configPath, "utf8"), desired, { repairSelectedToolIds: ["codebase-memory"] });
+  expect(mergeCodexMcpServers(unowned, desired, {repairSelectedToolIds:['codebase-memory']})).toMatchObject({status:'blocked',content:unowned});
+  const merged = mergeCodexMcpServers(readFileSync(configPath, "utf8"), desired, { repairSelectedToolIds: ["codebase-memory"], ownedServerIds: ["codebase-memory"] });
   expect(merged.status).toBe("updated"); writeFileSync(configPath, merged.content);
   expect(readFileSync(configPath, "utf8")).toContain(tools.codebase.command()!);
   expect(merged.content).toContain('model = "custom"'); expect(merged.content).toContain('[mcp_servers.other]\ncommand = "custom"');
-  const custom = original.replace(JSON.stringify(f.shared), '"my-wrapper"');
-  expect(mergeCodexMcpServers(custom, desired, { repairSelectedToolIds: ["codebase-memory"] })).toMatchObject({ status: "blocked", content: custom });
+  const custom = unowned.replace(JSON.stringify(f.shared), '"my-wrapper"');
+  expect(mergeCodexMcpServers(custom, desired, { repairSelectedToolIds: ["codebase-memory"], ownedServerIds: ["codebase-memory"] })).toMatchObject({ status: "blocked", content: custom });
 });
 
 test("Pi rematerializes manifest-owned stale command and refuses user-modified entries", async () => {
@@ -134,7 +149,7 @@ test("OpenCode production actions rematerialize stale config and preserve custom
   const action = { id: "fixture.install", kind: "install-opencode-plugin", title: "Install reviewed fixture", toolId: "codebase-memory", capabilityId: "codebase-memory", status: "ready" as const };
   expect((await adapter.runAction!(action, context)).status).toBe("executed");
   const configPath = join(f.home, "opencode.json");
-  writeFileSync(configPath, JSON.stringify({ model: "custom", mcp: { "codebase-memory": { type: "local", command: [f.shared], enabled: true }, custom: { type: "remote", url: "https://example.test" } } }));
+  seedOwnedOpenCode(configPath, f.home, { model: "custom", mcp: { "codebase-memory": { type: "local", command: [f.shared], enabled: true }, custom: { type: "remote", url: "https://example.test" } } });
   expect((await adapter.runAction!({ ...action, id: "fixture.config", kind: "write-mcp-config" }, context)).status).toBe("executed");
   const config = JSON.parse(readFileSync(configPath, "utf8")); expect(config.mcp["codebase-memory"].command).toEqual([tools.command()]); expect(config.model).toBe("custom");
   config.mcp["codebase-memory"].command = ["custom-wrapper", "--custom"];
@@ -157,7 +172,7 @@ test("OpenCode reviewed config migrates an exact PATH candidate and preserves ma
   const f = fixture(); const configPath = join(f.home, "opencode.json");
   const previous = join(f.home, "path-bin", "codebase-memory-mcp");
   const next = join(f.dataRoot, "opencode", "tools", "codebase-native-v0.11.0", "codebase-memory-mcp");
-  writeFileSync(configPath, JSON.stringify({ mcp: { "codebase-memory": { type: "local", command: [previous], enabled: true } } }));
+  seedOwnedOpenCode(configPath, f.home, { mcp: { "codebase-memory": { type: "local", command: [previous], enabled: true } } });
   expect(writeOpenCodeMcpConfig({ configPath, homeDir: f.home, serverName: "codebase-memory", type: "local", command: [next], codebasePreviousCommands: [previous] }).ok).toBe(true);
   expect(JSON.parse(readFileSync(configPath, "utf8")).mcp["codebase-memory"].command).toEqual([next]);
   writeFileSync(configPath, '{"mcp":[]}'); const before = readFileSync(configPath, "utf8");
@@ -261,7 +276,7 @@ for (const runner of ["claude", "codex", "opencode"] as const) {
     if (runner === "claude") {
       writeFileSync(f.shared, binary);
       const claude = createClaudeRunnerAdapter({homeDir:f.home,dataRoot:f.dataRoot,resolveCommand:f.resolveCommand,codebaseReleaseOverride:f.release});
-      const plan=claude.buildDeveloperTeamInstallPlan({projectRoot:f.home,environmentId:"claude-development",deckConfig:getDefaultDeckConfig(),capabilityIds:["claude-team-files","codebase-memory"]});
+      const plan=claude.buildDeveloperTeamInstallPlan({projectRoot:f.home,environmentId:"claude-development",deckConfig:codebaseConfig(),capabilityIds:["claude-team-files","codebase-memory"]});
       await claude.applyDeveloperTeamInstall({projectRoot:f.home,environmentId:"claude-development",plan});
       configPath=plan.files.find(file=>file.path.endsWith("/.mcp.json"))!.path; adapter=claude;
       writeFileSync(f.shared,binary.replace("build A","build B"));
@@ -278,7 +293,7 @@ for (const runner of ["claude", "codex", "opencode"] as const) {
     }
     const before=readFileSync(configPath), shared=readFileSync(f.shared);
     const readiness=new SessionCodebaseReadiness({supervisor:{spawn(){throw new Error("unverified binary must never run");}}});
-    const config=getDefaultDeckConfig();config.adaptiveMemory.enabled=false;config.webSearch.enabled=false;
+    const config=codebaseConfig();config.adaptiveMemory.enabled=false;config.webSearch.enabled=false;
     try {
       const resolver=await resolveSessionChildMcp(adapter,config,{}, {readiness,context:{projectRoot:f.home,sessionId:"fixture",taskId:"lead",signal:new AbortController().signal}});
       expect(resolver.capabilityAvailability).toEqual([{capabilityId:"codebase-memory",status:"unavailable",reasonCode:"codebase-memory-unsupported"}]);
@@ -286,7 +301,7 @@ for (const runner of ["claude", "codex", "opencode"] as const) {
       expect(readFileSync(configPath)).toEqual(before);expect(readFileSync(f.shared)).toEqual(shared);
       if (runner!=="opencode") {
         const root=join(f.dataRoot,runner,"tools","codebase-native-v0.11.0",`${process.platform}-${process.arch}`);mkdirSync(root,{recursive:true,mode:0o700});writeFileSync(join(root,"codebase-memory-mcp"),"tampered owned artifact",{mode:0o700});
-        await expect(adapter.readSessionMcpServers!()).rejects.toThrow("codebase-memory-integrity-failed");
+        await expect(adapter.readSessionMcpServers!(codebaseConfig())).rejects.toThrow("codebase-memory-integrity-failed");
       }
     } finally {await readiness.close();}
   });

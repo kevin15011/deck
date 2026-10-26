@@ -39,6 +39,11 @@ function hasPreferenceArgv(rel: string, text: string): boolean {
   if (rel === "packages/adapter-pi/src/pi-codebase-guard.ts") {
     text = text.replace("realpathSync(process.argv[1]!)", "");
   }
+  // Native tool restrictions are authorization evidence, not Deck preference selection.
+  if (rel === "packages/adapter-pi/src/pi-extensions/tool-policy/native-mcp.ts") {
+    text = text.replace('process.argv.findIndex(arg => arg === "--tools")', "");
+    text = text.replace('process.argv[toolsIndex + 1]', "");
+  }
   return /process\.argv/.test(text);
 }
 
@@ -99,6 +104,14 @@ describe("production Deck preference source audit", () => {
     expect(hasPreferenceArgv(path, `${source}\nconst preferences = process.argv[2];`)).toBe(true);
     expect(hasPreferenceArgv(path, `${source}\nrealpathSync(process.argv[1]!)`)).toBe(true);
     expect(hasPreferenceArgv("packages/adapter-pi/src/runner-adapter.ts", source)).toBe(true);
+  });
+
+  test("native tool restriction exception cannot hide preference reads", () => {
+    const path="packages/adapter-pi/src/pi-extensions/tool-policy/native-mcp.ts";
+    const source=readFileSync(join(repoRoot,path),"utf8");
+    expect(hasPreferenceArgv(path,source)).toBe(false);
+    expect(hasPreferenceArgv(path,source+'\nprocess.argv[2]')).toBe(true);
+    expect(hasPreferenceArgv('packages/adapter-pi/src/runner-adapter.ts',source)).toBe(true);
   });
 
   test("requires explicit Deck config on preference-sensitive Core contracts", () => {

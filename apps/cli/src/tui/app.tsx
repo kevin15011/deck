@@ -1636,6 +1636,10 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           const deckConfig = requiredConfigStore.readRequired();
           const effectiveDeckConfig = adapter.runnerId === "claude" ? {
             ...deckConfig,
+            capabilities: { "codebase-memory": {
+              enabled: deckConfig.capabilities?.["codebase-memory"].enabled ?? false,
+              runners: { ...deckConfig.capabilities?.["codebase-memory"].runners, claude: dashboardState.packageInstructions["codebase-memory"] === true },
+            } },
             adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: dashboardState.adaptiveMemory.provider === "supermemory", activeProvider: dashboardState.adaptiveMemory.provider },
             webSearch: { ...deckConfig.webSearch, enabled: dashboardState.selectedCapabilities["web-search"] === true, provider: dashboardState.webSearchProvider ?? deckConfig.webSearch.provider },
           } : adapter.runnerId === "codex" ? {

@@ -1,4 +1,4 @@
-import type {ProjectBrowse} from '../../core/src/session/project-files';
+import type {ProjectBrowse} from '@deck/core';
 /** Host admission and process supervision. Native reads never run in the host. */
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm, realpath } from 'node:fs/promises';

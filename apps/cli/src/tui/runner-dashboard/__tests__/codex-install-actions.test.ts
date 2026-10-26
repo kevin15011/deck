@@ -36,15 +36,15 @@ function adapterWith(overrides: Parameters<typeof testTools>[0] = {}) {
 }
 
 describe("Codex install action kinds through the dashboard action runner", () => {
-  test("routes every install-codex-* kind to the Codex adapter and returns its evidence", async () => {
+  test("routes supported Codex installs and refuses retired tool actions", async () => {
     const { adapter, calls } = adapterWith();
     const runnerAdapter = { runAction: (action: Parameters<typeof adapter.runAction>[0], context: unknown) => adapter.runAction(action, context as Parameters<typeof adapter.runAction>[1]) };
     const results = [];
     for (const [kind, capabilityId] of [["install-codex-rtk", "rtk"], ["install-codex-tool", "context-mode"], ["install-codex-codebase", "codebase-memory"]] as const) {
       results.push(await runRunnerAction({ id: `codex.${capabilityId}`, kind, title: kind, capabilityId, status: "ready" }, { runnerAdapter, projectRoot: "/p", runnerId: "codex", operationId: "op" }));
     }
-    expect(results.map((result) => result.status)).toEqual(["executed", "executed", "executed"]);
-    expect(calls).toEqual(["rtk", "context-mode"]);
+    expect(results.map((result) => result.status)).toEqual(["executed", "skipped", "executed"]);
+    expect(calls).toEqual(["rtk"]);
     const missingAdapter = await runRunnerAction({ id: "x", kind: "install-codex-rtk", title: "x", capabilityId: "rtk", status: "ready" }, {});
     expect(missingAdapter).toMatchObject({ status: "failed", message: "Codex tool installer is unavailable." });
   });
@@ -53,7 +53,7 @@ describe("Codex install action kinds through the dashboard action runner", () =>
     const { adapter, calls } = adapterWith();
     const inventory = await adapter.getCapabilityInventory({ projectRoot: "/p", environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
     const plan = adapter.buildReviewPlan({ runnerId: "codex", environmentId: "codex-development", selectedCapabilities: { rtk: true, "context-mode": true }, packageInstructions: {}, adaptiveMemory: { provider: "none" } }, inventory);
-    expect(plan.groups.automaticInstalls.map((action) => action.kind)).toEqual(["install-codex-rtk", "install-codex-tool"]);
+    expect(plan.groups.automaticInstalls.map((action) => action.kind)).toEqual(["install-codex-rtk"]);
     const order: string[] = [];
     const results = await runRunnerReviewPlan(plan as never, {
       projectRoot: "/p",
@@ -63,8 +63,8 @@ describe("Codex install action kinds through the dashboard action runner", () =>
       installTeamBundle: async () => { order.push(`team-after:${calls.join(",")}`); return { results: [] }; },
       onActionResult: (result: { actionId: string; status: string }) => order.push(`${result.actionId}:${result.status}`),
     } as never);
-    expect(results.filter((result) => result.actionId.startsWith("codex.tool")).map((result) => result.status)).toEqual(["executed", "executed"]);
-    expect(order.find((entry) => entry.startsWith("team-after:"))).toBe("team-after:rtk,context-mode");
+    expect(results.filter((result) => result.actionId.startsWith("codex.tool")).map((result) => result.status)).toEqual(["executed"]);
+    expect(order.find((entry) => entry.startsWith("team-after:"))).toBe("team-after:rtk");
     expect(order.findIndex((entry) => entry.startsWith("codex.tool.rtk.install"))).toBeLessThan(order.findIndex((entry) => entry.startsWith("team-after:")));
   });
 });

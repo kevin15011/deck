@@ -25,17 +25,17 @@ describe("Runner Capability Parity Resolver", () => {
     const contribution = defineRunnerCapabilityContribution({
       runnerId: "codex",
       mappings: [
-        { capabilityId: "context-mode", runnerId: "codex", status: "shared", detectors: { commands: ["context-mode"], mcpServerNames: ["context-mode"] }, parityChecks: ["binary-usable", "mcp-config-present"] },
+        { capabilityId: "context7", runnerId: "codex", status: "shared", detectors: { commands: ["context7"], mcpServerNames: ["context7"] }, parityChecks: ["binary-usable", "mcp-config-present"] },
         { capabilityId: "codebase-memory", runnerId: "codex", status: "shared", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present"] },
       ],
     });
     const report = resolveCoreRunnerParity("codex", {
-      binariesInPath: ["context-mode", "codebase-memory-mcp"],
+      binariesInPath: ["context7", "codebase-memory-mcp"],
       mcpServersConfigured: ["codebase-memory"],
       projectIndexVerified: false,
     }, [contribution]);
 
-    expect(report.capabilities.find((entry) => entry.capabilityId === "context-mode")).toMatchObject({
+    expect(report.capabilities.find((entry) => entry.capabilityId === "context7")).toMatchObject({
       runnerId: "codex",
       code: "capability-mcp-not-configured",
     });
@@ -49,11 +49,11 @@ describe("Runner Capability Parity Resolver", () => {
     }
   });
 
-  it("uses the same neutral context-mode, RTK, Serena, MCP, and index failures for a synthetic runner", () => {
+  it("uses the same neutral Context7, RTK, MCP, and index failures for a synthetic runner", () => {
     const contribution = defineRunnerCapabilityContribution({
       runnerId: "synthetic",
       mappings: [
-        { capabilityId: "context-mode", runnerId: "synthetic", status: "shared" },
+        { capabilityId: "context7", runnerId: "synthetic", status: "shared", detectors: {mcpServerNames:["context7"]}, parityChecks:["mcp-config-present"] },
         { capabilityId: "rtk", runnerId: "synthetic", status: "gap" },
         { capabilityId: "serena", runnerId: "synthetic", status: "shared" },
         { capabilityId: "codebase-memory", runnerId: "synthetic", status: "shared" },
@@ -61,17 +61,17 @@ describe("Runner Capability Parity Resolver", () => {
       ],
     });
     const report = resolveCoreRunnerParity("synthetic", {
-      binariesInPath: ["context-mode", "codebase-memory-mcp"],
+      binariesInPath: ["context7", "codebase-memory-mcp"],
       mcpServersConfigured: ["codebase-memory"],
       projectIndexVerified: false,
     }, [contribution]);
 
-    expect(report.capabilities.find((entry) => entry.capabilityId === "context-mode")?.code).toBe("capability-mcp-not-configured");
+    expect(report.capabilities.find((entry) => entry.capabilityId === "context7")?.code).toBe("capability-mcp-not-configured");
     expect(report.capabilities.find((entry) => entry.capabilityId === "rtk")?.code).toBe("capability-mapping-gap");
-    expect(report.capabilities.find((entry) => entry.capabilityId === "serena")?.code).toBe("capability-binary-not-usable");
+    expect(report.capabilities.find((entry) => entry.capabilityId === "serena")).toBeUndefined();
     expect(report.capabilities.find((entry) => entry.capabilityId === "codebase-memory")?.code).toBe("capability-index-unverified");
     const mcpReport = resolveCoreRunnerParity("synthetic", {
-      binariesInPath: ["context-mode", "codebase-memory-mcp"],
+      binariesInPath: ["context7", "codebase-memory-mcp"],
       mcpServersConfigured: [],
     }, [contribution]);
     expect(mcpReport.capabilities.find((entry) => entry.capabilityId === "codebase-memory-mcp")?.code).toBe("capability-mcp-not-configured");
@@ -130,15 +130,15 @@ describe("Runner Capability Parity Resolver", () => {
   });
 
   describe("Pi with missing capabilities", () => {
-    it("should identify Serena gap when not in PATH", () => {
+    it("should omit retired Serena even when not in PATH", () => {
       const report = resolveRunnerParity("pi", {
         binariesInPath: [],
         mcpServersConfigured: [],
       });
 
       const serenaEntry = report.capabilities.find((c) => c.capabilityId === "serena");
-      expect(serenaEntry?.status).toBe("gap");
-      expect(serenaEntry?.code).toBe("capability-binary-not-usable");
+      expect(serenaEntry).toBeUndefined();
+      expect(report.gaps.some(entry=>entry.capabilityId === "serena")).toBe(false);
     });
 
     it("should identify Context7 gap when MCP not configured", () => {
@@ -177,14 +177,14 @@ describe("Runner Capability Parity Resolver", () => {
       expect(rtkEntry?.status).toBe("shared");
     });
 
-    it("should identify context-mode as shared when binary and MCP configured", () => {
+    it("should omit retired context-mode even when binary and MCP configured", () => {
       const report = resolveRunnerParity("pi", {
         binariesInPath: ["context-mode"],
         mcpServersConfigured: ["context-mode"],
       });
 
       const contextModeEntry = report.capabilities.find((c) => c.capabilityId === "context-mode");
-      expect(contextModeEntry?.status).toBe("shared");
+      expect(contextModeEntry).toBeUndefined();
     });
 
     it("should identify codebase-memory as gap when binary missing", () => {

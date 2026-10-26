@@ -135,14 +135,14 @@ describe("failure and abort handling", () => {
 
   test("a child that ignores SIGTERM is killed with SIGKILL after the grace period", async () => {
     const controller = new AbortController();
-    const started = Date.now();
+    const started = performance.now();
     const pending = runner({ killGraceMs: 200 }).run({ agent: INVESTIGATE, task: "IGNORE_TERM", cwd: dir, signal: controller.signal });
     await Bun.sleep(300);
     controller.abort();
     const result = await pending;
     expect(result.aborted).toBe(true);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(450);
-    expect(Date.now() - started).toBeLessThan(4000);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(450);
+    expect(performance.now() - started).toBeLessThan(4000);
   });
 
   test("killAll terminates in-flight children (lead shutdown)", async () => {

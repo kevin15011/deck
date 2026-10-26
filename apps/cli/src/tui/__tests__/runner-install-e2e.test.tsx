@@ -424,11 +424,14 @@ describe("Codex adapter-driven render-only states", () => {
     }
     const dashboardState = createDefaultRunnerDashboardState({ runnerScope: "codex", runnerDisplayName: adapter.displayName, runnerUi: adapter.ui, screen: "packages-detail", capabilityStatuses });
     const toggleableIds = getToggleablePackageInstructionIds(dashboardState, resolver);
-    expect(toggleableIds).toEqual(["codebase-memory", "context-mode", "rtk", "adaptive-memory", "serena"]);
+    expect(toggleableIds).toEqual(["codebase-memory", "rtk", "adaptive-memory"]);
     expect(toggleableIds).not.toContain("code-economy");
     const dispositions = renderToString(<RunnerDashboardScreens state={dashboardState} capabilityResolver={resolver} />);
-    for (const label of ["Codebase Memory", "Context Mode", "RTK"]) expect(dispositions).toContain(`[x] ${label}`);
-    for (const label of ["Adaptive Memory", "Serena"]) expect(dispositions).toContain(`[x] ${label}`);
+    expect(dispositions).toContain("[ ] Codebase Memory");
+    expect(dispositions).toContain("[x] RTK");
+    expect(dispositions).not.toContain("Context Mode");
+    expect(dispositions).toContain("[x] Adaptive Memory");
+    expect(dispositions).not.toContain("Serena");
     expect(dispositions).not.toContain("[ ] Code Economy");
     expect(dispositions).not.toContain("OpenCode Mermaid Renderer");
     expect(dispositions).not.toContain("Deck Model Variants");

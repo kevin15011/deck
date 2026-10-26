@@ -4,9 +4,9 @@
  * End-to-end tests covering the 18 scenarios from spec.md:
  * - Mapping absent -> explicit gap
  * - Silent Mermaid -> no gap
- * - Serena mandatory in Pi -> gap if missing/not configured
+ * - Retired Serena and Context Mode -> no availability gaps or remediation
  * - Context7 standard works / blocked
- * - context-mode MCP local in Pi
+ * - Legacy context-mode evidence does not reactivate it
  * - codebase-memory requires MCP local + index status
  * - RTK reuse and availability by runner
  * - Supermemory without Pi-only gate / misconfigured
@@ -61,32 +61,30 @@ describe("Runner Capability Parity E2E", () => {
   });
 
   // ========================================================================
-  // Scenario: Pi with serena configured -> no gap for serena
+  // Scenario: retired Serena never produces availability gaps
   // ========================================================================
 
-  test("pi without serena shows gap (mandatory capability)", () => {
+  test("pi without retired Serena has no Serena gap", () => {
     const report = resolveRunnerParity("pi", {
       binariesInPath: [],
       mcpServersConfigured: [],
     });
 
-    // Serena has gap in mapping - this is expected until configured
+    // Retired capabilities must not generate install or remediation advice.
     const serenaGap = report.gaps.find((g) => g.capabilityId === "serena");
-    expect(serenaGap).toBeDefined();
-    expect(serenaGap?.severity).toBe("error");
+    expect(serenaGap).toBeUndefined();
+    expect(report.capabilities.some(c=>c.capabilityId === "serena")).toBe(false);
   });
 
-  test("pi serena gap has proper error code and message", () => {
+  test("pi retirement produces no Serena remediation", () => {
     const report = resolveRunnerParity("pi", {
       binariesInPath: [],
       mcpServersConfigured: [],
     });
 
     const serenaGap = report.gaps.find((g) => g.capabilityId === "serena");
-    expect(serenaGap).toBeDefined();
-    expect(serenaGap?.code).toMatch(/missing|gap|not-satisf|not-usable/);
-    expect(serenaGap?.message).toMatch(/[Ss]erena/);
-    expect(serenaGap?.recommendedAction).toBeDefined();
+    expect(serenaGap).toBeUndefined();
+    expect(getCanonicalCapability("serena")).toBeUndefined();
   });
 
   // ========================================================================
@@ -162,7 +160,7 @@ describe("Runner Capability Parity E2E", () => {
   });
 
   // ========================================================================
-  // Scenario: context-mode MCP local in Pi
+  // Scenario: retired context-mode remains absent with or without legacy evidence
   // ========================================================================
 
   test("pi with context-mode binary and MCP config has no gap", () => {
@@ -178,15 +176,15 @@ describe("Runner Capability Parity E2E", () => {
     expect(ctxModeGap).toHaveLength(0);
   });
 
-  test("pi without context-mode shows gap with proper code", () => {
+  test("pi without retired context-mode has no capability or gap", () => {
     const report = resolveRunnerParity("pi", {
       binariesInPath: [],
       mcpServersConfigured: [],
     });
 
     const ctxModeGap = report.gaps.find((g) => g.capabilityId === "context-mode");
-    expect(ctxModeGap).toBeDefined();
-    expect(ctxModeGap?.code).toMatch(/missing|capability-(?:mcp-not-configured|binary-not-usable)/);
+    expect(ctxModeGap).toBeUndefined();
+    expect(report.capabilities.some(c=>c.capabilityId === "context-mode")).toBe(false);
   });
 
   // ========================================================================
@@ -394,11 +392,9 @@ describe("Runner Capability Parity E2E", () => {
 
   test("all required capabilities are present in registry", () => {
     const required = [
-      "context-mode",
       "codebase-memory",
       "codebase-memory-mcp",
       "rtk",
-      "serena",
       "context7",
       "supermemory-tool-bindings",
       "pi-orchestrator-prompt-persistence",

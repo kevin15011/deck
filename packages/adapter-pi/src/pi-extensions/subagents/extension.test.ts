@@ -36,7 +36,18 @@ function load(child = false) {
   };
   const i = { tools, commands, messages, entries, emit, call, switchTo, modelContext, selectBranch: (value: any[]) => { branch = value; } }; cleanup.push(() => emit("session_shutdown")); return i;
 }
-const records = () => existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map(l => JSON.parse(l)) : [];
+const records = () => {
+  if (!existsSync(log)) return [];
+  const content = readFileSync(log, "utf8");
+  // The child may have opened or partially appended the log before polling reads it.
+  return content.slice(0, content.lastIndexOf("\n") + 1).split("\n").filter(Boolean).map(line => JSON.parse(line));
+};
+test("child log polling waits for complete records and rejects malformed completed records", () => {
+  writeFileSync(log, ""); expect(records()).toEqual([]);
+  writeFileSync(log, '{"id":1}\n{"id":'); expect(records()).toEqual([{id:1}]);
+  writeFileSync(log, '{"id":1}\n{"id":2}\n'); expect(records()).toEqual([{id:1},{id:2}]);
+  writeFileSync(log, 'invalid\n'); expect(() => records()).toThrow();
+});
 const text = (r: any) => r.content[0].text;
 async function waitUntil(fn: () => boolean) { const end = Date.now() + 5000; while (!fn()) { if (Date.now() > end) throw new Error("Timed out"); await Bun.sleep(10); } }
 async function completed(i: ReturnType<typeof load>, id: string) { let r: any; await waitUntil(() => { const snapshots = i.entries["parent-a"] ?? []; r = snapshots.at(-1)?.data.jobs.find((j: any) => j.id === id); return ["completed", "failed", "cancelled"].includes(r?.state); }); return r; }
