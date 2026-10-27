@@ -1,3 +1,5 @@
+import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
+import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
@@ -37,7 +39,8 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
   test("keeps all native Deck skill descriptors valid with YAML frontmatter at byte zero", () => {
     const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map() });
     const skills = plan.expectedFiles.filter((file) => file.relativePath.endsWith("/SKILL.md") && file.relativePath.includes("/deck-"));
-    expect(skills).toHaveLength(10);
+    const expectedIds = [...DEVELOPER_TEAM_AGENTS.map(agent => agent.skillId), ...getBootstrapSkillFiles().map(skill => skill.skillId), ...getStandaloneSkills().map(skill => skill.skillId)].filter(id => id.startsWith("deck-"));
+    expect(skills.map(skill => skill.relativePath.split("/").at(-2)).sort()).toEqual([...new Set(expectedIds)].sort());
     for (const skill of skills) {
       expect(skill.content.startsWith("---\n")).toBe(true);
       expect(parseSkillDescriptor(skill.content, skill.relativePath.split("/").at(-2))).toMatchObject({ ok: true });

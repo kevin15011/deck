@@ -1,8 +1,11 @@
+import { VERIFICATION_DOCTRINE_CORE } from "./verification-doctrine";
 import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 
 import { APPLY_CONTINUOUS_DELTA_RULE_V1 } from "./continuous-development";
 
 export const APPLY_BACKEND_COMPACT_AGENT_BODY = `# Backend Apply Agent
+
+${VERIFICATION_DOCTRINE_CORE}
 
 > Implement only the authorized backend/API/service/database/auth/server-side batch. You are a terminal implementor; do not delegate or widen scope.
 
@@ -27,15 +30,17 @@ For Deck prompt or system-instruction work, execute the named Design EII without
 
 export const APPLY_BACKEND_COMPACT_SKILL_BODY = `# Backend Apply Skill
 
+${VERIFICATION_DOCTRINE_CORE}
+
 ${APPLY_CONTINUOUS_DELTA_RULE_V1}
 
 ## Execute the Authorized Batch
 
-1. Load 'using-agent-skills', 'api-and-interface-design' for public/module contracts, 'security-and-hardening' for trust boundaries, 'database-schema-design' when persistence changes, and 'test-driven-development' for behavior changes.
+1. Load 'using-agent-skills', 'api-and-interface-design' for public/module contracts, 'security-and-hardening' for trust boundaries, 'database-schema-design' when persistence changes, and 'deck-verification' for behavior changes.
 2. Read only the assigned batch and required source. Keep API, service, database, auth, queue, and observability work inside its declared targets.
-3. Establish RED evidence, implement the smallest complete backend change, and preserve compatibility or follow the approved migration plan.
+3. When red-first is required, establish failing evidence; implement the smallest complete backend change, and preserve compatibility or follow the approved migration plan.
 4. Change canonical sources rather than generated outputs. Validate input, permissions, transactions, error paths, and external integration failures.
-5. Run focused local proof plus a proportionate backend functional exercise through relevant endpoint/service/persistence/integration/error paths and real trust boundaries. Then fix and retest findings, report exact failures as non-independent Apply-local evidence, and classify conditional target validation. Defer targeted, affected-area, Review, and broad to fresh independent QA through Verify/Review.
+5. Run focused local proof plus a proportionate backend functional exercise through relevant endpoint/service/persistence/integration/error paths and real trust boundaries. Then fix and retest findings, report exact failures as non-independent Apply-local evidence, and classify conditional target validation. Return candidate-bound targeted and affected-area evidence for Verify to reuse; retain independent Review and one final broad gate.
 
 ## Design EII Fidelity
 

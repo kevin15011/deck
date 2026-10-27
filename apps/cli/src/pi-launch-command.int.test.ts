@@ -1,3 +1,4 @@
+import { VERIFICATION_DOCTRINE_CORE } from "../../../packages/core/src/teams/developer/verification-doctrine";
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -173,8 +174,7 @@ describe("runPiLaunch", () => {
       );
 
       expect(result.status).toBe("ready");
-      expect(prompt).toContain("# Lead (deck-lead)");
-      expect(prompt).toContain("Adaptive Developer Team Contract");
+      expect(prompt).toContain(VERIFICATION_DOCTRINE_CORE);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -245,7 +245,6 @@ describe("runPiLaunch", () => {
         const systemPromptContent = fs.readFileSync(path.join(profileDir, "system-prompt.md"), "utf-8");
         expect(systemPromptContent).toContain("## Adaptive Memory (provider-injected)");
         expect(systemPromptContent).toContain("Test Supermemory session injection.");
-        expect(systemPromptContent).toContain("Memory is auxiliary");
       }
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });

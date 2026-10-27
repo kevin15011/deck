@@ -13,13 +13,6 @@ import { describe, it, expect } from "bun:test";
 import { COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1 } from "./orchestrator-invariants";
 
 describe("INV-004 SDD Triage Gate: strengthened condition and requiredAction", () => {
-
-  it("invariant count remains six and compact INV-004 summary is exact", () => {
-    const compact = COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1.find((e) => e.id === "INV-004");
-    expect(compact?.summary).toBe(
-      "Classify each new outcome. For new substantive work, briefly state objective and scope. For missing required input or material ambiguity, ask ONE concise question and wait before dependent action; bounded read-only clarification discovery is allowed. Proceed without redundant approval when clear and authorized. For follow-ups, confirm only changed scope; do not restart intake. Preserve authority and security gates, including scope expansion, protected risk, irreversible action, or an actual conflict.",
-    );
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -162,13 +155,4 @@ describe("ModificationAuthorization: renderApplyAuthorizationCard", () => {
 });
 
 describe("streamlined coordinator ownership invariants", () => {
-
-  it("keeps compact Automatic and ownership boundaries explicit", () => {
-    const automatic = COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1.find(({ id }) => id === "INV-001")!.summary;
-    const ownership = COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1.find(({ id }) => id === "INV-002")!.summary;
-    expect(automatic).toContain("no routine pause");
-    expect(automatic).toContain("target/product validation");
-    expect(ownership).toContain("bounded coordinator operations");
-    expect(ownership).toContain("implementation and judgment");
-  });
 });

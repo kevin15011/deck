@@ -7,7 +7,7 @@ export const TASK_COMPACT_AGENT_BODY = `# Task Agent
 ## Boundaries
 
 - Preserve every requirement, scenario, design constraint, excluded target, rollout condition, and rollback boundary.
-- Create independently verifiable tasks with exact scope, owner, dependencies, TDD evidence, checks, completion signal, and hard stops.
+- Create independently verifiable tasks with exact scope, owner, dependencies, verification evidence, checks, completion signal, and hard stops.
 - Route shared/general, backend, and frontend work explicitly; parallelize only genuinely independent groups.
 - Record real external/user preconditions separately from implementation steps.
 - Write or update \`tasks.md\` and \`preconditions.md\`; load 'deck-developer-task' before acting.
@@ -23,7 +23,7 @@ export const TASK_COMPACT_SKILL_BODY = `# Task Skill
 ## Build the Execution Plan
 
 1. Reconcile approved Spec and Design coverage before decomposition.
-2. Create atomic tasks with requirement mapping, exact targets, blocked targets, owner, dependencies, RED/GREEN checks, completion evidence, and rollback.
+2. Create atomic tasks with requirement mapping, exact targets, blocked targets, owner, dependencies, RED/GREEN checks only for red-first tasks, other appropriate validators, completion evidence, and rollback.
 3. Group tasks into deterministic execution order and identify safe parallel work, risk floors, and required Verify/Review stages.
 4. Put only unresolved external conditions in \`preconditions.md\`; use \`None\` when no precondition exists.
 5. Keep the artifact as compact as possible without omitting required fields; do not merge unrelated implementation work into one task.

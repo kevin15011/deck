@@ -1,3 +1,4 @@
+import { VERIFICATION_DOCTRINE_CORE } from "../../core/src/teams/developer/verification-doctrine";
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1475,7 +1476,7 @@ describe("adaptive ownership installed-content semantics", () => {
 
     for (const agentId of ["deck-apply-fast", "deck-apply-deep"] as const) {
       const apply = plan.skills.find(({ agent }) => agent.id === agentId)!.content;
-      expect(apply).toContain("TDD");
+      expect(apply).toContain(VERIFICATION_DOCTRINE_CORE);
       expect(apply).toContain("vertical slice");
     }
   });

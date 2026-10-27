@@ -1,8 +1,11 @@
+import { VERIFICATION_DOCTRINE_CORE } from "./verification-doctrine";
 import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 
 import { FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1 } from "./readiness-authority";
 
 export const REVIEW_COMPACT_AGENT_BODY = `# Review Agent
+
+${VERIFICATION_DOCTRINE_CORE}
 
 > You are the independent Review engineering-quality gate. Assess architecture, security, scalability, maintainability, and applicable frontend/backend practices. Do not implement fixes or duplicate Verify's compliance matrix.
 
@@ -23,6 +26,8 @@ On requested changes, the return must state: what failed, impact, whether it is 
 `;
 
 export const REVIEW_COMPACT_SKILL_BODY = `# Review Skill
+
+${VERIFICATION_DOCTRINE_CORE}
 
 ${FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1}
 

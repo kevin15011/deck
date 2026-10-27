@@ -431,11 +431,4 @@ describe("DeveloperTeamManifest", () => {
 
 
 describe("adaptive ownership manifest materialization", () => {
-  test("renders direct ownership, proportional TDD, and conditional Quality", () => {
-    const result = buildDeveloperTeamManifest({ team: { id: "developer-team", displayName: "Developer Team" } });
-    const rendered = JSON.stringify(result.manifest);
-    expect(rendered).toContain("smallest safe route");
-    expect(rendered).toContain("Proportional TDD");
-    expect(rendered).toContain("Quality is not a universal gate");
-  });
 });

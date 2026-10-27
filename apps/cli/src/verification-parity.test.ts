@@ -1,3 +1,4 @@
+import { VERIFICATION_DOCTRINE_CORE } from "../../../packages/core/src/teams/developer/verification-doctrine";
 import { GIT_DISCARD_PROTECTION_RULE } from "../../../packages/core/src/teams/developer/git-safety";
 import { ADAPTIVE_TEAM_RUNTIME_CONTRACT } from "../../../packages/core/src/teams/developer/adaptive-team-content";
 import { describe, expect, test } from "bun:test";
@@ -28,6 +29,12 @@ for (const [runner, build] of Object.entries(plans)) {
   describe(`verification parity: ${runner}`, () => {
     test("canonical standalone skills survive production plan composition", () => {
       const files = build();
+      expect(getStandaloneSkills().map(s => s.skillId), `${runner}: doctrine registration`).toContain("deck-verification");
+      for (const file of files) {
+        expect(file.path).not.toContain("test-driven-development");
+        expect(file.content).not.toContain("test-driven-development");
+      }
+      for (const file of files) expect(file.content, `${runner}: obsolete TDD trigger in ${file.path}`).not.toContain("Use when implementing any logic, fixing any bug, or changing any behavior");
       for (const { skillId } of getStandaloneSkills()) {
         const file = files.find(f => (`/` + f.path).endsWith(`/skills/${skillId}/SKILL.md`));
         expect(file, `${runner}: missing ${skillId}`).toBeDefined();
@@ -43,6 +50,8 @@ for (const [runner, build] of Object.entries(plans)) {
         const file = files.find(f => (`/` + f.path).endsWith(`/agents/${agent.id}.${runner === "codex" ? "toml" : "md"}`));
         expect(file, `${runner}: missing agent ${agent.id}`).toBeDefined();
         const body = runner === "codex" ? String((Bun.TOML.parse(file!.content) as { developer_instructions: string }).developer_instructions) : file!.content;
+        expect(body.split(VERIFICATION_DOCTRINE_CORE), `${runner}: ${agent.id} doctrine exactly once`).toHaveLength(2);
+        expect(body, `${runner}: ${agent.id} default strict skill`).not.toContain("test-driven-development");
         expect(body, `${runner}: ${agent.id} git protection`).toContain(GIT_DISCARD_PROTECTION_RULE);
         expect(body, `${runner}: ${agent.id} team contract`).toContain(runner === "opencode" ? removeDeckMemoryClaimsForOpenCode(ADAPTIVE_TEAM_RUNTIME_CONTRACT) : ADAPTIVE_TEAM_RUNTIME_CONTRACT);
         const canonical = runner === "opencode" && agent.id === "deck-lead"
@@ -57,6 +66,7 @@ for (const [runner, build] of Object.entries(plans)) {
         const file = files.find(f => (`/` + f.path).endsWith(`/skills/${agent.skillId}/SKILL.md`));
         expect(file, `${runner}: missing ${agent.skillId}`).toBeDefined();
         const canonical = getAgentContent(agent.id, { promptProfile: "compact" })!;
+        expect(file!.content.split(VERIFICATION_DOCTRINE_CORE), `${runner}: ${agent.id} role-skill doctrine`).toHaveLength(2);
         expect(file!.content, `${runner}: ${agent.id} canonical role skill`).toContain((runner === "opencode" ? removeDeckMemoryClaimsForOpenCode(canonical.skillBody) : canonical.skillBody).trim());
       }
     });
@@ -66,6 +76,8 @@ for (const [runner, build] of Object.entries(plans)) {
 test("cross-runner session embeds canonical role bodies without installed skills", () => {
   for (const agent of getDeveloperTeamCatalog()) {
     for (const runnerId of Object.keys(plans)) {
+      expect(sessionRolePrompt(agent.id, { projectRoot, runnerId })).not.toContain("test-driven-development");
+      expect(sessionRolePrompt(agent.id, { projectRoot, runnerId }).split(VERIFICATION_DOCTRINE_CORE), `${runnerId}: ${agent.id} session doctrine`).toHaveLength(2);
       expect(sessionRolePrompt(agent.id, { projectRoot, runnerId }), `${runnerId}: ${agent.id}`).toContain(getAgentContent(agent.id, { promptProfile: "compact" })!.agentBody);
     }
   }

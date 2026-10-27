@@ -1,3 +1,4 @@
+import { VERIFICATION_DOCTRINE_CORE } from "../../../packages/core/src/teams/developer/verification-doctrine";
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -109,7 +110,7 @@ describe("production prompt activation", () => {
       expect(result.status).toBe("ready");
       expect(prompt).toContain("# Apply Fast (deck-apply-fast)");
       expect(prompt).toContain("Adaptive Developer Team Contract");
-      expect(prompt).toContain("## Proportional TDD");
+      expect(prompt).toContain(VERIFICATION_DOCTRINE_CORE);
       expect(prompt).toContain("Modifying work requires the user's request and the active runner's authority");
       expect(prompt).not.toContain("Orchestrator will inject renderApplyAuthorizationCard()");
     } finally {

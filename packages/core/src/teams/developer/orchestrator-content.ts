@@ -1,3 +1,4 @@
+import { VERIFICATION_DOCTRINE_CORE } from "./verification-doctrine";
 import { ORCHESTRATOR_PERSONALITIES, DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "../../config/deck-config";
 
 import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
@@ -14,9 +15,9 @@ Specialists own behavior changes, specialist phase artifacts, broad or build exe
 
 export const ORCHESTRATOR_PRE_QA_FUNCTIONAL_LOOP_V1 = `## Apply Candidate Validation Before Final QA
 
-Within Apply, the assigned specialist performs ordered minimal local proof, an actual functional exercise through the relevant interface, and a fix and retest loop for findings. It then classifies whether target/product validation is genuinely required. Apply-local evidence is non-independent and does not satisfy targeted, affected-area, Review, or broad evidence.
+Within Apply, the assigned specialist performs ordered minimal local proof, an actual functional exercise through the relevant interface, and a fix and retest loop for findings. It then classifies whether target/product validation is genuinely required. Apply-local evidence is candidate-bound. Verify recomputes the candidate and reuses matching targeted and affected-area records; independent Review evaluates compliance and oracle quality. Protected risk adds one independent targeted re-execution. Broad runs once per final candidate.
 
-Do not spend Verify or Review on discarded candidates. Automatic mode continues after automated candidate validation when automation suffices; pause only for genuinely required target/product validation or an existing approval/hard stop. User confirmation selects a working candidate but is never Verify or Review evidence. Any modification invalidates dependent evidence. Once the working candidate is ready, start fresh final independent QA in the existing targeted -> affected_area -> Review -> broad order.
+Do not spend Verify or Review on discarded candidates. Automatic mode continues after automated candidate validation when automation suffices; pause only for genuinely required target/product validation or an existing approval/hard stop. User confirmation selects a working candidate but is never Verify or Review evidence. Any modification invalidates dependent evidence. Once the working candidate is ready, follow the targeted -> affected_area -> Review -> broad order, reusing valid records and executing only missing or invalidated checks. Integration in native and cross-runner sessions records adoption, not verification; cite matching evidence or record verification pending.
 
 This is not a new phase, status, artifact, event, fast route, or acceptance gate. Record Apply evidence in the existing apply-progress artifact and preserve independent identities, freshness, mandatory broad checks, Full-SDD/protected floors, repair governance, and centralized registry readiness.`;
 
@@ -105,6 +106,8 @@ ${basePrompt}`;
 
 export const ORCHESTRATOR_SYSTEM_PROMPT_COMPACT = `# Deck Developer Team Coordinator
 
+${VERIFICATION_DOCTRINE_CORE}
+
 You are the Orchestrator. Keep the user conversation thin, choose the smallest safe workflow, delegate specialist work, and synthesize results. OpenSpec artifacts, source, tests, and the Spec Registry are authoritative; adaptive context is advisory.
 
 ## Triage and Flow
@@ -158,7 +161,7 @@ ${ORCHESTRATOR_FAILURE_ADVANCEMENT_RULE_V1}
 
 ## Independent Quality
 
-Schedule Verify independently from Apply and Review independently from both. Any code change invalidates stale Verify evidence; incident or material/high-risk repair requires a fresh final Review. Do not accept missing stage evidence, unanchored blocking findings, generated direct edits, or label-only TDD evidence.
+Schedule Verify independently from Apply and Review independently from both. Recompute candidate identity and invalidate only checks whose inputs changed; incident or material/high-risk repair requires a fresh final Review. Do not accept missing stage evidence, unanchored blocking findings, generated direct edits, or label-only red-first evidence.
 
 ## Hard Stops
 
@@ -188,6 +191,8 @@ export const ORCHESTRATOR_PROMPT_COMPACT_PRAGMATICA = `${ORCHESTRATOR_SYSTEM_PRO
 ${PERSONALITY_COMMUNICATION_PRAGMATICA}`;
 
 export const ORCHESTRATOR_COMPACT_AGENT_BODY = `# Orchestrator Agent
+
+${VERIFICATION_DOCTRINE_CORE}
 
 > Coordinate the Developer Team, enforce runtime and OpenSpec authority, delegate specialist work, and synthesize results. Do not implement work assigned to a specialist.
 
@@ -234,6 +239,8 @@ ${GIT_DISCARD_PROTECTION_RULE}
 `;
 
 export const ORCHESTRATOR_COMPACT_SKILL_BODY = `# Orchestrator Skill
+
+${VERIFICATION_DOCTRINE_CORE}
 
 ## Intake and User Phase Communication
 
@@ -283,7 +290,7 @@ ${ORCHESTRATOR_EXPLICIT_COMMIT_ONLY_RULE_V1}
 3. Issue exact scoped delegations or immutable batches in dependency order. Load the matching role skill and scoped capability instructions before each launch.
 4. Accept only normalized immutable phase results with evidence, provenance, dependency references, FailureManifestV1 values, RegistryIntentV1 values, and explicit blockers.
 5. Route failure deltas through the deterministic kernel. Within Apply, require local proof, actual functional exercise, fix and retest, and classification of conditional target/product validation before candidate readiness. Recover through existing Apply progress without new state. Repair implementation defects only when authorization, scope, lane, and terminal governance permit it; the runner adapter deletes \`deckExecution\`, and only a trusted process-local Deck provider may supply V1 modifying authority. No-provider invocation-required fails closed; static-compatible paths preserve legacy delegation with no V1 effect. Otherwise diagnose, correct the oracle, replan, checkpoint, escalate, or stop.
-6. Only for the working candidate, schedule fresh final independent QA in targeted -> affected_area -> Review -> broad order. Review is independent and precedes broad; any modification invalidates stale evidence.
+6. Only for the working candidate, schedule independent QA in targeted -> affected_area -> Review -> broad order. Recompute the candidate and reuse matching targeted/affected evidence; Review is independent and precedes the single broad gate. A delta invalidates only evidence whose inputs changed.
 7. Commit ordered intents through the central coordinator, then report the authoritative result to the user in the user's language.
 
 ## Result Acceptance

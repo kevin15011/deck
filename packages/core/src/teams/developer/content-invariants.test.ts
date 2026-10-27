@@ -1,3 +1,4 @@
+import { VERIFICATION_DOCTRINE_CORE } from "./verification-doctrine";
 import { describe, expect, test } from "bun:test";
 import { parse } from "yaml";
 import { getStandaloneSkill, STANDALONE_SKILLS } from "../../skills/external";
@@ -10,11 +11,12 @@ import * as verify from "./verify-content";
 import * as review from "./review-content";
 import * as archive from "./archive-content";
 
-// Protect structure and safety contracts, not editorial wording. U2 activates doctrine rules.
-const BANNED_PHRASES: readonly string[] = [];
+// Protect structure and safety contracts, not editorial wording.
+const BANNED_PHRASES = ["strict TDD", "sufficient test coverage", "every new behavior has a corresponding test", "run tests after every refactor step"];
 const PROTECTED_BLOCKS = {
   GIT_DISCARD_PROTECTION_RULE,
   ADAPTIVE_TEAM_RUNTIME_CONTRACT,
+  VERIFICATION_DOCTRINE_CORE,
 };
 const REQUIRED_SECTIONS: Record<string, readonly string[]> = {
   "deck-lead": ["Route selection", "OpenSpec persistence", "Communication"],
@@ -59,7 +61,7 @@ test("compact review, verify and archive surfaces preserve authority verbatim", 
   for (const [role, exports] of Object.entries({ verify, review, archive })) {
     for (const [name, body] of Object.entries(exports)) {
       if (typeof body === "string" && /_(AGENT|SKILL)_BODY$/.test(name)) {
-        expect(body, `${role}/${name}: FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1`).toContain(FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1);
+        expect(body.split(FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1), `${role}/${name}: authority exactly once`).toHaveLength(2);
       }
     }
   }
@@ -67,9 +69,11 @@ test("compact review, verify and archive surfaces preserve authority verbatim", 
 
 test("standalone skill IDs, frontmatter and size bounds", () => {
   const ids = STANDALONE_SKILLS.map((s) => s.skillId);
+  expect(ids).not.toContain("test-driven-development");
   expect(new Set(ids).size).toBe(ids.length);
   for (const id of ids) {
     const body = getStandaloneSkill(id).SKILL;
+    expect(body, `${id}: removed methodology`).not.toContain("test-driven-development");
     const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(body);
     expect(frontmatter, `${id}: frontmatter`).not.toBeNull();
     const descriptor = parse(frontmatter![1]!);
@@ -77,4 +81,32 @@ test("standalone skill IDs, frontmatter and size bounds", () => {
     expect(typeof descriptor.description, id).toBe("string");
     expect(Buffer.byteLength(body), `${id}: byte budget`).toBeLessThanOrEqual(100_000);
   }
+});
+
+// The shipped core must remain useful without an installed skill or a particular stack.
+test("doctrine core is bounded and stack-neutral", () => {
+  expect(Buffer.byteLength(VERIFICATION_DOCTRINE_CORE)).toBeLessThanOrEqual(1500);
+  expect(VERIFICATION_DOCTRINE_CORE).not.toMatch(/merchant|Liquid|bun test|test:changed|scripts\/test\.ts|pytest|npm|Shopify/i);
+});
+
+// Compact Full SDD helpers remain in source even though only adaptive roles install.
+import * as general from "./apply-general-content";
+import * as frontend from "./apply-frontend-content";
+import * as backend from "./apply-backend-content";
+import * as orchestrator from "./orchestrator-content";
+import { APPLY_CONTINUOUS_DELTA_RULE_V1 } from "./continuous-development";
+import { SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1 } from "./skill-discovery-content";
+
+test("compact Full SDD surfaces preserve canonical contracts", () => {
+  for (const [role, exports] of Object.entries({ general, frontend, backend, verify, review, orchestrator })) {
+    for (const [name, body] of Object.entries(exports)) {
+      if (typeof body !== "string" || !/_(AGENT|SKILL)_BODY$/.test(name)) continue;
+      expect(body.split(VERIFICATION_DOCTRINE_CORE), `${role}/${name}: doctrine`).toHaveLength(2);
+      if (name.endsWith("_AGENT_BODY")) expect(body, `${role}: git protection`).toContain(GIT_DISCARD_PROTECTION_RULE);
+      if (["general", "frontend", "backend"].includes(role)) expect(body, `${role}: delta contract`).toContain(APPLY_CONTINUOUS_DELTA_RULE_V1);
+      if (role === "orchestrator") expect(body.split(SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1), name).toHaveLength(2);
+      expect(body, `${role}: default TDD skill`).not.toContain("test-driven-development");
+    }
+  }
+  expect(orchestrator.ORCHESTRATOR_SYSTEM_PROMPT_COMPACT.split(VERIFICATION_DOCTRINE_CORE)).toHaveLength(2);
 });

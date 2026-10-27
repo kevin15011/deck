@@ -25,6 +25,7 @@ These 59 skills are shipped as standalone reusable content. They are copied with
 | `api-and-interface-design` | Design stable APIs and module boundaries. |
 | `ci-cd-and-automation` | Set up or modify CI/CD and automation. |
 | `code-review-and-quality` | Review changes across correctness, architecture, security, and maintainability. |
+| `deck-verification` | Choose proportional checks, report candidate-bound evidence, and retire tests safely. |
 | `code-simplification` | Refactor working code for clarity without changing behavior. |
 | `cognitive-doc-design` | Write documentation that reduces cognitive load. |
 | `comment-writer` | Draft warm, direct collaboration and review comments. |
@@ -40,7 +41,6 @@ These 59 skills are shipped as standalone reusable content. They are copied with
 | `performance-optimization` | Optimize application performance from requirements and profiling evidence. |
 | `security-and-hardening` | Harden input, authentication, storage, and integrations. |
 | `shipping-and-launch` | Prepare production launches, monitoring, rollout, and rollback. |
-| `test-driven-development` | Drive behavior changes with proportional tests. |
 | `using-agent-skills` | Discover and invoke the relevant agent skill. |
 | `ui-skills-root` | Select the smallest useful UI skills context before UI work. |
 | `frontend-design` | Establish an intentional visual direction for distinctive interfaces. |

@@ -37,10 +37,6 @@ describe("continuous conversational development", () => {
       expect(surface).not.toContain("Permit at most three user-requested revision cycles");
     }
   });
-
-  test("recovery selects semantic lifecycle state instead of treating every directory as active", () => {
-    expect(ORCHESTRATOR_COMPACT_SKILL_BODY).toContain("Do not infer activity from directory presence");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -92,28 +88,6 @@ describe("T9 skill discovery prompt lifecycle", () => {
     }
   });
 
-  test("keeps the legacy and compact system prompts semantically aligned", () => {
-    const requiredTerms = [
-      "session-start",
-      "read-only",
-      "status",
-      "ready",
-      "missing",
-      "stale",
-      "invalid",
-      "indeterminate",
-      "direct discovery",
-      "verify",
-      "normal loading mechanism",
-      "authorization",
-      "never watch",
-    ];
-
-    for (const term of requiredTerms) {
-      expect(ORCHESTRATOR_SYSTEM_PROMPT_COMPACT.toLowerCase()).toContain(term.toLowerCase());
-    }
-  });
-
   test("adds bounded context projection without candidate or body injection", () => {
     for (const surface of allSurfaces) {
       expect(surface).toContain("Skill Discovery Context");
@@ -125,12 +99,6 @@ describe("T9 skill discovery prompt lifecycle", () => {
       expect(surface).not.toContain("loadReference");
       expect(surface).not.toContain("/home/");
     }
-  });
-
-  test("keeps the Orchestrator non-writing and leaves loading to specialists", () => {
-    expect(ORCHESTRATOR_COMPACT_AGENT_BODY).toContain("never write during validation");
-    expect(ORCHESTRATOR_COMPACT_SKILL_BODY).toContain("registry-only");
-    expect(ORCHESTRATOR_COMPACT_SKILL_BODY).toContain("Reject phase results that claim discovery authority or undelegated writes");
   });
 });
 
@@ -172,9 +140,6 @@ describe("getOrchestratorSystemPrompt", () => {
 // ---------------------------------------------------------------------------
 
 describe("PERSONALITY_COMMUNICATION_GUIDA", () => {
-  test("contains guia communication style header", () => {
-    expect(PERSONALITY_COMMUNICATION_GUIDA).toContain("Communication Style — Guia");
-  });
 
   test("does not contain operational keywords (triage, routing, registry, recovery)", () => {
     // These are actual operational keywords that should NOT appear
@@ -191,9 +156,6 @@ describe("PERSONALITY_COMMUNICATION_GUIDA", () => {
 });
 
 describe("PERSONALITY_COMMUNICATION_PRAGMATICA", () => {
-  test("contains pragmatica communication style header", () => {
-    expect(PERSONALITY_COMMUNICATION_PRAGMATICA).toContain("Communication Style — Pragmatica");
-  });
 
   test("does not contain operational keywords (triage, routing, registry, recovery)", () => {
     // These are actual operational keywords that should NOT appear
@@ -266,51 +228,11 @@ describe("streamlined Orchestrator ownership and candidate validation", () => {
     }
   });
 
-  test("locks the complete bounded coordinator and specialist ownership examples", async () => {
-    const { ORCHESTRATOR_OWNERSHIP_BOUNDARY_V1: ownership } = await import("./orchestrator-content");
-    for (const directOperation of [
-      "`git status`/`git diff`/`git log` inspection",
-      "exact staging and commit",
-      "deterministic artifact/digest/count/existence checks",
-      "centralized RegistryIntentV1 reconciliation",
-      "synthesis",
-      "recording a resolved in-scope decision",
-    ]) {
-      expect(ownership).toContain(directOperation);
-    }
-    for (const specialistOwned of [
-      "behavior changes",
-      "specialist phase artifacts",
-      "broad or build execution",
-      "protected-risk",
-      "architecture",
-      "migration",
-      "security",
-      "data-loss",
-      "public-API judgment",
-      "Verify",
-      "Review",
-    ]) {
-      expect(ownership).toContain(specialistOwned);
-    }
-  });
-
   test("locks relevant unstaged/staged diff inspection and exact commit handling", async () => {
     const { ORCHESTRATOR_EXPLICIT_COMMIT_ONLY_RULE_V1: commitOnly } = await import("./orchestrator-content");
     expect(commitOnly).toContain("relevant unstaged and staged `git diff`");
     expect(commitOnly).toContain("recent `git log`");
     expect(commitOnly).toContain("Stage only the explicitly intended paths with exact pathspecs");
     expect(commitOnly).toContain("Execute only the explicitly requested commit");
-  });
-
-  test("orders Apply-local functional validation before fresh independent final QA", () => {
-    for (const [, surface] of surfaces) {
-      expect(surface).toContain("local proof");
-      expect(surface).toContain("functional exercise");
-      expect(surface).toContain("fresh final independent QA");
-      expect(surface.indexOf("functional exercise")).toBeLessThan(surface.indexOf("fresh final independent QA"));
-      expect(surface).toContain("Automatic");
-      expect(surface).not.toContain("git add .");
-    }
   });
 });

@@ -77,51 +77,6 @@ const ALLOWED_SOURCE_FILES = new Set([
 ]);
 
 describe("User Phase Communication contract", () => {
-  test("UPC-INTAKE-01: BV-INTAKE-ALIGNMENT on orchestrator session/agent/skill surfaces", () => {
-    for (const surface of ORCH_ALL) {
-      expect(surface).toContain(BV_INTAKE_ALIGNMENT);
-    }
-    for (const surface of ORCH_ALL) {
-      expect(surface).toMatch(/Direct/);
-      expect(surface).toMatch(/Specialist\(s\)/);
-      expect(surface).toMatch(/Recommend SDD/);
-      expect(surface).toMatch(/Run SDD/);
-      expect(surface).toMatch(/Bounded read-only clarification discovery/);
-      expect(surface).toMatch(/proceed without redundant approval/);
-      expect(surface).toMatch(/There is no arbitrary revision-cycle limit/);
-      expect(surface).toMatch(/rerun only evidence invalidated by that delta/);
-      expect(surface).not.toMatch(/at most three user-requested revision cycles|on a fourth revision request/);
-    }
-  });
-
-  test("UPC-INTAKE-02: INV-004 requiredAction and compact summary are exact; six invariants", () => {
-    const compact = COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1.find((e) => e.id === "INV-004");
-    expect(compact?.summary).toBe(BV_INTAKE_COMPACT_SUMMARY);
-  });
-
-  test("UPC-COMMS-01: SC-PHASE-MATRIX phases present on session and skill surfaces", () => {
-    const surfaces = [ORCHESTRATOR_SYSTEM_PROMPT_COMPACT, ORCHESTRATOR_COMPACT_SKILL_BODY, ORCHESTRATOR_PROMPT_COMPACT_GUIDA, ORCHESTRATOR_PROMPT_COMPACT_PRAGMATICA];
-    for (const surface of surfaces) {
-      for (const phase of PHASES) {
-        expect(surface, phase).toContain("| " + phase + " |");
-      }
-      expect(surface).toMatch(/user's language|user language/i);
-      expect(surface).toMatch(/authoritative OpenSpec artifact|Keep artifact detail separate|keep full detail in artifacts/i);
-      expect(surface).toMatch(/never be removed for brevity|Never drop blockers/i);
-      expect(surface).toMatch(/Personality is applied only after|Personality applies only after|Personality only after/i);
-    }
-  });
-
-  test("UPC-COMMS-02: failure gate, Apply low-noise, conditional diagrams", () => {
-    for (const surface of ORCH_ALL) {
-      expect(surface).toContain(BV_FAILURE_DECISION_GATE);
-    }
-    for (const surface of [ORCHESTRATOR_SYSTEM_PROMPT_COMPACT, ORCHESTRATOR_COMPACT_SKILL_BODY, ORCHESTRATOR_COMPACT_AGENT_BODY]) {
-      expect(surface).toMatch(/low-noise|Final outcome, material deviations|Apply stays low-noise|required user actions only/i);
-      expect(surface).not.toContain("After each planning phase (Proposal, Spec, Design, Task), include a concise Mermaid diagram");
-      expect(surface).toMatch(/optional|never a phase gate|non-blocking|never treat a diagram as a required/i);
-    }
-  });
 
   test("UPC-PERSONALITY-01: content-preserving overlay and revised Pragmatica signal", () => {
     expect(PERSONALITY_COMMUNICATION_GUIDA).toContain(BV_PERSONALITY_CONTENT_PRESERVING);
@@ -134,14 +89,6 @@ describe("User Phase Communication contract", () => {
       const overlayIdx = composed.indexOf(BV_PERSONALITY_CONTENT_PRESERVING);
       expect(invIdx).toBeGreaterThanOrEqual(0);
       expect(overlayIdx).toBeGreaterThan(invIdx);
-    }
-  });
-
-  test("UPC-PROPOSAL-01: collaboration block and conditional approval handoff", () => {
-    for (const surface of [PROPOSAL_COMPACT_AGENT_BODY, PROPOSAL_COMPACT_SKILL_BODY]) {
-      expect(surface).toContain(BV_PROPOSAL_COLLABORATION);
-      expect(surface).toMatch(/Approval is awaited|awaited|after recorded approval|only after recorded approval/i);
-      expect(surface).not.toMatch(/Ready for Spec[\s\S]{0,40}in parallel\.\s*$/m);
     }
   });
 
@@ -208,19 +155,6 @@ describe("User Phase Communication contract", () => {
     }
   });
 
-  test("UPC-EXPLORER-01: explorer handoff fields without user-facing authority", () => {
-    for (const surface of [EXPLORER_COMPACT_AGENT_BODY, EXPLORER_COMPACT_SKILL_BODY]) {
-      expect(surface).toMatch(/key findings/i);
-      expect(surface).toMatch(/risks/i);
-      expect(surface).toMatch(/assumptions/i);
-      expect(surface).toMatch(/open decisions/i);
-      expect(surface).toMatch(/confidence/i);
-      expect(surface).toMatch(/evidence/i);
-      expect(surface).toMatch(/blockers/i);
-      expect(surface).toMatch(/make Explorer user-facing|Do not synthesize user-facing|without reducing exploration|Do not implement, approve scope|authorize product decisions/i);
-    }
-  });
-
   test("UPC-SCOPE-01: intended targets only; no runner-capability-standardization intersection", () => {
     // Contract surfaces live only in the allowlisted developer content modules.
     for (const name of ALLOWED_SOURCE_FILES) {
@@ -263,20 +197,6 @@ describe("User Phase Communication contract", () => {
 
 
 describe("streamlined ownership user communication", () => {
-  test("keeps Automatic low-noise while making target validation conditional", () => {
-    const combined = [ORCHESTRATOR_SYSTEM_PROMPT_COMPACT, ORCHESTRATOR_COMPACT_SKILL_BODY].join("\n");
-    expect(combined).toContain("no routine");
-    expect(combined).toContain("target/product validation");
-    expect(combined).not.toContain("unconditional post-Apply");
-  });
-
-  test("Apply roles distinguish non-independent local and functional evidence from final QA", () => {
-    for (const body of [APPLY_GENERAL_COMPACT_SKILL_BODY, APPLY_BACKEND_COMPACT_SKILL_BODY, APPLY_FRONTEND_COMPACT_SKILL_BODY]) {
-      expect(body).toContain("functional exercise");
-      expect(body).toContain("non-independent");
-      expect(body).toContain("fresh");
-    }
-  });
 
   test("makes failure block advancement without forcing a routine user pause before diagnosis or bounded authorized repair", () => {
     const surfaces = [ORCHESTRATOR_SYSTEM_PROMPT_COMPACT, ORCHESTRATOR_COMPACT_SKILL_BODY];

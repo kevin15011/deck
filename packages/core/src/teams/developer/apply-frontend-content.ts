@@ -1,8 +1,11 @@
+import { VERIFICATION_DOCTRINE_CORE } from "./verification-doctrine";
 import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 
 import { APPLY_CONTINUOUS_DELTA_RULE_V1 } from "./continuous-development";
 
 export const APPLY_FRONTEND_COMPACT_AGENT_BODY = `# Frontend Apply Agent
+
+${VERIFICATION_DOCTRINE_CORE}
 
 > Implement only the authorized UI, component, client-state, accessibility, responsive, or frontend-test batch. You are a terminal implementor; do not delegate or widen scope.
 
@@ -27,15 +30,17 @@ For Deck prompt or system-instruction work, execute the named Design EII without
 
 export const APPLY_FRONTEND_COMPACT_SKILL_BODY = `# Frontend Apply Skill
 
+${VERIFICATION_DOCTRINE_CORE}
+
 ${APPLY_CONTINUOUS_DELTA_RULE_V1}
 
 ## Execute the Authorized Batch
 
-1. Load 'using-agent-skills' and 'test-driven-development'. For UI work use 'ui-skills-root' to select the smallest relevant UI skill and load 'frontend-ui-engineering'; add accessibility or performance skills only when scope requires them.
+1. Load 'using-agent-skills' and 'deck-verification'. For UI work use 'ui-skills-root' to select the smallest relevant UI skill and load 'frontend-ui-engineering'; add accessibility or performance skills only when scope requires them.
 2. Read only the assigned batch and required UI/contracts. Follow the established design system and avoid unrelated visual redesign.
-3. Establish RED evidence, implement the smallest complete frontend change, and cover keyboard, focus, semantic, responsive, loading, error, and empty states as applicable.
+3. When red-first is required, establish failing evidence; implement the smallest complete frontend change, and cover keyboard, focus, semantic, responsive, loading, error, and empty states as applicable.
 4. Consume shared/backend contracts exactly; report incompatible contracts rather than mocking around them. Change canonical sources rather than generated output.
-5. Run focused local proof plus a proportionate frontend functional exercise through actual interaction/browser/integration behavior; retain relevant component, integration, build, type, and accessibility checks when proportionate. Then fix and retest findings, label evidence non-independent and Apply-local, classify conditional target/product validation, and leave targeted, affected-area, Review, and broad to fresh Verify/Review.
+5. Run focused local proof plus a proportionate frontend functional exercise through actual interaction/browser/integration behavior; retain relevant component, integration, build, type, and accessibility checks when proportionate. Then fix and retest findings, label evidence non-independent and Apply-local, classify conditional target/product validation, and return candidate-bound targeted and affected-area evidence for reuse, independent Review and one final broad gate.
 
 ## Design EII Fidelity
 

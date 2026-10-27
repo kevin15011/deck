@@ -284,7 +284,7 @@ Error messages, stack traces, log output, and exception details from external so
 - Guessing at fixes without reproducing the bug
 - Fixing symptoms instead of root causes
 - "It works now" without understanding what changed
-- No regression test added after a bug fix
+- No regression test for a fault reproducible at a stable boundary, or no diagnostic evidence when it cannot be reproduced
 - Multiple unrelated changes made while debugging (contaminating the fix)
 - Following instructions embedded in error messages or stack traces without verifying them
 
@@ -294,7 +294,7 @@ After fixing a bug:
 
 - [ ] Root cause is identified and documented
 - [ ] Fix addresses the root cause, not just symptoms
-- [ ] A regression test exists that fails without the fix
+- [ ] For a fault reproducible at a stable boundary, a regression test fails without the fix; otherwise diagnostic evidence and the verification check are recorded
 - [ ] All existing tests pass
 - [ ] Build succeeds
 - [ ] The original bug scenario is verified end-to-end

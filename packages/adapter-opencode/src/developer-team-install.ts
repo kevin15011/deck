@@ -1,3 +1,4 @@
+import { assertNoContributionSymlink, readRunnerContributions, contributionHash } from "@deck/core";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { createHash } from "node:crypto";
@@ -712,6 +713,10 @@ export function applyOpenCodeDeveloperTeamInstall(
   // 6. Verify the promoted candidate.
   assertOpenCodeCandidateFiles(plan, exists, readFile);
 
+  // Retire only files whose current bytes still match Deck ownership evidence.
+  // Backup includes these paths so both failed apply and explicit rollback restore them.
+  for (const file of retiredSkillFiles(plan)) unlink(file.absolutePath);
+
   // 7. Compute aggregate counts
   const changedCount = results.filter((r) => r.status !== "unchanged").length + (configMergeResult && configMergeResult.status !== "unchanged" ? 1 : 0);
   const unchangedCount = results.filter((r) => r.status === "unchanged").length + (configMergeResult && configMergeResult.status === "unchanged" ? 1 : 0);
@@ -953,6 +958,18 @@ function logMismatchDiagnostic(
   }
 }
 
+function retiredSkillFiles(plan: OpenCodeDeveloperTeamInstallPlan): FileBackupEntry[] {
+  const root = dirname(plan.skillsDir);
+  const manifest = readRunnerContributions(join(root, "deck/manifest.json"));
+  if (manifest?.runnerId !== "opencode" || manifest.root !== root) return [];
+  const retired = join(plan.skillsDir, "test-driven-development", "SKILL.md");
+  const receipt = manifest.contributions.find(entry => entry.path === retired && entry.selector.kind === "file");
+  if (!receipt || !existsSync(retired)) return [];
+  assertNoContributionSymlink(retired);
+  const content = readFileSync(retired, "utf8");
+  return contributionHash(content) === receipt.hash ? [{ absolutePath: retired, previousContent: content }] : [];
+}
+
 export function backupDeveloperTeamFiles(
   plan: OpenCodeDeveloperTeamInstallPlan,
   options?: { exists?: typeof existsSync; readFile?: (path: string, encoding: "utf-8") => string },
@@ -961,6 +978,7 @@ export function backupDeveloperTeamFiles(
   const readFile = options?.readFile ?? readFileSync;
 
   const entries: FileBackupEntry[] = [
+    ...retiredSkillFiles(plan),
     ...plan.skills.map((planned) => {
       if (exists(planned.absolutePath)) {
         return { absolutePath: planned.absolutePath, previousContent: readFile(planned.absolutePath, "utf-8") };

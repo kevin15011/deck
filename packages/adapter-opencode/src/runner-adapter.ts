@@ -1379,6 +1379,12 @@ class OpenCodeRunnerAdapterImpl {
     const targets = input.plan.files.flatMap(file => file.path === "opencode.json"
       ? sharedJsonContributionTargets(join(configDir, file.path), JSON.parse(file.content)).map(target => ({ ...target, expectedHash: contributionHash(selectContributionContent(file.content, target.selector)!) }))
       : [{ path: join(configDir, file.path), selector: { kind: "file" as const }, expectedHash: contributionHash(file.content) }]);
+    const desiredPaths = new Set(input.plan.files.map(file => join(configDir, file.path)));
+    for (const file of backupDeveloperTeamFiles(nativePlan).entries) {
+      if (!desiredPaths.has(file.absolutePath) && file.previousContent !== null) {
+        targets.push({ path: file.absolutePath, selector: { kind: "file" as const } } as typeof targets[number]);
+      }
+    }
     const contributionManifestPath = join(configDir, "deck", "manifest.json");
     const accounting = beginRunnerContributions({ runnerId: "opencode", root: configDir, manifestPath: contributionManifestPath,
       deckVersion: "0.13.0", targets, dedicatedRoots: [join(configDir, "deck")], beforeMetadataWrite: input.beforeMetadataWrite });

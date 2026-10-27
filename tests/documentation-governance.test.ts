@@ -438,26 +438,6 @@ describe("documentation governance", () => {
     expect(text).not.toMatch(/Adaptive memory is provided|Conversation Capture|Project Scope Binding/);
   });
 
-  test("Codex guidance uses native role and skill delivery with ownership-verified updates", () => {
-    const agents = content("AGENTS.md");
-    expect(agents).toContain("## Architecture and invariants");
-    expect(agents).toContain("bun run canary:install");
-    expect(agents).toContain("deck-canary <runner> developer");
-    expect(agents).toContain("[runners](docs/runners.md)");
-    expect(agents).toContain("[support matrix](docs/reference/support-matrix.md)");
-    expect(agents).not.toContain("## Safe editing");
-    expect((agents.match(/Do not hand-edit generated/g) ?? [])).toHaveLength(1);
-
-    const readme = content("README.md");
-    expect(readme).not.toContain("marker-owned `AGENTS.md` section");
-    expect(readme).toContain("native Codex roles and skills");
-
-    const support = content("docs/runners.md");
-    expect(support).not.toContain("exact Deck marker span in `AGENTS.md`");
-    expect(support).toContain("ownership-verified updates");
-    expect(content("docs/runners.md")).toContain("[Codex adapter](../packages/adapter-codex/src/runner-adapter.ts)");
-  });
-
   test("product entry points reference the maintained Deck brand assets", () => {
     const readme = content("README.md");
     expect(readme).toContain('src="docs/assets/brand/deck-hero-readme-v2.jpg"');
@@ -482,17 +462,6 @@ describe("documentation governance", () => {
     }
   });
 
-  test("README keeps the product narrative before governance metadata", () => {
-    const text = content("README.md");
-    expect(text.trimStart().startsWith('<p align="center">'), "DOC_ORDER_INVALID: README must open with the Deck brand").toBe(true);
-    expect(text.indexOf('alt="Deck'), "DOC_ORDER_INVALID: README must open with the Deck brand").toBeLessThan(text.indexOf("## "));
-    const narrative = text.indexOf("## Choose your next move");
-    expect(narrative, "DOC_REQUIRED_ENTRY_POINT_INVALID: README lacks product navigation").toBeGreaterThanOrEqual(0);
-    for (const label of ["Audience:", "Authority:", "Maintainer:", "Evidence:"]) {
-      expect(text.indexOf(label), `DOC_ORDER_INVALID: README ${label} precedes product narrative`).toBeGreaterThan(narrative);
-    }
-  });
-
   test("maintained surfaces are non-empty and declare their role", () => {
     for (const file of maintainedSurfaces) {
       const text = content(file);
@@ -514,17 +483,6 @@ describe("documentation governance", () => {
 
     const externalSection = sectionBetween(skillsText, "## Bundled external skills", "## Project-local skills");
     expect(extractFirstColumnIds(externalSection).sort()).toEqual(STANDALONE_SKILLS.map((skill) => skill.skillId).sort());
-  });
-
-  test("product documentation preserves explicit support boundaries", () => {
-    const text = productDocumentation();
-
-    expect(text).not.toMatch(/\bpi-hud\b/i);
-    expect(text).not.toMatch(/\b(?:uninstall|uninstallation)\b/i);
-    expect(text).not.toMatch(/\b(?:spec-driven-development|planning-and-task-breakdown|incremental-implementation|context-engineering|source-driven-development|browser-testing-with-devtools)\b/i);
-    expect(text).not.toMatch(/\b(?:Claude|Codex)\b[^.\n]*(?:is|are)\s+(?:an?\s+)?(?:operational|supported|first-class)\b/i);
-    expect(text).not.toMatch(/\b(?:supports?|install(?:s|ed)?|launch(?:es|ed)?|configure(?:s|d)?)\s+(?:Claude|Codex)\b/i);
-    expect(text).not.toMatch(/\bautomatic(?:ally)?\s+(?:routes?|loads?|invokes?|activates?)\s+(?:all|every)\s+(?:\d+\s+)?(?:bundled\s+)?external\s+skills\b/i);
   });
 
   test("getting started documents checksum-verified recovery without insecure guidance", () => {

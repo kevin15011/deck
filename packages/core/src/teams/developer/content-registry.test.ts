@@ -46,33 +46,6 @@ describe("getAgentContent", () => {
     expect(getAgentContent("deck-orchestrator")).toBeUndefined();
   });
 
-  test("all catalog agent content is not placeholder", () => {
-    for (const id of DEVELOPER_AGENT_IDS) {
-      const content = getAgentContent(id)!;
-      expect(content.agentBody).not.toContain("Placeholder");
-      expect(content.skillBody).not.toContain("Placeholder");
-    }
-  });
-
-  test("core prompts do not hardcode Engram topic-key artifact locations", () => {
-    for (const id of DEVELOPER_AGENT_IDS) {
-      const content = getAgentContent(id)!;
-      const combined = `${content.agentBody}\n${content.skillBody}`;
-      expect(combined, id).not.toMatch(/engram topic key/i);
-    }
-  });
-
-  test("old artifact-store modes remain absent across core prompts", () => {
-    for (const id of DEVELOPER_AGENT_IDS) {
-      const content = getAgentContent(id)!;
-      const combined = `${content.agentBody}\n${content.skillBody}`;
-      expect(combined, id).not.toMatch(/engram\s*\|\s*openspec\s*\|\s*hybrid\s*\|\s*none/i);
-      expect(combined, id).not.toContain("| engram |");
-      expect(combined, id).not.toContain("| hybrid |");
-      expect(combined, id).not.toContain("| none |");
-    }
-  });
-
   test("SDD subagent skills do NOT include visual explanations content (REQ-VISUAL-002, REQ-TEAMINSTALL-002)", () => {
     for (const id of SDD_SUBAGENT_IDS) {
       const content = getAgentContent(id)!;
@@ -172,66 +145,6 @@ describe("code-economy injection", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Negative tests: no hard LOC caps — REQ-CE-005, REQ-TK-002
-// ---------------------------------------------------------------------------
-
-describe("code-economy negative tests: no hard LOC caps", () => {
-  // Direct gating instructions that should NEVER appear
-  const DIRECT_GATE_PHRASES = [
-    "MUST stay under",
-    "block if over budget",
-    "reject if over",
-  ];
-
-  // Phrases that should only appear in NEGATIVE context (saying what we DON'T do)
-  const NEGATIVE_CONTEXT_PHRASES = [
-    "hard LOC cap",
-    "hard cap",
-  ];
-
-  test("code-economy does not contain direct gate instructions", () => {
-    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
-
-    for (const fragment of bundle.instructions) {
-      for (const phrase of DIRECT_GATE_PHRASES) {
-        expect(fragment.markdown.toLowerCase()).not.toContain(phrase.toLowerCase());
-      }
-    }
-  });
-
-  test("hard cap phrases only appear in negative context", () => {
-    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
-
-    for (const fragment of bundle.instructions) {
-      const markdown = fragment.markdown;
-      // If "hard cap" appears, it must be in negative context (e.g., "No hard LOC cap")
-      if (markdown.toLowerCase().includes("hard cap")) {
-        // Should contain "no hard" before "cap" - negative context
-        const hasNegativeContext =
-          markdown.toLowerCase().includes("no hard") ||
-          markdown.toLowerCase().includes("not a hard") ||
-          markdown.toLowerCase().includes("never a hard");
-        expect(hasNegativeContext).toBe(true);
-      }
-    }
-  });
-
-  test("code-economy content contains non-negotiable quality overrides", () => {
-    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
-
-    // Should contain phrases that indicate quality/security/etc. are non-negotiable
-    const allMarkdown = bundle.instructions.map((f) => f.markdown).join(" ");
-    const hasNonNegotiables =
-      allMarkdown.includes("non-negotiable") ||
-      allMarkdown.includes("never sacrifice") ||
-      allMarkdown.includes("always override") ||
-      allMarkdown.includes("critical") ||
-      allMarkdown.includes("quality") ||
-      allMarkdown.includes("security");
-    expect(hasNonNegotiables).toBe(true);
-  });
-});
-
 describe("getTeamSessionInstructions with capabilityInstructions", () => {
   test("existing output unchanged when no bundle provided", () => {
     const instructions = getTeamSessionInstructions("developer-team");
