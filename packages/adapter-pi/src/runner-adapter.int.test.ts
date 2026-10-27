@@ -387,7 +387,7 @@ describe("Repair #21: No console.log leakage in runner-adapter", () => {
 
 describe("Repair #21: MCP config write handler structure", () => {
   test("write-pi-mcp-config handler keeps the evidence-gated Serena writer; other Deck servers go through the global plan", () => {
-    // Structure check only; behavior is covered by runner-adapter.global.test.ts (global mcp.json transaction).
+    // Structure check only; behavior is covered by runner-adapter.global.int.test.ts (global mcp.json transaction).
     const runnerAdapterPath = join(__dirname, "runner-adapter.ts");
     const content = readFileSync(runnerAdapterPath, "utf-8");
 

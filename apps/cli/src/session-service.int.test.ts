@@ -12,6 +12,9 @@ import { acknowledgeClaudeTos } from "./session-tos";
 import type { SupermemoryRuntimeHost } from "./supermemory-runtime-host";
 import { execFileSync } from "node:child_process";
 
+// Fake native drivers do not touch disk; adapter artifact verification has its own tests.
+const nativeSkillsFixture = { root: "/verified/developer-team", pluginName: "deck-developer-team", selectionPath: "/verified/model-assignments.json", selectionHash: "a".repeat(64), contentHash: "b".repeat(64), files: {} };
+const prepareSessionNativeSkills = async () => nativeSkillsFixture;
 const roots: string[] = [];
 afterEach(() => { for (const d of roots.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
@@ -203,7 +206,7 @@ describe("createCrossSessionService (production composition)", () => {
     const first = "# Project rules\n\nUse project-fixture-style.\n";
     writeFileSync(file, first);
     const inputs: DriverTaskInput[] = [];
-    const selected = { runnerId, getSessionDriver: () => ({ ...driver(runnerId), startTask: async (input: DriverTaskInput, io: DriverHostIo) => {
+    const selected = { prepareSessionNativeSkills, runnerId, getSessionDriver: () => ({ ...driver(runnerId), startTask: async (input: DriverTaskInput, io: DriverHostIo) => {
       inputs.push(input);
       io.emit({ kind: "turn.started", data: {} });
       return { nativeSessionId: Promise.resolve("fixture-native-session"), done: Promise.resolve({ status: "completed" as const }), send: async () => ({ status: "completed" as const }), interrupt: async () => {}, close: async () => {} };
@@ -218,6 +221,7 @@ describe("createCrossSessionService (production composition)", () => {
       }
       expect(inputs).toHaveLength(2);
       for (const input of inputs) {
+        expect(input.nativeSkills).toEqual(runnerId === "claude" ? nativeSkillsFixture : undefined);
         expect(input.rolePrompt).toContain("For new substantive work, briefly state the understood objective and scope");
         expect(input.rolePrompt).toContain("ask ONE concise question and wait for the reply before dependent action");
         expect(input.rolePrompt).toContain("confirm only changed scope and do not restart intake");
@@ -247,7 +251,7 @@ describe("createCrossSessionService (production composition)", () => {
     writeFileSync(join(e.home, "outside.md"), "Outside private content must not be read");
     symlinkSync(join(e.home, "outside.md"), join(e.project, "AGENTS.md"));
     let starts = 0;
-    const selected = { runnerId: "claude", getSessionDriver: () => ({ ...driver("claude"), startTask: async () => { starts++; throw new Error("must not start"); } }), readSessionMcpServers: async () => ({}) } as unknown as RunnerAdapter;
+    const selected = { prepareSessionNativeSkills, runnerId: "claude", getSessionDriver: () => ({ ...driver("claude"), startTask: async () => { starts++; throw new Error("must not start"); } }), readSessionMcpServers: async () => ({}) } as unknown as RunnerAdapter;
     const service = createCrossSessionService(e.services, { configStore: e.store, adapters: () => [selected] });
     try {
       const sessionId = (await create(service, e.project) as { data: { sessionId: string } }).data.sessionId;
@@ -268,7 +272,7 @@ describe("createCrossSessionService (production composition)", () => {
     let input: DriverTaskInput | undefined;
     let finish!: (outcome: { status: "completed" }) => void;
     let creations = 0, writes = 0;
-    const selected = { runnerId: "claude", getSessionDriver: () => ({ ...driver("claude"), startTask: async (value: DriverTaskInput) => {
+    const selected = { prepareSessionNativeSkills, runnerId: "claude", getSessionDriver: () => ({ ...driver("claude"), startTask: async (value: DriverTaskInput) => {
       input = value;
       const done = new Promise<{ status: "completed" }>((resolve) => { finish = resolve; });
       return { nativeSessionId: Promise.resolve("native-fixture"), done, send: async () => ({ status: "completed" }), interrupt: async () => finish({ status: "completed" }), close: async () => finish({ status: "completed" }) };
@@ -302,7 +306,7 @@ describe("createCrossSessionService (production composition)", () => {
     acknowledgeClaudeTos(e.store);
     let input: DriverTaskInput | undefined;
     const fake = { ...driver(runnerId), startTask: async (value: DriverTaskInput) => { input = value; throw new Error("fixture stops here"); } };
-    const selected = { runnerId, getSessionDriver: () => fake,
+    const selected = { prepareSessionNativeSkills, runnerId, getSessionDriver: () => fake,
       readSessionMcpServers: async () => ({ "context-mode": { command: process.execPath, args: ["--fixture"], env: {} }, context7: { transport: "http", url: "https://mcp.context7.com/mcp", envHttpHeaders: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } } }),
     } as unknown as RunnerAdapter;
     const service = createCrossSessionService(e.services, { configStore: e.store, adapters: () => [selected] });
@@ -321,7 +325,7 @@ describe("createCrossSessionService (production composition)", () => {
     e.store.write({ crossRunner: { enabled: true, members: { lead: { runnerId, modelId: "fixture" } } } });
     acknowledgeClaudeTos(e.store);
     let starts = 0;
-    const selected = { runnerId, getSessionDriver: () => ({ ...driver(runnerId), startTask: async () => { starts++; throw new Error("must not spawn"); } }),
+    const selected = { prepareSessionNativeSkills, runnerId, getSessionDriver: () => ({ ...driver(runnerId), startTask: async () => { starts++; throw new Error("must not spawn"); } }),
       readSessionMcpServers: async () => { throw new Error("context-mode has no verified executable"); },
     } as unknown as RunnerAdapter;
     const service = createCrossSessionService(e.services, { configStore: e.store, adapters: () => [selected] });
@@ -338,7 +342,7 @@ describe("createCrossSessionService (production composition)", () => {
     const e = env();
     e.store.write({ crossRunner: { enabled: true, members: { lead: { runnerId, modelId: "fixture" } } } });
     let starts = 0;
-    const selected = { runnerId, getSessionDriver: () => ({ ...driver(runnerId), startTask: async (input: DriverTaskInput) => {
+    const selected = { prepareSessionNativeSkills, runnerId, getSessionDriver: () => ({ ...driver(runnerId), startTask: async (input: DriverTaskInput) => {
       starts++; expect(input.mcp.servers).not.toContain("codebase-memory"); expect(input.mcpServerSpecs["codebase-memory"]).toBeUndefined();
       expect(input.rolePrompt).toContain("Use file listing, rg searches, and focused file reads");
       return {nativeSessionId:Promise.resolve("fixture"),send:async()=>({status:"completed" as const}),interrupt:async()=>{},done:Promise.resolve({status:"completed" as const}),close:async()=>{}};
@@ -363,7 +367,7 @@ describe("createCrossSessionService (production composition)", () => {
     acknowledgeClaudeTos(e.store);
     const inputs: DriverTaskInput[] = [];
     let resolves = 0;
-    const selected = { runnerId, getSessionDriver: () => ({ ...driver(runnerId), startTask: async (input: DriverTaskInput) => { inputs.push(input); throw new Error("fixture stops here"); } }),
+    const selected = { prepareSessionNativeSkills, runnerId, getSessionDriver: () => ({ ...driver(runnerId), startTask: async (input: DriverTaskInput) => { inputs.push(input); throw new Error("fixture stops here"); } }),
       readSessionMcpServers: async () => ({ [`selected-${++resolves}`]: { command: process.execPath, args: [], env: {} } }),
     } as unknown as RunnerAdapter;
     const service = createCrossSessionService(e.services, { configStore: e.store, adapters: () => [selected] });
@@ -381,7 +385,7 @@ test.each(['claude','codex','opencode'].flatMap(runnerId=>[true,false].map(prepa
  const {FakeDriver}=await import('../../../packages/session-host/src/testing/fake-driver');
  const e=env();const native=new FakeDriver(runnerId);native.onStart=turn=>{turn.emit('diagnostic',{code:'personal-mcp.sources',servers:[{id:'docs',source:'native',status:'configured',privateConfig:'SECRET_SENTINEL'},...Array.from({length:260},(_,i)=>({id:'native-'+i,source:'native',status:'configured'}))]});turn.emit('diagnostic',{code:'personal-mcp.runtime',active:turn.input.memberId==='lead'?['docs']:[],unavailable:turn.input.memberId==='lead'?[]:['docs']});turn.init();if(turn.input.memberId!=='lead')queueMicrotask(()=>turn.finish());};
  e.store.write({crossRunner:{enabled:true,members:{lead:{runnerId:runnerId as any,modelId:'fixture/model'},investigate:{runnerId:runnerId as any,modelId:'fixture/model'}}},adaptiveMemory:{enabled:false,activeProvider:'none'}});
- const adapter={runnerId,getSessionDriver:()=>native,readSessionMcpServers:async()=>({})} as any;
+ const adapter={prepareSessionNativeSkills,runnerId,getSessionDriver:()=>native,readSessionMcpServers:async()=>({})} as any;
  const service=createCrossSessionService(e.services,{configStore:e.store,adapters:()=>[adapter],environment:{}});
  const command=async(type:string,data:Record<string,unknown>={},sessionId?:string)=>service.execute({clientId:'test',sessionId,command:{v:1,commandId:crypto.randomUUID(),type,...data} as any});
  const until=async(check:()=>boolean|Promise<boolean>)=>{const end=Date.now()+3000;while(!await check()){if(Date.now()>end)throw new Error('test timeout');await new Promise(r=>setTimeout(r,5));}};
@@ -396,8 +400,29 @@ test.each(['claude','codex','opencode'].flatMap(runnerId=>[true,false].map(prepa
   const grant=e.services.credentials.lookup(credential.token)!;expect(grant).toBeDefined();
   const delegated=await service.callTaskTool(grant,'deck_delegate',{agent:'investigate',task:'inspect personal tools'});expect(delegated).toMatchObject({ok:true});
   await until(()=>native.turns.length>=2&&native.turns[1]!.closed);
-  const member=native.turns[1]!.input;expect(member.memberId).toBe('investigate');expect(member.mcp.servers).not.toContain('docs');expect(member.mcp.sessionTools).not.toContain('deck_delegate');expect((await readiness()).memberMcpAvailability.investigate).toMatchObject({runnerId,servers:expect.arrayContaining([{id:'docs',source:'native',status:'unavailable',reason:'not-connected'}])});
+  const member=native.turns[1]!.input;expect(member.nativeSkills).toEqual(runnerId==='claude'?nativeSkillsFixture:undefined);expect(native.turns[0]!.input.nativeSkills).toEqual(runnerId==='claude'?nativeSkillsFixture:undefined);expect(member.memberId).toBe('investigate');expect(member.mcp.servers).not.toContain('docs');expect(member.mcp.sessionTools).not.toContain('deck_delegate');expect((await readiness()).memberMcpAvailability.investigate).toMatchObject({runnerId,servers:expect.arrayContaining([{id:'docs',source:'native',status:'unavailable',reason:'not-connected'}])});
   native.turns[0]!.finish();
   const events=[...service.openLog(id)!.readAfter(0)];expect(JSON.stringify(events)).not.toContain('SECRET_SENTINEL');expect(events.some(event=>event.data.code==='personal-mcp.sources'||event.data.code==='personal-mcp.runtime')).toBe(false);
  }finally{await service.close();}
+});
+
+test("Claude preparation failure blocks the production child before spawn", async () => {
+  const e = env();
+  e.store.write({ crossRunner: { enabled: true, members: { lead: { runnerId: "claude", modelId: "fixture" } } } });
+  let starts = 0;
+  const selected = {
+    runnerId: "claude",
+    prepareSessionNativeSkills: async () => { throw new Error("claude-session-skills-unverified"); },
+    getSessionDriver: () => ({ ...driver("claude"), startTask: async () => { starts++; throw new Error("must not launch"); } }),
+    readSessionMcpServers: async () => ({}),
+  } as unknown as RunnerAdapter;
+  const service = createCrossSessionService(e.services, { configStore: e.store, adapters: () => [selected] });
+  try {
+    const result = await service.execute({ clientId: "c", command: { v: 1, commandId: crypto.randomUUID(), type: "session.create", projectRoot: e.project } });
+    const sessionId = (result as { data: { sessionId: string } }).data.sessionId;
+    await service.execute({ sessionId, clientId: "c", command: { v: 1, commandId: crypto.randomUUID(), type: "prompt.send", text: "go" } });
+    for (let i = 0; i < 100 && service.hasRunningWork(); i++) await new Promise(resolve => setTimeout(resolve, 1));
+    expect(starts).toBe(0);
+    expect(JSON.stringify([...service.openLog(sessionId)!.readAfter(0)])).toContain("claude-session-skills-unverified");
+  } finally { await service.close(); }
 });

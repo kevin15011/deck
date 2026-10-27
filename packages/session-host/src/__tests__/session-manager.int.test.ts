@@ -2895,6 +2895,7 @@ describe("Stage 2 durable decisions", () => {
     const prompt=await t.run({type:"prompt.send",text:"Replan this task as independent work"},id);await waitFor(()=>t.driver.turns.length===5);
     const replan={commandId:"cccccccc-1111-4111-8111-cccccccccccc",agent:"investigate",task:"Explicit independent continuation",continueTaskId:taskId,dependsOn:[],replan:{promptId:(prompt as any).data.promptId,note:"User requested independent continuation"}};
     expect(await call("deck_delegate",{...replan,commandId:"open-1"})).toMatchObject({ok:false,code:"command-id-reused"});
+    expect(await call("deck_delegate",{commandId:"no-replan",agent:"investigate",task:"New delegation"})).toMatchObject({ok:false,code:"invalid-arguments",message:expect.stringContaining("only valid together with replan")});
     expect(await call("deck_delegate",replan)).toMatchObject({ok:true,data:{taskId}});
     expect(await call("deck_delegate",replan)).toMatchObject({ok:true,duplicate:true,data:{taskId}});
     expect(await call("deck_decision_open",{commandId:replan.commandId,key:"replan-collision",question:"Collision?",source:{promptId:(prompt as any).data.promptId}})).toMatchObject({ok:false,code:"command-id-reused"});

@@ -1,3 +1,5 @@
+import { SESSION_SKILLS_PLUGIN_NAME, ClaudeSkillsError, verifyClaudeSessionSkills } from "./session-skills";
+import type { NativeSkillsDescriptor } from "@deck/core/session/driver";
 import { claudeProjectConfigTrusted } from './personal-mcp';
 import { inspectClaudeNativeSearch } from "./native-search";
 import { beginRunnerContributions, contributionId, readRunnerContributions, recordOwnedRunnerArtifactTree } from "@deck/core";
@@ -23,6 +25,7 @@ import type { ChildMcpServerSpec } from "@deck/core/session/driver";
 
 /** Read-only session composition seam; shared runner contracts remain unchanged until S2. */
 export type ClaudeSessionMcpAdapter = RunnerAdapter & {
+  prepareSessionNativeSkills(): Promise<NativeSkillsDescriptor>;
   readSessionMcpServers(config?: import("@deck/core").NormalizedDeckConfig): Promise<Record<string, ChildMcpServerSpec>>;
 };
 
@@ -65,7 +68,7 @@ const pluginMarker = JSON.stringify(pluginIdentity, null, 2) + "\n";
 // Claude namespaces MCP servers bundled by a plugin as plugin:<plugin-name>:<server>.
 const pluginTool = (server: string, tool: string) => `mcp__plugin_${pluginIdentity.name}_${server}__${tool}`;
 
-function expectedFiles(root: string, assignments: ClaudeAssignments = {}, capabilities: readonly ClaudeCapabilityId[] = [], effects: ClaudeCapabilityOptions = {}, providerId?: string, efforts: ClaudeEfforts = {}) {
+export function expectedFiles(root: string, assignments: ClaudeAssignments = {}, capabilities: readonly ClaudeCapabilityId[] = [], effects: ClaudeCapabilityOptions = {}, providerId?: string, efforts: ClaudeEfforts = {}) {
   const files: { path: string; content: string; kind: "agent" | "skill" | "other" }[] = [{ path: join(root, ".claude-plugin", "plugin.json"), content: pluginMarker, kind: "other" }];
   for (const agent of getDeveloperTeamCatalog()) {
     if (!/^[a-z][a-z0-9-]*$/.test(agent.id) || !/^[a-z][a-z0-9-]*$/.test(agent.skillId)) throw new Error("Invalid canonical Claude role ID.");
@@ -473,6 +476,18 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
   };
   const adapter: ClaudeSessionMcpAdapter = {
     inspectNativeSearch: async (input) => inspectClaudeNativeSearch({ ...input, environment: input.environment ?? options.sessionDriver?.baseEnv, flags: input.flags ?? options.sessionDriver?.extraArgs }, home),
+    async prepareSessionNativeSkills() {
+      try {
+        const selected = active();
+        const selectionHash = hash(readFileSync(metadataPath, "utf8"));
+        const contentHash = hash(JSON.stringify(selected.expected.map(file => [relative(selected.location, file.path), file.kind, hash(file.content)])));
+        if (selected.contentHash !== contentHash || inspect(selected.location, selected.expected, home) !== "ready") throw new ClaudeSkillsError();
+        const root = selected.location;
+        const descriptor = { root, pluginName: SESSION_SKILLS_PLUGIN_NAME, selectionPath: metadataPath, selectionHash, contentHash, files: Object.fromEntries(selected.expected.map(file => [relative(root, file.path), hash(file.content)])) };
+        verifyClaudeSessionSkills(descriptor);
+        return descriptor;
+      } catch { throw new ClaudeSkillsError(); }
+    },
     getSessionDriver: () => createClaudeSessionDriver(options.sessionDriver),
     runnerId: "claude", displayName: "Claude Code", environmentIds: [ENVIRONMENT], packageInstructionIds: ["codebase-memory", "rtk"],
     ui: { environmentLabels: { [ENVIRONMENT]: "Claude Code" }, dashboard: { defaultSelectedTeamIds: ["developer-team"], defaultSelectedCapabilityIds: ["claude-team-files"], extraSelectableCapabilities: [{ id: "context7", label: "Context7", description: "Use a verified shared Context7 MCP binary in the Claude plugin." }], managedLaunchSupported: false, launchHint: "deck claude developer starts a supervised static-compatible session. Deck supplies the pinned official memory plugin when selected; co-loaded user plugins may also see the process credential. Protected execution remains unsupported.", executionClass: "static-compatible" }, model: { providerSource: "Installed Claude runtime-reported metadata; account entitlement not guaranteed", missingChecks: ["account entitlement", "comparison with authenticated native /model"], remediation: "Retry metadata discovery and check native Claude /model for account-specific availability.", defaultThinkingLevels: [] }, adaptiveMemory: { supermemory: { supported: true, requiresExternalToken: true, selectionStatus: "Official Claude Supermemory uses the existing protected alias/default profile store." } } },

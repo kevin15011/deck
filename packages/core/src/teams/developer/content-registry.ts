@@ -517,7 +517,7 @@ export function getAgentContentResult(
   const real = compact ?? REAL_CONTENT[agentId];
   if (real) {
     // Apply composition order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) shared specialist discovery contract, (5) language policy, (6) capability instructions
-    const withInvariants = compact
+    const withInvariants = compact || DEVELOPER_TEAM_AGENTS.some((agent) => agent.id === agentId)
       ? withCompactRuntimeContract(real, agentId)
       : withOrchestratorInvariants(real, agentId);
     const withAuthority = withContextAuthorityGuidance(withInvariants);

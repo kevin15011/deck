@@ -90,6 +90,16 @@ export async function runSessionSmoke(options: { deck: string[]; keep?: boolean;
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     config.crossRunner = { ...config.crossRunner, enabled: true, members: { lead: { runnerId: runner, modelId: runner === "opencode" ? "fixture/model" : runner === "codex" ? "gpt-5" : "haiku" } } };
     writeFileSync(configPath, JSON.stringify(config, null, 2));
+    if (runner === "claude") {
+      // Exercise the same verified installed generation required by native Deck launch.
+      const { createClaudeRunnerAdapter } = await import("../packages/adapter-claude/src/runner-adapter");
+      const { getDefaultDeckConfig } = await import("../packages/core/src/index");
+      const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(env.XDG_DATA_HOME!, "deck"), resolveCommand: name => name === "claude" ? join(bin, runner) : undefined });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: cwd, environmentId: "claude-development", deckConfig: { ...getDefaultDeckConfig(), ...config }, capabilityIds: ["claude-team-files"] });
+      if (plan.blocked) throw new Error("Smoke Claude team installation is blocked");
+      await adapter.applyDeveloperTeamInstall({ projectRoot: cwd, environmentId: "claude-development", plan });
+      await adapter.prepareSessionNativeSkills();
+    }
 
     // Own the daemon process so failure cleanup never signals a PID read from disk/status.
     daemon = spawn(["internal", "session-daemon"], "ignore");

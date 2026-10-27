@@ -5,6 +5,8 @@ import { PassThrough } from "node:stream";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { WebService } from "../../../packages/session-host/src/web-service";
+import { createClaudeRunnerAdapter } from "../../../packages/adapter-claude/src/runner-adapter";
+import { getDefaultDeckConfig } from "../../../packages/core/src/index";
 import type { RunnerAdapter } from "../../../packages/core/src/index";
 import { ApprovalBroker, CredentialRegistry, ensureStateLayout, resolveStatePaths, Supervisor, type DaemonServices } from "../../../packages/session-host/src/index";
 import { FakeDriver } from "../../../packages/session-host/src/testing/fake-driver";
@@ -37,7 +39,7 @@ async function nativeLaunch(input: import("../../../packages/core/src/session/dr
   }
 }
 
-function fixture(runnerId: string, activation: "enabled" | "disabled" | "absent" = "enabled") {
+async function fixture(runnerId: string, activation: "enabled" | "disabled" | "absent" = "enabled") {
   const home = realpathSync(mkdtempSync(join(realpathSync("/tmp"), "dca-"))); roots.push(home);
   const project = join(home, "project"); mkdirSync(project);
   const binary = join(home, "codebase-memory-mcp"); writeFileSync(binary, "wrong build", { mode: 0o700 });
@@ -56,7 +58,14 @@ function fixture(runnerId: string, activation: "enabled" | "disabled" | "absent"
       stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: message.method === "initialize" ? { protocolVersion: "2024-11-05", serverInfo: { name: "codebase-memory-mcp", version: "0.11.0" } } : { tools: ["search_graph", "trace_path", "get_code_snippet"].map(name=>({name})) } }) + "\n"); });
     return { stdin, stdout, stderr, ready: Promise.resolve({workerPid:1}), exited, anchorPid: 1, interrupt: ()=>true, terminateGroup: async()=>{stdin.end();} };
   } } });
-  const adapter = { runnerId, getSessionDriver: () => driver, readSessionMcpServers: async () => ({ "codebase-memory": { command: binary, args: [], env: {} }, context7: { command: "unused-context7", args: [], env: {} } }) } as unknown as RunnerAdapter;
+  // Codebase readiness is optional; the Claude team generation is a launch prerequisite.
+  const claude = runnerId === "claude" ? createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: () => process.execPath }) : undefined;
+  if (claude) {
+    const plan = claude.buildDeveloperTeamInstallPlan({ projectRoot: project, environmentId: "claude-development", deckConfig: getDefaultDeckConfig(), capabilityIds: ["claude-team-files"] });
+    expect(plan.blocked).toBe(false);
+    await claude.applyDeveloperTeamInstall({ projectRoot: project, environmentId: "claude-development", plan });
+  }
+  const adapter = { ...(claude ? { prepareSessionNativeSkills: () => claude.prepareSessionNativeSkills() } : {}), runnerId, getSessionDriver: () => driver, readSessionMcpServers: async () => ({ "codebase-memory": { command: binary, args: [], env: {} }, context7: { command: "unused-context7", args: [], env: {} } }) } as unknown as RunnerAdapter;
   const services = { paths, broker: new ApprovalBroker({ sink: { emit() {} } }), credentials: new CredentialRegistry({socketPath: paths.socket.path}), supervisor: new Supervisor({anchorCommand:["unused"]}), logger: {info(){},warn(){},error(){}} } as unknown as DaemonServices;
   const service = createCrossSessionService(services, { configStore: store, adapters: ()=>[adapter], codebaseReadiness: readiness, environment: {} });
   const web = new WebService({paths, service, config:{port:0,trustedProxy:null,allowedOrigins:[],allowFunnel:false}}); web.start();
@@ -78,7 +87,7 @@ function fixture(runnerId: string, activation: "enabled" | "disabled" | "absent"
 
 for (const runner of ["claude", "codex", "opencode"]) for (const activation of ["absent", "disabled"] as const) {
   test(`${runner}: ${activation} Codebase activation never verifies or starts a backend`, async () => {
-    const t = fixture(runner, activation);
+    const t = await fixture(runner, activation);
     const created = await t.run({type:"session.create",projectRoot:t.project});
     expect(created.ok).toBe(true);
     const id = (created as any).data.sessionId;
@@ -103,7 +112,7 @@ for (const runner of ["claude", "codex", "opencode"]) for (const activation of [
 
 for (const runner of ["claude", "codex", "opencode"]) for (const reason of ["unsupported", "unavailable"] as const) {
   test(`${runner}: ${reason} production resolver -> preparation -> Web API/view -> turn omits Codebase and recovers`, async () => {
-    const t = fixture(runner), created = await t.run({type:"session.create",projectRoot:t.project}); expect(created.ok).toBe(true);
+    const t = await fixture(runner), created = await t.run({type:"session.create",projectRoot:t.project}); expect(created.ok).toBe(true);
     const id = (created as any).data.sessionId;
     if (reason === "unavailable") t.unavailable();
     await t.run({type:"session.prepare"}, id);
@@ -125,7 +134,7 @@ for (const runner of ["claude", "codex", "opencode"]) for (const reason of ["uns
 }
 
 test.each(["codebase-memory-unavailable: forged optional failure", "codebase-memory-integrity-failed: private detail", "authorization-denied: private detail", "control-channel-failed: private detail", "permission-denied: private detail"])("protected failure stays failed, never optional: %s", async message => {
-  const t = fixture("claude"); t.fail(Object.assign(new Error(message), {code:"EACCES"}));
+  const t = await fixture("claude"); t.fail(Object.assign(new Error(message), {code:"EACCES"}));
   const created = await t.run({type:"session.create",projectRoot:t.project}), id = (created as any).data.sessionId;
   await t.run({type:"session.prepare"},id);
   await until(async()=> (await t.read(id)).status === "failed");
@@ -135,7 +144,7 @@ test.each(["codebase-memory-unavailable: forged optional failure", "codebase-mem
 });
 
 test("cancelling actual preparation cannot become optional ready", async () => {
-  const t=fixture("claude"), {started,release}=t.pause();
+  const t=await fixture("claude"), {started,release}=t.pause();
   const created=await t.run({type:"session.create",projectRoot:t.project}),id=(created as any).data.sessionId;
   const prepared=await t.run({type:"session.prepare"},id);
   expect(prepared.ok).toBe(true);
@@ -149,7 +158,7 @@ test("cancelling actual preparation cannot become optional ready", async () => {
 });
 
 test("a recovered actual turn clears the Web warning without another preparation", async () => {
-  const t=fixture("codex"),created=await t.run({type:"session.create",projectRoot:t.project}),id=(created as any).data.sessionId;
+  const t=await fixture("codex"),created=await t.run({type:"session.create",projectRoot:t.project}),id=(created as any).data.sessionId;
   await t.run({type:"session.prepare"},id);await until(async()=> (await t.read(id)).status === "ready");
   expect((await t.read(id)).reasonCode).toBe("codebase-memory-unsupported");t.recover();
   await t.run({type:"prompt.send",text:"Use repaired capability"},id);await until(()=>t.driver.turns.length===1 && t.driver.turns[0]!.closed);

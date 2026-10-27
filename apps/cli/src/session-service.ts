@@ -1,3 +1,4 @@
+import { prepareSessionNativeSkills } from "./session-native-skills";
 import {readScopedTaskDiff} from "./session-task-diff";
 /**
  * Production composition of the session daemon's service (D-6: apps/cli is the only place that
@@ -79,7 +80,7 @@ function sessionDelegationPrompt(context: SessionRolePromptContext): string {
   ].join("\n");
 }
 
-function sessionRolePrompt(memberId: string, context: SessionRolePromptContext): string {
+export function sessionRolePrompt(memberId: string, context: SessionRolePromptContext): string {
   const roleId = memberId.startsWith("deck-") ? memberId : `deck-${memberId}`;
   const isLead = roleId === "deck-lead";
   const role = getAgentContent(roleId, { promptProfile: "compact" });
@@ -119,7 +120,9 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
     childMcp: async (runnerId, context) => {
       // Keep each turn's resolved specs isolated from concurrent sessions.
       const adapter = list.find((adapter) => adapter.runnerId === runnerId);
-      return resolveSessionChildMcp(adapter, options.configStore.read(), options.environment, { readiness, context }, options.nativeMemoryEffects);
+      const nativeSkills = await prepareSessionNativeSkills(adapter);
+      const resolver = await resolveSessionChildMcp(adapter, options.configStore.read(), options.environment, { readiness, context }, options.nativeMemoryEffects);
+      return { ...resolver, ...(nativeSkills ? { nativeSkills } : {}) };
     },
     closeChildMcp: () => readiness.close(),
     memory: async (context) => createSessionMemoryPort(context, options.configStore.read(), options.memoryRuntime),

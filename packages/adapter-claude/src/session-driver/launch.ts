@@ -1,3 +1,4 @@
+import { ClaudeSkillsError, verifyClaudeSessionSkills, claudeSessionPluginMcpDenials } from "../session-skills";
 import { PersonalMcpPreparationError } from "@deck/core/session/personal-mcp";
 import { claudeNativePolicy } from "../personal-mcp";
 /**
@@ -104,7 +105,16 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   if(input.steeringVersion==='2.1.296')args.push('--replay-user-messages');
   args.push("--mcp-config", mcpConfigFile);
   args.push("--setting-sources", policy.sources);
-  const denied = [...new Set([...policy.denied, ...input.suppressedMcpServers ?? [],
+  if (input.nativeSkills) {
+    try { verifyClaudeSessionSkills(input.nativeSkills); }
+    catch (error) {
+      if (error instanceof ClaudeSkillsError) throw new ClaudeLaunchError(error.code, error.message);
+      throw error;
+    }
+    args.push("--plugin-dir", input.nativeSkills.root);
+  }
+  const denied = [...new Set([...policy.denied,
+    ...(input.nativeSkills ? claudeSessionPluginMcpDenials(input.nativeSkills) : []), ...input.suppressedMcpServers ?? [],
     ...([...input.mcp.servers, ...input.suppressedMcpServers ?? []].includes("codebase-memory") ? ["plugin:deck-developer-team:codebase-memory"] : [])])];
   args.push("--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, ...(denied.length ? { deniedMcpServers: denied.map(serverName => ({ serverName })) } : {}) }));
   if (nativePlugin) args.push("--plugin-dir", nativePlugin.root);

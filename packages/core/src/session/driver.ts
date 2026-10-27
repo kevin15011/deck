@@ -49,6 +49,16 @@ export type NativeMemoryDescriptor = {
   };
 };
 
+/** Host-verified native plugin providing skills, bound to an installed team selection. */
+export type NativeSkillsDescriptor = {
+  root: string;
+  pluginName: string;
+  selectionPath: string;
+  selectionHash: string;
+  contentHash: string;
+  files: Readonly<Record<string, string>>;
+};
+
 /** Host-validated managed files, supplied as native structured image input. */
 export type DriverImageInput = { path: string; mimeType: "image/png" | "image/jpeg" | "image/webp"; name: string };
 
@@ -64,6 +74,7 @@ export type DriverTaskInput = {
   /** Launch spec for every id in `mcp.servers` (the Deck session server included). */
   mcpServerSpecs: Readonly<Record<string, ChildMcpServerSpec>>;
   nativeMemory?: NativeMemoryDescriptor;
+  nativeSkills?: NativeSkillsDescriptor;
   /** Host-owned canonical project grant. Absence never authorizes OpenCode project execution. */
   projectConfigTrusted?: boolean;
   /** Native names suppressed only for an unavailable managed binding or protected conflict. */

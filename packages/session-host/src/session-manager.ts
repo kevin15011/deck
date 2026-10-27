@@ -81,6 +81,7 @@ const ALL_KINDS = new Set<string>(SESSION_EVENT_KINDS);
 export type DriverLookup = { get(runnerId: string): RunnerSessionDriver | undefined; list(): readonly RunnerSessionDriver[] };
 
 export type ChildMcpResolver = {
+  nativeSkills?: import("@deck/core/session/driver").NativeSkillsDescriptor;
   suppressedMcpServers?: readonly string[];
   personalMcpAvailability?: readonly PersonalMcpAvailability[];
   capabilityAvailability?: readonly CapabilityAvailability[];
@@ -652,7 +653,7 @@ export class SessionManager implements SessionService {
 
   private delegate(live: Live, d: Record<string, unknown>, caller?: Turn): ExecuteOutcome {
     if (d.commandId !== undefined) {
-      if (!text(d.commandId) || !d.replan) return fail("invalid-arguments");
+      if (!text(d.commandId) || !d.replan) return fail("invalid-arguments", "commandId is only valid together with replan; omit it for new delegations and plain continuations");
       const duplicate = this.decisions(live).duplicate("deck_delegate", d); if (duplicate) return duplicate;
       if (live.ledger.prompt(d.commandId) || live.ledger.receipt(d.commandId) || live.ledger.lifecycleReceipt(d.commandId)) return fail("command-id-reused");
     }
@@ -1836,6 +1837,7 @@ export class SessionManager implements SessionService {
         prompt, ...(resume ? { resume } : {}), ...(!resume && nativeSessionId ? { nativeSessionId } : {}),
         mcp: child.mcp, mcpServerSpecs: child.specs, suppressedMcpServers: resolver?.suppressedMcpServers, approvals, credentialFile, disableNativeDelegation: true,
         ...(nativeMemory ? { nativeMemory } : {}),
+        ...(resolver?.nativeSkills ? { nativeSkills: resolver.nativeSkills } : {}),
       };
       const spawn = createDriverSpawn(this.options.supervisor, { lease: { file: live.paths.taskLeaseFile(turn.taskId), taskId: turn.taskId } });
       const launchedAttempt=turn.attempt;
