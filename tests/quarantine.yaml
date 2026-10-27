@@ -1,0 +1,3 @@
+# Each entry requires path, owner, reason, link, created and expires (within 14 days).
+# Protected-risk tests also require a reference to explicit user approval.
+entries: []

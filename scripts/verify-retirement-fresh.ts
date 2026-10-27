@@ -4,16 +4,16 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const suites = [
-  'apps/cli/src/native-package-retirement-fresh.test.ts',
-  'apps/cli/src/native-package-retirement-install.test.ts',
+  'apps/cli/src/native-package-retirement-fresh.e2e.test.ts',
+  'apps/cli/src/native-package-retirement-install.e2e.test.ts',
   'packages/core/src/config/package-retirement.test.ts',
   'packages/core/src/teams/developer/package-retirement-output.test.ts',
   'apps/cli/src/native-search-preparation.test.ts',
-  'apps/cli/src/session-shared-services.test.ts',
-  'apps/cli/src/runner-launch-command.test.ts',
-  'apps/cli/src/claude-team-launch.test.ts',
-  'apps/cli/src/runner-migration-gates.test.ts',
-  'apps/cli/src/upgrade-command/runner-recovery-composition.test.ts',
+  'apps/cli/src/session-shared-services.int.test.ts',
+  'apps/cli/src/runner-launch-command.int.test.ts',
+  'apps/cli/src/claude-team-launch.int.test.ts',
+  'apps/cli/src/runner-migration-gates.int.test.ts',
+  'apps/cli/src/upgrade-command/runner-recovery-composition.int.test.ts',
 ];
 const output = process.argv[2] ? resolve(process.argv[2]) : mkdtempSync(join(tmpdir(), 'deck-fresh-evidence-'));
 mkdirSync(output, { recursive: true, mode: 0o700 });

@@ -91,7 +91,7 @@ OpenCode, Pi, their CLI launch paths, and the canonical content registry resolve
 |---|---|
 | Immutable batch, normalized findings, delta routing, terminal guard, deterministic replay | `packages/sdd-runtime/src/contracts/execution-v1-contracts.test.ts`, `packages/sdd-runtime/src/orchestrator/decision-kernel.test.ts`, `packages/sdd-runtime/src/execution/batch-c-authoritative-matrix.test.ts` |
 | Least privilege, invalid authorization, tamper, replay, and zero-effect rejection | `packages/sdd-runtime/src/execution/invocation-authorization-service.test.ts` and each active adapter's `developer-team-execution-bridge.test.ts` |
-| Registry replay, conflict, all partial-write boundaries, and legacy history | `packages/sdd-runtime/src/artifact-state/registry-coordinator.test.ts` |
+| Registry replay, conflict, all partial-write boundaries, and legacy history | `packages/sdd-runtime/src/artifact-state/registry-coordinator.int.test.ts` |
 | Staged verification, bounded omission, causal context, and fresh judgment | `packages/sdd-runtime/src/orchestrator/staged-verification.test.ts`, `packages/sdd-runtime/src/orchestrator/freshness-policy.test.ts`, `packages/sdd-runtime/src/execution/execution-role-scheduler.test.ts` |
 | Lane floors and escalation | `packages/sdd-runtime/src/orchestrator/execution-lane-router.test.ts` |
 | Shadow, activation windows, pause, rollback, and telemetry redaction | `packages/sdd-runtime/src/execution/rollout-policy.test.ts`, `packages/sdd-runtime/src/execution/telemetry.test.ts` |

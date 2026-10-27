@@ -6,7 +6,7 @@ index_mode: full
 context: |
   Tech stack: TypeScript, Bun (runtime + package manager), React, Ink (CLI TUI)
   Architecture: Monorepo (apps/cli, packages/core, packages/adapter-*)
-  Testing: Bun built-in test runner (bun:test), ~70 test files
+  Testing: Bun built-in test runner, tiered by test filename suffix
   Style: ES2022, ESNext modules, strict TypeScript, no explicit linter/formatter
 
 rules:
@@ -24,41 +24,27 @@ rules:
     - Keep tasks completable in one session
   apply:
     - Follow existing code patterns
-    tdd: true
-    test_command: "bun test"
+    - Verify proportionally; focused checks in the edit loop, test:changed once at handoff
   verify:
-    test_command: "bun test"
-    build_command: ""
-    coverage_threshold: 0
+    - Reuse Apply evidence bound to the same candidate; run only missing or invalidated checks
   archive:
     - Warn before merging destructive deltas
 
 testing:
-  strict_tdd: true
-  runner:
-    framework: bun
-    command: "bun test"
-  layers:
-    unit:
-      available: true
-      tool: bun:test
-    integration:
-      available: true
-      tool: bun:test
-      description: |
-        Contract tests for runner-install flow using mocked dependencies.
-        Validates install sequencing and gating without real I/O.
-    e2e:
-      available: true
-      tool: bun:test
-      description: |
-        E2E-ish TUI tests using render-only pattern.
-        Tests preflight → install → artifact verification without real installs or network.
-  strict_tdd_gates:
-    - focused_preflight_tests: "bun test packages/adapter-pi/src/preflight.test.ts packages/adapter-opencode/src/preflight.test.ts"
-    - contract_tests: "bun test apps/cli/src/tui/runner-dashboard/__tests__/runner-install-contract.test.ts"
-    - e2e_ish_tests: "bun test apps/cli/src/tui/__tests__/runner-install-e2e.test.tsx"
-    - baseline_ledger_comparison: "openspec/baseline-health.yaml"
+  policy: proportional
+  red_first:
+    - reproducible_bug_fix
+    - specified_logic
+  commands:
+    focused: "bun test <file>"
+    affected: "bun run test:changed"
+    typecheck: "bunx tsc --noEmit"
+    full: "bun run test:full"
+  tiers:
+    fast: "*.test.ts(x), in-process, median file <= 1s"
+    int: "*.int.test.ts(x), subprocess, git fixtures, composition"
+    e2e: "*.e2e.test.ts(x), binary, cross-runner, TUI/web flows"
+  quarantine: tests/quarantine.yaml
   baseline_health:
     ledger: openspec/baseline-health.yaml
     policy: |
@@ -71,16 +57,6 @@ testing:
     - No network calls in test gates
     - No user filesystem writes
     - Deterministic mocks for all external dependencies
-  coverage:
-    available: true
-    command: "bun test --coverage"
   quality:
-    linter:
-      available: false
-      command: ""
     type_checker:
-      available: true
-      command: "tsc --noEmit"
-    formatter:
-      available: false
-      command: ""
+      command: "bunx tsc --noEmit"

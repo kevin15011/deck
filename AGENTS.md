@@ -14,6 +14,8 @@
 - `apps/cli` composes configuration, adapters, review/install flows, and the CLI/TUI. Canonical capabilities are selected centrally; adapters contribute only their runner-native materialization and evidence.
 - Active/promoted OpenSpec artifacts define requirements and lifecycle; source and tests define runtime behavior. Do not hand-edit generated outputs such as `packages/core/src/skills/external/content.generated.ts` or `apps/cli/src/runtime/build-info.generated.ts`; preserve historical OpenSpec records, and follow [git-safety.ts](packages/core/src/teams/developer/git-safety.ts) before any discard operation.
 
-## Development path
+## Development path (Deck repository conventions)
 
 For a canary development path, run `bun run canary:install`, then launch `deck-canary <runner> developer`. Focused verification starts with the tests affected by the change. Use [CONTRIBUTING.md](CONTRIBUTING.md) for commands, [architecture](docs/architecture.md) for boundaries, [runners](docs/runners.md) and the [support matrix](docs/reference/support-matrix.md) for runner status, and [OpenSpec configuration](openspec/config.yaml) for SDD context.
+
+For this repository, run focused test files during editing (for example, `bun test tests/documentation-governance.test.ts`), then `bun run test:changed` and `bunx tsc --noEmit` once at handoff. `bun run test` is the fast tier; `test:int` and `test:e2e` select `.int.test.ts(x)` and `.e2e.test.ts(x)`. Run `bun run test:full` once for the final candidate. Reuse unchanged evidence and rerun only invalidated checks. Quarantine is tracked in `tests/quarantine.yaml`, expires within 14 days, and requires user approval for protected tests. These are Deck-repo conventions, not defaults for user projects.

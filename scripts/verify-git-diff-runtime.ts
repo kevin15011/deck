@@ -9,7 +9,7 @@ if(!process.argv.includes('--target') || target!==`${process.platform}-${process
 const machine=Bun.spawnSync(['uname','-m']).stdout.toString().trim();
 if(!(process.arch==='x64' ? machine==='x86_64' : ['aarch64','arm64'].includes(machine)))throw Error('Host architecture mismatch');
 if(process.platform==='darwin' && Bun.spawnSync(['/usr/sbin/sysctl','-in','sysctl.proc_translated']).stdout.toString().trim()==='1')throw Error('Translated execution is not native qualification');
-if(Bun.version!=='1.3.12')throw Error('Qualification requires Bun 1.3.12');
+if(Bun.version!=='1.4.0')throw Error('Qualification requires Bun 1.4.0');
 if(!process.argv.includes('--artifact') || !artifactArg)throw Error('Supply --artifact <extracted canonical release executable>');
 const artifact=realpathSync(artifactArg);
 if(artifact.startsWith(root+'/'))throw Error('Extract artifact outside checkout');
@@ -44,8 +44,8 @@ try {
  const versionText=await new Response(version.stdout).text();
  console.log(versionText.trim());
  if(await version.exited!==0 || !versionText.split(/\r?\n/).includes('deck '+JSON.parse(readFileSync(join(root,'package.json'),'utf8')).version) || !versionText.split(/\r?\n/).includes('target: '+target))throw Error('Extracted artifact version mismatch');
- await run([process.execPath,'test','--timeout','30000','packages/session-host/src/__tests__/git-diff.test.ts','packages/session-host/src/__tests__/git-diff-process.test.ts','packages/session-host/src/__tests__/project-files.test.ts','packages/session-host/src/__tests__/git-object-snapshot.test.ts']);
- await run([process.execPath,'test','--timeout','30000','packages/session-host/src/__tests__/session-manager.test.ts','-t','Git queries|Git process|native reader abort']);
+ await run([process.execPath,'test','--timeout','30000','packages/session-host/src/__tests__/git-diff.int.test.ts','packages/session-host/src/__tests__/git-diff-process.int.test.ts','packages/session-host/src/__tests__/project-files.int.test.ts','packages/session-host/src/__tests__/git-object-snapshot.test.ts']);
+ await run([process.execPath,'test','--timeout','30000','packages/session-host/src/__tests__/session-manager.int.test.ts','-t','Git queries|Git process|native reader abort']);
  await run([process.execPath,'build','--compile','scripts/git-diff-runtime-smoke.ts','--outfile',join(output,'probe')]);
  // Confinement is inherited by the compiled probe and its native reader descendants.
  const probe=Bun.spawn([...prefix,join(output,'probe')],{cwd:output,env,stdout:'inherit',stderr:'inherit'});

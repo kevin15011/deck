@@ -1502,7 +1502,7 @@ function createDeckToolPolicyEntry(options = {}) {
 }
 var deck_tool_policy_default = createDeckToolPolicyEntry();
 export {
-  deck_tool_policy_default as default,
+  createDeckToolPolicyEntry,
   createDeckToolPolicyExtension,
-  createDeckToolPolicyEntry
+  deck_tool_policy_default as default
 };

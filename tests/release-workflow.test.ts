@@ -82,15 +82,15 @@ describe("release workflow platform contract", () => {
     const freshness=steps.findIndex(step=>step.name==='Generated asset freshness');
     expect(freshness).toBeGreaterThanOrEqual(0);
     expect(freshness).toBeLessThan(steps.findIndex(step=>step.name==='Full test suite'));
-    expect(steps[freshness]?.run).toContain('scripts/generate-pi-extension-assets.test.ts');
+    expect(steps[freshness]?.run).toContain('scripts/generate-pi-extension-assets.int.test.ts');
     const stepRuns = steps.map((step) => step.run).filter(Boolean);
-    expect(stepRuns).toContain("bun test --timeout 30000");
+    expect(stepRuns).toContain("bun run test:full");
     expect(stepRuns).toContain("bunx tsc --noEmit");
     expect(stepRuns).toContain("bun run apps/cli/src/main.tsx openspec validate --json --root . --change canonical-supermemory-conversation-memory");
     expect(stepRuns).toContain("bun run bench:memory");
     expect(stepRuns).toContain("bun run verify:supermemory-compiled");
     const order = [
-      "bun test --timeout 30000",
+      "bun run test:full",
       "bunx tsc --noEmit",
       "bun run apps/cli/src/main.tsx openspec validate --json --root . --change canonical-supermemory-conversation-memory",
       "bun run bench:memory",

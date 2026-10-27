@@ -9,7 +9,7 @@ Deck coordinates a Developer Team across coding runners. Read the [architecture]
 
 ## Prerequisites and setup
 
-Use Git and **Bun 1.3.12**, pinned in [.bun-version](.bun-version), [package.json](package.json), and the [release workflow](.github/workflows/release.yml). From the repository root:
+Use Git and **Bun 1.4.0**, pinned in [.bun-version](.bun-version), [package.json](package.json), and the [release workflow](.github/workflows/release.yml). From the repository root:
 
 ```sh
 bun install --frozen-lockfile
@@ -86,22 +86,31 @@ bun sandbox:update
 
 The sandbox mounts no host HOME, repository, or credentials. Exit its main shell to remove the container. See the [sandbox guide](sandbox/linux-install/README.md) for prerequisites, supplying an existing Linux binary, authentication, and inspection.
 
-## Verify your change
+## Verify your change (Deck repository conventions)
 
-Run the smallest affected test first. For example, for documentation:
+During editing, run the focused file, for example `bun test tests/documentation-governance.test.ts`.
+At handoff, run `bun run test:changed` and `bunx tsc --noEmit` once. Reuse evidence for an unchanged
+candidate; rerun checks whose inputs changed. The final full gate is `bun run test:full`, once.
 
-```sh
-bun test tests/documentation-governance.test.ts
-```
+| Command | Scope |
+| --- | --- |
+| `bun run test` / `bun run test:fast` | In-process `*.test.ts(x)` tests |
+| `bun run test:changed -- --changed=HEAD` | Fast and integration importers of changed inputs |
+| `bun run test:int` | `*.int.test.ts(x)`: subprocesses, git fixtures and composition |
+| `bun run test:e2e` | `*.e2e.test.ts(x)`: binaries, cross-runner and full UI flows |
+| `bun run test:full` | All required tiers, 30-second per-test timeout |
+| `bun run test:quarantine` | Tests listed in `tests/quarantine.yaml` |
 
-Then run the relevant broader checks:
+Use `--list` to inspect a selection and `bun scripts/test.ts --self-check` to check the tier partition.
+Affected selection follows imports; fixtures, generated files and manifests expand to the owning
+package, while shared test configuration and lockfile changes expand to all fast and integration tests.
+The wrapper preserves vendor exclusions from `bunfig.toml`. Quarantine entries require ownership,
+an issue link and expiry within 14 days; protected tests require explicit user approval.
 
-```sh
-bunx tsc --noEmit
-bun run test
-```
-
-The test script sets a 30-second per-test timeout. Release CI also runs the full suite and typecheck, plus release-specific checks. Compare broad-suite failures with [openspec/baseline-health.yaml](openspec/baseline-health.yaml); do not label a new fingerprint as known without evidence through the approved workflow.
+PR CI runs fast and integration tiers plus typecheck and generated-asset checks. Release CI runs the
+full suite. Compare failures with [openspec/baseline-health.yaml](openspec/baseline-health.yaml);
+do not label a new fingerprint as known without evidence through the approved workflow.
+These commands and suffixes apply to Deck itself; user projects retain their own conventions.
 
 ## Work on the web UI
 

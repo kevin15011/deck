@@ -64,7 +64,7 @@ function fileContents(paths: Record<string, string>): Record<string, string> {
 
 describe("generate-runner-execution-assets canonical Bun guard", () => {
   test("binds the generator guard to the release workflow Bun version contract", () => {
-    expect(readCanonicalBunVersionFromReleaseWorkflow(process.cwd())).toBe("1.3.12");
+    expect(readCanonicalBunVersionFromReleaseWorkflow(process.cwd())).toBe("1.4.0");
 
     const root = tempRoot("deck-runner-assets-workflow-guard-");
     mkdirSync(join(root, ".github", "workflows"), { recursive: true });
