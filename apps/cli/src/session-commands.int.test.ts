@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { RunnerAdapter } from "@deck/core";
+import { getDefaultDeckConfig, type RunnerAdapter } from "@deck/core";
+import { createClaudeRunnerAdapter } from "../../../packages/adapter-claude/src/runner-adapter";
+import { verifyClaudeSessionSkills } from "../../../packages/adapter-claude/src/session-skills";
 import type { DriverHostIo, DriverTaskInput, RunnerSessionDriver } from "@deck/core/session/driver";
 import { ControlClient, resolveStatePaths, startDaemon, type RunningDaemon, type StatePaths } from "@deck/session-host";
 import { createDeckConfigStore } from "./deck-config-store";
@@ -25,6 +27,7 @@ function echoDriver(): RunnerSessionDriver & { starts: DriverTaskInput[] } {
     newNativeSessionId: () => crypto.randomUUID(),
     probe: async () => ({ status: "ready", version: "2.1.296", capabilities: [], mcpIsolationVerified: true }),
     async startTask(input: DriverTaskInput, io: DriverHostIo) {
+      verifyClaudeSessionSkills(input.nativeSkills!);
       starts.push(input);
       queueMicrotask(() => {
         io.emit({ kind: "turn.started", data: { nativeSessionId: input.nativeSessionId ?? input.resume?.nativeSessionId } });
@@ -45,7 +48,13 @@ async function boot(options: { configured?: boolean; web?: boolean } = {}) {
   const project = join(home, "project");
   mkdirSync(project);
   const driver = echoDriver();
-  const adapter = { runnerId: "claude", getSessionDriver: () => driver } as unknown as RunnerAdapter;
+  // Hermetic installed generation, using the same preparation path as the native smoke.
+  const nativeAdapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: () => undefined });
+  const plan = nativeAdapter.buildDeveloperTeamInstallPlan({ projectRoot: project, environmentId: "claude-development", deckConfig: { ...getDefaultDeckConfig(), ...store.read() }, capabilityIds: ["claude-team-files"] });
+  if (plan.blocked) throw new Error("Fixture Claude generation is blocked");
+  await nativeAdapter.applyDeveloperTeamInstall({ projectRoot: project, environmentId: "claude-development", plan });
+  await nativeAdapter.prepareSessionNativeSkills();
+  const adapter = { runnerId: "claude", getSessionDriver: () => driver, prepareSessionNativeSkills: () => nativeAdapter.prepareSessionNativeSkills() } as unknown as RunnerAdapter;
   const result = await startDaemon({
     ...(options.web ? {web:{config:{port:0,trustedProxy:null,allowedOrigins:[],allowFunnel:false}}} : {}),
     paths, version: "1.0.0", anchorCommand: [process.execPath, "run", ANCHOR_ENTRY],

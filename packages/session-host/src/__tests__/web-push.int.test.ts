@@ -1,3 +1,4 @@
+import { seedAttentionHistory } from './push-attention-history';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -479,7 +480,7 @@ test('durable outcomes beyond cache capacity keep independent unsent work eligib
   let items:any[]=[];const {p,paths}=fixture({now:clock.now,attentionItems:()=>items,attentionSessions:()=>['s']});p.close();
   const store=new PushAttentionStore(paths.webDir,clock.now),device=JSON.stringify(['d','https://deck.test']);
   const old=Array.from({length:512},(_,n)=>({sessionId:`s${Math.floor(n/16)}`,kind:'decision' as const,key:`decision:${n}`,revision:1,seq:n+1,ts:clock.now()}));
-  for(const item of old)expect(store.record(device,item,outcome)).toBe(true);
+  seedAttentionHistory(store, device, old, outcome);store.close();
   clock.advance(60000);const pending={sessionId:'independent',kind:'result' as const,key:'decision:pending',revision:1,seq:1,ts:clock.now(),summary:'Still waiting.'};items=[...old,pending];const calls:any[]=[];
   const opts={paths,now:clock.now,isDeviceActive:()=>true,isCurrent:()=>false,attentionItems:(id:string)=>items.filter(i=>i.sessionId===id),attentionSessions:()=>[...new Set(items.map(i=>i.sessionId))],send:async(...args:any[])=>{calls.push(args);return 201;}};
   const first=new WebPush(opts);hosts.push(first);await advance(80);expect(calls).toHaveLength(1);expect(first.status('d','https://deck.test').delivery).toMatchObject({sent:1,deferred:0});first.close();
@@ -494,7 +495,7 @@ test('concurrent independent transports do not compete for durable identity capa
  await withPushClock(async(clock,advance)=>{
   const {PushAttentionStore}=await import('../push-attention-store');const {readFileSync}=await import('node:fs');
   const {p,paths}=fixture({now:clock.now});p.close();const device=JSON.stringify(['d','https://deck.test']),store=new PushAttentionStore(paths.webDir,clock.now);
-  for(let n=0;n<510;n++)expect(store.record(device,{sessionId:'old',kind:'decision',key:`decision:${n}`,revision:1,seq:n+1,ts:clock.now()},'sent')).toBe(true);
+  seedAttentionHistory(store, device, Array.from({length:510},(_,n)=>({sessionId:'old',kind:'decision',key:`decision:${n}`,revision:1,seq:n+1,ts:clock.now()})), 'sent');store.close();
   clock.advance(60000);const items=Array.from({length:4},(_,n)=>({sessionId:'new',kind:'decision' as const,key:`decision:new${n}`,revision:1,seq:n+1,ts:clock.now()}));const calls:any[]=[],finish:((status:number)=>void)[]=[];
   const opts={paths,now:clock.now,isDeviceActive:()=>true,isCurrent:()=>false,attentionItems:()=>items,attentionSessions:()=>['new'],send:async(...args:any[])=>{calls.push(args);return new Promise<number>(resolve=>finish.push(resolve));}};
   const first=new WebPush(opts);hosts.push(first);await advance(80);expect(calls).toHaveLength(4);
@@ -521,7 +522,7 @@ test('512 still-relevant terminal outcomes never delay an independent 30-minute 
   const {PushAttentionStore}=await import('../push-attention-store');let items:any[]=[];
   const {p,paths}=fixture({now:clock.now,attentionItems:()=>items,attentionSessions:()=>[]});p.close();
   const store=new PushAttentionStore(paths.webDir,clock.now),device=JSON.stringify(['d','https://deck.test']);
-  const current=Array.from({length:512},(_,n)=>({sessionId:'s'+Math.floor(n/16),kind:'decision' as const,key:'decision:'+n,revision:1,seq:n+1,ts:clock.now()}));for(const a of current)store.record(device,a,outcome);
+  const current=Array.from({length:512},(_,n)=>({sessionId:'s'+Math.floor(n/16),kind:'decision' as const,key:'decision:'+n,revision:1,seq:n+1,ts:clock.now()}));seedAttentionHistory(store, device, current, outcome);store.close();
   clock.advance(60000);items=[...current,{sessionId:'new',kind:'result',key:'result:lead:2',revision:1,seq:999,ts:clock.now(),summary:'Independent result.'}];const sent:any[]=[];
   const opts={paths,now:clock.now,isDeviceActive:()=>true,isCurrent:()=>false,attentionItems:(id:string)=>items.filter(i=>i.sessionId===id),attentionSessions:()=>[...new Set(items.map(i=>i.sessionId))],send:async(...a:any[])=>{sent.push(a);return 201;}};
   const first=new WebPush(opts);hosts.push(first);await advance(80);expect(sent).toHaveLength(1);expect(sent[0][1]).toMatchObject({attention:'result',summary:'Independent result.'});first.close();

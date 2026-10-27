@@ -70,11 +70,13 @@ test("native tree journal survives old/root navigation and reload; veto/summary 
       await session.reload();
       expect((await call({ action: "inspect", taskId: id })).content[0].text).toContain("completed");
     }
-    for (const mode of ["veto", "error", "aborted"] as const) {
+    for (const [index, mode] of (["veto", "error", "aborted"] as const).entries()) {
       const target = manager.appendMessage({ role: "user", content: "earlier node", timestamp: Date.now() });
       manager.appendMessage(fauxAssistantMessage("summarize this abandoned branch"));
       const r = await call({ agent: "deck-quality", task: "SLEEP" }); const taskId = r.details.taskIds[0];
-      await Bun.sleep(80); const oldLeaf = manager.getLeafId();
+      // Cancellation must follow observable child startup, including on a busy runner.
+      // Otherwise a killed child may never log its start and the later exact count cannot reach five.
+      await until(() => childCount() === index + 2); const oldLeaf = manager.getLeafId();
       veto = mode === "veto"; if (mode !== "veto") summary = mode;
       if (mode === "error") await expect(session.navigateTree(target, { summarize: true })).rejects.toThrow("forced summary failure");
       else expect((await session.navigateTree(target, { summarize: mode !== "veto" })).cancelled).toBe(true);

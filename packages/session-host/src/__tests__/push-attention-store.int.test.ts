@@ -1,3 +1,4 @@
+import { seedAttentionHistory } from './push-attention-history';
 import { afterEach, expect, test } from 'bun:test';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,8 +36,7 @@ test('receipt migration, invalid store floors, private mode and no persisted con
 test('bounded receipts and views; older retry cannot overwrite newer revision', () => {
     const dir = tempDir(), store = new PushAttentionStore(dir, () => 1000);
     store.sync([device]);
-    for (let n = 0; n < 600; n++)
-        store.record(device, { ...item, key: `decision:${n}` }, 'sent');
+    seedAttentionHistory(store, device, Array.from({ length: 600 }, (_, n) => ({ ...item, key: `decision:${n}` })), 'sent');
     for (let n = 0; n < 80; n++)
         store.viewed(device, `s${n}`, n + 1);
     const raw = JSON.parse(readFileSync(join(dir, 'push-attention.json'), 'utf8'));
@@ -54,7 +54,7 @@ test('bounded receipts and views; older retry cannot overwrite newer revision', 
 test('capacity preserves terminal sent and failed receipts across reload without covering pending attention',()=>{
  for(const outcome of ['sent','failed'] as const){
   const dir=tempDir();let store=new PushAttentionStore(dir,()=>1000);store.sync([device]);
-  for(let n=0;n<512;n++)store.record(device,{...item,sessionId:`s${Math.floor(n/16)}`,key:`decision:${n}`},outcome);
+  seedAttentionHistory(store, device, Array.from({length:512}, (_,n)=>({...item,sessionId:`s${Math.floor(n/16)}`,key:`decision:${n}`})), outcome);
   const first={...item,sessionId:'s0',key:'decision:0'},pending={...item,sessionId:'independent',key:'decision:pending'};
   expect(store.record(device,pending,'sent')).toBe(true);
   store=new PushAttentionStore(dir,()=>1100);expect(store.eligible(device,first)).toBe(false);expect(store.eligible(device,pending)).toBe(false);

@@ -455,7 +455,15 @@ describe("runner-sync", () => {
       const initialConfig = getDefaultDeckConfig();
       initialConfig.packageInstructions.codex.serena = false;
       const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: initialConfig });
-      await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial });
+      // Seed the historical release from the real plan; its installation transaction is
+      // not the behavior under test. Keep the repair below on real durable effects.
+      expect(initial.blocked).not.toBe(true);
+      for (const file of initial.files) {
+        const path = join(root, file.path);
+        await mkdir(join(path, ".."), { recursive: true });
+        await writeFile(path, file.content, { mode: 0o644 });
+      }
+      expect(await adapter.verifyDeveloperTeamInstall(initial)).toEqual({ valid: true, diagnostics: [] });
       const paths = [
         ".codex/agents/deck-lead.toml",
         ".agents/skills/idea-refine/examples.md",
