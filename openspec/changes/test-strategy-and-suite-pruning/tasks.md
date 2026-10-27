@@ -134,3 +134,8 @@ R4 depends on R1. R5 follows R3.
 - No hand edits to generated files.
 - No destructive git operations. Rollback uses `git revert`.
 - No Deck-repo conventions in shipped doctrine content or in deck-init output for user projects.
+
+
+### Candidate-specific acceptance decision
+
+The user accepted composite verification for U2+B0 and the bounded blocking B2 repairs after disclosure of the unresolved Pi Supermemory worker stall. For this candidate only, the green full-command requirement is satisfied by explicit acceptance of the source-bound composite evidence (7,511 pass, 11 unchanged skips, zero missing cases); the command itself remains recorded as interrupted/exit 1. See working-brief.md, “Approved bounded closure”. Future batches retain their existing acceptance requirements. Broader outstanding tasks remain open.

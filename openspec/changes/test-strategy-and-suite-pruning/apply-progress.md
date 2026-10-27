@@ -90,3 +90,12 @@ Final affected check after typing-only and passthrough-guard deltas: `bun test a
  1099 expect() calls
 Ran 18 tests across 2 files. [1340.00ms]
 ```
+
+
+## Approved bounded closure: U2+B0 and blocking B2 repairs
+
+The user explicitly accepted composite verification after disclosure that the full command was interrupted by an unexplained CPU-active Pi Supermemory worker stall. The user deferred reconsideration of adaptive memory to another session and authorized closing this candidate as-is. This resolves the pending acceptance question for this candidate only; it does not weaken future full-gate requirements.
+
+Accepted evidence: 7,511 passing cases, 11 unchanged skips, zero missing cases across all 613 canonical selected paths, with matching source hashes. Quality reconciliation: /tmp/deck-quality-reconciliation-59420/report.md and per-case/per-file evidence (task-7c45aa40-578d-43d0-ba38-41ae88e0ea70 attempt 5, result 60395/60396). Typecheck and protected scoped reviews remain valid. The full command's actual exit remains 1 following evaluator-induced termination; neither a successful full invocation nor a fixed stall is claimed. No additional broad rerun is required for this bounded closure.
+
+Scope: U2+B0 and the reviewed blocking B2 fixture repairs are accepted for separate commits. U3 runtime wiring, readiness/Setup implementation, broader parity and remaining pruning are not declared complete. Adaptive-memory redesign and investigation of the unexplained stall are deferred to another session. No push authorized.
