@@ -1,0 +1,622 @@
+path,package,test_count,loc,duration_ms,category,protected_area,proposed_action,reason
+apps/cli/src/__tests__/binary-pi-launch.test.ts,apps/cli,8,170,1031,S,none,tier-e2e,spawns processes/fs/network or >3s
+apps/cli/src/__tests__/binary-smoke.test.tsx,apps/cli,13,857,13580,S,none,tier-e2e,spawns processes/fs/network or >3s
+apps/cli/src/__tests__/doctor-checks.test.ts,apps/cli,12,233,2291,K,none,keep,behavioral
+apps/cli/src/__tests__/doctor-diagnostics.test.ts,apps/cli,30,741,12606,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/__tests__/doctor-presentation.test.ts,apps/cli,12,237,308,K,none,keep,behavioral
+apps/cli/src/__tests__/doctor-report.test.ts,apps/cli,15,287,286,K,none,keep,behavioral
+apps/cli/src/__tests__/global-config-production-audit.test.ts,apps/cli,11,156,1519,K,none,keep,behavioral
+apps/cli/src/__tests__/runner-text-guard.test.ts,apps/cli,4,65,1562,K,none,keep,behavioral
+apps/cli/src/__tests__/tui-boundary-audit.test.ts,apps/cli,1,96,373,K,none,keep,behavioral
+apps/cli/src/claude-launch-plan.test.ts,apps/cli,6,77,3696,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/claude-supermemory-launch.test.ts,apps/cli,6,172,2481,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/claude-team-launch.test.ts,apps/cli,7,294,33887,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/cli-args.test.ts,apps/cli,68,603,877,K,none,keep,behavioral
+apps/cli/src/codebase-guard-command.test.ts,apps/cli,3,55,12880,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/codebase-install-compatibility.test.ts,apps/cli,16,372,9265,S,release-install,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/codex-supermemory-launch.test.ts,apps/cli,11,289,120099,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/daemon-commands.test.ts,apps/cli,11,114,1764,K,session-lifecycle,keep,behavioral; must-keep area
+apps/cli/src/deck-config-store.test.ts,apps/cli,14,201,1449,K,none,keep,behavioral
+apps/cli/src/developer-team-flow.test.ts,apps/cli,18,196,255,K,none,keep,behavioral
+apps/cli/src/doctor-command/doctor-diagnostics.test.ts,apps/cli,2,41,1238,K,none,keep,behavioral
+apps/cli/src/interactive-search-review.test.ts,apps/cli,2,132,1134,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/internal-memory-mcp.test.ts,apps/cli,2,64,4444,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/internal-serena-mcp.test.ts,apps/cli,5,114,869,K,none,keep,behavioral
+apps/cli/src/internal-session-commands.test.ts,apps/cli,4,109,8981,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/launch-diagnostic-format.test.ts,apps/cli,5,55,248,K,none,keep,behavioral
+apps/cli/src/launch-supermemory-hermeticity.test.ts,apps/cli,16,708,4550,K,none,tier-int,slow (4550ms) behavioral
+apps/cli/src/line-queue.test.ts,apps/cli,2,29,336,K,none,keep,behavioral
+apps/cli/src/menu-options.test.ts,apps/cli,9,123,276,K,none,keep,behavioral
+apps/cli/src/native-customizations.test.ts,apps/cli,3,21,328,K,none,keep,behavioral
+apps/cli/src/native-interactive-authority.test.ts,apps/cli,0,63,77392,K,approvals-authority,tier-int,slow (77392ms) behavioral
+apps/cli/src/native-package-retirement-fresh.test.ts,apps/cli,0,55,46457,G,none,tier-int,generated-artifact freshness
+apps/cli/src/native-package-retirement-install.test.ts,apps/cli,0,65,50269,O,release-install,rewrite-structural,change/one-off-regression named; verify git log -S [protected area: block-level only]
+apps/cli/src/native-search-preparation.test.ts,apps/cli,5,76,1096,K,none,keep,behavioral
+apps/cli/src/opencode-launch-command.test.ts,apps/cli,13,355,3780,C,none,rewrite-structural,phrase/content assertions dominate (31 of 46 expects)
+apps/cli/src/opencode-supermemory-launch.test.ts,apps/cli,17,393,1496,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/openspec-validate-command.test.ts,apps/cli,8,283,344,K,none,keep,behavioral
+apps/cli/src/personal-mcp-native.test.ts,apps/cli,0,110,233,S,none,tier-e2e,spawns processes/fs/network or >3s
+apps/cli/src/pi-client-proof.native.test.ts,apps/cli,0,97,49849,K,none,tier-int,slow (49849ms) behavioral
+apps/cli/src/pi-client-proof.test.ts,apps/cli,7,67,1548,K,none,keep,behavioral
+apps/cli/src/pi-launch-command.direct-supermemory.test.ts,apps/cli,3,172,1441,C,none,rewrite-structural,phrase/content assertions dominate (10 of 14 expects)
+apps/cli/src/pi-launch-command.supermemory.test.ts,apps/cli,13,562,6829,C,none,rewrite-structural,phrase/content assertions dominate (57 of 85 expects)
+apps/cli/src/pi-launch-command.test.ts,apps/cli,17,591,5191,C,none,rewrite-structural,phrase/content assertions dominate (41 of 78 expects)
+apps/cli/src/pi-memory-launch.test.ts,apps/cli,1,149,7445,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/pi-memory-token-handoff.test.ts,apps/cli,3,56,232,K,security,keep,behavioral; must-keep area
+apps/cli/src/pi-native-pre-spawn.test.ts,apps/cli,1,48,903,K,none,keep,behavioral
+apps/cli/src/pi-update-detection.test.ts,apps/cli,1,16,738,K,none,keep,behavioral
+apps/cli/src/project-root.test.ts,apps/cli,7,152,287,K,none,keep,behavioral
+apps/cli/src/runner-adapters.codex.test.ts,apps/cli,3,73,1214,K,none,keep,behavioral
+apps/cli/src/runner-capability-registry.test.ts,apps/cli,17,171,877,K,data-integrity,keep,behavioral; must-keep area
+apps/cli/src/runner-cleanup-command.test.ts,apps/cli,18,307,1342,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/runner-cleanup-update.test.ts,apps/cli,4,37,1115,K,none,keep,behavioral
+apps/cli/src/runner-launch-command.test.ts,apps/cli,57,1856,95949,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/runner-migration-gates.test.ts,apps/cli,4,57,5928,S,release-install,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/runner-migration-recovery.test.ts,apps/cli,7,409,23570,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/runtime-detection.test.ts,apps/cli,2,28,212,K,none,keep,behavioral
+apps/cli/src/runtime-executable-receipt.test.ts,apps/cli,5,118,233,K,none,keep,behavioral
+apps/cli/src/runtime/__tests__/build-info.test.ts,apps/cli,4,113,242,K,none,keep,behavioral
+apps/cli/src/runtime/__tests__/paths.test.ts,apps/cli,18,217,262,K,none,keep,behavioral
+apps/cli/src/runtime/__tests__/process.test.ts,apps/cli,11,130,905,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/session-codebase-readiness.test.ts,apps/cli,36,510,1398,K,none,keep,behavioral
+apps/cli/src/session-commands.test.ts,apps/cli,14,258,14247,K,none,tier-int,slow (14247ms) behavioral
+apps/cli/src/session-global-memory-transport.test.ts,apps/cli,11,152,345,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/session-model-catalog.test.ts,apps/cli,6,55,169,K,none,keep,behavioral
+apps/cli/src/session-native-memory.test.ts,apps/cli,9,115,835,S,none,tier-e2e,spawns processes/fs/network or >3s
+apps/cli/src/session-project-instructions.test.ts,apps/cli,8,74,206,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/session-runtime-readiness.test.ts,apps/cli,2,24,169,K,none,keep,behavioral
+apps/cli/src/session-self-test.test.ts,apps/cli,8,58,524,K,none,keep,behavioral
+apps/cli/src/session-service.test.ts,apps/cli,25,404,10106,C,none,rewrite-structural,phrase/content assertions dominate (68 of 120 expects)
+apps/cli/src/session-shared-services.test.ts,apps/cli,18,197,658,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/session-smoke.test.ts,apps/cli,3,52,120010,K,none,tier-int,slow (120010ms) behavioral
+apps/cli/src/session-task-diff.test.ts,apps/cli,2,18,238,K,none,keep,behavioral
+apps/cli/src/session-terminal-client.test.ts,apps/cli,19,335,441,K,none,keep,behavioral
+apps/cli/src/session-tos.test.ts,apps/cli,7,81,1158,K,none,keep,behavioral
+apps/cli/src/session-web-doctor.test.ts,apps/cli,2,22,1094,K,none,keep,behavioral
+apps/cli/src/skill-registry-command.test.ts,apps/cli,13,681,3202,K,data-integrity,tier-int,slow (3202ms) behavioral
+apps/cli/src/standalone-web-search-smoke.compiled.test.ts,apps/cli,1,83,3451,S,none,tier-e2e,spawns processes/fs/network or >3s
+apps/cli/src/standalone-web-search-smoke.test.ts,apps/cli,2,95,664,K,none,keep,behavioral
+apps/cli/src/supermemory-migration-command.test.ts,apps/cli,2,43,635,K,release-install,keep,behavioral; must-keep area
+apps/cli/src/supermemory-observability.test.ts,apps/cli,6,200,245,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/supermemory-runtime-host.explicit-tools.test.ts,apps/cli,9,152,1154,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/supermemory-runtime-host.test.ts,apps/cli,34,1468,2321,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/tui/__tests__/developer-team-screens-effort.test.tsx,apps/cli,44,1044,1673,K,none,keep,behavioral
+apps/cli/src/tui/__tests__/pi-background-install.test.tsx,apps/cli,1,41,3023,K,release-install,tier-int,slow (3023ms) behavioral
+apps/cli/src/tui/__tests__/runner-install-e2e.test.tsx,apps/cli,29,771,,C,release-install,rewrite-structural,phrase/content assertions dominate (90 of 113 expects) [protected area: block-level only]
+apps/cli/src/tui/__tests__/tui-integration.test.tsx,apps/cli,24,433,,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/tui/app.codex-discovery.test.tsx,apps/cli,4,328,2252,K,none,keep,behavioral
+apps/cli/src/tui/app.opencode-discovery.test.tsx,apps/cli,7,371,2565,K,none,keep,behavioral
+apps/cli/src/tui/app.serena-bridge.test.ts,apps/cli,1,103,1094,K,none,keep,behavioral
+apps/cli/src/tui/app.synthetic-runner.test.tsx,apps/cli,31,1981,57503,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/tui/app.update-recovery.test.tsx,apps/cli,2,154,1350,K,session-lifecycle,keep,behavioral; must-keep area
+apps/cli/src/tui/app.web-search-developer-team.test.tsx,apps/cli,1,258,5066,K,none,tier-int,slow (5066ms) behavioral
+apps/cli/src/tui/components/menu-list.test.tsx,apps/cli,40,676,1088,K,none,keep,behavioral
+apps/cli/src/tui/cross-config.test.tsx,apps/cli,5,80,830,K,none,keep,behavioral
+apps/cli/src/tui/cross-configuration-flow.test.tsx,apps/cli,3,100,2625,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/tui/developer-team-flow.test.tsx,apps/cli,42,617,1764,C,none,rewrite-structural,phrase/content assertions dominate (82 of 109 expects)
+apps/cli/src/tui/opencode-discovery.test.ts,apps/cli,3,65,264,K,none,keep,behavioral
+apps/cli/src/tui/release-check-transport.test.ts,apps/cli,0,70,21632,K,session-lifecycle,tier-int,slow (21632ms) behavioral
+apps/cli/src/tui/release-check.test.ts,apps/cli,3,46,707,K,release-install,keep,behavioral; must-keep area
+apps/cli/src/tui/render-screen.test.tsx,apps/cli,6,116,1494,K,none,keep,behavioral
+apps/cli/src/tui/runner-dashboard/__tests__/action-runner.test.ts,apps/cli,14,345,264,K,none,keep,behavioral
+apps/cli/src/tui/runner-dashboard/__tests__/codex-install-actions.test.ts,apps/cli,2,71,802,K,release-install,keep,behavioral; must-keep area
+apps/cli/src/tui/runner-dashboard/__tests__/runner-install-contract.test.ts,apps/cli,13,549,780,K,release-install,keep,behavioral; must-keep area
+apps/cli/src/tui/runner-dashboard/action-runner.test.ts,apps/cli,47,1933,1699,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/tui/runner-dashboard/input-handler.test.ts,apps/cli,14,247,1103,K,none,keep,behavioral
+apps/cli/src/tui/runner-dashboard/inventory.test.ts,apps/cli,5,109,959,K,none,keep,behavioral
+apps/cli/src/tui/runner-dashboard/reducer.test.ts,apps/cli,27,563,968,K,none,keep,behavioral
+apps/cli/src/tui/runner-dashboard/render.test.tsx,apps/cli,12,243,1029,K,none,keep,behavioral
+apps/cli/src/tui/runner-options.test.ts,apps/cli,3,65,600,K,none,keep,behavioral
+apps/cli/src/tui/screens/developer-team-screens.test.tsx,apps/cli,5,128,1001,K,none,keep,behavioral
+apps/cli/src/tui/screens/home-screen.test.tsx,apps/cli,11,251,1065,K,none,keep,behavioral
+apps/cli/src/tui/screens/model-discovery-progress.test.tsx,apps/cli,1,68,1555,I,none,rewrite-structural,mock/call-count choreography
+apps/cli/src/tui/screens/rollback-screen.test.tsx,apps/cli,6,121,618,K,release-install,keep,behavioral; must-keep area
+apps/cli/src/tui/screens/runner-dashboard-progress.test.tsx,apps/cli,1,68,1265,I,none,rewrite-structural,mock/call-count choreography
+apps/cli/src/tui/screens/upgrade-progress-screen.test.tsx,apps/cli,4,47,605,K,none,keep,behavioral
+apps/cli/src/tui/screens/upgrade-screen.test.tsx,apps/cli,3,128,691,K,none,keep,behavioral
+apps/cli/src/tui/web-search-credential-screen.test.tsx,apps/cli,2,38,1508,K,none,keep,behavioral
+apps/cli/src/upgrade-command/__tests__/backup-store.test.ts,apps/cli,14,404,1528,K,release-install,keep,behavioral; must-keep area
+apps/cli/src/upgrade-command/__tests__/github-release-descriptor.test.ts,apps/cli,14,211,1781,K,release-install,keep,behavioral; must-keep area
+apps/cli/src/upgrade-command/__tests__/github-release.test.ts,apps/cli,45,383,2267,K,release-install,keep,behavioral; must-keep area
+apps/cli/src/upgrade-command/__tests__/index.test.ts,apps/cli,13,223,1010,K,none,keep,behavioral
+apps/cli/src/upgrade-command/__tests__/install.test.ts,apps/cli,9,137,749,S,release-install,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/upgrade-command/__tests__/manifest-store.test.ts,apps/cli,18,347,308,K,none,keep,behavioral
+apps/cli/src/upgrade-command/__tests__/orchestrator.test.ts,apps/cli,32,1209,26815,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/upgrade-command/__tests__/release-descriptor.test.ts,apps/cli,38,913,298,K,release-install,keep,behavioral; must-keep area
+apps/cli/src/upgrade-command/__tests__/rollback.test.ts,apps/cli,14,394,979,K,release-install,keep,behavioral; must-keep area
+apps/cli/src/upgrade-command/__tests__/runner-sync.test.ts,apps/cli,22,760,90870,S,none,tier-int,spawns processes/fs/network or >3s
+apps/cli/src/upgrade-command/__tests__/state-store.test.ts,apps/cli,22,319,253,K,data-integrity,keep,behavioral; must-keep area
+apps/cli/src/upgrade-command/__tests__/xdg-migration.test.ts,apps/cli,14,275,296,K,release-install,keep,behavioral; must-keep area
+apps/cli/src/upgrade-command/runner-recovery-composition.test.ts,apps/cli,1,11,120008,K,session-lifecycle,tier-int,slow (120008ms) behavioral
+apps/cli/src/upgrade-command/runner-sync.opencode-rollback.test.ts,apps/cli,0,58,7106,K,release-install,tier-int,slow (7106ms) behavioral
+apps/cli/src/version-no-home.test.ts,apps/cli,1,16,2050,K,none,keep,behavioral
+apps/cli/src/web-daemon-restart.test.ts,apps/cli,6,31,1026,K,session-lifecycle,keep,behavioral; must-keep area
+apps/cli/src/web-search-dashboard-contract.test.ts,apps/cli,1,107,1824,K,none,keep,behavioral
+apps/cli/src/web-search-provider.test.ts,apps/cli,2,21,220,K,none,keep,behavioral
+apps/cli/src/web-search-setup.test.ts,apps/cli,8,279,1016,K,none,keep,behavioral
+apps/cli/src/web-search-shell-profile.test.ts,apps/cli,14,301,475,S,none,tier-int,spawns processes/fs/network or >3s
+apps/web/src/activity.test.tsx,apps/web,15,189,23,K,none,keep,behavioral
+apps/web/src/approvals.test.tsx,apps/web,13,80,31,C,approvals-authority,rewrite-structural,phrase/content assertions dominate (54 of 57 expects) [protected area: block-level only]
+apps/web/src/chat-history.test.ts,apps/web,8,150,46,K,none,keep,behavioral
+apps/web/src/clipboard.test.ts,apps/web,2,45,5,K,none,keep,behavioral
+apps/web/src/composer-keyboard.test.ts,apps/web,15,165,412,K,none,keep,behavioral
+apps/web/src/context-window.test.tsx,apps/web,9,169,877,K,none,keep,behavioral
+apps/web/src/decisions.test.tsx,apps/web,7,50,10,K,none,keep,behavioral
+apps/web/src/dismiss-layer.test.ts,apps/web,3,39,2,K,none,keep,behavioral
+apps/web/src/git-diff.test.tsx,apps/web,8,98,217,C,none,rewrite-structural,phrase/content assertions dominate (30 of 43 expects)
+apps/web/src/image-attachments.test.tsx,apps/web,3,22,3,K,none,keep,behavioral
+apps/web/src/install-deck.test.tsx,apps/web,5,31,14,K,release-install,keep,behavioral; must-keep area
+apps/web/src/lead-progress.test.tsx,apps/web,22,231,30,K,none,keep,behavioral
+apps/web/src/lead-replies.test.tsx,apps/web,1,9,3,K,none,keep,behavioral
+apps/web/src/markdown.test.tsx,apps/web,3,24,28,C,none,rewrite-structural,phrase/content assertions dominate (14 of 18 expects)
+apps/web/src/message-copy.test.tsx,apps/web,1,15,2,K,none,keep,behavioral
+apps/web/src/mobile-viewport.test.ts,apps/web,4,58,3,K,none,keep,behavioral
+apps/web/src/navigation.test.ts,apps/web,18,146,39,K,none,keep,behavioral
+apps/web/src/ordering.test.ts,apps/web,2,18,1,K,none,keep,behavioral
+apps/web/src/personal-mcp-availability.test.tsx,apps/web,3,19,2,K,none,keep,behavioral
+apps/web/src/project-files.test.tsx,apps/web,4,44,29,K,none,keep,behavioral
+apps/web/src/project-navigation.test.tsx,apps/web,5,45,23,K,none,keep,behavioral
+apps/web/src/project-trust-settings.test.tsx,apps/web,3,9,3,K,none,keep,behavioral
+apps/web/src/prompt-queue.test.tsx,apps/web,9,71,18,K,none,keep,behavioral
+apps/web/src/provider-failure.integration.test.tsx,apps/web,2,85,,S,none,tier-int,spawns processes/fs/network or >3s
+apps/web/src/push-notifications.test.ts,apps/web,9,129,13,K,none,keep,behavioral
+apps/web/src/question-answer.test.tsx,apps/web,8,21,91,K,none,keep,behavioral
+apps/web/src/questions.test.tsx,apps/web,6,55,58,K,none,keep,behavioral
+apps/web/src/quota.test.tsx,apps/web,3,20,7,K,none,keep,behavioral
+apps/web/src/restart-deck.test.tsx,apps/web,3,6,75,K,none,keep,behavioral
+apps/web/src/secondary-info.test.tsx,apps/web,2,20,3,K,none,keep,behavioral
+apps/web/src/service-worker.test.ts,apps/web,18,382,1075,K,none,keep,behavioral
+apps/web/src/session-approvals.test.tsx,apps/web,6,40,5,K,approvals-authority,keep,behavioral; must-keep area
+apps/web/src/session-codebase-availability.test.tsx,apps/web,7,166,55003,S,none,tier-int,spawns processes/fs/network or >3s
+apps/web/src/session-controls.test.tsx,apps/web,6,49,11,K,none,keep,behavioral
+apps/web/src/state.test.ts,apps/web,25,189,40,K,data-integrity,keep,behavioral; must-keep area
+apps/web/src/status-indicator.test.tsx,apps/web,9,56,3,K,none,keep,behavioral
+apps/web/src/steering.test.tsx,apps/web,5,25,3,K,none,keep,behavioral
+apps/web/src/subagents-tab.test.tsx,apps/web,4,41,6,K,none,keep,behavioral
+apps/web/src/theme-reveal.test.ts,apps/web,11,159,13,K,none,keep,behavioral
+apps/web/src/theme.test.tsx,apps/web,8,88,9,K,none,keep,behavioral
+apps/web/src/turn-failure.test.tsx,apps/web,8,72,10,K,none,keep,behavioral
+apps/web/src/workspace.test.tsx,apps/web,2,63,49,K,none,keep,behavioral
+benchmarks/deckmemorybench.test.ts,benchmarks,3,51,,K,none,keep,behavioral
+packages/adapter-claude/src/codebase-native-artifact.test.ts,packages/adapter-claude,4,75,94,S,data-integrity,tier-e2e,spawns processes/fs/network or >3s
+packages/adapter-claude/src/model-discovery.test.ts,packages/adapter-claude,7,131,5767,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-claude/src/personal-mcp.test.ts,packages/adapter-claude,3,10,30,K,none,keep,behavioral
+packages/adapter-claude/src/quota.test.ts,packages/adapter-claude,3,33,198,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-claude/src/rtk-artifact.test.ts,packages/adapter-claude,3,61,17,K,data-integrity,keep,behavioral; must-keep area
+packages/adapter-claude/src/rtk-hook.test.ts,packages/adapter-claude,2,89,813,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-claude/src/runner-adapter.test.ts,packages/adapter-claude,29,743,38852,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-claude/src/session-driver/adapter-registration.test.ts,packages/adapter-claude,1,22,1,K,none,keep,behavioral
+packages/adapter-claude/src/session-driver/driver.test.ts,packages/adapter-claude,49,554,,K,none,keep,behavioral
+packages/adapter-claude/src/session-driver/failure.test.ts,packages/adapter-claude,6,50,3,K,none,keep,behavioral
+packages/adapter-claude/src/session-driver/launch.test.ts,packages/adapter-claude,19,199,,K,none,keep,behavioral
+packages/adapter-claude/src/session-driver/mapper.test.ts,packages/adapter-claude,28,297,,K,none,keep,behavioral
+packages/adapter-claude/src/session-driver/steering-driver.test.ts,packages/adapter-claude,12,88,70,K,none,keep,behavioral
+packages/adapter-claude/src/session-driver/steering.test.ts,packages/adapter-claude,8,55,41,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-claude/src/session-mcp.test.ts,packages/adapter-claude,5,62,35,K,none,keep,behavioral
+packages/adapter-claude/src/supermemory-artifact.test.ts,packages/adapter-claude,3,63,9,K,data-integrity,keep,behavioral; must-keep area
+packages/adapter-codex/src/capability-catalog.test.ts,packages/adapter-codex,4,66,4,K,none,keep,behavioral
+packages/adapter-codex/src/codex-0162-compat.test.ts,packages/adapter-codex,6,93,10,K,none,keep,behavioral
+packages/adapter-codex/src/codex-config.test.ts,packages/adapter-codex,11,131,1,K,none,keep,behavioral
+packages/adapter-codex/src/codex-hook-host.test.ts,packages/adapter-codex,1,20,2,K,none,keep,behavioral
+packages/adapter-codex/src/codex-hook.test.ts,packages/adapter-codex,5,82,3,K,none,keep,behavioral
+packages/adapter-codex/src/codex-model-discovery.test.ts,packages/adapter-codex,12,312,,K,none,keep,behavioral
+packages/adapter-codex/src/compatibility.test.ts,packages/adapter-codex,3,43,,K,none,keep,behavioral
+packages/adapter-codex/src/developer-team-execution-bridge.test.ts,packages/adapter-codex,7,42,727,K,none,keep,behavioral
+packages/adapter-codex/src/developer-team-install.test.ts,packages/adapter-codex,28,441,3435,K,release-install,tier-int,slow (3435ms) behavioral
+packages/adapter-codex/src/instruction-translation.test.ts,packages/adapter-codex,3,62,177,K,none,keep,behavioral
+packages/adapter-codex/src/launch.test.ts,packages/adapter-codex,8,176,,K,none,keep,behavioral
+packages/adapter-codex/src/mcp-config.test.ts,packages/adapter-codex,19,190,,K,none,keep,behavioral
+packages/adapter-codex/src/memory-mcp-server.test.ts,packages/adapter-codex,8,117,30,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-codex/src/node-effects.test.ts,packages/adapter-codex,2,51,108,K,none,keep,behavioral
+packages/adapter-codex/src/preflight.test.ts,packages/adapter-codex,3,30,,K,release-install,keep,behavioral; must-keep area
+packages/adapter-codex/src/quota.test.ts,packages/adapter-codex,2,17,56,K,none,keep,behavioral
+packages/adapter-codex/src/rtk-hook.test.ts,packages/adapter-codex,5,83,511,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-codex/src/runner-adapter.test.ts,packages/adapter-codex,34,1423,168731,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-codex/src/runner-adapter.tools.test.ts,packages/adapter-codex,21,480,74877,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-codex/src/session-driver/adapter-registration.test.ts,packages/adapter-codex,1,8,1,K,none,keep,behavioral
+packages/adapter-codex/src/session-driver/driver.test.ts,packages/adapter-codex,99,1053,3,K,none,keep,behavioral
+packages/adapter-codex/src/session-driver/failure.test.ts,packages/adapter-codex,5,38,4,K,none,keep,behavioral
+packages/adapter-codex/src/session-driver/launch.test.ts,packages/adapter-codex,7,16,5,K,none,keep,behavioral
+packages/adapter-codex/src/session-driver/mapper.test.ts,packages/adapter-codex,13,118,2,K,none,keep,behavioral
+packages/adapter-codex/src/session-driver/rpc.test.ts,packages/adapter-codex,13,114,,K,none,keep,behavioral
+packages/adapter-codex/src/session-driver/steering.test.ts,packages/adapter-codex,3,21,2,K,none,keep,behavioral
+packages/adapter-codex/src/supermemory-artifact.test.ts,packages/adapter-codex,4,102,9,K,data-integrity,keep,behavioral; must-keep area
+packages/adapter-codex/src/tools-codebase-version.test.ts,packages/adapter-codex,3,30,7,K,none,keep,behavioral
+packages/adapter-codex/src/transaction.test.ts,packages/adapter-codex,9,255,2,K,none,keep,behavioral
+packages/adapter-codex/src/web-search.test.ts,packages/adapter-codex,4,106,,K,none,keep,behavioral
+packages/adapter-opencode/src/__tests__/opencode-cross-cutting.test.ts,packages/adapter-opencode,3,71,,K,none,keep,behavioral
+packages/adapter-opencode/src/capability-catalog.test.ts,packages/adapter-opencode,4,37,,K,none,keep,behavioral
+packages/adapter-opencode/src/capability-inventory.test.ts,packages/adapter-opencode,3,82,,K,none,keep,behavioral
+packages/adapter-opencode/src/capability-plan.test.ts,packages/adapter-opencode,12,243,,K,none,keep,behavioral
+packages/adapter-opencode/src/command-generation.test.ts,packages/adapter-opencode,3,56,1,G,none,tier-int,generated-artifact freshness
+packages/adapter-opencode/src/config-merge.test.ts,packages/adapter-opencode,24,375,2,K,data-integrity,keep,behavioral; must-keep area
+packages/adapter-opencode/src/context-mode-integration.test.ts,packages/adapter-opencode,5,86,4,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-opencode/src/developer-team-execution-bridge.test.ts,packages/adapter-opencode,16,38,827,K,none,keep,behavioral
+packages/adapter-opencode/src/developer-team-execution-reachability.test.ts,packages/adapter-opencode,72,2264,39569,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-opencode/src/developer-team-install.test.ts,packages/adapter-opencode,82,1569,9,S,release-install,tier-int,spawns processes/fs/network or >3s
+packages/adapter-opencode/src/execution-capability-probe.test.ts,packages/adapter-opencode,1,10,1,K,none,keep,behavioral
+packages/adapter-opencode/src/install-tools.test.ts,packages/adapter-opencode,18,474,4,K,release-install,keep,behavioral; must-keep area
+packages/adapter-opencode/src/installation-plan.test.ts,packages/adapter-opencode,4,62,2,K,release-install,keep,behavioral; must-keep area
+packages/adapter-opencode/src/interactive-search.test.ts,packages/adapter-opencode,3,60,681,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-opencode/src/internal-opencode-packages.test.ts,packages/adapter-opencode,8,52,,K,none,keep,behavioral
+packages/adapter-opencode/src/model-config.test.ts,packages/adapter-opencode,36,339,,K,none,keep,behavioral
+packages/adapter-opencode/src/model-discovery-context.test.ts,packages/adapter-opencode,10,175,17,K,none,keep,behavioral
+packages/adapter-opencode/src/model-inventory-cache.test.ts,packages/adapter-opencode,8,203,1,K,none,keep,behavioral
+packages/adapter-opencode/src/model-inventory.test.ts,packages/adapter-opencode,3,38,,K,none,keep,behavioral
+packages/adapter-opencode/src/model-project-trust.test.ts,packages/adapter-opencode,2,11,34,K,none,keep,behavioral
+packages/adapter-opencode/src/model-variants.test.ts,packages/adapter-opencode,16,203,,K,none,keep,behavioral
+packages/adapter-opencode/src/opencode-mcp-config.test.ts,packages/adapter-opencode,36,916,70,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-opencode/src/opencode-models-cli.test.ts,packages/adapter-opencode,9,273,1,K,none,keep,behavioral
+packages/adapter-opencode/src/opencode-supermemory-composition.integration.test.ts,packages/adapter-opencode,1,32,1521,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-opencode/src/opencode-supermemory-plugin.test.ts,packages/adapter-opencode,7,263,42,K,none,keep,behavioral
+packages/adapter-opencode/src/opencode-supermemory-profiles.test.ts,packages/adapter-opencode,14,264,69,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-opencode/src/parity-consumer.test.ts,packages/adapter-opencode,19,285,1,K,none,keep,behavioral
+packages/adapter-opencode/src/personal-mcp.test.ts,packages/adapter-opencode,5,12,15,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-opencode/src/preflight.test.ts,packages/adapter-opencode,8,138,,K,release-install,keep,behavioral; must-keep area
+packages/adapter-opencode/src/prompt-generation.test.ts,packages/adapter-opencode,10,195,1,G,none,tier-int,generated-artifact freshness
+packages/adapter-opencode/src/prompt-memory-injection.test.ts,packages/adapter-opencode,16,276,,C,none,rewrite-structural,phrase/content assertions dominate (33 of 38 expects)
+packages/adapter-opencode/src/required-tools.test.ts,packages/adapter-opencode,10,252,,K,none,keep,behavioral
+packages/adapter-opencode/src/rtk-install-contributions.test.ts,packages/adapter-opencode,2,82,71,K,release-install,keep,behavioral; must-keep area
+packages/adapter-opencode/src/runner-adapter.detect-deck-install.test.ts,packages/adapter-opencode,8,122,149,K,release-install,keep,behavioral; must-keep area
+packages/adapter-opencode/src/runner-adapter.inventory.test.ts,packages/adapter-opencode,7,186,17,I,none,rewrite-structural,mock/call-count choreography
+packages/adapter-opencode/src/runner-adapter.test.ts,packages/adapter-opencode,26,717,2,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-opencode/src/runner-capabilities.test.ts,packages/adapter-opencode,25,276,57,K,none,keep,behavioral
+packages/adapter-opencode/src/session-driver/driver.test.ts,packages/adapter-opencode,77,892,236,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-opencode/src/session-driver/failure.test.ts,packages/adapter-opencode,5,36,2,K,none,keep,behavioral
+packages/adapter-opencode/src/session-driver/mapper.test.ts,packages/adapter-opencode,14,153,1,K,none,keep,behavioral
+packages/adapter-opencode/src/session-driver/transport.test.ts,packages/adapter-opencode,3,27,1,K,session-lifecycle,keep,behavioral; must-keep area
+packages/adapter-opencode/src/team-catalog.test.ts,packages/adapter-opencode,3,27,,K,none,keep,behavioral
+packages/adapter-opencode/src/web-search.test.ts,packages/adapter-opencode,7,129,9,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-pi/src/agent-dir.test.ts,packages/adapter-pi,10,76,,K,none,keep,behavioral
+packages/adapter-pi/src/capability-catalog.test.ts,packages/adapter-pi,17,184,,K,none,keep,behavioral
+packages/adapter-pi/src/capability-inventory.test.ts,packages/adapter-pi,13,174,,K,none,keep,behavioral
+packages/adapter-pi/src/capability-plan.test.ts,packages/adapter-pi,35,763,,K,none,keep,behavioral
+packages/adapter-pi/src/developer-team-catalog.test.ts,packages/adapter-pi,3,43,2,K,none,keep,behavioral
+packages/adapter-pi/src/developer-team-execution-bridge.test.ts,packages/adapter-pi,16,38,770,K,none,keep,behavioral
+packages/adapter-pi/src/developer-team-execution-reachability.test.ts,packages/adapter-pi,43,1272,2952,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-pi/src/developer-team-install.layout.test.ts,packages/adapter-pi,5,58,14,K,release-install,keep,behavioral; must-keep area
+packages/adapter-pi/src/developer-team-install.runner-text.test.ts,packages/adapter-pi,3,40,13,K,release-install,keep,behavioral; must-keep area
+packages/adapter-pi/src/developer-team-install.test.ts,packages/adapter-pi,85,1905,,C,release-install,rewrite-structural,phrase/content assertions dominate (167 of 309 expects) [protected area: block-level only]
+packages/adapter-pi/src/execution-capability-probe.test.ts,packages/adapter-pi,1,10,1,K,none,keep,behavioral
+packages/adapter-pi/src/execution-memory-neutralization.test.ts,packages/adapter-pi,2,61,1175,K,none,keep,behavioral
+packages/adapter-pi/src/global-materialization.test.ts,packages/adapter-pi,17,293,237,K,none,keep,behavioral
+packages/adapter-pi/src/install-tools.owned.test.ts,packages/adapter-pi,9,98,1,K,release-install,keep,behavioral; must-keep area
+packages/adapter-pi/src/install-tools.test.ts,packages/adapter-pi,23,474,,K,release-install,keep,behavioral; must-keep area
+packages/adapter-pi/src/installation-plan.test.ts,packages/adapter-pi,9,96,,K,release-install,keep,behavioral; must-keep area
+packages/adapter-pi/src/instruction-translation.test.ts,packages/adapter-pi,3,27,,K,none,keep,behavioral
+packages/adapter-pi/src/internal-runner-packages.test.ts,packages/adapter-pi,33,302,,K,none,keep,behavioral
+packages/adapter-pi/src/model-config.test.ts,packages/adapter-pi,34,313,,K,none,keep,behavioral
+packages/adapter-pi/src/orchestrator-prompt.test.ts,packages/adapter-pi,27,159,,C,none,rewrite-structural,phrase/content assertions dominate (60 of 60 expects)
+packages/adapter-pi/src/package-layout.test.ts,packages/adapter-pi,10,99,,K,none,keep,behavioral
+packages/adapter-pi/src/pi-activation-guard.test.ts,packages/adapter-pi,15,143,5,K,none,keep,behavioral
+packages/adapter-pi/src/pi-bundle-compat.test.ts,packages/adapter-pi,2,58,1036,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-pi/src/pi-codebase-guard.test.ts,packages/adapter-pi,9,236,50618,K,none,tier-int,slow (50618ms) behavioral
+packages/adapter-pi/src/pi-codebase-materialization.test.ts,packages/adapter-pi,0,43,3540,K,none,tier-int,slow (3540ms) behavioral
+packages/adapter-pi/src/pi-deck-mcp.test.ts,packages/adapter-pi,20,144,,K,none,keep,behavioral
+packages/adapter-pi/src/pi-doctor.test.ts,packages/adapter-pi,15,200,9076,C,none,rewrite-structural,phrase/content assertions dominate (20 of 38 expects)
+packages/adapter-pi/src/pi-extensions/memory/client.test.ts,packages/adapter-pi,2,34,113,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/memory/extension.test.ts,packages/adapter-pi,31,431,22,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-pi/src/pi-extensions/memory/pi-cli.contract.test.ts,packages/adapter-pi,0,141,29826,K,none,tier-int,slow (29826ms) behavioral
+packages/adapter-pi/src/pi-extensions/memory/reinitialization.test.ts,packages/adapter-pi,6,85,10,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/memory/reload.native.test.ts,packages/adapter-pi,1,76,130,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/memory/sdk.contract.test.ts,packages/adapter-pi,0,118,84,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/memory/token-isolation.contract.test.ts,packages/adapter-pi,0,47,5422,K,security,tier-int,slow (5422ms) behavioral
+packages/adapter-pi/src/pi-extensions/memory/tools.test.ts,packages/adapter-pi,8,124,51,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-pi/src/pi-extensions/subagents/agents.test.ts,packages/adapter-pi,4,62,2,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/child-shell.test.ts,packages/adapter-pi,0,36,206,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/clarification.native.test.ts,packages/adapter-pi,0,75,4900,K,none,tier-int,slow (4900ms) behavioral
+packages/adapter-pi/src/pi-extensions/subagents/clarification.test.ts,packages/adapter-pi,2,46,4,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/clarification.transport.test.ts,packages/adapter-pi,1,69,2262,K,session-lifecycle,keep,behavioral; must-keep area
+packages/adapter-pi/src/pi-extensions/subagents/completion.test.ts,packages/adapter-pi,6,91,6,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/extension.test.ts,packages/adapter-pi,13,186,2074,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/interactive.native.test.ts,packages/adapter-pi,0,39,8733,K,none,tier-int,slow (8733ms) behavioral
+packages/adapter-pi/src/pi-extensions/subagents/jobs.test.ts,packages/adapter-pi,8,102,19,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/navigation-diagnostics.test.ts,packages/adapter-pi,2,109,160,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-pi/src/pi-extensions/subagents/navigation.native.test.ts,packages/adapter-pi,1,114,976,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/panel.native.test.ts,packages/adapter-pi,13,245,1067,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/pi-cli.contract.test.ts,packages/adapter-pi,0,65,15865,K,none,tier-int,slow (15865ms) behavioral
+packages/adapter-pi/src/pi-extensions/subagents/process-group.test.ts,packages/adapter-pi,0,22,362,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/recap-repair.native.test.ts,packages/adapter-pi,6,218,7064,K,none,tier-int,slow (7063ms) behavioral
+packages/adapter-pi/src/pi-extensions/subagents/recap.native.test.ts,packages/adapter-pi,1,105,1947,C,none,rewrite-structural,phrase/content assertions dominate (13 of 23 expects)
+packages/adapter-pi/src/pi-extensions/subagents/recap.test.ts,packages/adapter-pi,5,51,7,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/repair.test.ts,packages/adapter-pi,1,99,1307,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-pi/src/pi-extensions/subagents/runner.test.ts,packages/adapter-pi,17,169,1557,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/scheduling.native.test.ts,packages/adapter-pi,1,101,6380,K,none,tier-int,slow (6380ms) behavioral
+packages/adapter-pi/src/pi-extensions/subagents/shell-policy.native.test.ts,packages/adapter-pi,0,33,6490,K,none,tier-int,slow (6489ms) behavioral
+packages/adapter-pi/src/pi-extensions/subagents/shell.native.test.ts,packages/adapter-pi,0,43,9190,K,none,tier-int,slow (9190ms) behavioral
+packages/adapter-pi/src/pi-extensions/subagents/storage.test.ts,packages/adapter-pi,3,37,7,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/supervisor.test.ts,packages/adapter-pi,0,37,1212,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-pi/src/pi-extensions/subagents/task-board.test.ts,packages/adapter-pi,2,18,,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/subagents/transport.test.ts,packages/adapter-pi,1,28,304,K,session-lifecycle,keep,behavioral; must-keep area
+packages/adapter-pi/src/pi-extensions/tool-policy/coexistence.test.ts,packages/adapter-pi,3,83,851,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/tool-policy/extension.test.ts,packages/adapter-pi,19,207,,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/tool-policy/graph.test.ts,packages/adapter-pi,5,45,,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/tool-policy/native-mcp.test.ts,packages/adapter-pi,6,178,48,S,none,tier-e2e,spawns processes/fs/network or >3s
+packages/adapter-pi/src/pi-extensions/tool-policy/personal-mcp.test.ts,packages/adapter-pi,2,21,5,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/tool-policy/pi-cli.contract.test.ts,packages/adapter-pi,0,150,35910,K,none,tier-int,slow (35910ms) behavioral
+packages/adapter-pi/src/pi-extensions/tool-policy/policy.test.ts,packages/adapter-pi,4,37,,K,none,keep,behavioral
+packages/adapter-pi/src/pi-extensions/tool-policy/rtk.test.ts,packages/adapter-pi,6,60,233,K,none,keep,behavioral
+packages/adapter-pi/src/pi-global-install.test.ts,packages/adapter-pi,33,438,17,K,release-install,keep,behavioral; must-keep area
+packages/adapter-pi/src/pi-legacy.test.ts,packages/adapter-pi,17,217,37,K,none,keep,behavioral
+packages/adapter-pi/src/pi-manifest.test.ts,packages/adapter-pi,8,75,,K,none,keep,behavioral
+packages/adapter-pi/src/pi-mcp-catalog.test.ts,packages/adapter-pi,12,95,,K,none,keep,behavioral
+packages/adapter-pi/src/pi-mcp-config.test.ts,packages/adapter-pi,44,1053,,K,none,keep,behavioral
+packages/adapter-pi/src/pi-mcp-runtime-validation.test.ts,packages/adapter-pi,8,199,5,K,none,keep,behavioral
+packages/adapter-pi/src/pi-native-codebase.test.ts,packages/adapter-pi,1,78,11,K,none,keep,behavioral
+packages/adapter-pi/src/pi-native-execution-boundary.test.ts,packages/adapter-pi,6,169,1037,K,none,keep,behavioral
+packages/adapter-pi/src/pi-native-loader.test.ts,packages/adapter-pi,1,38,2046,K,none,keep,behavioral
+packages/adapter-pi/src/pi-native-reconnect.test.ts,packages/adapter-pi,2,178,17245,K,none,tier-int,slow (17245ms) behavioral
+packages/adapter-pi/src/pi-native-rejected-build.test.ts,packages/adapter-pi,1,147,2557,K,none,keep,behavioral
+packages/adapter-pi/src/pi-native-startup.test.ts,packages/adapter-pi,1,50,10367,K,none,tier-int,slow (10367ms) behavioral
+packages/adapter-pi/src/pi-owned-tools.test.ts,packages/adapter-pi,16,175,3,K,none,keep,behavioral
+packages/adapter-pi/src/pi-personal-native.test.ts,packages/adapter-pi,1,39,238,K,none,keep,behavioral
+packages/adapter-pi/src/pi-resume-target.test.ts,packages/adapter-pi,1,6,15,K,none,keep,behavioral
+packages/adapter-pi/src/pi-skill-precedence.test.ts,packages/adapter-pi,3,106,135,K,none,keep,behavioral
+packages/adapter-pi/src/pi-team-launch.test.ts,packages/adapter-pi,22,309,2,C,none,rewrite-structural,phrase/content assertions dominate (35 of 68 expects)
+packages/adapter-pi/src/pi-team-profile.test.ts,packages/adapter-pi,23,458,43,C,none,rewrite-structural,phrase/content assertions dominate (88 of 115 expects)
+packages/adapter-pi/src/pi-test-fixtures.test.ts,packages/adapter-pi,3,44,,K,none,keep,behavioral
+packages/adapter-pi/src/pi-version.test.ts,packages/adapter-pi,10,66,,K,none,keep,behavioral
+packages/adapter-pi/src/preflight.test.ts,packages/adapter-pi,14,225,,K,release-install,keep,behavioral; must-keep area
+packages/adapter-pi/src/registry-consumption.test.ts,packages/adapter-pi,3,48,1,C,data-integrity,rewrite-structural,phrase/content assertions dominate (9 of 14 expects) [protected area: block-level only]
+packages/adapter-pi/src/required-tools.test.ts,packages/adapter-pi,4,63,,K,none,keep,behavioral
+packages/adapter-pi/src/runner-adapter.global.test.ts,packages/adapter-pi,44,570,695,K,none,keep,behavioral
+packages/adapter-pi/src/runner-adapter.model-preservation.test.ts,packages/adapter-pi,5,87,4854,K,none,tier-int,slow (4854ms) behavioral
+packages/adapter-pi/src/runner-adapter.test.ts,packages/adapter-pi,22,628,8,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-pi/src/runner-capabilities.test.ts,packages/adapter-pi,21,252,1241,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-pi/src/settings-merge.test.ts,packages/adapter-pi,6,127,1,K,none,keep,behavioral
+packages/adapter-pi/src/team-catalog.test.ts,packages/adapter-pi,3,28,,K,none,keep,behavioral
+packages/adapter-pi/src/web-search.test.ts,packages/adapter-pi,6,128,4,S,none,tier-int,spawns processes/fs/network or >3s
+packages/adapter-supermemory/src/account-validation.test.ts,packages/adapter-supermemory,2,30,2,K,none,keep,behavioral
+packages/adapter-supermemory/src/conversation.test.ts,packages/adapter-supermemory,7,114,1,K,none,keep,behavioral
+packages/adapter-supermemory/src/index.test.ts,packages/adapter-supermemory,20,294,,K,none,keep,behavioral
+packages/adapter-supermemory/src/runtime-observability-receipts.test.ts,packages/adapter-supermemory,5,194,5,K,none,keep,behavioral
+packages/adapter-supermemory/src/runtime.test.ts,packages/adapter-supermemory,12,272,4,K,none,keep,behavioral
+packages/core/src/__tests__/core-purity-audit.test.ts,packages/core,1,224,46,K,none,keep,behavioral
+packages/core/src/__tests__/model-reasoning-capability.test.ts,packages/core,12,172,,K,none,keep,behavioral
+packages/core/src/__tests__/runner-adapter-contract.test.ts,packages/core,12,175,,K,none,keep,behavioral
+packages/core/src/adapter-registry.test.ts,packages/core,21,373,,K,data-integrity,keep,behavioral; must-keep area
+packages/core/src/config/deck-config-cross-runner.test.ts,packages/core,14,140,39,K,session-lifecycle,keep,behavioral; must-keep area
+packages/core/src/config/deck-config-file-primitives.test.ts,packages/core,11,198,627,K,none,keep,behavioral
+packages/core/src/config/deck-config.test.ts,packages/core,76,1183,21,K,none,keep,behavioral
+packages/core/src/config/env-sanitizer.test.ts,packages/core,3,44,,K,none,keep,behavioral
+packages/core/src/config/package-retirement.test.ts,packages/core,3,26,8,O,none,retire,change/one-off-regression named; verify git log -S
+packages/core/src/config/secret-store.test.ts,packages/core,5,90,8,S,security,tier-int,spawns processes/fs/network or >3s
+packages/core/src/memory/adaptive-context-renderer.test.ts,packages/core,5,66,,K,none,keep,behavioral
+packages/core/src/memory/adaptive-memory-contract.test.ts,packages/core,6,133,,K,none,keep,behavioral
+packages/core/src/memory/adaptive-memory-governance.test.ts,packages/core,9,151,,K,none,keep,behavioral
+packages/core/src/memory/adaptive-memory-observability-receipts.test.ts,packages/core,2,54,,K,none,keep,behavioral
+packages/core/src/memory/adaptive-memory.test.ts,packages/core,19,366,,K,none,keep,behavioral
+packages/core/src/memory/canonical-supermemory-project.test.ts,packages/core,27,692,1454,S,none,tier-int,spawns processes/fs/network or >3s
+packages/core/src/memory/capture-eligibility.test.ts,packages/core,10,117,1,K,none,keep,behavioral
+packages/core/src/memory/managed-project-memory-recall.test.ts,packages/core,3,50,,K,none,keep,behavioral
+packages/core/src/memory/supermemory-session-scope.test.ts,packages/core,14,134,320,S,none,tier-int,spawns processes/fs/network or >3s
+packages/core/src/model-catalog.test.ts,packages/core,20,163,,K,none,keep,behavioral
+packages/core/src/model-reasoning-capability.test.ts,packages/core,15,181,,K,none,keep,behavioral
+packages/core/src/native-search.test.ts,packages/core,1,11,1,K,none,keep,behavioral
+packages/core/src/owned-tools/codebase-compatibility.test.ts,packages/core,6,71,4231,K,none,tier-int,slow (4230ms) behavioral
+packages/core/src/owned-tools/codebase-version-policy.test.ts,packages/core,1,8,0,K,none,keep,behavioral
+packages/core/src/owned-tools/rtk-hook.test.ts,packages/core,2,41,1,K,none,keep,behavioral
+packages/core/src/package-retirement.test.ts,packages/core,14,231,95,O,none,retire,change/one-off-regression named; verify git log -S
+packages/core/src/runner-adapter.test.ts,packages/core,5,308,,K,none,keep,behavioral
+packages/core/src/runner-capability-parity-e2e.test.ts,packages/core,29,440,,S,none,tier-e2e,spawns processes/fs/network or >3s
+packages/core/src/runner-capability-parity.test.ts,packages/core,23,321,,K,none,keep,behavioral
+packages/core/src/runner-capability-registry.test.ts,packages/core,16,172,,K,data-integrity,keep,behavioral; must-keep area
+packages/core/src/runner-capability-validation.test.ts,packages/core,8,139,,K,none,keep,behavioral
+packages/core/src/runner-capability.test.ts,packages/core,10,172,,K,none,keep,behavioral
+packages/core/src/runner-contributions.test.ts,packages/core,14,173,6,K,none,keep,behavioral
+packages/core/src/runner-generation-references.test.ts,packages/core,2,45,43,G,none,tier-int,generated-artifact freshness
+packages/core/src/serena-bootstrap.test.ts,packages/core,19,615,14,I,none,rewrite-structural,mock/call-count choreography
+packages/core/src/session/approval.test.ts,packages/core,2,24,1,K,approvals-authority,keep,behavioral; must-keep area
+packages/core/src/session/assignments.test.ts,packages/core,3,26,,K,none,keep,behavioral
+packages/core/src/session/commands.test.ts,packages/core,12,113,,K,none,keep,behavioral
+packages/core/src/session/context-window.test.ts,packages/core,10,164,14,K,none,keep,behavioral
+packages/core/src/session/driver.test.ts,packages/core,2,22,1,K,none,keep,behavioral
+packages/core/src/session/events.test.ts,packages/core,19,129,1,K,none,keep,behavioral
+packages/core/src/session/failure.test.ts,packages/core,7,33,,K,none,keep,behavioral
+packages/core/src/session/mcp.test.ts,packages/core,7,58,,K,none,keep,behavioral
+packages/core/src/session/personal-mcp.test.ts,packages/core,2,5,1,K,none,keep,behavioral
+packages/core/src/session/question.test.ts,packages/core,3,28,1,K,none,keep,behavioral
+packages/core/src/session/redaction.test.ts,packages/core,12,57,4,K,security,keep,behavioral; must-keep area
+packages/core/src/session/request-input.test.ts,packages/core,2,14,1,K,none,keep,behavioral
+packages/core/src/session/schema.test.ts,packages/core,4,156,13,K,none,keep,behavioral
+packages/core/src/session/task-continuity.test.ts,packages/core,6,46,,K,none,keep,behavioral
+packages/core/src/session/task-handoff.test.ts,packages/core,2,25,3,K,none,keep,behavioral
+packages/core/src/shared-binary-usability.test.ts,packages/core,7,71,,K,none,keep,behavioral
+packages/core/src/skill-discovery/discovery.test.ts,packages/core,19,707,3626,K,none,tier-int,slow (3626ms) behavioral
+packages/core/src/skill-discovery/persistence.test.ts,packages/core,13,471,708,K,none,keep,behavioral
+packages/core/src/skill-discovery/registry.test.ts,packages/core,20,727,46,S,data-integrity,tier-int,spawns processes/fs/network or >3s
+packages/core/src/skill-discovery/runtime.test.ts,packages/core,13,421,4,K,none,keep,behavioral
+packages/core/src/skills/bootstrap/index.test.ts,packages/core,3,40,,C,none,retire,phrase/content assertions dominate (9 of 15 expects)
+packages/core/src/skills/external/__tests__/content.test.ts,packages/core,19,234,1874,S,none,tier-int,spawns processes/fs/network or >3s
+packages/core/src/skills/external/frontend-design-catalog.test.ts,packages/core,5,67,66,K,none,keep,behavioral
+packages/core/src/skills/external/index.test.ts,packages/core,7,93,,K,none,keep,behavioral
+packages/core/src/spec-registry/documents.test.ts,packages/core,9,187,19,K,data-integrity,keep,behavioral; must-keep area
+packages/core/src/spec-registry/events.test.ts,packages/core,11,151,,K,data-integrity,keep,behavioral; must-keep area
+packages/core/src/spec-registry/execution-v1-baseline.test.ts,packages/core,1,15,2,K,data-integrity,keep,behavioral; must-keep area
+packages/core/src/spec-registry/lifecycle.test.ts,packages/core,3,44,,K,data-integrity,keep,behavioral; must-keep area
+packages/core/src/spec-registry/paths.test.ts,packages/core,23,151,,K,data-integrity,keep,behavioral; must-keep area
+packages/core/src/spec-registry/schema.test.ts,packages/core,4,44,,K,data-integrity,keep,behavioral; must-keep area
+packages/core/src/spec-registry/types.test.ts,packages/core,12,229,,K,data-integrity,keep,behavioral; must-keep area
+packages/core/src/spec-registry/validator.test.ts,packages/core,36,1610,69,S,data-integrity,tier-int,spawns processes/fs/network or >3s
+packages/core/src/team-catalog.test.ts,packages/core,5,35,,K,none,keep,behavioral
+packages/core/src/teams/developer/adaptive-team-content.test.ts,packages/core,8,91,1,C,none,rewrite-structural,phrase/content assertions dominate (44 of 46 expects)
+packages/core/src/teams/developer/apply-backend-content.test.ts,packages/core,44,297,,C,none,rewrite-structural,phrase/content assertions dominate (64 of 69 expects)
+packages/core/src/teams/developer/apply-continuous-development.test.ts,packages/core,1,47,,C,none,retire,phrase/content assertions dominate (3 of 3 expects)
+packages/core/src/teams/developer/apply-frontend-content.test.ts,packages/core,63,396,,C,none,rewrite-structural,phrase/content assertions dominate (86 of 92 expects)
+packages/core/src/teams/developer/apply-general-content.test.ts,packages/core,43,298,,C,none,rewrite-structural,phrase/content assertions dominate (62 of 67 expects)
+packages/core/src/teams/developer/archive-content.test.ts,packages/core,29,225,,C,none,rewrite-structural,phrase/content assertions dominate (43 of 48 expects)
+packages/core/src/teams/developer/catalog.test.ts,packages/core,5,69,,K,none,keep,behavioral
+packages/core/src/teams/developer/content-registry.test.ts,packages/core,92,1210,,C,data-integrity,rewrite-structural,phrase/content assertions dominate (201 of 293 expects) [protected area: block-level only]
+packages/core/src/teams/developer/design-content.test.ts,packages/core,57,378,,C,none,rewrite-structural,phrase/content assertions dominate (77 of 83 expects)
+packages/core/src/teams/developer/execution-v1-prompt-baseline.test.ts,packages/core,1,12,,K,none,keep,behavioral
+packages/core/src/teams/developer/explorer-content.test.ts,packages/core,36,253,,C,none,rewrite-structural,phrase/content assertions dominate (56 of 59 expects)
+packages/core/src/teams/developer/frontend-external-skill-routing.test.ts,packages/core,6,109,,C,none,rewrite-structural,phrase/content assertions dominate (20 of 20 expects)
+packages/core/src/teams/developer/git-safety.test.ts,packages/core,6,140,4,C,git-safety,rewrite-structural,phrase/content assertions dominate (4 of 5 expects) [protected area: block-level only]
+packages/core/src/teams/developer/instruction-bundles/adaptive-memory.test.ts,packages/core,5,110,,K,none,keep,behavioral
+packages/core/src/teams/developer/instruction-bundles/bundle-parity.test.ts,packages/core,11,144,,K,none,keep,behavioral
+packages/core/src/teams/developer/instruction-bundles/index.test.ts,packages/core,29,361,,K,none,keep,behavioral
+packages/core/src/teams/developer/instruction-bundles/runner-translation.test.ts,packages/core,4,36,,K,none,keep,behavioral
+packages/core/src/teams/developer/instruction-bundles/serena-composition.test.ts,packages/core,5,115,,K,none,keep,behavioral
+packages/core/src/teams/developer/instruction-bundles/serena.test.ts,packages/core,15,186,,K,none,keep,behavioral
+packages/core/src/teams/developer/manifest.test.ts,packages/core,34,465,96,K,none,keep,behavioral
+packages/core/src/teams/developer/model-migration.test.ts,packages/core,4,56,,K,release-install,keep,behavioral; must-keep area
+packages/core/src/teams/developer/no-op-skill-absence.test.ts,packages/core,5,152,,K,none,keep,behavioral
+packages/core/src/teams/developer/orchestrator-content.test.ts,packages/core,133,1044,,C,none,rewrite-structural,phrase/content assertions dominate (333 of 350 expects)
+packages/core/src/teams/developer/orchestrator-invariants.task2.test.ts,packages/core,16,248,,K,none,keep,behavioral
+packages/core/src/teams/developer/orchestrator-invariants.test.ts,packages/core,57,621,,C,none,rewrite-structural,phrase/content assertions dominate (105 of 151 expects)
+packages/core/src/teams/developer/package-retirement-output.test.ts,packages/core,1,15,11,O,none,retire,change/one-off-regression named; verify git log -S
+packages/core/src/teams/developer/prompt-profile.test.ts,packages/core,8,125,2,C,none,rewrite-structural,phrase/content assertions dominate (15 of 24 expects)
+packages/core/src/teams/developer/proposal-content.test.ts,packages/core,45,325,,C,none,rewrite-structural,phrase/content assertions dominate (67 of 72 expects)
+packages/core/src/teams/developer/readiness-authority.test.ts,packages/core,2,68,,K,approvals-authority,keep,behavioral; must-keep area
+packages/core/src/teams/developer/review-content.test.ts,packages/core,57,381,,C,none,rewrite-structural,phrase/content assertions dominate (68 of 77 expects)
+packages/core/src/teams/developer/skill-discovery-content.test.ts,packages/core,4,73,,C,none,rewrite-structural,phrase/content assertions dominate (29 of 33 expects)
+packages/core/src/teams/developer/spec-content.test.ts,packages/core,45,316,,C,none,rewrite-structural,phrase/content assertions dominate (65 of 69 expects)
+packages/core/src/teams/developer/task-content.test.ts,packages/core,43,276,,C,none,rewrite-structural,phrase/content assertions dominate (58 of 61 expects)
+packages/core/src/teams/developer/user-phase-communication.test.ts,packages/core,15,419,,C,none,rewrite-structural,phrase/content assertions dominate (79 of 88 expects)
+packages/core/src/teams/developer/verify-content.test.ts,packages/core,33,256,,C,release-install,rewrite-structural,phrase/content assertions dominate (58 of 62 expects) [protected area: block-level only]
+packages/core/src/utils/git.test.ts,packages/core,14,62,,K,none,keep,behavioral
+packages/core/src/web-search-capability.test.ts,packages/core,11,287,26,K,none,keep,behavioral
+packages/provider-tavily/src/index.test.ts,packages/provider-tavily,2,42,,K,none,keep,behavioral
+packages/sdd-runtime/src/artifact-state/artifact-state-manager.test.ts,packages/sdd-runtime,7,192,,K,data-integrity,keep,behavioral; must-keep area
+packages/sdd-runtime/src/artifact-state/lifecycle-support.test.ts,packages/sdd-runtime,2,37,,K,data-integrity,keep,behavioral; must-keep area
+packages/sdd-runtime/src/artifact-state/registry-coordinator.test.ts,packages/sdd-runtime,21,515,168,K,data-integrity,keep,behavioral; must-keep area
+packages/sdd-runtime/src/contracts/apply-batch.test.ts,packages/sdd-runtime,1,4,1,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/approval-receipt.test.ts,packages/sdd-runtime,2,55,1,K,approvals-authority,keep,behavioral; must-keep area
+packages/sdd-runtime/src/contracts/authoritative-outcome.test.ts,packages/sdd-runtime,3,44,,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/baseline-evidence.test.ts,packages/sdd-runtime,3,183,,K,data-integrity,keep,behavioral; must-keep area
+packages/sdd-runtime/src/contracts/batch-b-direct-recovery.test.ts,packages/sdd-runtime,43,197,157,K,session-lifecycle,keep,behavioral; must-keep area
+packages/sdd-runtime/src/contracts/batch-b-r3a-public-matrix.test.ts,packages/sdd-runtime,14,107,2,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/batch-b-repair.test.ts,packages/sdd-runtime,18,98,9,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/batch-b-replacement.test.ts,packages/sdd-runtime,11,100,17,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/blocking-repair-projection.test.ts,packages/sdd-runtime,23,1543,95,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/canonical.test.ts,packages/sdd-runtime,1,3,7,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/execution-convergence.test.ts,packages/sdd-runtime,26,2156,81,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/execution-v1-contracts.test.ts,packages/sdd-runtime,5,99,4,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/failure-manifest.test.ts,packages/sdd-runtime,2,5,2,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/finding-disposition.test.ts,packages/sdd-runtime,18,663,26,K,approvals-authority,keep,behavioral; must-keep area
+packages/sdd-runtime/src/contracts/outcome.test.ts,packages/sdd-runtime,7,113,,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/qa-authority.test.ts,packages/sdd-runtime,5,108,10,K,approvals-authority,keep,behavioral; must-keep area
+packages/sdd-runtime/src/contracts/registry-lifecycle-intent.test.ts,packages/sdd-runtime,1,24,,K,data-integrity,keep,behavioral; must-keep area
+packages/sdd-runtime/src/contracts/repair-incident.test.ts,packages/sdd-runtime,12,468,6,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/risk.test.ts,packages/sdd-runtime,8,137,,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/routing-decision.test.ts,packages/sdd-runtime,16,668,59,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/self-audit.test.ts,packages/sdd-runtime,54,969,,K,none,keep,behavioral
+packages/sdd-runtime/src/contracts/state-update.test.ts,packages/sdd-runtime,8,145,,K,data-integrity,keep,behavioral; must-keep area
+packages/sdd-runtime/src/contracts/verification-stage-execution.test.ts,packages/sdd-runtime,6,98,19,K,none,keep,behavioral
+packages/sdd-runtime/src/execution/batch-c-authoritative-matrix.test.ts,packages/sdd-runtime,68,792,449,K,none,keep,behavioral
+packages/sdd-runtime/src/execution/batch-c-matrix-audit.test.ts,packages/sdd-runtime,1,23,1,K,none,keep,behavioral
+packages/sdd-runtime/src/execution/developer-team-convergence.e2e.test.ts,packages/sdd-runtime,1,12,476,S,none,tier-e2e,spawns processes/fs/network or >3s
+packages/sdd-runtime/src/execution/developer-team-host-reachability.test.ts,packages/sdd-runtime,2,60,58,K,none,keep,behavioral
+packages/sdd-runtime/src/execution/execution-composition.test.ts,packages/sdd-runtime,7,83,,K,none,keep,behavioral
+packages/sdd-runtime/src/execution/execution-control-plane.test.ts,packages/sdd-runtime,9,15,,K,none,keep,behavioral
+packages/sdd-runtime/src/execution/execution-registry-coordinator-port.test.ts,packages/sdd-runtime,2,98,5,K,data-integrity,keep,behavioral; must-keep area
+packages/sdd-runtime/src/execution/execution-role-scheduler.test.ts,packages/sdd-runtime,19,925,163,K,none,keep,behavioral
+packages/sdd-runtime/src/execution/invocation-authorization-service.test.ts,packages/sdd-runtime,20,216,8,K,none,keep,behavioral
+packages/sdd-runtime/src/execution/qa-execution-authority.test.ts,packages/sdd-runtime,1,26,8,K,approvals-authority,keep,behavioral; must-keep area
+packages/sdd-runtime/src/execution/qa-runner-host-authority.test.ts,packages/sdd-runtime,7,331,128,K,approvals-authority,keep,behavioral; must-keep area
+packages/sdd-runtime/src/execution/rollout-policy.test.ts,packages/sdd-runtime,15,452,,K,none,keep,behavioral
+packages/sdd-runtime/src/execution/session-preparation.test.ts,packages/sdd-runtime,9,257,,K,none,keep,behavioral
+packages/sdd-runtime/src/execution/task-skill-discovery.test.ts,packages/sdd-runtime,6,174,3,K,none,keep,behavioral
+packages/sdd-runtime/src/execution/telemetry.test.ts,packages/sdd-runtime,15,324,16,S,none,tier-int,spawns processes/fs/network or >3s
+packages/sdd-runtime/src/fixtures/execution-v1/baseline-harness.test.ts,packages/sdd-runtime,5,92,1,K,none,keep,behavioral
+packages/sdd-runtime/src/index.test.ts,packages/sdd-runtime,1,20,428,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/broad-causal-disposition.test.ts,packages/sdd-runtime,6,136,1,K,approvals-authority,keep,behavioral; must-keep area
+packages/sdd-runtime/src/orchestrator/budget-watchdog.test.ts,packages/sdd-runtime,15,143,,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/coordination-assessment.test.ts,packages/sdd-runtime,4,73,,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/decision-kernel.test.ts,packages/sdd-runtime,4,34,31,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/developer-team-leadership.test.ts,packages/sdd-runtime,9,247,3,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/enforcement-mode.test.ts,packages/sdd-runtime,8,87,,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/execution-lane-router.test.ts,packages/sdd-runtime,10,187,1,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/failure-delta.test.ts,packages/sdd-runtime,1,9,2,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/finding-disposition-service.test.ts,packages/sdd-runtime,9,124,52,K,approvals-authority,keep,behavioral; must-keep area
+packages/sdd-runtime/src/orchestrator/freshness-policy.test.ts,packages/sdd-runtime,6,120,1,G,release-install,keep,generated-artifact freshness; must-keep area
+packages/sdd-runtime/src/orchestrator/governance-recovery.test.ts,packages/sdd-runtime,2,34,,K,session-lifecycle,keep,behavioral; must-keep area
+packages/sdd-runtime/src/orchestrator/init-state.test.ts,packages/sdd-runtime,5,90,1,K,data-integrity,keep,behavioral; must-keep area
+packages/sdd-runtime/src/orchestrator/loop-breaker.test.ts,packages/sdd-runtime,6,133,,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/orchestrator-pipeline.test.ts,packages/sdd-runtime,31,677,,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/outcome-reconciliation.test.ts,packages/sdd-runtime,1,19,1,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/process-posture.test.ts,packages/sdd-runtime,3,52,,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/project-discovery.test.ts,packages/sdd-runtime,3,67,,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/quality-readiness.test.ts,packages/sdd-runtime,2,162,95,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/quality-router.test.ts,packages/sdd-runtime,10,149,,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/repair-loop-governance.test.ts,packages/sdd-runtime,29,596,12,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/risk-scorer.test.ts,packages/sdd-runtime,7,130,,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/staged-verification.test.ts,packages/sdd-runtime,11,204,3,K,none,keep,behavioral
+packages/sdd-runtime/src/orchestrator/verification-stage-executor.test.ts,packages/sdd-runtime,7,192,36,K,none,keep,behavioral
+packages/sdd-runtime/src/runner/runner-pipeline.test.ts,packages/sdd-runtime,8,236,,K,none,keep,behavioral
+packages/sdd-runtime/src/runner/runner-recovery.test.ts,packages/sdd-runtime,36,588,,K,session-lifecycle,keep,behavioral; must-keep area
+packages/sdd-runtime/src/scenarios.test.ts,packages/sdd-runtime,8,252,,K,none,keep,behavioral
+packages/session-host/src/__tests__/anchor.test.ts,packages/session-host,14,207,1344,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/approval-broker.test.ts,packages/session-host,20,234,5,K,approvals-authority,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/approval-identity.test.ts,packages/session-host,3,62,3,K,approvals-authority,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/attachment-store.test.ts,packages/session-host,6,66,2443,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/bridge.test.ts,packages/session-host,45,675,1571,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/chat-history.test.ts,packages/session-host,10,163,2158,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/claude-steering.test.ts,packages/session-host,8,148,1476,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/context-window-history.test.ts,packages/session-host,2,31,58,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/continuity.test.ts,packages/session-host,8,125,19,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/control-server.test.ts,packages/session-host,26,394,14,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+packages/session-host/src/__tests__/cross-runner.e2e.test.ts,packages/session-host,17,394,7686,S,session-lifecycle,tier-e2e,spawns processes/fs/network or >3s
+packages/session-host/src/__tests__/daemon-client.test.ts,packages/session-host,8,113,253,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/daemon-lock.test.ts,packages/session-host,11,122,30,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/daemon-process.test.ts,packages/session-host,9,133,6360,K,session-lifecycle,tier-int,slow (6360ms) behavioral
+packages/session-host/src/__tests__/daemon-support.test.ts,packages/session-host,4,88,423,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/daemon.test.ts,packages/session-host,23,368,76,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+packages/session-host/src/__tests__/driver-spawn.test.ts,packages/session-host,3,66,498,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/event-log.test.ts,packages/session-host,20,276,28,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/git-diff-process.test.ts,packages/session-host,1,37,60588,K,session-lifecycle,tier-int,slow (60587ms) behavioral
+packages/session-host/src/__tests__/git-diff.test.ts,packages/session-host,26,344,21114,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+packages/session-host/src/__tests__/git-object-snapshot.test.ts,packages/session-host,2,45,4,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/idle-monitor.test.ts,packages/session-host,6,69,4,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/import-boundary.test.ts,packages/session-host,4,65,6,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/index.test.ts,packages/session-host,2,14,3,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/lead-replies.test.ts,packages/session-host,9,131,15482,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+packages/session-host/src/__tests__/ledger.test.ts,packages/session-host,34,448,369,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/openspec-artifacts.test.ts,packages/session-host,11,100,93,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/paths.test.ts,packages/session-host,18,168,53,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/project-files.test.ts,packages/session-host,14,112,8058,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+packages/session-host/src/__tests__/project-store.test.ts,packages/session-host,10,134,314,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/project-trust-revision.test.ts,packages/session-host,5,80,24723,K,session-lifecycle,tier-int,slow (24722ms) behavioral
+packages/session-host/src/__tests__/project-trust.test.ts,packages/session-host,3,13,197,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/provider-failure-history.test.ts,packages/session-host,1,33,35,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/push-attention-store.test.ts,packages/session-host,9,113,133695,K,session-lifecycle,tier-int,slow (133694ms) behavioral
+packages/session-host/src/__tests__/push-attention.test.ts,packages/session-host,22,186,122,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/push-markdown-renderer.test.ts,packages/session-host,2,34,2607,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/quota-daemon.test.ts,packages/session-host,1,34,1663,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+packages/session-host/src/__tests__/quota.test.ts,packages/session-host,4,42,25,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/recovery.integration.test.ts,packages/session-host,1,57,,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+packages/session-host/src/__tests__/recovery.test.ts,packages/session-host,27,344,,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/runner-mutation.test.ts,packages/session-host,17,282,6679,K,session-lifecycle,tier-int,slow (6678ms) behavioral
+packages/session-host/src/__tests__/session-manager.daemon.test.ts,packages/session-host,6,175,930,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/session-manager.test.ts,packages/session-host,252,3691,1382,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+packages/session-host/src/__tests__/supervisor.test.ts,packages/session-host,17,223,,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/task-continuity-metrics.test.ts,packages/session-host,9,195,43,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/task-evidence.test.ts,packages/session-host,4,69,28,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/task-handoff.test.ts,packages/session-host,5,59,22,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/web-push-daemon.test.ts,packages/session-host,21,657,52160,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+packages/session-host/src/__tests__/web-push.test.ts,packages/session-host,36,617,107159,K,session-lifecycle,tier-int,slow (107158ms) behavioral
+packages/session-host/src/__tests__/web-restart-http.test.ts,packages/session-host,3,16,5083,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+packages/session-host/src/__tests__/web-restart.test.ts,packages/session-host,6,31,813,K,session-lifecycle,keep,behavioral; must-keep area
+packages/session-host/src/__tests__/web-service.test.ts,packages/session-host,36,538,6952,S,session-lifecycle,tier-int,spawns processes/fs/network or >3s
+packages/session-host/src/question-broker.test.ts,packages/session-host,6,76,338,K,session-lifecycle,keep,behavioral; must-keep area
+scripts/checkout-read-denial.test.ts,scripts,1,27,,S,none,tier-int,spawns processes/fs/network or >3s
+scripts/fixtures/native-smoke.test.ts,scripts,3,52,,S,none,tier-e2e,spawns processes/fs/network or >3s
+scripts/generate-pi-extension-assets.test.ts,scripts,1,39,,G,release-install,keep,generated-artifact freshness; must-keep area
+scripts/generate-runner-execution-assets.test.ts,scripts,3,114,,G,release-install,keep,generated-artifact freshness; must-keep area
+scripts/generate-session-schemas.test.ts,scripts,1,20,,G,none,tier-int,generated-artifact freshness
+scripts/generate-web-assets.test.ts,scripts,4,49,,G,release-install,keep,generated-artifact freshness; must-keep area
+scripts/install-canary.test.ts,scripts,22,544,,S,release-install,tier-int,spawns processes/fs/network or >3s
+scripts/install.test.ts,scripts,38,1108,,S,release-install,tier-int,spawns processes/fs/network or >3s
+scripts/linux-install-sandbox.test.ts,scripts,6,59,,I,release-install,rewrite-structural,mock/call-count choreography [protected area: block-level only]
+scripts/prepare-release.test.ts,scripts,26,436,,S,release-install,tier-int,spawns processes/fs/network or >3s
+scripts/release-build-contract.test.ts,scripts,6,130,,S,release-install,tier-int,spawns processes/fs/network or >3s
+scripts/retirement-live-search.test.ts,scripts,2,41,,O,none,retire,change/one-off-regression named; verify git log -S
+scripts/retirement-matrix-fixture.test.ts,scripts,18,226,,O,none,retire,change/one-off-regression named; verify git log -S
+scripts/retirement-publication-contract.test.ts,scripts,5,52,,O,none,retire,change/one-off-regression named; verify git log -S
+scripts/session-contract-shapes.test.ts,scripts,3,32,,K,none,keep,behavioral
+scripts/session-live-approvals.test.ts,scripts,1,14,,K,approvals-authority,keep,behavioral; must-keep area
+scripts/verify-supermemory-compiled-runtime.test.ts,scripts,2,37,,S,release-install,tier-int,spawns processes/fs/network or >3s
+tests/deps/no-gentle-ai-dependency.test.ts,tests,3,148,,K,none,keep,behavioral
+tests/documentation-governance.test.ts,tests,18,620,,C,none,rewrite-structural,phrase/content assertions dominate (42 of 71 expects)
+tests/release-workflow.test.ts,tests,6,103,,K,release-install,keep,behavioral; must-keep area
+tests/workspace-test-dependencies.test.ts,tests,2,24,,K,none,keep,behavioral
