@@ -106,10 +106,10 @@ describe("buildTeamSystemPrompt", () => {
   test("uses compact session content by default regardless of obsolete rollout receipts", () => {
     const compact = buildTeamSystemPrompt("developer-team");
     const eligible = buildTeamSystemPrompt("developer-team", {
-      promptProfileActivation: compactPromptActivation,
+
     });
     const paused = buildTeamSystemPrompt("developer-team", {
-      promptProfileActivation: { ...compactPromptActivation, status: "rollout-paused" },
+
     });
 
     expect(compact.content).toContain("# Lead (deck-lead)");

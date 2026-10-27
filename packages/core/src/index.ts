@@ -1,7 +1,5 @@
 // Backward-compatible re-exports from old flat paths
 export * from "./developer-team-catalog";
-export * from "./explorer-prompt";
-export * from "./orchestrator-prompt";
 
 // Re-export team-catalog but hide TeamEntry (conflicts with runner-capability)
 export { getTeamById, getTeamsForEnvironment, ALL_TEAMS, DEVELOPER_TEAM } from "./team-catalog";
@@ -99,7 +97,6 @@ export * from "./model-reasoning-capability";
 // Developer Team manifest builder
 export {
   buildDeveloperTeamManifest,
-  buildDeveloperTeamManifestLegacy,
   getDeveloperTeamAgentIds,
   isManifestModelComplete,
   type ManifestBuildResult,

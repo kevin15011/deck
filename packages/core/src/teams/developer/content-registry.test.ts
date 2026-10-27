@@ -22,104 +22,17 @@ import {
   renderSkillDiscoveryRuntimeContextV1,
 } from "./skill-discovery-content";
 
-const DEVELOPER_AGENT_IDS = [
-  "deck-developer-orchestrator",
-  "deck-developer-explorer",
-  "deck-developer-proposal",
-  "deck-developer-spec",
-  "deck-developer-design",
-  "deck-developer-task",
-  "deck-developer-apply-general",
-  "deck-developer-apply-backend",
-  "deck-developer-apply-frontend",
-  "deck-developer-verify",
-  "deck-developer-review",
-  "deck-developer-archive",
-] as const;
-
-// Agents with real content for language policy test iteration (covers all REAL_CONTENT keys per REQ-TEST-001)
-// Includes deck-init and deck-onboard which are user-invocable skills, not artifact-writing agents.
-const LANGUAGE_POLICY_TEST_AGENT_IDS = [
-  ...DEVELOPER_AGENT_IDS,
-  "deck-init",
-  "deck-onboard",
-] as const;
-
-const REGISTRY_WRITER_AGENT_IDS = DEVELOPER_AGENT_IDS.filter(
-  (id) => id !== "deck-developer-orchestrator",
-);
-
-const PLANNING_AGENT_IDS = [
-  "deck-developer-proposal",
-  "deck-developer-spec",
-  "deck-developer-design",
-  "deck-developer-task",
-] as const;
-
-const SDD_SUBAGENT_IDS = [
-  "deck-developer-proposal",
-  "deck-developer-spec",
-  "deck-developer-design",
-  "deck-developer-task",
-] as const;
+const DEVELOPER_AGENT_IDS = ["deck-lead", "deck-investigate", "deck-architect", "deck-apply-fast", "deck-apply-deep", "deck-quality", "deck-setup"] as const;
+const LANGUAGE_POLICY_TEST_AGENT_IDS = DEVELOPER_AGENT_IDS;
+const SDD_SUBAGENT_IDS = ["deck-architect"] as const;
 
 // ---------------------------------------------------------------------------
 // getAgentContent
 // ---------------------------------------------------------------------------
 
 describe("getAgentContent", () => {
-  test("returns content for orchestrator agent", () => {
-    const content = getAgentContent("deck-developer-orchestrator");
-    expect(content).toBeDefined();
-    expect(content!.agentBody).toContain("# Orchestrator Agent");
-    expect(content!.skillBody).toContain("# Orchestrator Skill");
-    expect(content!.agentBody.length).toBeGreaterThan(200);
-    expect(content!.skillBody.length).toBeGreaterThan(200);
-  });
 
-  test("returns content for explorer agent", () => {
-    const content = getAgentContent("deck-developer-explorer");
-    expect(content).toBeDefined();
-    expect(content!.agentBody).toContain("# Explorer Agent");
-    expect(content!.skillBody).toContain("# Explorer Skill");
-    expect(content!.agentBody.length).toBeGreaterThan(200);
-    expect(content!.skillBody.length).toBeGreaterThan(200);
-  });
-
-  test("returns real content for proposal agent", () => {
-    const content = getAgentContent("deck-developer-proposal");
-    expect(content).toBeDefined();
-    expect(content!.agentBody).toContain("# Proposal Agent");
-    expect(content!.skillBody).toContain("# Proposal Skill");
-    expect(content!.agentBody.length).toBeGreaterThan(200);
-    expect(content!.skillBody.length).toBeGreaterThan(200);
-  });
-
-  test("returns real content for spec agent", () => {
-    const content = getAgentContent("deck-developer-spec");
-    expect(content).toBeDefined();
-    expect(content!.agentBody).toContain("# Spec Agent");
-    expect(content!.skillBody).toContain("# Spec Skill");
-    expect(content!.agentBody.length).toBeGreaterThan(200);
-    expect(content!.skillBody.length).toBeGreaterThan(200);
-    // Not placeholder
-    expect(content!.agentBody).not.toContain("Placeholder");
-    expect(content!.skillBody).not.toContain("Placeholder");
-  });
-
-  test("returns real content for design agent", () => {
-    const content = getAgentContent("deck-developer-design");
-    expect(content).toBeDefined();
-    expect(content!.agentBody).toContain("# Design Agent");
-    expect(content!.skillBody).toContain("# Design Skill");
-    expect(content!.agentBody.length).toBeGreaterThan(200);
-    expect(content!.skillBody.length).toBeGreaterThan(200);
-    // Not placeholder
-    expect(content!.agentBody).not.toContain("Placeholder");
-    expect(content!.skillBody).not.toContain("Placeholder");
-  });
-
-  test("returns content for all 12 agents — no undefined gaps", () => {
+  test("returns content for all seven agents — no undefined gaps", () => {
     for (const id of DEVELOPER_AGENT_IDS) {
       const content = getAgentContent(id);
       expect(content).toBeDefined();
@@ -141,125 +54,6 @@ describe("getAgentContent", () => {
     }
   });
 
-  test("artifact-writing agents require Spec Registry state and events", () => {
-    for (const id of DEVELOPER_AGENT_IDS) {
-      const content = getAgentContent(id)!;
-      const combined = `${content.agentBody}\n${content.skillBody}`;
-      expect(combined, id).toContain("Spec Registry");
-      expect(combined, id).toContain("state.yaml");
-      expect(combined, id).toContain("events.yaml");
-    }
-  });
-
-  test("explicit legacy artifact writers retain merge/append registry instructions", () => {
-    for (const id of REGISTRY_WRITER_AGENT_IDS) {
-      const content = getAgentContent(id, { promptProfile: "legacy" })!;
-      const combined = `${content.agentBody}\n${content.skillBody}`;
-      expect(combined, id).toContain("Read existing");
-      expect(combined, id).toContain("Merge phase");
-      expect(combined, id).toContain("preserve previous artifacts");
-      expect(combined, id).toContain("Append");
-      expect(combined, id).toContain("preserve previous events");
-      expect(combined, id).toContain("Never overwrite or drop previous phase artifacts or events");
-      expect(combined, id).toContain("Registry Blocker");
-    }
-  });
-
-  test("explicit legacy orchestrator rejects registry history resets", () => {
-    const content = getAgentContent("deck-developer-orchestrator", { promptProfile: "legacy" })!;
-    const combined = `${content.agentBody}\n${content.skillBody}`;
-    expect(combined).toContain("merge new state without dropping prior artifacts/provenance");
-    expect(combined).toContain("append new events without dropping prior events");
-    expect(combined).toContain("Reject or request repair");
-    expect(combined).toContain("reset/dropped prior registry history");
-  });
-
-  test("explicit legacy orchestrator serializes registry reconciliation for parallel phases", () => {
-    const content = getAgentContent("deck-developer-orchestrator", { promptProfile: "legacy" })!;
-    const combined = `${content.agentBody}\n${content.skillBody}`;
-    expect(combined).toContain("Spec+Design");
-    expect(combined).toContain("Verify+Review");
-    expect(combined).toContain("registry-deferred mode");
-    expect(combined).toContain("serializes the shared");
-    expect(combined).toContain("deterministic serialized merge");
-    expect(combined).toContain("do not advance until reconciliation proves");
-  });
-
-  test("planning prompts avoid hard word budgets", () => {
-    for (const id of PLANNING_AGENT_IDS) {
-      const content = getAgentContent(id)!;
-      const combined = `${content.agentBody}\n${content.skillBody}`;
-      expect(combined, id).not.toMatch(/Size budget/i);
-      expect(combined, id).not.toMatch(/MUST be under \d+ words/i);
-      expect(combined, id).not.toMatch(/under \d+ words/i);
-    }
-  });
-
-  test("planning prompts require quality-focused conciseness", () => {
-    for (const id of PLANNING_AGENT_IDS) {
-      const content = getAgentContent(id)!;
-      const combined = `${content.agentBody}\n${content.skillBody}`;
-      expect(combined, id).toContain("compact as possible without omitting required fields");
-      expect(combined, id).toMatch(/do not merge unrelated/i);
-    }
-  });
-
-  test("task prompt requires self-check and forbids broad exploration", () => {
-    const content = getAgentContent("deck-developer-task")!;
-    const combined = `${content.agentBody}\n${content.skillBody}`;
-    expect(combined).toContain("Required Self-Check Before Return");
-    expect(combined).toContain("Every task has **Owner**, **Priority**, **Complexity**, **Parallel**, **Depends on**, **Files**, and **Verification** fields");
-    expect(combined).toContain("Complexity Summary counts exactly match the task IDs");
-    expect(combined).toContain("Every dependency reference points to a valid task ID");
-    expect(combined).toContain("Review Workload Forecast is present");
-    expect(combined).toContain("Open Questions / Blockers are classified");
-    expect(combined).toContain("Do not perform broad exploration");
-    expect(combined).toContain("explicit current-state/context provided by the Orchestrator");
-  });
-
-  test("explicit legacy orchestrator repairs contract violations and gates Apply blockers", () => {
-    const content = getAgentContent("deck-developer-orchestrator", { promptProfile: "legacy" })!;
-    const combined = `${content.agentBody}\n${content.skillBody}`;
-    expect(combined).toContain("violates the exact return contract");
-    expect(combined).toContain("wrong or non-requested language");
-    expect(combined).toContain("format mismatch");
-    expect(combined).toContain("omits required fields");
-    expect(combined).toContain("inconsistent counts");
-    expect(combined).toContain("bad registry status/intent");
-    expect(combined).toContain("misses the required review workload forecast");
-    expect(combined).toContain("blocker handling unexplained");
-    expect(combined).toContain("classify tasks as unblocked, blocked, or allowed-with-placeholder");
-    expect(combined).toContain("Do not launch Apply for blocked tasks");
-  });
-
-  test("explicit legacy parallel phase agents support registry-deferred mode", () => {
-    const parallelPhaseAgentIds = [
-      "deck-developer-spec",
-      "deck-developer-design",
-      "deck-developer-verify",
-      "deck-developer-review",
-    ] as const;
-
-    for (const id of parallelPhaseAgentIds) {
-      const content = getAgentContent(id, { promptProfile: "legacy" })!;
-      const combined = `${content.agentBody}\n${content.skillBody}`;
-      expect(combined, id).toContain("registry-deferred mode");
-      expect(combined, id).toContain("do not write shared");
-      expect(combined, id).toContain("Registry Write");
-      expect(combined, id).toContain("Registry Intent");
-      expect(combined, id).toContain("In default/non-parallel mode, perform the merge/append registry update yourself");
-      expect(combined, id).toContain("Never overwrite or drop previous phase artifacts or events");
-    }
-  });
-
-  test("archive prompt requires moving archived changes out of changes", () => {
-    const content = getAgentContent("deck-developer-archive")!;
-    const combined = `${content.agentBody}\n${content.skillBody}`;
-    expect(combined).toContain("remove the source change directory");
-    expect(combined).toContain("Archive means move, not duplicate");
-    expect(combined).toContain("If cleanup fails");
-  });
-
   test("core prompts do not hardcode Engram topic-key artifact locations", () => {
     for (const id of DEVELOPER_AGENT_IDS) {
       const content = getAgentContent(id)!;
@@ -279,42 +73,6 @@ describe("getAgentContent", () => {
     }
   });
 
-  test("real agents contain their display name", () => {
-    const proposal = getAgentContent("deck-developer-proposal")!;
-    expect(proposal.agentBody).toContain("Proposal Agent");
-
-    const verify = getAgentContent("deck-developer-verify")!;
-    expect(verify.agentBody).toContain("Verify Agent");
-  });
-
-  // -------------------------------------------------------------------------
-  // Visual explanations — REQ-VISUAL-001, REQ-VISUAL-002, REQ-VISUAL-003,
-  // REQ-VISUAL-004, REQ-OPENSPEC-002, REQ-TEAMINSTALL-002
-  // -------------------------------------------------------------------------
-
-  test("orchestrator skill includes visual explanations content (REQ-VISUAL-001, REQ-VISUAL-002)", () => {
-    const content = getAgentContent("deck-developer-orchestrator")!;
-    for (const snippet of VISUAL_EXPLANATIONS_REQUIRED_SNIPPETS) {
-      expect(content.skillBody, `missing: "${snippet}"`).toContain(snippet);
-    }
-  });
-
-  test("orchestrator skill has no Mermaid or config exposure (REQ-VISUAL-004)", () => {
-    const content = getAgentContent("deck-developer-orchestrator")!;
-    for (const phrase of VISUAL_EXPLANATIONS_FORBIDDEN_PHRASES) {
-      expect(content.skillBody, `forbidden phrase found: "${phrase}"`).not.toContain(phrase);
-    }
-  });
-
-  test("orchestrator skill contains non-authoritative guidance (REQ-VISUAL-003, REQ-OPENSPEC-002)", () => {
-    const content = getAgentContent("deck-developer-orchestrator")!;
-    expect(content.skillBody).toContain("not authoritative");
-    expect(content.skillBody).toContain("OpenSpec artifacts and Spec Registry remain authoritative");
-    expect(content.skillBody).toContain("Never alter approval state via visual");
-    expect(content.skillBody).toContain("Never introduce new requirements");
-    expect(content.skillBody).toContain("Never override registry status");
-  });
-
   test("SDD subagent skills do NOT include visual explanations content (REQ-VISUAL-002, REQ-TEAMINSTALL-002)", () => {
     for (const id of SDD_SUBAGENT_IDS) {
       const content = getAgentContent(id)!;
@@ -329,23 +87,6 @@ describe("getAgentContent", () => {
       );
     }
   });
-
-  test("all non-orchestrator agent skills do NOT include visual explanations content", () => {
-    const nonOrchestrator = DEVELOPER_AGENT_IDS.filter((id) => id !== "deck-developer-orchestrator");
-    for (const id of nonOrchestrator) {
-      const content = getAgentContent(id)!;
-      expect(content.skillBody, `${id} should NOT contain visual explanations`).not.toContain(
-        "# Visual Explanations",
-      );
-    }
-  });
-
-  test("orchestrator skill contains visual accessibility guidance", () => {
-    const content = getAgentContent("deck-developer-orchestrator")!;
-    expect(content.skillBody).toContain("Accessibility");
-    expect(content.skillBody).toContain("not rely on diagrams");
-    expect(content.skillBody).toContain("Visuals are supplemental to text");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -353,113 +94,9 @@ describe("getAgentContent", () => {
 // ---------------------------------------------------------------------------
 
 describe("getTeamSessionInstructions", () => {
-  test("explicit legacy session retains detailed orchestrator instructions", () => {
-    const instructions = getTeamSessionInstructions("developer-team", { promptProfile: "legacy" });
-    expect(instructions).toBeDefined();
-    expect(instructions).toContain("# Deck Developer Team");
-    expect(instructions).toContain("deck-developer-orchestrator");
-    expect(instructions).toContain("Delegation Rules");
-    expect(instructions).toContain("Dependency Graph");
-    // Not placeholder
-    expect(instructions).not.toContain("Follow the team's established workflow");
-  });
 
   test("returns undefined for unknown team", () => {
     expect(getTeamSessionInstructions("unknown-team")).toBeUndefined();
-  });
-
-  test("explicit legacy session retains all agent role references", () => {
-    const instructions = getTeamSessionInstructions("developer-team", { promptProfile: "legacy" })!;
-    expect(instructions).toContain("deck-developer-explorer");
-    expect(instructions).toContain("deck-developer-proposal");
-    expect(instructions).toContain("deck-developer-spec");
-    expect(instructions).toContain("deck-developer-design");
-    expect(instructions).toContain("deck-developer-task");
-    expect(instructions).toContain("deck-developer-apply-general");
-    expect(instructions).toContain("deck-developer-apply-backend");
-    expect(instructions).toContain("deck-developer-apply-frontend");
-    expect(instructions).toContain("deck-developer-verify");
-    expect(instructions).toContain("deck-developer-review");
-    expect(instructions).toContain("deck-developer-archive");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Capability instruction injection
-// ---------------------------------------------------------------------------
-
-describe("getAgentContent with capabilityInstructions", () => {
-  test("existing output unchanged when no bundle provided", () => {
-    const content = getAgentContent("deck-developer-explorer");
-    expect(content).toBeDefined();
-    expect(content!.agentBody).toContain("# Explorer Agent");
-    expect(content!.agentBody).not.toContain("## Package Instructions");
-  });
-
-  test("agent body includes capability instruction fragments when bundle provided", () => {
-    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
-    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
-
-    expect(content).toBeDefined();
-    expect(content!.agentBody).toContain("## Package Instructions (configured)");
-    expect(content!.agentBody).toContain("Codebase Memory");
-  });
-
-  test("skill body includes capability instruction fragments when bundle provided", () => {
-    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
-    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
-
-    expect(content).toBeDefined();
-    expect(content!.skillBody).toContain("## Package Instructions (configured)");
-    expect(content!.skillBody).toContain("Codebase Memory");
-  });
-
-  test("non-matching surface fragments are absent from agent body", () => {
-    // session-surface fragments should not appear in agent body
-    const bundle: CapabilityInstructionBundle = {
-      instructions: [
-        {
-          packageId: "codebase-memory",
-          surface: "session",
-          markdown: "This is a session-level fragment and should NOT appear in agent body",
-        },
-      ],
-    };
-
-    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
-
-    expect(content!.agentBody).not.toContain("session-level fragment");
-  });
-
-  test("multiple packages produce both instruction sections in agent body", () => {
-    const bundle = buildCapabilityInstructionBundle(["codebase-memory", "rtk"]);
-    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
-
-    expect(content!.agentBody).toContain("Codebase Memory");
-    expect(content!.agentBody).toContain("RTK");
-  });
-
-  test("both memory bundle and capability bundle coexist (independent injection)", () => {
-    // The content registry handles both independently;
-    // memory injection is a separate concern from capability instructions.
-    // Here we just verify the capability instructions don't break the structure.
-    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
-    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
-
-    // Context authority guidance still present
-    expect(content!.agentBody).toContain("Context Authority");
-    // Capability instructions appended after
-    expect(content!.agentBody).toContain("## Package Instructions (configured)");
-  });
-
-  test("empty bundle does not inject instructions", () => {
-    const bundle: CapabilityInstructionBundle = { instructions: [] };
-    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
-
-    // Same as no bundle
-    const withoutBundle = getAgentContent("deck-developer-explorer");
-    expect(content!.agentBody).toBe(withoutBundle!.agentBody);
-    expect(content!.skillBody).toBe(withoutBundle!.skillBody);
   });
 });
 
@@ -593,24 +230,6 @@ describe("code-economy negative tests: no hard LOC caps", () => {
       allMarkdown.includes("security");
     expect(hasNonNegotiables).toBe(true);
   });
-
-  test("target agent prompts contain advisory language, not blocking", () => {
-    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
-
-    const targetAgents = [
-      "deck-developer-task",
-      "deck-developer-apply-general",
-      "deck-developer-review",
-    ] as const;
-
-    for (const agentId of targetAgents) {
-      const content = getAgentContent(agentId, { capabilityInstructions: bundle });
-      // Should contain advisory language
-      const hasAdvisory =
-        content!.agentBody.includes("advisory") || content!.agentBody.includes("signal");
-      expect(hasAdvisory).toBe(true);
-    }
-  });
 });
 
 describe("getTeamSessionInstructions with capabilityInstructions", () => {
@@ -680,39 +299,6 @@ describe("getTeamSessionInstructions with capabilityInstructions", () => {
 // ---------------------------------------------------------------------------
 
 describe("getAgentContentResult", () => {
-  test("returns ok: true with content for known agent", () => {
-    const result = getAgentContentResult("deck-developer-orchestrator");
-    expect(result.ok).toBe(true);
-    const value = result as { ok: true; value: { agentBody: string; skillBody: string } };
-    expect(value.value).toBeDefined();
-    expect(value.value.agentBody).toContain("# Orchestrator Agent");
-    expect(value.value.skillBody).toContain("# Orchestrator Skill");
-  });
-
-  test("returns ok: true for all catalog agents with real content", () => {
-    const catalogIds = [
-      "deck-developer-orchestrator",
-      "deck-developer-explorer",
-      "deck-developer-proposal",
-      "deck-developer-spec",
-      "deck-developer-design",
-      "deck-developer-task",
-      "deck-developer-apply-general",
-      "deck-developer-apply-backend",
-      "deck-developer-apply-frontend",
-      "deck-developer-verify",
-      "deck-developer-review",
-      "deck-developer-archive",
-    ];
-    for (const id of catalogIds) {
-      const result = getAgentContentResult(id);
-      expect(result.ok, `${id} should be ok: true`).toBe(true);
-      if (result.ok) {
-        expect(result.value.agentBody).toBeTruthy();
-        expect(result.value.skillBody).toBeTruthy();
-      }
-    }
-  });
 
   test("returns ok: false with suggestions for typo in agent ID", () => {
     const result = getAgentContentResult("deck-led");
@@ -743,14 +329,6 @@ describe("getAgentContentResult", () => {
     }
   });
 
-  test("returns fallbackAvailable: true for agent in catalog but without real content", () => {
-    // This test checks the case where an agent exists in the catalog but has no REAL_CONTENT entry
-    // All current agents have real content, so we test the catalog check behavior
-    const result = getAgentContentResult("deck-developer-archive");
-    expect(result.ok).toBe(true); // archive has real content
-    // If there were a catalog entry without real content, fallbackAvailable would be true
-  });
-
   test("with fallback: true still returns error for unknown agent not in catalog", () => {
     // Agents not in catalog cannot receive fallback — must return error
     const result = getAgentContentResult("some-unknown-agent", { fallback: true });
@@ -758,14 +336,6 @@ describe("getAgentContentResult", () => {
     if (!result.ok) {
       expect(result.error.fallbackAvailable).toBe(false);
     }
-  });
-
-  test("with fallback: true returns generic content for catalog agent without real content", () => {
-    // Catalog agent without real content gets fallback when fallback: true
-    // All current catalog agents have real content, so this tests the logic path
-    // Using archive as a proxy (it has real content, but the check demonstrates behavior)
-    const result = getAgentContentResult("deck-developer-archive", { fallback: true });
-    expect(result.ok).toBe(true); // archive has real content so no fallback needed
   });
 
   test("suggestions are limited to maximum 3", () => {
@@ -822,43 +392,10 @@ describe("getUnknownAgentContent", () => {
 // ---------------------------------------------------------------------------
 
 describe("getAgentContent deprecated wrapper parity", () => {
-  test("getAgentContent returns content for known agent (same as getAgentContentResult)", () => {
-    const legacy = getAgentContent("deck-developer-orchestrator");
-    const result = getAgentContentResult("deck-developer-orchestrator");
-    expect(legacy).toBeDefined();
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(legacy!.agentBody).toBe(result.value.agentBody);
-      expect(legacy!.skillBody).toBe(result.value.skillBody);
-    }
-  });
 
   test("getAgentContent returns undefined for unknown agent", () => {
     const legacy = getAgentContent("xyz-unknown-agent");
     expect(legacy).toBeUndefined();
-  });
-
-  test("all catalog agents return content via getAgentContent (backward compat)", () => {
-    const catalogIds = [
-      "deck-developer-orchestrator",
-      "deck-developer-explorer",
-      "deck-developer-proposal",
-      "deck-developer-spec",
-      "deck-developer-design",
-      "deck-developer-task",
-      "deck-developer-apply-general",
-      "deck-developer-apply-backend",
-      "deck-developer-apply-frontend",
-      "deck-developer-verify",
-      "deck-developer-review",
-      "deck-developer-archive",
-    ];
-    for (const id of catalogIds) {
-      const content = getAgentContent(id);
-      expect(content, `${id} should return content`).toBeDefined();
-      expect(content!.agentBody).toBeTruthy();
-      expect(content!.skillBody).toBeTruthy();
-    }
   });
 });
 
@@ -868,49 +405,11 @@ describe("getAgentContent deprecated wrapper parity", () => {
 // ---------------------------------------------------------------------------
 
 describe("Developer Team language policy composition", () => {
-  test("every catalog agent body and skill body contains the language policy", () => {
-    // LANGUAGE_POLICY_TEST_AGENT_IDS covers all REAL_CONTENT keys per REQ-TEST-001
-    // Includes deck-init and deck-onboard which are user-invocable skills
-    for (const id of LANGUAGE_POLICY_TEST_AGENT_IDS) {
-      const content = getAgentContent(id)!;
-      expect(content.agentBody, `${id} agentBody missing language policy`).toContain(
-        DEVELOPER_TEAM_LANGUAGE_POLICY,
-      );
-      expect(content.skillBody, `${id} skillBody missing language policy`).toContain(
-        DEVELOPER_TEAM_LANGUAGE_POLICY,
-      );
-    }
-  });
-
-  test("no catalog agent body or skill body contains the known Spanish leak", () => {
-    // LANGUAGE_POLICY_TEST_AGENT_IDS covers all REAL_CONTENT keys per REQ-TEST-001
-    // Includes deck-init and deck-onboard which are user-invocable skills
-    for (const id of LANGUAGE_POLICY_TEST_AGENT_IDS) {
-      const content = getAgentContent(id)!;
-      expect(content.agentBody, `${id} agentBody contains leak`).not.toContain("herramienta");
-      expect(content.skillBody, `${id} skillBody contains leak`).not.toContain("herramienta");
-    }
-  });
 
   test("team session instructions contain the language policy and no leak", () => {
     const instructions = getTeamSessionInstructions("developer-team")!;
     expect(instructions).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
     expect(instructions).not.toContain("herramienta");
-  });
-
-  test("language policy is composed after context-authority guidance and before capability instructions", () => {
-    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
-    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle })!;
-
-    const authorityIdx = content.agentBody.indexOf("## Context Authority");
-    const policyIdx = content.agentBody.indexOf("## Developer Team Language Policy");
-    const packageIdx = content.agentBody.indexOf("## Package Instructions (configured)");
-
-    expect(authorityIdx, "context authority missing").toBeGreaterThan(-1);
-    expect(policyIdx, "language policy missing").toBeGreaterThan(-1);
-    expect(packageIdx, "package instructions missing").toBeGreaterThan(-1);
-    expect(authorityIdx).toBeLessThan(policyIdx);
-    expect(policyIdx).toBeLessThan(packageIdx);
   });
 
   test("session instructions compose language policy before capability instructions", () => {
@@ -932,26 +431,6 @@ describe("Developer Team language policy composition", () => {
     expect(packageIdx, "package instructions missing in session").toBeGreaterThan(-1);
     expect(policyIdx).toBeLessThan(packageIdx);
   });
-
-  test("capability bundle (Serena) preserves language policy and does not reintroduce leak", () => {
-    const bundle = buildCapabilityInstructionBundle(["serena"]);
-    const content = getAgentContent("deck-developer-apply-general", { capabilityInstructions: bundle })!;
-
-    expect(content.agentBody).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
-    expect(content.skillBody).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
-    expect(content.agentBody).not.toContain("herramienta");
-    expect(content.skillBody).not.toContain("herramienta");
-  });
-
-  test("fallback content receives the language policy when fallback is available", () => {
-    // Use a known catalog agent with real content; fallback: true still exercises the composition path.
-    const result = getAgentContentResult("deck-developer-archive", { fallback: true });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.agentBody).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
-      expect(result.value.skillBody).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -971,57 +450,6 @@ describe("orchestrator invariant injection", () => {
     const packageInstrIdx = instructions.indexOf("## Package Instructions");
 
     expect(packageInstrIdx).toBe(-1); // no capability instructions by default
-  });
-
-  test("default orchestrator agent body contains compact invariant section", () => {
-    const content = getAgentContent("deck-developer-orchestrator")!;
-    expect(content.agentBody).toContain("## Compact Orchestrator Invariants");
-    expect(content.agentBody).toContain("INV-001");
-    expect(content.agentBody).toContain("INV-002");
-    expect(content.agentBody).toContain("INV-003");
-    expect(content.agentBody).toContain("INV-004");
-    expect(content.agentBody).toContain("INV-005");
-    expect(content.agentBody).toContain("INV-006");
-  });
-
-  test("default orchestrator skill body references the compact runtime contract", () => {
-    const content = getAgentContent("deck-developer-orchestrator")!;
-    expect(content.skillBody).toContain("## Runtime Contract Reference");
-    expect(content.skillBody).toContain("Runtime-Enforced Team Contract remains binding");
-  });
-
-  test("non-orchestrator agents do NOT contain invariant section", () => {
-    const nonOrchestratorAgents = [
-      "deck-developer-explorer",
-      "deck-developer-spec",
-      "deck-developer-design",
-      "deck-developer-task",
-      "deck-developer-apply-general",
-      "deck-developer-apply-backend",
-      "deck-developer-apply-frontend",
-      "deck-developer-verify",
-      "deck-developer-review",
-      "deck-developer-archive",
-    ];
-
-    for (const id of nonOrchestratorAgents) {
-      const content = getAgentContent(id)!;
-      expect(content.agentBody, `${id} should NOT contain invariants`).not.toContain(
-        "## Orchestrator Invariants",
-      );
-      expect(content.skillBody, `${id} skill should NOT contain invariants`).not.toContain(
-        "## Orchestrator Invariants",
-      );
-    }
-  });
-
-  test("composition is idempotent — no duplicates on re-composition", () => {
-    const first = getAgentContent("deck-developer-orchestrator")!;
-    const second = getAgentContent("deck-developer-orchestrator")!;
-
-    // No duplicates of invariant section header
-    const headerMatches = first.agentBody.match(/^## Compact Orchestrator Invariants$/gm);
-    expect(headerMatches).toHaveLength(1);
   });
 
   test("adaptive contract appears before context-authority guidance", () => {
@@ -1090,7 +518,7 @@ describe("shared skill discovery composition", () => {
   ] as const;
 
   test("composes the specialist contract exactly once for every specialist in both profiles", () => {
-    for (const promptProfile of ["legacy", "compact"] as const) {
+    for (const promptProfile of ["compact"] as const) {
       for (const agentId of specialistAgentIds) {
         const content = getAgentContent(agentId, { promptProfile })!;
 
@@ -1121,12 +549,6 @@ describe("shared skill discovery composition", () => {
     expect(content.agentBody).not.toContain("/home/");
   });
 
-  test("does not add the specialist contract to the Orchestrator-owned surface", () => {
-    const content = getAgentContent("deck-developer-orchestrator", { promptProfile: "compact" })!;
-    expect(content.agentBody).not.toContain(SPECIALIST_SKILL_DISCOVERY_CONTRACT_V1);
-    expect(content.skillBody).not.toContain(SPECIALIST_SKILL_DISCOVERY_CONTRACT_V1);
-  });
-
   test("composes one active-runner runtime context before capability bundles for both profiles", () => {
     const bundle: CapabilityInstructionBundle = {
       instructions: [
@@ -1138,7 +560,7 @@ describe("shared skill discovery composition", () => {
       ],
     };
 
-    for (const promptProfile of ["legacy", "compact"] as const) {
+    for (const promptProfile of ["compact"] as const) {
       const instructions = getTeamSessionInstructions("developer-team", {
         promptProfile,
         skillDiscoveryRuntimeContext: { activeRunnerId: "opencode" },
@@ -1180,30 +602,5 @@ describe("shared skill discovery composition", () => {
     expect(renderSkillDiscoveryRuntimeContextV1({ activeRunnerId: "pi" })).toContain(
       SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1,
     );
-  });
-});
-
-
-describe("streamlined ownership composition parity", () => {
-  test("materializes candidate-validation semantics in compact and legacy Orchestrator content", () => {
-    for (const promptProfile of ["compact", "legacy"] as const) {
-      const content = getAgentContent("deck-developer-orchestrator", { promptProfile })!;
-      const combined = Object.values(content).join("\n");
-      expect(combined).toContain("## Explicit Commit-Only Requests");
-      expect(combined).toContain("functional exercise");
-      expect(combined).toContain("fresh final independent QA");
-      expect(combined).not.toContain("Pure Delegator");
-    }
-  });
-
-  test("materializes non-independent Apply-local functional evidence in every Apply role", () => {
-    for (const agentId of ["deck-developer-apply-general", "deck-developer-apply-backend", "deck-developer-apply-frontend"] as const) {
-      for (const promptProfile of ["compact", "legacy"] as const) {
-        const combined = Object.values(getAgentContent(agentId, { promptProfile })!).join("\n");
-        expect(combined).toContain("functional exercise");
-        expect(combined).toContain("non-independent");
-        expect(combined).toContain("conditional target");
-      }
-    }
   });
 });

@@ -13,7 +13,6 @@ import {
   backupDeveloperTeamFiles,
   rollbackDeveloperTeamFiles,
   verifyDeveloperTeamInstall,
-  cleanupLegacySddAgentFiles,
 } from "./developer-team-install";
 import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
 import { buildCapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
@@ -148,10 +147,10 @@ describe("buildDeveloperTeamInstallPlan", () => {
   test("installs compact content by default regardless of obsolete rollout receipts", () => {
     const compact = buildDeveloperTeamInstallPlan("/tmp/project");
     const eligible = buildDeveloperTeamInstallPlan("/tmp/project", {
-      promptProfileActivation: compactPromptActivation,
+
     });
     const paused = buildDeveloperTeamInstallPlan("/tmp/project", {
-      promptProfileActivation: { ...compactPromptActivation, status: "rollout-paused" },
+
     });
     const expected = getAgentContent("deck-apply-fast", { promptProfile: "compact" })!;
     const compactAgent = compact.agents.find(
@@ -679,7 +678,7 @@ describe("applyDeveloperTeamInstall - profile materialization", () => {
     const projectRoot = createTempProject();
     try {
       const plan = buildDeveloperTeamInstallPlan(projectRoot, {
-        promptProfileActivation: compactPromptActivation,
+
       });
       const result = applyDeveloperTeamInstall(plan);
       const content = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
@@ -1012,78 +1011,6 @@ describe("rollbackDeveloperTeamFiles", () => {
 
       // Files never touched still don't exist
       expect(existsSync(plan.skills[2].absolutePath)).toBe(false);
-    } finally {
-      cleanup(projectRoot);
-    }
-  });
-});
-
-describe("legacy Developer Team upgrade", () => {
-  test("promotes seven roles and quarantines exact legacy Pi files without touching user agents", () => {
-    const projectRoot = createTempProject();
-    try {
-      const legacyAgent = join(projectRoot, ".pi", "agents", "deck-developer-explorer.md");
-      const legacySkill = join(projectRoot, ".pi", "skills", "deck-developer-explorer", "SKILL.md");
-      const userAgent = join(projectRoot, ".pi", "agents", "user-agent.md");
-      mkdirSync(join(legacyAgent, ".."), { recursive: true });
-      mkdirSync(join(legacySkill, ".."), { recursive: true });
-      writeFileSync(legacyAgent, "legacy agent", "utf-8");
-      writeFileSync(legacySkill, "legacy skill", "utf-8");
-      writeFileSync(userAgent, "user-owned", "utf-8");
-
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
-      const result = applyDeveloperTeamInstall(plan);
-
-      expect(plan.agents).toHaveLength(7);
-      expect(existsSync(legacyAgent)).toBe(false);
-      expect(existsSync(legacySkill)).toBe(false);
-      expect(readFileSync(userAgent, "utf-8")).toBe("user-owned");
-      expect(readFileSync(join(projectRoot, ".deck", "backups", "developer-team-v2", ".pi", "agents", "deck-developer-explorer.md"), "utf-8")).toBe("legacy agent");
-      expect(readFileSync(join(projectRoot, ".deck", "backups", "developer-team-v2", ".pi", "skills", "deck-developer-explorer", "SKILL.md"), "utf-8")).toBe("legacy skill");
-      expect(result.legacyTeamFilesRetired).toEqual(expect.arrayContaining([legacyAgent, legacySkill]));
-      expect(verifyDeveloperTeamInstall(plan).valid).toBe(true);
-      expect(applyDeveloperTeamInstall(plan).legacyTeamFilesRetired).toEqual([]);
-    } finally {
-      cleanup(projectRoot);
-    }
-  });
-
-  test("rollback restores legacy Pi paths and removes promoted agent files", () => {
-    const projectRoot = createTempProject();
-    try {
-      const legacyAgent = join(projectRoot, ".pi", "agents", "deck-init.md");
-      mkdirSync(join(legacyAgent, ".."), { recursive: true });
-      writeFileSync(legacyAgent, "legacy init", "utf-8");
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
-      const backup = backupDeveloperTeamFiles(plan);
-
-      applyDeveloperTeamInstall(plan);
-      rollbackDeveloperTeamFiles(backup);
-
-      expect(readFileSync(legacyAgent, "utf-8")).toBe("legacy init");
-      expect(existsSync(plan.agents[0].absolutePath)).toBe(false);
-      expect(existsSync(plan.skills[0].absolutePath)).toBe(false);
-    } finally {
-      cleanup(projectRoot);
-    }
-  });
-
-  test("an intermediate Pi write failure restores the previous active inventory", () => {
-    const projectRoot = createTempProject();
-    try {
-      const legacyAgent = join(projectRoot, ".pi", "agents", "deck-init.md");
-      mkdirSync(join(legacyAgent, ".."), { recursive: true });
-      writeFileSync(legacyAgent, "legacy init", "utf-8");
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
-      const failedPath = plan.agents[0].absolutePath;
-      const failingWrite = ((path: Parameters<typeof writeFileSync>[0], data: Parameters<typeof writeFileSync>[1], option?: unknown) => {
-        if (String(path) === failedPath) throw new Error("injected write failure");
-        return writeFileSync(path, data, option as never);
-      }) as typeof writeFileSync;
-
-      expect(() => applyDeveloperTeamInstall(plan, { writeFile: failingWrite })).toThrow("injected write failure");
-      expect(readFileSync(legacyAgent, "utf-8")).toBe("legacy init");
-      expect(existsSync(failedPath)).toBe(false);
     } finally {
       cleanup(projectRoot);
     }

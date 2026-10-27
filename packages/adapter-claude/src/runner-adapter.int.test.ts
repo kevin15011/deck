@@ -140,34 +140,6 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 
-  test("legacy v1 receipt remains readable and a stale owned plugin is superseded without rewriting it", async () => {
-    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-v1-upgrade-")));
-    try {
-      const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck") });
-      const input = { projectRoot: home, environmentId: "claude-development", deckConfig: getDefaultDeckConfig() };
-      const initial = adapter.buildDeveloperTeamInstallPlan(input);
-      const newRoot = dirname(dirname(initial.files[0]!.path));
-      const oldRoot = join(home, "data", "deck", "claude", "developer-team-v1");
-      for (const file of initial.files) {
-        const target = join(oldRoot, relative(newRoot, file.path));
-        await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-        await writeFile(target, file.content, { mode: 0o600 });
-      }
-      await writeFile(join(home, "data", "deck", "claude", "model-assignments.json"), claudeModelMetadata({}, []), { mode: 0o600 });
-      const reused = adapter.buildDeveloperTeamInstallPlan(input);
-      expect(reused.blocked).toBe(false);
-      expect(reused.files[0]?.path).toBe(join(oldRoot, ".claude-plugin", "plugin.json"));
-      const previous = join(oldRoot, "agents", "deck-lead.md");
-      await writeFile(previous, (await readFile(previous, "utf8")) + "\nlegacy canonical content\n");
-      const upgraded = adapter.buildDeveloperTeamInstallPlan(input);
-      expect(upgraded.blocked).toBe(false);
-      expect(upgraded.files[0]?.path).toMatch(/developer-team-v2-[a-f0-9]{16}\/\.claude-plugin\/plugin\.json$/);
-      await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan: upgraded });
-      expect((await adapter.verifyDeveloperTeamInstall(upgraded)).valid).toBe(true);
-      expect(await readFile(previous, "utf8")).toContain("legacy canonical content");
-    } finally { await rm(home, { recursive: true, force: true }); }
-  });
-
   test("codebase-memory reuses an existing shared install instead of scheduling an owned install", async () => {
     const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-shared-codebase-")));
     try {
@@ -686,7 +658,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
       expect((await adapter.verifyDeveloperTeamInstall(plan)).valid).toBe(true);
       const plugin = dirname(dirname(plan.files[0]!.path));
       expect(JSON.parse(await readFile(join(plugin, ".claude-plugin", "plugin.json"), "utf8")).name).toBe("deck-developer-team");
-      expect(await readFile(join(plugin, "agents", "deck-lead.md"), "utf8")).toContain(getAgentContent("deck-lead", { promptProfile: "legacy" })!.agentBody);
+      expect(await readFile(join(plugin, "agents", "deck-lead.md"), "utf8")).toContain(getAgentContent("deck-lead", { promptProfile: "compact" })!.agentBody);
       const lead = await readFile(join(plugin, "agents", "deck-lead.md"), "utf8");
       expect(lead).toContain("skills:\n  - deck-developer-team:deck-lead");
       for (const role of ["deck-investigate", "deck-quality"]) {

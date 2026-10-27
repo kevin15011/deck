@@ -15,46 +15,9 @@ import {
 } from "./git-safety";
 
 // Import all 12 content modules
-import { ORCHESTRATOR_AGENT_BODY, ORCHESTRATOR_SKILL_BODY } from "./orchestrator-content";
-import { EXPLORER_AGENT_BODY, EXPLORER_SKILL_BODY } from "./explorer-content";
-import { PROPOSAL_AGENT_BODY, PROPOSAL_SKILL_BODY } from "./proposal-content";
-import { SPEC_AGENT_BODY, SPEC_SKILL_BODY } from "./spec-content";
-import { DESIGN_AGENT_BODY, DESIGN_SKILL_BODY } from "./design-content";
-import { TASK_AGENT_BODY, TASK_SKILL_BODY } from "./task-content";
-import { APPLY_BACKEND_AGENT_BODY, APPLY_BACKEND_SKILL_BODY } from "./apply-backend-content";
-import { APPLY_FRONTEND_AGENT_BODY, APPLY_FRONTEND_SKILL_BODY } from "./apply-frontend-content";
-import { APPLY_GENERAL_AGENT_BODY, APPLY_GENERAL_SKILL_BODY } from "./apply-general-content";
-import { VERIFY_AGENT_BODY, VERIFY_SKILL_BODY } from "./verify-content";
-import { REVIEW_AGENT_BODY, REVIEW_SKILL_BODY } from "./review-content";
-import { ARCHIVE_AGENT_BODY, ARCHIVE_SKILL_BODY } from "./archive-content";
-
-// All 24 body surfaces
-const allBodies = [
-  { name: "orchestrator-agent", body: ORCHESTRATOR_AGENT_BODY },
-  { name: "orchestrator-skill", body: ORCHESTRATOR_SKILL_BODY },
-  { name: "explorer-agent", body: EXPLORER_AGENT_BODY },
-  { name: "explorer-skill", body: EXPLORER_SKILL_BODY },
-  { name: "proposal-agent", body: PROPOSAL_AGENT_BODY },
-  { name: "proposal-skill", body: PROPOSAL_SKILL_BODY },
-  { name: "spec-agent", body: SPEC_AGENT_BODY },
-  { name: "spec-skill", body: SPEC_SKILL_BODY },
-  { name: "design-agent", body: DESIGN_AGENT_BODY },
-  { name: "design-skill", body: DESIGN_SKILL_BODY },
-  { name: "task-agent", body: TASK_AGENT_BODY },
-  { name: "task-skill", body: TASK_SKILL_BODY },
-  { name: "apply-backend-agent", body: APPLY_BACKEND_AGENT_BODY },
-  { name: "apply-backend-skill", body: APPLY_BACKEND_SKILL_BODY },
-  { name: "apply-frontend-agent", body: APPLY_FRONTEND_AGENT_BODY },
-  { name: "apply-frontend-skill", body: APPLY_FRONTEND_SKILL_BODY },
-  { name: "apply-general-agent", body: APPLY_GENERAL_AGENT_BODY },
-  { name: "apply-general-skill", body: APPLY_GENERAL_SKILL_BODY },
-  { name: "verify-agent", body: VERIFY_AGENT_BODY },
-  { name: "verify-skill", body: VERIFY_SKILL_BODY },
-  { name: "review-agent", body: REVIEW_AGENT_BODY },
-  { name: "review-skill", body: REVIEW_SKILL_BODY },
-  { name: "archive-agent", body: ARCHIVE_AGENT_BODY },
-  { name: "archive-skill", body: ARCHIVE_SKILL_BODY },
-];
+import { DEVELOPER_TEAM_AGENTS } from "./catalog";
+import { getAgentContent } from "./content-registry";
+const allBodies = DEVELOPER_TEAM_AGENTS.map(({ id }) => ({ name: id, body: getAgentContent(id)!.agentBody }));
 
 describe("Git Safety Rule — Structural Tests", () => {
   test("rule contains all required destructive command families", () => {

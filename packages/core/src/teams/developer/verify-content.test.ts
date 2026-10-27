@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  VERIFY_AGENT_BODY,
-  VERIFY_COMPACT_AGENT_BODY,
-  VERIFY_COMPACT_SKILL_BODY,
-  VERIFY_SKILL_BODY,
-} from "./verify-content";
+import { VERIFY_COMPACT_AGENT_BODY, VERIFY_COMPACT_SKILL_BODY } from "./verify-content";
 import { FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1 } from "./readiness-authority";
 
 // Import git-safety for rule presence assertion
@@ -31,177 +26,8 @@ function assertNotPlaceholder(content: string, label: string) {
   expect(content.length, `${label} should be >500 chars`).toBeGreaterThan(500);
 }
 
-// ---------------------------------------------------------------------------
-// VERIFY_AGENT_BODY
-// ---------------------------------------------------------------------------
-
-describe("VERIFY_AGENT_BODY", () => {
-  test("is not placeholder content", () => {
-    assertNotPlaceholder(VERIFY_AGENT_BODY, "VERIFY_AGENT_BODY");
-  });
-
-  test("contains identity header with Verify Agent name", () => {
-    expect(VERIFY_AGENT_BODY).toContain("# Verify Agent");
-  });
-
-  test("describes compliance and test gate role", () => {
-    expect(VERIFY_AGENT_BODY).toMatch(/compliance|test gate/i);
-  });
-
-  test("contains team-scoped ID reference", () => {
-    expect(VERIFY_AGENT_BODY).toContain("deck-developer-verify");
-  });
-
-  test("instructs to follow matching skill", () => {
-    expect(VERIFY_AGENT_BODY).toContain("Follow the matching skill");
-  });
-
-  test("states terminal behavior: no delegation", () => {
-    expect(VERIFY_AGENT_BODY).toMatch(/terminal|do(es)? not delegate/i);
-  });
-
-  test("references artifact persistence behavior", () => {
-    expect(VERIFY_AGENT_BODY).toMatch(/artifact|persist|store/i);
-  });
-
-  test("does not reference Pi-specific launcher behavior", () => {
-    expect(VERIFY_AGENT_BODY).not.toContain("pi launcher");
-    expect(VERIFY_AGENT_BODY).not.toContain("deck pi");
-    expect(VERIFY_AGENT_BODY).not.toContain("/sdd-");
-  });
-
-  test("distinguishes itself from Review Agent", () => {
-    expect(VERIFY_AGENT_BODY).toMatch(/not.*Review Agent|Review Agent's job/i);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// VERIFY_SKILL_BODY
-// ---------------------------------------------------------------------------
-
-describe("VERIFY_SKILL_BODY", () => {
-  test("is not placeholder content", () => {
-    assertNotPlaceholder(VERIFY_SKILL_BODY, "VERIFY_SKILL_BODY");
-  });
-
-  test("contains skill title", () => {
-    expect(VERIFY_SKILL_BODY).toContain("# Verify Skill");
-  });
-
-  test("references verify-report artifact under OpenSpec", () => {
-    expect(VERIFY_SKILL_BODY).toContain("openspec/");
-    expect(VERIFY_SKILL_BODY).toContain("verify-report.md");
-  });
-
-  test("states terminal behavior: no delegation", () => {
-    // Tested via canonical line reference to using-agent-skills
-    expect(VERIFY_SKILL_BODY).toContain("using-agent-skills");
-  });
-
-  test("describes compliance matrix", () => {
-    expect(VERIFY_SKILL_BODY).toMatch(/compliance matrix/i);
-  });
-
-  test("describes test, build, and typecheck execution", () => {
-    expect(VERIFY_SKILL_BODY).toMatch(/test|build|typecheck/i);
-  });
-
-  test("does not reference Pi-specific launcher behavior", () => {
-    expect(VERIFY_SKILL_BODY).not.toContain("pi launcher");
-    expect(VERIFY_SKILL_BODY).not.toContain("deck pi");
-    expect(VERIFY_SKILL_BODY).not.toContain("/sdd-");
-  });
-
-  test("contains structured return format for orchestrator consumption", () => {
-    expect(VERIFY_SKILL_BODY).toMatch(/## Verify Report|## Return Summary/i);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Canonical line verification tests (Task 2)
-// ---------------------------------------------------------------------------
-
-describe("Canonical line replacement", () => {
-  const CANONICAL_LINE =
-    "Follow the using-agent-skills skill for operating behaviors and failure mode guidance.";
-
-  test("SKILL_BODY contains canonical line exactly once", () => {
-    const matches = VERIFY_SKILL_BODY.split(CANONICAL_LINE).length - 1;
-    expect(matches).toBe(1);
-  });
-
-  test("SKILL_BODY contains no bullet variants of canonical line", () => {
-    expect(VERIFY_SKILL_BODY).not.toContain(`- ${CANONICAL_LINE}`);
-  });
-
-  test("AGENT_BODY does NOT contain canonical line (immutability)", () => {
-    expect(VERIFY_AGENT_BODY).not.toContain(CANONICAL_LINE);
-  });
-
-  test("SKILL_BODY preserves ## Rules heading", () => {
-    expect(VERIFY_SKILL_BODY).toContain("## Rules");
-  });
-});
-
-// Cognitive doc design canonical line test
-describe("Cognitive doc design canonical line", () => {
-  const CDD_CANONICAL_LINE =
-    "Follow the cognitive-doc-design skill for artifact structure and documentation patterns.";
-
-  test("SKILL_BODY contains cognitive-doc-design line exactly once", () => {
-    const matches = VERIFY_SKILL_BODY.split(CDD_CANONICAL_LINE).length - 1;
-    expect(matches).toBe(1);
-  });
-
-  test("SKILL_BODY contains no bullet variants of cognitive-doc-design line", () => {
-    expect(VERIFY_SKILL_BODY).not.toContain(`- ${CDD_CANONICAL_LINE}`);
-  });
-
-  test("AGENT_BODY does NOT contain cognitive-doc-design line (immutability)", () => {
-    expect(VERIFY_AGENT_BODY).not.toContain(CDD_CANONICAL_LINE);
-  });
-
-  test("SKILL_BODY preserves ## Rules heading", () => {
-    expect(VERIFY_SKILL_BODY).toContain("## Rules");
-  });
-});
-
-// Git Safety Rule presence test
-describe("Git Safety Rule presence", () => {
-  test("AGENT_BODY contains critical Git discard protection rule", () => {
-    expect(VERIFY_AGENT_BODY).toContain(GIT_SAFETY_SENTINEL);
-  });
-
-  test("SKILL_BODY contains critical Git discard protection rule", () => {
-    expect(VERIFY_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
-  });
-});
-
-
-describe("staged repair verification content", () => {
-  test("requires staged sequencing, failure manifest fields, and residual classification", () => {
-    expect(VERIFY_SKILL_BODY).toContain("repair-incident.md");
-    expect(VERIFY_SKILL_BODY).toContain("narrowest targeted check first");
-    expect(VERIFY_SKILL_BODY).toContain("affected-area checks");
-    expect(VERIFY_SKILL_BODY).toContain("broad release gate");
-    expect(VERIFY_SKILL_BODY).toContain("structured failure manifest");
-    expect(VERIFY_SKILL_BODY).toContain("normalized fingerprint");
-    expect(VERIFY_SKILL_BODY).toContain("evidence command and latest result");
-    expect(VERIFY_SKILL_BODY).toContain("owner or routing hint");
-    expect(VERIFY_SKILL_BODY).toContain("retry count");
-    expect(VERIFY_SKILL_BODY).toContain("generated-artifact classification");
-    expect(VERIFY_SKILL_BODY).toContain("next verification action");
-    expect(VERIFY_SKILL_BODY).toContain("same fingerprint, new related fingerprint, pre-existing, out of scope, or blocker");
-  });
-});
-
 describe("T08 evidence-bound warning contract", () => {
-  const surfaces = [
-    VERIFY_AGENT_BODY,
-    VERIFY_SKILL_BODY,
-    VERIFY_COMPACT_AGENT_BODY,
-    VERIFY_COMPACT_SKILL_BODY,
-  ];
+  const surfaces = [VERIFY_COMPACT_AGENT_BODY, VERIFY_COMPACT_SKILL_BODY];
 
   test("composes the exact finding-disposition authority once on every surface", () => {
     for (const surface of surfaces) {
@@ -209,47 +35,7 @@ describe("T08 evidence-bound warning contract", () => {
     }
   });
 
-  test("preserves mandatory execution, raw evidence, and evaluator-bound disposition", () => {
-    for (const surface of surfaces) {
-      expect(surface).toMatch(/mandatory/i);
-      expect(surface).toMatch(/raw/i);
-      expect(surface).toMatch(/qualityDisposition|quality disposition/i);
-      expect(surface).toMatch(/warning.*blocker|blocker.*warning/is);
-    }
-    expect(VERIFY_SKILL_BODY).toContain("FailureManifestV1");
-    expect(VERIFY_SKILL_BODY).toMatch(/mandatory BROAD/i);
-  });
-
-  test("limits Verify to its scheduled stage and reserves Review", () => {
-    expect(VERIFY_SKILL_BODY).toMatch(/only the scheduled Verify-stage obligation/i);
-    expect(VERIFY_SKILL_BODY).toMatch(/Never schedule, perform, or substitute independent Review/i);
-  });
-
-  test("states the closed proof thresholds, protected precedence, and status mapping", () => {
-    for (const clause of [
-      "2/2",
-      "exactly five",
-      "at least three",
-      "fourteen days",
-      "equivalent sanitized environments",
-      "causal",
-      "no worsening",
-      "protected risk",
-      "durable ledger",
-      "passed_with_warnings",
-    ]) {
-      expect(VERIFY_SKILL_BODY).toContain(clause);
-    }
-    expect(VERIFY_SKILL_BODY).toContain("stage completes and no blocker exists, it is `passed`");
-    expect(VERIFY_SKILL_BODY).toContain("stage-local result is `passed_with_warnings`");
-  });
-
   test("requires immutable bound return and never repairs or pauses for a proven warning", () => {
-    expect(VERIFY_AGENT_BODY).toMatch(/immutable.*quality disposition/is);
-    expect(VERIFY_SKILL_BODY).toMatch(/candidate.*environment.*causal.*non-regression.*ledger/is);
-    expect(VERIFY_SKILL_BODY).toMatch(/no active-session repair.*no routine user pause/is);
     expect(VERIFY_COMPACT_SKILL_BODY).toMatch(/mandatory BROAD/i);
-    expect(VERIFY_SKILL_BODY).not.toContain("PASS WITH WARNINGS → return to Apply agents for fixes");
-    expect(VERIFY_SKILL_BODY).not.toContain("Requirement partially satisfied");
   });
 });

@@ -166,7 +166,7 @@ export interface DeveloperTeamExecutionConfigV1 {
   };
   readonly registryWriter: "distributed-compatible" | "centralized";
   readonly routePolicy: "legacy-triage" | "shadow-risk-lanes" | "risk-lanes";
-  readonly promptProfile: "legacy" | "compact";
+  readonly promptProfile: "compact";
   readonly telemetry: "off" | "local-safe";
   readonly cohortPercent: number;
 }
@@ -236,7 +236,7 @@ export type CrossRunnerConfig = {
 };
 
 export type DeckConfigDiagnostic = Readonly<{
-  code: "PACKAGE_CONFIGURATION_RETIRED" | "SUPERMEMORY_CONFIG_DEPRECATED" | "CROSS_ASSIGNMENT_LEGACY_SHAPE";
+  code: "SUPERMEMORY_CONFIG_DEPRECATED";
   severity: "warning";
   message: string;
   fieldPath: string;
@@ -936,39 +936,8 @@ export function validateDeckConfig(
 export function diagnoseDeckConfigDeprecations(config: unknown): readonly DeckConfigDiagnostic[] {
   if (!config || typeof config !== "object" || Array.isArray(config)) return [];
   const diagnostics: DeckConfigDiagnostic[] = [];
-  const packages = (config as Record<string, unknown>).packageInstructions;
-  if (packages && typeof packages === "object") for (const [runner, selection] of Object.entries(packages)) {
-    if (!selection || typeof selection !== "object") continue;
-    for (const [key, value] of Object.entries(selection)) {
-      if (key === "context-mode" || key === "serena" || (key === "codebase-memory" && value === true && !(config as DeckConfig).capabilities?.["codebase-memory"])) diagnostics.push({
-        code: "PACKAGE_CONFIGURATION_RETIRED", severity: "warning", fieldPath: `packageInstructions.${runner}.${key}`,
-        message: key === "codebase-memory" ? "Legacy Codebase Memory selection does not establish explicit activation. Set capabilities.codebase-memory.enabled or a boolean runner override to opt in." : "Retired package selection is ignored and omitted from canonical writes.",
-      });
-    }
-  }
-  const legacyMembers = ((config as Record<string, unknown>).crossRunner as Record<string, unknown> | undefined)?.members;
-  if (legacyMembers && typeof legacyMembers === "object" && !Array.isArray(legacyMembers)) {
-    for (const [memberId, value] of Object.entries(legacyMembers)) {
-      if (typeof value === "string") {
-        diagnostics.push({
-          code: "CROSS_ASSIGNMENT_LEGACY_SHAPE",
-          severity: "warning",
-          fieldPath: `crossRunner.members.${memberId}`,
-          message: "Bare-string cross-runner member assignment is deprecated; it is normalized to {runnerId, modelId} and persisted in the qualified shape on next write.",
-        });
-      }
-    }
-  }
   const adaptiveMemory = (config as Record<string, unknown>).adaptiveMemory;
   if (!adaptiveMemory || typeof adaptiveMemory !== "object" || Array.isArray(adaptiveMemory)) return diagnostics;
-  if ((adaptiveMemory as Record<string, unknown>).activeProvider === "engram") {
-    diagnostics.push({
-      code: "SUPERMEMORY_CONFIG_DEPRECATED",
-      severity: "warning",
-      fieldPath: "adaptiveMemory.activeProvider",
-      message: "Engram has been removed. Legacy Engram configuration is migrated to Adaptive Memory disabled; enable Adaptive Memory to use Supermemory.",
-    });
-  }
   const supermemory = (adaptiveMemory as Record<string, unknown>).supermemory;
   if (supermemory && typeof supermemory === "object" && !Array.isArray(supermemory) && Object.prototype.hasOwnProperty.call(supermemory, "maxMemoriesPerSession")) {
     diagnostics.push({
@@ -1006,11 +975,6 @@ function normalizeCrossRunnerConfig(value: unknown, configPath?: string): CrossR
     assertPlainObject(value.members, "crossRunner.members", configPath);
     for (const [memberId, raw] of Object.entries(value.members)) {
       const path = `crossRunner.members.${memberId}`;
-      if (typeof raw === "string") {
-        if (!nonEmpty(raw)) throw crossInvalid(`${path} must be a non-empty model id.`, path, configPath);
-        members[memberId] = { runnerId: defaultRunner ?? "claude", modelId: raw.trim() };
-        continue;
-      }
       assertPlainObject(raw, path, configPath);
       assertKnownFields(raw, CROSS_MEMBER_FIELDS, path, configPath);
       if (!nonEmpty(raw.runnerId)) throw crossInvalid(`${path}.runnerId must be a non-empty string.`, `${path}.runnerId`, configPath);
@@ -1239,7 +1203,7 @@ function normalizeDeveloperTeamExecutionConfig(
     },
     registryWriter: executionConfigEnum(value.registryWriter, ["distributed-compatible", "centralized"] as const, "distributed-compatible", "developerTeamExecution.registryWriter", configPath),
     routePolicy: executionConfigEnum(value.routePolicy, ["legacy-triage", "shadow-risk-lanes", "risk-lanes"] as const, "legacy-triage", "developerTeamExecution.routePolicy", configPath),
-    promptProfile: executionConfigEnum(value.promptProfile, ["legacy", "compact"] as const, "compact", "developerTeamExecution.promptProfile", configPath),
+    promptProfile: executionConfigEnum(value.promptProfile, ["compact"] as const, "compact", "developerTeamExecution.promptProfile", configPath),
     telemetry: executionConfigEnum(value.telemetry, ["off", "local-safe"] as const, "off", "developerTeamExecution.telemetry", configPath),
     cohortPercent,
   };
@@ -1556,7 +1520,6 @@ function parseActiveProvider(
   }
   const normalized = value.trim().toLowerCase();
   if (normalized === "none" || normalized === "supermemory") return normalized;
-  if (normalized === "engram") return "none";
   throw new DeckConfigError(
     "ADAPTIVE_MEMORY_UNSUPPORTED_PROVIDER",
     "Unsupported adaptive-memory provider value. Adaptive Memory supports only disabled or Supermemory.",

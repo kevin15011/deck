@@ -224,13 +224,7 @@ function isDocumentedDeckCommandShape(args: string[]): boolean {
     let continueSeen = false;
     let resumeSeen = false;
     let memorySeen = false;
-    let cleanupSeen = false;
     for (const flag of rest.slice(1)) {
-      if (flag === "--cleanup-legacy") {
-        if (cleanupSeen) return false;
-        cleanupSeen = true;
-        continue;
-      }
       if (flag === "--continue") {
         if (continueSeen) return false;
         continueSeen = true;
@@ -333,7 +327,7 @@ const directCommandExpectations = [
   ["deck update --yes", true],
   ["deck rollback --backup backup-id", true],
   ["deck openspec validate --json --root .", true],
-  ["deck pi developer --cleanup-legacy", true],
+  ["deck pi developer --cleanup-legacy", false],
   ["deck skill-registry validate --runner pi", true],
   ["deck pi developer --memory=supermemory", true],
   ["deck --help", false],
@@ -444,7 +438,7 @@ describe("documentation governance", () => {
     expect(text).not.toMatch(/Adaptive memory is provided|Conversation Capture|Project Scope Binding/);
   });
 
-  test("Codex guidance uses native role and skill delivery with ownership-verified legacy cleanup", () => {
+  test("Codex guidance uses native role and skill delivery with ownership-verified updates", () => {
     const agents = content("AGENTS.md");
     expect(agents).toContain("## Architecture and invariants");
     expect(agents).toContain("bun run canary:install");
@@ -460,7 +454,7 @@ describe("documentation governance", () => {
 
     const support = content("docs/runners.md");
     expect(support).not.toContain("exact Deck marker span in `AGENTS.md`");
-    expect(support).toContain("ownership-verified legacy cleanup");
+    expect(support).toContain("ownership-verified updates");
     expect(content("docs/runners.md")).toContain("[Codex adapter](../packages/adapter-codex/src/runner-adapter.ts)");
   });
 

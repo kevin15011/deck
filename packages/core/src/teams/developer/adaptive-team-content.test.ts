@@ -43,7 +43,7 @@ describe("adaptive Developer Team installed content", () => {
     expect(getTeamSessionInstructions("developer-team")).toContain("specialists load the applicable execution skills themselves");
   });
 
-  test.each(["compact", "legacy"] as const)("calibrated intake reaches assembled Lead surfaces (%s)", (promptProfile) => {
+  test.each(["compact"] as const)("calibrated intake reaches assembled Lead surfaces (%s)", (promptProfile) => {
     const lead = getAgentContent(promptProfile === "compact" ? "deck-lead" : "deck-developer-orchestrator", { promptProfile })!;
     for (const body of [lead.agentBody, lead.skillBody, ...(["guia", "pragmatica"] as const).map(personality =>
       getTeamSessionInstructions("developer-team", { promptProfile, personality })!)]) {

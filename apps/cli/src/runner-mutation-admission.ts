@@ -3,7 +3,7 @@ import { withIdleRunnerMutation } from '@deck/session-host';
 export type RunnerMutationAdmission = <T>(effect: () => T | Promise<T>) => Promise<T>;
 /** CLI production composition: every runner write, including direct install/repair/replacement. */
 export function guardRunnerAdapter(adapter: RunnerAdapter, admission: RunnerMutationAdmission = withIdleRunnerMutation): RunnerAdapter {
-  const writes = new Set<PropertyKey>(['runAction','applyDeveloperTeamInstall','writeMcpConfig','cleanupLegacyInstall','rollbackDeveloperTeamFiles']);
+  const writes = new Set<PropertyKey>(['runAction','applyDeveloperTeamInstall','writeMcpConfig','rollbackDeveloperTeamFiles']);
   return new Proxy(adapter, {get(target,key) {
     const value = Reflect.get(target,key,target);
     if (typeof value !== 'function') return value;

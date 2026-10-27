@@ -14,7 +14,7 @@ Developer Team installs seven adaptive roles plus the standalone Onboard and Arc
 3. Aggregate comparable baseline and candidate observations by lane and risk tier.
 4. Call `evaluateRolloutGateV1()` for exactly the next step: `0 -> 5 -> 25 -> 50 -> 100`.
 5. Expand only when the decision is `eligible`. A `rollout-paused` result leaves the current cohort authoritative.
-6. Install exactly seven agent/skill pairs plus Onboard and Archive lifecycle skills in every OpenCode, Pi, and Codex installation. Legacy IDs remain readable migration/history surfaces, never active aliases.
+6. Install exactly seven agent/skill pairs plus Onboard and Archive lifecycle skills in every OpenCode, Pi, and Codex installation. Only the seven current role IDs are accepted.
 
 ## Runtime boundaries
 
@@ -83,7 +83,7 @@ Allowed rollout observations contain only runner, phase, risk tier, lane, closed
 
 `evaluateCompactPromptActivationV1()` remains available as compatibility evidence for the parity and size checks that preceded activation. Compact output retains the permanent safety, scope, Git, provider-filter, verification, and Review invariants while removing duplicated procedure.
 
-OpenCode, Pi, their CLI launch paths, and the canonical content registry resolve to `compact` without a receipt. Missing, paused, or malformed historical receipts cannot downgrade an installation to `legacy`. Explicit legacy content remains available only as a compatibility surface for tests, readers, and deliberate rollback tooling.
+Every runner and the canonical content registry uses `compact`. Prompt activation receipts and the retired prompt profile have been removed; stored `legacy` prompt profile values are invalid.
 
 ## Acceptance evidence
 

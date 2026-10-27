@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parse } from "yaml";
 import { getStandaloneSkill, STANDALONE_SKILLS } from "../../skills/external";
-import { DEVELOPER_TEAM_AGENTS, LEGACY_DEVELOPER_TEAM_AGENT_ID_MAP } from "./catalog";
+import { DEVELOPER_TEAM_AGENTS } from "./catalog";
 import { getAgentContent } from "./content-registry";
 import { ADAPTIVE_AGENT_CONTENT, ADAPTIVE_TEAM_RUNTIME_CONTRACT } from "./adaptive-team-content";
 import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
@@ -27,7 +27,7 @@ const SIZE_BUDGETS: Record<string, { agentBody: number; skillBody: number }> = O
     ? { agentBody: 26_000, skillBody: 20_000 } : { agentBody: 16_000, skillBody: 10_000 }]),
 );
 
-for (const promptProfile of ["compact", "legacy"] as const) {
+for (const promptProfile of ["compact"] as const) {
   describe(`content invariants: ${promptProfile}`, () => {
     for (const agent of DEVELOPER_TEAM_AGENTS) {
       test(agent.id, () => {
@@ -43,31 +43,19 @@ for (const promptProfile of ["compact", "legacy"] as const) {
             expect(headings, `${agent.id}/${surface}: ${section}`).toContain(section);
           }
           expect(Buffer.byteLength(body), `${agent.id}/${surface}: byte budget`).toBeLessThanOrEqual(SIZE_BUDGETS[agent.id]![surface as keyof typeof content]);
-          const knownIds = new Set([...Object.keys(ADAPTIVE_AGENT_CONTENT), ...Object.keys(LEGACY_DEVELOPER_TEAM_AGENT_ID_MAP), ...STANDALONE_SKILLS.map(s => s.skillId)]);
+          const knownIds = new Set([...Object.keys(ADAPTIVE_AGENT_CONTENT), ...STANDALONE_SKILLS.map(s => s.skillId)]);
           for (const [, id] of body.matchAll(/`(deck-[a-z][a-z-]+)`/g)) expect(knownIds.has(id!), `${agent.id}/${surface}: unresolved ID ${id}`).toBe(true);
           for (const phrase of BANNED_PHRASES) expect(body).not.toContain(phrase);
         }
       });
     }
-    test("legacy workflow roles retain Git protection on their declared surfaces", () => {
-      const roles = Object.keys(LEGACY_DEVELOPER_TEAM_AGENT_ID_MAP).filter(id => id.startsWith("deck-developer-"));
-      for (const id of roles) {
-        const content = getAgentContent(id, { promptProfile })!;
-        expect(content.agentBody, `${id}: GIT_DISCARD_PROTECTION_RULE`).toContain(GIT_DISCARD_PROTECTION_RULE);
-        if (promptProfile === "legacy") expect(content.skillBody, `${id}/skill: GIT_DISCARD_PROTECTION_RULE`).toContain(GIT_DISCARD_PROTECTION_RULE);
-      }
-    });
-    test("catalog and legacy role IDs resolve", () => {
-      for (const [alias, id] of Object.entries(LEGACY_DEVELOPER_TEAM_AGENT_ID_MAP)) {
-        expect(getAgentContent(alias, { promptProfile }), alias).toBeDefined();
-        expect(getAgentContent(id, { promptProfile }), id).toBeDefined();
-      }
+    test("catalog role IDs resolve", () => {
       for (const agent of DEVELOPER_TEAM_AGENTS) expect(getAgentContent(agent.skillId, { promptProfile }), agent.skillId).toBeDefined();
     });
   });
 }
 
-test("retained legacy review, verify and archive surfaces preserve authority verbatim", () => {
+test("compact review, verify and archive surfaces preserve authority verbatim", () => {
   for (const [role, exports] of Object.entries({ verify, review, archive })) {
     for (const [name, body] of Object.entries(exports)) {
       if (typeof body === "string" && /_(AGENT|SKILL)_BODY$/.test(name)) {

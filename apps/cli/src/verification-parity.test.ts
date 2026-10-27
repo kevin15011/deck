@@ -47,7 +47,7 @@ for (const [runner, build] of Object.entries(plans)) {
         expect(body, `${runner}: ${agent.id} team contract`).toContain(runner === "opencode" ? removeDeckMemoryClaimsForOpenCode(ADAPTIVE_TEAM_RUNTIME_CONTRACT) : ADAPTIVE_TEAM_RUNTIME_CONTRACT);
         const canonical = runner === "opencode" && agent.id === "deck-lead"
           ? getTeamSessionInstructions("developer-team", { promptProfile: "compact", skillDiscoveryRuntimeContext: { activeRunnerId: "opencode" } })!
-          : getAgentContent(agent.id, { promptProfile: runner === "claude" ? "legacy" : "compact" })!.agentBody;
+          : getAgentContent(agent.id, { promptProfile: "compact" })!.agentBody;
         expect(body, `${runner}: ${agent.id} canonical agent`).toContain((runner === "opencode" ? removeDeckMemoryClaimsForOpenCode(canonical) : canonical).trim());
       }
     });
@@ -56,7 +56,7 @@ for (const [runner, build] of Object.entries(plans)) {
       for (const agent of getDeveloperTeamCatalog()) {
         const file = files.find(f => (`/` + f.path).endsWith(`/skills/${agent.skillId}/SKILL.md`));
         expect(file, `${runner}: missing ${agent.skillId}`).toBeDefined();
-        const canonical = getAgentContent(agent.id, { promptProfile: runner === "claude" ? "legacy" : "compact" })!;
+        const canonical = getAgentContent(agent.id, { promptProfile: "compact" })!;
         expect(file!.content, `${runner}: ${agent.id} canonical role skill`).toContain((runner === "opencode" ? removeDeckMemoryClaimsForOpenCode(canonical.skillBody) : canonical.skillBody).trim());
       }
     });

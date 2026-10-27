@@ -286,13 +286,13 @@ describe("Repair #21: Path canonicalization for Pi agents directory", () => {
 
       // Write agent files with model frontmatter
       writeFileSync(
-        join(agentsDir, "deck-developer-orchestrator.md"),
-        ["---", "name: deck-developer-orchestrator", "model: openai-codex/gpt-5.5", "thinking: high", "---"].join("\n"),
+        join(agentsDir, "deck-lead.md"),
+        ["---", "name: deck-lead", "model: openai-codex/gpt-5.5", "thinking: high", "---"].join("\n"),
         "utf-8",
       );
       writeFileSync(
-        join(agentsDir, "deck-developer-explorer.md"),
-        ["---", "name: deck-developer-explorer", "model: opencode-go/kimi-k2.6", "thinking: off", "---"].join("\n"),
+        join(agentsDir, "deck-investigate.md"),
+        ["---", "name: deck-investigate", "model: opencode-go/kimi-k2.6", "thinking: off", "---"].join("\n"),
         "utf-8",
       );
 
@@ -319,7 +319,7 @@ describe("Repair #21: Path canonicalization for Pi agents directory", () => {
       mkdirSync(agentsDir, { recursive: true });
 
       writeFileSync(
-        join(agentsDir, "deck-developer-orchestrator.md"),
+        join(agentsDir, "deck-lead.md"),
         ["---", "name: orchestrator", "model: anthropic/claude-sonnet-4", "thinking: medium", "---"].join("\n"),
         "utf-8",
       );

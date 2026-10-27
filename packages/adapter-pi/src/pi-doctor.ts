@@ -2,7 +2,6 @@ import { isAbsolute, join } from "node:path";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 
 import { piAgentPaths, type PiAgentDirResolution } from "./agent-dir";
-import { detectPiLegacy, PI_LEGACY_STALE_MEMORY_MS } from "./pi-legacy";
 import type { PiFileIO } from "./pi-global-install";
 import { hashContent, matchesOwnedHash, normalizePackageSource, parsePiManifest } from "./pi-manifest";
 import { PI_MIN_VERSION, evaluatePiVersion } from "./pi-version";
@@ -136,7 +135,8 @@ export function inspectPiDeckInstall(input: InspectPiDeckInstallInput): PiDoctor
   }
   result.push(category("Pi Deck package", installItems));
   if (!manifest) {
-    result.push(inspectLegacyAndPackages(input, agentDir, globalSources, undefined));
+    result.push(inspectPackageConflicts(input, agentDir, globalSources, undefined));
+
     return result;
   }
 
@@ -199,40 +199,30 @@ export function inspectPiDeckInstall(input: InspectPiDeckInstallInput): PiDoctor
     : { status: "error", message: "The deck-memory extension is not installed.", suggestion: REINSTALL });
   if (input.runtimeDirectory && input.listDirectory) {
     const now = (input.now ?? Date.now)();
-    const stale = (input.listDirectory(input.runtimeDirectory) ?? []).filter((entry) => entry.name.startsWith("pi-memory-") && now - entry.mtimeMs > PI_LEGACY_STALE_MEMORY_MS).map((entry) => join(input.runtimeDirectory!, entry.name));
+    const stale = (input.listDirectory(input.runtimeDirectory) ?? []).filter((entry) => entry.name.startsWith("pi-memory-") && now - entry.mtimeMs > 24 * 60 * 60_000).map((entry) => join(input.runtimeDirectory!, entry.name));
     memoryItems.push(stale.length === 0
       ? { status: "ok", message: "No stale pi-memory-* token handoff directories." }
       : { status: "warning", message: `${stale.length} stale pi-memory-* token handoff director${stale.length === 1 ? "y" : "ies"} older than 24h: ${truncated(stale, 3)}.`, suggestion: "They are swept on the next Deck-managed Pi launch; remove them manually if no Pi session is running." });
   }
   result.push(category("Pi adaptive memory", memoryItems));
+  result.push(inspectPackageConflicts(input, agentDir, globalSources, manifest.settings.addedPackages));
 
-  result.push(inspectLegacyAndPackages(input, agentDir, globalSources, manifest.settings.addedPackages));
   return result;
 }
 
-function inspectLegacyAndPackages(input: InspectPiDeckInstallInput, agentDir: string, globalSources: readonly string[], deckAdded: readonly string[] | undefined): PiDoctorCategory {
+function inspectPackageConflicts(input: InspectPiDeckInstallInput, agentDir: string, globalSources: readonly string[], deckAdded: readonly string[] | undefined): PiDoctorCategory {
   const items: PiDoctorItem[] = [];
   const projectSettings = input.projectRoot ? readJson(input.io, join(input.projectRoot, ".pi", "settings.json")) : undefined;
   const projectSources = packageSources(projectSettings?.ok ? projectSettings.value : undefined);
-  const report = detectPiLegacy({ io: input.io, agentDir, projectRoot: input.projectRoot ?? join(agentDir, "deck", "no-project") });
   const deckAddedSet = new Set((deckAdded ?? []).map((entry) => normalizePackageSource(entry)));
 
   if (globalSources.includes("pi-mcp-adapter") || projectSources.includes("pi-mcp-adapter")) {
-    const byDeck = deckAddedSet.has("pi-mcp-adapter") || report.packages.some((entry) => entry.source === "pi-mcp-adapter" && entry.deckAdded);
+    const byDeck = deckAddedSet.has("pi-mcp-adapter");
     items.push({ status: "error", message: `pi-mcp-adapter is registered and disables Pi's built-in MCP (the Deck MCP servers will not load). ${byDeck ? "An earlier Deck version added it." : "It was not added by Deck."}`, suggestion: byDeck ? "Run 'deck pi developer': Deck removes the entry it added." : "Remove npm:pi-mcp-adapter from settings.json yourself, or accept that Deck MCP servers are unavailable." });
   }
   if (globalSources.includes("pi-subagents") || projectSources.includes("pi-subagents")) {
-    items.push({ status: "warning", message: "pi-subagents is registered and would register a second 'subagent' tool next to the Deck delegation tool.", suggestion: deckAddedSet.has("pi-subagents") || report.packages.some((entry) => entry.source === "pi-subagents" && entry.deckAdded) ? "Run 'deck pi developer': Deck removes the entry it added." : "Remove npm:pi-subagents from settings.json if you do not need it." });
+    items.push({ status: "warning", message: "pi-subagents is registered and would register a second 'subagent' tool next to the Deck delegation tool.", suggestion: deckAddedSet.has("pi-subagents") ? "Run 'deck pi developer': Deck removes the entry it added." : "Remove npm:pi-subagents from settings.json if you do not need it." });
   }
-  if (report.files.length > 0) {
-    const shadowing = report.files.some((file) => file.scope === "global" && file.kind === "skill");
-    items.push({
-      status: "warning",
-      message: `${report.files.length} legacy Deck file(s) from an earlier version can duplicate the global package: ${truncated(report.files.map((file) => file.path), 4)}.${shadowing ? " Legacy skills in the Pi skills directory shadow the package's skills outside Deck sessions and show up as a '[Skill conflicts]' block at startup (Deck sessions already prefer the package)." : ""}`,
-      suggestion: "Run 'deck pi developer --cleanup-legacy': it removes unmodified Deck files and global deck-* files that are demonstrably Deck-authored but older than the current templates (a backup is kept; user-modified files stay). ~/.agents/skills belongs to other runners and is never touched.",
-    });
-  } else if (items.length === 0) {
-    items.push({ status: "ok", message: "No legacy Deck artifacts, pi-subagents or pi-mcp-adapter entries found." });
-  }
-  return category("Pi legacy and conflicts", items);
+  if (items.length === 0) items.push({ status: "ok", message: "No conflicting Pi package entries found." });
+  return category("Pi package conflicts", items);
 }

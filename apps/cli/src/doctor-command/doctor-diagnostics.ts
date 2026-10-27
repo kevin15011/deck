@@ -765,15 +765,6 @@ function buildGlobalConfigDoctorCheck(store: DeckConfigStore | undefined): { con
   }
   try {
     const discovery = store.discover();
-    if (discovery.conflict) {
-      return {
-        category: {
-          category: "Global Deck Config",
-          status: "error",
-          items: [{ status: "error", message: `Global Deck config migration conflict at canonical path. Candidates: ${discovery.conflict.candidates.length}. Invalid: ${discovery.conflict.invalidCandidates.length}.`, suggestion: "Choose one legacy config to adopt before running diagnostics." }],
-        },
-      };
-    }
     if (!discovery.canonicalExists) {
       return {
         category: {

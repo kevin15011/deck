@@ -219,15 +219,6 @@ export function buildDeveloperTeamManifest(options: BuildManifestOptions): Manif
   };
 }
 
-/**
- * @deprecated Use buildDeveloperTeamManifest with { strict: false } for explicit behavior.
- *             This wrapper exists for backward compatibility.
- */
-export function buildDeveloperTeamManifestLegacy(options: BuildManifestOptions): DeveloperTeamManifest {
-  const result = buildDeveloperTeamManifest({ ...options, strict: false });
-  return result.manifest;
-}
-
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------

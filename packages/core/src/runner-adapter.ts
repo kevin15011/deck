@@ -959,11 +959,6 @@ export interface RunnerAdapter {
    * implement this method opt out of detection-driven sync.
    */
   detectDeckInstall?(input: RunnerDeckInstallInput): Promise<RunnerDeckInstallStatus>;
-  /**
-   * Opt-in removal of a superseded per-project install. Only unmodified Deck-owned files are removed; the caller must
-   * have obtained explicit consent. Optional: adapters without a legacy layout omit it.
-   */
-  cleanupLegacyInstall?(projectRoot: string, context: { readonly deckConfig: NormalizedDeckConfig }): Promise<{ removed: readonly string[]; preserved: readonly string[]; diagnostics: readonly string[] }>;
 
   // -------------------------------------------------------------------------
   // Team file backup/restore (wraps backup/restore functions)

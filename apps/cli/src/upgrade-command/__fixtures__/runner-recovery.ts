@@ -62,7 +62,7 @@ try {
   if (existsSync(receipt)) inventoryBefore = upsertManifestFile(inventoryBefore,{path:receipt,owner:`runner:${runner}`,deck_version:'1.0.0',kind:'state'},'1.0.0');
   writeManifest(inventoryBefore);
   const legacy = join(home,'config/opencode/agents/deck-developer-orchestrator.md');
-  if (scenario === 'legacy') { mkdirSync(join(legacy,'..'),{recursive:true}); writeFileSync(legacy,'previous active Deck role'); }
+  if (scenario === 'retired-unmanaged') { mkdirSync(join(legacy,'..'),{recursive:true}); writeFileSync(legacy,'previous active Deck role'); }
   const before = readFileSync(target,'utf8'), beforeReceipt = existsSync(receipt) ? readFileSync(receipt,'utf8') : null;
   const previous = structuredClone(config);
   config.orchestratorPersonality = 'guia';
@@ -75,7 +75,7 @@ try {
   assert.equal(result.status,scenario === 'apply-failure' ? 'partial_failure' : 'completed',JSON.stringify(result.content));
   if (scenario === 'apply-failure') assert.match(result.content.outcomes![0]!.diagnostics.join(' '),/fixture failure after actual adapter writes/);
   else assert.notEqual(readFileSync(target,'utf8'),before,'fixture must exercise an actual content/selection change');
-  if (scenario === 'legacy') assert(!existsSync(legacy),'update must retire the fixture legacy active path');
+  if (scenario === 'retired-unmanaged') assert.equal(readFileSync(legacy,'utf8'),'previous active Deck role','update must leave unmanaged retired paths untouched');
   const backup = readBackupManifest(result.backupId!);
   if (scenario === 'legacy-inventory') {
     delete backup.inventoryChanges;
@@ -132,7 +132,7 @@ try {
     console.log(JSON.stringify({runner,scenario,exit,recoveryRetained:true}));
   } else {
     assert.equal(exit,0,stderr);
-    if (scenario === 'legacy') assert.equal(readFileSync(legacy,'utf8'),'previous active Deck role');
+    if (scenario === 'retired-unmanaged') assert.equal(readFileSync(legacy,'utf8'),'previous active Deck role');
     assert.equal(readFileSync(target,'utf8'),before,'actual target must be restored');
     assert.equal(existsSync(receipt) ? readFileSync(receipt,'utf8') : null,beforeReceipt,'ownership receipts must match restored content');
     assert(backup.entries.some(e=>e.sourcePath === target),'physical target missing from backup');

@@ -57,8 +57,6 @@ import {
   readDeveloperTeamThinkingAssignments,
   type DeveloperTeamInstallOptions,
 } from "./developer-team-install";
-import { cleanupPiLegacy, describePiLegacy, detectPiLegacy, type PiLegacyReport } from "./pi-legacy";
-import { buildPiLegacyTemplates } from "./pi-legacy-templates";
 import { PI_THINKING_LEVELS, supportsThinkingForModel, getDefaultThinkingForModel, resolveThinkingForModel } from "./model-config";
 import { getPiRunnerCapability, getUserFacingCapability, PI_RUNNER_CAPABILITY_CONTRIBUTION, PI_RUNNER_CAPABILITY_IDS, type CapabilityId } from "./capability-catalog";
 import { getOptionalPiTools } from "./installation-plan";
@@ -162,7 +160,7 @@ export type PiRunnerAdapterOptions = {
   /** File effects for the global install engine (hermetic tests inject failures here). */
   readonly piFileIO?: PiFileIO;
   /** Directory (under the Deck state home) that receives the backup of an opt-in legacy cleanup. */
-  readonly legacyBackupRoot?: () => string;
+
   /** Deck-owned tool resolution (RTK, Codebase Memory, shared commands). Defaults to the production resolver. */
   readonly piTools?: PiToolResolution;
   /** Shared Web Search credential resolver (composition root); the value only ever reaches the launched process env. */
@@ -624,10 +622,8 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   #lastMaterialization: { materialization: PiGlobalMaterialization; enginePlan: PiGlobalPlan } | null = null;
   #piTools?: PiToolResolution;
   #webSearchCredential?: () => string | undefined;
-  #legacyBackupRoot?: () => string;
   #codebaseGuardInvocation?: () => CodebaseGuardInvocation;
   constructor(options: PiRunnerAdapterOptions = {}) {
-    this.#legacyBackupRoot = options.legacyBackupRoot;
     this.#codebaseGuardInvocation = options.codebaseGuardInvocation;
     this.#homeDirectory = options.homeDirectory ?? process.env.HOME ?? homedir();
     this.#env = options.env ?? process.env;
@@ -1303,40 +1299,6 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     }
   }
 
-  /** Read-only legacy detection; the Deck-template check runs only when a Deck-named path actually exists. */
-  #detectLegacy(projectRoot: string, agentDir: string, installOptions: DeveloperTeamInstallOptions): PiLegacyReport {
-    const quick = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot });
-    if (quick.files.length === 0) return quick;
-    try {
-      const templates = buildPiLegacyTemplates({ projectRoot, packageRoot: piAgentPaths(agentDir).packageRoot, installOptions });
-      return detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot, templates });
-    } catch {
-      return quick;
-    }
-  }
-
-  /**
-   * Opt-in cleanup of legacy Deck artifacts (project `.pi/agents|skills`, `.deck/pi/profiles`, loose files in the Pi
-   * agent directory, Deck-added project package entries). Backed up first, rolled back on failure; modified files stay.
-   */
-  async cleanupLegacyInstall(projectRoot: string, context?: { readonly deckConfig: NormalizedDeckConfig }): Promise<{ removed: readonly string[]; preserved: readonly string[]; diagnostics: readonly string[] }> {
-    if (!this.#agentDirResolution.ok) return { removed: [], preserved: [], diagnostics: [this.#agentDirResolution.message] };
-    const agentDir = this.#agentDirResolution.dir;
-    const quick = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot });
-    if (quick.files.length === 0 && quick.packages.length === 0) return { removed: [], preserved: [], diagnostics: ["No legacy Pi artifacts were found."] };
-    const backupRoot = this.#legacyBackupRoot?.();
-    if (!backupRoot) return { removed: [], preserved: [], diagnostics: ["Legacy cleanup needs a Deck state directory for its backup; nothing was changed."] };
-    let report = quick;
-    if (context?.deckConfig) {
-      const { installOptions } = this.#resolveInstallOptions({ projectRoot, environmentId: PI_ENVIRONMENT_IDS[0]!, deckConfig: context.deckConfig } as DeveloperTeamAdapterInstallInput, agentDir);
-      report = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot, templates: buildPiLegacyTemplates({ projectRoot, packageRoot: piAgentPaths(agentDir).packageRoot, installOptions }) });
-    } else {
-      // Without a Deck config the templates cannot be reproduced: nothing is provably unmodified, so nothing is removed.
-      report = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot, templates: new Map() });
-    }
-    return cleanupPiLegacy({ io: this.#fileIO, agentDir, projectRoot, report, backupRoot });
-  }
-
   /**
    * Role model/thinking assignments exist only as frontmatter in the installed agent files, so a re-render of the
    * package must carry them over. Precedence (lowest first): project `.pi/agents`, pre-package `<agent dir>/agents`,
@@ -1492,15 +1454,6 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     this.#lastMaterialization = { materialization, enginePlan };
 
     for (const diagnostic of enginePlan.diagnostics) diagnosticEntries.push({ code: diagnostic.code, severity: diagnostic.severity, message: diagnostic.message });
-    const legacy = this.#detectLegacy(input.projectRoot, agentDir, installOptions);
-    if (legacy.files.length > 0 || legacy.packages.length > 0) {
-      const lines = describePiLegacy(legacy);
-      diagnosticEntries.push({
-        code: "PI_LEGACY_ARTIFACTS",
-        severity: "warning",
-        message: `Earlier Deck versions left ${lines.length} legacy Pi item(s) that can duplicate the global Deck package: ${lines.slice(0, 8).join("; ")}${lines.length > 8 ? `; and ${lines.length - 8} more` : ""}. ${lines.some((line) => line.includes("/skills/")) ? " Legacy skills in the Pi skills directory shadow the package skills outside Deck sessions and cause a '[Skill conflicts]' startup block (Deck sessions already prefer the package); copies in ~/.agents/skills belong to other runners and are never touched." : ""} Run 'deck pi developer --cleanup-legacy' to remove unmodified Deck files and global deck-* files that are demonstrably Deck-authored but older than the current templates (a backup is kept; user-modified files are never touched).`,
-      });
-    }
     for (const kept of enginePlan.kept) diagnosticEntries.push({ code: "PI_FILE_KEPT", severity: "info", message: `${kept.relPath} ${kept.reason}.` });
     const standalone = new Set(materialization.nativePlan.standaloneSkills.map((file) => file.skillId));
     const files = materialization.desired.files.map((file) => {

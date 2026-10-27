@@ -4,7 +4,6 @@ import { createHash } from "node:crypto";
 
 import {
   DEVELOPER_TEAM_AGENTS,
-  DEVELOPER_TEAM_LEGACY_AGENT_IDS,
 } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import {
@@ -13,7 +12,6 @@ import {
   composeCapabilityInstructions,
   getEnabledPackageInstructionIds,
 } from "@deck/core/teams/developer/instruction-bundles";
-// import { verifyOrchestratorInvariantPresence, type OrchestratorInvariantSurface } from "@deck/core/teams/developer/orchestrator-invariants";
 
 // Inline verification for adapter — uses core directly at runtime (Task 6)
 // TODO: restore import when @deck/core exports are fully typed
@@ -48,18 +46,7 @@ function verifyInvariantPresence(
     return { pass: true, missing: [] };
   }
 
-  const hasLegacyHeader = /^## Orchestrator Invariants$/m.test(content);
-  if (!hasLegacyHeader) {
-    return { pass: false, missing: criticalIds };
-  }
-
-  for (const id of criticalIds) {
-    if (!content.includes(id)) {
-      missing.push(id);
-    }
-  }
-
-  return { pass: missing.length === 0, missing };
+  return { pass: false, missing: criticalIds };
 }
 import {
   type AdaptiveMemoryProvider,
@@ -69,7 +56,6 @@ import {
 import { type ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
 import { translateOpenCodeCapabilityInstructions } from "./instruction-translation";
 import { getAgentContent, type DeveloperTeamPromptProfileV1 } from "@deck/core/teams/developer/content-registry";
-import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "@deck/core/config/deck-config";
 import { type CapabilityInstructionBundle } from "@deck/core";
 import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
@@ -156,8 +142,7 @@ export type OpenCodeDeveloperTeamApplyResult = {
   changedCount: number;
   unchangedCount: number;
   fileResults: OpenCodeBundleApplyResult[];
-  /** Exact legacy Deck-managed paths moved outside runner discovery. */
-  legacyFilesRetired: string[];
+
 };
 
 export type OpenCodeBundleVerifyResult = {
@@ -463,7 +448,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
      */
     capabilityMap?: Record<string, boolean | null>;
     /** Retained for API compatibility; compact prompt selection no longer depends on rollout receipts. */
-    promptProfileActivation?: PromptProfileActivationV1;
+
   },
 ): OpenCodeDeveloperTeamInstallPlan {
   const configDir = options?.configDir ?? join(process.env.HOME ?? "/home/user", ".config", "opencode");
@@ -565,20 +550,6 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Apply
-// ---------------------------------------------------------------------------
-
-function getOpenCodeLegacyActivePaths(plan: OpenCodeDeveloperTeamInstallPlan): string[] {
-  const configDir = dirname(plan.skillsDir);
-  const retainedSkillIds = new Set(getBootstrapSkillFiles().map((skill) => skill.skillId));
-  return DEVELOPER_TEAM_LEGACY_AGENT_IDS.flatMap((agentId) => [
-    join(configDir, "agents", `${agentId}.md`),
-    join(configDir, "prompts", "deck-developer", `${agentId}.md`),
-    ...(retainedSkillIds.has(agentId) ? [] : [join(configDir, "skills", agentId, "SKILL.md")]),
-  ]);
-}
-
 function assertOpenCodeCandidateFiles(
   plan: OpenCodeDeveloperTeamInstallPlan,
   exists: typeof existsSync,
@@ -602,47 +573,6 @@ function assertOpenCodeCandidateFiles(
       throw new Error(`Developer Team candidate configuration is missing ${agent.id}.`);
     }
   }
-  for (const legacyId of DEVELOPER_TEAM_LEGACY_AGENT_IDS) {
-    if (config.agent?.[legacyId]) {
-      throw new Error(`Legacy Developer Team configuration remains active for ${legacyId}.`);
-    }
-  }
-}
-
-function retireOpenCodeLegacyFiles(
-  plan: OpenCodeDeveloperTeamInstallPlan,
-  options: {
-    exists: typeof existsSync;
-    readFile: typeof readFileSync;
-    writeFile: typeof writeFileSync;
-    mkdir: typeof mkdirSync;
-    unlink: typeof unlinkSync;
-  },
-): string[] {
-  const configDir = dirname(plan.skillsDir);
-  const quarantineRoot = join(configDir, "deck-backups", "developer-team-v2");
-  const retired: string[] = [];
-
-  for (const sourcePath of getOpenCodeLegacyActivePaths(plan)) {
-    if (!options.exists(sourcePath)) continue;
-    const content = options.readFile(sourcePath, "utf-8");
-    const relativePath = relative(configDir, sourcePath);
-    let destinationPath = join(quarantineRoot, relativePath);
-    if (options.exists(destinationPath) && options.readFile(destinationPath, "utf-8") !== content) {
-      destinationPath = `${destinationPath}.${simpleHash(content)}`;
-    }
-    options.mkdir(dirname(destinationPath), { recursive: true });
-    if (!options.exists(destinationPath)) {
-      options.writeFile(destinationPath, content, "utf-8");
-    }
-    if (options.readFile(destinationPath, "utf-8") !== content) {
-      throw new Error(`Legacy Developer Team quarantine verification failed for ${sourcePath}.`);
-    }
-    options.unlink(sourcePath);
-    retired.push(sourcePath);
-  }
-
-  return retired;
 }
 
 export function applyOpenCodeDeveloperTeamInstall(
@@ -677,7 +607,7 @@ export function applyOpenCodeDeveloperTeamInstall(
     const mergeResult = mergeAndWrite({
       configPath: opencodeConfigPath,
       agentEntries: plan.agentEntries,
-      agentKeysToRemove: DEVELOPER_TEAM_LEGACY_AGENT_IDS,
+
       pluginsToAdd: mermaidPlugins,
       readFile,
       writeFile,
@@ -779,21 +709,14 @@ export function applyOpenCodeDeveloperTeamInstall(
     }
   }
 
-  // 6. Verify the promoted candidate before retiring exact legacy paths.
+  // 6. Verify the promoted candidate.
   assertOpenCodeCandidateFiles(plan, exists, readFile);
-  const legacyFilesRetired = retireOpenCodeLegacyFiles(plan, {
-    exists,
-    readFile,
-    writeFile,
-    mkdir,
-    unlink,
-  });
 
   // 7. Compute aggregate counts
   const changedCount = results.filter((r) => r.status !== "unchanged").length + (configMergeResult && configMergeResult.status !== "unchanged" ? 1 : 0);
   const unchangedCount = results.filter((r) => r.status === "unchanged").length + (configMergeResult && configMergeResult.status === "unchanged" ? 1 : 0);
 
-  return { results, configMergeResult, changedCount, unchangedCount, fileResults: results, legacyFilesRetired };
+  return { results, configMergeResult, changedCount, unchangedCount, fileResults: results };
   } catch (error) {
     rollbackDeveloperTeamFiles(fileBackup, { writeFile, unlink });
     if (previousConfig === null) {
@@ -906,19 +829,16 @@ export function verifyOpenCodeDeveloperTeamInstall(
     const content = readFile(planned.absolutePath, "utf-8");
     return { agentId: planned.agent.id, valid: content === planned.content, issues: content === planned.content ? [] : ["Prompt content mismatch."] };
   });
-  const legacyResults: OpenCodeBundleVerifyResult[] = getOpenCodeLegacyActivePaths(plan)
-    .filter((absolutePath) => exists(absolutePath))
-    .map((absolutePath) => ({ agentId: "legacy-inventory", valid: false, issues: [`Legacy active path remains: ${absolutePath}`] }));
   const configResults: OpenCodeBundleVerifyResult[] = (() => {
     const configPath = join(dirname(plan.skillsDir), "opencode.json");
     if (!exists(configPath)) return [{ agentId: "opencode-config", valid: false, issues: ["opencode.json does not exist."] }];
     try {
       const config = JSON.parse(readFile(configPath, "utf-8")) as OpenCodeConfig;
       const missing = DEVELOPER_TEAM_AGENTS.filter((agent) => !config.agent?.[agent.id]).map((agent) => agent.id);
-      const activeLegacy = DEVELOPER_TEAM_LEGACY_AGENT_IDS.filter((agentId) => Boolean(config.agent?.[agentId]));
+
       const issues = [
         ...missing.map((agentId) => `Missing agent configuration: ${agentId}`),
-        ...activeLegacy.map((agentId) => `Legacy agent configuration remains active: ${agentId}`),
+
       ];
       return [{ agentId: "opencode-config", valid: issues.length === 0, issues }];
     } catch {
@@ -927,8 +847,8 @@ export function verifyOpenCodeDeveloperTeamInstall(
   })();
 
   return {
-    valid: skillResults.every((r) => r.valid) && standaloneResults.every((r) => r.valid) && pluginResults.every((r) => r.valid) && promptResults.every((r) => r.valid) && legacyResults.length === 0 && configResults.every((r) => r.valid),
-    agentResults: [...promptResults, ...legacyResults, ...configResults],
+    valid: skillResults.every((r) => r.valid) && standaloneResults.every((r) => r.valid) && pluginResults.every((r) => r.valid) && promptResults.every((r) => r.valid) && configResults.every((r) => r.valid),
+    agentResults: [...promptResults, ...configResults],
     skillResults: [...skillResults, ...standaloneResults],
     pluginResults,
   };
@@ -1060,10 +980,6 @@ export function backupDeveloperTeamFiles(
     ...plan.promptGenerationPlan.map((planned) => ({
       absolutePath: planned.absolutePath,
       previousContent: exists(planned.absolutePath) ? readFile(planned.absolutePath, "utf-8") : null,
-    })),
-    ...getOpenCodeLegacyActivePaths(plan).map((absolutePath) => ({
-      absolutePath,
-      previousContent: exists(absolutePath) ? readFile(absolutePath, "utf-8") : null,
     })),
   ];
 

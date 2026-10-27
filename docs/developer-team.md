@@ -21,7 +21,7 @@ The canonical installation contains seven agent/skill pairs. The first column is
 | `deck-quality` | Quality | Independently verifies behavior, architecture, regression risk, security, and protected boundaries without modifying the candidate. |
 | `deck-setup` | Setup | Repairs missing, stale, invalid, or indeterminate project-readiness components found during preflight. |
 
-The standalone `deck-onboard` and `deck-archive` skills are lifecycle companions, not additional Developer Team agents. Legacy role IDs remain migration/history surfaces and are not materialized as aliases.
+The standalone `deck-onboard` and `deck-archive` skills are lifecycle companions, not additional Developer Team agents. Retired role IDs are not accepted or materialized as aliases.
 
 ## Adaptive routing
 

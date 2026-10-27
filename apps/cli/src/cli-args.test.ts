@@ -131,15 +131,6 @@ describe("parseArgs", () => {
     });
   });
 
-  test("parses 'deck pi developer --cleanup-legacy' as the opt-in legacy cleanup", () => {
-    expect(parseArgs(["pi", "developer", "--cleanup-legacy"])).toEqual<ParsedArgs>({
-      command: "pi-launch",
-      teamId: "developer-team",
-      flags: {},
-      cleanupLegacy: true,
-    });
-  });
-
   test("parses 'deck pi developer --continue' with continue flag", () => {
     const result = parseArgs(["pi", "developer", "--continue"]);
     expect(result).toEqual<ParsedArgs>({
@@ -600,3 +591,8 @@ test("session pair and devices expose the documented local aliases", () => {
   expect(parseArgs(["web","--help"])).toEqual({command:"web-help"});
   for(const args of [["web","x"],["web","--json","--json"]]) expect(parseArgs(args).command).toBe("error");
  });
+
+test("retired cleanup flags cannot request a cleanup", () => {
+  expect(parseArgs(["pi", "developer", "--cleanup-legacy"])).toEqual(parseArgs(["pi", "developer"]));
+  expect(parseArgs(["codex", "developer", "--cleanup-legacy"]).command).toBe("error");
+});

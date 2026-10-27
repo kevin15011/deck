@@ -69,7 +69,7 @@ export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOpti
   const registry = createAdapterRegistry();
   registry.register("pi", guardRunnerAdapter(createPiRunnerAdapter({
     codebaseGuardInvocation: deckCodebaseGuardInvocation,
-    legacyBackupRoot: () => join(getDeckStateDir(), "backups", "pi-legacy"),
+
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     ...options.pi,

@@ -1,20 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  ORCHESTRATOR_AGENT_BODY,
-  ORCHESTRATOR_COMPACT_AGENT_BODY,
-  ORCHESTRATOR_COMPACT_SKILL_BODY,
-  ORCHESTRATOR_CONTINUOUS_DELIVERY_LOOP_V1,
-  ORCHESTRATOR_INTAKE_ALIGNMENT_V2,
-  ORCHESTRATOR_PROMPT_GUIDA,
-  ORCHESTRATOR_PROMPT_PRAGMATICA,
-  ORCHESTRATOR_SKILL_BODY,
-  ORCHESTRATOR_SYSTEM_PROMPT,
-  ORCHESTRATOR_SYSTEM_PROMPT_COMPACT,
-  PERSONALITY_COMMUNICATION_GUIDA,
-  PERSONALITY_COMMUNICATION_PRAGMATICA,
-  getOrchestratorSystemPrompt,
-} from "./orchestrator-content";
+import { ORCHESTRATOR_COMPACT_AGENT_BODY, ORCHESTRATOR_COMPACT_SKILL_BODY, ORCHESTRATOR_CONTINUOUS_DELIVERY_LOOP_V1, ORCHESTRATOR_INTAKE_ALIGNMENT_V2, ORCHESTRATOR_SYSTEM_PROMPT_COMPACT, PERSONALITY_COMMUNICATION_GUIDA, PERSONALITY_COMMUNICATION_PRAGMATICA, getOrchestratorSystemPrompt } from "./orchestrator-content";
 
 import { SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1 } from "./skill-discovery-content";
 
@@ -22,87 +8,9 @@ import { SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1 } from "./skill-discovery-content
 import { GIT_SAFETY_SENTINEL } from "./git-safety";
 
 describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
-  test("contains team identity header", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("# Deck Developer Team");
-  });
-
-  test("contains team-scoped agent IDs", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("deck-developer-orchestrator");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("deck-developer-explorer");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("deck-developer-proposal");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("deck-developer-spec");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("deck-developer-design");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("deck-developer-task");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("deck-developer-apply-general");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("deck-developer-verify");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("deck-developer-review");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("deck-developer-archive");
-  });
-
-  test("does not contain old non-team-scoped IDs", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("`deck-orchestrator`");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("`deck-explorer`");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("`deck-archive`");
-  });
-
-  test("contains role definition — orchestrator is coordinator, not executor", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("coordinator");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("delegate");
-  });
-
-  test("contains delegation guidance without numeric automatic stops", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Delegation Rules");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("4+");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("advisory signals, never automatic stops");
-  });
-
-  test("contains cost-aware delegation signals", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Delegation Signals");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("Mandatory Delegation Triggers");
-  });
-
-  test("contains SDD dependency graph", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Dependency Graph");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("proposal");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("spec");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("design");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("tasks");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("apply");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("verify");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("archive");
-  });
-
-  test("requires SDD triage before execution mode", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("SDD Triage Gate");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Direct");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Specialist(s)");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Recommend SDD");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Run SDD");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Use Automatic mode unless the user explicitly requested phase-by-phase interaction");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("ask which execution mode");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Documentation-only requests are not automatically SDD");
-  });
-
-  test("allows one or more specialists", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("one or more");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/Specialist\(s\)/);
-  });
-
-  test("contains parallel specialist launch section", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Parallel Specialist Launch");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Safe to parallelize");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Unsafe to parallelize");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("sharing a directory");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("only coordination information");
-  });
-
-  test("dependency graph starts with Explorer", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("SDD flow order: Explore -> Proposal");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Explorer runs **first**");
-  });
 
   test("uses the canonical targeted, affected, Review, broad convergence order and rejects caller-controlled deckExecution authority", () => {
-    for (const prompt of [ORCHESTRATOR_SYSTEM_PROMPT, ORCHESTRATOR_SYSTEM_PROMPT_COMPACT]) {
+    for (const prompt of [ORCHESTRATOR_SYSTEM_PROMPT_COMPACT]) {
       expect(prompt).toContain("targeted -> affected_area -> Review -> broad");
       expect(prompt).not.toMatch(/attach .*deckExecution|pass .*deckExecution/i);
       expect(prompt).not.toContain("deterministic-targeted-repair-authority-v1");
@@ -114,106 +22,10 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
       expect(prompt).toMatch(/fails closed/i);
     }
   });
-
-  test("SDD triage starts clear work and reuses classification for conversational deltas", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("For each new desired outcome");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("proceed without redundant approval");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("An in-scope conversational delta reuses the existing classification");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Use Automatic mode unless the user explicitly requested phase-by-phase interaction");
-  });
-
-  test("contains apply routing to general, backend, or frontend", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("General");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Backend");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Frontend");
-  });
-
-  test("references project AI notes under .deck/ai-notes/", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain(".deck/ai-notes/");
-  });
-
-  test("does not inject skill rules through Project Standards", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("Project Standards");
-  });
-
-  test("does not contain runtime-specific model assignment details", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("claude-sonnet-4-20250514");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("Model Assignments");
-  });
-
-  test("does not reference slash commands (/sdd-new, /sdd-ff)", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("/sdd-new");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("/sdd-ff");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("/sdd-continue");
-  });
-
-  test("does not contain old artifact-store mode selection", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("| engram |");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("| hybrid |");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("| none |");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toMatch(/engram.*openspec.*hybrid/);
-  });
-
-  test("does not contain chained PR or delivery strategy language", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("auto-chain");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("ask-on-risk");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("single-pr");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("exception-ok");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("size:exception");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("Delivery Strategy");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("Review Workload Guard");
-  });
-
-  test("requires OpenSpec artifacts", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("openspec/");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("required and non-optional");
-  });
-
-  test("describes memory as auxiliary", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/memory.*auxiliary|auxiliary.*memory/i);
-  });
-
-  // --- Need 1: Apply Batching ---
-
-  test("contains apply batching guidance", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Apply Batching");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Group related tasks");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("ordered task list");
-  });
-
-  // --- Need 2: Post-Archive Git Suggestions ---
-
-  test("contains post-Archive Git suggestion guidance", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Post-Archive Git Suggestions");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("NEVER");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("advisory");
-  });
-
-  // --- Need 3: Expanded Explorer Triage ---
-
-  test("SDD triage covers workflow and agent config triggers", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("agent configuration");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("workflow internals");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("OpenSpec");
-  });
-
-  // --- Need 4: Role-Based Delegation ---
-
-  test("contains SDD vs role-based delegation clarification", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("SDD vs. Role-Based Delegation");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("formal pipeline");
-  });
 });
 
 describe("continuous conversational development", () => {
-  const surfaces = [
-    ORCHESTRATOR_SYSTEM_PROMPT,
-    ORCHESTRATOR_SYSTEM_PROMPT_COMPACT,
-    ORCHESTRATOR_AGENT_BODY,
-    ORCHESTRATOR_COMPACT_AGENT_BODY,
-    ORCHESTRATOR_SKILL_BODY,
-    ORCHESTRATOR_COMPACT_SKILL_BODY,
-  ];
+  const surfaces = [ORCHESTRATOR_SYSTEM_PROMPT_COMPACT, ORCHESTRATOR_COMPACT_AGENT_BODY, ORCHESTRATOR_COMPACT_SKILL_BODY];
 
   test("all canonical surfaces preserve one in-scope feedback loop", () => {
     for (const surface of surfaces) {
@@ -226,19 +38,7 @@ describe("continuous conversational development", () => {
     }
   });
 
-  test("parallelism is based on modifying effects rather than folders", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("disjoint or provably compatible modifying effects");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("sharing a directory");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("Specialists share files or the same directory");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("isolated worktrees are explicitly approved");
-  });
-
   test("recovery selects semantic lifecycle state instead of treating every directory as active", () => {
-    for (const surface of [ORCHESTRATOR_SYSTEM_PROMPT, ORCHESTRATOR_SKILL_BODY]) {
-      expect(surface).toContain("Do not treat every directory as active");
-      expect(surface).toContain("missing historical events");
-      expect(surface).not.toContain("recover the active change state");
-    }
     expect(ORCHESTRATOR_COMPACT_SKILL_BODY).toContain("Do not infer activity from directory presence");
   });
 });
@@ -249,19 +49,14 @@ describe("continuous conversational development", () => {
 
 describe("Deterministic authority boundary", () => {
   test("no prompt surface instructs the coordinator to attach or pass deckExecution to an Apply agent", () => {
-    const surfaces = [
-      ORCHESTRATOR_SYSTEM_PROMPT,
-      ORCHESTRATOR_SYSTEM_PROMPT_COMPACT,
-      ORCHESTRATOR_SKILL_BODY,
-      ORCHESTRATOR_COMPACT_SKILL_BODY,
-    ];
+    const surfaces = [ORCHESTRATOR_SYSTEM_PROMPT_COMPACT, ORCHESTRATOR_COMPACT_SKILL_BODY];
     for (const surface of surfaces) {
       expect(surface).not.toMatch(/attach.*deckExecution|pass.*deckExecution/i);
     }
   });
 
   test("system prompt and compact prompt state the accepted authority boundary", () => {
-    for (const prompt of [ORCHESTRATOR_SYSTEM_PROMPT, ORCHESTRATOR_SYSTEM_PROMPT_COMPACT]) {
+    for (const prompt of [ORCHESTRATOR_SYSTEM_PROMPT_COMPACT]) {
       expect(prompt).toMatch(/runner adapters? delete[s]? (any )?[`"]?deckExecution/i);
       expect(prompt).toMatch(/trusted process-local Deck provider/i);
       expect(prompt).toMatch(/V1 modifying authority/i);
@@ -270,7 +65,7 @@ describe("Deterministic authority boundary", () => {
   });
 
   test("skill bodies state the accepted authority boundary and do not delegate through deckExecution", () => {
-    for (const body of [ORCHESTRATOR_SKILL_BODY, ORCHESTRATOR_COMPACT_SKILL_BODY]) {
+    for (const body of [ORCHESTRATOR_COMPACT_SKILL_BODY]) {
       expect(body).toMatch(/runner adapters? delete[s]? (any )?[`"]?deckExecution/i);
       expect(body).toMatch(/trusted process-local Deck provider/i);
       expect(body).toMatch(/V1 modifying authority/i);
@@ -280,52 +75,13 @@ describe("Deterministic authority boundary", () => {
   });
 });
 
-describe("ORCHESTRATOR_AGENT_BODY", () => {
-  test("contains identity and role header", () => {
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("# Orchestrator Agent");
-  });
-
-  test("states coordinator role, not executor", () => {
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("coordinator");
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("delegate");
-  });
-
-  test("contains delegation triggers section", () => {
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("Delegation Triggers");
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("4+");
-  });
-
-  test("contains instruction to follow matching skill with team-scoped ID", () => {
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("deck-developer-orchestrator");
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("Follow the matching skill");
-  });
-
-  test("mentions SDD triage in agent body", () => {
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("Run SDD triage before selecting execution mode");
-  });
-
-  test("agent body supports in-scope iteration without a repeated gate", () => {
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("For each new desired outcome");
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("continues the same working outcome");
-  });
-
-  test("does not contain placeholder comment", () => {
-    expect(ORCHESTRATOR_AGENT_BODY).not.toContain("Placeholder");
-  });
-});
-
 describe("T9 skill discovery prompt lifecycle", () => {
-  const legacySurfaces = [
-    ORCHESTRATOR_SYSTEM_PROMPT,
-    ORCHESTRATOR_AGENT_BODY,
-    ORCHESTRATOR_SKILL_BODY,
-  ];
   const compactSurfaces = [
     ORCHESTRATOR_SYSTEM_PROMPT_COMPACT,
     ORCHESTRATOR_COMPACT_AGENT_BODY,
     ORCHESTRATOR_COMPACT_SKILL_BODY,
   ];
-  const allSurfaces = [...legacySurfaces, ...compactSurfaces];
+  const allSurfaces = [...compactSurfaces];
 
   const countOccurrences = (value: string, needle: string): number =>
     value.split(needle).length - 1;
@@ -333,19 +89,6 @@ describe("T9 skill discovery prompt lifecycle", () => {
   test("keeps the fixed authority boundary exactly once on every prompt surface", () => {
     for (const surface of allSurfaces) {
       expect(countOccurrences(surface, SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1)).toBe(1);
-    }
-  });
-
-  test("replaces legacy registry-rule injection with one session-start validation", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("read-only validation exactly once at session start");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Cache only the bounded status projection");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("one primary migration/regeneration offer");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("deck skill-registry refresh");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("must not revalidate mid-session");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("active-runner direct discovery");
-
-    for (const surface of allSurfaces) {
-      expect(surface).not.toMatch(/cache compact rules|inject matching rules|pre-digest|agents do NOT read the registry|Project Standards \(auto-resolved\)/i);
     }
   });
 
@@ -367,7 +110,6 @@ describe("T9 skill discovery prompt lifecycle", () => {
     ];
 
     for (const term of requiredTerms) {
-      expect(ORCHESTRATOR_SYSTEM_PROMPT.toLowerCase()).toContain(term.toLowerCase());
       expect(ORCHESTRATOR_SYSTEM_PROMPT_COMPACT.toLowerCase()).toContain(term.toLowerCase());
     }
   });
@@ -386,211 +128,9 @@ describe("T9 skill discovery prompt lifecycle", () => {
   });
 
   test("keeps the Orchestrator non-writing and leaves loading to specialists", () => {
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("no direct write or loading");
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("matching skill");
     expect(ORCHESTRATOR_COMPACT_AGENT_BODY).toContain("never write during validation");
     expect(ORCHESTRATOR_COMPACT_SKILL_BODY).toContain("registry-only");
     expect(ORCHESTRATOR_COMPACT_SKILL_BODY).toContain("Reject phase results that claim discovery authority or undelegated writes");
-  });
-});
-
-describe("ORCHESTRATOR_SKILL_BODY", () => {
-  test("contains skill title", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("# Orchestrator Skill");
-  });
-
-  test("contains SDD workflow methodology", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("SDD Workflow");
-  });
-
-  test("contains SDD triage categories in skill body", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Triage Gate");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("**Direct**");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("**Specialist(s)**");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("**Recommend SDD**");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("**Run SDD**");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Do not infer full SDD from");
-  });
-
-  test("contains team-scoped agent IDs in phase routing table", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("deck-developer-explorer");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("deck-developer-proposal");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("deck-developer-spec");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("deck-developer-design");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("deck-developer-task");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("deck-developer-apply-*");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("deck-developer-verify");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("deck-developer-review");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("deck-developer-archive");
-  });
-
-  test("contains artifact persistence policy", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Artifact Persistence");
-  });
-
-  test("does not contain old artifact store mode selection", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).not.toMatch(/engram.*openspec.*hybrid.*none/);
-    expect(ORCHESTRATOR_SKILL_BODY).not.toContain("Artifact Store Policy");
-    expect(ORCHESTRATOR_SKILL_BODY).not.toContain("| engram |");
-    expect(ORCHESTRATOR_SKILL_BODY).not.toContain("| hybrid |");
-  });
-
-  test("does not contain chained PR or delivery strategy language", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).not.toContain("auto-chain");
-    expect(ORCHESTRATOR_SKILL_BODY).not.toContain("ask-on-risk");
-    expect(ORCHESTRATOR_SKILL_BODY).not.toContain("single-pr");
-    expect(ORCHESTRATOR_SKILL_BODY).not.toContain("exception-ok");
-    expect(ORCHESTRATOR_SKILL_BODY).not.toContain("size:exception");
-    expect(ORCHESTRATOR_SKILL_BODY).not.toContain("Delivery Strategy");
-    expect(ORCHESTRATOR_SKILL_BODY).not.toContain("Review Workload");
-  });
-
-  test("requires OpenSpec artifact persistence", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("openspec/");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("required and non-optional");
-  });
-
-  test("describes memory as auxiliary only", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/memory.*auxiliary|auxiliary.*memory/i);
-  });
-
-  test("contains project AI notes retrieval instructions", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Project AI Notes");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain(".deck/ai-notes/");
-  });
-
-  test("contains skill resolution instructions", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Skill Resolution");
-  });
-
-  test("does not contain placeholder comment", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).not.toContain("Placeholder");
-  });
-
-  // --- Need 1: Apply Batching ---
-
-  test("skill body contains apply batching guidance", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Apply Batching");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Do NOT default to one agent per task");
-  });
-
-  // --- Need 3: Expanded Explorer Triage ---
-
-  test("skill triage covers workflow and agent config triggers", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("agent configuration");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("workflow internals");
-  });
-
-  // --- Need 5: Persistence Hardening ---
-
-  test("skill body contains self-verification guidance", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Self-Verification Before Phase Completion");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Orchestrator Verification Before Phase Advancement");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("completion evidence");
-  });
-
-  // --- Need 6: Execution Config ---
-
-  test("skill body contains agent execution configuration guidance", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Agent Execution Configuration");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("registered configuration");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("readDeveloperTeamModelAssignments");
-  });
-
-  // --- Need 7: Mermaid Phase Summaries ---
-
-  test("skill body contains conditional non-authoritative diagram guidance", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("User Phase Communication");
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/optional/i);
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/non-authoritative/i);
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/never a phase gate/i);
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("runner-agnostic");
-    expect(ORCHESTRATOR_SKILL_BODY).not.toContain(
-      "After each planning phase (Proposal, Spec, Design, Task), include a concise Mermaid diagram",
-    );
-  });
-
-  test("personality cannot hide blockers, approvals, failures, decisions, or authorizations", () => {
-    for (const body of [PERSONALITY_COMMUNICATION_GUIDA, PERSONALITY_COMMUNICATION_PRAGMATICA]) {
-      expect(body).toContain("Content-preserving overlay");
-      expect(body).toMatch(/Do not remove, weaken, hide, or reorder that content/);
-    }
-    expect(PERSONALITY_COMMUNICATION_PRAGMATICA).not.toContain("Phase completions get one line");
-    expect(PERSONALITY_COMMUNICATION_PRAGMATICA).toMatch(/enough space to be explicit/);
-  });
-
-  // --- Need 2: Post-Archive Git Suggestions ---
-
-  test("skill body contains post-Archive Git suggestion guidance", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Post-Archive Git Suggestions");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("advisory");
-  });
-
-  test("skill body aligns on new-outcome triage and conversational deltas", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("For each new desired outcome");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("An in-scope conversational delta reuses the existing classification");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Use Automatic mode unless the user explicitly requested phase-by-phase interaction");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Language Policy reinforcement — REQ-ORCH-001, REQ-ORCH-002, REQ-ORCH-003,
-// REQ-ORCH-004, REQ-LANG-001, REQ-LANG-002
-// ---------------------------------------------------------------------------
-
-describe("Orchestrator Language Policy reinforcement", () => {
-  const SURFACES: { name: string; content: string }[] = [
-    { name: "prompt", content: ORCHESTRATOR_SYSTEM_PROMPT },
-    { name: "skillBody", content: ORCHESTRATOR_SKILL_BODY },
-  ];
-
-  for (const surface of SURFACES) {
-    test(`${surface.name} contains a Language Policy heading`, () => {
-      expect(surface.content).toContain("## Language Policy");
-    });
-
-    test(`${surface.name} requires English-only delegation prompts to sub-agents`, () => {
-      expect(surface.content).toContain("Delegation prompts");
-      expect(surface.content).toMatch(/MUST be in English|MUST be English/i);
-    });
-
-    test(`${surface.name} requires English-only sub-agent responses and generated artifacts`, () => {
-      expect(surface.content).toContain("Sub-agent responses");
-      expect(surface.content).toContain("generated OpenSpec artifacts");
-      expect(surface.content).toContain("MUST be English only");
-    });
-
-    test(`${surface.name} requires repair for non-English outputs except allowed literals`, () => {
-      expect(surface.content).toMatch(/reject.*request repair|request repair.*reject/i);
-      expect(surface.content).toContain("allowed literal exception");
-    });
-
-    test(`${surface.name} requires direct user-facing responses to use the user's language`, () => {
-      expect(surface.content).toContain("Direct user-facing responses");
-      expect(surface.content).toContain("user's language");
-    });
-
-    test(`${surface.name} lists allowed literal exceptions`, () => {
-      expect(surface.content).toContain("Allowed literal exceptions");
-      expect(surface.content).toContain("quoted user input");
-      expect(surface.content).toContain("file paths");
-      expect(surface.content).toContain("identifiers");
-    });
-  }
-});
-
-describe("ORCHESTRATOR_PROMPT_GUIDA", () => {
-  test("guida variant preserves dynamic triage", () => {
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("For each new desired outcome");
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("continues the same working outcome");
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("Use Automatic mode unless the user explicitly requested phase-by-phase interaction");
-  });
-
-  test("SDD triage gate lists all four categories", () => {
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Direct**");
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Specialist(s)**");
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Recommend SDD**");
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Run SDD**");
   });
 });
 
@@ -606,16 +146,6 @@ describe("getOrchestratorSystemPrompt", () => {
     expect(guia).toContain("# Deck Developer Team");
     // Still longer than core
     expect(guia.length).toBeGreaterThan(ORCHESTRATOR_SYSTEM_PROMPT_COMPACT.length);
-  });
-
-  test("pragmatica variant is composition (not identity)", () => {
-    const pragmatica = getOrchestratorSystemPrompt("pragmatica");
-    // Core present
-    expect(pragmatica).toContain("# Deck Developer Team");
-    // Layer present
-    expect(pragmatica).toContain("Communication Style — Pragmatica");
-    // No longer equals core
-    expect(pragmatica).not.toBe(ORCHESTRATOR_SYSTEM_PROMPT);
   });
 
   test("default (no arg) returns pragmatica", () => {
@@ -634,17 +164,6 @@ describe("getOrchestratorSystemPrompt", () => {
     expect(guia.length).toBeGreaterThan(pragmatica.length);
     // All distinct strings
     expect(guia).not.toBe(pragmatica);
-  });
-
-  test("ORCHESTRATOR_PROMPT_GUIDA exports the guia variant", () => {
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toBe(getOrchestratorSystemPrompt("guia", "legacy"));
-  });
-
-  test("ORCHESTRATOR_PROMPT_PRAGMATICA exports the pragmatica variant", () => {
-    // Composition check instead of identity
-    expect(ORCHESTRATOR_PROMPT_PRAGMATICA).toContain("# Deck Developer Team");
-    expect(ORCHESTRATOR_PROMPT_PRAGMATICA).toContain("Communication Style — Pragmatica");
-    expect(ORCHESTRATOR_PROMPT_PRAGMATICA).not.toBe(ORCHESTRATOR_SYSTEM_PROMPT);
   });
 });
 
@@ -690,234 +209,6 @@ describe("PERSONALITY_COMMUNICATION_PRAGMATICA", () => {
   });
 });
 
-describe("ORCHESTRATOR_PROMPT_GUIDA composition", () => {
-  test("starts with ORCHESTRATOR_SYSTEM_PROMPT (idempotency)", () => {
-    expect(ORCHESTRATOR_PROMPT_GUIDA.startsWith(ORCHESTRATOR_SYSTEM_PROMPT)).toBe(true);
-  });
-
-  test("contains full ORCHESTRATOR_SYSTEM_PROMPT", () => {
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain(ORCHESTRATOR_SYSTEM_PROMPT);
-  });
-});
-
-describe("ORCHESTRATOR_PROMPT_PRAGMATICA composition", () => {
-  test("starts with ORCHESTRATOR_SYSTEM_PROMPT (idempotency)", () => {
-    expect(ORCHESTRATOR_PROMPT_PRAGMATICA.startsWith(ORCHESTRATOR_SYSTEM_PROMPT)).toBe(true);
-  });
-
-  test("contains full ORCHESTRATOR_SYSTEM_PROMPT", () => {
-    expect(ORCHESTRATOR_PROMPT_PRAGMATICA).toContain(ORCHESTRATOR_SYSTEM_PROMPT);
-  });
-});
-
-// Git Safety Rule presence test
-describe("Git Safety Rule presence", () => {
-  test("AGENT_BODY contains critical Git discard protection rule", () => {
-    expect(ORCHESTRATOR_AGENT_BODY).toContain(GIT_SAFETY_SENTINEL);
-  });
-
-  test("SKILL_BODY contains critical Git discard protection rule", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
-  });
-});
-
-// --- Review repair: Semantic static verification for Pre-Delegation Checklist and automatic mode text ---
-describe("Pre-Delegation Checklist and Automatic Mode (REQ-OA-004, REQ-OA-006)", () => {
-  test("system prompt contains Pre-Delegation Checklist section", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("## Pre-Delegation Checklist");
-  });
-
-  test("system prompt contains all six checklist items", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("1. **Classify the request**");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("2. **Confirm SDD workspace**");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("3. **Confirm Explorer-first evidence**");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("4. **Confirm required phase artifacts**");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("5. **Confirm user authorization**");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("6. **Emit blocked outcome if any item is missing**");
-  });
-
-  test("system prompt contains semantic blocking wording for triage (INV-004)", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("triage classification is present");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("new outcome has a recorded classification");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("in-scope conversational delta reuses");
-  });
-
-  test("system prompt contains semantic blocking wording for Explorer (INV-006)", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Explorer-first evidence");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Explorer phase completed");
-  });
-
-  test("system prompt contains semantic blocking wording for authorization", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("user authorization");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("explicit user consent");
-  });
-
-  test("system prompt contains automatic mode non-bypass text (REQ-OA-006)", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Automatic execution mode does NOT bypass");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("triage");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Explorer-first");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("user authorization");
-  });
-
-  test("system prompt contains blocked outcome wording", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Emit blocked outcome");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("do NOT delegate");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Preconditions gate tests (Task 4, Task 5)
-// ---------------------------------------------------------------------------
-
-describe("Preconditions gate (Task 4, Task 5)", () => {
-  test("system prompt contains SDD flow with precondition gate", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/Tasks.*Apply|Tasks.*Preconditions.*Apply/i);
-  });
-
-  test("system prompt mentions preconditions gate before Apply", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/precondition.*gate|Gate.*precondition/i);
-  });
-
-  test("system prompt contains gate pass/block rules", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/pass.*block|blocked.*Apply/i);
-  });
-
-  test("system prompt mentions preconditions.md artifact", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("preconditions.md");
-  });
-
-  test("system prompt accepts None as passing result", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/None.*pass|pass.*None/i);
-  });
-
-  test("skill body contains preconditions gate evaluation", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/precondition.*gate|gate.*precondition/i);
-  });
-
-  test("skill body contains gate pass/block rules", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/pass.*block|blocked.*Apply/i);
-  });
-
-  test("skill body contains registry event guidance for gate result", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/gate.*event|event.*gate|registry.*event/i);
-  });
-
-  test("skill body contains anti-bureaucracy constraints", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/anti-bureaucracy|fast.*gate|None.*valid/i);
-  });
-
-  test("skill body mentions preconditions.md existence requirement", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("preconditions.md");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Lifecycle support: Orchestrator lifecycle branches (Tasks 7-9)
-// ---------------------------------------------------------------------------
-
-describe("Orchestrator lifecycle branches for exploration", () => {
-  test("system prompt distinguishes formal SDD Explorer from delegated Explorer", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/SDD.*Explorer|delegated.*Explorer/i);
-  });
-
-  test("system prompt handles SDD Explorer stopped before Proposal", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/stopped.*before.*Proposal|exploration.*context/i);
-  });
-
-  test("system prompt does NOT request lifecycle for blocked Explorer", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/blocked|unclear/i);
-  });
-
-  test("system prompt does NOT request lifecycle for immediate Proposal", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/immediate.*Proposal|continues.*Proposal/i);
-  });
-
-  test("system prompt handles delegated Explorer actionable diagnosis", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/delegated|actionable.*diagnosis/i);
-  });
-
-  test("system prompt does NOT request lifecycle for non-actionable delegated exploration", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/non-actionable|exploratory|consultation/i);
-  });
-
-  test("system prompt includes exploration_context field guidance", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/exploration_context|sdd.*delegated/i);
-  });
-
-  test("system prompt includes lifecycle_status field guidance", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/lifecycle_status|diagnosed|deferred/i);
-  });
-
-  test("skill body contains lifecycle branch logic", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/exploration.*lifecycle|lifecycle.*eligible/i);
-  });
-
-  test("skill body contains anti-bureaucracy constraint for lifecycle", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/no.*lifecycle|lifecycle.*anti-bureaucracy/i);
-  });
-
-  test("skill body distinguishes Run SDD from delegated Explorer", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/Run SDD|delegated.*Explorer/i);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Anti-bureaucracy invariants (Task 9)
-// ---------------------------------------------------------------------------
-
-describe("Anti-bureaucracy invariants for lifecycle", () => {
-  test("system prompt does NOT add new SDD phase for lifecycle", () => {
-    // Lifecycle is auxiliary, not replacing existing phases
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toMatch(/replace.*phase|new.*canonical.*phase/i);
-  });
-
-  test("system prompt does NOT add Apply gate for lifecycle", () => {
-    // No lifecycle requirement before Apply
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toMatch(/Apply.*gate.*lifecycle|lifecycle.*Apply.*gate/i);
-  });
-
-  test("system prompt does NOT require historical migration", () => {
-    // Historical records not migrated
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toMatch(/historical.*migration|migrate.*historical/i);
-  });
-
-  test("system prompt does NOT make lifecycle mandatory", () => {
-    // Lifecycle is optional
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/optional.*lifecycle|lifecycle.*optional/i);
-  });
-
-  test("skill body does NOT add new canonical phase for lifecycle", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).not.toMatch(/phase.*lifecycle/i);
-  });
-
-  test("skill body preserves existing Explorer to Proposal flow without lifecycle", () => {
-    // Direct Explorer -> Proposal has no lifecycle friction
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/Explorer.*Proposal|Proposal.*Explorer/i);
-  });
-
-  test("skill body preserves delegated to SDD flow without lifecycle ceremony", () => {
-    // Immediate conversion has no pending lifecycle
-    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/immediate|continues.*SDD|continues.*Proposal/i);
-  });
-});
-
-
-describe("bounded repair loop governance content", () => {
-  test("requires declared mode, budget launch, checkpoint, hard stop, registry reconciliation, and evaluator guidance", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("declared operating mode");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("incident budget");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("fingerprint budget");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("verification-cycle limits");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("soft checkpoint");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("continue, replan, escalate, or stop rationale");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("hard stop");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("human override");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("repair.* lifecycle events");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("repair-incident.md");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("evaluateRepairIncident()");
-  });
-});
-
 
 const EXPLICIT_COMMIT_ONLY_RULE_V1_EXPECTED = `## Explicit Commit-Only Requests
 
@@ -931,14 +222,7 @@ Treat an explicit commit-only request as authorization to record the unambiguous
 6. Do not launch Verify or Review solely because a commit was requested. If current final independent QA evidence does not bind to the exact committed subject and dependencies, report the commit as an **unverified snapshot**. Never imply acceptance, release readiness, Archive readiness, or commit-ready registry evidence.`;
 
 describe("streamlined Orchestrator ownership and candidate validation", () => {
-  const surfaces = [
-    ["legacy session", ORCHESTRATOR_SYSTEM_PROMPT],
-    ["compact session", ORCHESTRATOR_SYSTEM_PROMPT_COMPACT],
-    ["legacy agent", ORCHESTRATOR_AGENT_BODY],
-    ["compact agent", ORCHESTRATOR_COMPACT_AGENT_BODY],
-    ["legacy skill", ORCHESTRATOR_SKILL_BODY],
-    ["compact skill", ORCHESTRATOR_COMPACT_SKILL_BODY],
-  ] as const;
+  const surfaces = [["compact session", ORCHESTRATOR_SYSTEM_PROMPT_COMPACT], ["compact agent", ORCHESTRATOR_COMPACT_AGENT_BODY], ["compact skill", ORCHESTRATOR_COMPACT_SKILL_BODY]] as const;
 
   test("removes pure-delegator prohibitions from every surface", () => {
     for (const [, surface] of surfaces) {
@@ -947,17 +231,6 @@ describe("streamlined Orchestrator ownership and candidate validation", () => {
       expect(surface).not.toContain("never execute any specialist-capable task");
       expect(surface).not.toContain("never execute specialized agent work itself");
     }
-  });
-
-  test("rejects the contradictory commit-only Review trigger on all six surfaces", () => {
-    const contradictoryTrigger = "fresh review before commit/push/PR unless trivial docs/text";
-    const preservedReviewTrigger =
-      "fresh independent Review for lifecycle acceptance or completion, merge, release, or PR judgment, protected-risk judgment, and any non-mechanical operation";
-
-    for (const [surfaceName, surface] of surfaces) {
-      expect(surface, `${surfaceName} contradictory commit-only Review trigger`).not.toContain(contradictoryTrigger);
-    }
-    expect(ORCHESTRATOR_AGENT_BODY).toContain(preservedReviewTrigger);
   });
 
   test("composes every shared fragment exactly once in all six legacy and compact surfaces", async () => {

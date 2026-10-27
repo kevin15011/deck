@@ -105,8 +105,6 @@ export type ParsedArgs =
         continue?: boolean;
         resume?: boolean;
       };
-      /** Opt-in removal of legacy Deck artifacts left by earlier versions (backed up first). */
-      cleanupLegacy?: boolean;
       /** Legacy CLI memory override. Undefined means no memory; Supermemory is the only supported backend. */
       memoryProvider?: string;
     }
@@ -120,9 +118,10 @@ export type ParsedArgs =
         | { mode: "resume-by-id"; sessionId: string }
         | { mode: "resume-latest" };
       installOnly?: boolean;
+
       dryRun?: boolean;
       localOnly?: boolean;
-      cleanupLegacy?: boolean;
+
       verbose?: boolean;
       yes?: boolean;
       memoryProvider?: "supermemory" | "none";
@@ -167,7 +166,7 @@ export function serializeCodexExecPrompt(tokens: readonly string[]): { ok: true;
  */
 function parseCodexArgs(rest: string[]): ParsedArgs {
   if (rest[0] !== "developer") {
-    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--verbose] [--cleanup-legacy] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck installs globally and writes nothing into projects; use --dry-run or --verbose for details." };
+    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--verbose] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck installs globally and writes nothing into projects; use --dry-run or --verbose for details." };
   }
 
   const tokens = rest.slice(1);
@@ -175,7 +174,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
   const deckFlagRegion = separatorIndex >= 0 ? tokens.slice(0, separatorIndex) : tokens;
   const dryRun = deckFlagRegion.includes("--dry-run");
   const localOnly = deckFlagRegion.includes("--local-only");
-  const cleanupLegacy = deckFlagRegion.includes("--cleanup-legacy");
+
   const verbose = deckFlagRegion.includes("--verbose");
   const yes = deckFlagRegion.includes("--yes");
   const installOnly = deckFlagRegion.includes("--install-only");
@@ -188,7 +187,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
       memoryProvider = value;
     }
   }
-  const deckFlags = new Set(["--dry-run", "--local-only", "--yes", "--install-only", "--cleanup-legacy", "--verbose"]);
+  const deckFlags = new Set(["--dry-run", "--local-only", "--yes", "--install-only", "--verbose"]);
   const filtered = [
     ...deckFlagRegion.filter((token) => !deckFlags.has(token) && !token.startsWith("--memory=")),
     ...(separatorIndex >= 0 ? ["--", ...tokens.slice(separatorIndex + 1)] : []),
@@ -225,7 +224,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
     ...(installOnly ? { installOnly: true } : {}),
     ...(dryRun ? { dryRun: true } : {}),
     ...(localOnly ? { localOnly: true } : {}),
-    ...(cleanupLegacy ? { cleanupLegacy: true } : {}),
+
     ...(verbose ? { verbose: true } : {}),
     ...(yes ? { yes: true } : {}),
     ...(memoryProvider ? { memoryProvider } : {}),
@@ -620,7 +619,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (rest.length === 0) {
     return {
       command: "error",
-      message: "Usage: deck pi <team> [--continue | --resume] [--memory=supermemory|none] [--cleanup-legacy]\nAvailable teams: developer",
+      message: "Usage: deck pi <team> [--continue | --resume] [--memory=supermemory|none]\nAvailable teams: developer",
     };
   }
 
@@ -639,12 +638,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let shouldContinue = false;
   let shouldResume = false;
   let memoryProvider: string | undefined;
-  let cleanupLegacy = false;
+
 
   for (const flag of flags) {
-    if (flag === "--cleanup-legacy") {
-      cleanupLegacy = true;
-    } else if (flag === "--continue") {
+    if (flag === "--continue") {
       shouldContinue = true;
     } else if (flag.startsWith("--continue=")) {
       const value = parseBooleanFlag(flag.slice("--continue=".length));
@@ -691,7 +688,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       ...(shouldContinue ? { continue: true } : {}),
       ...(shouldResume ? { resume: true } : {}),
     },
-    ...(cleanupLegacy ? { cleanupLegacy: true } : {}),
+
     ...(memoryProvider ? { memoryProvider } : {}),
   };
 }

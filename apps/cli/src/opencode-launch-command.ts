@@ -5,7 +5,7 @@ import {
   applyOpenCodeDeveloperTeamInstall,
   buildOpenCodeDeveloperTeamInstallPlan,
   type MemoryDiagnostic,
-  type PromptProfileActivationV1,
+
 } from "@deck/adapter-opencode";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import {
@@ -45,7 +45,7 @@ export type RunOpenCodeLaunchOptions = {
   opencodeCommand?: string;
   configDir?: string;
   /** Retained for API compatibility; compact prompts are active by default. */
-  promptProfileActivation?: PromptProfileActivationV1;
+
   /** @deprecated Compatibility-only; managed runtime effects are owned exclusively by runRunnerLaunch. */
   supermemoryRuntimeTransport?: SupermemoryRuntimeTransport;
   /** @deprecated Compatibility-only; managed runtime effects are owned exclusively by runRunnerLaunch. */
@@ -246,7 +246,7 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
     capabilityInstructions,
     personality: deckConfig.orchestratorPersonality,
     standaloneSkills,
-    promptProfileActivation: options.promptProfileActivation,
+
   });
 
   allDiagnostics.push(...installPlan.memoryDiagnostics.map(toMemoryDiagnostic));

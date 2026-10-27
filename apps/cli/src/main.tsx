@@ -347,7 +347,6 @@ if (parsed.command === "runner-launch") {
     dryRun: parsed.dryRun,
     yes: parsed.yes,
     localOnly: parsed.localOnly,
-    cleanupLegacy: parsed.cleanupLegacy,
     cliMemoryProvider: parsed.memoryProvider,
     interactive,
     confirm: interactive ? async (question) => {
@@ -400,7 +399,6 @@ if (parsed.command === "runner-launch") {
     adapter,
     launch: { projectRoot, teamId: parsed.teamId, mode: "interactive", runnerNative: parsed.flags, deckConfig },
     cliMemoryProvider: parsed.memoryProvider,
-    cleanupLegacy: parsed.cleanupLegacy,
     interactive,
     yes: !interactive,
     confirm: interactive ? async (question) => {

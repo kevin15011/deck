@@ -55,7 +55,7 @@ describe("opencode / cross-cutting runner inventory behavior", () => {
         exists: () => true,
         readFile: () => JSON.stringify({
           agent: {
-            "deck-developer-orchestrator": {
+            "deck-lead": {
               model: "retired/model",
               variant: "custom-legacy-token",
             },

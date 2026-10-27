@@ -9,7 +9,7 @@ Deck separates its own preferences, runner-native configuration, and credentials
 
 ## Where settings live
 
-Deck preferences have one active source: the global configuration file. Project roots are execution and materialization targets; Deck no longer creates or updates `<project>/.deck/config.json`, which is read only as legacy migration input.
+Deck preferences have one active source: the global configuration file. Project roots are execution and materialization targets; Deck no longer creates or updates `<project>/.deck/config.json`; retired project configuration locations are ignored.
 
 | Purpose | Primary path | Environment override |
 |---|---|---|
@@ -18,7 +18,7 @@ Deck preferences have one active source: the global configuration file. Project 
 | State and history | `~/.local/state/deck/` | `$XDG_STATE_HOME/deck/` |
 | Release cache and backups | `~/.cache/deck/` | `$XDG_CACHE_HOME/deck/` |
 
-Legacy configuration locations can be read for migration compatibility. New writes use the primary XDG layout. Runner-native files remain in the runner's own locations; Deck does not turn those files into a universal schema.
+Configuration is read and written only in the primary XDG layout. Runner-native files remain in the runner's own locations; Deck does not turn those files into a universal schema.
 
 ## Normalized Deck config
 
@@ -112,7 +112,7 @@ The `developerTeamExecution` section is optional advanced configuration. Normal 
 | `invocationAuthorization` | Object with `default`, optional `opencode`, and optional `pi`; each is `static-compatible` or `invocation-required`. | `{ "default": "static-compatible" }` | Operators managing invocation boundaries. |
 | `registryWriter` | `distributed-compatible` or `centralized`. | `distributed-compatible` | Maintainers controlling registry persistence mode. |
 | `routePolicy` | `legacy-triage`, `shadow-risk-lanes`, or `risk-lanes`. | `legacy-triage` | Operators selecting routing policy. |
-| `promptProfile` | `legacy` or `compact`. | `compact` | Advanced prompt/profile configuration. |
+| `promptProfile` | `compact` only; other values are invalid. | `compact` | Advanced prompt/profile configuration. |
 | `telemetry` | `off` or `local-safe`. | `off` | Operators who explicitly need local evidence. |
 | `cohortPercent` | Finite number from `0` through `100`. | `0` | Maintainers controlling rollout exposure. |
 

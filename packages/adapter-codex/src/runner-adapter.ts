@@ -1458,14 +1458,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
     if (input.localOnly) {
       extraDiagnostics.push({ code: "codex-local-only-ignored", severity: "info", message: "--local-only has no effect for Codex: Deck installs globally under your Codex home and ~/.agents/skills and writes nothing into projects." });
     }
-    const legacy = this.#detectLegacyProject(input.projectRoot);
-    if (legacy.found) {
-      extraDiagnostics.push({
-        code: "codex-legacy-project-install",
-        severity: "warning",
-        message: `A previous per-project Deck install in ${input.projectRoot} (${legacy.unmodified.length + legacy.modified.length} files) overrides the global team files in this project. Run the Codex developer command with --cleanup-legacy to remove it; only unmodified Deck files are deleted and anything you changed is kept.`,
-      });
-    }
     const unconfirmedAssignmentChanges = hasInventoryEvidence
       ? []
       : [...changedAssignmentAgents(persistedAssignments.modelAssignments, input.modelAssignments),
@@ -1654,79 +1646,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
       }
     }
     return { installed: managedPaths.length > 0, managedPaths: [...new Set(managedPaths)].sort(), diagnostics };
-  }
-
-  /**
-   * Finds a pre-global, per-project Deck install through its old ownership manifest. Read-only: files whose bytes still
-   * match the recorded hash are "unmodified" (safe to remove on request); anything else is reported and preserved.
-   */
-  #detectLegacyProject(projectRoot: string): { found: boolean; manifestPath: string; unmodified: string[]; modified: string[] } {
-    const result = { found: false, manifestPath: join(projectRoot, ".codex", "deck-manifest.json"), unmodified: [] as string[], modified: [] as string[] };
-    try {
-      if (!inspectSafeProjectPath(projectRoot, result.manifestPath)?.isFile()) return result;
-      const manifest = JSON.parse(readFileSync(result.manifestPath, "utf8")) as { version?: unknown; files?: Record<string, unknown> };
-      if (manifest.version !== 1 || !manifest.files || typeof manifest.files !== "object") return result;
-      result.found = true;
-      for (const [relativePath, expectedHash] of Object.entries(manifest.files)) {
-        if (relativePath === "AGENTS.md" || typeof expectedHash !== "string" || relativePath.startsWith("/") || relativePath.split("/").includes("..")) continue;
-        const absolute = join(projectRoot, relativePath);
-        const stat = inspectSafeProjectPath(projectRoot, absolute);
-        if (!stat?.isFile()) continue;
-        (sha256(readFileSync(absolute, "utf8")) === expectedHash ? result.unmodified : result.modified).push(relativePath);
-      }
-    } catch { /* an unreadable legacy manifest is simply not reported as an install */ }
-    return result;
-  }
-
-  /**
-   * Opt-in removal of a legacy per-project Deck install. Only files whose bytes still equal the legacy manifest hash are
-   * deleted (transactionally, with rollback); project config keeps everything outside Deck's marked blocks; modified or
-   * unknown files are never touched. The caller must have obtained explicit consent before calling this.
-   */
-  async cleanupLegacyInstall(projectRoot: string): Promise<{ removed: readonly string[]; preserved: readonly string[]; diagnostics: readonly string[] }> {
-    const legacy = this.#detectLegacyProject(projectRoot);
-    if (!legacy.found) return { removed: [], preserved: [], diagnostics: ["No legacy per-project Deck install was found."] };
-    const mutations: CodexMutation[] = [];
-    const preserved = [...legacy.modified];
-    const diagnostics: string[] = [];
-    const manifest = JSON.parse(readFileSync(legacy.manifestPath, "utf8")) as { files: Record<string, string> };
-    for (const relativePath of legacy.unmodified) {
-      if (relativePath === ".codex/config.toml") continue; // handled below: only Deck's marker-owned blocks leave the file
-      const absolute = join(projectRoot, relativePath);
-      const content = readFileSync(absolute, "utf8");
-      const mode = lstatSync(absolute).mode & 0o777;
-      mutations.push({ operation: "delete", relativePath, expected: { kind: "file", hash: sha256(content), mode }, postimageHash: sha256(""), postimageMode: mode, ownership: { kind: "deck-file", marker: `legacy:${relativePath}` }, rollback: "restore", content: "" });
-    }
-    // Legacy whole-file receipts and comment markers do not prove ownership of shared entries.
-    const configPath = join(projectRoot, '.codex/config.toml');
-    if (inspectSafeProjectPath(projectRoot, configPath)?.isFile() && (legacy.unmodified.includes('.codex/config.toml') || legacy.modified.includes('.codex/config.toml'))) {
-      if (!preserved.includes('.codex/config.toml')) preserved.push('.codex/config.toml');
-      diagnostics.push('Preserved shared legacy MCP/hook configuration without granular proof; review individual entries before removal.');
-    }
-    const source = readFileSync(legacy.manifestPath, 'utf8');
-    const mode = lstatSync(legacy.manifestPath).mode & 0o777;
-    const deleted = new Set(mutations.filter(mutation => mutation.operation === 'delete').map(mutation => mutation.relativePath));
-    const retained = Object.fromEntries(Object.entries(manifest.files).filter(([path]) => !deleted.has(path)));
-    if (preserved.length > 0) {
-      preserved.push('.codex/deck-manifest.json');
-      const content = `${JSON.stringify({ ...manifest, files: retained }, null, 2)}\n`;
-      if (source !== content) mutations.push({ relativePath: '.codex/deck-manifest.json', expected: { kind: 'file', hash: sha256(source), mode }, postimageHash: sha256(content), postimageMode: mode, ownership: { kind: 'deck-manifest', marker: 'legacy:manifest' }, rollback: 'restore', content });
-    } else {
-      mutations.push({ operation: 'delete', relativePath: '.codex/deck-manifest.json', expected: { kind: 'file', hash: sha256(source), mode }, postimageHash: sha256(''), postimageMode: mode, ownership: { kind: 'deck-manifest', marker: 'legacy:manifest' }, rollback: 'restore', content: '' });
-    }
-    if (mutations.length > 0) {
-      const effects = this.#fileEffects ?? createNodeCodexFileEffects({ journalRoot: this.#journalRoot });
-      await applyCodexMutationPlan({
-        projectRoot,
-        mutations,
-        expectedFiles: [],
-        inventory: { agentRoleIds: [], agentBoundSkillIds: [], externalStandaloneSkillIds: [], bootstrapSkillIds: [] },
-        diagnostics: [],
-        blocked: false,
-      }, effects, { operationKind: "legacy-cleanup" });
-    }
-    if (preserved.length > 0) diagnostics.push(`Kept ${preserved.length} file(s) with unresolved ownership or changed recorded bytes: ${preserved.join(", ")}. Review them yourself.`);
-    return { removed: mutations.filter((mutation) => mutation.operation === "delete").map((mutation) => mutation.relativePath), preserved, diagnostics };
   }
 
   async diagnoseProject(projectRoot: string, deckConfig: NormalizedDeckConfig): Promise<ReadonlyArray<{ category: string; status: "ok" | "warning" | "error"; message: string; suggestion?: string }>> {

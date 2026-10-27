@@ -400,43 +400,6 @@ describe("Codex global ownership and migration", () => {
     });
   }, 120_000);
 
-  test("reports a legacy per-project install, never deletes it implicitly, and removes only unmodified Deck files on opt-in", async () => {
-    await withProject(async (root, journalRoot) => {
-      const { cwd, adapter } = await globalAdapter(root, journalRoot);
-      const files: Record<string, string> = {
-        ".codex/agents/deck-lead.toml": "name = \"Lead\"\n",
-        ".agents/skills/deck-lead/SKILL.md": "---\nname: deck-lead\ndescription: d\n---\nbody\n",
-        ".agents/skills/deck-modified/SKILL.md": "---\nname: deck-modified\ndescription: d\n---\noriginal\n",
-        ".codex/config.toml": "[features]\nmulti_agent = true\n# deck-codex-mcp:context7\n[mcp_servers.context7]\nurl = \"https://mcp.context7.com/mcp\"\n\n[profiles.mine]\nmodel = \"x\"\n",
-      };
-      for (const [path, content] of Object.entries(files)) {
-        await mkdir(join(cwd, path, ".."), { recursive: true });
-        await writeFile(join(cwd, path), content);
-      }
-      const recorded = Object.fromEntries(Object.entries(files).map(([path, content]) => [path, sha(path === ".agents/skills/deck-modified/SKILL.md" ? "original-changed-later" : content)]));
-      await writeFile(join(cwd, ".codex", "deck-manifest.json"), `${JSON.stringify({ version: 1, files: recorded })}\n`);
-      await writeFile(join(cwd, "unrelated.txt"), "keep");
-
-      const reviewed = plan(adapter, cwd);
-      const legacy = reviewed.diagnostics?.find((message) => message.includes("previous per-project Deck install"));
-      expect(legacy).toContain("overrides the global team files");
-      expect(legacy).toContain("--cleanup-legacy");
-      expect(await readFile(join(cwd, ".codex", "agents", "deck-lead.toml"), "utf8")).toBe(files[".codex/agents/deck-lead.toml"]);
-
-      const result = await adapter.cleanupLegacyInstall!(cwd, { deckConfig: deckConfig() });
-      expect(result.removed).toEqual(expect.arrayContaining([".codex/agents/deck-lead.toml", ".agents/skills/deck-lead/SKILL.md"]));
-      expect(result.preserved).toEqual(expect.arrayContaining([".agents/skills/deck-modified/SKILL.md", ".codex/config.toml", ".codex/deck-manifest.json"]));
-      await expect(stat(join(cwd, ".codex", "agents", "deck-lead.toml"))).rejects.toThrow();
-      expect((await stat(join(cwd, ".codex", "deck-manifest.json"))).isFile()).toBe(true);
-      expect(await readFile(join(cwd, ".agents", "skills", "deck-modified", "SKILL.md"), "utf8")).toBe(files[".agents/skills/deck-modified/SKILL.md"]);
-      const config = await readFile(join(cwd, ".codex", "config.toml"), "utf8");
-      expect(config).toContain("[profiles.mine]");
-      expect(config).toContain("mcp_servers.context7");
-      expect(await readFile(join(cwd, "unrelated.txt"), "utf8")).toBe("keep");
-      expect((await adapter.cleanupLegacyInstall!(cwd, { deckConfig: deckConfig() })).removed).toEqual([]);
-    });
-  });
-
   test("a launch-time plan keeps Deck-managed servers chosen in the TUI (for example Context7) instead of dropping them", async () => {
     await withProject(async (root, journalRoot) => {
       const { cwd, g, adapter } = await globalAdapter(root, journalRoot);

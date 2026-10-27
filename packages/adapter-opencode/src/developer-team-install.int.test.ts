@@ -145,10 +145,10 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
   test("installs compact content by default regardless of obsolete rollout receipts", () => {
     const compact = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
     const eligible = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
-      promptProfileActivation: compactPromptActivation,
+
     });
     const paused = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
-      promptProfileActivation: { ...compactPromptActivation, status: "rollout-paused" },
+
     });
     const compactPrompt = compact.promptGenerationPlan.find(
       (planned) => planned.agent.id === "deck-apply-fast",
@@ -770,92 +770,6 @@ describe("rollbackDeveloperTeamFiles", () => {
       rollbackDeveloperTeamFiles(backup);
       const content = readFileSync(plan.skills[0].absolutePath, "utf-8");
       expect(content).not.toBe("CORRUPTED");
-    } finally {
-      cleanup(projectRoot);
-    }
-  });
-});
-
-describe("legacy Developer Team upgrade", () => {
-  test("promotes seven roles, preserves user agents, and quarantines exact legacy files", () => {
-    const projectRoot = createTempProject();
-    try {
-      const configDir = createTempConfigDir(projectRoot);
-      const legacySkill = join(configDir, "skills", "deck-developer-explorer", "SKILL.md");
-      const legacyPrompt = join(configDir, "prompts", "deck-developer", "deck-developer-explorer.md");
-      mkdirSync(join(legacySkill, ".."), { recursive: true });
-      mkdirSync(join(legacyPrompt, ".."), { recursive: true });
-      writeFileSync(legacySkill, "legacy skill", "utf-8");
-      writeFileSync(legacyPrompt, "legacy prompt", "utf-8");
-      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({
-        agent: {
-          "deck-developer-explorer": { mode: "subagent", model: "legacy/model" },
-          "user-agent": { mode: "subagent", prompt: "user-owned" },
-        },
-      }), "utf-8");
-
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
-      const result = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
-      const config = JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8"));
-
-      expect(Object.keys(plan.agentEntries)).toHaveLength(7);
-      expect(config.agent["deck-developer-explorer"]).toBeUndefined();
-      expect(config.agent["user-agent"]).toEqual({ mode: "subagent", prompt: "user-owned" });
-      expect(existsSync(legacySkill)).toBe(false);
-      expect(existsSync(legacyPrompt)).toBe(false);
-      expect(readFileSync(join(configDir, "deck-backups", "developer-team-v2", "skills", "deck-developer-explorer", "SKILL.md"), "utf-8")).toBe("legacy skill");
-      expect(readFileSync(join(configDir, "deck-backups", "developer-team-v2", "prompts", "deck-developer", "deck-developer-explorer.md"), "utf-8")).toBe("legacy prompt");
-      expect(result.legacyFilesRetired).toEqual(expect.arrayContaining([legacySkill, legacyPrompt]));
-      expect(verifyOpenCodeDeveloperTeamInstall(plan).valid).toBe(true);
-
-      expect(applyOpenCodeDeveloperTeamInstall(plan, { configDir }).legacyFilesRetired).toEqual([]);
-    } finally {
-      cleanup(projectRoot);
-    }
-  });
-
-  test("file rollback restores legacy discovery paths and removes newly promoted files", () => {
-    const projectRoot = createTempProject();
-    try {
-      const configDir = createTempConfigDir(projectRoot);
-      const legacySkill = join(configDir, "skills", "deck-init", "SKILL.md");
-      mkdirSync(join(legacySkill, ".."), { recursive: true });
-      writeFileSync(legacySkill, "legacy init", "utf-8");
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
-      const backup = backupDeveloperTeamFiles(plan);
-
-      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
-      rollbackDeveloperTeamFiles(backup);
-
-      expect(readFileSync(legacySkill, "utf-8")).toBe("legacy init");
-      expect(existsSync(plan.skills[0].absolutePath)).toBe(false);
-      expect(existsSync(plan.promptGenerationPlan[0].absolutePath)).toBe(false);
-    } finally {
-      cleanup(projectRoot);
-    }
-  });
-
-  test("an intermediate write failure restores config and active files", () => {
-    const projectRoot = createTempProject();
-    try {
-      const configDir = createTempConfigDir(projectRoot);
-      const configPath = join(configDir, "opencode.json");
-      const previousConfig = JSON.stringify({ agent: { "deck-developer-explorer": { description: "legacy", mode: "subagent", prompt: "legacy" } } });
-      writeFileSync(configPath, previousConfig, "utf-8");
-      const legacySkill = join(configDir, "skills", "deck-developer-explorer", "SKILL.md");
-      mkdirSync(join(legacySkill, ".."), { recursive: true });
-      writeFileSync(legacySkill, "legacy", "utf-8");
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
-      const failedPath = plan.skills[0].absolutePath;
-      const failingWrite = ((path: Parameters<typeof writeFileSync>[0], data: Parameters<typeof writeFileSync>[1], option?: unknown) => {
-        if (String(path) === failedPath) throw new Error("injected write failure");
-        return writeFileSync(path, data, option as never);
-      }) as typeof writeFileSync;
-
-      expect(() => applyOpenCodeDeveloperTeamInstall(plan, { configDir, writeFile: failingWrite })).toThrow("injected write failure");
-      expect(readFileSync(configPath, "utf-8")).toBe(previousConfig);
-      expect(readFileSync(legacySkill, "utf-8")).toBe("legacy");
-      expect(existsSync(failedPath)).toBe(false);
     } finally {
       cleanup(projectRoot);
     }

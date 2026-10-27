@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildDeveloperTeamManifest, buildDeveloperTeamManifestLegacy, getDeveloperTeamAgentIds, isManifestModelComplete } from "./manifest";
+import { buildDeveloperTeamManifest, getDeveloperTeamAgentIds, isManifestModelComplete } from "./manifest";
 import type { DeveloperTeamManifest, ManifestBuildResult } from "./manifest";
 
 import { STANDALONE_SKILLS } from "../../skills/external/index";
@@ -155,29 +155,6 @@ describe("DeveloperTeamManifest", () => {
       expect(result.warnings).toBeDefined();
       expect(Array.isArray(result.errors)).toBe(true);
       expect(Array.isArray(result.warnings)).toBe(true);
-    });
-  });
-
-  describe("buildDeveloperTeamManifestLegacy", () => {
-    test("returns DeveloperTeamManifest directly (backward compat)", () => {
-      const manifest = buildDeveloperTeamManifestLegacy({
-        team: { id: "developer-team", displayName: "Developer Team" },
-      });
-
-      expect(manifest.team).toBeDefined();
-      expect(manifest.team.id).toBe("developer-team");
-      expect(manifest.agents.length).toBe(DEVELOPER_TEAM_AGENTS.length);
-    });
-
-    test("returns manifest with no errors/warnings exposed", () => {
-      const manifest = buildDeveloperTeamManifestLegacy({
-        team: { id: "developer-team", displayName: "Developer Team" },
-      });
-
-      // Legacy returns the manifest directly, not a result object
-      expect(manifest.agents).toBeDefined();
-      expect((manifest as any).errors).toBeUndefined();
-      expect((manifest as any).warnings).toBeUndefined();
     });
   });
 

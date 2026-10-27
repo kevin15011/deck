@@ -3,7 +3,7 @@ import { getAgentContent } from './content-registry';
 import { getDeveloperTeamCatalog } from './catalog';
 import { buildCapabilityInstructionBundle } from './instruction-bundles';
 import { getBootstrapSkillFiles } from '../../skills/bootstrap';
-for (const runnerId of ['codex', 'claude', 'opencode', 'pi']) for (const promptProfile of ['compact', 'legacy'] as const) {
+for (const runnerId of ['codex', 'claude', 'opencode', 'pi']) for (const promptProfile of ['compact'] as const) {
   test(`${runnerId}/${promptProfile}: every rendered role and skill excludes retired packages`, () => {
     for (const role of getDeveloperTeamCatalog()) {
       const rendered = getAgentContent(role.id, { promptProfile, capabilityInstructions: buildCapabilityInstructionBundle(['code-economy', 'rtk', 'codebase-memory']) });

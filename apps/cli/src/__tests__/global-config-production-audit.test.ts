@@ -131,10 +131,8 @@ describe("production Deck preference source audit", () => {
     expect(offenders).toEqual([]);
   });
 
-  test("forbids migration-candidate config resolvers outside migration modules", () => {
+  test("forbids retired migration-candidate config resolvers", () => {
     const permitted = new Set([
-      "apps/cli/src/runtime/paths.ts",
-      "apps/cli/src/upgrade-command/xdg-migration.ts",
       "apps/cli/src/__tests__/global-config-production-audit.test.ts",
     ]);
     const offenders = files(repoRoot).filter((rel) => {

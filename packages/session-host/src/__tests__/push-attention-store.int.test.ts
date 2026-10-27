@@ -60,22 +60,6 @@ test('capacity preserves terminal sent and failed receipts across reload without
   store=new PushAttentionStore(dir,()=>1100);expect(store.eligible(device,first)).toBe(false);expect(store.eligible(device,pending)).toBe(false);
  }
 });
-
-test('v1 migration preserves floor, sent/failed receipts and views without reloading index per event',()=>{
- const dir=tempDir(),legacy={v:1,devices:[[device,{since:1000,viewed:[['viewed',7]],delivered:[
-  [JSON.stringify(['s','decision:a']),{revision:1,seq:1,outcome:'sent',at:1000}],
-  [JSON.stringify(['s','decision:b']),{revision:2,seq:2,outcome:'failed',at:1000,expires:86401001}],
- ]}]]};
- writePrivateFile(join(dir,'push-attention.json'),JSON.stringify(legacy));const store=new PushAttentionStore(dir,()=>1100);
- expect(store.healthy).toBe(true);expect(store.eligible(device,item)).toBe(false);expect(store.eligible(device,{...item,key:'decision:b',revision:2})).toBe(false);
- expect(store.eligible(device,{...item,key:'independent',ts:1000})).toBe(true);expect(store.eligible(device,{...item,sessionId:'viewed',seq:7})).toBe(false);
- const epoch=store.epoch(device);store.sync([device]);store.close();const reload=new PushAttentionStore(dir,()=>1200);expect(reload.epoch(device)).toBe(epoch);expect(reload.eligible(device,item)).toBe(false);
- const metadata=readFileSync(join(dir,'push-attention.json'),'utf8');expect(JSON.parse(metadata).v).toBe(2);
- for(let n=0;n<550;n++)expect(reload.record(device,{...item,key:'extra:'+n},n%2?'sent':'failed')).toBe(true);
- expect(reload.cacheEntries).toBeLessThanOrEqual(512);expect(readFileSync(join(dir,'push-attention.json'),'utf8')).toBe(metadata);
- expect(statSync(join(dir,'push-attention.sqlite')).mode&0o777).toBe(0o600);
- const db=new Database(join(dir,'push-attention.sqlite'),{readonly:true});expect((db.query('SELECT COUNT(*) AS n FROM outcomes').get() as any).n).toBe(552);db.close();reload.close();
-});
 test('expiry and opt-out compact exact identities without hiding independent work',()=>{
  const dir=tempDir();let now=1000;const store=new PushAttentionStore(dir,()=>now);store.sync([device]);
  store.record(device,{...item,kind:'result'},'sent');store.record(device,{...item,key:'long'},'failed');
@@ -91,13 +75,6 @@ test('failed writes retain volatile known outcomes, expose unhealthy state and r
  expect((db.query('SELECT COUNT(*) AS n FROM outcomes').get() as any).n).toBe(0);expect(store.eligible(device,{...item,key:'unseen'})).toBe(false);expect(store.maintain()).toBe(false);
  db.exec('PRAGMA query_only=OFF');expect(store.maintain()).toBe(true);expect(store.eligible(device,item)).toBe(false);expect(store.eligible(device,{...item,key:'unseen'})).toBe(true);
  store.close();const reload=new PushAttentionStore(dir,()=>1100);expect(reload.eligible(device,item)).toBe(false);reload.close();
-});
-
-test('failed legacy migration preserves original receipts until the index can be repaired',async()=>{
- const {rmSync}=await import('node:fs');const dir=tempDir(),file=join(dir,'push-attention.json'),index=join(dir,'push-attention.sqlite');
- const legacy=JSON.stringify({v:1,devices:[[device,{since:1000,viewed:[],delivered:[[JSON.stringify(['s','decision:a']),{revision:1,seq:1,outcome:'failed',at:1000}]]}]]});
- writePrivateFile(file,legacy);writePrivateFile(index,'not a SQLite database');const broken=new PushAttentionStore(dir,()=>1100);broken.sync([device]);expect(broken.healthy).toBe(false);expect(broken.maintain()).toBe(false);expect(readFileSync(file,'utf8')).toBe(legacy);broken.close();
- rmSync(index);const repaired=new PushAttentionStore(dir,()=>1200);expect(repaired.healthy).toBe(true);expect(repaired.eligible(device,item)).toBe(false);expect(repaired.eligible(device,{...item,key:'unseen',ts:1000})).toBe(true);repaired.close();
 });
 test('loss of a v2 index is an explicit storage error, never an empty delivery history',async()=>{
  const {rmSync}=await import('node:fs');const dir=tempDir();const store=new PushAttentionStore(dir,()=>1000);store.sync([device]);store.record(device,item,'sent');store.close();rmSync(join(dir,'push-attention.sqlite'));

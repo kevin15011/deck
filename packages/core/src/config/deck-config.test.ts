@@ -799,15 +799,6 @@ describe("resolveActiveMemoryProvider", () => {
     expect(resolution.source).toBe("cli");
   });
 
-  test("migrates legacy Engram config to disabled when CLI override is absent", () => {
-    const resolution = resolveActiveMemoryProvider({
-      config: { version: 1, adaptiveMemory: { activeProvider: "engram" } },
-    });
-
-    expect(resolution.activeProvider).toBe("none");
-    expect(resolution.source).toBe("config");
-  });
-
   test("falls back to none when no CLI override or config file is present", () => {
     const root = createTempRoot();
 
@@ -824,16 +815,6 @@ describe("resolveActiveMemoryProvider", () => {
     });
     expect(valid.activeProvider).toBe("supermemory");
     expect(valid.supermemory?.userId).toBeUndefined();
-  });
-
-  test("reads project config file and disables legacy Engram", () => {
-    const root = createTempRoot();
-    writeDeckConfig(root, { version: 1, adaptiveMemory: { activeProvider: "engram" } });
-
-    const resolution = resolveActiveMemoryProvider({ projectRoot: root });
-
-    expect(resolution.activeProvider).toBe("none");
-    expect(resolution.source).toBe("config");
   });
 });
 

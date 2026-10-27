@@ -24,7 +24,6 @@ function log(msg: string) { if (!process.env.DECK_DEBUG) return; try { appendFil
 import { join, relative, resolve, isAbsolute } from "node:path";
 import { mergeConfig } from "./config-merge";
 import { INTERNAL_OPENCODE_PACKAGE_IDS } from "./internal-opencode-packages";
-import { DEVELOPER_TEAM_LEGACY_AGENT_IDS } from "@deck/core/teams/developer/catalog";
 
 import type {
   RunnerAdapter,
@@ -1321,7 +1320,7 @@ class OpenCodeRunnerAdapterImpl {
       try { existingConfig = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>; }
       catch { blocked = true; diagnostics.push("Existing opencode.json is malformed; exact preview is unavailable and apply is blocked."); }
     }
-    const mergedConfig = mergeConfig(existingConfig, nativePlan.agentEntries, [...INTERNAL_OPENCODE_PACKAGE_IDS], [...DEVELOPER_TEAM_LEGACY_AGENT_IDS]);
+    const mergedConfig = mergeConfig(existingConfig, nativePlan.agentEntries, [...INTERNAL_OPENCODE_PACKAGE_IDS]);
     const plannedFiles: Array<{ path: string; absolutePath: string; content: string; kind: import("@deck/core").DeveloperTeamInstallFile["kind"]; skillId?: string; packagePath?: string }> = [
       { path: "opencode.json", absolutePath: configPath, content: JSON.stringify(mergedConfig, null, 2), kind: "other" },
       ...nativePlan.skills.map((skill) => ({ path: skill.relativePath, absolutePath: skill.absolutePath, content: skill.content, kind: "skill" as const, skillId: skill.agent.skillId, packagePath: "SKILL.md" })),

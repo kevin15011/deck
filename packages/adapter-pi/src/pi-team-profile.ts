@@ -11,7 +11,6 @@ import {
 } from "@deck/core/memory/adaptive-memory";
 import { renderSddContextSections } from "@deck/core/memory/adaptive-context-renderer";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY } from "@deck/core/config/deck-config";
-import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 import type { MemoryDiagnostic } from "./developer-team-install";
 import { buildTeamProfileDir } from "./pi-team-launch";
 import { getTeamsForEnvironment } from "./team-catalog";
@@ -54,7 +53,7 @@ export type MaterializeTeamProfileOptions = {
   /** Optional orchestrator personality. When absent, falls back to default. */
   orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
   /** Retained for API compatibility; compact prompt selection no longer depends on rollout receipts. */
-  promptProfileActivation?: PromptProfileActivationV1;
+
 };
 
 // --- System Prompt Builder ---
@@ -90,7 +89,7 @@ export type BuildTeamSystemPromptOptions = {
   /** Project root used only for project artifact materialization. */
   projectRoot?: string;
   /** Retained for API compatibility; compact prompt selection no longer depends on rollout receipts. */
-  promptProfileActivation?: PromptProfileActivationV1;
+
 };
 
 /**
@@ -219,7 +218,7 @@ export function materializeTeamProfile(options: MaterializeTeamProfileOptions): 
     memoryUnavailableReason: options.memoryUnavailableReason,
     capabilityInstructions: options.capabilityInstructions,
     orchestratorPersonality: options.orchestratorPersonality,
-    promptProfileActivation: options.promptProfileActivation,
+
     projectRoot: options.projectRoot,
   });
 

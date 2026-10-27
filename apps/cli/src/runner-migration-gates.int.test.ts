@@ -28,7 +28,6 @@ test('default CLI composition blocks all four runner writes, cleanup and rollbac
    await expect(adapter.rollbackDeveloperTeamFiles({})).rejects.toBeInstanceOf(RunnerMutationDeferredError);
    await expect(adapter.runAction({id:'nrp-admission',kind:'nrp-no-effect',title:'fixture'} as never,{projectRoot:home} as never)).rejects.toBeInstanceOf(RunnerMutationDeferredError);
    if(adapter.writeMcpConfig)await expect(adapter.writeMcpConfig({capabilityId:'nrp-no-effect'} as never)).rejects.toBeInstanceOf(RunnerMutationDeferredError);
-   if(adapter.cleanupLegacyInstall)await expect(adapter.cleanupLegacyInstall(home,{deckConfig:getDefaultDeckConfig()})).rejects.toBeInstanceOf(RunnerMutationDeferredError);
   }
   const result=await runRunnerSync({config:getDefaultDeckConfig(),registry,projectRoot:home,deckVersion:'test'});
   expect(result.outcomes.map(x=>x.status)).toEqual(['deferred','deferred','deferred','deferred']);

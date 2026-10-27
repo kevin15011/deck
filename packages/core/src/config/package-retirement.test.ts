@@ -7,13 +7,13 @@ test('global explicit opt-in inherits and boolean runner exceptions win', () => 
   expect(getEnabledCapabilityInstructionIds(config, 'codex')).not.toContain('codebase-memory');
   expect(getEnabledCapabilityInstructionIds(config, 'pi')).toContain('codebase-memory');
 });
-test('absent and legacy true are off; canonical config drops retired keys and reports legacy intent', () => {
+test('absent and legacy true are off; canonical config drops retired keys and ignores retired keys', () => {
   expect(getEnabledCapabilityInstructionIds(validateDeckConfig({}), 'pi')).not.toContain('codebase-memory');
   const legacy = { packageInstructions: { pi: { 'context-mode': true, serena: true, 'codebase-memory': true } } };
   const normalized = validateDeckConfig(legacy);
   expect(getEnabledCapabilityInstructionIds(normalized, 'pi')).not.toContain('codebase-memory');
   expect(JSON.stringify(normalized)).not.toMatch(/context-mode|serena/);
-  expect(diagnoseDeckConfigDeprecations(legacy)).toHaveLength(3);
+  expect(diagnoseDeckConfigDeprecations(legacy)).toHaveLength(0);
   expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).not.toContain('serena');
   expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).not.toContain('context-mode');
   expect(JSON.stringify(buildCapabilityInstructionBundle(['serena', 'context-mode'] as never))).not.toMatch(/serena|context-mode/i);

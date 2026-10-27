@@ -62,7 +62,7 @@ describe("deck doctor Pi coverage (7.3)", () => {
     await installFull();
     const result = inspect({ piListOutput: `User packages:\n  ${piAgentPaths(agentDir).packageSettingsEntry}\n` });
     expect(problems(result)).toEqual([]);
-    expect(result.map((entry) => entry.category)).toEqual(["Pi runtime", "Pi Deck package", "Pi extensions", "Pi MCP (built-in)", "Pi adaptive memory", "Pi legacy and conflicts"]);
+    expect(result.map((entry) => entry.category)).toEqual(["Pi runtime", "Pi Deck package", "Pi extensions", "Pi MCP (built-in)", "Pi adaptive memory", "Pi package conflicts"]);
     const text = items(result).map((item) => item.message).join("\n");
     expect(text).toContain("Pi 1.0.0");
     expect(text).toContain(agentDir);
@@ -173,27 +173,5 @@ describe("deck doctor Pi coverage (7.3)", () => {
     expect(found).toHaveLength(1);
     expect(found[0]!.message).toContain("pi-memory-old");
     expect(found[0]!.message).not.toContain("pi-memory-new");
-  });
-
-  test("legacy Deck files are listed with the cleanup command", async () => {
-    await installFull();
-    mkdirSync(join(project, ".pi", "agents"), { recursive: true });
-    writeFileSync(join(project, ".pi", "agents", "deck-lead.md"), "legacy\n");
-    mkdirSync(join(agentDir, "skills", "deck-lead"), { recursive: true });
-    writeFileSync(join(agentDir, "skills", "deck-lead", "SKILL.md"), "legacy skill\n");
-    const legacy = problems(inspect()).find((item) => item.message.includes("legacy Deck file"));
-    expect(legacy?.message).toContain(".pi/agents/deck-lead.md");
-    expect(legacy?.suggestion).toContain("--cleanup-legacy");
-  });
-
-  test("legacy global skills are reported as shadowing the package, and ~/.agents is never mentioned as removable", async () => {
-    await installFull();
-    mkdirSync(join(agentDir, "skills", "deck-lead"), { recursive: true });
-    writeFileSync(join(agentDir, "skills", "deck-lead", "SKILL.md"), "---\nname: deck-lead\n---\nAdaptive Developer Team Contract\n");
-    const legacy = problems(inspect()).find((item) => item.message.includes("legacy Deck file"));
-    expect(legacy?.message).toContain("shadow");
-    expect(legacy?.message).toContain("Skill conflicts");
-    expect(legacy?.suggestion).toContain("--cleanup-legacy");
-    expect(legacy?.suggestion).toContain("~/.agents/skills");
   });
 });

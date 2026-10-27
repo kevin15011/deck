@@ -326,8 +326,6 @@ export type RunRunnerLaunchInput = {
   dryRun?: boolean;
   yes?: boolean;
   localOnly?: boolean;
-  /** Explicit consent to remove a superseded per-project Deck install (unmodified Deck-owned files only). */
-  cleanupLegacy?: boolean;
   /** Print routine notes and full mutation details too (dry runs always do). */
   verbose?: boolean;
   cliMemoryProvider?: string;
@@ -510,22 +508,6 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     inspectionDiagnostics.push(...inspection.diagnostics.map((diagnostic) => diagnostic.message));
     if (inspection.state === "blocked") return { status: "blocked", message: inspection.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: inspection.diagnostics };
     if (inspection.state === "unsupported") return { status: "unsupported", code: "runner-version-unsupported", message: inspection.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: inspection.diagnostics };
-  }
-
-  if (input.cleanupLegacy && input.adapter.cleanupLegacyInstall) {
-    if (input.dryRun) {
-      await input.presentPreview("Legacy cleanup requested: a dry run removes nothing. Rerun without --dry-run to remove the unmodified Deck-owned per-project files.");
-    } else {
-      if (!input.yes && (!input.interactive || !input.confirm || !(await input.confirm("Remove the previous Deck install artifacts (unmodified Deck-owned files only; a backup is kept)? [y/N]")))) {
-        return { status: "blocked", message: "Legacy cleanup needs --yes or an interactive confirmation; nothing was removed." };
-      }
-      try {
-        const cleaned = await input.adapter.cleanupLegacyInstall(input.launch.projectRoot, { deckConfig: input.launch.deckConfig });
-        await input.presentPreview([`Legacy cleanup removed ${cleaned.removed.length} file(s).`, ...cleaned.diagnostics.map((message) => `! ${message}`)].join("\n"));
-      } catch (error) {
-        return { status: "blocked", message: `Legacy cleanup failed and was rolled back: ${error instanceof Error ? error.message : "unknown error"}` };
-      }
-    }
   }
 
   const codexAssignments = input.adapter.runnerId === "codex"

@@ -73,7 +73,7 @@ export function expectedFiles(root: string, assignments: ClaudeAssignments = {},
   for (const agent of getDeveloperTeamCatalog()) {
     if (!/^[a-z][a-z0-9-]*$/.test(agent.id) || !/^[a-z][a-z0-9-]*$/.test(agent.skillId)) throw new Error("Invalid canonical Claude role ID.");
     const instructionIds = capabilities.filter((id) => id !== "context7") as Exclude<ClaudeCapabilityId, "context7">[];
-    const canonical = getAgentContent(agent.id, { promptProfile: "legacy", ...(instructionIds.length ? { capabilityInstructions: translateClaudeCapabilityInstructions(buildCapabilityInstructionBundle(instructionIds)) } : {}) });
+    const canonical = getAgentContent(agent.id, { promptProfile: "compact", ...(instructionIds.length ? { capabilityInstructions: translateClaudeCapabilityInstructions(buildCapabilityInstructionBundle(instructionIds)) } : {}) });
     if (!canonical?.agentBody || !canonical.skillBody || /<!-- Placeholder:/.test(canonical.agentBody + canonical.skillBody)) throw new Error("Incomplete canonical Claude role.");
     const readOnlyTools = [
       "Read", "Grep", "Glob", "Skill",
@@ -390,24 +390,10 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
     } catch { return false; }
   };
   const materialization = (assignments: ClaudeAssignments, capabilities: readonly ClaudeCapabilityId[], providerId: string | undefined, current: Selection, efforts: ClaudeEfforts = current.efforts ?? {}) => {
-    const legacyName = claudePluginName(assignments, capabilities);
-    const legacyRoot = join(parent, legacyName);
-    const legacyFiles = expectedFiles(legacyRoot, assignments, capabilities, toolEffects, providerId, efforts);
-    const contentHash = hash(JSON.stringify(legacyFiles.map((file) => [relative(legacyRoot, file.path), file.kind, hash(file.content)])));
+    const hashRoot = parent;
+    const hashFiles = expectedFiles(hashRoot, assignments, capabilities, toolEffects, providerId, efforts);
+    const contentHash = hash(JSON.stringify(hashFiles.map((file) => [relative(hashRoot, file.path), file.kind, hash(file.content)])));
     const versionedName = claudeContentPluginName(assignments, capabilities, providerId, contentHash);
-    const legacyState = inspect(legacyRoot, legacyFiles, home);
-    // Preserve an existing v1 receipt while it still exactly matches. A stale v1
-    // selection may be superseded, but an unrelated conflicting directory may not.
-    if (legacyState === "ready" && current.plugin === legacyName && !current.contentHash) return { location: legacyRoot, files: legacyFiles, plugin: legacyName, state: legacyState };
-    if (legacyState === "conflict") {
-      const marker = legacyFiles[0]!;
-      try {
-        privateDir(legacyRoot);
-        privateDir(dirname(marker.path));
-        const stat = lstatSync(marker.path);
-        if (!stat.isFile() || (stat.mode & 0o077) !== 0 || (typeof process.getuid === "function" && stat.uid !== process.getuid()) || readFileSync(marker.path, "utf8") !== marker.content) throw new Error("Invalid Deck plugin marker.");
-      } catch { throw new Error("Claude plugin destination conflicts with unowned content."); }
-    }
     const location = join(parent, versionedName);
     const files = expectedFiles(location, assignments, capabilities, toolEffects, providerId, efforts);
     return { location, files, plugin: versionedName, contentHash, state: inspect(location, files, home) };

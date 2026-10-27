@@ -2,8 +2,7 @@
  * Canonical, runner-neutral Developer Team inventory.
  *
  * The seven entries below are the desired state installed by every runner.
- * Legacy IDs are kept separately for history/model migration and MUST NOT be
- * materialized as aliases.
+ * Retired IDs are not catalog aliases.
  */
 
 export type DeveloperTeamAgent = {
@@ -74,40 +73,12 @@ export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = Object.freez
   },
 ]);
 
-export const LEGACY_DEVELOPER_TEAM_AGENT_ID_MAP = Object.freeze({
-  "deck-developer-orchestrator": "deck-lead",
-  "deck-developer-explorer": "deck-investigate",
-  "deck-developer-proposal": "deck-architect",
-  "deck-developer-spec": "deck-architect",
-  "deck-developer-design": "deck-architect",
-  "deck-developer-task": "deck-architect",
-  "deck-developer-apply-general": "deck-apply-fast",
-  "deck-developer-apply-backend": "deck-apply-deep",
-  "deck-developer-apply-frontend": "deck-apply-deep",
-  "deck-developer-verify": "deck-quality",
-  "deck-developer-review": "deck-quality",
-  "deck-developer-archive": "deck-lead",
-  "deck-init": "deck-setup",
-  "deck-onboard": "deck-lead",
-} as const satisfies Record<string, string>);
-
-export const DEVELOPER_TEAM_LEGACY_AGENT_IDS = Object.freeze(
-  Object.keys(LEGACY_DEVELOPER_TEAM_AGENT_ID_MAP),
-);
-
-export function resolveLegacyDeveloperTeamAgentId(agentId: string): string | undefined {
-  return LEGACY_DEVELOPER_TEAM_AGENT_ID_MAP[
-    agentId as keyof typeof LEGACY_DEVELOPER_TEAM_AGENT_ID_MAP
-  ];
-}
-
 export function getDeveloperTeamCatalog(): readonly DeveloperTeamAgent[] {
   return DEVELOPER_TEAM_AGENTS;
 }
 
-/** Classify actual materialized role identity, including legacy canonical mappings. Unknown stays fresh. */
+/** Classify actual materialized role identity, using current catalog roles. Unknown stays fresh. */
 export function developerRoleContinuity(roleId: string | undefined): "work" | "review" | "unknown" {
   if (!roleId) return "unknown";
-  const canonical = resolveLegacyDeveloperTeamAgentId(roleId) ?? roleId;
-  return DEVELOPER_TEAM_AGENTS.find(role => role.id === canonical)?.continuityRole ?? "unknown";
+  return DEVELOPER_TEAM_AGENTS.find(role => role.id === roleId)?.continuityRole ?? "unknown";
 }

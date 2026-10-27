@@ -14,37 +14,37 @@ describe("DEFAULT_OPENCODE_MODELS", () => {
 describe("resolveModelConfig", () => {
   test("returns defaults when no overrides", () => {
     // REQ-MC-005: No hardcoded defaults - returns empty when nothing configured
-    const config = resolveModelConfig("deck-developer-orchestrator");
+    const config = resolveModelConfig("deck-lead");
     expect(config.model).toBeUndefined();
     expect(config.reasoningEffort).toBeUndefined();
   });
 
   test("CLI override takes highest precedence", () => {
     // REQ-MC-005: No defaults - no reasoningEffort without explicit config
-    const config = resolveModelConfig("deck-developer-orchestrator", "anthropic/claude-sonnet-4");
+    const config = resolveModelConfig("deck-lead", "anthropic/claude-sonnet-4");
     expect(config.model).toBe("anthropic/claude-sonnet-4");
     expect(config.reasoningEffort).toBeUndefined();
   });
 
   test("config file override is used when no CLI override", () => {
     // REQ-MC-005: No defaults - no reasoningEffort without explicit config
-    const overrides = { "deck-developer-orchestrator": "google/gemini-2.5-pro" };
-    const config = resolveModelConfig("deck-developer-orchestrator", undefined, overrides);
+    const overrides = { "deck-lead": "google/gemini-2.5-pro" };
+    const config = resolveModelConfig("deck-lead", undefined, overrides);
     expect(config.model).toBe("google/gemini-2.5-pro");
     expect(config.reasoningEffort).toBeUndefined();
   });
 
   test("reasoningEffort override is respected", () => {
     // Verify reasoningEffort overrides work correctly
-    const reasoningOverrides = { "deck-developer-orchestrator": "high" as const };
-    const config = resolveModelConfig("deck-developer-orchestrator", "anthropic/claude-sonnet-4", undefined, reasoningOverrides);
+    const reasoningOverrides = { "deck-lead": "high" as const };
+    const config = resolveModelConfig("deck-lead", "anthropic/claude-sonnet-4", undefined, reasoningOverrides);
     expect(config.model).toBe("anthropic/claude-sonnet-4");
     expect(config.reasoningEffort).toBe("high");
   });
 
   test("CLI override wins over config file override", () => {
-    const overrides = { "deck-developer-orchestrator": "google/gemini-2.5-pro" };
-    const config = resolveModelConfig("deck-developer-orchestrator", "openai/gpt-4o", overrides);
+    const overrides = { "deck-lead": "google/gemini-2.5-pro" };
+    const config = resolveModelConfig("deck-lead", "openai/gpt-4o", overrides);
     expect(config.model).toBe("openai/gpt-4o");
   });
 
@@ -57,7 +57,7 @@ describe("resolveModelConfig", () => {
 
   test("composable — CLI override sets model", () => {
     // REQ-MC-005: No defaults, CLI override works correctly
-    const config = resolveModelConfig("deck-developer-explorer", "anthropic/claude-haiku-4");
+    const config = resolveModelConfig("deck-investigate", "anthropic/claude-haiku-4");
     expect(config.model).toBe("anthropic/claude-haiku-4");
     expect(config.reasoningEffort).toBeUndefined(); // no default reasoning
   });
@@ -194,10 +194,10 @@ describe("resolveModelConfig with capabilityMap", () => {
   test("omits reasoningEffort when model is unsupported by catalog", () => {
     // openai/gpt-4o is unsupported by catalog
     const config = resolveModelConfig(
-      "deck-developer-orchestrator",
+      "deck-lead",
       "openai/gpt-4o",
       undefined,
-      { "deck-developer-orchestrator": "high" }
+      { "deck-lead": "high" }
     );
     expect(config.model).toBe("openai/gpt-4o");
     // reasoningEffort should be omitted because model doesn't support it
@@ -207,10 +207,10 @@ describe("resolveModelConfig with capabilityMap", () => {
   test("preserves reasoningEffort when model is supported by catalog", () => {
     // anthropic/claude-sonnet-4 is supported
     const config = resolveModelConfig(
-      "deck-developer-orchestrator",
+      "deck-lead",
       "anthropic/claude-sonnet-4",
       undefined,
-      { "deck-developer-orchestrator": "high" }
+      { "deck-lead": "high" }
     );
     expect(config.model).toBe("anthropic/claude-sonnet-4");
     expect(config.reasoningEffort).toBe("high");
@@ -220,10 +220,10 @@ describe("resolveModelConfig with capabilityMap", () => {
     // openai/gpt-4o is unsupported by catalog, but runner says true
     const capabilityMap = { "openai/gpt-4o": true };
     const config = resolveModelConfig(
-      "deck-developer-orchestrator",
+      "deck-lead",
       "openai/gpt-4o",
       undefined,
-      { "deck-developer-orchestrator": "high" },
+      { "deck-lead": "high" },
       undefined,
       capabilityMap
     );
@@ -235,10 +235,10 @@ describe("resolveModelConfig with capabilityMap", () => {
     // anthropic/claude-sonnet-4 is supported by catalog, but runner says false
     const capabilityMap = { "anthropic/claude-sonnet-4": false };
     const config = resolveModelConfig(
-      "deck-developer-orchestrator",
+      "deck-lead",
       "anthropic/claude-sonnet-4",
       undefined,
-      { "deck-developer-orchestrator": "high" },
+      { "deck-lead": "high" },
       undefined,
       capabilityMap
     );
@@ -248,10 +248,10 @@ describe("resolveModelConfig with capabilityMap", () => {
 
   test("off level omits reasoningEffort even for supported model", () => {
     const config = resolveModelConfig(
-      "deck-developer-orchestrator",
+      "deck-lead",
       "anthropic/claude-sonnet-4",
       undefined,
-      { "deck-developer-orchestrator": "off" }
+      { "deck-lead": "off" }
     );
     expect(config.model).toBe("anthropic/claude-sonnet-4");
     expect(config.reasoningEffort).toBeUndefined(); // off means omit
@@ -259,10 +259,10 @@ describe("resolveModelConfig with capabilityMap", () => {
 
   test("no model means no reasoningEffort even if reasoning override exists", () => {
     const config = resolveModelConfig(
-      "deck-developer-orchestrator",
+      "deck-lead",
       undefined, // no model
       undefined,
-      { "deck-developer-orchestrator": "high" } // reasoning override without model
+      { "deck-lead": "high" } // reasoning override without model
     );
     expect(config.model).toBeUndefined();
     // When no model, no reasoningEffort should be written
@@ -272,7 +272,7 @@ describe("resolveModelConfig with capabilityMap", () => {
 
 describe("readOpenCodeDeveloperTeamModelConfigAssignments with effectiveThinkingAssignments", () => {
   it("prefers native variant over legacy reasoningEffort without mutating the source", () => {
-    const content = JSON.stringify({ agent: { "deck-developer-orchestrator": { model: "openai/gpt-5.5", variant: "runner-token", reasoningEffort: "high" } } });
+    const content = JSON.stringify({ agent: { "deck-lead": { model: "openai/gpt-5.5", variant: "runner-token", reasoningEffort: "high" } } });
     const result = readOpenCodeDeveloperTeamModelConfigAssignments("/fixture", {
       exists: () => true,
       readFile: () => content,
@@ -286,7 +286,7 @@ describe("readOpenCodeDeveloperTeamModelConfigAssignments with effectiveThinking
       exists: (_path: PathLike) => true,
       readFile: (_path: string, _encoding: string) => JSON.stringify({
         agent: {
-          "deck-developer-orchestrator": {
+          "deck-lead": {
             model: "openai/gpt-4o",
             reasoningEffort: "high"
           }
@@ -308,7 +308,7 @@ describe("readOpenCodeDeveloperTeamModelConfigAssignments with effectiveThinking
       exists: (_path: PathLike) => true,
       readFile: (_path: string, _encoding: string) => JSON.stringify({
         agent: {
-          "deck-developer-orchestrator": {
+          "deck-lead": {
             model: "anthropic/claude-sonnet-4",
             reasoningEffort: "high"
           }
@@ -335,4 +335,16 @@ describe("readOpenCodeDeveloperTeamModelConfigAssignments with effectiveThinking
 
     expect(result.modelAssignments["deck-apply-deep"]).toBeUndefined();
   });
+});
+
+test("reads only current Developer Team role assignments", () => {
+  const result = readOpenCodeDeveloperTeamModelConfigAssignments("/fixture", {
+    exists: () => true,
+    readFile: () => JSON.stringify({ agent: {
+      "deck-developer-orchestrator": { model: "retired/model" },
+      "user-agent": { model: "user/model" },
+      "deck-quality": { model: "current/model" },
+    } }),
+  });
+  expect(result.modelAssignments).toEqual({ "deck-quality": "current/model" });
 });

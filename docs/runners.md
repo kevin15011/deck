@@ -71,20 +71,13 @@ deck pi developer --continue
 deck pi developer --resume
 deck pi developer --memory=supermemory
 deck pi developer --memory=none
-deck pi developer --cleanup-legacy
 ```
 
 `deck pi developer` plans and applies the global install when needed and then starts Pi's normal interactive TUI as the Deck lead session; Deck sessions are stored through `--session-dir`, so `--continue` and `--resume` use Pi's own session handling.
 
-### Migrating from earlier Pi installs
+### Pi package diagnostics
 
-Earlier Deck versions wrote `.pi/agents`, `.pi/skills` and `.deck/pi/profiles` into projects, loose Deck agents and skills into `<agent dir>/agents` and `<agent dir>/skills`, and required the community `pi-subagents` and `pi-mcp-adapter` packages.
-
-- **Mandatory, on install:** a `pi-mcp-adapter` or `pi-subagents` entry that Deck added is removed transactionally with a backup, because `pi-mcp-adapter` disables Pi's built-in MCP and `pi-subagents` would register a second `subagent` tool. An entry you added yourself is never removed: a `pi-mcp-adapter` entry produces a blocking MCP diagnostic, a `pi-subagents` entry a warning.
-- **Detected on every plan:** the legacy project and loose global files above are listed with their state and a cleanup hint; nothing is deleted automatically.
-- **Opt-in cleanup:** run `deck pi developer --cleanup-legacy` once from the project (an interactive run asks for confirmation first, and the launch continues afterwards). Files that still match the current Deck templates (ignoring your `model`, `thinking` and `tools` frontmatter lines), global `deck-*` agent/skill files in the Pi agent directory that are demonstrably Deck-authored by an older version (a `deck-*` name, the Deck contract marker and a matching frontmatter name), and package entries Deck added are removed; each removed item is backed up first under `$XDG_STATE_HOME/deck/backups/pi-legacy/` (default `~/.local/state/deck/backups/pi-legacy/`), and any failure restores everything. Other files that differ from the templates (no Deck marker, a mismatching name, or project-local copies) are kept and listed: delete them yourself if unwanted. `~/.agents/skills` belongs to the Codex install and is never touched.
-
-`deck doctor` reports the Pi version and minimum, the resolved agent directory, package registration (cross-checked with `pi list`), manifest drift, extension files and their `source-sha256` header, the pinned RTK binary, the MCP entries (absolute command, direct exposure, blanked memory variables), the `pi-mcp-adapter` conflict, stale `pi-memory-*` token directories, and legacy artifacts.
+Deck reports conflicting `pi-mcp-adapter` and `pi-subagents` entries. It checks package registration, installed-file hashes, extension assets, MCP configuration, and stale memory handoff directories. Retired project and loose global installations are no longer migrated or cleaned up by the Pi launch command.
 
 ### Known limits (Pi)
 
@@ -94,7 +87,6 @@ Earlier Deck versions wrote `.pi/agents`, `.pi/skills` and `.deck/pi/profiles` i
 - Investigate and Quality have no shell, so Quality cannot run test suites.
 - Delegating to `deck-setup` through the Deck `subagent` tool fails closed (`modification-not-authorized`) until `developer-team-execution-convergence` wires its authorization provider.
 - The graph guidance classification is a conservative heuristic; it may miss a code search or add its note to a borderline one.
-- Legacy cleanup matches the current Deck templates only.
 
 ## OpenCode
 
@@ -147,11 +139,10 @@ A normal launch prints only a few plain lines: what is starting, the adaptive-me
 
 ### Migrating a previous per-project install
 
-Earlier versions wrote `.codex/`, `.agents/skills/` and a manifest into each project. Those project files override the global agents and skills that share a name, so they shadow the global install in that project. Deck detects them through the old manifest, reports them on every plan, and never deletes them by itself. Run the Codex developer command once from that project with the `--cleanup-legacy` flag (add `--yes` to skip the prompt) to remove only the files whose bytes still match what Deck recorded and Deck's marker blocks from the project `config.toml`; anything you changed is kept. If the files are tracked in Git, the removal shows up as ordinary deletions you can review and commit, or restore. You can also delete them yourself.
 
 ### Ownership and recovery
 
-Deck owns only entries recorded in `$CODEX_HOME/deck/manifest.json` and its marker-delimited TOML blocks. Codex receives instructions through native roles and skills; ownership-verified legacy cleanup of a previous per-project install happens only through the explicit `--cleanup-legacy` flag, and until then it is only reported. Existing user MCP servers and malformed or ambiguous TOML block automatic apply. Each reviewed operation carries one transaction per root (Codex home and user skills); rollback consumes only that receipt, restores matching postimages and keeps conflicts for explicit recovery.
+Deck owns only entries recorded in `$CODEX_HOME/deck/manifest.json` and its marker-delimited TOML blocks. Codex receives instructions through native roles and skills; ownership-verified updates use the current receipts. Existing user MCP servers and malformed or ambiguous TOML block automatic apply. Each reviewed operation carries one transaction per root (Codex home and user skills); rollback consumes only that receipt, restores matching postimages and keeps conflicts for explicit recovery.
 
 ### Known limits (Codex)
 
