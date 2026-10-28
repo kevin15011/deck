@@ -1053,7 +1053,7 @@ describe("Codex RunnerAdapter production composition", () => {
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-readiness-journal-"));
     try {
       await writeGitOrigin(projectRoot);
-      const adapter = createCodexRunnerAdapter({ tools: readyTestTools({ supermemory: true }), ...layout(projectRoot),
+      const adapter = createCodexRunnerAdapter({ tools: readyTestTools({ supermemory: true, resolveCommand: name => name === "context7-mcp" ? process.execPath : undefined }), ...layout(projectRoot),
         journalRoot,
         preflight: hermeticCodexPreflight(),
         mcpCapabilityIds: ["context7"],

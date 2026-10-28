@@ -1,4 +1,4 @@
-import { parseTOML, type AST } from "toml-eslint-parser";
+import { getStaticTOMLValue, parseTOML, type AST } from "toml-eslint-parser";
 import {
   isWebSearchProviderDescriptor,
   WEB_SEARCH_CAPABILITY_ID,
@@ -67,22 +67,27 @@ function scalar(value: unknown): unknown {
 
 function existingServers(source: string): Map<string, object> {
   const ast = parseTOML(source, { tomlVersion: "1.0.0" });
-  const result = new Map<string, object>();
-  for (const node of ast.body[0]?.body ?? []) {
-    if (node.type !== "TOMLTable" || node.resolvedKey.length < 2 || node.resolvedKey[0] !== "mcp_servers") continue;
-    const fields = Object.fromEntries(node.body.map((entry) => [entry.key.keys.map((key) => key.type === "TOMLBare" ? key.name : key.value).join("."), scalar(entry.value)]));
-    const serverId = String(node.resolvedKey[1]);
-    if (node.resolvedKey.length === 2) {
-      result.set(serverId, { ...(result.get(serverId) ?? {}), ...fields });
-      continue;
+  // Compare the complete subtree, including dotted keys, inline tables and nested
+  // tool policies. A partial projection must never authorize legacy adoption.
+  const document = getStaticTOMLValue(ast) as Record<string, unknown>;
+  const servers = document.mcp_servers;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) return new Map();
+  return new Map(Object.entries(servers).map(([id, value]) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Invalid MCP server table.");
     }
-    if (node.resolvedKey.length === 3) {
-      const server = { ...(result.get(serverId) ?? {}) } as Record<string, unknown>;
-      server[String(node.resolvedKey[2])] = fields;
-      result.set(serverId, server);
-    }
-  }
-  return result;
+    return [id, value];
+  }));
+}
+
+/** A receipt span must account for the entire server, including nonadjacent tables. */
+export function codexMcpReceiptCoversServer(source: string, receiptContent: string, id: string): boolean {
+  try {
+    const full = existingServers(source).get(id);
+    const recorded = existingServers(receiptContent).get(id);
+    return full !== undefined && recorded !== undefined
+      && JSON.stringify(canonical(full)) === JSON.stringify(canonical(recorded));
+  } catch { return false; }
 }
 
 export function inspectCodexMcpServerIds(source: string): readonly string[] {
@@ -333,12 +338,15 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
     const present = existing.get(server.id);
     if (!present) missing.push(server);
     else if (JSON.stringify(canonical(present)) !== JSON.stringify(canonical(normalized(server)))) {
-      // Older installs wrote this exact marker and command-only shape before contribution receipts existed.
+      // Older installs wrote these exact marked shapes before contribution receipts existed.
       // Never let legacy recognition override a recorded digest or adopt custom launch fields.
       const legacy = options.allowLegacyMigration !== false && !options.recordedServerIds?.includes(server.id)
-        && server.id === "codebase-memory" && server.transport === "stdio"
+        && server.transport === "stdio"
         && source.includes(`# deck-codex-mcp:${server.id}\n[mcp_servers.${server.id}]\n`)
-        && JSON.stringify(canonical(present)) === JSON.stringify(canonical({ command: server.command }));
+        && JSON.stringify(canonical(present)) === JSON.stringify(canonical(
+          server.id === "codebase-memory" ? { command: server.command }
+          : server.id === "context7" ? { url: "https://mcp.context7.com/mcp", env_http_headers: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } }
+          : undefined));
       if (managed.has(server.id) && (proven.has(server.id) || legacy)) {
         replaceManaged.add(server.id); missing.push(server);
         if (legacy && !proven.has(server.id)) adoptedServerIds.push(server.id);
@@ -381,6 +389,8 @@ export function buildCodexMcpServers(input: {
   deckMemoryCommand?: readonly string[];
   /** Absolute, verified Context Mode executable; a bare PATH name is never written. */
   contextModeCommand?: string;
+  /** Absolute verified shared Context7 executable. */
+  context7Command?: string;
   /** Absolute, verified Codebase Memory executable (shared install or Deck-owned pinned release). */
   codebaseMemoryCommand?: string;
   /** Provider selection is validated by the CLI composition root. */
@@ -427,7 +437,10 @@ export function buildCodexMcpServers(input: {
       gaps.push("serena-proxy-not-ready");
     }
   }
-  if (selected.has("context7")) servers.push({ id: "context7", transport: "streamable-http", url: "https://mcp.context7.com/mcp", envHttpHeaders: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } });
+  if (selected.has("context7")) {
+    if (isAbsolutePinnedCommand(input.context7Command)) servers.push({ id: "context7", transport: "stdio", command: input.context7Command });
+    else gaps.push("context7-not-ready");
+  }
   // The official plugin owns memory and derives its repository tag per launch, so a global install needs no project scope.
   if (input.memoryProvider === "supermemory") gaps.push("supermemory-raw-mcp-disabled");
   // Explicit memory tools ride the Deck loopback host; the entry is inert without the loopback variables.

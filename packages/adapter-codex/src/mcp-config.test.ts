@@ -49,7 +49,7 @@ describe("Codex MCP semantic configuration", () => {
 
   test("legacy Serena markers alone never authorize migration", () => { const desired = buildCodexMcpServers({ packageIds: ['context-mode', 'serena'], memoryProvider: 'none', contextModeCommand: '/verified/context-mode', serenaLauncherAvailable: true, serenaProxyAvailable: true }); expect(desired).toEqual({ servers: [], gaps: [] }); const source = '# deck-codex-mcp:serena\n[mcp_servers.serena]\ncommand="user-or-legacy"\n'; expect(mergeCodexMcpServers(source, desired.servers)).toMatchObject({ status: 'unchanged', content: source }); });
 
-  test("is semantically idempotent and blocks same-ID collisions", () => { const desired = buildCodexMcpServers({ packageIds: ['context7'], memoryProvider: 'none' }); const first = mergeCodexMcpServers('', desired.servers); expect(first.status).toBe('updated'); expect(mergeCodexMcpServers(first.content, desired.servers).status).toBe('unchanged'); expect(mergeCodexMcpServers(first.content, [], { ownedServerIds: ['context7'] }).content).not.toContain('mcp_servers.context7'); const source = '[mcp_servers.context7]\ncommand="user"\n'; expect(mergeCodexMcpServers(source, desired.servers)).toMatchObject({ status: 'blocked', content: source, collisions: ['context7'] }); });
+  test("is semantically idempotent and blocks same-ID collisions", () => { const desired = buildCodexMcpServers({ packageIds: ['context7'], memoryProvider: 'none', context7Command: '/verified/context7-mcp' }); const first = mergeCodexMcpServers('', desired.servers); expect(first.status).toBe('updated'); expect(mergeCodexMcpServers(first.content, desired.servers).status).toBe('unchanged'); expect(mergeCodexMcpServers(first.content, [], { ownedServerIds: ['context7'] }).content).not.toContain('mcp_servers.context7'); const source = '[mcp_servers.context7]\ncommand="user"\n'; expect(mergeCodexMcpServers(source, desired.servers)).toMatchObject({ status: 'blocked', content: source, collisions: ['context7'] }); });
 
   test("pins explicit Codebase while ignoring retired Context Mode", () => { const pinned = buildCodexMcpServers({ packageIds: ['context-mode', 'codebase-memory'], memoryProvider: 'none', contextModeCommand: '/verified/context-mode', codebaseMemoryCommand: '/verified/codebase-memory-mcp' }); expect(pinned.gaps).toEqual([]); expect(pinned.servers.map(server => server.id)).toEqual(['codebase-memory']); const merged = mergeCodexMcpServers('', pinned.servers); expect(merged.content).toContain('command = "/verified/codebase-memory-mcp"'); expect(merged.content).not.toContain('context-mode'); expect(buildCodexMcpServers({ packageIds: ['context-mode', 'codebase-memory'], memoryProvider: 'none' })).toEqual({ servers: [], gaps: ['codebase-memory-not-ready'] }); });
 
@@ -198,3 +198,37 @@ test("available Codebase executable does not opt default selection into MCP prep
   expect(mergeCodexMcpServers(source + 'args = ["custom"]\n', desired).status).toBe("blocked");
   expect(mergeCodexMcpServers(source, desired, { allowLegacyMigration: false }).status).toBe("blocked");
  });
+
+describe("Context7 local migration", () => {
+  const legacy = '# deck-codex-mcp:context7\n[mcp_servers.context7]\nurl = "https://mcp.context7.com/mcp"\nenv_http_headers = { "X-Context7-API-Key" = "CONTEXT7_API_KEY" }\n';
+  const desired = [{ id: "context7" as const, transport: "stdio" as const, command: "/verified/context7-mcp" }];
+  test("adopts only the exact marked legacy remote entry and remains idempotent", () => {
+    const result = mergeCodexMcpServers(legacy, desired);
+    expect(result).toMatchObject({ status: "updated", adoptedServerIds: ["context7"] });
+    expect(Bun.TOML.parse(result.content)).toEqual({ mcp_servers: { context7: { command: "/verified/context7-mcp" } } });
+    expect(mergeCodexMcpServers(result.content, desired).status).toBe("unchanged");
+    expect(mergeCodexMcpServers(legacy, desired, { ownedServerIds: ["context7"], recordedServerIds: ["context7"] }).status).toBe("updated");
+  });
+  test("preserves customized, unmarked and receipt-mismatched remote entries", () => {
+    for (const source of [legacy + 'enabled = false\n', legacy.replace('https://mcp.context7.com/mcp', 'https://custom.example/mcp'), legacy.replace('# deck-codex-mcp:context7\n', '')]) {
+      expect(mergeCodexMcpServers(source, desired)).toMatchObject({ status: "blocked", content: source });
+    }
+    expect(mergeCodexMcpServers(legacy, desired, { recordedServerIds: ["context7"] })).toMatchObject({ status: "blocked", content: legacy });
+  });
+});
+
+for (const id of ["context7", "codebase-memory"] as const) {
+  for (const policy of ['approval_mode = "approve"', 'enabled = false']) {
+    test(`preserves nested ${policy} in legacy ${id} during migration`, () => {
+      // Protects user tool policy: a marker cannot authorize deleting nested customization.
+      const launch = id === "context7"
+        ? 'url = "https://mcp.context7.com/mcp"\nenv_http_headers = { "X-Context7-API-Key" = "CONTEXT7_API_KEY" }\n'
+        : 'command = "/tools/codebase-memory-mcp"\n';
+      const source = `# deck-codex-mcp:${id}\n[mcp_servers.${id}]\n${launch}[mcp_servers.${id}.tools.resolve-library-id]\n${policy}\n`;
+      const desired = buildCodexMcpServers({ packageIds: [id], memoryProvider: "none", context7Command: "/tools/context7-mcp", codebaseMemoryCommand: "/tools/codebase-memory-mcp" }).servers;
+      for (const options of [{}, { recordedServerIds: [id] }]) {
+        expect(mergeCodexMcpServers(source, desired, options)).toMatchObject({ status: "blocked", content: source });
+      }
+    });
+  }
+}

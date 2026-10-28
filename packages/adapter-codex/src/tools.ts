@@ -27,6 +27,7 @@ import {
 
 /** Pinned shared npm release, identical to the Claude adapter's reviewed Context Mode version. */
 export const CODEX_CONTEXT_MODE_PACKAGE = "context-mode@1.0.169";
+export const CODEX_CONTEXT7_PACKAGE = "@upstash/context7-mcp@4.1.1";
 export const CODEX_MIN_NODE_MAJOR = 18;
 
 export type CodexOwnedState = "absent" | "ready" | "conflict" | "unusable" | "unsupported";
@@ -48,6 +49,7 @@ export type CodexToolOptions = {
   /** Verifies a shared Context Mode executable (defaults to the reviewed size and hash). */
   verifyContextMode?: (executable: string) => boolean;
   installContextMode?: () => Promise<boolean>;
+  installContext7?: () => Promise<boolean>;
   /** Absolute Node.js used by Deck-owned hook scripts; production resolves `node` and checks the version. */
   nodeCommand?: string;
   verifyNodeRuntime?: (executable: string) => boolean;
@@ -155,13 +157,23 @@ export function createCodexTools(options: CodexToolOptions = {}) {
     }
     return undefined;
   };
-  const installContextMode = async (): Promise<boolean> => {
-    if (options.installContextMode) return options.installContextMode();
+  // Match Claude's executable verification and reuse its per-user npm installation when present.
+  const context7Command = (): string | undefined => {
+    const candidates = [pathCandidate("context7-mcp"), join(dataRoot, "claude", "tools", "node_modules", ".bin", "context7-mcp"), join(toolRoot, "node_modules", ".bin", "context7-mcp")];
+    for (const candidate of candidates) {
+      const executable = executableFile(candidate);
+      if (executable) return executable;
+    }
+    return undefined;
+  };
+  const installSharedTool = async (id: "context-mode" | "context7"): Promise<boolean> => {
+    const override = id === "context7" ? options.installContext7 : options.installContextMode;
+    if (override) return override();
     const npm = Bun.which("npm");
     if (!npm) return false;
     await ensurePrivatePath(toolRoot, home);
     const code = await new Promise<number>((done) => {
-      const child = spawn(npm, ["install", "--prefix", toolRoot, "--no-audit", "--no-fund", "--ignore-scripts", CODEX_CONTEXT_MODE_PACKAGE], {
+      const child = spawn(npm, ["install", "--prefix", toolRoot, "--no-audit", "--no-fund", "--ignore-scripts", id === "context7" ? CODEX_CONTEXT7_PACKAGE : CODEX_CONTEXT_MODE_PACKAGE], {
         cwd: home,
         env: { HOME: home, PATH: process.env.PATH ?? "", USER: process.env.USER ?? "" },
         stdio: "ignore",
@@ -170,7 +182,7 @@ export function createCodexTools(options: CodexToolOptions = {}) {
       child.once("error", () => { clearTimeout(timer); done(1); });
       child.once("close", (status) => { clearTimeout(timer); done(status ?? 1); });
     });
-    return code === 0 && contextModeCommand() !== undefined;
+    return code === 0 && (id === "context7" ? context7Command() : contextModeCommand()) !== undefined;
   };
 
   // ---- Official Supermemory plugin hooks ----
@@ -221,7 +233,8 @@ export function createCodexTools(options: CodexToolOptions = {}) {
         return result;
       },
     }),
-    contextMode: Object.freeze({ command: contextModeCommand, install: installContextMode }),
+    contextMode: Object.freeze({ command: contextModeCommand, install: () => installSharedTool("context-mode") }),
+    context7: Object.freeze({ command: context7Command, install: () => installSharedTool("context7") }),
     supermemory: Object.freeze({
       root: supermemoryRoot,
       state: supermemoryState,

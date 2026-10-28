@@ -708,15 +708,9 @@ class CodexRunnerAdapter implements RunnerAdapter {
       context7: evidence.observe(isDeckManagedCodexMcpServer(source, "context7") && context7?.enabled !== false, () => {
         const entry = context7;
         if (entry?.enabled === false) throw new Error("disabled");
-        if (entry?.url) {
-          const endpoint = new URL(entry.url);
-          if (endpoint.protocol !== "https:") throw new Error("endpoint-unverified");
-          const environment = this.#sessionDriverOptions?.baseEnv ?? process.env;
-          const names = Object.values(entry.env_http_headers ?? {}) as string[];
-          if (entry.bearer_token_env_var) names.push(entry.bearer_token_env_var);
-          if (names.some(name => !environment[name]?.trim())) throw new Error("credential-missing");
-          return [entry.url, names.sort(), "credentials-present"];
-        }
+        if (entry?.url || entry?.args?.length || entry?.env_http_headers || entry?.bearer_token_env_var) throw new Error("local-context7-required");
+        const command = this.#tools.context7.command();
+        if (!command || entry?.command !== command) throw new Error("executable-unverified");
         return [entry?.args ?? [], evidence.executable(entry?.command)];
       }),
     };
@@ -823,6 +817,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const webSearchProvider = this.resolveWebSearchProvider(input.deckConfig.webSearch.provider);
     const desiredMcp = buildCodexMcpServers({
       packageIds: input.mcpCapabilityIds,
+      context7Command: this.#tools.context7.command(),
       memoryProvider: input.memoryProviderId,
       supermemoryProjectScope: input.derivedSupermemoryProjectScope,
       serenaLauncherAvailable: input.serenaPreparation?.readiness.state === "ready",
@@ -1074,7 +1069,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       { capabilityId: "codex-runtime", label: "Codex runtime", description: "Native roles, skills, materialization, and CLI launch", section: "runtime", requirementLevel: "required", installKind: "runner-native", supportStatus: "supported", isInstalled: inspection.evidence.binary === true, isBlocked: inspection.state === "blocked" || inspection.state === "unsupported", diagnostics: inspection.diagnostics.map((diagnostic) => diagnostic.message) },
       codebase,
       rtk,
-      { ...base("context7", "Context7"), isInstalled: mcp.has("context7"), isBlocked: false, diagnostics: mcp.has("context7") ? [] : ["context7: MCP configuration missing"] },
+      { ...base("context7", "Context7"), isInstalled: Boolean(tools.context7.command()) && inspectCodexMcpServerCommand(config, "context7") === tools.context7.command(), isBlocked: false, diagnostics: mcp.has("context7") ? [] : ["context7: MCP configuration missing"] },
       webSearch,
       supermemory,
     ];
@@ -1240,6 +1235,10 @@ class CodexRunnerAdapter implements RunnerAdapter {
         return tools.codebase.command() !== undefined || !tools.codebase.supported()
           ? undefined
           : { id: "codex.tool.codebase-memory.install", kind: "install-codex-codebase", title: "Install and verify the pinned Codebase Memory native release in Deck-owned shared tools", capabilityId, status: tools.codebase.state() === "conflict" || tools.codebase.state() === "unusable" ? "blocked" : "ready", required: true };
+      case "context7":
+        return tools.context7.command() !== undefined
+          ? undefined
+          : { id: "codex.tool.context7.install", kind: "install-codex-tool", title: "Install and verify the shared Context7 MCP package", capabilityId, status: "ready", required: true };
       case "context-mode":
         return tools.contextMode.command() !== undefined
           ? undefined
@@ -1258,7 +1257,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       steps: [
         { action: "configure", tool: "codex", capabilityId: "developer-team", reason: "Materialize project-scoped Developer Team roles, skills, bootstrap content, and instructions" },
         ...selected.filter((id) => id === "serena").map((capabilityId) => ({ action: "install" as const, tool: capabilityId, capabilityId, reason: "Reuse or provision Serena through the explicitly authorized Core bootstrap before configuring Codex MCP" })),
-        ...selected.filter((id) => ["context-mode", "codebase-memory", "rtk"].includes(id)).map((capabilityId) => ({ action: "install" as const, tool: capabilityId, capabilityId, reason: "Reuse or install the verified Deck-owned shared tool before pinning Codex MCP/hook configuration to its absolute path" })),
+        ...selected.filter((id) => ["context-mode", "codebase-memory", "rtk", "context7"].includes(id)).map((capabilityId) => ({ action: "install" as const, tool: capabilityId, capabilityId, reason: "Reuse or install the verified Deck-owned shared tool before pinning Codex MCP/hook configuration to its absolute path" })),
         ...selected.filter((id) => ["context-mode", "codebase-memory", "rtk", "context7", "web-search", "supermemory-tool-bindings"].includes(id)).map((capabilityId) => ({ action: "configure" as const, tool: capabilityId, capabilityId, reason: "Apply reviewed Codex MCP/hook configuration pinned to verified executables" })),
         { action: "validate", tool: "codex", capabilityId: "codex-runtime", reason: "Verify managed content, trust activation, route classification, and capability readiness" },
       ],
@@ -1351,6 +1350,10 @@ class CodexRunnerAdapter implements RunnerAdapter {
           return ok(outcome === "installed" ? "Pinned Codebase Memory native executable installed and verified; no session download is needed." : "Pinned Codebase Memory native executable verified without changes.");
         }
         case "install-codex-tool": {
+          if (action.capabilityId === "context7") {
+            if (tools.context7.command()) return ok("Shared Context7 is already available and verified.");
+            return await tools.context7.install() && tools.context7.command() ? ok("Context7 was installed and verified.") : fail("Context7 installation failed or its executable was not verified.");
+          }
           if (action.capabilityId !== "context-mode") return fail("Codex tool install action is unsupported.");
           if (tools.contextMode.command()) return ok("Context Mode is already available and verified.");
           return await tools.contextMode.install() ? ok("Context Mode was installed and verified.") : fail("Context Mode installation failed or its executable was not verified.");
@@ -1464,6 +1467,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       memoryProvider: memoryProviderId,
       mcpCapabilityIds,
       contextModeCommand: tools.contextMode.command(),
+      context7Command: tools.context7.command(),
       codebaseMemoryCommand: tools.codebase.command(),
       // A reviewed install includes enabled package instructions as well as explicit capability toggles.
       // Launch-time reconciliation omits capabilityIds and must never repair an unowned entry.

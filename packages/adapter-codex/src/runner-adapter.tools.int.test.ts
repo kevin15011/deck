@@ -403,7 +403,7 @@ describe("Codex global ownership and migration", () => {
 
   test("a launch-time plan keeps Deck-managed servers chosen in the TUI (for example Context7) instead of dropping them", async () => {
     await withProject(async (root, journalRoot) => {
-      const { cwd, g, adapter } = await globalAdapter(root, journalRoot);
+      const { cwd, g, adapter } = await globalAdapter(root, journalRoot, { tools: testTools({ resolveCommand: name => name === "context7-mcp" ? process.execPath : undefined }) });
       const tuiPlan = plan(adapter, cwd, { capabilityIds: ["context7"] });
       await adapter.applyDeveloperTeamInstall({ projectRoot: cwd, environmentId: "codex-development", plan: tuiPlan });
       expect(await readFile(join(g, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.context7]");
@@ -440,4 +440,49 @@ describe("Codex global ownership and migration", () => {
       expect(adapter.readThinkingAssignments(cwd)).toEqual(thinkingAssignments);
     });
   }, 120_000);
+});
+
+test("Context7 reuses Claude's shared executable and observes readiness without credentials", async () => {
+  await withProject(async (root, journalRoot) => {
+    const tools = testTools({ homeDir: root, dataRoot: join(root, "data", "deck") });
+    const binary = join(tools.dataRoot!, "claude", "tools", "node_modules", ".bin", "context7-mcp");
+    await mkdir(join(binary, ".."), { recursive: true });
+    await writeFile(binary, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+    const adapter = createCodexRunnerAdapter({ tools, ...layout(root), journalRoot, preflight: preflight(), sessionDriver: { baseEnv: {} }, ...noSerena });
+    const config = noPackagesConfig();
+    const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: config, capabilityIds: ["context7"] });
+    await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan });
+    const source = await readFile(join(root, ".codex", "config.toml"), "utf8");
+    expect((Bun.TOML.parse(source) as any).mcp_servers.context7).toEqual({ command: binary });
+    expect(adapter.readPreparationCapabilities!(config).context7).toMatchObject({ enabled: true, prerequisites: "present" });
+    await chmod(binary, 0o600);
+    expect(adapter.readPreparationCapabilities!(config).context7).toMatchObject({ prerequisites: "missing" });
+    await chmod(binary, 0o700);
+    await writeFile(join(root, ".codex", "config.toml"), '# deck-codex-mcp:context7\n[mcp_servers.context7]\nurl = "https://mcp.context7.com/mcp"\n');
+    expect(adapter.readPreparationCapabilities!(config).context7).toMatchObject({ prerequisites: "missing" });
+  });
+}, 120_000);
+
+test("Context7 Review installs a missing tool and rejects unverified installation success", async () => {
+  await withProject(async (root, journalRoot) => {
+    const binary = join(root, "context7-mcp");
+    let publish = false;
+    const tools = testTools({
+      homeDir: root, dataRoot: join(root, "data", "deck"),
+      resolveCommand: name => name === "context7-mcp" ? binary : undefined,
+      installContext7: async () => {
+        if (publish) await writeFile(binary, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+        return true;
+      },
+    });
+    const adapter = createCodexRunnerAdapter({ tools, ...layout(root), journalRoot, preflight: preflight(), ...noSerena });
+    const inventory = await adapter.getCapabilityInventory({ projectRoot: root, environmentId: "codex-development", runnerId: "codex", deckConfig: noPackagesConfig() });
+    const review = adapter.buildReviewPlan({ runnerId: "codex", environmentId: "codex-development", selectedCapabilities: { context7: true }, packageInstructions: {}, adaptiveMemory: { provider: "none" } }, inventory);
+    const action = review.groups.automaticInstalls.find(action => action.capabilityId === "context7")!;
+    expect(action).toMatchObject({ kind: "install-codex-tool", status: "ready" });
+    expect(await adapter.runAction(action, {} as never)).toMatchObject({ status: "failed" });
+    publish = true;
+    expect(await adapter.runAction(action, {} as never)).toMatchObject({ status: "executed" });
+    expect(await adapter.runAction(action, {} as never)).toMatchObject({ status: "executed" });
+  });
 });

@@ -25,7 +25,7 @@ import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 import { CODEX_MEMORY_BRIDGE_HOOK_BLOCK, codexHooksFeatureDisabled, mergeCodexOwnedHooks, mergeCodexProjectConfig, type CodexOwnedHookBlock } from "./codex-config";
 import { rtkHookScript } from "@deck/core";
 import { translateCodexCapabilityInstructions, validateCodexInstructionTranslation } from "./instruction-translation";
-import { buildCodexMcpServers, inspectCodexSupermemoryMcpState, mergeCodexMcpServers } from "./mcp-config";
+import { codexMcpReceiptCoversServer, buildCodexMcpServers, inspectCodexSupermemoryMcpState, mergeCodexMcpServers } from "./mcp-config";
 import type { CodexExpectedFile, CodexMutation, CodexMutationPlan, CodexOwnershipReleaseCheck } from "./types";
 
 const OWNED_MARKER = "deck-codex-v1";
@@ -68,6 +68,7 @@ export type BuildCodexInstallPlanInput = {
   foreignMcpCommands?: ReadonlyMap<string, string>;
   /** Absolute, verified executables written into MCP tables; bare PATH names are never persisted. */
   contextModeCommand?: string;
+  context7Command?: string;
   codebaseMemoryCommand?: string;
   /** Current reviewed install selection; never supplied by implicit launch-time reconciliation. */
   repairSelectedToolIds?: readonly string[];
@@ -376,6 +377,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         serenaProxyCommand: input.serenaProxyCommand,
         deckMemoryCommand: input.deckMemoryCommand,
         contextModeCommand: input.contextModeCommand,
+        context7Command: input.context7Command,
         codebaseMemoryCommand: input.codebaseMemoryCommand,
         webSearchProviderSupported: input.webSearchProviderSupported,
         webSearchProviderConfigured: input.webSearchProviderConfigured,
@@ -430,8 +432,8 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
           diagnostics.push({ code: gap, severity: "warning", message: "Web Search is enabled but its configured MCP executable prerequisite is unavailable." });
         } else if (gap === "supermemory-raw-mcp-disabled") {
           diagnostics.push({ code: gap, severity: "info", message: "Supermemory is provided by the pinned official plugin hooks; no Supermemory MCP entry is written beside it." });
-        } else if (gap === "context-mode-not-ready" || gap === "codebase-memory-not-ready") {
-          diagnostics.push({ code: gap, severity: "warning", message: `${gap === "context-mode-not-ready" ? "Context Mode" : "Codebase Memory"} is selected but no verified executable is available; no MCP entry was written. Install it through the Deck TUI (Review & Install) and rerun.` });
+        } else if (gap === "context-mode-not-ready" || gap === "codebase-memory-not-ready" || gap === "context7-not-ready") {
+          diagnostics.push({ code: gap, severity: "warning", message: `${gap === "context-mode-not-ready" ? "Context Mode" : gap === "context7-not-ready" ? "Context7" : "Codebase Memory"} is selected but no verified executable is available; no MCP entry was written. Install it through the Deck TUI (Review & Install) and rerun.` });
         } else if (gap === "supermemory-project-scope-missing") {
           blocked = true;
           diagnostics.push({ code: gap, severity: "error", message: "Supermemory Codex MCP configuration is blocked because no canonical x-sm-project scope was resolved." });
@@ -442,7 +444,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
           diagnostics.push({ code: gap, severity: "warning", message: "Optional provider configuration remains deferred because no verified Codex provider contract is available." });
         }
       }
-      const ownedServerIds = priorContributions.filter(entry => entry.selector.kind === "toml" && entry.selector.header.startsWith("mcp_servers.") && selectContributionContent(config.content, entry.selector) !== undefined && hash(selectContributionContent(config.content, entry.selector)!) === entry.hash).map(entry => (entry.selector as { header: string }).header.slice("mcp_servers.".length));
+      const ownedServerIds = priorContributions.filter(entry => entry.selector.kind === "toml" && entry.selector.header.startsWith("mcp_servers.") && selectContributionContent(config.content, entry.selector) !== undefined && hash(selectContributionContent(config.content, entry.selector)!) === entry.hash && codexMcpReceiptCoversServer(config.content, selectContributionContent(config.content, entry.selector)!, entry.selector.header.slice("mcp_servers.".length))).map(entry => (entry.selector as { header: string }).header.slice("mcp_servers.".length));
       const mcp = mergeCodexMcpServers(config.content, desiredMcp.servers, { repairSelectedToolIds: input.repairSelectedToolIds, ownedServerIds, recordedServerIds: priorContributions.filter(entry => entry.selector.kind === "toml").map(entry => (entry.selector as { header: string }).header.replace(/^mcp_servers\./, "")), allowLegacyMigration: true });
       if (mcp.status !== "blocked") for (const id of mcp.adoptedServerIds ?? []) adoptedMcpIds.add(id);
       if (mcp.status === "blocked") {

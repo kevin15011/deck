@@ -30,7 +30,7 @@ test("prerequisite reader skips disabled collectors and refreshes executable met
 
 test.each(["codex", "opencode", "pi"])("real %s adapter observes only selected Context7 prerequisites and refreshes route", lane => {
   const home = root(), executable = join(home, "tool"); put(executable, "never execute"); chmodSync(executable, 0o700);
-  const adapter = lane === "codex" ? createCodexRunnerAdapter({ codexHome: home, userHome: home })
+  const adapter = lane === "codex" ? createCodexRunnerAdapter({ codexHome: home, userHome: home, tools: { homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: name => name === "context7-mcp" ? executable : undefined } })
     : lane === "opencode" ? createOpenCodeRunnerAdapter({ developerTeamConfigDir: home })
     : createPiRunnerAdapter({ homeDirectory: home, env: { PI_CODING_AGENT_DIR: home } });
   const config = getDefaultDeckConfig(); config.packageInstructions[lane]!.rtk = false;
@@ -73,7 +73,7 @@ test("Codex RTK metadata follows its installed hook and executable, without exec
   config.packageInstructions.codex!.rtk = false; expect(inspect()).toEqual({ enabled: false });
 });
 
-test("Codex remote Context7 checks credential presence without serializing it or contacting the endpoint", () => {
+test("Codex remote Context7 remains unavailable even with credentials and never exposes them", () => {
   const home = root(), environment: Record<string, string> = {};
   const adapter = createCodexRunnerAdapter({ codexHome: home, userHome: home, sessionDriver: { baseEnv: environment } });
   put(join(home, "config.toml"), '# deck-codex-mcp:context7\n[mcp_servers.context7]\nurl = "https://mcp.context7.com/mcp"\n[mcp_servers.context7.env_http_headers]\nX-Context7-API-Key = "CONTEXT7_API_KEY"\n');
@@ -81,6 +81,6 @@ test("Codex remote Context7 checks credential presence without serializing it or
   expect(adapter.readPreparationCapabilities!(config).context7).toMatchObject({ prerequisites: "missing" });
   environment.CONTEXT7_API_KEY = "fixture-secret";
   const evidence = adapter.readPreparationCapabilities!(config);
-  expect(evidence.context7).toMatchObject({ prerequisites: "present", availability: "unverified" });
+  expect(evidence.context7).toMatchObject({ prerequisites: "missing", availability: "unavailable" });
   expect(JSON.stringify(evidence)).not.toContain("fixture-secret");
 });

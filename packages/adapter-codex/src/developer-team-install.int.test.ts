@@ -415,7 +415,7 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
 
   test("re-planning without a previously selected MCP server keeps the neighbouring hook ownership markers intact", () => {
     const rtkHook = { nodeCommand: "/usr/bin/node", rtkBinary: "/deck/tools/rtk" };
-    const first = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map(), mcpCapabilityIds: ["context7", "rtk"], rtkHook });
+    const first = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map(), mcpCapabilityIds: ["context7", "rtk"], context7Command: "/verified/context7-mcp", rtkHook });
     const installed = first.expectedFiles.find((file) => file.relativePath === ".codex/config.toml")!.content;
     expect(installed).toContain("# deck-codex-mcp:context7");
     const second = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map(first.expectedFiles.map(file => [file.relativePath, file.content])), mcpCapabilityIds: ["rtk"], rtkHook });
@@ -512,3 +512,43 @@ test("preserves an edited receipt-less RTK hook when RTK is deselected", () => {
   expect(plan.mutations.some(m => m.relativePath === ".codex/config.toml")).toBe(false);
   expect(existingFiles.get(".codex/config.toml")).toBe(source);
 });
+
+test("migrates legacy Context7 to local stdio and protects edits with a receipt", () => {
+  const source = '# deck-codex-mcp:context7\n[mcp_servers.context7]\nurl = "https://mcp.context7.com/mcp"\nenv_http_headers = { "X-Context7-API-Key" = "CONTEXT7_API_KEY" }\n';
+  const input = { projectRoot: "/p", mcpCapabilityIds: ["context7"], context7Command: "/tools/context7-mcp" };
+  const first = buildCodexDeveloperTeamInstallPlan({ ...input, existingFiles: new Map([[".codex/config.toml", source]]) });
+  expect(first.blocked).toBe(false);
+  const files = new Map(first.expectedFiles.map(f => [f.relativePath, f.content]));
+  expect((Bun.TOML.parse(files.get(".codex/config.toml")!) as any).mcp_servers.context7).toEqual({ command: "/tools/context7-mcp" });
+  expect(buildCodexDeveloperTeamInstallPlan({ ...input, existingFiles: files }).mutations).toEqual([]);
+  files.set(".codex/config.toml", files.get(".codex/config.toml")!.replace("/tools/context7-mcp", "/user/custom"));
+  expect(buildCodexDeveloperTeamInstallPlan({ ...input, existingFiles: files }).blocked).toBe(true);
+});
+
+for (const id of ["context7", "codebase-memory"] as const) {
+  for (const policy of ['approval_mode = "approve"', 'enabled = false']) {
+    test(`preserves nested ${policy} in legacy ${id} during migration`, () => {
+      // Protects user tool policy: a marker cannot authorize deleting nested customization.
+      const launch = id === "context7"
+        ? 'url = "https://mcp.context7.com/mcp"\nenv_http_headers = { "X-Context7-API-Key" = "CONTEXT7_API_KEY" }\n'
+        : 'command = "/tools/codebase-memory-mcp"\n';
+      const source = `# deck-codex-mcp:${id}\n[mcp_servers.${id}]\n${launch}[mcp_servers.${id}.tools.resolve-library-id]\n${policy}\n`;
+      const existingFiles = new Map([[".codex/config.toml", source]]);
+      const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/p", existingFiles, mcpCapabilityIds: [id], context7Command: "/tools/context7-mcp", codebaseMemoryCommand: "/tools/codebase-memory-mcp" });
+      expect(plan.blocked).toBe(true);
+      expect(plan.mutations.some(m => m.relativePath === ".codex/config.toml")).toBe(false);
+      expect(existingFiles.get(".codex/config.toml")).toBe(source);
+
+      // A receipt for the original entry cannot authorize a later nested edit.
+      const input = { projectRoot: "/p", mcpCapabilityIds: [id], context7Command: "/tools/context7-mcp", codebaseMemoryCommand: "/tools/codebase-memory-mcp" };
+      const installed = buildCodexDeveloperTeamInstallPlan({ ...input, existingFiles: new Map() });
+      const files = new Map(installed.expectedFiles.map(file => [file.relativePath, file.content]));
+      const edited = files.get(".codex/config.toml")! + `\n[mcp_servers.${id}.tools.resolve-library-id]\n${policy}\n`;
+      files.set(".codex/config.toml", edited);
+      const upgrade = buildCodexDeveloperTeamInstallPlan({ ...input, existingFiles: files, context7Command: "/updated/context7-mcp", codebaseMemoryCommand: "/updated/codebase-memory-mcp" });
+      expect(upgrade.blocked).toBe(true);
+      expect(upgrade.mutations.some(m => m.relativePath === ".codex/config.toml")).toBe(false);
+      expect(files.get(".codex/config.toml")).toBe(edited);
+    });
+  }
+}

@@ -88,7 +88,7 @@ test("native lifecycle refreshes selected prerequisites after repair and disable
   config.capabilities!["codebase-memory"].enabled = false; config.webSearch.enabled = false;
   const command = join(root, "context7");
   writeFileSync(join(root, "config.toml"), `# deck-codex-mcp:context7\n[mcp_servers.context7]\ncommand = ${JSON.stringify(command)}\n`);
-  const adapter = createCodexRunnerAdapter({ codexHome: root, userHome: root });
+  const adapter = createCodexRunnerAdapter({ codexHome: root, userHome: root, tools: { homeDir: root, dataRoot: join(root, "data", "deck"), resolveCommand: name => name === "context7-mcp" ? command : undefined } });
   const plan = withNativeProjectReadiness({ command: "unused", args: [], cwd: root, stdio: "pipe", stdin: "closed" }, "codex", () => config,
     () => { throw new Error("disabled Codebase must not be observed"); }, current => adapter.readPreparationCapabilities!(current));
   const environment: Record<string, string> = {};
