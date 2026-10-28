@@ -222,11 +222,7 @@ export class SessionCodebaseReadiness {
         entry.connection = this.connect(entry, binary, spec.args, projectRoot, { ...environment, CBM_RUNTIME_DIR: runtime }, runtime);
         const connection = entry.connection;
         await this.abortable(connection.process.ready, boundedSignal);
-        const response = await this.request(connection, "initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "deck-session-readiness", version: "1" } }, boundedSignal);
-        const server = response.serverInfo as Record<string, unknown> | undefined;
-        if (response.protocolVersion !== "2024-11-05" || server?.name !== "codebase-memory-mcp" || server.version !== OWNED_CODEBASE_VERSION) throw failure("unsupported");
-        connection.process.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
-        await this.tools(connection, boundedSignal);
+        await this.initialize(connection, boundedSignal);
       });
       aborted(signal);
       return { ...spec, env: { ...spec.env, CBM_RUNTIME_DIR: entry.connection!.runtime } };
@@ -237,6 +233,44 @@ export class SessionCodebaseReadiness {
       // printed by a backend or retry native account rendezvous indefinitely.
       throw error;
     }
+  }
+
+  private async initialize(connection: Connection, signal: AbortSignal): Promise<void> {
+    const response = await this.request(connection, "initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "deck-readiness", version: "1" } }, signal);
+    const server = response.serverInfo as Record<string, unknown> | undefined;
+    if (response.protocolVersion !== "2024-11-05" || server?.name !== "codebase-memory-mcp" || server.version !== OWNED_CODEBASE_VERSION) throw failure("unsupported");
+    connection.process.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+    await this.tools(connection, signal);
+  }
+
+  /** Launch-owned native observation: preserve the plugin's executable, environment and
+   * account rendezvous. Only our probe frontend is drained; no managed namespace is created.
+   */
+  async observeNative(spec: StdioSpec, project: string, signal: AbortSignal): Promise<void> {
+    aborted(signal);
+    const projectRoot = realpathSync(project);
+    const environment = Object.fromEntries(Object.entries({ ...(this.options.environment ?? process.env), ...spec.env }).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+    let binary: string;
+    try { binary = realpathSync(Bun.which(spec.command, { PATH: environment.PATH, cwd: projectRoot }) ?? resolve(projectRoot, spec.command)); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw failure("unsupported");
+      throw error;
+    }
+    let connection: Connection | undefined;
+    try {
+      await this.deadline(signal, this.options.coldTimeoutMs ?? 15_000, async bounded => {
+        if (!await (this.options.verifyExecutable ?? this.verifyExecutable)(binary, bounded)) {
+          if ([binary, spec.command].some(ownedCodebasePath)) throw new Error("codebase-memory-integrity-failed");
+          throw failure("unsupported");
+        }
+        aborted(bounded);
+        const owner: Entry = { projectRoot, binary, launchPath: binary, environmentKey: "native", lastUsed: 0, admissions: 0 };
+        connection = this.connect(owner, binary, spec.args, projectRoot, environment, `native-observation-${crypto.randomUUID()}`);
+        await this.abortable(connection.process.ready, bounded);
+        await this.initialize(connection, bounded);
+      });
+    } finally { if (connection) await this.dispose(connection); }
+    aborted(signal);
   }
 
   private readonly verifyExecutable = async (path: string, signal: AbortSignal): Promise<boolean> => {

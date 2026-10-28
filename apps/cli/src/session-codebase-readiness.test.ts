@@ -507,3 +507,26 @@ test("native supervisor authorization/control failures retain their identity", a
   const service=track(new SessionCodebaseReadiness({supervisor:{spawn(){throw error;}},verifyExecutable:async()=>true}));
   await expect(service.ensure(t.spec,t.context())).rejects.toBe(error);
 });
+
+test('native observation keeps native rendezvous independent from managed failure and drains only its frontend', async () => {
+  const f = fixture();
+  f.setMode('hang');
+  await expect(f.service.ensure(f.spec, f.context())).rejects.toThrow('unavailable');
+  f.setMode('healthy');
+  await f.service.observeNative({ ...f.spec, env: { CBM_RUNTIME_DIR: '/native/rendezvous' } }, f.root, new AbortController().signal);
+  expect(f.environments.at(-1)?.CBM_RUNTIME_DIR).toBe('/native/rendezvous');
+  expect(f.environments.at(-1)?.CBM_CACHE_DIR).toBe('/canonical/cache');
+  expect(f.counts().drains).toBe(f.counts().spawns);
+  const before = f.counts().spawns;
+  await expect(f.service.ensure(f.spec, f.context())).rejects.toThrow('unavailable');
+  expect(f.counts().spawns).toBe(before); // managed negative cache is retained, not native evidence
+});
+
+test.each(['protocol', 'tools', 'hang'])('native observation returns typed failure and drains the probe (%s)', async mode => {
+  const f = fixture(); f.setMode(mode);
+  await expect(f.service.observeNative(f.spec, f.root, new AbortController().signal)).rejects.toThrow(mode === 'hang' ? 'unavailable' : 'unsupported');
+  expect(f.counts().spawns).toBe(1); expect(f.counts().drains).toBe(1);
+  f.setMode('healthy');
+  await f.service.observeNative(f.spec, f.root, new AbortController().signal);
+  expect(f.counts().drains).toBe(2);
+});
