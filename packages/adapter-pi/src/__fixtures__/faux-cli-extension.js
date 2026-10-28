@@ -5,8 +5,9 @@ import { createFauxCore, fauxAssistantMessage, fauxToolCall } from "@earendil-wo
 import fs from "node:fs";
 
 export default function (pi) {
+  let sessionContext;
   const core = createFauxCore({ api: "faux-cli", provider: "faux", models: [{ id: "faux-1", name: "Faux 1" }] });
-  pi.on("session_start", () => { if (process.env.FAUX_READY_FILE && process.env.DECK_PI_CHILD !== "1") fs.writeFileSync(process.env.FAUX_READY_FILE, "ready"); });
+  pi.on("session_start", (_event, ctx) => { sessionContext = ctx; if (process.env.FAUX_READY_FILE && process.env.DECK_PI_CHILD !== "1") fs.writeFileSync(process.env.FAUX_READY_FILE, "ready"); });
   const log = (entry) => { if (process.env.FAUX_LOG) fs.appendFileSync(process.env.FAUX_LOG, `${JSON.stringify(entry)}\n`); };
   pi.registerProvider("faux", {
     name: "faux", baseUrl: "http://127.0.0.1:1", apiKey: "x", api: "faux-cli",
@@ -28,7 +29,17 @@ export default function (pi) {
       else if (pending) reply = fauxAssistantMessage([fauxToolCall("subagent", { action: "resolve", taskId: pending.taskId, outcomeId: pending.outcomeId, disposition: "integrated", summary: "Faux integration fixture inspected the report" })], { stopReason: "toolUse" });
       else reply = fauxAssistantMessage(process.env.FAUX_REPLY ?? (jobs.some(job => ["queued", "running"].includes(job.execution)) ? "LEAD_AVAILABLE" : "LEAD_DONE"));
       const delay = child ? Number(process.env.FAUX_CHILD_DELAY_MS ?? 0) : hasResult && !pending ? Number(process.env.FAUX_PARENT_DELAY_MS ?? 0) : 0;
-      core.setResponses([delay ? async () => { await new Promise(resolve => setTimeout(resolve, delay)); return reply; } : reply]);
+      const waitForChild = !child && hasResult && process.env.FAUX_WAIT_FOR_CHILD === "1" && jobs.some(job => ["queued", "running"].includes(job.execution));
+      core.setResponses([waitForChild ? async () => {
+        // Print mode exits after its final response. Keep this scripted response open
+        // until the accepted child settles, so agent_settled can deliver its outcome.
+        while (!options?.signal?.aborted) {
+          const snapshot = sessionContext.sessionManager.getEntries().filter(entry => entry.type === "custom" && entry.customType === "deck-subagents-v1").at(-1);
+          if (jobs.every(job => snapshot?.data.jobs.some(current => current.id === job.taskId && current.outcomeId))) break;
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        return reply;
+      } : delay ? async () => { await new Promise(resolve => setTimeout(resolve, delay)); return reply; } : reply]);
       return core.streamSimple(model, context, options);
     },
     models: [{ id: "faux-1", name: "Faux 1", input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 4096 }],

@@ -22,7 +22,7 @@ let home: string;
 const saved: Record<string, string | undefined> = {};
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'nrp-recovery-'));
-  for (const [key, value] of Object.entries({HOME: home, XDG_STATE_HOME: join(home, 's'), XDG_CONFIG_HOME: join(home, 'c'), XDG_CACHE_HOME: join(home, 'b'), XDG_DATA_HOME: join(home, 'd')})) {
+  for (const [key, value] of Object.entries({HOME: home, CODEX_HOME: join(home, '.codex'), XDG_STATE_HOME: join(home, 's'), XDG_CONFIG_HOME: join(home, 'c'), XDG_CACHE_HOME: join(home, 'b'), XDG_DATA_HOME: join(home, 'd')})) {
     saved[key] = process.env[key]; process.env[key] = value;
   }
   _resetDeckPathCache();
@@ -73,13 +73,15 @@ test('public and direct rollback preserve runner files, created files, backups a
   } finally {await started.daemon.stop('test');}
 }, 30000);
 
-test('direct restore defers unknown offline history without altering recovery state or runner files', async () => {
+test('direct restore admits offline history and preserves historical sessions', async () => {
   const paths = resolveStatePaths(); ensureStateLayout(paths); mkdirSync(join(paths.sessionsDir,'historical'));
   const config = join(home,'config.toml'); writeFileSync(config,'original');
   const backup = createBackup({operationId:'fixture',deckVersionBefore:'1.0.0',reason:'rollback-test',files:[{id:'config',sourcePath:config,owner:'runner:codex',kind:'config'}]});
-  writeFileSync(config,'current'); const before = tree(home);
-  await expect(Promise.resolve().then(() => restoreBackup(backup.backupId))).rejects.toBeInstanceOf(RunnerMutationDeferredError);
-  expect(tree(home)).toEqual(before);
+  const account = prepareBackupPostimages(backup.backupId, [{sourcePath:config,sha256:createHash('sha256').update('current').digest('hex'),owner:'runner:codex',kind:'config'}]);
+  writeFileSync(config,'current'); account();
+  await restoreBackup(backup.backupId);
+  expect(readFileSync(config,'utf8')).toBe('original');
+  expect(existsSync(join(paths.sessionsDir,'historical'))).toBe(true);
 });
 
 test('automatic rollback retains the failed update and its backup when activity starts before restoration', async () => {
@@ -163,8 +165,10 @@ for (const evidence of ['history','socket','unreadable-history','mutation-guard'
   if (evidence === 'unreadable-history') {rmSync(paths.sessionsDir,{recursive:true}); writeFileSync(paths.sessionsDir,'invalid directory');}
   if (evidence === 'mutation-guard') mkdirSync(join(paths.daemonDir,'runner-mutation.json.gate'));
   const before = tree(home), report = await reviewRunnerCleanup(roots,paths);
-  expect(report.status).toBe(evidence === 'none' ? 'ok' : 'warning');
-  if (evidence !== 'none') {
+  const admitted = evidence === 'none' || evidence === 'history';
+  expect(report.status).toBe(admitted ? 'ok' : 'warning');
+  if (admitted) await withIdleRunnerMutation(() => {}, {paths});
+  else {
     expect(JSON.stringify(report)).toContain('unknown');
     await expect(withIdleRunnerMutation(()=>{throw Error('must not mutate');},{paths})).rejects.toBeInstanceOf(RunnerMutationDeferredError);
   }

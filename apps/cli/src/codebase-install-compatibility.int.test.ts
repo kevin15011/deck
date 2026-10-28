@@ -82,7 +82,7 @@ test("Claude: reviewed owned install rematerializes plugin config while preservi
   expect(repaired.blocked).toBe(false);
   expect(repaired.files.find(file => file.path.endsWith("/.mcp.json"))?.content).toContain("codebase-native-v0.11.0");
   await adapter.applyDeveloperTeamInstall({ projectRoot: f.home, environmentId: "claude-development", plan: repaired });
-  expect((await adapter.readSessionMcpServers(codebaseConfig()))["codebase-memory"]).toMatchObject({ command: expect.stringContaining("codebase-native-v0.11.0") });
+  expect((await adapter.readSessionCapabilityOverrides(codebaseConfig()))["codebase-memory"]).toMatchObject({ command: expect.stringContaining("codebase-native-v0.11.0") });
   expect(readFileSync(f.shared)).toEqual(before);
   expect(readFileSync(original.files.find(file => file.path.endsWith("/.mcp.json"))!.path, "utf8")).toContain(f.shared);
 });
@@ -273,11 +273,13 @@ for (const runner of ["claude", "codex", "opencode"] as const) {
     const { resolveSessionChildMcp } = await import("./session-shared-services");
     const { SessionCodebaseReadiness } = await import("./session-codebase-readiness");
     const f = fixture(); let adapter: import("@deck/core").RunnerAdapter, configPath: string;
+    let nativeSkills: import("@deck/core/session/driver").NativeSkillsDescriptor | undefined;
     if (runner === "claude") {
       writeFileSync(f.shared, binary);
       const claude = createClaudeRunnerAdapter({homeDir:f.home,dataRoot:f.dataRoot,resolveCommand:f.resolveCommand,codebaseReleaseOverride:f.release});
       const plan=claude.buildDeveloperTeamInstallPlan({projectRoot:f.home,environmentId:"claude-development",deckConfig:codebaseConfig(),capabilityIds:["claude-team-files","codebase-memory"]});
       await claude.applyDeveloperTeamInstall({projectRoot:f.home,environmentId:"claude-development",plan});
+      nativeSkills = await claude.prepareSessionNativeSkills();
       configPath=plan.files.find(file=>file.path.endsWith("/.mcp.json"))!.path; adapter=claude;
       writeFileSync(f.shared,binary.replace("build A","build B"));
     } else if (runner === "codex") {
@@ -295,13 +297,13 @@ for (const runner of ["claude", "codex", "opencode"] as const) {
     const readiness=new SessionCodebaseReadiness({supervisor:{spawn(){throw new Error("unverified binary must never run");}}});
     const config=codebaseConfig();config.adaptiveMemory.enabled=false;config.webSearch.enabled=false;
     try {
-      const resolver=await resolveSessionChildMcp(adapter,config,{}, {readiness,context:{projectRoot:f.home,sessionId:"fixture",taskId:"lead",signal:new AbortController().signal}});
+      const resolver=await resolveSessionChildMcp(adapter,config,{}, {readiness,nativeSkills,context:{projectRoot:f.home,sessionId:"fixture",taskId:"lead",signal:new AbortController().signal}});
       expect(resolver.capabilityAvailability).toEqual([{capabilityId:"codebase-memory",status:"unavailable",reasonCode:"codebase-memory-unsupported"}]);
       expect(resolver.resolveServer("codebase-memory")).toBeUndefined();expect(f.downloads()).toBe(0);
       expect(readFileSync(configPath)).toEqual(before);expect(readFileSync(f.shared)).toEqual(shared);
       if (runner!=="opencode") {
         const root=join(f.dataRoot,runner,"tools","codebase-native-v0.11.0",`${process.platform}-${process.arch}`);mkdirSync(root,{recursive:true,mode:0o700});writeFileSync(join(root,"codebase-memory-mcp"),"tampered owned artifact",{mode:0o700});
-        await expect(adapter.readSessionMcpServers!(codebaseConfig())).rejects.toThrow("codebase-memory-integrity-failed");
+        await expect(adapter.readSessionCapabilityOverrides!(codebaseConfig())).rejects.toThrow("codebase-memory-integrity-failed");
       }
     } finally {await readiness.close();}
   });

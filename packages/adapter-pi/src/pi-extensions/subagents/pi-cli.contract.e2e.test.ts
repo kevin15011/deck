@@ -49,10 +49,16 @@ describe("deck-subagents in the real Pi 1.0 runtime (faux provider)", () => {
   realTest("a child that cannot start its model is accepted then reports background failure without ending the lead", async () => {
     harness = createPiHarness({ installOptions: { modelAssignments: { "deck-quality": "nope/not-a-model" } } });
     const log = join(harness.root, "provider.jsonl");
-    const run = await harness.run(["go"], { DECK_PI_SESSION: "1", DECK_PI_ROLE: "lead", FAUX_SCRIPT: "delegate", FAUX_PARENT_DELAY_MS: "1500", FAUX_LOG: log, FAUX_DELEGATE: JSON.stringify({ agent: "deck-quality", task: "x" }) }, { persistSession: true });
+    const run = await harness.run(["go"], { DECK_PI_SESSION: "1", DECK_PI_ROLE: "lead", FAUX_SCRIPT: "delegate", FAUX_WAIT_FOR_CHILD: "1", FAUX_LOG: log, FAUX_DELEGATE: JSON.stringify({ agent: "deck-quality", task: "x" }) }, { persistSession: true });
     expect(toolEnd(run.events)?.isError).toBe(false);
     expect(readFileSync(log, "utf8")).toContain("failed");
     expect(JSON.stringify(run.events)).toContain("LEAD_DONE");
+    expect(run.code).toBe(0);
+    const parentFile = join(harness.sessionsDir, readdirSync(harness.sessionsDir).find(n => n.endsWith(".jsonl"))!);
+    const entries = readFileSync(parentFile, "utf8").trim().split("\n").map(line => JSON.parse(line));
+    const job = entries.filter(entry => entry.type === "custom" && entry.customType === "deck-subagents-v1").at(-1).data.jobs[0];
+    expect(job.state).toBe("failed");
+    expect(job.integration).toBe("integrated");
   }, 120_000);
 
   realTest("outside a Deck session the subagent tool is not registered", async () => {

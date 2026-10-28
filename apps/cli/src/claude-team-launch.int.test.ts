@@ -26,7 +26,7 @@ afterEach(async () => {
   await rm(stateHome, { recursive: true, force: true });
 });
 
-test('Claude reopen republishes search selection using current provider without mutating the old generation', async () => {
+test('Claude reopen selects the current search route without republishing the generation', async () => {
   const root = await mkdtemp(join(tmpdir(), 'deck-claude-search-reopen-'));
   const environment: Record<string, string | undefined> = {};
   try {
@@ -46,7 +46,7 @@ test('Claude reopen republishes search selection using current provider without 
     expect(fallback.status).toBe('ready');
     if (fallback.status !== 'ready') throw new Error('fallback launch');
     expect(fallback.plan.envOverlay?.TAVILY_API_KEY?.value).toBe('fixture-only');
-    expect(fallback.plan.generationReference!.root).not.toBe(previousGeneration);
+    expect(fallback.plan.generationReference!.root).toBe(previousGeneration);
     expect(await import('node:fs').then(fs => fs.existsSync(previousGeneration))).toBe(true);
     environment.CLAUDE_CODE_USE_BEDROCK = '0';
     const native = await prepareClaudeInteractiveLaunch(adapter, input);
@@ -127,7 +127,9 @@ test("Claude shared Tavily credential is child-only, redacted, and absent when W
       return { exitCode: 0, stdout: "", stderr: token };
     } });
     expect(result.stderr).toBe("[REDACTED]");
-    expect((await adapter.buildLaunchPlan!({ projectRoot: root, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() })).status).toBe("blocked");
+    const off = await adapter.buildLaunchPlan!({ projectRoot: root, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() });
+    expect(off.status).toBe("blocked");
+    if (off.status === "blocked") expect(off.code).toBe("claude-web-search-selection-stale");
     const disabled = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "claude-development", deckConfig: getDefaultDeckConfig(), capabilityIds: ["claude-team-files"] });
     await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "claude-development", plan: disabled });
     const noSearch = await adapter.buildLaunchPlan!({ projectRoot: root, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() });

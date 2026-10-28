@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createPiHarness, findRealPi } from "../../pi-cli-harness";
 import { createChildRunner } from "./runner";
@@ -8,14 +8,14 @@ import { createDeckSubagentsExtension } from "./extension";
 
 async function until(fn: () => boolean) { const end = Date.now() + 10000; while (!fn()) { if (Date.now() > end) throw new Error("Timed out"); await Bun.sleep(10); } }
 test.skipIf(!["linux", "darwin"].includes(process.platform) || !findRealPi())("native running child queues clarification without interrupting bash or replacing history", async () => {
-  const h = createPiHarness(), started = join(h.root, "started"), ended = join(h.root, "ended"), history = join(h.root, "child.jsonl"), log = join(h.root, "provider.jsonl");
+  const h = createPiHarness({ installOptions: { modelAssignments: { "deck-apply-fast": "faux/faux-1", "deck-investigate": "faux/faux-1", "deck-quality": "faux/faux-1" } } }), started = join(h.root, "started"), ended = join(h.root, "ended"), history = join(h.root, "child.jsonl"), log = join(h.root, "provider.jsonl");
   const runner = createChildRunner({ packageRoot: join(h.agentDir, "deck/package"), piInvocation: args => ({ command: findRealPi()!, args }), killGraceMs: 50,
     env: { PATH: process.env.PATH, HOME: h.home, PI_CODING_AGENT_DIR: h.agentDir, FAUX_LOG: log, FAUX_CHILD_TOOL: "bash", FAUX_CHILD_TOOL_INPUT: JSON.stringify({ command: `touch '${started}'; sleep 1; echo SHELL_FINISHED > '${ended}'` }) } });
   let deliver: ((message: string) => Promise<unknown>) | undefined;
   let pending: ReturnType<typeof runner.run> | undefined;
   try {
     writeFileSync(history, JSON.stringify({ type: "session", version: 3, id: "same-child", timestamp: new Date().toISOString(), cwd: h.project }) + "\n");
-    pending = runner.run({ agent: parseAgentMarkdown("deck-apply-fast", "---\nname: deck-apply-fast\nmodel: faux/faux-1\n---\nApply"), task: "Original authorized assignment", cwd: h.project, sessionFile: history, parentId: "parent", taskId: "task", attempt: 1, onClarifyReady: fn => { deliver = fn; } });
+    pending = runner.run({ agent: parseAgentMarkdown("deck-apply-fast", readFileSync(join(h.agentDir, "deck/package/agents/deck-apply-fast.md"), "utf8")), task: "Original authorized assignment", cwd: h.project, sessionFile: history, parentId: "parent", taskId: "task", attempt: 1, onClarifyReady: fn => { deliver = fn; } });
     await until(() => existsSync(started));
     expect(deliver).toBeFunction();
     expect(await deliver!("Clarify acceptance: check the marker only.")).toMatchObject({ delivery: "accepted" });
@@ -36,9 +36,7 @@ test.skipIf(!["linux", "darwin"].includes(process.platform) || !findRealPi())("n
 }, 20000);
 
 test.skipIf(!["linux", "darwin"].includes(process.platform) || !findRealPi())("existing subagent clarify action reaches packaged native child and rejects terminal/foreign targets", async () => {
-  const h = createPiHarness(), started = join(h.root, "started"), historyLog = join(h.root, "provider.jsonl"), agentsDir = join(h.root, "roles");
-  mkdirSync(agentsDir);
-  writeFileSync(join(agentsDir, "deck-apply-fast.md"), "---\nname: deck-apply-fast\nmodel: faux/faux-1\n---\nApply");
+  const h = createPiHarness({ installOptions: { modelAssignments: { "deck-apply-fast": "faux/faux-1", "deck-investigate": "faux/faux-1", "deck-quality": "faux/faux-1" } } }), started = join(h.root, "started"), historyLog = join(h.root, "provider.jsonl"), agentsDir = join(h.agentDir, "deck/package/agents");
   const tools: any[] = [], handlers: Record<string, any[]> = {}, snapshots: any[] = [];
   const parentFile = join(h.root, "parent.jsonl");
   writeFileSync(parentFile, "");

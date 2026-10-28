@@ -106,6 +106,8 @@ function readIfExists(path: string): string | undefined {
 describe("DeckApp Web Search Developer Team materialization", () => {
   test("dashboard install writes provider-neutral Web Search policy only to Developer Team roles", async () => {
     const root = mkdtempSync(join(tmpdir(), "deck-opencode-web-search-tui-"));
+    const previousStateHome = process.env.XDG_STATE_HOME;
+    process.env.XDG_STATE_HOME = join(root, "state");
     const projectRoot = join(root, "project");
     const configDir = join(root, "home", ".config", "opencode");
     const config = getDefaultDeckConfig();
@@ -249,6 +251,8 @@ describe("DeckApp Web Search Developer Team materialization", () => {
       try {
         await withTimeout(instance.waitUntilExit(), DASHBOARD_WAIT_TIMEOUT_MS, `Ink exit timed out after ${DASHBOARD_WAIT_TIMEOUT_MS}ms`);
       } finally {
+        if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME;
+        else process.env.XDG_STATE_HOME = previousStateHome;
         harness.close();
         rmSync(root, { recursive: true, force: true });
       }

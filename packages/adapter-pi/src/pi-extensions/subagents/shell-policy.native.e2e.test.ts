@@ -6,12 +6,12 @@ import { createChildRunner } from "./runner";
 import { parseAgentMarkdown } from "./agents";
 
 test.skipIf(!["linux", "darwin"].includes(process.platform) || !findRealPi())("custom non-Bash shell cannot acknowledge containment or launch a command", async () => {
-  const h = createPiHarness(), history = join(h.root, "history.jsonl"), effect = join(h.root, "effect");
+  const h = createPiHarness({ installOptions: { modelAssignments: { "deck-apply-fast": "faux/faux-1", "deck-investigate": "faux/faux-1", "deck-quality": "faux/faux-1" } } }), history = join(h.root, "history.jsonl"), effect = join(h.root, "effect");
   try {
     writeFileSync(join(h.agentDir, "settings.json"), JSON.stringify({ packages: ["./deck/package"], shellPath: "/bin/sh" }));
     writeFileSync(history, JSON.stringify({ type: "session", version: 3, id: "child", timestamp: new Date().toISOString(), cwd: h.project }) + "\n", { mode: 0o600 });
     const runner = createChildRunner({ packageRoot: join(h.agentDir, "deck/package"), piInvocation: args => ({ command: findRealPi()!, args }), env: { PATH: process.env.PATH, HOME: h.home, PI_CODING_AGENT_DIR: h.agentDir, FAUX_CHILD_TOOL: "bash", FAUX_CHILD_TOOL_INPUT: JSON.stringify({ command: `echo escape > '${effect}'` }) } });
-    const result = await runner.run({ agent: parseAgentMarkdown("deck-apply-fast", "---\nname: deck-apply-fast\nmodel: faux/faux-1\n---\nApply"), task: "unsupported shell", cwd: h.project, sessionFile: history, parentId: "parent", taskId: "task" });
+    const result = await runner.run({ agent: parseAgentMarkdown("deck-apply-fast", readFileSync(join(h.agentDir, "deck/package/agents/deck-apply-fast.md"), "utf8")), task: "unsupported shell", cwd: h.project, sessionFile: history, parentId: "parent", taskId: "task" });
     expect(result.failed).toBe(true); expect(result.errorMessage).toContain("startup was not verified");
     expect(existsSync(effect)).toBe(false);
     expect(JSON.parse(readFileSync(history + ".execution", "utf8")).effectsUncertain).toBe(true);
@@ -19,10 +19,10 @@ test.skipIf(!["linux", "darwin"].includes(process.platform) || !findRealPi())("c
 }, 10000);
 
 for (const [role, tool] of [["investigate", "bash"], ["quality", "bash"], ["apply-fast", "powershell"]]) test.skipIf(!["linux", "darwin"].includes(process.platform) || !findRealPi())(`packaged child ${role} cannot escape through ${tool}`, async () => {
-  const h = createPiHarness(), log = join(h.root, "provider-log"), effect = join(h.root, "effect");
+  const h = createPiHarness({ installOptions: { modelAssignments: { "deck-apply-fast": "faux/faux-1", "deck-investigate": "faux/faux-1", "deck-quality": "faux/faux-1" } } }), log = join(h.root, "provider-log"), effect = join(h.root, "effect");
   try {
     const runner = createChildRunner({ packageRoot: join(h.agentDir, "deck/package"), piInvocation: args => ({ command: findRealPi()!, args }), env: { PATH: process.env.PATH, HOME: h.home, PI_CODING_AGENT_DIR: h.agentDir, FAUX_LOG: log, FAUX_CHILD_TOOL: tool, FAUX_CHILD_TOOL_INPUT: JSON.stringify({ command: `echo escape > '${effect}'` }) } });
-    const result = await runner.run({ agent: parseAgentMarkdown(`deck-${role}`, `---\nname: deck-${role}\nmodel: faux/faux-1\n---\nRole`), task: "try forbidden shell", cwd: h.project });
+    const result = await runner.run({ agent: parseAgentMarkdown(`deck-${role}`, readFileSync(join(h.agentDir, `deck/package/agents/deck-${role}.md`), "utf8")), task: "try forbidden shell", cwd: h.project });
     expect(result.failed, JSON.stringify(result)).toBe(false);
     expect(existsSync(effect)).toBe(false);
     const calls = readFileSync(log, "utf8").trim().split("\n").map(l => JSON.parse(l));
