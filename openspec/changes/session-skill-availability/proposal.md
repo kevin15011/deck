@@ -25,19 +25,25 @@ The session does not meet this today.
 9. **Session overlay and generation verification.** These are unchanged from revision 1: a typed core overlay, plus a per-runner `NativeRoleDescriptor` re-verified before spawn.
 10. **Parity guard.** For each runner, a structural diff of the native and session launch plans. The native MCP set must be identical. Any other difference must match the final allow-list in `design.md` §5.1, and every capability override needs a named necessity test.
 
+11. **Project-readiness preflight and shared coordination.** One bounded read-only evaluator serves native and cross-runner launches. Every member retains its native runner enablement. OpenSpec/configuration and the skill registry are unconditional; optional shared project components are checked once for unchanged inputs when any participating runner needs them; runner components are checked only for enabled bindings. Lead receives consolidated project and runner-qualified findings through the runner's native session-start channel and receives typed per-member capability data in its roster. Setup repairs only project items through authenticated preparation authority; runner installation/configuration gaps are reported with remediation. The change includes retired Deck testing-policy cleanup, Setup naming and removal of the obsolete readiness producer. It neither grants capabilities to disabled members nor introduces a readiness overlay. A shared preparation service is required; a universal new deck-prepare server is not.
+
+
 ## Sequencing
 
-This lands after option A (`task-b475cdb9…` attempt 2, integrated), the live checks (`task-1295d93c…`, integrated) and the legacy-profile removal (inventory `task-83ac36fe…`). The override-only denial partially reverses option A's "deny all plugin MCP" rule; that reversal is intentional. The shared role tool policy (S2) lands before the runner verticals, because sessions inherit it from the native role.
+Option A and P1–P3 are integrated; legacy removal is committed as `2204c47`. U2+B0 remains with its existing apply-fast owner pending acceptance. This change absorbs U2.9 and follows that acceptance. S2 role policy precedes repair exposure; implement a functioning scoped-readiness/authority/native-delivery vertical before repeating adapter integration. Remove old producer/provider code only after replacement responsibilities are demonstrated. Lead records official OpenSpec updates centrally.
+
 
 ## Non-goals
 
 - A Pi session driver. Pi stays explicitly unsupported and fails closed.
-- Changing native role content, native approval UX or the cross-runner model roster. The one exception is the read-only tool restriction (a shared core safety defect).
+- Unrelated native role-content changes, native approval UX changes, or changes to the cross-runner model roster. Approved role changes are the shared read-only tool restriction, Setup-only preparation visibility and authority guidance, readiness coordination guidance, and Setup naming cleanup.
 - Designing memory mechanisms. Global-scope memory alignment belongs to the adaptive-memory redesign.
 
 ## Risk
 
-The live checks are complete and every branch is locked (`design.md` §7). Two risks remain:
+The earlier P1–P3 parity checks are complete and their branches are locked (`design.md` §7). Two risks remain:
 
 - **Rollout.** The Claude generation hash changes (`SessionStart` hook, route-free `.mcp.json`, policy-generated `tools:`), and the OpenCode and Codex role materializations change too. Existing installs fail closed in sessions until `deck upgrade` runs.
-- **Codex MCP restriction.** Restricting MCP tools on Codex depends on Codex native per-server tool filtering. If that is unavailable, the gap is recorded as a residual native limitation and pinned by the guard, never as a silent session divergence.
+- **Codex MCP restriction.** Restricting MCP tools on Codex depends on Codex native per-server tool filtering. If that is unavailable, the gap is recorded as a residual native limitation and pinned by the guard, never as a silent session divergence. Recording a residual limitation does not satisfy the read-only policy or parity acceptance. If required MCP denies cannot be enforced, the affected read-only role launch remains unavailable and S2 is incomplete for that runner; the guard must not normalize an unsafe tool set into success.
+
+The original parity branches are locked, but readiness delivery and repair identity are not all proven. Codex app-server SessionStart context, Pi lifecycle/AGENTS.md behavior and authenticated Setup-call identity need targeted adapter evidence. Existing server startup checks do not prove project indexing, and a no-network/no-subprocess preflight must return indeterminate when it lacks current bounded index evidence. Registry freshness is runner-exposure-specific even though the file is shared. No paid probes or new universal MCP installation is implied by this design handoff.

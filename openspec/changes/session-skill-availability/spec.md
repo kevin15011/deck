@@ -49,12 +49,25 @@ Before every child spawn, the driver MUST re-verify a host-prepared `NativeRoleD
 
 ### Requirement: Native-first MCP
 
-A session child MUST load the same native MCP set as native Deck in the same runner: user, project (per native trust) and Deck-installed capability servers. The session MAY only:
+A session child MUST load the same native MCP sources as native Deck on that runner, subject to native trust and the shared capability-availability policy. The session MAY add the `deck` session server and override a capability in `SESSION_CAPABILITY_OVERRIDES` (`codebase-memory`). A working override MUST deny only its native entry and supply its verified rebound spec.
 
-- (a) add the `deck` session server, and
-- (b) override a capability listed in `SESSION_CAPABILITY_OVERRIDES` (`codebase-memory`).
+For `codebase-memory` only, trusted launch preparation MAY instead produce an availability omission when effective capability intent remains enabled and the selected backend has a typed unavailable or unsupported outcome. An omission MUST carry current project, runner, generation, selection and backend evidence. It MUST suppress only the exact Deck-owned server for that invocation, supply no replacement, retain enabled intent, and report enabled/unavailable while permitting ordinary work. This is an explicit exception to replacement pairing, not a working override. Native and session launches MUST apply the same rule. Disabled intent, integrity/ownership failure, cancellation, unclassified errors and unverified generations MUST NOT enter this exception.
 
-An override MUST deny the native entry for that capability only and MUST supply the rebound spec. The adapter MUST NOT deny, drop or re-supply any other native or plugin server.
+The adapter MUST NOT deny, drop or re-supply any other native or plugin server under this rule. It MUST preserve installed generation and selection bytes, native role selection and exact role restrictions. Raw server-name lists, model-supplied fields and report text MUST NOT authorize an omission. Recovery MUST use fresh evidence at the next supported launch/resume boundary. No installation, persisted disablement or project repair authority follows from availability omission.
+
+### Scenario: Enabled Codebase temporarily unavailable
+- GIVEN a verified enabled generation and trusted typed unavailable evidence for its selected Codebase route
+- WHEN a native or session invocation is admitted
+- THEN the exact Deck Codebase server is prevented from loading, no replacement is fabricated, and ordinary work can start
+- AND the roster reports enabled/unavailable through the native context channel
+- AND all unrelated native sources, role bytes and installed selection bytes are preserved
+- AND fresh ready evidence on a later invocation restores the permitted route without a configuration write.
+
+### Scenario: Omission does not bypass disabled or integrity policy
+- GIVEN disabled intent, a stale selection, an unverified generation, or an integrity failure
+- WHEN an omission is requested
+- THEN the omission path is rejected under the existing admission policy
+- AND disabled capabilities cause no optional backend check or new capability grant.
 
 #### Scenario: Claude plugin servers load natively
 - GIVEN the verified Claude generation declares `context7` and `codebase-memory` in `.mcp.json`
@@ -110,11 +123,13 @@ A session child MUST receive the same skills, hooks and execution plugins or pol
 
 ### Requirement: Structural parity guard with documented allow-list
 
+Readiness full bytes MUST match on equal complete scopes/evidence. On unequal scopes only the typed additional-participant coordination projection in allow-list row 12 MAY differ; native channel, local capability policy and independently derived local/base projection remain identical.
+
 For each runner that has a session driver, a test MUST build the native and session launch plans (Lead and `quality`, in relay and in `yolo`) from the same fixture install. It MUST normalize both into a `ParityLaunchShape` and fail on:
 
 - any field difference without a `SESSION_PARITY_ALLOWLIST` entry;
 - any unused entry;
-- any difference in `mcpNative` or `webSearch`.
+- any unrelated native MCP declaration/exposure or `webSearch` difference; Codebase route/omission differences require independently established backend evidence under the approved availability rule.
 
 Entries MUST use one of these categories: ledger, delegation, approval-relay, session-mode, evidence, headless-transport, capability-override, temporary-tracked or unsupported. A `temporary-tracked` entry MUST name an owner, an expiry condition and a `reviewBy` date, and the guard MUST fail once that date has passed.
 
@@ -158,3 +173,193 @@ Project-scope memory in a session MUST use the same launch builders and environm
 ### Requirement: Pi session support is explicit
 
 Until a Pi session driver exists, the session MUST NOT offer Pi as a member runner. Delegating to a Pi-assigned member MUST fail closed with `session-runner-unsupported`. Session memory composition that exists only for a Pi lead (`createSessionMemoryPort`) MUST be removed while no Pi driver exists.
+
+
+### Requirement: Readiness scope preserves native member enablement
+
+Deck MUST use the same native enablement resolvers for each member's actual runner in native and cross-runner operation. OpenSpec initialization/configuration, retired Deck testing-policy cleanup and the skill registry MUST be unconditional project components. Optional shared project components MUST be evaluated once for unchanged inputs when ANY participating runner enables them. Runner components MUST be evaluated only for participating enabled runner bindings.
+
+The union of project prerequisites MUST NOT grant any member a capability, instruction bundle, plugin, MCP tool or permission. A disabled capability MUST NOT be probed, marked degraded, repaired, installed or given an installation recommendation for that disabled runner. It MAY appear as `disabled` in the capability roster.
+
+#### Scenario: Lead disabled and a member enabled
+- GIVEN Lead on Claude has Codebase Memory disabled and Quality on Codex has it enabled
+- WHEN readiness is prepared
+- THEN one shared project index observation is requested with Quality/Codex as a consumer
+- AND only the enabled Codex binding receives Codebase Memory runner checks
+- AND Lead receives the consolidated finding without receiving Codebase Memory tools or instructions
+- AND the roster reports Lead disabled and Quality enabled with independently evidenced availability.
+
+#### Scenario: No participant enables an optional capability
+- GIVEN every participant disables capability C
+- WHEN preflight, formatting and repair selection run
+- THEN C causes zero optional file/runtime probes, degradations, repairs or install suggestions
+- AND OpenSpec and registry checks still run.
+
+#### Scenario: Shared component and two runner gaps
+- GIVEN two enabled runner bindings require one project component
+- WHEN both bindings have distinct installation defects
+- THEN the project component is evaluated once and identifies both consumers
+- AND two runner-qualified report-only findings are retained without conflating their remedies.
+
+### Requirement: Bounded evidence-only preflight
+
+All topologies MUST use one shared readiness evaluator. The evaluator MUST make no writes, network calls or subprocess launches. Supplied config, exposure snapshots and previously produced runtime evidence MUST be distinguished from local bounded reads. All reads/stats, bytes and parsing work MUST be bounded; fingerprint validation is included in those bounds.
+
+Unknown, stale, unreadable or over-budget evidence MUST be `indeterminate`, never inferred ready or repairable. A component error MUST NOT erase independent proven findings. Invalid trusted scope/root MUST invalidate the complete evaluation. The evaluator MUST NOT auto-launch Setup or block ordinary work.
+
+#### Scenario: Unknown index state
+- GIVEN an enabled Codebase Memory backend has initialized and advertises graph tools
+- AND no current project-bound index observation exists
+- WHEN preflight runs
+- THEN index state is indeterminate
+- AND no MCP call, process startup, indexing or synthetic ready marker occurs.
+
+#### Scenario: Guessed directory exists
+- GIVEN `.codebase-memory` exists in the project or HOME
+- WHEN no supported metadata contract proves project identity and index freshness
+- THEN directory presence alone cannot produce verified index readiness
+- AND absence of a guessed directory alone cannot authorize indexing.
+
+#### Scenario: Partial uncertainty
+- GIVEN registry freshness cannot be established within budget but OpenSpec has a proven retired Deck policy field
+- WHEN preflight runs
+- THEN registry is indeterminate and excluded from automatic repair
+- AND the independently proven OpenSpec finding remains actionable.
+
+#### Scenario: Registry evidence is scoped
+- GIVEN one shared registry file and different authorized source exposures for two runners
+- WHEN readiness runs
+- THEN shared bytes are read once
+- AND one runner's freshness status is not copied to the other
+- AND neither runner enumerates the other's exclusive roots
+- AND no alternating per-runner refresh loop rewrites the shared file.
+
+### Requirement: Consolidated findings and member capability roster
+
+Lead MUST receive one deterministic readiness block for proven degraded findings. Shared project findings MUST name their enabled consumers; runner findings MUST name the affected runner/binding. Only project findings eligible for repair MUST request Setup delegation. Runner installation, plugin and credential findings MUST be report-only with appropriate remediation.
+
+The member roster MUST distinguish disabled capability intent from enabled/ready, enabled/unavailable and enabled/unverified availability. Current assignment and preserved task-continuation assignment MUST not be confused. Roster data MUST NOT imply authority to install or enable a capability.
+
+#### Scenario: Runner-only problem
+- GIVEN a ready project and an enabled runner with a missing plugin
+- WHEN Lead receives the consolidated block
+- THEN the finding names that runner and its remediation
+- AND it does not request Setup to install or upgrade the plugin.
+
+#### Scenario: Ready or wholly unknown result
+- WHEN no component is proven degraded
+- THEN no readiness block is emitted
+- AND indeterminate details remain in diagnostics while the roster may report enabled/unverified.
+
+### Requirement: Native session-start delivery remains the sole readiness channel
+
+Claude MUST use its hashed plugin SessionStart hook; Codex its trusted Deck native hook; OpenCode its execution plugin lifecycle/system transform; Pi its native extension lifecycle. These mechanisms MUST be used in both native and supported cross-runner launches. Project instructions MUST be supplied only where the runner does not already load them. Readiness MUST NOT depend on optional memory enablement.
+
+The session overlay MUST NOT carry readiness findings, repair instructions, the readiness marker or project instructions. Its existing Lead delegation/roster section MAY contain typed member capability data. A missing native delivery mechanism MUST be repaired in that adapter rather than bypassed through the overlay.
+
+#### Scenario: Mixed roster delivery
+- GIVEN a trusted mixed-runner snapshot is prepared by the coordinator
+- WHEN a Claude Lead starts or resumes
+- THEN the native SessionStart hook emits the consolidated block once
+- AND its overlay contains neither that block nor its findings copied into notices.
+
+#### Scenario: Memory disabled
+- GIVEN adaptive memory is disabled on every participant
+- WHEN a project has a proven readiness defect
+- THEN the native readiness channel still delivers the finding
+- AND no memory plugin is loaded to provide that channel.
+
+#### Scenario: Same scope, same bytes
+- GIVEN identical complete readiness scope and evidence for native and session launch on runner R
+- WHEN their native channels compose context
+- THEN the full channel bytes are equal.
+
+#### Scenario: Different roster, bounded difference
+- GIVEN native R has only native participants while session R has additional runners
+- WHEN parity is evaluated
+- THEN the local/base projection and delivery mechanism remain equal
+- AND only typed coordination data derived from the additional participants may differ under the narrow evidence allow-list entry
+- AND dropping the hook, adding disabled tools or copying readiness into the overlay still fails.
+
+### Requirement: Session cache and repair deduplication
+
+A trusted coordinator MUST share immutable snapshots across child processes. Component cache keys MUST include relevant policy, input and runner-binding evidence; session keys MUST also include epoch and effective roster identity. Process-local hook maps alone MUST NOT be described as a session-wide cache.
+
+The coordinator MUST revalidate bounded dependencies at start/resume/compaction and explicit relevant lifecycle changes, reuse unchanged component results, and invalidate changed scope/evidence. Previously absent files MUST participate in invalidation. An enablement change MUST be rechecked before repair. No per-turn filesystem scanning is permitted in a system transform.
+
+#### Scenario: Concurrent starts and duplicate delivery
+- GIVEN two children request the same unchanged project component concurrently
+- THEN only one component evaluation runs
+- AND each prompt assembly receives at most one readiness segment
+- AND repeated lifecycle delivery does not create another Setup task for the same unresolved finding.
+
+#### Scenario: Roster or config changes
+- GIVEN a new enabled runner joins or a runner's relevant capability/configuration changes
+- WHEN the next affected execution is admitted
+- THEN the coordinator refreshes affected observations and the roster through the native delivery lifecycle
+- AND unaffected OpenSpec evidence is reused
+- AND removal of the last enabled consumer removes optional repair eligibility.
+
+#### Scenario: Continuation retains its runner
+- GIVEN a member's new-task assignment changes from Claude to Codex
+- WHEN an older Claude task is continued
+- THEN its actual Claude assignment participates in readiness and appears in the roster
+- AND Codex configuration is not substituted for that task's enablement.
+
+#### Scenario: Resume after repair or restart
+- GIVEN a Setup attempt already exists for a finding
+- WHEN the session resumes with unchanged evidence
+- THEN the prior attempt is reused/reconciled rather than duplicated
+- AND changed project bytes invalidate affected evidence
+- AND a restarted authority never accepts the old process token or blindly retries an uncertain effect.
+
+### Requirement: Trusted Setup authority for project repair
+
+Only a trusted runtime-selected Setup invocation with an exact Lead delegation MAY request modifying project preparation. The service MUST authenticate the selected role and invocation independently of caller-provided tool fields and native tool allow-lists. It MUST revalidate the current scope, enablement, evidence and exact targets under a target lock, reject non-degraded or report-only requests, then issue and consume single-use process-local authority before each concrete effect.
+
+Claims MUST bind session/epoch, requester runner, executor binding when different, canonical project, delegation, component evidence and exact action/target set. Role, scope or executor arguments from a model MUST NOT mint or widen authority. Missing identity, expired/replayed/restarted authority or changed source bytes MUST fail closed without a write fallback. The implementation MUST preserve existing project-only mutation limits and MUST NOT write user configuration, install tools, change Git state or write centralized SDD state/events.
+
+#### Scenario: Setup disabled, enabled executor available
+- GIVEN Setup's runner disables optional capability C but another participant enables C
+- AND shared project component C is proven degraded
+- WHEN the trusted Setup invocation requests its exact delegated project repair
+- THEN the core service may execute only the bounded project operation using that enabled participant's verified initializer binding
+- AND authority records requester and executor separately
+- AND Setup receives no C tools, instructions, plugin or enablement change
+- AND no extra paid member is started.
+
+#### Scenario: No eligible executor or disabled before repair
+- GIVEN the last enabled consumer disappears, becomes disabled, or has no safe verified initializer
+- WHEN Setup requests the old repair
+- THEN no optional capability effect runs
+- AND the handoff reports the current limitation without enabling or reassigning a member.
+
+#### Scenario: Forged role or scope
+- WHEN Lead, Apply, a user-defined MCP client or an unbound process calls repair with `agentId: deck-setup`, forged roster or another runner identity
+- THEN the service rejects the request before any effect, even if a tool-visibility rule failed.
+
+#### Scenario: One nonce and multiple operations
+- GIVEN a delegated batch contains two concrete operations
+- WHEN the service executes it
+- THEN each effect has a valid separate reservation or a deliberately defined atomic batch authorization
+- AND a consumed single-operation token cannot authorize the second effect.
+
+### Requirement: Deterministic retired Deck testing-policy cleanup
+
+Setup MUST remove retired Deck TDD policy fields from their supported top-level and nested policy locations, move command-valued gate entries losslessly into testing commands with collision handling, and set proportional policy where absent or strict. It MUST preserve unrelated content, user command text, comments, key order and style; report a diff; be idempotent; and preserve prior bytes on digest mismatch or unsupported/lossy transformation. Similarly named keys in user command maps or opaque user data MUST not be treated as Deck policy. Strict TDD and legacy compatibility MUST NOT survive as an opt-in or fallback.
+
+#### Scenario: Policy removed, commands preserved
+- GIVEN supported retired policy fields, gate commands, unrelated data and an existing colliding command name
+- WHEN Setup repairs the config
+- THEN retired policy is gone, each command is preserved, collisions are resolved without loss and unrelated data remains
+- AND a second run is unchanged
+- AND a concurrent edit prevents the stale write.
+
+### Requirement: One producer and Setup naming
+
+After the new producer is wired, Deck MUST remove the unused needs-init readiness path and dead deck-init role/content remnants, use Setup naming, and include Setup in the default delegable member catalog. Existing trusted native-provider seams MAY be reused for the selected transport; their removal MUST not precede equivalent authority and lifecycle support. A new universal deck-prepare server is not required by this specification.
+
+
+### Approved availability parity evidence
+
+Each lane independently derives installed declarations, selected backend route, actual omitted servers and effective exposure. Equal intent and backend evidence require equal omission. Native-healthy and managed-unavailable evidence may differ only for Codebase under its override necessity rationale. Missing sources must never be normalized back into availability. Read-only safety applies independently of lane equality.
