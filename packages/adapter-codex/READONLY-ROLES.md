@@ -1,0 +1,7 @@
+# Codex review-role enforcement
+
+Deck cross-runner `deck-quality` and `deck-investigate` threads use `sandbox: read-only` and `approvalPolicy: never`, including runner-default approval mode. Deck denies permission/file/command escalation requests. Per-thread MCP configuration disables inherited servers and unknown Deck servers; approved Deck servers receive `enabled_tools` from Core's `ROLE_TOOL_POLICY`. Runtime inventory is checked before sending the prompt. Unexpected servers or tools fail closed. Apps and plugins are disabled for these threads.
+
+Verified against installed `codex-cli 0.164.0`. The versioned [MCP configuration source](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/config/src/mcp_types.rs) defines `enabled_tools` and `disabled_tools`.
+
+Native installs publish both role files with `sandbox_mode = "read-only"`. **Native residual:** Codex 0.164.0 [role overrides](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/agent/role.rs) do not project `mcp_servers` or `sandbox_mode`; native children inherit their parent's authority. Role TOML alone therefore does not enforce either restriction on native subagents. For enforced review isolation use Deck cross-runner sessions, or configure the native parent itself with read-only sandbox and an MCP allowlist. Publishing the roles restores native availability, not enforcement parity. Deck does not silently modify the parent team's permissions or user MCP configuration.
