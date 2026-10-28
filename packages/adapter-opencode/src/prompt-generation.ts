@@ -1,3 +1,4 @@
+import { openCodeRoleGeneration } from "./native-role";
 /**
  * Prompt file generation for OpenCode Developer Team.
  *
@@ -218,7 +219,7 @@ export function buildPromptGenerationPlan(
       authorization,
     );
 
-    return { agent, absolutePath: promptPath, content };
+    return { agent, absolutePath: promptPath, content: `<!-- deck-role-generation:${openCodeRoleGeneration()} -->\n${content}` };
   });
 }
 

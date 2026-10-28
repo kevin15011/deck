@@ -1,3 +1,4 @@
+import { ROLE_TOOL_POLICY, isReadOnlyRole, readOnlyMcpTools } from "@deck/core/session/role-tool-policy";
 import { assertNoContributionSymlink, readRunnerContributions, contributionHash } from "@deck/core";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -9,7 +10,6 @@ import {
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import {
   buildCapabilityInstructionBundle,
-  buildCapabilityToolPolicyBundle,
   composeCapabilityInstructions,
   getEnabledPackageInstructionIds,
 } from "@deck/core/teams/developer/instruction-bundles";
@@ -262,64 +262,9 @@ const ORCHESTRATOR_TOOLS: Record<string, boolean> = {
 // Agent entry builder
 // ---------------------------------------------------------------------------
 
-/**
- * Get target agents from tool policy bundle.
- * Returns apply agents list from policy, falls back to empty array if no serena policy.
- */
-function getTargetAgentsFromPolicy(
-  toolPolicyBundle?: ReturnType<typeof buildCapabilityToolPolicyBundle>,
-): readonly string[] {
-  return toolPolicyBundle?.policies?.serena?.targetAgents ?? [];
-}
-
-/**
- * Build Serena tools dict from tool policy.
- * Returns a Record<string, boolean> from policy.enabledTools, or empty if no serena policy.
- */
-function buildSerenaToolsDict(
-  toolPolicyBundle?: ReturnType<typeof buildCapabilityToolPolicyBundle>,
-): Record<string, boolean> {
-  const enabledTools = toolPolicyBundle?.policies?.serena?.enabledTools;
-  if (!enabledTools || enabledTools.length === 0) {
-    return {};
-  }
-  return Object.fromEntries(enabledTools.map((t) => [t, true])) as Record<string, boolean>;
-}
-
-/**
- * Resolve Serena tools for a specific agent based on role.
- * Non-apply agents get only read-only tools.
- * Apply agents get read-only + write tools.
- */
-function resolveSerenaToolsForAgent(
-  agentId: string,
-  toolPolicyBundle?: ReturnType<typeof buildCapabilityToolPolicyBundle>,
-): Record<string, boolean> {
-  const policy = toolPolicyBundle?.policies?.serena;
-  if (!policy) {
-    return {};
-  }
-
-  const isApplyAgent = policy.targetAgents.includes(agentId as "deck-apply-fast" | "deck-apply-deep");
-  const readOnly = policy.readOnlyTools ?? [];
-  const write = policy.writeTools ?? [];
-
-  let allowedTools: string[];
-  if (isApplyAgent) {
-    // Apply agents get both read-only and write tools
-    allowedTools = [...readOnly, ...write];
-  } else {
-    // Non-apply agents get only read-only tools
-    allowedTools = [...readOnly];
-  }
-
-  return Object.fromEntries(allowedTools.map((t) => [t, true])) as Record<string, boolean>;
-}
-
 function buildAgentEntry(
   agent: DeveloperTeamAgent,
   promptReference: string,
-  toolPolicyBundle?: ReturnType<typeof buildCapabilityToolPolicyBundle>,
   options?: {
     cliModelOverride?: string;
     configModelOverrides?: Record<string, string>;
@@ -332,7 +277,8 @@ function buildAgentEntry(
   const isChanged = options?.changedAgentIds?.includes(agent.id) ?? false;
   const hasPersistedModel = Object.prototype.hasOwnProperty.call(options?.configModelOverrides ?? {}, agent.id);
   const hasPersistedReasoning = Object.prototype.hasOwnProperty.call(options?.reasoningEffortOverrides ?? {}, agent.id);
-  const serenaTools = resolveSerenaToolsForAgent(agent.id, toolPolicyBundle);
+  const readOnly = isReadOnlyRole(agent.id);
+  const allowed = [...ROLE_TOOL_POLICY.builtins, ...readOnlyMcpTools(Object.keys(ROLE_TOOL_POLICY.mcp), (server, tool) => [`${server}_${server === "web-search" ? `tavily_${tool}` : tool}`])];
   const modelConfig = isChanged || hasPersistedModel ? resolveModelConfig(
     agent.id,
     options?.cliModelOverride,
@@ -341,15 +287,14 @@ function buildAgentEntry(
     undefined,
     options?.capabilityMap,
   ) : undefined;
-  const tools = isOrchestrator
-    ? ORCHESTRATOR_TOOLS
-    : Object.keys(serenaTools).length > 0 ? { ...SUBAGENT_BASE_TOOLS, ...serenaTools } : SUBAGENT_BASE_TOOLS;
+  const tools = readOnly ? { "*": false, bash: false, edit: false, write: false, ...Object.fromEntries(allowed.map(tool => [tool, true])) } : isOrchestrator ? ORCHESTRATOR_TOOLS : SUBAGENT_BASE_TOOLS;
   const entry: AgentEntry = {
     description: agent.description,
     mode: isOrchestrator ? "primary" : "subagent",
     prompt: promptReference,
     tools,
   };
+  if (readOnly) entry.permission = { "*": "deny", ...Object.fromEntries(allowed.map(tool => [tool, "allow"])) };
   // Exact persisted assignments are re-emitted so legacy IDs can migrate onto the
   // seven-role inventory. An explicit change may additionally clear the variant.
   if (isChanged || hasPersistedModel) {
@@ -467,14 +412,6 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     ? translateOpenCodeCapabilityInstructions({ instructions: Object.freeze(options.capabilityInstructions.instructions.filter((fragment) => fragment.packageId !== "adaptive-memory")) })
     : undefined;
 
-  // Build tool policies from capability instructions for dynamic tool resolution
-  const toolPolicyBundle =
-    capabilityInstructions && capabilityInstructions.instructions.length > 0
-      ? buildCapabilityToolPolicyBundle(
-          capabilityInstructions.instructions.map((f) => f.packageId) as Parameters<typeof buildCapabilityToolPolicyBundle>[0],
-        )
-      : undefined;
-
   const resolvedPersonality: OrchestratorPersonality = options?.personality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
   const promptProfile = "compact" as const;
 
@@ -482,7 +419,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   const agentEntries: Record<string, AgentEntry> = {};
   for (const agent of DEVELOPER_TEAM_AGENTS) {
     const promptReference = buildPromptReference(configDir, agent.id);
-    agentEntries[agent.id] = buildAgentEntry(agent, promptReference, toolPolicyBundle, {
+    agentEntries[agent.id] = buildAgentEntry(agent, promptReference, {
       cliModelOverride: options?.cliModelOverride,
       configModelOverrides: options?.configModelOverrides,
       reasoningEffortOverrides: options?.reasoningEffortOverrides,

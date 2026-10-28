@@ -202,7 +202,8 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
   test("subagents have correct tool whitelist", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
     const explorer = plan.agentEntries["deck-investigate"];
-    expect(explorer.tools).toEqual({ bash: true, edit: true, read: true, write: true });
+    expect(explorer.tools).toMatchObject({ "*": false, bash: false, edit: false, read: true, write: false });
+    expect(explorer.permission).toMatchObject({ "*": "deny", read: "allow" });
   });
 
   test("orchestrator has delegation tools", () => {
@@ -1388,8 +1389,9 @@ describe("dynamic tool resolution", () => {
       expect(explorerEntry.tools.insert_after_symbol).toBeUndefined();
       expect(explorerEntry.tools.insert_before_symbol).toBeUndefined();
 
-      // Should have base tools
-      expect(explorerEntry.tools.bash).toBe(true);
+      // Retired selection cannot widen the canonical read-only policy.
+      expect(explorerEntry.tools.bash).toBe(false);
+      expect(explorerEntry.tools["*"]).toBe(false);
     } finally {
       cleanup(projectRoot);
     }

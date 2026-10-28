@@ -441,3 +441,74 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(kept.expectedFiles.find((file) => file.relativePath === ".codex/config.toml")!.content).toContain("mcp.supermemory.ai");
   });
 });
+
+for (const retiredRole of ["deck-quality", "deck-investigate"]) test(`publishes owned ${retiredRole} and preserves unknown role bytes`, () => {
+  const path = `.codex/agents/${retiredRole}.toml`;
+  const fresh = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/p", existingFiles: new Map() });
+  expect(fresh.blocked).toBe(false);
+  for (const role of ["deck-quality", "deck-investigate"]) {
+    expect(fresh.expectedFiles.find(f => f.relativePath === `.codex/agents/${role}.toml`)?.content).toContain('sandbox_mode = "read-only"');
+    expect(fresh.inventory.agentRoleIds).toContain(role);
+  }
+  for (const owned of [false, true]) {
+    const source = 'name = "deck-quality"\nsandbox_mode = "read-only"\n';
+    const files = new Map([[path, source], [".codex/config.toml", '[mcp_servers.user]\ncommand = "arbitrary-shell"\n']]);
+    if (owned) files.set(".codex/deck/manifest.json", JSON.stringify({ version: 1, files: { [path]: createHash("sha256").update(source).digest("hex") } }));
+    const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/p", existingFiles: files });
+    expect(plan.blocked).toBe(!owned);
+    expect(plan.mutations.some(m => m.relativePath === path && m.operation !== "delete" && m.rollback === "restore")).toBe(owned);
+    expect(files.get(path)).toBe(source);
+    expect(plan.diagnostics.some(d => d.code === "codex-readonly-native-policy-unverified")).toBe(false);
+  }
+});
+
+for (const role of ["deck-quality", "deck-investigate"]) {
+  test(`preserves modified prior ${role}`, () => {
+    const path = `.codex/agents/${role}.toml`;
+    const source = `name = "${role}"\n`;
+    const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/p", existingFiles: new Map([
+      [path, source + "# user edit\n"],
+      [".codex/deck/manifest.json", JSON.stringify({ version: 1, files: { [path]: createHash("sha256").update(source).digest("hex") } })],
+    ]) });
+    expect(plan.blocked).toBe(true);
+    expect(plan.mutations.some(m => m.relativePath === path)).toBe(false);
+  });
+}
+
+test("upgrades legacy marked codebase MCP and records ownership for subsequent edit protection", () => {
+  const source = '# deck-codex-mcp:codebase-memory\n[mcp_servers.codebase-memory]\ncommand = "/tools/codebase-memory-mcp"\n';
+  const input = { projectRoot: "/p", mcpCapabilityIds: ["codebase-memory"], codebaseMemoryCommand: "/tools/codebase-memory-mcp" };
+  const first = buildCodexDeveloperTeamInstallPlan({ ...input, existingFiles: new Map([[".codex/config.toml", source]]) });
+  expect(first.blocked).toBe(false);
+  const files = new Map(first.expectedFiles.map(f => [f.relativePath, f.content]));
+  expect(files.get(".codex/config.toml")).toContain("CBM_RUNTIME_DIR");
+  expect(buildCodexDeveloperTeamInstallPlan({ ...input, existingFiles: files }).blocked).toBe(false);
+  files.set(".codex/config.toml", files.get(".codex/config.toml")!.replace('/tools/codebase-memory-mcp', '/user/custom'));
+  expect(buildCodexDeveloperTeamInstallPlan({ ...input, existingFiles: files }).blocked).toBe(true);
+  expect(buildCodexDeveloperTeamInstallPlan({ ...input, existingFiles: new Map([[".codex/config.toml", source.replace('# deck-codex-mcp:codebase-memory\n', '')]]) }).blocked).toBe(true);
+});
+
+test.each([false,true])("adopts only a byte-identical marked hook without a receipt (edited=%s)", edited => {
+  const initial = buildCodexDeveloperTeamInstallPlan({projectRoot:"/p",existingFiles:new Map()});
+  const config = initial.expectedFiles.find(file=>file.relativePath === ".codex/config.toml")!.content;
+  const hook = config.match(/^# deck-codex-hook:memory-bridge:start\n[\s\S]*?^# deck-codex-hook:memory-bridge:end$/m)![0];
+  const existing = edited ? hook.replace("command =", "# user edit\ncommand =") : hook;
+  const next = buildCodexDeveloperTeamInstallPlan({projectRoot:"/p",existingFiles:new Map([[".codex/config.toml",existing]])});
+  const manifest=JSON.parse(next.expectedFiles.find(file=>file.relativePath === ".codex/deck/manifest.json")!.content);
+  expect(manifest.contributions.some((entry:any)=>entry.selector.kind === "text" && entry.selector.start === "# deck-codex-hook:memory-bridge:start")).toBe(!edited);
+  // protects: an edited, unowned Deck hook is refused and its bytes are never rewritten.
+  expect(next.blocked).toBe(edited);
+});
+
+test("preserves an edited receipt-less RTK hook when RTK is deselected", () => {
+  const initial = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/p", existingFiles: new Map(), rtkHook: { nodeCommand: "/tools/node", rtkBinary: "/tools/rtk" } });
+  const config = initial.expectedFiles.find(file => file.relativePath === ".codex/config.toml")!.content;
+  const hook = config.match(/^# deck-codex-hook:rtk:start\n[\s\S]*?^# deck-codex-hook:rtk:end$/m)![0];
+  const source = hook.replace("command =", "# user edit\ncommand =") + "\n";
+  const existingFiles = new Map([[".codex/config.toml", source]]);
+  const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/p", existingFiles });
+  expect(plan.blocked).toBe(true);
+  expect(plan.diagnostics.some(d => d.code === "trusted-hook-config-collision")).toBe(true);
+  expect(plan.mutations.some(m => m.relativePath === ".codex/config.toml")).toBe(false);
+  expect(existingFiles.get(".codex/config.toml")).toBe(source);
+});
