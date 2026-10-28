@@ -114,7 +114,8 @@ test.each(["runner", "model", "route-race"])("preserved Setup continuation refre
     expect(nativeContext.stdout.toString()).toContain("Native preparation repair is unavailable");
     expect(readFileSync(configFile, "utf8")).toBe(original);
     const context = () => Bun.spawnSync(["/bin/sh", "-c", hookCommand], { cwd: project, env: { ...process.env, ...children[1]!.env }, stdout: "pipe", stderr: "pipe" });
-    expect(context().exitCode).toBe(0); expect(context().stdout.toString()).toContain("retired-policy-present");
+    const initialContext = context();
+    expect(initialContext.exitCode).toBe(0); expect(initialContext.stdout.toString()).toContain("retired-policy-present");
     init(1);
     const input = new PassThrough(), replies: any[] = [];
     const done = runSessionMcpBridge({ input, write: line => { replies.push(JSON.parse(line)); }, version: "test", env: { DECK_SESSION_CREDENTIAL_FILE: sessionPaths(paths, sessionId).taskCredentialFile(taskId) } }); streams.push({ input, done });

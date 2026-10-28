@@ -179,7 +179,7 @@ describe("Pi active-runner skill discovery provider", () => {
   test("treats absent Pi roots as a complete empty source set", async () => {
     const home = tempHome();
     try {
-      const result = await createPiRunnerAdapter({ homeDirectory: home }).skillDiscovery!.listSources({
+      const result = await createPiRunnerAdapter({ homeDirectory: home, env: {} }).skillDiscovery!.listSources({
         projectRoot: join(home, "missing-project"),
       });
 
@@ -199,7 +199,7 @@ describe("Pi active-runner skill discovery provider", () => {
       mkdirSync(skillsRoot, { recursive: true });
       chmodSync(skillsRoot, 0o000);
 
-      const result = await createPiRunnerAdapter({ homeDirectory: home }).skillDiscovery!.listSources({ projectRoot });
+      const result = await createPiRunnerAdapter({ homeDirectory: home, env: {} }).skillDiscovery!.listSources({ projectRoot });
 
       expect(result.outcome).toBe("indeterminate");
       if (result.outcome === "indeterminate") {
@@ -248,7 +248,7 @@ describe("Pi active-runner skill discovery provider", () => {
       mkdirSync(join(userSkill, ".."), { recursive: true });
       writeFileSync(projectSkill, "# project", "utf-8");
       writeFileSync(userSkill, "# user", "utf-8");
-      const provider = createPiRunnerAdapter({ homeDirectory: home }).skillDiscovery!;
+      const provider = createPiRunnerAdapter({ homeDirectory: home, env: {} }).skillDiscovery!;
 
       await expect(provider.resolveLocator({ projectRoot, locator: "project:.pi/skills/project-skill/SKILL.md" })).resolves.toMatchObject({
         status: "available",

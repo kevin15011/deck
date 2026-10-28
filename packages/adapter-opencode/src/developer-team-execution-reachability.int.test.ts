@@ -656,6 +656,7 @@ function sha256Hex(value: string): string {
 test("OpenCode execution hooks ignore legacy Deck memory loopback configuration", async () => {
   const posts: unknown[] = [];
   const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1({
+    environment: {},
     memoryLoopback: {
       endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
       token: "legacy-token",
@@ -836,7 +837,11 @@ function runIsolatedNativeSkillDiscoveryTest(exercise: () => Promise<void>): voi
       import createOpenCodeDeveloperTeamExecutionPluginDefault from ${JSON.stringify(pluginUrl)};
       await (${exercise.toString()})();
     `;
-    const run = Bun.spawnSync({ cmd: [process.execPath, "--eval", script], cwd: project, env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
+    const env: Record<string, string | undefined> = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, ".config"), XDG_STATE_HOME: join(home, ".local/state"), XDG_CACHE_HOME: join(home, ".cache") };
+    // This native fixture owns no session handoff. Never consume the invoking
+    // developer session's private readiness record in its temporary project.
+    for (const key of Object.keys(env)) if (key.startsWith("DECK_SESSION_START_")) delete env[key];
+    const run = Bun.spawnSync({ cmd: [process.execPath, "--eval", script], cwd: project, env, stdout: "pipe", stderr: "pipe" });
     expect({ exitCode: run.exitCode, stderr: run.stderr.toString().replaceAll("deck-preparation: native-snapshot-unavailable\n", "") }).toEqual({ exitCode: 0, stderr: "" });
   } finally {
     rmSync(root, { recursive: true, force: true });

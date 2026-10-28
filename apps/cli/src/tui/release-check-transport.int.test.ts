@@ -53,8 +53,10 @@ localTest("preabort spawns nothing; active API/asset cancellation cleans up with
   });
 }, 10000);
 
-localTest("async transport preserves sync descriptor/cache/legacy/error validation", async () => {
-  for (const mode of ["success", "sync", "invalid", "mismatch", "missing", "api-error"]) await exercise(mode, (result, root, children) => {
+// Each independently isolated scenario has its own deadline; six application
+// startups are not one transport operation. exercise still caps every probe at 8s.
+localTest.each(["success", "sync", "invalid", "mismatch", "missing", "api-error"])("async transport preserves descriptor/cache/legacy/error validation: %s", async mode => {
+  await exercise(mode, (result, root, children) => {
     if (mode === "success" || mode === "sync") {
       expect(result.state.kind).toBe("descriptor");
       expect(result.state.commit).toBe("abcdef1234567");

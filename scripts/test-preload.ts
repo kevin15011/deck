@@ -1,3 +1,5 @@
+import "./test-isolation";
+
 // Tests import the production CLI, which embeds the generated web application.
 // Generate it before test modules load so a fresh checkout needs no prior build.
 import { resolve } from "node:path";

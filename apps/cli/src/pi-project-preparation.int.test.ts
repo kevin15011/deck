@@ -32,8 +32,10 @@ test.each(['repair','generation','concurrent-edit'])('production Pi Setup shared
   await lead.applyDeveloperTeamInstall({projectRoot:h.project,environmentId:'claude-development',plan});
   const leadDriver=new FakeDriver('claude');leadDriver.onStart=t=>t.init();lead.getSessionDriver=()=>leadDriver;
   const env:Record<string,string>={PATH:process.env.PATH!,HOME:h.home,FAUX_CHILD_TOOL:'mcp__deck__deck_prepare_project',FAUX_LOG:join(h.root,'faux.jsonl')};
-  const pi=createPiRunnerAdapter({homeDirectory:h.home,env:{...env,PI_CODING_AGENT_DIR:h.agentDir},piCommand:command});
-  const actual=createPiSessionDriver({command,baseEnv:env});
+  const pi=createPiRunnerAdapter({homeDirectory:h.home,env:{...env,PI_CODING_AGENT_DIR:h.agentDir},piCommand:command,piVersionProbe:()=>({exitCode:0,stdout:"1.0.0"})});
+  // Version discovery is outside this repair fixture's oracle. It exercises
+  // the real native lifecycle; avoid starting the entire CLI again just for --version.
+  const actual=createPiSessionDriver({command,baseEnv:env,exec:async executable=>executable===command?"1.0.0":process.version});
   let setupToken='';
   pi.getSessionDriver=()=>({...actual,startTask(input,io){
     setupToken=JSON.parse(readFileSync(input.credentialFile,'utf8')).token;

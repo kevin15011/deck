@@ -112,15 +112,23 @@ for (const fault of ["size", "hash", "manifest", "missing", "guard", "selection"
 
 test("guard preserves bytes and backpressure through EOF without orphaning child", async()=>{
   const f=fixture("process.stdin.pipe(process.stdout);");
+  // Bun's node:child_process stdin.end(largeBuffer) can report finish/destroy
+  // without delivering EOF. Use its native pipe transport for the test producer;
+  // the production guard and its child still exercise the real stream pipeline.
+  const run=Bun.spawn([f.entry.command,...f.entry.args],{stdin:"pipe",stdout:"pipe",stderr:"pipe"});
+  const diagnostic=new Response(run.stderr).text();
   try{
-    const run=f.start(), chunks:Buffer[]=[];
     const bytes=Buffer.alloc(2*1024*1024);for(let i=0;i<bytes.length;i++)bytes[i]=i%251;
-    run.child.stdout.pause();run.child.stdin.end(bytes);
+    run.stdin.write(bytes);run.stdin.end();
     await new Promise(r=>setTimeout(r,100));
-    run.child.stdout.on("data",c=>chunks.push(c));run.child.stdout.resume();
-    expect(await run.closed).toBe(0);expect(Buffer.concat(chunks)).toEqual(bytes);
+    const received=Buffer.from(await new Response(run.stdout).arrayBuffer());
+    expect(await run.exited).toBe(0);expect(received).toEqual(bytes);
     expect(isAlive(Number(readFileSync(f.marker,"utf8")))).toBe(false);
-  }finally{await f.close();}
+  }finally{
+    if(run.exitCode===null)run.kill("SIGTERM");
+    const timer=setTimeout(()=>run.kill("SIGKILL"),1500);
+    try{await run.exited;await diagnostic;}finally{clearTimeout(timer);await f.close();}
+  }
 });
 for(const signal of ["SIGTERM","SIGHUP","SIGINT"] as const)test(`guard cleans owned child on ${signal}`,async()=>{
  const f=fixture("process.on('SIGTERM',()=>{});setInterval(()=>{},1000);");

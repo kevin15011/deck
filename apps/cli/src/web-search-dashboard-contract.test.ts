@@ -52,7 +52,7 @@ describe("Web Search dashboard contract", () => {
         expect(persisted.ok).toBe(true);
 
         const adapter = runner === "pi"
-          ? createPiRunnerAdapter({ homeDirectory: home, webSearchProviderResolver: getWebSearchProviderDescriptor, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0" }) })
+          ? createPiRunnerAdapter({ homeDirectory: home, env: { PATH: executableDir, HOME: home, TAVILY_API_KEY: credential }, webSearchProviderResolver: getWebSearchProviderDescriptor, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0" }) })
           : createOpenCodeRunnerAdapter({ developerTeamConfigDir: join(home, ".config", "opencode"), webSearchProviderResolver: getWebSearchProviderDescriptor });
         const environmentId = runner === "pi" ? "pi-development" : "opencode-development";
         const deckConfig = configStore.read();

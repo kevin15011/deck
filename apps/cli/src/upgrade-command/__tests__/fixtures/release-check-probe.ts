@@ -1,8 +1,6 @@
 // Invoked in an isolated subprocess by release-check-transport.test.ts; never contacts GitHub.
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fetchReleaseDescriptor, fetchReleaseDescriptorAsync } from "../../github-release";
-import { runReleaseCheckWithTimeout } from "../../../tui/release-check";
 
 const root = process.env.RELEASE_PROBE_ROOT!;
 const mode = process.env.RELEASE_PROBE_MODE!;
@@ -20,6 +18,10 @@ if (process.argv[2] === "curl") {
     process.stdout.write(mode === "invalid" ? "{}" : mode === "mismatch" ? JSON.stringify({ ...descriptor, version: "98.0.0" }) : JSON.stringify(descriptor));
   }
 } else {
+  // Fake curl only emits a local response. Loading the application in each curl
+  // child repeats the entire dependency graph before transport can even start.
+  const { fetchReleaseDescriptor, fetchReleaseDescriptorAsync } = await import("../../github-release");
+  const { runReleaseCheckWithTimeout } = await import("../../../tui/release-check");
   const quoted = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
   mkdirSync(join(root, "bin"));
   writeFileSync(join(root, "bin", "curl"), `#!/bin/sh\nexec ${quoted(process.execPath)} ${quoted(import.meta.path)} curl "$@"\n`, { mode: 0o700 });
