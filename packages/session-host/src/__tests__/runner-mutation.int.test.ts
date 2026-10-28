@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { systemClock } from '../clock';
 import { ControlClient } from '../control-client';
 import { startDaemon, type RunningDaemon } from '../daemon';
 import { ensureStateLayout, resolveStatePaths } from '../paths';
@@ -83,10 +84,27 @@ test('an asynchronous descendant cannot reuse admission after the reservation is
  busy=true;start();await expect(child).rejects.toBeInstanceOf(RunnerMutationDeferredError);
 });
 
-test('offline history is unknown until an authoritative daemon can inspect it',async()=>{
- const {mkdirSync}=await import('node:fs'),{join}=await import('node:path'),{ensureStateLayout}=await import('../paths');
- const home=tempDir(),paths=resolveStatePaths({env:{HOME:home},tmpdir:home});ensureStateLayout(paths);mkdirSync(join(paths.sessionsDir,'historical'));
- await expect(withIdleRunnerMutation(()=>{throw Error('unknown history effect');},{paths})).rejects.toBeInstanceOf(RunnerMutationDeferredError);
+test('offline mutation admits historical sessions after daemon shutdown removes its socket', async () => {
+ const paths = await fixture();
+ for (let i = 0; i < 29; i++) mkdirSync(join(paths.sessionsDir, `historical-${i}`));
+ await daemons[daemons.length - 1]!.stop('test');
+ expect(existsSync(paths.socket.path)).toBe(false);
+ let writes = 0;
+ await withIdleRunnerMutation(() => { writes++; }, { paths });
+ expect(writes).toBe(1);
+ expect(existsSync(join(paths.sessionsDir, 'historical-0'))).toBe(true);
+});
+test('offline mutation preserves an unresponsive socket and unknown lock holder', async () => {
+ for (const obstruction of ['socket', 'lock'] as const) {
+  const home = tempDir(), paths = resolveStatePaths({env:{HOME:home},tmpdir:home});
+  ensureStateLayout(paths);
+  const path = obstruction === 'socket' ? paths.socket.path : paths.lockFile;
+  writeFileSync(path, 'unknown holder', {mode:0o600});
+  let writes = 0;
+  await expect(withIdleRunnerMutation(() => { writes++; }, {paths})).rejects.toBeInstanceOf(RunnerMutationDeferredError);
+  expect(writes).toBe(0);
+  expect(readFileSync(path, 'utf8')).toBe('unknown holder');
+ }
 });
 
 test('a paused production starter cannot delete a newer live maintenance reservation', async () => {
@@ -279,3 +297,15 @@ for (const online of [false, true]) for (const fails of [false, true]) {
     } finally { rmdirSync(gate); }
   });
 }
+
+test('offline lock acquisition cannot reclaim a holder appearing after the caller precheck', async () => {
+ const { acquireDaemonLock } = await import('../daemon-lock');
+ const home = tempDir(), paths = resolveStatePaths({env:{HOME:home},tmpdir:home});
+ ensureStateLayout(paths);
+ for (const holder of ['unknown', JSON.stringify({v:1,pid:2147483647,nonce:'unverified',startedAt:0})]) {
+  writeFileSync(paths.lockFile, holder, {mode:0o600});
+  const result = await acquireDaemonLock(paths, {role:'runner-mutation', clock:systemClock, presence:()=> 'unknown', ping:async()=>false});
+  expect(result.ok).toBe(false);
+  expect(readFileSync(paths.lockFile, 'utf8')).toBe(holder);
+ }
+});

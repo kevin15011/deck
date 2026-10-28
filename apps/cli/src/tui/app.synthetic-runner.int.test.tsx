@@ -1,3 +1,6 @@
+import { resolveStatePaths, startDaemon } from "@deck/session-host";
+import { runDaemonCommand } from "../daemon-commands";
+import { RunnerMutationDeferredScreen } from "./screens/runner-mutation-deferred";
 import React from "react";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
@@ -49,6 +52,7 @@ afterEach(() => {
 });
 
 test("Claude model apply diagnostics preserve public causes without leaking arbitrary error text", () => {
+  expect(modelConfigurationFailureMessage(new Error("Runner changes deferred: daemon work is active or activity is unknown. Retry when idle."))).toContain("Deck is busy");
   expect(modelConfigurationFailureMessage(new Error("Claude global plugin plan is stale or untrusted."))).toContain("stale or untrusted");
   expect(modelConfigurationFailureMessage(Object.assign(new Error("private-token-do-not-print"), { code: "EACCES" }))).toContain("EACCES");
   expect(modelConfigurationFailureMessage(new Error("private-token-do-not-print"))).not.toContain("private-token");
@@ -227,8 +231,23 @@ describe("DeckApp synthetic runner production flow", () => {
     const configStore = createDeckConfigStore({ homeDir: join(root, "home"), xdgConfigHome: join(root, "xdg"), projectRoot: root });
     configStore.write(getDefaultDeckConfig());
     const registry = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot, serenaOwnedRoot: owned, serenaProxyCommand: [deckCli, "internal", "serena-mcp"], serenaReadiness: async () => ({ state: "missing", diagnostic: { code: "serena-not-ready", message: "fixture missing" } }), serenaBootstrap: async (request) => { calls.push(request); return { outcome: "installed", evidence }; }, serenaRevalidate: async () => true } });
+    const paths = resolveStatePaths();
+    const daemon = await startDaemon({ paths, version: "test", anchorCommand: [process.execPath], recoverOnStart: false,
+      createService: () => ({ execute: async () => ({ok:true}), openLog: () => undefined, hasRunningWork: () => false, hasActiveSessions: () => true }),
+    });
+    if (!daemon.ok) throw new Error("fixture daemon failed");
+    mkdirSync(join(paths.sessionsDir, "historical"));
+    let stops = 0;
+    const stopDaemonForInstall = async () => {
+      stops++;
+      const code = await runDaemonCommand({ paths, version: "test", spawnDaemon: () => { throw new Error("must not spawn"); },
+        write: () => {}, writeErr: () => {}, presence: () => existsSync(paths.lockFile) ? "alive" : "absent",
+      }, { action: "stop", json: false });
+      expect(code).toBe(0);
+      expect(existsSync(paths.socket.path)).toBe(false);
+    };
     const harness = createInkHarness();
-    const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => root} runReleaseCheck={async () => ({ kind: "none" })} />,
+    const instance = render(<DeckApp stopDaemonForInstall={stopDaemonForInstall} adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => root} runReleaseCheck={async () => ({ kind: "none" })} />,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
     try {
       await waitForOutput(instance, harness.output, "Your AI environment, configured.");
@@ -246,14 +265,22 @@ describe("DeckApp synthetic runner production flow", () => {
       for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
       harness.input("\r"); await waitForOutput(instance, harness.output, "Run install");
       harness.input("\r");
+      await waitForOutput(instance, harness.output, "Stop Deck daemon and retry");
+    await new Promise(resolve => setTimeout(resolve, 30));
+      expect(stops).toBe(0);
+      expect(existsSync(join(dataRoot, "claude", "model-assignments.json"))).toBe(false);
+      harness.input("\r"); await waitForOutput(instance, harness.output, "All open Deck sessions will stop");
+      expect(stops).toBe(0);
+      harness.input("\r");
       try { await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "Claude Serena plugin publication", 20_000); }
       catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; calls=${calls.length}; signals=${harness.output().split("\n").filter((line) => /Serena|serena|Blocked|failed|skipped|review|install|Claude/.test(line)).slice(-25).join(" | ")}`); }
+      expect(stops).toBe(1);
       expect(calls).toHaveLength(0);
       const receipt = JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8"));
       expect(receipt.capabilities ?? []).toEqual([]);
       expect(existsSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"))).toBe(false);
       expect(existsSync(join(root, ".claude"))).toBe(false);
-    } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
+    } finally { await daemon.daemon.stop("test"); instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
   });
   test("Claude TUI reuses the protected shared profile, installs official plugin, then activates memory", async () => {
     expect(resolveDashboardMemoryProviderForInstall("claude", "supermemory", createMemoryProviderForSelection("supermemory", { token: "fixture-not-used-by-legacy-host" }))).toBeUndefined();
@@ -491,11 +518,9 @@ describe("DeckApp synthetic runner production flow", () => {
       await waitForCondition(instance, () => adapter.readModelAssignments(root) !== undefined && existsSync(join(dataRoot, "claude", "model-assignments.json")), "global capability receipt", 20_000).catch(error=>{throw new Error(String(error)+"\n"+harness.output().slice(-10000));});
       const receipt = JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8"));
       expect(receipt.capabilities).toEqual(["rtk", "web-search"]);
-      const mcp = readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8");
-      expect(JSON.parse(mcp).mcpServers["context-mode"]).toBeUndefined();
-      expect(JSON.parse(mcp).mcpServers["web-search"].command).toBe(join(bin, "tavily-mcp"));
+      expect(existsSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"))).toBe(false);
       expect(installations).toEqual(["web-search"]);
-      expect(mcp).not.toContain("fixture-shared-token");
+      expect(JSON.stringify(receipt)).not.toContain("fixture-shared-token");
       const hooks = JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, "hooks", "hooks.json"), "utf8"));
       expect(hooks.hooks.PreToolUse[0].matcher).toBe("Bash");
       expect(hooks.hooks.PreToolUse[0].hooks[0].command).toContain("rtk-hook.cjs");
@@ -580,7 +605,7 @@ describe("DeckApp synthetic runner production flow", () => {
       try { await waitForOutput(instance, harness.output, "Run install"); }
       catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; signals=${harness.output().split("\n").filter((line) => /Claude|Review|Blocked|install|Team|Unsupported|Capability|Choose/i.test(line)).slice(-35).join(" | ")}`); }
       const standaloneCount = getStandaloneSkills().reduce((count, { skillId }) => count + 1 + Object.keys(getStandaloneSkill(skillId).files).length, 0);
-      expect(harness.output()).toContain(`Create ${15 + standaloneCount} owner-only files in`);
+      expect(harness.output()).toContain(`Create ${17 + standaloneCount} owner-only files in`);
       harness.input("\r");
       if (scenario !== "ready") {
         const expected = { blocked: "Fixture dashboard plan is blocked.", "apply-failure": "Claude Serena readiness is stale; plugin was not modified.", "private-error": "Apply error: unknown.", "verify-failure": "Verification failed." }[scenario];
@@ -600,7 +625,7 @@ describe("DeckApp synthetic runner production flow", () => {
        expect((await adapter.verifyDeveloperTeamInstall(installed)).valid).toBe(true);
        const selectedPlugin = JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8")).plugin as string;
        expect(existsSync(join(dataRoot, "claude", selectedPlugin, ".mcp.json"))).toBe(false);
-       expect(existsSync(join(dataRoot, "claude", selectedPlugin, "hooks", "hooks.json"))).toBe(false);
+       expect(JSON.parse(readFileSync(join(dataRoot, "claude", selectedPlugin, "hooks", "hooks.json"), "utf8")).hooks).toHaveProperty("SessionStart");
       expect(installSignals.some((signal) => signal.startsWith("plan blocked=false"))).toBe(true);
       expect(existsSync(join(projectRoot, ".claude"))).toBe(false);
     } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(projectRoot, { recursive: true, force: true }); }
@@ -1977,4 +2002,27 @@ describe("DeckApp synthetic runner production flow", () => {
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
+});
+
+for (const choice of ["back", "failure"] as const) test(`deferred install ${choice} does not retry`, async () => {
+  const harness = createInkHarness();
+  let stops = 0, retries = 0, backs = 0;
+  const instance = render(<RunnerMutationDeferredScreen onRetry={() => { retries++; }} onBack={() => { backs++; }}
+    stopDaemon={async () => { stops++; throw new Error("Unknown daemon holder; refusing shutdown"); }} />,
+    { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
+  try {
+    await waitForOutput(instance, harness.output, "Stop Deck daemon and retry");
+    await new Promise(resolve => setTimeout(resolve, 30));
+    if (choice === "back") {
+      harness.input("j"); await instance.waitUntilRenderFlush(); harness.input("\r");
+      await waitForCondition(instance, () => backs === 1, "Back action");
+      expect(stops).toBe(0);
+    } else {
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Confirm stop and retry");
+      expect(stops).toBe(0);
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Unknown daemon holder; refusing shutdown");
+      expect(stops).toBe(1);
+    }
+    expect(retries).toBe(0);
+  } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); }
 });

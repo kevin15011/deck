@@ -1,7 +1,7 @@
 /** Exclusive runner mutation admission. No timer, restart or delayed background apply. */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ControlClient } from './control-client';
 import { ControlServer } from './control-server';
@@ -132,7 +132,8 @@ export async function withIdleRunnerMutation<T>(effect: () => T | Promise<T>, op
     let reservation: ControlServer | undefined;
     try {
       // A leftover/unresponsive socket makes activity unknown. Do not unlink it here.
-      if (existsSync(paths.socket.path) || readdirSync(paths.sessionsDir).length > 0) throw new RunnerMutationDeferredError();
+      // The exclusive daemon lock excludes session hosts; persisted sessions are history, not activity.
+      if (existsSync(paths.socket.path)) throw new RunnerMutationDeferredError();
       if (!acquireRunnerMutationMarker(paths,identity)) throw new RunnerMutationDeferredError();
       return await withReservationCleanup(paths, async () => {
         // Keep the existing lock handshake alive for older clients too. This serves only

@@ -21,7 +21,7 @@ export type CodexMcpServer =
   | { id: CodexMcpServerId; transport: "streamable-http"; url: string; bearerTokenEnvVar?: string; envHttpHeaders?: Readonly<Record<string, string>>; httpHeaders?: Readonly<Record<string, string>> };
 
 export type CodexMcpMergeResult =
-  | { status: "unchanged" | "updated"; content: string; configured: readonly CodexMcpServerId[] }
+  | { status: "unchanged" | "updated"; content: string; configured: readonly CodexMcpServerId[]; adoptedServerIds?: readonly string[] }
   | { status: "blocked"; content: string; collisions: readonly CodexMcpServerId[]; diagnostics: readonly string[] };
 
 const SECRET = /(?:token|secret|password|credential|api[-_]?key)/i;
@@ -310,7 +310,7 @@ function repairSelectedToolServers(source: string, desired: readonly CodexMcpSer
   return source;
 }
 
-export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpServer[], options: { repairSelectedToolIds?: readonly string[]; ownedServerIds?: readonly string[] } = {}): CodexMcpMergeResult {
+export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpServer[], options: { repairSelectedToolIds?: readonly string[]; ownedServerIds?: readonly string[]; recordedServerIds?: readonly string[]; allowLegacyMigration?: boolean } = {}): CodexMcpMergeResult {
   const originalSource = source;
   let existing: Map<string, object>;
   for (const server of desired) {
@@ -326,13 +326,23 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
   const desiredIds = new Set<string>(desired.map((server) => server.id));
   const proven = new Set(options.ownedServerIds ?? []);
   const replaceManaged = new Set<string>([...managed].filter((id) => !desiredIds.has(id) && proven.has(id)));
+  const adoptedServerIds: string[] = [];
   const collisions: CodexMcpServerId[] = [];
   const missing: CodexMcpServer[] = [];
   for (const server of desired) {
     const present = existing.get(server.id);
     if (!present) missing.push(server);
     else if (JSON.stringify(canonical(present)) !== JSON.stringify(canonical(normalized(server)))) {
-      if (managed.has(server.id) && proven.has(server.id)) { replaceManaged.add(server.id); missing.push(server); }
+      // Older installs wrote this exact marker and command-only shape before contribution receipts existed.
+      // Never let legacy recognition override a recorded digest or adopt custom launch fields.
+      const legacy = options.allowLegacyMigration !== false && !options.recordedServerIds?.includes(server.id)
+        && server.id === "codebase-memory" && server.transport === "stdio"
+        && source.includes(`# deck-codex-mcp:${server.id}\n[mcp_servers.${server.id}]\n`)
+        && JSON.stringify(canonical(present)) === JSON.stringify(canonical({ command: server.command }));
+      if (managed.has(server.id) && (proven.has(server.id) || legacy)) {
+        replaceManaged.add(server.id); missing.push(server);
+        if (legacy && !proven.has(server.id)) adoptedServerIds.push(server.id);
+      }
       else collisions.push(server.id);
     }
   }
@@ -355,7 +365,7 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
   const separator = base.length === 0 || base.endsWith("\n") ? "" : "\n";
   const content = `${base}${separator}${missing.map(render).join("\n")}`;
   try { existingServers(content); } catch { return { status: "blocked", content: originalSource, collisions: [], diagnostics: ["The MCP TOML edit did not reparse."] }; }
-  return { status: "updated", content, configured: desired.map((server) => server.id) };
+  return { status: "updated", content, configured: desired.map((server) => server.id), adoptedServerIds };
 }
 
 export function buildCodexMcpServers(input: {

@@ -83,6 +83,9 @@ export async function acquireDaemonLock(paths: StatePaths, options: AcquireOptio
     }
     const holder = readHolder(paths.lockFile);
     if (holder === "absent") continue; // vanished between link and read: retry
+    // Offline mutations may reserve an empty slot only, including when a holder
+    // appears after the caller's existence check. Never reclaim unknown owners.
+    if (options.role === "runner-mutation") return { ok: false, reason: "already-running", ...(holder ? { holder } : {}) };
     if (holder && (await holderIsLive(holder, options))) return { ok: false, reason: "already-running", holder };
 
     // Stale (or unreadable). Reclaim under the gate so two reclaimers cannot both unlink a fresh lock.

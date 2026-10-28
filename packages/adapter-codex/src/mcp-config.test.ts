@@ -187,3 +187,14 @@ test("available Codebase executable does not opt default selection into MCP prep
     status: "unchanged", content: "",
   });
 });
+
+ test("legacy Codebase upgrade respects recorded ownership and custom fields", () => {
+  const source = '# deck-codex-mcp:codebase-memory\n[mcp_servers.codebase-memory]\ncommand = "/tools/codebase-memory-mcp"\n';
+  const desired = buildCodexMcpServers({ packageIds: ["codebase-memory"], memoryProvider: "none", codebaseMemoryCommand: "/tools/codebase-memory-mcp" }).servers;
+  expect(mergeCodexMcpServers(source, desired, { ownedServerIds: ["codebase-memory"], recordedServerIds: ["codebase-memory"] }).status).toBe("updated");
+  for (const current of [source, source + 'args = ["custom"]\n', source.replace('/tools/codebase-memory-mcp', '/user/custom')]) {
+    expect(mergeCodexMcpServers(current, desired, { recordedServerIds: ["codebase-memory"] })).toMatchObject({ status: "blocked", content: current });
+  }
+  expect(mergeCodexMcpServers(source + 'args = ["custom"]\n', desired).status).toBe("blocked");
+  expect(mergeCodexMcpServers(source, desired, { allowLegacyMigration: false }).status).toBe("blocked");
+ });
