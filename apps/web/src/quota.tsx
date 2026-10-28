@@ -1,8 +1,9 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { QuotaRunner, QuotaState } from '../../../packages/core/src/session/quota';
-import { useDismissLayer } from './dismiss-layer';
+import { NavigationIcon } from './project-navigation';
 
 const empty: QuotaState = { runners: { claude: { refreshAfter: 0, refreshing: false }, codex: { refreshAfter: 0, refreshing: false } } };
+const CLAUDE_REFRESH_NOTE = 'Refresh uses a tiny amount of Claude quota for one isolated Haiku request.';
 const names = { claude: 'Claude', codex: 'Codex' };
 const elapsed = (at: number, now: number) => {
     const seconds = Math.max(0, Math.floor((now - at) / 1000));
@@ -13,7 +14,7 @@ export function QuotaContents({ state, now, onRefresh, loading = false }: { stat
         const view = state.runners[runner], snapshot = view.snapshot;
         const wait = Math.max(0, Math.ceil((view.refreshAfter - now) / 1000));
         return <section key={runner} className={`quota-runner quota-${runner}`} aria-label={`${names[runner]} quota`}>
-            <div className="quota-heading"><h3>{names[runner]}</h3><button type="button" className="quiet" aria-label={`Refresh ${names[runner]} quota`} disabled={loading || view.refreshing || wait > 0} onClick={() => onRefresh(runner)}>{view.refreshing ? 'Refreshing…' : wait ? `Refresh in ${wait}s` : 'Refresh'}</button></div>
+            <div className="quota-heading"><h3>{names[runner]}</h3><span className="quota-actions">{runner === 'claude' && <span className="quota-info" tabIndex={0} role="img" aria-label={CLAUDE_REFRESH_NOTE} data-tip={CLAUDE_REFRESH_NOTE}><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.3"/><path d="M8 7.2v4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><circle cx="8" cy="4.9" r=".85" fill="currentColor"/></svg></span>}<button type="button" className="quiet" aria-label={`Refresh ${names[runner]} quota`} disabled={loading || view.refreshing || wait > 0} onClick={() => onRefresh(runner)}>{view.refreshing ? 'Refreshing…' : wait ? `Refresh in ${wait}s` : 'Refresh'}</button></span></div>
             {snapshot ? <p className="muted">Updated {elapsed(snapshot.updatedAt, now)}{snapshot.plan ? ` · Plan: ${snapshot.plan}` : ''}</p> : <p className="muted">No quota snapshot yet</p>}
             {snapshot?.windows.length ? snapshot.windows.map(window => {
                 const label = window.id === 'five-hour' ? '5-hour' : '7-day';
@@ -23,24 +24,44 @@ export function QuotaContents({ state, now, onRefresh, loading = false }: { stat
                     <p className="muted">{window.resetsAt ? <>Resets <time dateTime={new Date(window.resetsAt).toISOString()}>{new Date(window.resetsAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}</time></> : 'Reset time not reported'}</p>
                 </div>;
             }) : <p className="quota-empty">{snapshot ? 'No subscription quota data' : 'Refresh to check subscription quota.'}</p>}
-            {snapshot?.overageStatus && <p className="muted">Overage: {snapshot.overageStatus}</p>}
-            {runner === 'claude' && <p className="quota-note">Refresh uses a tiny amount of Claude quota for one isolated Haiku request.</p>}
+            {snapshot?.overageStatus?.startsWith('allowed') && <p className="muted">Extra usage enabled: billed beyond plan limits</p>}
         </section>;
     })}</div>;
 }
 
-/** Modal is outside the drawer; closing navigation cannot hide it. No runner polling. */
-export function QuotaDialog({ api, onClose }: { api(path: string, init?: RequestInit): Promise<any>; onClose(): void }) {
-    const dialog = useRef<HTMLDialogElement>(null), contents = useRef<HTMLDivElement>(null), controller = useRef<AbortController | null>(null);
+const COLLAPSED_KEY = 'deck.usage-collapsed';
+export const QUOTA_POLL_MS = 15_000;
+const readCollapsed = () => { try { return localStorage.getItem(COLLAPSED_KEY) === 'true'; } catch { return false; } };
+
+/** Sidebar/drawer section above the Deck menu. Rereads host state periodically while visible; never polls runners. */
+export function QuotaSection({ api }: { api(path: string, init?: RequestInit): Promise<any> }) {
+    const controller = useRef<AbortController | null>(null);
+    const [collapsed, setCollapsed] = useState(readCollapsed);
     const [state, setState] = useState<QuotaState>(empty), [loading, setLoading] = useState(true), [message, setMessage] = useState(''), [now, setNow] = useState(Date.now);
-    useDismissLayer({ open: true, roots: [contents], onDismiss: onClose });
-    useLayoutEffect(() => { const node = dialog.current!; node.showModal(); return () => node.close(); }, []);
+    useEffect(() => { try { localStorage.setItem(COLLAPSED_KEY, String(collapsed)); } catch { /* Preferences are optional. */ } }, [collapsed]);
     useEffect(() => {
         const abort = new AbortController(); controller.current = abort;
-        void api('/api/quota', { signal: abort.signal }).then(data => { if (!abort.signal.aborted) setState(data); }).catch(error => { if (!abort.signal.aborted) setMessage(error.message || 'Could not read quota.'); }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
-        const timer = setInterval(() => setNow(Date.now()), 1000);
-        return () => { abort.abort(); clearInterval(timer); };
+        let reading = false;
+        // Host-only read: snapshots update from every runner turn's rate-limit events; never calls a runner.
+        const read = (initial = false) => {
+            if (reading || abort.signal.aborted || (!initial && document.visibilityState === 'hidden')) return;
+            reading = true;
+            void api('/api/quota', { signal: abort.signal }).then(data => { if (!abort.signal.aborted) { setState(data); setMessage(previous => previous === 'Could not read quota.' ? '' : previous); } })
+                .catch(error => { if (!abort.signal.aborted && initial) setMessage(error.message || 'Could not read quota.'); })
+                .finally(() => { reading = false; if (!abort.signal.aborted && initial) setLoading(false); });
+        };
+        read(true);
+        const timer = setInterval(read, QUOTA_POLL_MS);
+        const visible = () => { if (document.visibilityState === 'visible') read(); };
+        document.addEventListener('visibilitychange', visible);
+        return () => { abort.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', visible); };
     }, [api]);
+    useEffect(() => {
+        if (collapsed) return;
+        setNow(Date.now());
+        const timer = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(timer);
+    }, [collapsed]);
     async function refresh(runner: QuotaRunner) {
         const signal = controller.current?.signal;
         if (!signal || signal.aborted || loading || state.runners[runner].refreshing) return;
@@ -57,12 +78,25 @@ export function QuotaDialog({ api, onClose }: { api(path: string, init?: Request
             catch { if (!signal.aborted) setState(previous => ({ runners: { ...previous.runners, [runner]: { ...previous.runners[runner], refreshing: false, refreshAfter: Date.now() + 60_000 } } })); }
         }
     }
-    return <dialog ref={dialog} className="workspace-dialog quota-dialog" aria-labelledby="quota-title" onCancel={event => { event.preventDefault(); event.stopPropagation(); onClose(); }}>
-        <div ref={contents} className="quota-contents">
-            <div className="dialog-heading"><h2 id="quota-title">Quota usage</h2><button autoFocus type="button" className="quiet" aria-label="Close quota usage" onClick={onClose}>✕</button></div>
-            <QuotaContents state={state} now={now} loading={loading} onRefresh={runner => void refresh(runner)}/>
+    return <QuotaSectionView collapsed={collapsed} onToggle={() => setCollapsed(value => !value)} state={state} now={now} loading={loading} message={message} onRefresh={runner => void refresh(runner)}/>;
+}
+
+export function quotaSummary(state: QuotaState) {
+    return (['claude', 'codex'] as const).flatMap(runner => {
+        const windows = state.runners[runner].snapshot?.windows ?? [];
+        return windows.length ? [`${names[runner]} ${Math.max(...windows.map(window => window.usedPercent))}%`] : [];
+    }).join(' · ');
+}
+
+export function QuotaSectionView({ collapsed, onToggle, state, now, loading, message, onRefresh }: { collapsed: boolean; onToggle(): void; state: QuotaState; now: number; loading: boolean; message: string; onRefresh(runner: QuotaRunner): void }) {
+    const summary = quotaSummary(state);
+    return <section className="usage-section" aria-labelledby="usage-section-title">
+        <button type="button" className="quiet usage-toggle" aria-expanded={!collapsed} aria-controls="usage-section-body" onClick={onToggle}>
+            <NavigationIcon kind="chevron" expanded={!collapsed}/><span id="usage-section-title">Usage</span>{collapsed && summary && <span className="usage-summary">{summary}</span>}
+        </button>
+        <div id="usage-section-body" className="usage-body" hidden={collapsed}>
+            <QuotaContents state={state} now={now} loading={loading} onRefresh={onRefresh}/>
             <p className="quota-status muted" role="status" aria-live="polite">{loading ? 'Reading latest quota…' : message}</p>
-            <div className="dialog-actions"><button type="button" onClick={onClose}>Done</button></div>
         </div>
-    </dialog>;
+    </section>;
 }

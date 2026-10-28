@@ -11,7 +11,7 @@ const assets = new Map(build.outputs.map(output=>[output.path.split('/').at(-1)!
 const project = {projectId:'project',name:'Layout audit',path:'/tmp/deck-layout-fixture',available:true};
 const sessions = ['one','two','unprepared'].map((sessionId,index)=>({sessionId,projectId:project.projectId,title:index===0?'First session':index===1?'Second session with a longer name':'Unprepared session',state:'idle',generation:0,preparationStatus:index===2?'unprepared':'ready',lastSeq:41,grants:index===0?[{grantId:'grant',kind:'exact',toolKey:'codex:Read',exactKey:'README.md',risk:'normal',createdAt:'2026-01-01T00:00:00Z'}]:[],members:index===0?{lead:{runnerId:'codex',modelId:'fixture-model'}}:{}}));
 let historyRequests = 0, sockets = 0, offline = false, sent = 0, approvalVisible = false, summaryDelay = 0, inboxRequests = 0, pushEnabled=false;
-let quotaRefreshes=0,claudeQuotaRefreshes=0;
+let quotaRefreshes=0,claudeQuotaRefreshes=0,codexUsed=7;
 let promptEffect: ((text:string)=>Promise<void>)|undefined;
 const history = (sessionId:string) => {
     const events: any[] = [{v:1,sessionId,seq:1,ts:'2026-01-01T00:00:00Z',kind:'task.created',source:{taskId:'lead',memberId:'lead',runnerId:'codex',nativeSessionId:'fixture-thread'},data:{taskId:'lead',attempt:1,state:'idle',runnerId:'codex',modelId:'fixture-model'}}];
@@ -29,7 +29,7 @@ const server = Bun.serve({port:0,hostname:'127.0.0.1',fetch: async (request,serv
     if(path.endsWith('/history')){historyRequests++;await Bun.sleep(160);return json(history(sessionId));}
     if(path.endsWith('/summary')){if(summaryDelay)await Bun.sleep(summaryDelay);return json({ok:true,data:{session:sessions.find(s=>s.sessionId===sessionId)}});}
     if(path.endsWith('/readiness')){await Bun.sleep(160);return json({ok:true,data:{status:sessionId==='unprepared'?'unprepared':'ready',generation:0,personalMcpRunnerId:'codex',personalMcpAvailability:sessionId==='one'?[{id:'fixture-mcp',source:'user',status:'configured'}]:[]}});}
-    const quotaState=()=>({runners:{claude:{refreshAfter:claudeQuotaRefreshes?Date.now()+60000:0,refreshing:false,snapshot:{runnerId:'claude',updatedAt:Date.now()-120000,windows:[{id:'five-hour',usedPercent:90,resetsAt:Date.now()+3600000},{id:'seven-day',usedPercent:49,resetsAt:Date.now()+86400000}],overageStatus:'rejected'}},codex:{refreshAfter:quotaRefreshes?Date.now()+60000:0,refreshing:false,snapshot:{runnerId:'codex',updatedAt:Date.now()-60000,plan:'pro',windows:[{id:'seven-day',usedPercent:7,resetsAt:Date.now()+86400000}]}}}});
+    const quotaState=()=>({runners:{claude:{refreshAfter:claudeQuotaRefreshes?Date.now()+60000:0,refreshing:false,snapshot:{runnerId:'claude',updatedAt:Date.now()-120000,windows:[{id:'five-hour',usedPercent:90,resetsAt:Date.now()+3600000},{id:'seven-day',usedPercent:49,resetsAt:Date.now()+86400000}],overageStatus:'rejected'}},codex:{refreshAfter:quotaRefreshes?Date.now()+60000:0,refreshing:false,snapshot:{runnerId:'codex',updatedAt:Date.now()-60000,plan:'pro',windows:[{id:'seven-day',usedPercent:codexUsed,resetsAt:Date.now()+86400000}]}}}});
     if(path==='/api/quota')return json({ok:true,...quotaState()});
     if(path==='/api/quota/claude/refresh'){claudeQuotaRefreshes++;return Response.json({ok:false,code:'quota-no-data',message:'No quota event arrived. Previous snapshot kept.'},{status:503});}
     if(path==='/api/quota/codex/refresh'){quotaRefreshes++;return json({ok:true,state:quotaState()});}
@@ -122,35 +122,47 @@ try{
             }finally{await copyContext.close();}
         }
     });
-    await check('quota dialog menus, bars, cooldown and dismissal at 390 and 1440',async()=>{
+    await check('usage section sits above the Deck menu, folds with persisted state at 390 and 1440',async()=>{
+        await page.evaluate(()=>localStorage.removeItem('deck.usage-collapsed'));
         for(const width of [390,1440]){
             await page.setViewportSize({width,height:844});await select('one');
-            const open=async()=>{if(width<1000)await page.getByRole('button',{name:'Open sessions',exact:true}).click();else await page.getByRole('button',{name:'Deck menu',exact:true}).click();await page.getByRole(width<1000?'button':'menuitem',{name:'Quota usage',exact:true}).click();};
-            const chat=await rect('#conversation');await open();
-            const dialog=page.getByRole('dialog',{name:'Quota usage',exact:true});await dialog.waitFor();
-            await page.getByRole('progressbar',{name:'Claude 5-hour usage',exact:true}).waitFor();
-            assert.equal(await dialog.getByRole('progressbar').count(),3);
-            assert.equal(await dialog.getByRole('progressbar',{name:'Codex 5-hour usage',exact:true}).count(),0);
-            const bounds=await dialog.boundingBox();assert(bounds&&bounds.x>=0&&bounds.x+bounds.width<=width&&bounds.y>=0&&bounds.y+bounds.height<=844,'quota dialog fits viewport');
+            const chat=await rect('#conversation');
+            if(width<1000)await page.getByRole('button',{name:'Open sessions',exact:true}).click();
+            const nav=page.getByRole('navigation',{name:width<1000?'Mobile sessions':'Sessions',exact:true});
+            const section=nav.locator('.usage-section'),toggle=section.getByRole('button',{name:/^Usage/});await toggle.waitFor();
+            const order=await nav.evaluate(root=>{const usage=root.querySelector('.usage-section')!,menu=root.querySelector('.deck-menu')!;return usage.compareDocumentPosition(menu)&Node.DOCUMENT_POSITION_FOLLOWING&&usage.getBoundingClientRect().bottom<=menu.getBoundingClientRect().top+1;});
+            assert(order,'usage section renders directly above the Deck menu');
+            if(await toggle.getAttribute('aria-expanded')==='false')await toggle.click();
+            await section.getByRole('progressbar',{name:'Claude 5-hour usage',exact:true}).waitFor();
+            assert.equal(await section.getByRole('progressbar').count(),3);
+            assert.equal(await section.getByRole('progressbar',{name:'Codex 5-hour usage',exact:true}).count(),0);
+            const bounds=await section.boundingBox();assert(bounds&&bounds.x>=0&&bounds.x+bounds.width<=width&&bounds.y>=0&&bounds.y+bounds.height<=844,'usage section fits viewport');
             const colors=await page.evaluate(themes=>{
                 const root=document.documentElement,original=root.dataset.theme,result:{theme:string;runner:string;ratio:number;color:string}[]=[];
                 const luminance=(rgb:string)=>{const c=rgb.match(/[\d.]+/g)!.slice(0,3).map(Number).map(v=>v/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return c[0]!*.2126+c[1]!*.7152+c[2]!*.0722;};
-                for(const theme of themes){root.dataset.theme=theme;for(const runner of ['claude','codex']){const bar=document.querySelector(`.quota-${runner} .quota-track`)!;const color=getComputedStyle(bar.firstElementChild!).backgroundColor,a=luminance(color),b=luminance(getComputedStyle(bar).backgroundColor);result.push({theme,runner,color,ratio:(Math.max(a,b)+.05)/(Math.min(a,b)+.05)});}}
+                for(const theme of themes){root.dataset.theme=theme;for(const runner of ['claude','codex']){const bar=[...document.querySelectorAll(`.quota-${runner} .quota-track`)].find(node=>(node as HTMLElement).offsetParent)!;const color=getComputedStyle(bar.firstElementChild!).backgroundColor,a=luminance(color),b=luminance(getComputedStyle(bar).backgroundColor);result.push({theme,runner,color,ratio:(Math.max(a,b)+.05)/(Math.min(a,b)+.05)});}}
                 root.dataset.theme=original;return result;
             },THEMES.map(theme=>theme.id));
             for(const value of colors)assert(value.ratio>=3,`${value.theme} ${value.runner} progress contrast ${value.ratio}`);
             assert.equal(colors.find(value=>value.theme==='dark'&&value.runner==='claude')!.color,'rgb(237, 119, 119)');
             assert.equal(colors.find(value=>value.theme==='light'&&value.runner==='codex')!.color,'rgb(29, 96, 196)');
-            for(const button of await dialog.getByRole('button').all()){const box=await button.boundingBox();assert(box&&box.height>=(width<1000?44:40));}
-            if(!quotaRefreshes){await dialog.getByRole('button',{name:'Refresh Codex quota',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.quota-codex button')?.textContent?.startsWith('Refresh in'));}
-            assert.equal(quotaRefreshes,1,'opening dialog never refreshes runners automatically');
-            if(!claudeQuotaRefreshes){await dialog.getByRole('button',{name:'Refresh Claude quota',exact:true}).click();await dialog.getByRole('status').getByText('No quota event arrived. Previous snapshot kept.',{exact:true}).waitFor();assert.equal(await dialog.getByRole('progressbar').count(),3);}
+            for(const button of await section.getByRole('button').all()){const box=await button.boundingBox();assert(box&&box.height>=(width<1000?44:32));}
+            if(!quotaRefreshes){await section.getByRole('button',{name:'Refresh Codex quota',exact:true}).click();await page.waitForFunction(()=>[...document.querySelectorAll('.quota-codex button')].some(node=>node.textContent?.startsWith('Refresh in')));}
+            assert.equal(quotaRefreshes,1,'showing usage never refreshes runners automatically');
+            if(!claudeQuotaRefreshes){await section.getByRole('button',{name:'Refresh Claude quota',exact:true}).click();await section.getByRole('status').getByText('No quota event arrived. Previous snapshot kept.',{exact:true}).waitFor();assert.equal(await section.getByRole('progressbar').count(),3);}
             assert.equal(claudeQuotaRefreshes,1,'no automatic Claude refresh or silent retry');
             const proof=process.env.DECK_QUOTA_EVIDENCE??'/tmp/deck-quota';mkdirSync(proof,{recursive:true});await page.screenshot({path:`${proof}/${width}.png`});
-            await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
-            assert.deepEqual(await rect('#conversation'),chat,'quota modal does not move the conversation');
-            await open();await dialog.waitFor();await page.mouse.click(2,2);await dialog.waitFor({state:'hidden'});
-            await page.waitForTimeout(30);assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),width<1000?'Open sessions':'Deck menu');
+            await toggle.click();assert.equal(await toggle.getAttribute('aria-expanded'),'false');assert.equal(await section.getByRole('progressbar').count(),0);
+            await toggle.getByText('Claude 90%',{exact:false}).waitFor();
+            assert.equal(await page.evaluate(()=>localStorage.getItem('deck.usage-collapsed')),'true','folded state persists');
+            await page.reload();await select('one');if(width<1000)await page.getByRole('button',{name:'Open sessions',exact:true}).click();
+            assert.equal(await nav.locator('.usage-section').getByRole('button',{name:/^Usage/}).getAttribute('aria-expanded'),'false','folded state survives reload');
+            await nav.locator('.usage-section').getByRole('button',{name:/^Usage/}).click();
+            assert.equal(await page.evaluate(()=>localStorage.getItem('deck.usage-collapsed')),'false','expanded state persists');
+            assert.equal(quotaRefreshes,1,'reload and toggling never refresh runners');
+            if(width>=1000){const next=codexUsed+5;codexUsed=next;await section.getByRole('progressbar',{name:'Codex 7-day usage',exact:true}).and(page.locator(`[aria-valuenow="${next}"]`)).waitFor({timeout:25000});assert.equal(quotaRefreshes,1,'automatic updates read host snapshots only');}
+            if(width<1000){await page.getByRole('button',{name:'Close sessions',exact:true}).click();}
+            assert.deepEqual(await rect('#conversation'),chat,'usage section does not move the conversation');
         }
     });
     await check('composer floats over scroll-under conversation with measured multiline growth at 320, 390 and 1440',async()=>{
