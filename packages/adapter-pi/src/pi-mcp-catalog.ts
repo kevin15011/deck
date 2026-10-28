@@ -1,3 +1,4 @@
+import { ROLE_TOOL_POLICY } from "@deck/core/session/role-tool-policy";
 /**
  * Catalog of the MCP servers Deck manages for Pi, and the tool names Pi exposes for them.
  *
@@ -24,19 +25,19 @@ export const DECK_PI_MCP_CATALOG: Readonly<Partial<Record<DeckPiMcpServerId, Dec
     id: "context7",
     capabilityIds: ["context7"],
     tools: ["resolve-library-id", "query-docs"],
-    readOnlyTools: ["resolve-library-id", "query-docs"],
+    readOnlyTools: ROLE_TOOL_POLICY.mcp["context7"]!,
   },
   "codebase-memory": {
     id: "codebase-memory",
     capabilityIds: ["codebase-memory-mcp", "codebase-memory"],
     tools: ["search_graph", "trace_path", "get_code_snippet", "query_graph", "get_architecture", "search_code", "detect_changes", "get_graph_schema", "list_projects", "index_status", "check_index_coverage", "manage_adr", "ingest_traces", "index_repository", "delete_project"],
-    readOnlyTools: ["search_graph", "trace_path", "get_code_snippet", "check_index_coverage", "query_graph", "get_architecture", "search_code", "index_status", "list_projects"],
+    readOnlyTools: ROLE_TOOL_POLICY.mcp["codebase-memory"]!,
   },
   "web-search": {
     id: "web-search",
     capabilityIds: ["web-search"],
     tools: ["tavily_search", "tavily_extract"],
-    readOnlyTools: ["tavily_search", "tavily_extract"],
+    readOnlyTools: ROLE_TOOL_POLICY.mcp["web-search"]!.map(operation => `tavily_${operation}`),
   },
 });
 

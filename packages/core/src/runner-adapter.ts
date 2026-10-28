@@ -185,6 +185,9 @@ export type SessionRuntimeReadiness = Readonly<{
 }>;
 
 export type RunnerLaunchBase = {
+  /** Trusted launch composition receipt; never read from runner-native hints. */
+  codebaseAvailability?: import("./session/codebase-availability").CodebaseAvailabilityDisposition;
+  codebaseInvocationId?: string;
   projectRoot: string;
   teamId: string;
   modelId?: string;
@@ -210,6 +213,8 @@ export type RunnerLaunchInput =
   | (RunnerLaunchBase & { mode: "resume-latest" });
 
 export type RunnerLaunchPlan = {
+  /** In-process runtime fences/resources; not serializable configuration or model input. */
+  launchLifecycle?: { beforeSpawn(environment: Record<string, string>, signal?: AbortSignal): void | Promise<void>; afterExit(): void };
   /** CLI runtime review receipt; excludes configuration contents and credentials. */
   interactiveSearchReview?: Readonly<{ path: string; runnerId: string; projectRoot: string; modelId?: string; fingerprint: string }>;
   /** Hold immutable content through native process exit; revalidate selection before spawning. */
@@ -834,10 +839,13 @@ export interface RunnerAdapter {
    * excluded from cross assignments.
    */
   getSessionDriver?(): RunnerSessionDriver;
+  prepareSessionNativeRole?(roleId: string): Promise<import("./session/driver").NativeRoleDescriptor>;
 
   /** Resolve the selected managed Codebase identity for task-scoped readiness. Ordinary customizations stay native. */
-  readSessionMcpServers?(config?: NormalizedDeckConfig): Promise<Record<string, ChildMcpServerSpec>>;
+  readSessionCapabilityOverrides?(config?: NormalizedDeckConfig): Promise<Record<string, ChildMcpServerSpec>>;
   /** Read fresh effective member facts at every turn; no model calls or cross-member cache. */
+  /** Trusted contribution ownership only; never probes capability availability. */
+  readOwnedSearchFallbackIds?(input: import("./native-search").NativeSearchInspectionInput): Promise<readonly string[]>;
   inspectNativeSearch?(input: import("./native-search").NativeSearchInspectionInput): Promise<import("./native-search").NativeSearchEvidence>;
 
   /**
@@ -850,6 +858,10 @@ export interface RunnerAdapter {
   /** Optional persisted runner-native selection, read from an owner-verified receipt.
    * Does not imply the selected executable is presently ready. */
   readSelectedCapabilityIds?(projectRoot?: string): readonly string[] | undefined;
+  /** Bounded local prerequisite metadata only. No process, network or repair effects. */
+  /** Read-only identity of the currently installed team; adapter-owned roots only. */
+  readPreparationGeneration?(): string;
+  readPreparationCapabilities?(config: NormalizedDeckConfig): import("./session/preparation").PreparationMember["capabilities"];
 
   /**
    * Get the available thinking levels for this runner.

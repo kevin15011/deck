@@ -1,4 +1,5 @@
 import { readExplicitPiCapabilities } from "../shared/explicit-capabilities";
+import { installPiSessionMcp } from "../../session-driver/managed-mcp";
 import { resolve } from "node:path";
 import type { ExtensionAPI } from "../shared/pi-api";
 import { createDeckToolPolicyExtension } from "../tool-policy/extension";
@@ -11,6 +12,9 @@ const initialLoadsKey = Symbol.for("deck.pi.codebase.initial-factory.v1");
 type FactoryGlobals = typeof globalThis & { [initialLoadsKey]?: Set<string> };
 export function createDeckToolPolicyEntry(options: Parameters<typeof installReviewedPiMcp>[2] = {}) {
   return async function deckToolPolicy(pi: ExtensionAPI, native: Parameters<typeof installReviewedPiMcp>[1]) {
+    if (process.env.DECK_PI_CROSS_CONFIG) {
+      native = installPiSessionMcp(pi, native, process.env.DECK_PI_CROSS_CONFIG);
+    }
     const globals = globalThis as FactoryGlobals;
     const initialLoads = globals[initialLoadsKey] ??= new Set<string>();
     const agentDir = resolve(native.getAgentDir());

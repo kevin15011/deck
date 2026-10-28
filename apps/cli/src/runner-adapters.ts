@@ -87,6 +87,7 @@ export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOpti
     ...options.codex,
   })));
   registry.register("claude", guardRunnerAdapter(createClaudeRunnerAdapter({
+    nativeSessionStartCommand: deckInternalCommand("project-readiness"),
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     resolveMemoryCredential: resolveClaudeSupermemoryLaunchCredential,

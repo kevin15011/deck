@@ -3,7 +3,10 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PassThrough } from "node:stream";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { buildCodexDeveloperTeamInstallPlan } from "../../../packages/adapter-codex/src/developer-team-install";
+import { prepareCodexNativeRole } from "../../../packages/adapter-codex/src/native-role";
+import { createOpenCodeRunnerAdapter } from "../../../packages/adapter-opencode/src/runner-adapter";
 import { WebService } from "../../../packages/session-host/src/web-service";
 import { createClaudeRunnerAdapter } from "../../../packages/adapter-claude/src/runner-adapter";
 import { getDefaultDeckConfig } from "../../../packages/core/src/index";
@@ -59,13 +62,28 @@ async function fixture(runnerId: string, activation: "enabled" | "disabled" | "a
     return { stdin, stdout, stderr, ready: Promise.resolve({workerPid:1}), exited, anchorPid: 1, interrupt: ()=>true, terminateGroup: async()=>{stdin.end();} };
   } } });
   // Codebase readiness is optional; the Claude team generation is a launch prerequisite.
-  const claude = runnerId === "claude" ? createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: () => process.execPath }) : undefined;
+  const claude = runnerId === "claude" ? createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: () => process.execPath, verifyExistingCodebase: () => true }) : undefined;
   if (claude) {
-    const plan = claude.buildDeveloperTeamInstallPlan({ projectRoot: project, environmentId: "claude-development", deckConfig: getDefaultDeckConfig(), capabilityIds: ["claude-team-files"] });
+    const plan = claude.buildDeveloperTeamInstallPlan({ projectRoot: project, environmentId: "claude-development", deckConfig: store.read(), capabilityIds: activation === "enabled" ? ["claude-team-files", "codebase-memory"] : ["claude-team-files"] });
     expect(plan.blocked).toBe(false);
     await claude.applyDeveloperTeamInstall({ projectRoot: project, environmentId: "claude-development", plan });
   }
-  const adapter = { ...(claude ? { prepareSessionNativeSkills: () => claude.prepareSessionNativeSkills() } : {}), runnerId, getSessionDriver: () => driver, readSessionMcpServers: async () => ({ "codebase-memory": { command: binary, args: [], env: {} }, context7: { command: "unused-context7", args: [], env: {} } }) } as unknown as RunnerAdapter;
+  let prepareSessionNativeRole: RunnerAdapter["prepareSessionNativeRole"];
+  if (runnerId === "codex") {
+    const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: home, existingFiles: new Map() });
+    for (const file of plan.expectedFiles) {
+      const path = join(home, file.relativePath);
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+      writeFileSync(path, file.content, { mode: 0o600 });
+    }
+    prepareSessionNativeRole = async roleId => prepareCodexNativeRole(join(home, ".codex"), roleId);
+  } else if (runnerId === "opencode") {
+    const native = createOpenCodeRunnerAdapter({ developerTeamConfigDir: join(home, "opencode") });
+    const plan = native.buildDeveloperTeamInstallPlan({ projectRoot: project, environmentId: "opencode-development", deckConfig: store.read() });
+    await native.applyDeveloperTeamInstall({ projectRoot: project, environmentId: "opencode-development", plan });
+    prepareSessionNativeRole = roleId => native.prepareSessionNativeRole!(roleId);
+  }
+  const adapter = { prepareSessionNativeRole, ...(claude ? { prepareSessionNativeSkills: () => claude.prepareSessionNativeSkills() } : {}), runnerId, getSessionDriver: () => driver, readSessionCapabilityOverrides: async () => ({ "codebase-memory": { command: binary, args: [], env: {} } }) } as unknown as RunnerAdapter;
   const services = { paths, broker: new ApprovalBroker({ sink: { emit() {} } }), credentials: new CredentialRegistry({socketPath: paths.socket.path}), supervisor: new Supervisor({anchorCommand:["unused"]}), logger: {info(){},warn(){},error(){}} } as unknown as DaemonServices;
   const service = createCrossSessionService(services, { configStore: store, adapters: ()=>[adapter], codebaseReadiness: readiness, environment: {} });
   const web = new WebService({paths, service, config:{port:0,trustedProxy:null,allowedOrigins:[],allowFunnel:false}}); web.start();
@@ -111,14 +129,15 @@ for (const runner of ["claude", "codex", "opencode"]) for (const activation of [
 }
 
 for (const runner of ["claude", "codex", "opencode"]) for (const reason of ["unsupported", "unavailable"] as const) {
-  test(`${runner}: ${reason} production resolver -> preparation -> Web API/view -> turn omits Codebase and recovers`, async () => {
+  test(`${runner}: ${reason} production resolver -> truthful preparation and actual launch after recovery`, async () => {
     const t = await fixture(runner), created = await t.run({type:"session.create",projectRoot:t.project}); expect(created.ok).toBe(true);
     const id = (created as any).data.sessionId;
     if (reason === "unavailable") t.unavailable();
     await t.run({type:"session.prepare"}, id);
     const read = () => t.read(id);
     await until(async()=>["ready","failed"].includes((await read()).status));
-    const state = await read(); expect(state.status).toBe("ready"); expect(state.reasonCode).toBe(`codebase-memory-${reason}`);
+    const state = await read();
+    expect(state.status).toBe("ready"); expect(state.reasonCode).toBe(`codebase-memory-${reason}`);
     expect(render(state)).toContain("Codebase Memory is unavailable"); expect(render(state)).toContain("Ready to send"); expect(t.driver.turns).toHaveLength(0); expect(t.spawns()).toBe(reason === "unsupported" ? 0 : 1);
     await t.run({type:"prompt.send",text:"Inspect repository"},id); await until(()=>t.driver.turns.length===1 && t.driver.turns[0]!.closed);
     const first = t.driver.turns[0]!.input; expect(first.mcp.servers).not.toContain("codebase-memory"); expect(first.mcp.servers).not.toContain("context7"); expect(first.mcpServerSpecs["codebase-memory"]).toBeUndefined();

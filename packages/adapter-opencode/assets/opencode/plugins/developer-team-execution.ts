@@ -1,3 +1,5 @@
+import { OpenCodeNativePreparation } from "../../../src/native-preparation";
+import { loadPreparedSessionStartContext } from "@deck/core/session/start-context";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -45,6 +47,7 @@ type OpenCodeDeveloperTeamExecutionHooksV1 = {
 type OpenCodeNativePluginInputV1 = { readonly client?: unknown; readonly directory?: unknown; readonly worktree?: unknown };
 
 export interface OpenCodeDeveloperTeamExecutionPluginOptionsV1 {
+  readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly authorizationService?: InvocationAuthorizationServiceV1;
   readonly bridge?: DeveloperTeamRunnerHostBridgeV1;
   readonly invocationAuthorization?: "static-compatible" | "invocation-required";
@@ -598,14 +601,32 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
   const mode = modeIsValid ? (rawMode as "invocation-required" | "static-compatible") : "static-compatible";
   const resolveExecutionEvent = options.resolveExecutionEvent ?? provider?.resolveOpenCode;
   return async function DeveloperTeamExecutionPlugin(pluginInput?: OpenCodeNativePluginInputV1) {
+    // Initialization is also the resume boundary for each host-owned server.
+    // Model transforms never read files or evaluate readiness.
+    let readiness: string | undefined;
+    let readinessRevision = 0;
+    const refreshReadiness = async () => {
+      const revision = ++readinessRevision;
+      readiness = undefined;
+      try {
+        const current = await loadPreparedSessionStartContext(typeof pluginInput?.directory === "string" ? pluginInput.directory : process.cwd(), options.environment);
+        if (revision === readinessRevision) readiness = current;
+      } catch { process.stderr.write("deck-preparation: session-start-context-unverified\n"); }
+    };
+    await refreshReadiness();
     skillDiscoveryHost ??= createDefaultSkillDiscoveryHostFromPluginInput(pluginInput);
     const skillDiscoveryTool = skillDiscoveryHost ? createTaskSkillDiscoveryTool(skillDiscoveryHost, skillState) : undefined;
-    const tools = Object.assign({}, skillDiscoveryTool ? { deck_skill_discovery: skillDiscoveryTool } : {}) as OpenCodeToolMapV1;
+    const nativePreparation = pluginInput?.client && (options.environment ?? process.env).DECK_SESSION_START_CONTEXT
+      ? new OpenCodeNativePreparation(typeof pluginInput.directory === "string" ? pluginInput.directory : process.cwd(), pluginInput.client, options.environment ?? process.env) : undefined;
+    const tools = Object.assign({}, nativePreparation?.tools(), skillDiscoveryTool ? { deck_skill_discovery: skillDiscoveryTool } : {}) as OpenCodeToolMapV1;
     return {
-      ...(skillDiscoveryTool ? { tool: tools } : {}),
+      ...(skillDiscoveryTool || nativePreparation ? { tool: tools } : {}),
       "experimental.chat.messages.transform": async (_input: Record<string, never>, _output: OpenCodeModelMessageTransformOutput) => {},
-      "experimental.chat.system.transform": async (_input: OpenCodeSystemTransformInput, _output: OpenCodeSystemTransformOutput) => {},
+      "experimental.chat.system.transform": async (_input: OpenCodeSystemTransformInput, output: OpenCodeSystemTransformOutput) => {
+        if (readiness && !output.system.includes(readiness)) output.system.push(readiness);
+      },
       "chat.message": async (input: OpenCodePluginInput, output: OpenCodePluginOutput) => {
+        nativePreparation?.select(input);
         receipts.set(input.sessionID, receiptDigest(input, output));
       },
       "tool.execute.before": async (input: OpenCodePluginInput, output: OpenCodePluginOutput) => {
@@ -626,6 +647,7 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
             pruneSkillToolState(skillState, skillDiscoveryHost);
           }
         }
+        const nativePrepared = nativePreparation?.before(input, args);
         const requestedRole = qaRole(args);
         if (requestedRole) {
           if (!isDelegationTool(input.tool) || !input.sessionID || !input.callID) throw new Error("invalid-evidence");
@@ -656,6 +678,7 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
         }
         const role = args.subagent_type ?? args.agent ?? args.role;
         if (role === "deck-setup") {
+          if (nativePrepared || nativePreparation && !preparationAuthorizationService) return;
           if (!isDelegationTool(input.tool) || !input.callID) throw new Error("invalid-evidence");
           if (!preparationAuthorizationService) throw new Error("modification-not-authorized:AUTHZ_PROVIDER_MISSING");
           if (!resolveSessionPreparation) throw new Error("modification-not-authorized:AUTHZ_MISSING");
@@ -731,6 +754,7 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
         }
       },
       "tool.execute.after": async (input: OpenCodePluginInput, output: OpenCodePluginOutput) => {
+        nativePreparation?.after(input);
         const args = output.args;
         if (args && typeof args === "object") {
           delete args.deckQaInvocation;
@@ -763,6 +787,9 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
         }
       },
       event: async ({ event }: { event: Record<string, unknown> & { type?: string; properties?: { info?: { id?: string } }; sessionID?: unknown; sessionId?: unknown; callID?: unknown; callId?: unknown; tool?: unknown; name?: unknown; args?: unknown } }) => {
+        nativePreparation?.event(event);
+        if (["session.created", "session.updated", "session.idle", "file.watcher.updated"].includes(event.type ?? "")) await refreshReadiness();
+        if (event.type === "session.deleted") { ++readinessRevision; readiness = undefined; }
         if (event.type === "tool.execute.error" && skillDiscoveryHost) {
           const sessionId = nativeSessionId(event);
           const callId = nativeInvocationId(event);

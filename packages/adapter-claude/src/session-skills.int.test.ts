@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { createClaudeRunnerAdapter } from "./runner-adapter";
 import { getDefaultDeckConfig } from "@deck/core";
-import { skillHash, verifyClaudeSessionSkills, claudeSessionPluginMcpDenials } from "./session-skills";
+import { ClaudeSkillsError, skillHash, verifyClaudeSessionSkills, claudeSessionOverrideDenials } from "./session-skills";
 import { buildClaudeTurnLaunch } from "./session-driver/launch";
 import { prepareSessionNativeSkills } from "../../../apps/cli/src/session-native-skills";
 
@@ -33,7 +33,7 @@ test("production preparation verifies the full installed team plugin and launche
       const input = {
         taskId: memberId, memberId, cwd: home, assignment: { runnerId: "claude", modelId: "haiku" },
         rolePrompt: "role", prompt: "task", nativeSessionId: "3f2b8c1e-5d4a-4b7e-9a1c-0e2d3f4a5b6c",
-        mcp: { servers: [], sessionTools: [] }, mcpServerSpecs: {}, nativeSkills: descriptor,
+        mcp: { servers: [], sessionTools: [] }, mcpServerSpecs: {}, nativeSkills: descriptor, nativeRole: { roleId: `deck-${memberId}`, roleRef: `deck-developer-team:deck-${memberId}`, generation: descriptor.contentHash },
         nativeMemory: { provider: "supermemory" as const, integration: "runner-plugin" as const, status: "ready" as const, projectScope: "sm_project_v1_test_repo", plugin: { root: "/memory" } },
         projectConfigTrusted, approvals: "runner-default" as const, credentialFile: "/credential", disableNativeDelegation: true,
       };
@@ -42,19 +42,10 @@ test("production preparation verifies the full installed team plugin and launche
       expect(launch.args.flatMap((arg, i) => arg === "--plugin-dir" ? [launch.args[i + 1]] : [])).toEqual([descriptor.root, "/memory"]);
       expect(launch.args).toContain(teamRoot);
       expect(launch.args[launch.args.indexOf("--disallowedTools") + 1]).toBe("Task,Agent");
-      expect(launch.args).not.toContain("--agent");
+      expect(launch.args).toContain("--agent");
       expect(launch.expectedMcpServers).toEqual([]);
-      expect(JSON.parse(launch.args[launch.args.indexOf("--settings") + 1]!).deniedMcpServers).toContainEqual({ serverName: "plugin:deck-developer-team:context7" });
-      for (const suppressed of [true, false]) {
-        const routed = buildClaudeTurnLaunch({ ...input,
-          mcp: { servers: suppressed ? [] : ["context7"], sessionTools: [] },
-          mcpServerSpecs: { context7: { command: "/managed/context7", args: [], env: {} } },
-          suppressedMcpServers: suppressed ? ["context7", "web-search", "codebase-memory"] : [],
-        }, { writePrivateFile: name => join(home, name) }, { baseEnv: { HOME: home } });
-        const denied = JSON.parse(routed.args[routed.args.indexOf("--settings") + 1]!).deniedMcpServers;
-        expect(denied).toContainEqual({ serverName: "plugin:deck-developer-team:context7" });
-        expect(routed.expectedMcpServers).toEqual(suppressed ? [] : ["context7"]);
-      }
+      expect(JSON.parse(launch.args[launch.args.indexOf("--settings") + 1]!).deniedMcpServers ?? []).not.toContainEqual({ serverName: "plugin:deck-developer-team:context7" });
+      expect(() => buildClaudeTurnLaunch({ ...input, suppressedMcpServers: ["codebase-memory"] }, { writePrivateFile: name => join(home, name) }, { baseEnv: { HOME: home } })).toThrow("claude-mcp-override-unpaired");
 
     }
     for (const extra of ["unexpected.json"]) {
@@ -96,13 +87,50 @@ test("missing Claude generation fails closed; other native loaders are untouched
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
-// The session policy covers every manifest server, including retired or future IDs.
-test("plugin MCP denials include all declared servers, regardless of session selection", async () => {
+// Retired manifests cannot be used as authority for a native generation.
+test("retired plugin MCP manifests fail closed", async () => {
   const root = await mkdtemp(join(tmpdir(), "deck-plugin-mcp-"));
   try {
     const ids = ["context-mode", "codebase-memory", "context7", "serena", "web-search", "future-server"];
     const manifest = JSON.stringify({ mcpServers: Object.fromEntries(ids.map(id => [id, { command: id }])) });
     await writeFile(join(root, ".mcp.json"), manifest);
-    expect(claudeSessionPluginMcpDenials({ root, pluginName: "deck-developer-team", selectionPath: "", selectionHash: "", contentHash: "", files: { ".mcp.json": skillHash(manifest) } })).toEqual(ids.map(id => `plugin:deck-developer-team:${id}`));
+    expect(() => claudeSessionOverrideDenials({ root, pluginName: "deck-developer-team", selectionPath: "", selectionHash: "", contentHash: "", files: { ".mcp.json": skillHash(manifest) } }, [])).toThrow("claude-session-generation-unverified");
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("installed generation survives a different Deck entrypoint but refuses edited hook bytes", async () => {
+  const home = await mkdtemp(join(tmpdir(), "deck-installed-generation-"));
+  try {
+    const options = { homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: () => process.execPath };
+    const installer = createClaudeRunnerAdapter({ ...options, nativeSessionStartCommand: [join(home, ".deck-canary.payload-installed"), "internal", "project-readiness"] });
+    const plan = installer.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: getDefaultDeckConfig(), capabilityIds: ["context7"] });
+    expect(plan.blocked).toBe(false);
+    await installer.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan });
+    for (const command of [undefined, [join(home, "deck-stable"), "internal", "project-readiness"]]) {
+      const loader = createClaudeRunnerAdapter({ ...options, nativeSessionStartCommand: command });
+      const descriptor = await loader.prepareSessionNativeSkills();
+      expect(descriptor.contentHash).toBe(JSON.parse(await readFile(descriptor.selectionPath, "utf8")).contentHash);
+      const hook = join(descriptor.root, "hooks/session-start.cjs");
+      const original = await readFile(hook, "utf8");
+      for (const edited of [original.replace("payload-installed", "payload-tampered"), original + "\n// edited\n"]) {
+        await writeFile(hook, edited);
+        await expect(loader.prepareSessionNativeSkills()).rejects.toThrow("claude-session-skills-unverified");
+      }
+      await writeFile(hook, original);
+    }
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+
+test("verification diagnostics expose the failing check only to the internal logger", async () => {
+  const checks: string[] = [];
+  const adapter = { runnerId: "claude", prepareSessionNativeSkills: async () => { throw new ClaudeSkillsError("generation-content-hash"); } };
+  try {
+    await prepareSessionNativeSkills(adapter as never, undefined, check => checks.push(check));
+    throw new Error("expected verification refusal");
+  } catch (error) {
+    expect(error).toBeInstanceOf(ClaudeSkillsError);
+    expect((error as Error).message).not.toContain("generation-content-hash");
+  }
+  expect(checks).toEqual(["generation-content-hash"]);
 });

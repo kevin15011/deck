@@ -17,7 +17,7 @@ bun install --frozen-lockfile
 
 Tracked runner execution assets, skill bundles, and build metadata enforce the release workflow's Bun version before writing output; the release binary build invokes that guard too. A mismatch fails closed. The standalone web asset generator and canary installer do **not** enforce this guard themselves; still use the pinned version for reproducible work.
 
-To exercise a real runner, install and authenticate its native CLI separately. Cross sessions support Claude, Codex, and OpenCode; Pi uses its native Deck workflow.
+To exercise a real runner, install and authenticate its native CLI separately. Cross sessions support Claude, Codex, and OpenCode. Pi 1.0.0 also supports delegated Setup in cross sessions; its other roles use the native Deck workflow.
 
 ## Run from source
 

@@ -1,4 +1,5 @@
-import { ClaudeSkillsError, verifyClaudeSessionSkills, claudeSessionPluginMcpDenials } from "../session-skills";
+import { assertSessionOverlay } from "@deck/core/session/overlay";
+import { ClaudeSkillsError, verifyClaudeSessionSkills, claudeCodebaseDenials } from "../session-skills";
 import { PersonalMcpPreparationError } from "@deck/core/session/personal-mcp";
 import { claudeNativePolicy } from "../personal-mcp";
 /**
@@ -11,6 +12,7 @@ import { claudeNativePolicy } from "../personal-mcp";
  * interactive launch lane in `claude-launch-plan.ts` is not touched.
  */
 import type { DriverTaskInput } from "@deck/core/session/driver";
+import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 
 export const DECK_APPROVE_PROMPT_TOOL = "mcp__deck__deck_approve";
@@ -34,6 +36,8 @@ export type ClaudeTurnLaunch = {
   env: Record<string, string>;
   /** MCP server ids the child must list at init, in config order. */
   expectedMcpServers: string[];
+  expectedAbsentMcpServers: string[];
+  expectedAbsentToolPrefixes: string[];
   diagnostics: Array<{ code: string; detail?: string }>;
 };
 
@@ -58,6 +62,7 @@ export function encodeUserMessage(text: string, images: readonly { mimeType: str
 }
 
 export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunchFiles, options: ClaudeLaunchOptions = {}): ClaudeTurnLaunch {
+  assertSessionOverlay(input.rolePrompt);
   const memory = input.nativeMemory;
   if (memory?.status === "unavailable") throw new ClaudeLaunchError(memory.reasonCode ?? "native-memory-unavailable", memory.reasonCode ?? "Native Supermemory is unavailable");
   const nativePlugin = memory?.status === "ready" ? memory.plugin : undefined;
@@ -113,8 +118,26 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
     }
     args.push("--plugin-dir", input.nativeSkills.root);
   }
+  if (input.nativeSkills && !input.nativeRole) throw new ClaudeLaunchError("claude-session-generation-unverified", "claude-session-generation-unverified: native role selection is required");
+  if (input.nativeRole) {
+    const role = input.nativeRole;
+    if (!input.nativeSkills || role.generation !== input.nativeSkills.contentHash || !/^deck-(lead|setup|investigate|architect|apply-fast|apply-deep|quality)$/.test(role.roleId)
+      || role.roleRef !== `${input.nativeSkills.pluginName}:${role.roleId}` || !input.nativeSkills.files[`agents/${role.roleId}.md`]) {
+      throw new ClaudeLaunchError("claude-session-generation-unverified", "Run deck upgrade to refresh the selected native role.");
+    }
+    args.push("--agent", role.roleRef);
+  }
+  if (input.suppressedMcpServers?.includes("codebase-memory")) throw new ClaudeLaunchError("claude-mcp-override-unpaired", "claude-mcp-override-unpaired: managed binding unavailable");
+  if (input.codebaseAvailability && !input.nativeSkills) throw new Error("codebase-availability-evidence-invalid");
+  const codebaseDenials = input.nativeSkills ? claudeCodebaseDenials({ skills: input.nativeSkills, projectRoot: input.cwd,
+    invocationId: input.taskId, route: "managed", overrides: input.mcp.servers.filter(id => id === "codebase-memory"), availability: input.codebaseAvailability }) : [];
+  // Only host-supplied managed specs establish ownership of an unqualified identity.
+  // Native user declarations may legitimately use the same name during omission.
+  const omittedManagedReplacement = input.codebaseAvailability && Object.hasOwn(input.mcpServerSpecs, "codebase-memory");
+  const expectedAbsentMcpServers = [...codebaseDenials, ...(omittedManagedReplacement ? ["codebase-memory"] : [])];
+  const expectedAbsentToolPrefixes = [...(codebaseDenials.length ? ["mcp__plugin_deck-developer-team_codebase-memory__"] : []), ...(omittedManagedReplacement ? ["mcp__codebase-memory__"] : [])];
   const denied = [...new Set([...policy.denied,
-    ...(input.nativeSkills ? claudeSessionPluginMcpDenials(input.nativeSkills) : []), ...input.suppressedMcpServers ?? [],
+    ...codebaseDenials, ...input.suppressedMcpServers ?? [],
     ...([...input.mcp.servers, ...input.suppressedMcpServers ?? []].includes("codebase-memory") ? ["plugin:deck-developer-team:codebase-memory"] : [])])];
   args.push("--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, ...(denied.length ? { deniedMcpServers: denied.map(serverName => ({ serverName })) } : {}) }));
   if (nativePlugin) args.push("--plugin-dir", nativePlugin.root);
@@ -123,7 +146,8 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   if (input.approvals === "relay") args.push("--permission-prompt-tool", DECK_APPROVE_PROMPT_TOOL);
   // Verified on Claude 2.1.301: runner-default skips the permission-prompt path
   // and does not expose AskUserQuestion. Structured questions require relay mode.
-  else args.push("--dangerously-skip-permissions");
+  else if (input.approvals === "runner-default") args.push("--dangerously-skip-permissions");
+  else throw new ClaudeLaunchError("claude-approval-mode-invalid", "Explicit session approval mode is required.");
   if (input.disableNativeDelegation) args.push("--disallowedTools", NATIVE_DELEGATION_TOOLS);
   if (input.rolePrompt.length > 0) args.push("--append-system-prompt-file", files.writePrivateFile("role-prompt.md", input.rolePrompt));
 
@@ -132,7 +156,15 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(options.baseEnv ?? process.env)) if (typeof value === "string") env[key] = value;
   env.MCP_TOOL_TIMEOUT = String(MCP_TOOL_TIMEOUT_MS);
+  for (const key of Object.keys(env)) if (key.startsWith("DECK_SESSION_START_")) delete env[key];
+  if (input.sessionStartContext && input.nativeRole) {
+    const value = JSON.stringify({ ...input.sessionStartContext, root: input.cwd, generation: input.nativeRole.generation });
+    env.DECK_SESSION_START_CONTEXT = files.writePrivateFile("session-start-context.json", value);
+    env.DECK_SESSION_START_DIGEST = createHash("sha256").update(value).digest("hex");
+    env.DECK_SESSION_START_EPOCH = input.sessionStartContext.epoch;
+    env.DECK_SESSION_START_GENERATION = input.nativeRole.generation;
+  }
 
   if (input.nativeMemory?.scopeMode === "global") for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
-  return { command: options.executable ?? "claude", args, env, expectedMcpServers, diagnostics, nativeMcpAvailability: policy.availability };
+  return { command: options.executable ?? "claude", args, env, expectedMcpServers, expectedAbsentMcpServers, expectedAbsentToolPrefixes, diagnostics, nativeMcpAvailability: policy.availability };
 }

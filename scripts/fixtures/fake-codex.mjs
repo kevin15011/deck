@@ -1,6 +1,7 @@
 // Native app-server JSONL fixture, including read-only inventory and effective config checks.
 import { createHash } from "node:crypto";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 const argv = process.argv.slice(2);
 if (process.env.FAKE_CODEX_LOG) appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify({ argv, home: process.env.HOME }) + "\n");
@@ -8,9 +9,11 @@ if (argv.includes("--version")) { console.log("codex-cli 0.162.1"); process.exit
 let servers = {};
 let plugins = {};
 const features = {};
+let hookState = {};
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] !== "-c") continue;
   const entry = argv[++i];
+  if (entry.startsWith("hooks=")) hookState = Bun.TOML.parse(entry).hooks.state ?? {};
   const feature = /^features\.(.+)=false$/.exec(entry);
   if (feature) features[feature[1]] = false;
   if (entry.startsWith("mcp_servers=")) servers = JSON.parse(entry.slice("mcp_servers=".length).replace(/([,{])"([^"\\]+)"=/g, '$1"$2":'));
@@ -30,6 +33,15 @@ createInterface({ input: process.stdin }).on("line", line => {
   if (message.id === undefined) return;
   let result = {};
   if (message.method === "initialize") result = { userAgent: "fake-codex" };
+  else if (message.method === "hooks/list") {
+    const path = join(process.env.CODEX_HOME ?? join(process.env.HOME, ".codex"), "config.toml");
+    const config = existsSync(path) ? Bun.TOML.parse(readFileSync(path, "utf8")) : {};
+    const hooks = Object.entries(config.hooks ?? {}).flatMap(([event, groups]) => Array.isArray(groups) ? groups.flatMap(group => group.hooks ?? []).map(hook => {
+      const currentHash = digest(hook), key = `${event}-${currentHash}`;
+      return { key, currentHash, eventName: event[0].toLowerCase() + event.slice(1), handlerType: hook.type, command: hook.command, source: "user", enabled: hookState[key]?.enabled !== false, trustStatus: hookState[key]?.trusted_hash === currentHash ? "trusted" : "untrusted" };
+    }) : []);
+    result = { data: [{ cwd: message.params.cwds[0], hooks, errors: [], warnings: [] }] };
+  }
   else if (message.method === "config/read") result = { config: { mcp_servers: servers, features, plugins } };
   else if (message.method === "thread/start" || message.method === "thread/resume") {
     activeThreadId = message.params.threadId ?? "fake-thread";

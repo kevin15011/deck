@@ -837,7 +837,7 @@ function runIsolatedNativeSkillDiscoveryTest(exercise: () => Promise<void>): voi
       await (${exercise.toString()})();
     `;
     const run = Bun.spawnSync({ cmd: [process.execPath, "--eval", script], cwd: project, env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
-    expect({ exitCode: run.exitCode, stderr: run.stderr.toString() }).toEqual({ exitCode: 0, stderr: "" });
+    expect({ exitCode: run.exitCode, stderr: run.stderr.toString().replaceAll("deck-preparation: native-snapshot-unavailable\n", "") }).toEqual({ exitCode: 0, stderr: "" });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

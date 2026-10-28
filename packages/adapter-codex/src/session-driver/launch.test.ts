@@ -13,3 +13,11 @@ test('default-mode questions remain enabled for supervised launches',()=>expect(
 test('installed default matchers are compatible; a different memory command is an exact protected conflict',()=>{const inputWithMemory={...input,nativeMemory};const groups=(codexMemoryHooks(inputWithMemory).UserPromptSubmit as any[]).map(group=>({...group,matcher:'*'}));expect(matchesCodexMemoryGroups(groups,'UserPromptSubmit',inputWithMemory)).toBe(true);expect(matchesCodexMemoryGroups([{hooks:[{type:'command',command:'foreign'}]}],'UserPromptSubmit',inputWithMemory)).toBe(false);});
 
 test('absent suppressed names must not create invalid native MCP tables',()=>{expect(codexThreadMcpConfig({...input,suppressedMcpServers:['absent']})).toEqual(codexThreadMcpConfig(input));});
+
+test('review threads default-deny personal and unknown MCPs and allow only canonical read tools',()=>{
+  const review={...input,memberId:'quality',mcp:{servers:['context7','deck-task'],sessionTools:[]},mcpServerSpecs:{...input.mcpServerSpecs,context7:{command:'context7',args:[],env:{}}}};
+  const servers=codexThreadMcpConfig(review,['personal']).mcp_servers as any;
+  expect(servers.personal).toEqual({enabled:false});
+  expect(servers['deck-task']).toBeUndefined();
+  expect(servers.context7.enabled_tools).toEqual(['resolve-library-id','query-docs']);
+});

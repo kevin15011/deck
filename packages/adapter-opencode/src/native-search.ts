@@ -51,7 +51,12 @@ function inspectOpenCodeFacts(input: NativeSearchInspectionInput, configRoot: st
 }
 
 export function inspectOpenCodeNativeSearch(input: NativeSearchInspectionInput, configRoot: string): NativeSearchEvidence {
-  const evidence = inspectOpenCodeFacts(input, configRoot);
+  return { ...inspectOpenCodeFacts(input, configRoot), ...readOpenCodeSearchFallbackOwnership(input, configRoot) };
+}
+
+/** Resolve effective ownership without inspecting native search availability. */
+export function readOpenCodeSearchFallbackOwnership(input: NativeSearchInspectionInput, configRoot: string): Pick<NativeSearchEvidence, "ownedFallbackServerIds" | "unresolvedFallbackServerIds"> {
+  const evidence: Pick<NativeSearchEvidence, "ownedFallbackServerIds" | "unresolvedFallbackServerIds"> = {};
   const env = input.environment ?? process.env;
   let selected: { path?: string; entry: unknown } | undefined;
   try {

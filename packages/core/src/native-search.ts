@@ -25,3 +25,9 @@ export function selectSearchRoute(enabled: boolean, native: NativeSearchEvidence
   if (!fallbackUsable) throw new Error('web-search-fallback-unavailable: configure a supported Deck provider and its credential');
   return { route: 'fallback', diagnostics: native.availability === 'unknown' ? ['native-search-detection-defect', 'native-search-possible-duplicate'] : [] };
 }
+
+/** Shared launch decision. Fallback materialization is permitted only on this route. */
+export function resolveWebSearchLaunch(enabled: boolean, native: NativeSearchEvidence, fallbackUsable: boolean) {
+  const selection = selectSearchRoute(enabled, native, fallbackUsable);
+  return { ...selection, ...(selection.route === 'fallback' ? { serverId: 'web-search' as const } : {}) };
+}

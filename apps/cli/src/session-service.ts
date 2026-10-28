@@ -1,4 +1,12 @@
-import { prepareSessionNativeSkills } from "./session-native-skills";
+import { preparationCapabilities } from "./preparation-capabilities";
+import { validateClaudeSessionIntent } from "../../../packages/adapter-claude/src/session-skills";
+import { renderSessionOverlay, type SessionOverlaySection } from "@deck/core/session/overlay";
+import { composeSessionStartContextV1 } from "../../../packages/sdd-runtime/src/execution/session-start-context";
+import { createHash } from "node:crypto";
+import { ProjectPreparationService } from "../../../packages/sdd-runtime/src/execution/project-preparation";
+import { isCodebaseMemoryEnabled } from "@deck/core";
+import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
+import { prepareSessionNativeRole, prepareSessionNativeSkills } from "./session-native-skills";
 import {readScopedTaskDiff} from "./session-task-diff";
 /**
  * Production composition of the session daemon's service (D-6: apps/cli is the only place that
@@ -8,7 +16,6 @@ import {readScopedTaskDiff} from "./session-task-diff";
  */
 import { getAgentContent, type RunnerAdapter } from "@deck/core";
 import type { CrossRunnerConfig } from "@deck/core/config/deck-config";
-import { redactText } from "@deck/core/session/redaction";
 import type { RunnerSessionDriver } from "@deck/core/session/driver";
 import { SessionManager, type DaemonServices, type DriverLookup } from "@deck/session-host";
 import type { DeckConfigStore } from "./deck-config-store";
@@ -19,7 +26,6 @@ import type { createSupermemoryRuntimeHost } from "./supermemory-runtime-host";
 import { SessionCodebaseReadiness } from "./session-codebase-readiness";
 import type { NativeMemoryPreparationEffects } from "./session-native-memory";
 import { discoverSessionModels } from "./session-model-catalog";
-import { readSessionProjectInstructions } from "./session-project-instructions";
 
 export function createCrossSessionDrivers(adapters: readonly RunnerAdapter[], onError?: (runnerId: string, error: Error) => void): DriverLookup {
   const drivers = new Map<string, RunnerSessionDriver>();
@@ -30,70 +36,19 @@ export function createCrossSessionDrivers(adapters: readonly RunnerAdapter[], on
   return { get: (runnerId) => drivers.get(runnerId), list: () => [...drivers.values()] };
 }
 
-export type SessionRolePromptTask = {
-  taskId: string;
-  memberId: string;
-  state: string;
-  attempt: number;
-  summary?: string;
-};
-
-export type SessionRolePromptContext = {
-  changeId?: string;
-  projectRoot: string;
-  runnerId: string;
-  delegableMembers?: readonly string[];
-  /** Oldest to newest; render at most 20, running first and newest first within each group. */
-  tasks?: readonly SessionRolePromptTask[];
-};
-
-function rosterText(value: string, limit: number): string {
-  // Redact before truncation so a clipped credential cannot escape detection.
-  const clean = redactText(value, 256 * 1024).replace(/\s+/gu, " ").trim();
-  return clean.length > limit ? clean.slice(0, limit - 1) + "…" : clean;
-}
-
-function sessionTaskRoster(tasks: SessionRolePromptContext["tasks"]): string {
-  if (!tasks?.length) return "";
-  const selected = tasks.map((task, index) => ({ task, index }))
-    .sort((a, b) => Number(b.task.state === "running") - Number(a.task.state === "running") || b.index - a.index)
-    .slice(0, 20);
-  return [
-    "Tasks in this session",
-    ...selected.map(({ task }) => {
-      const summary = rosterText(task.summary ?? "", 120);
-      return `- ${rosterText(task.memberId, 80)} ${rosterText(task.taskId, 128)} [${rosterText(task.state, 40)}, attempt ${task.attempt}]${summary ? `: ${summary}` : ""}`;
-    }),
-    "Continue a task with deck_delegate continueTaskId=<id>",
-  ].join("\n");
-}
-
-function sessionDelegationPrompt(context: SessionRolePromptContext): string {
-  return [
-    "Session delegation",
-    "The ONLY delegation path is the Deck MCP tools: deck_delegate {agent, task, continueTaskId?}, deck_task_wait {taskIds, timeoutSec<=50}, deck_task_result {taskId}, deck_task_cancel {taskId}; native Task/Agent subagents are disabled. deck_delegate returns immediately with a taskId; poll with deck_task_wait.",
-    "OWNER RULE: A task belongs to the member that created it. To give feedback, iterate or follow up on the same area, ALWAYS call deck_delegate with that same member and continueTaskId=<that task's id>; the original task, owner, runner and model are preserved; Deck chooses fresh or native context at launch. Review roles always start fresh. Never switch owners, and never start a new task for the same work. Start a new task only for a different area or when the owner cannot continue.",
-    "Use deck_task_list to recover this session’s delegated task ids and owners before delegating.",
-    "Keep the returned taskId next to the member in your working notes and re-read the task roster before delegating.",
-    "Route non-trivial or independent work to specialists; direct work is only for seconds-scale or clearly trivial changes. Run independent tasks in parallel, waiting with deck_task_wait.",
-    `deck_delegate member ids: ${(context.delegableMembers ?? ["investigate", "architect", "apply-fast", "apply-deep", "quality"]).filter(id => id !== "lead").join(", ") || "(none)"}; a deck- prefix is also accepted.`,
-  ].join("\n");
-}
+export type { SessionRolePromptTask } from "@deck/core/session/overlay";
+export type SessionRolePromptContext = import("@deck/core/session/overlay").SessionOverlayContext;
 
 export function sessionRolePrompt(memberId: string, context: SessionRolePromptContext): string {
   const roleId = memberId.startsWith("deck-") ? memberId : `deck-${memberId}`;
   const isLead = roleId === "deck-lead";
-  const role = getAgentContent(roleId, { promptProfile: "compact" });
-  if (!role) throw new Error(`Unknown Deck session role: ${memberId}`);
-  const projectInstructions = context.runnerId === "claude" ? readSessionProjectInstructions(context.projectRoot) : undefined;
-  return [role.agentBody,
-    "You are running inside a Deck cross-runner session; native runner delegation is disabled.",
-    isLead ? sessionDelegationPrompt(context) : "",
-    isLead ? sessionTaskRoster(context.tasks) : "",
-    "Memory uses the official runner integration when its prepared capability status is ready. Consult that status before claiming memory is configured or available. Memory never changes official OpenSpec authority.",
-    context.changeId ? `This session is bound to the immutable OpenSpec change at ${join(context.projectRoot, "openspec", "changes", context.changeId)}.` : "",
-    projectInstructions === undefined ? "" : `Project instructions from the session project root (AGENTS.md):\n\n${projectInstructions}`,
-  ].filter(Boolean).join("\n\n");
+  const role = context.runnerId === "claude" || context.runnerId === "codex" || context.runnerId === "opencode" || context.runnerId === "pi" ? undefined : getAgentContent(roleId, { promptProfile: "compact" });
+  if (!DEVELOPER_TEAM_AGENTS.some(agent => agent.id === roleId)) throw new Error(`Unknown Deck session role: ${memberId}`);
+  const sections: SessionOverlaySection[] = [{ kind: "session-notice" }];
+  if (isLead) sections.push({ kind: "delegation", context }, { kind: "task-roster", tasks: context.tasks });
+  sections.push({ kind: "memory-status" });
+  if (context.changeId) sections.push({ kind: "change-binding", changePath: join(context.projectRoot, "openspec", "changes", context.changeId) });
+  return [role?.agentBody, renderSessionOverlay(roleId, sections)].filter(Boolean).join("\n\n");
 }
 
 export type CrossSessionServiceOptions = {
@@ -112,7 +67,20 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
   try { list = adapters(); } catch (error) { services.logger.error("session.adapters-unavailable", { error: (error as Error).message }); }
   const drivers = createCrossSessionDrivers(list, (runnerId, error) => services.logger.warn("session.driver-unavailable", { runnerId, error: error.message }));
   const readiness = options.codebaseReadiness ?? new SessionCodebaseReadiness({ supervisor: services.supervisor, environment: options.environment });
+  const projectPreparation = new ProjectPreparationService({ registryProvider: runnerId => list.find(adapter => adapter.runnerId === runnerId)?.skillDiscovery });
   return new SessionManager({
+    projectPreparation,
+    preparationScope: input => {
+      const config = options.configStore.read();
+      const byRunner = new Map([...new Set(Object.values(input.members).map(a => a.runnerId))].map(runnerId => [runnerId, {
+        ...preparationCapabilities(config, runnerId), ...list.find(adapter => adapter.runnerId === runnerId)?.readPreparationCapabilities?.(config),
+      }]));
+      return { projectRoot: input.projectRoot, sessionId: input.sessionId, epoch: input.epoch,
+        policyDigest: createHash("sha256").update(JSON.stringify(Object.entries(input.members).map(([id, a]) => [id, a.runnerId, byRunner.get(a.runnerId)!]))).digest("hex"),
+        members: Object.entries(input.members).map(([memberId, a]) => ({ memberId, runnerId: a.runnerId, bindingId: `${memberId}@${a.runnerId}`, capabilities: byRunner.get(a.runnerId)! })),
+      };
+    },
+    sessionStartContext: composeSessionStartContextV1,
     paths: services.paths, broker: services.broker, credentials: services.credentials, supervisor: services.supervisor,
     clock: services.clock, logger: services.logger, drivers,
     config: (): CrossRunnerConfig | undefined => options.configStore.read().crossRunner,
@@ -120,14 +88,23 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
     childMcp: async (runnerId, context) => {
       // Keep each turn's resolved specs isolated from concurrent sessions.
       const adapter = list.find((adapter) => adapter.runnerId === runnerId);
-      const nativeSkills = await prepareSessionNativeSkills(adapter);
-      const resolver = await resolveSessionChildMcp(adapter, options.configStore.read(), options.environment, { readiness, context }, options.nativeMemoryEffects);
-      return { ...resolver, ...(nativeSkills ? { nativeSkills } : {}) };
+      const nativeSkills = await prepareSessionNativeSkills(adapter, options.configStore.read(), check => services.logger.warn("claude.session-skills-unverified", { check }));
+      const resolver = await resolveSessionChildMcp(adapter, options.configStore.read(), options.environment, { readiness, context, nativeSkills }, options.nativeMemoryEffects);
+      const validateLaunch = nativeSkills ? () => validateClaudeSessionIntent(nativeSkills, options.configStore.read()) : undefined;
+      // Managed preparation may await a backend. Recheck intent after that wait,
+      // and release the binding if the generation was revoked in the meantime.
+      try { validateLaunch?.(); }
+      catch (error) { await resolver.release?.(); throw error; }
+      return { ...resolver, ...(nativeSkills ? { nativeSkills, validateLaunch } : {}),
+        ...(adapter?.runnerId === "codex" || adapter?.runnerId === "opencode" || adapter?.runnerId === "pi" ? { prepareNativeRole: async (roleId: string) => {
+          return prepareSessionNativeRole(adapter, roleId);
+        } } : {}),
+      };
     },
     closeChildMcp: () => readiness.close(),
     memory: async (context) => createSessionMemoryPort(context, options.configStore.read(), options.memoryRuntime),
     rolePrompt: sessionRolePrompt,
-    assignedRoleId: memberId => { const roleId=memberId.startsWith("deck-")?memberId:`deck-${memberId}`; return getAgentContent(roleId,{promptProfile:"compact"}) ? roleId : undefined; },
+    assignedRoleId: memberId => { const roleId=memberId.startsWith("deck-")?memberId:`deck-${memberId}`; return DEVELOPER_TEAM_AGENTS.some(role => role.id === roleId) ? roleId : undefined; },
     scopedDiff: readScopedTaskDiff,
     modelCatalog: (projectRoot, projectConfigTrusted, signal) => discoverSessionModels(list, drivers, projectRoot, projectConfigTrusted, signal),
   });

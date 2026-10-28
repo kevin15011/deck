@@ -133,10 +133,10 @@ export async function runDaemonCommand(deps: DaemonCommandDeps, sub: DaemonSubco
   }
 }
 
-export async function runDaemonCli(sub: DaemonSubcommand): Promise<number> {
+export async function runDaemonCli(sub: DaemonSubcommand, output?: Pick<DaemonCommandDeps, "write" | "writeErr">): Promise<number> {
   return runDaemonCommand({
     paths: resolveStatePaths(), version: getBuildInfo().version,
     spawnDaemon: () => spawnDetachedDaemon(deckInternalCommand("session-daemon")),
-    write: (text) => { process.stdout.write(text); }, writeErr: (text) => { process.stderr.write(text); },
+    write: output?.write ?? ((text) => { process.stdout.write(text); }), writeErr: output?.writeErr ?? ((text) => { process.stderr.write(text); }),
   }, sub);
 }

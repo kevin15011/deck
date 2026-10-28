@@ -783,7 +783,7 @@ describe("Codex RunnerAdapter production composition", () => {
     }
   });
 
-  test("round-trips all project-local Codex role assignments and preserves unknown native slugs", async () => {
+  test("round-trips supported project-local Codex role assignments and preserves unknown native slugs", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-role-assignments-"));
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-role-assignments-journal-"));
     try {
@@ -794,8 +794,9 @@ describe("Codex RunnerAdapter production composition", () => {
         inventoryDiscovery: async () => ({ state: "ready", source: "live", discoveredAt: 1, fingerprint: "current-codex", inventory: parsed.inventory }),
       });
       await adapter.getModelInventory?.({ projectRoot, mode: "rescan" });
-      const modelAssignments = Object.fromEntries(DEVELOPER_TEAM_AGENTS.map((agent) => [agent.id, "openai-codex/gpt-5.6-terra"]));
-      const thinkingAssignments = Object.fromEntries(DEVELOPER_TEAM_AGENTS.map((agent) => [agent.id, "ultra"]));
+      const supportedRoles = DEVELOPER_TEAM_AGENTS;
+      const modelAssignments = Object.fromEntries(supportedRoles.map((agent) => [agent.id, "openai-codex/gpt-5.6-terra"]));
+      const thinkingAssignments = Object.fromEntries(supportedRoles.map((agent) => [agent.id, "ultra"]));
       const plan = adapter.buildDeveloperTeamInstallPlan({
         projectRoot,
         environmentId: "codex-development",
@@ -815,6 +816,17 @@ describe("Codex RunnerAdapter production composition", () => {
       ].join("\n"));
       expect(adapter.readModelAssignments(projectRoot)).toMatchObject({ "deck-lead": "openai-codex/gpt-5.6-sol" });
       expect(adapter.readThinkingAssignments(projectRoot)).toMatchObject({ "deck-lead": "high" });
+      for (const role of ["deck-investigate", "deck-quality"]) {
+        const file = join(projectRoot, ".codex", "agents", `${role}.toml`);
+        const preserved = 'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "ultra"\n';
+        await writeFile(file, preserved);
+        const blocked = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development",
+          deckConfig: getDefaultDeckConfig(), modelAssignments: { [role]: "openai-codex/gpt-5.6-terra" }, thinkingAssignments: { [role]: "ultra" } });
+        expect(blocked.blocked).toBe(true);
+        expect(JSON.stringify(blocked)).not.toContain("codex-assignment-not-materialized");
+        await expect(adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan: blocked })).rejects.toThrow(/blocked/i);
+        expect(await readFile(file, "utf8")).toBe(preserved);
+      }
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
@@ -1204,7 +1216,9 @@ describe("Codex RunnerAdapter production composition", () => {
   } });
 
   test("reports reused, missing, unusable, MCP-missing, and index-missing readiness by capability ID", async () => {
-    const adapter = createCodexRunnerAdapter({ tools: testTools({ verifyExistingCodebase: () => false, verifyCodebaseNative: () => false }),
+    const root = await mkdtemp(join(tmpdir(), "deck-codex-readiness-"));
+    try {
+    const adapter = createCodexRunnerAdapter({ ...layout(root), tools: testTools({ verifyExistingCodebase: () => false, verifyCodebaseNative: () => false }),
       preflight: {
         probe: async () => ({ found: true, version: "0.146.1", help: "Usage: codex [OPTIONS]", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" }),
         inspectTrust: async () => "trusted",
@@ -1238,6 +1252,7 @@ describe("Codex RunnerAdapter production composition", () => {
       capabilityId: "serena",
       status: "ready",
     }));
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   test("doctor covers ready, degraded, blocked, drifted, unsupported, and per-route static states", async () => {

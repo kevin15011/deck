@@ -1,7 +1,23 @@
 import { createHash } from "node:crypto";
-import { closeSync, lstatSync, mkdirSync, openSync, readSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Job } from "./jobs";
+
+/** Read only the host-created header, not the model-controlled history. */
+export function readChildInvocationId(file: string, parentId: string, taskId: string, cwd: string): string {
+  const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.nlink !== 1 || stat.mode & 0o077 || process.getuid && stat.uid !== process.getuid()) throw new Error("Unsafe child history file");
+    const bytes = Buffer.alloc(8192), n = readSync(fd, bytes, 0, bytes.length, 0);
+    const newline = bytes.subarray(0, n).indexOf(0x0a);
+    if (newline < 0) throw new Error("Child header unavailable");
+    const header = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, newline));
+    const h = JSON.parse(header);
+    if (h.type !== "session" || typeof h.id !== "string" || !h.id || h.id.length > 256 || h.deckParent !== parentId || h.deckTaskId !== taskId || h.cwd !== cwd) throw new Error("Exact child history binding mismatch");
+    return h.id;
+  } finally { closeSync(fd); }
+}
 
 export function childSessionPath(parentFile: string, parent: string, childId: string): string {
   const key = createHash("sha256").update(parentFile + "\0" + parent).digest("hex");

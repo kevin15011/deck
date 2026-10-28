@@ -1,3 +1,6 @@
+import { readPreparedSessionStartContext } from "@deck/core/session/start-context";
+import { createOpenCodeRunnerAdapter } from "../runner-adapter";
+import { getDefaultDeckConfig } from "@deck/core";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, truncateSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -70,7 +73,7 @@ describe("OpenCode SSE", () => {
   });
 });
 
-function fakeServer(options: { contextUsage?: boolean; catalog?: unknown; hangCatalog?: boolean; nativeModel?: string; compacted?: boolean; personal?: boolean; extraMcp?: boolean; mutatedMcp?: boolean; nativePermissions?: Array<{permission:string;pattern:string;action:string}>; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; messageError?: unknown; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number; pendingPermissions?: unknown[]; permissionReplyStatus?: number } = {}) {
+function fakeServer(options: { selectedRole?: {name:string;prompt:string}; contextUsage?: boolean; catalog?: unknown; hangCatalog?: boolean; nativeModel?: string; compacted?: boolean; personal?: boolean; extraMcp?: boolean; mutatedMcp?: boolean; nativePermissions?: Array<{permission:string;pattern:string;action:string}>; hang?: boolean; pending?: boolean; abortError?: boolean; failMessage?: boolean; messageError?: unknown; hangEvent?: boolean; resumeStatus?: number; plugins?: readonly string[]; memoryTool?: boolean; pendingQuestions?: unknown[]; questionReplyStatus?: number; pendingPermissions?: unknown[]; permissionReplyStatus?: number } = {}) {
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const requests: Array<{ path: string; body: any; auth: string | null }> = [];
   let messages = 0;
@@ -84,7 +87,7 @@ function fakeServer(options: { contextUsage?: boolean; catalog?: unknown; hangCa
     if (path === "/event") return new Response(new ReadableStream({ start(c) { stream = c; c.enqueue(new TextEncoder().encode('data: {"type":"server.connected","properties":{}}\n\n')); }, cancel() {} }), { headers: { "content-type": "text/event-stream" } });
     if (path === "/mcp") return Response.json({ deck: { status: "connected" }, ...(options.personal ? {personal:{status:"failed",error:"PRIVATE_FAILURE_SENTINEL"}} : {}), ...(options.extraMcp ? { unwanted: { status: "connected" } } : {}) });
     if (path === "/config") return Response.json({ mcp:{deck:{type:"local",command:[options.mutatedMcp ? "foreign" : "deck","internal","session-mcp"],environment:{DECK_SESSION_CREDENTIAL_FILE:"/private/credential"},enabled:true}}, plugin: options.plugins ?? [] });
-    if (path === "/agent") return Response.json([{name:"build",permission:options.nativePermissions ?? [{permission:"*",pattern:"*",action:"allow"}]}]);
+    if (path === "/agent") return Response.json([{...(options.selectedRole ?? {name:"build"}),permission:options.nativePermissions ?? [{permission:"*",pattern:"*",action:"allow"}]}]);
     if (path === "/experimental/tool/ids") return Response.json(options.memoryTool ? ["bash", "supermemory"] : ["bash"]);
     if (path === "/session") return Response.json({ id: "ses_native" });
     if (path === "/session/ses_native") return Response.json({ id: "ses_native" }, { status: options.resumeStatus ?? 200 });
@@ -477,7 +480,7 @@ test("adapter registration and ordinary read-only MCP composition exclude memory
   writeFileSync(join(h.dir, "opencode.json"), JSON.stringify({ plugin: ["untrusted-plugin"], mcp: { "context-mode": { type: "local", command: ["context-mode", "--mcp"] }, supermemory: { type: "remote", url: "https://memory.invalid" }, "web-search": { type: "local", command: ["web"] }, arbitrary: { type: "local", command: ["other"] } } }));
   const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: h.dir, sessionDriver: { exec: async () => ({ code: 0, stdout: "1.18.31" }) } });
   expect(adapter.getSessionDriver?.()?.runnerId).toBe("opencode");
-  expect(await adapter.readSessionMcpServers?.()).toEqual({});
+  expect(await adapter.readSessionCapabilityOverrides?.()).toEqual({});
 });
 
 test("personal HTTP configuration and credentials remain in the native source", async () => {
@@ -485,12 +488,12 @@ test("personal HTTP configuration and credentials remain in the native source", 
   const h = privateIo();
   writeFileSync(join(h.dir, "opencode.json"), JSON.stringify({ mcp: { context7: { type: "remote", url: "https://mcp.context7.com/mcp", enabled: true } } }));
   const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: h.dir });
-  const servers = await adapter.readSessionMcpServers?.();
+  const servers = await adapter.readSessionCapabilityOverrides?.();
   expect(servers).toEqual({});
   const launch = buildOpenCodeLaunch(input(), h.io, {baseEnv:{HOME:h.dir,OPENCODE_CONFIG:join(h.dir,"opencode.json")}});
   expect(JSON.parse(launch.env.OPENCODE_CONFIG_CONTENT!).mcp.context7).toBeUndefined();expect(launch.env.OPENCODE_CONFIG).toBe(join(h.dir,"opencode.json"));
   writeFileSync(join(h.dir, "opencode.json"), JSON.stringify({ mcp: { context7: { type: "remote", url: "https://mcp.context7.com/mcp", headers: { Authorization: "Bearer sensitive" } } } }));
-  expect(await adapter.readSessionMcpServers?.()).toEqual({});
+  expect(await adapter.readSessionCapabilityOverrides?.()).toEqual({});
 });
 
 test("HTTP header auth uses native environment references, never resolved values", () => {
@@ -888,4 +891,92 @@ test.each([true,false])('OpenCode claim gate prevents the native message POST; a
     expect((await task.done).status).toBe(allowed?'completed':'interrupted');expect(claims).toBe(1);
     expect(s.requests.filter(r=>r.path.endsWith('/message'))).toHaveLength(allowed?1:0);await task.close();
   }finally{await s.stop();}
+});
+
+// Protects exact installed role selection and immutable deny rules under both approval modes.
+test.each(["relay", "runner-default"] as const)("verified OpenCode review role runs with native and MCP denies (%s)", async approvals => {
+  const root=mkdtempSync(join(tmpdir(),"deck-oc-native-")); dirs.push(root);
+  const adapter=createOpenCodeRunnerAdapter({developerTeamConfigDir:root});
+  const plan=adapter.buildDeveloperTeamInstallPlan!({environmentId:"opencode-development",projectRoot:root,deckConfig:getDefaultDeckConfig()});
+  await adapter.applyDeveloperTeamInstall!({environmentId:"opencode-development",projectRoot:root,plan});
+  const role=await adapter.prepareSessionNativeRole!("deck-quality");
+  const s=fakeServer({selectedRole:{name:role.roleRef,prompt:role.instructions},plugins:role.hooks.map(h=>h.command),nativePermissions:[
+    {permission:"*",pattern:"*",action:"deny"},
+    {permission:"read",pattern:"*",action:"allow"},
+    {permission:"codebase-memory_search_graph",pattern:"*",action:"allow"},
+    {permission:"read",pattern:"private/*",action:"deny"},
+    {permission:"context7_*",pattern:"*",action:"deny"},
+  ]}); const h=privateIo(); let task;
+  try {
+    task=await createOpenCodeSessionDriver({requireNativeRole:true}).startTask({...input(),memberId:"quality",approvals,nativeRoleDescriptor:role},{...h.io,spawn:async()=>s.child});
+    expect((await task.done).status).toBe("completed");
+    expect(s.requests.find(r=>r.path.endsWith("/message"))!.body).toMatchObject({agent:"deck-quality"});
+    expect(s.requests.find(r=>r.path.endsWith("/message"))!.body.system).toBe(input().rolePrompt);
+    const rules=s.requests.find(r=>r.path==="/session")!.body.permission;
+    const action=(tool:string,pattern="*")=>rules.filter((r:any)=>(r.permission==="*"||r.permission===tool)&&(r.pattern==="*"||r.pattern===pattern)).at(-1)?.action;
+    expect(action("context7_query-docs")).toBe("deny");
+    expect(action("bash")).toBe("deny"); expect(action("personal_write")).toBe("deny");
+    expect(action("codebase-memory_index_repository")).toBe("deny");
+    expect(action("read")).toBe(approvals==="relay"?"ask":"allow");
+    expect(action("read","private/*")).toBe("deny");
+    expect(action("codebase-memory_search_graph")).toBe(approvals==="relay"?"ask":"allow");
+    writeFileSync(join(root,"prompts/deck-team/deck-quality.md"),"stale");
+    expect((await task.send("again")).status).toBe("failed");
+    expect(s.requests.filter(r=>r.path.endsWith("/message"))).toHaveLength(1);
+  } finally {await task?.close();await s.stop();}
+});
+
+// Protects live Setup correlation, host rejection, cancellation and permanently revoked generations.
+test.each(["accept", "reject", "generation", "cancel", "role-switch"])("OpenCode Setup invocation binding: %s", async mode => {
+  const root=mkdtempSync(join(tmpdir(),"deck-oc-setup-")); dirs.push(root);
+  const adapter=createOpenCodeRunnerAdapter({developerTeamConfigDir:root});
+  const plan=adapter.buildDeveloperTeamInstallPlan!({environmentId:"opencode-development",projectRoot:root,deckConfig:getDefaultDeckConfig()});
+  await adapter.applyDeveloperTeamInstall!({environmentId:"opencode-development",projectRoot:root,plan});
+  const role=await adapter.prepareSessionNativeRole!("deck-setup");
+  const s=fakeServer({hang:true,selectedRole:{name:role.roleRef,prompt:role.instructions},plugins:role.hooks.map(h=>h.command)}), h=privateIo();
+  let binding:any, task;
+  let confirm!:()=>void; const confirmed=new Promise<void>(resolve=>{confirm=resolve;});
+  try {
+    task=await createOpenCodeSessionDriver({requireNativeRole:true}).startTask({...input(),memberId:"setup",nativeRoleDescriptor:role},{...h.io,spawn:async()=>s.child,validatedLaunch:value=>{binding=value;confirm();return mode!=="reject";}});
+    await waitForRequest(s,"/session/ses_native/message");
+    expect(binding).toBeUndefined();
+    const messageID=s.requests.find(r=>r.path.endsWith("/message"))!.body.messageID;
+    s.event("message.updated",{info:{id:"msg_forged",role:"user",agent:"deck-setup",sessionID:"ses_native"}});
+    s.event("message.updated",{info:{id:messageID,role:"user",agent:"deck-setup",sessionID:"foreign-session"}});
+    const forgedObserved=()=>h.events.some(event=>JSON.stringify(event.raw??{}).includes("msg_forged"));
+    for(let i=0;i<100&&!forgedObserved();i++)await Bun.sleep(5);
+    expect(forgedObserved()).toBe(true);
+    expect(binding).toBeUndefined();
+    s.event("message.updated",{info:{id:messageID,role:"user",agent:"deck-setup",sessionID:"ses_native"}});
+    await confirmed;
+    expect(binding).toMatchObject({roleId:"deck-setup",generation:role.generation,nativeSessionId:"ses_native"});
+    if(mode==="reject") { expect((await task.done).status).toBe("failed"); expect(s.requests.filter(r=>r.path.endsWith("/message"))).toHaveLength(1); }
+    else {
+      expect(binding.current()).toBe(true);
+      if(mode==="generation") {
+        const file=join(root,"prompts/deck-team/deck-setup.md"), before=readFileSync(file,"utf8");
+        writeFileSync(file,"changed");expect(binding.current()).toBe(false);
+        writeFileSync(file,before);expect(binding.current()).toBe(false);
+      }
+      if(mode==="cancel") {await task.interrupt();expect(binding.current()).toBe(false);}
+      if(mode==="role-switch") {
+        s.event("message.updated",{info:{id:messageID,role:"user",agent:"deck-lead",sessionID:"ses_native"}});
+        for(let i=0;i<100&&binding.current();i++)await Bun.sleep(5);
+        expect(binding.current()).toBe(false);
+      }
+    }
+  } finally {await task?.close();await s.stop();}
+  expect(binding.current()).toBe(false);
+});
+
+// Protects host-to-plugin snapshot binding and rejection of ambient references.
+test("launch passes only current host-prepared readiness to the native plugin", () => {
+  const h = privateIo();
+  const base = { DECK_SESSION_START_CONTEXT: "/foreign/context", DECK_SESSION_START_EPOCH: "foreign" };
+  expect(buildOpenCodeLaunch(input(), h.io, { baseEnv: base }).env.DECK_SESSION_START_CONTEXT).toBeUndefined();
+  const task = { ...input(), cwd: h.dir, sessionStartContext: { text: "host evidence", epoch: "current", snapshotId: "snapshot" } };
+  expect(() => buildOpenCodeLaunch(task, h.io, { baseEnv: base })).toThrow("opencode-session-context-unverified");
+  const nativeRoleDescriptor = { generation: "installed" } as NonNullable<DriverTaskInput["nativeRoleDescriptor"]>;
+  const launch = buildOpenCodeLaunch({ ...task, nativeRoleDescriptor }, h.io, { baseEnv: base });
+  expect(readPreparedSessionStartContext(h.dir, launch.env)).toBe("host evidence");
 });

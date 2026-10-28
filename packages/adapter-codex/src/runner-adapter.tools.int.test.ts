@@ -346,7 +346,8 @@ describe("Codex global ownership and migration", () => {
       expect(await readFile(join(g, ".codex", "agents", "codebase-memory.toml"), "utf8")).toBe(foreignAgent);
       expect(await readFile(join(g, ".codex", "hooks.json"), "utf8")).toBe('{"hooks":{"Stop":[]}}');
       expect(await readFile(join(g, ".codex", "AGENTS.md"), "utf8")).toBe("# my global rules\n");
-      for (const role of ["deck-lead", "deck-investigate", "deck-quality"]) expect((await stat(join(g, ".codex", "agents", `${role}.toml`))).isFile()).toBe(true);
+      expect((await stat(join(g, ".codex", "agents", "deck-lead.toml"))).isFile()).toBe(true);
+      for (const role of ["deck-investigate", "deck-quality"]) expect((await stat(join(g, ".codex", "agents", `${role}.toml`))).isFile()).toBe(true);
       expect((await stat(join(g, ".agents", "skills", "deck-lead", "SKILL.md"))).isFile()).toBe(true);
       expect((await stat(join(g, ".codex", "deck", "manifest.json"))).isFile()).toBe(true);
       for (const name of [".codex", ".agents", "AGENTS.md"]) await expect(stat(join(cwd, name))).rejects.toThrow();

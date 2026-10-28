@@ -11,6 +11,9 @@
     "./web-search-capability": "./src/web-search-capability.ts",
     "./developer-team-catalog": "./src/developer-team-catalog.ts",
     "./team-catalog": "./src/team-catalog.ts",
+    "./session/start-context": "./src/session/start-context.ts",
+    "./session/readiness-parity": "./src/session/readiness-parity.ts",
+    "./session/preparation": "./src/session/preparation.ts",
     "./session/quota": "./src/session/quota.ts",
     "./session/daemon-restart": "./src/session/daemon-restart.ts",
     "./session/lead-replies": "./src/session/lead-replies.ts",
@@ -49,7 +52,11 @@
     "./spec-registry": "./src/spec-registry/index.ts",
     "./session/task-continuity": "./src/session/task-continuity.ts",
     "./session/task-handoff": "./src/session/task-handoff.ts",
-    "./session/request-input": "./src/session/request-input.ts"
+    "./session/request-input": "./src/session/request-input.ts",
+    "./session/role-tool-policy": "./src/session/role-tool-policy.ts",
+    "./session/overlay": "./src/session/overlay.ts",
+    "./session/codebase-availability": "./src/session/codebase-availability.ts",
+    "./session/parity": "./src/session/parity.ts"
   },
   "devDependencies": {
     "@deck/adapter-codex": "workspace:*",

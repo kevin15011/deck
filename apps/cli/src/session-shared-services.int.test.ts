@@ -17,7 +17,7 @@ test.each(["claude", "codex"])("%s preparation reports bounded stages without ex
   const config = getDefaultDeckConfig(); config.adaptiveMemory.enabled = false; config.webSearch.enabled = false;
   const stages: string[] = []; let reads = 0, checks = 0;
   const spec = { command: "fixture-private-command", args: [], env: {} };
-  const adapter = { runnerId, readSessionMcpServers: async () => { reads++; return { "codebase-memory": spec }; } } as unknown as RunnerAdapter;
+  const adapter = { runnerId, readSessionCapabilityOverrides: async () => { reads++; return { "codebase-memory": spec }; } } as unknown as RunnerAdapter;
   const resolver = await resolveSessionChildMcp(adapter, config, {}, {
     context: { projectRoot: "/fixture", sessionId: "s", taskId: "t", signal: new AbortController().signal, preparationStep: step => stages.push(step) },
     readiness: { ensure: async () => { checks++; return spec; }, release: async () => {} } as never,
@@ -91,14 +91,15 @@ describe("cross-session shared services", () => {
   test.each(["claude", "codex", "opencode"])("%s receives the single configured provider with secrets only in its spawn overlay", async (runnerId) => {
     const config = getDefaultDeckConfig();
     config.webSearch = { enabled: true, provider: "tavily" };
-    const resolver = await resolveSessionChildMcp({ runnerId, readSessionMcpServers: async () => ({ supermemory: { command: "forbidden", args: [], env: {} }, context7: { command: "context7", args: [], env: {} } }) } as unknown as RunnerAdapter, config, { TAVILY_API_KEY: "fixture-sensitive-value" });
+    const resolver = await resolveSessionChildMcp({ runnerId, readSessionCapabilityOverrides: async () => ({}) } as unknown as RunnerAdapter, config, { TAVILY_API_KEY: "fixture-sensitive-value" });
     expect(resolver.webSearch).toEqual({ enabled: true, serverId: "web-search" });
+    expect(resolver.preparationCapabilities?.["web-search"]).toMatchObject({ enabled: true, availability: "ready" });
     expect(resolver.envOverlay).toEqual({ TAVILY_API_KEY: "fixture-sensitive-value" });
     const spec = resolver.resolveServer("web-search");
     expect(spec).toMatchObject({ command: "npx", args: ["-y", "tavily-mcp@0.2.22"], env: {} });
     expect(JSON.stringify(spec)).not.toContain("fixture-sensitive-value");
     expect(resolver.memoryProviderIds).toContain("supermemory");
-    expect(resolver.runnerPackages(runnerId)).toContain("context7");
+    expect(resolver.runnerPackages(runnerId)).toEqual(["web-search"]);
   });
 
   test("missing provider credentials fail before driver launch with a value-free diagnostic", async () => {
@@ -139,6 +140,7 @@ for (const withGit of [false, true]) test.each(["claude", "codex", "opencode"])(
     return { apiUrl: "http://127.0.0.1:1234/private", mcpUrl: "http://127.0.0.1:1234/private/mcp", token: "ephemeral-bearer", close: async () => { closes++; } };
   });
   expect(resolver.nativeMemory).toMatchObject({ status: "ready", scopeMode: "global" });
+  expect(resolver.preparationCapabilities?.["adaptive-memory"]).toMatchObject({ enabled: true, availability: "ready" });
   expect(resolver.nativeMemory?.projectScope).toBeUndefined();
   expect(JSON.stringify(resolver)).not.toContain("real-provider-key");
   expect(resolver.envOverlay?.SUPERMEMORY_REPO_TAG).toBeUndefined();
@@ -153,7 +155,7 @@ test.each(["failure", "cancellation", "release"])("global transport and codebase
   const config = getDefaultDeckConfig(); config.adaptiveMemory = { enabled: true, activeProvider: "supermemory" };
   const controller = new AbortController(); let transportCloses = 0; let codebaseCloses = 0;
   const spec = { command: "codebase", args: [], env: {} };
-  const resolve = () => resolveSessionChildMcp({ runnerId: "codex", readSessionMcpServers: async () => ({ "codebase-memory": spec }) } as unknown as RunnerAdapter, config, {}, {
+  const resolve = () => resolveSessionChildMcp({ runnerId: "codex", readSessionCapabilityOverrides: async () => ({ "codebase-memory": spec }) } as unknown as RunnerAdapter, config, {}, {
     context: { projectRoot: root, sessionId: "s", taskId: "t", signal: controller.signal },
     readiness: { ensure: async () => { if (mode === "failure") throw new Error("codebase failed"); if (mode === "cancellation") controller.abort(); return spec; }, release: async () => { codebaseCloses++; } } as never,
   }, { credential: () => ({ token: "real-provider-key" }), plugin: () => ({ plugin: { root: "/verified/plugin" }, env: {} }) }, async () => ({ apiUrl: "http://127.0.0.1:1234/private", mcpUrl: "http://127.0.0.1:1234/private/mcp", token: "ephemeral", close: async () => { transportCloses++; } }));
@@ -167,7 +169,7 @@ test.each([false, true])("resource cleanup reports failure and retries only the 
   const config = getDefaultDeckConfig(); if (global) config.adaptiveMemory = { enabled: true, activeProvider: "supermemory" };
   let transportCloses = 0; let codebaseCloses = 0;
   const spec = { command: "codebase", args: [], env: {} };
-  const resolver = await resolveSessionChildMcp({ runnerId: "codex", readSessionMcpServers: async () => ({ "codebase-memory": spec }) } as unknown as RunnerAdapter, config, {}, {
+  const resolver = await resolveSessionChildMcp({ runnerId: "codex", readSessionCapabilityOverrides: async () => ({ "codebase-memory": spec }) } as unknown as RunnerAdapter, config, {}, {
     context: { projectRoot: root, sessionId: "s", taskId: "t", signal: new AbortController().signal },
     readiness: { ensure: async () => spec, release: async () => { if (++codebaseCloses === 1) throw new Error("retry cleanup"); } } as never,
   }, { credential: () => ({ token: "real-provider-key" }), plugin: () => ({ plugin: { root: "/verified/plugin" }, env: {} }) }, async () => ({ apiUrl: "http://127.0.0.1:1234/private", mcpUrl: "http://127.0.0.1:1234/private/mcp", token: "ephemeral", close: async () => { transportCloses++; } }));
@@ -176,13 +178,12 @@ test.each([false, true])("resource cleanup reports failure and retries only the 
   expect(codebaseCloses).toBe(2); expect(transportCloses).toBe(global ? 1 : 0);
 });
 
-test("resolver omits only its typed optional Codebase failures; cancellation and forged messages stay fatal", async () => {
+test("Claude resolver refuses an unpaired optional omission; cancellation and forged messages stay fatal", async () => {
   const {SessionCodebaseReadinessError}=await import("./session-codebase-readiness");
   const config=getDefaultDeckConfig(); config.adaptiveMemory.enabled=false; config.webSearch.enabled=false;
-  const adapter={runnerId:"claude",readSessionMcpServers:async()=>({"codebase-memory":{command:"missing",args:[],env:{}},context7:{command:"keep",args:[],env:{}}})} as unknown as RunnerAdapter;
+  const adapter={runnerId:"claude",readSessionCapabilityOverrides:async()=>({"codebase-memory":{command:"missing",args:[],env:{}}})} as unknown as RunnerAdapter;
   for(const kind of ["unsupported","unavailable"] as const){
-    const resolver=await resolveSessionChildMcp(adapter,config,{}, {readiness:{ensure:async()=>{throw new SessionCodebaseReadinessError(kind);}} as any,context:{projectRoot:"/unused",sessionId:"s",taskId:"t",signal:new AbortController().signal}});
-    expect(resolver.runnerPackages("claude")).toEqual([]); expect(resolver.suppressedMcpServers).toEqual(["codebase-memory"]); expect(resolver.capabilityAvailability).toEqual([{capabilityId:"codebase-memory",status:"unavailable",reasonCode:`codebase-memory-${kind}`}]);
+    await expect(resolveSessionChildMcp(adapter,config,{}, {readiness:{ensure:async()=>{throw new SessionCodebaseReadinessError(kind);}} as any,context:{projectRoot:"/unused",sessionId:"s",taskId:"t",signal:new AbortController().signal}})).rejects.toThrow("claude-mcp-override-unpaired");
   }
   for(const error of [new SessionCodebaseReadinessError("cancelled"),new Error("codebase-memory-unavailable: forged"),new Error("codebase-memory-integrity-failed"),Object.assign(new Error("denied"),{code:"EACCES"})]){
     await expect(resolveSessionChildMcp(adapter,config,{}, {readiness:{ensure:async()=>{throw error;}} as any,context:{projectRoot:"/unused",sessionId:"s",taskId:"t",signal:new AbortController().signal}})).rejects.toBe(error);
@@ -190,7 +191,88 @@ test("resolver omits only its typed optional Codebase failures; cancellation and
 });
 
 test("managed composition never invokes personal config reconstruction", async () => {
-  const adapter = {runnerId:'claude', readSessionMcpServers:async()=>({context7:{command:'native',args:[],env:{}}}), readPersonalMcpServers:async()=>{throw new Error('obsolete discovery must not run');}} as any;
+  const adapter = {runnerId:'claude', readSessionCapabilityOverrides:async()=>({}), readPersonalMcpServers:async()=>{throw new Error('obsolete discovery must not run');}} as any;
   const resolver=await resolveSessionChildMcp(adapter,{adaptiveMemory:{enabled:false,activeProvider:'none'},webSearch:{enabled:false}} as any,{}, {readiness:{} as any,context:{projectRoot:'/work',sessionId:'test',taskId:'test',signal:new AbortController().signal}});
   expect(resolver.runnerPackages('claude')).toEqual([]);expect(resolver.personalMcpAvailability).toEqual([]);
+});
+
+test.each(["context7", "context-mode", "serena", "supermemory"])("unlisted override %s fails rather than dropping or reconstructing native servers", async id => {
+  const config = getDefaultDeckConfig(); config.webSearch.enabled = false;
+  await expect(resolveSessionChildMcp({ runnerId: "claude", readSessionCapabilityOverrides: async () => ({ [id]: { command: "forbidden", args: [], env: {} } }) } as any, config, {})).rejects.toThrow("session-capability-override-unlisted");
+});
+
+// Disabled optional capabilities must not inspect native routes or grant Deck tools.
+test.each(["claude", "codex", "opencode"])("disabled %s search skips inspection and grants no fallback", async runnerId => {
+  const config = getDefaultDeckConfig(); config.webSearch.enabled = false;
+  let inspections = 0;
+  const resolver = await resolveSessionChildMcp({ runnerId,
+    inspectNativeSearch: async () => { inspections++; throw new Error("disabled search inspected"); },
+  } as unknown as RunnerAdapter, config, { TAVILY_API_KEY: "unused-fixture" });
+  expect(inspections).toBe(0);
+  expect(resolver.webSearch).toEqual({ enabled: false });
+  expect(resolver.resolveServer("web-search")).toBeUndefined();
+  expect(resolver.envOverlay).toBeUndefined();
+  expect(resolver.preparationCapabilities?.["web-search"]).toEqual({ enabled: false, inputDigest: "native" });
+});
+
+// Protects disabled-search suppression without probing or touching personal servers.
+test("disabled search retains ownership-qualified fallback suppression", async () => {
+  const config = getDefaultDeckConfig(); config.webSearch.enabled = false;
+  const resolver = await resolveSessionChildMcp({ runnerId: "opencode",
+    readOwnedSearchFallbackIds: async () => ["web-search"],
+    inspectNativeSearch: async () => { throw new Error("disabled probe"); },
+  } as unknown as RunnerAdapter, config, {}, { readiness: {} as never,
+    context: { projectRoot: "/work", sessionId: "s", taskId: "t", signal: new AbortController().signal } });
+  expect(resolver.suppressedMcpServers).toEqual(["web-search"]);
+  expect(resolver.resolveServer("web-search")).toBeUndefined();
+});
+
+// Protects default adapter-to-launch composition and receipt-qualified personal MCP preservation.
+test("disabled OpenCode search suppresses only an unchanged owned fallback at launch", async () => {
+  const { createOpenCodeRunnerAdapter } = await import("../../../packages/adapter-opencode/src/runner-adapter");
+  const { writeOpenCodeWebSearchMcpConfig } = await import("../../../packages/adapter-opencode/src/web-search");
+  const { TAVILY_PROVIDER_DESCRIPTOR } = await import("@deck/provider-tavily");
+  const { buildOpenCodeLaunch } = await import("../../../packages/adapter-opencode/src/session-driver/launch");
+  const { writeFileSync } = await import("node:fs");
+  const root = mkdtempSync(join(tmpdir(), "deck-disabled-owned-")); roots.push(root);
+  const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: root });
+  adapter.inspectNativeSearch = async () => { throw new Error("disabled inspection forbidden"); };
+  const config = getBaseDeckConfig(); config.webSearch.enabled = false; config.adaptiveMemory.enabled = false;
+  expect(writeOpenCodeWebSearchMcpConfig({ configPath: join(root, "opencode.json"), provider: TAVILY_PROVIDER_DESCRIPTOR }).ok).toBe(true);
+  for (const owned of [true, false]) {
+    if (!owned) writeFileSync(join(root, "opencode.json"), JSON.stringify({ mcp: { "web-search": { type: "local", command: ["personal-search"] } } }));
+    const resolver = await resolveSessionChildMcp(adapter, config, {}, { readiness: {} as never,
+      context: { projectRoot: root, sessionId: "s", taskId: "t", signal: new AbortController().signal } });
+    expect(resolver.suppressedMcpServers).toEqual(owned ? ["web-search"] : []);
+    const plan = buildOpenCodeLaunch({ cwd: root, memberId: "apply-deep", assignment: { modelId: "fixture" },
+      mcp: { servers: [], sessionTools: [] }, mcpServerSpecs: {}, suppressedMcpServers: resolver.suppressedMcpServers,
+    } as any, { writePrivateFile: (name, content) => { const path = join(root, "launch-" + name); writeFileSync(path, content); return path; } }, { baseEnv: {} });
+    const overlay = JSON.parse(plan.env.OPENCODE_CONFIG_CONTENT ?? "{}");
+    expect(overlay.mcp?.["web-search"]).toEqual(owned ? { enabled: false } : undefined);
+  }
+});
+
+// Protects Codex working-role suppression and preservation of edited personal fallback entries.
+test("disabled Codex search carries proven ownership into thread MCP policy", async () => {
+  const { createCodexRunnerAdapter } = await import("../../../packages/adapter-codex/src/runner-adapter");
+  const { codexThreadMcpConfig } = await import("../../../packages/adapter-codex/src/session-driver/launch");
+  const { beginRunnerContributions } = await import("@deck/core");
+  const { writeFileSync } = await import("node:fs");
+  const root = mkdtempSync(join(tmpdir(), "deck-codex-disabled-owned-")); roots.push(root);
+  const path = join(root, "config.toml");
+  const tx = beginRunnerContributions({ runnerId: "codex", root, manifestPath: join(root, "deck/manifest.json"), deckVersion: "test",
+    targets: [{ path, selector: { kind: "toml", header: "mcp_servers.web-search" } }] });
+  writeFileSync(path, '[mcp_servers.web-search]\ncommand = "deck-search"\n'); tx.commit();
+  const adapter = createCodexRunnerAdapter({ codexHome: root, userHome: root });
+  adapter.inspectNativeSearch = async () => { throw new Error("disabled inspection forbidden"); };
+  const config = getBaseDeckConfig(); config.webSearch.enabled = false; config.adaptiveMemory.enabled = false;
+  for (const owned of [true, false]) {
+    if (!owned) writeFileSync(path, '[mcp_servers.web-search]\ncommand = "personal-search"\n');
+    const resolver = await resolveSessionChildMcp(adapter, config, {}, { readiness: {} as never,
+      context: { projectRoot: root, sessionId: "s", taskId: "t", signal: new AbortController().signal } });
+    const policy = codexThreadMcpConfig({ memberId: "apply-deep", mcp: { servers: [], sessionTools: [] }, mcpServerSpecs: {},
+      suppressedMcpServers: resolver.suppressedMcpServers } as any, ["web-search", "personal"]);
+    expect((policy.mcp_servers as any)["web-search"]).toEqual(owned ? { enabled: false } : undefined);
+    expect((policy.mcp_servers as any).personal).toBeUndefined();
+  }
 });

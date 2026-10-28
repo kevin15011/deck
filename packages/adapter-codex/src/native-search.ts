@@ -52,6 +52,13 @@ export function inspectCodexNativeSearch(input: NativeSearchInspectionInput, cod
   const effectiveHome = input.environment?.CODEX_HOME;
   if (effectiveHome && isAbsolute(effectiveHome)) codexHome = effectiveHome;
   const evidence = inspectCodexFacts(input, codexHome);
+  Object.assign(evidence, readCodexSearchFallbackOwnership(codexHome));
+  return evidence;
+}
+
+/** Ownership receipts only; no capability availability inspection. */
+export function readCodexSearchFallbackOwnership(codexHome: string): Pick<NativeSearchEvidence, "ownedFallbackServerIds" | "unresolvedFallbackServerIds"> {
+  const evidence: Pick<NativeSearchEvidence, "ownedFallbackServerIds" | "unresolvedFallbackServerIds"> = {};
   const target = { path: join(codexHome, 'config.toml'), selector: { kind: 'toml' as const, header: 'mcp_servers.web-search' } };
   if (hasRunnerContributionProof(join(codexHome, 'deck/manifest.json'), target)) evidence.ownedFallbackServerIds = ['web-search'];
   else if (existsSync(target.path) && /web-search/.test(readFileSync(target.path, 'utf8'))) evidence.unresolvedFallbackServerIds = ['web-search'];

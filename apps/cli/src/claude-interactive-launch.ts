@@ -1,8 +1,9 @@
 import type { RunnerAdapter, RunnerLaunchInput, RunnerLaunchResult } from '@deck/core';
+import { attachClaudeCodebaseObservation } from './claude-native-codebase';
 import { buildReviewedInteractiveLaunch } from './interactive-search-review';
 
 /** Reuse immutable plugin publication when only launch-time search selection became stale. */
-export async function prepareClaudeInteractiveLaunch(adapter: RunnerAdapter, input: RunnerLaunchInput): Promise<RunnerLaunchResult> {
+async function preparePluginLaunch(adapter: RunnerAdapter, input: RunnerLaunchInput): Promise<RunnerLaunchResult> {
   const launch = await buildReviewedInteractiveLaunch(adapter, input);
   if (launch.status !== 'blocked' || launch.code !== 'claude-web-search-selection-stale') return launch;
   const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: input.projectRoot, environmentId: adapter.environmentIds[0]!, deckConfig: input.deckConfig });
@@ -17,4 +18,10 @@ export async function prepareClaudeInteractiveLaunch(adapter: RunnerAdapter, inp
     return { status: 'blocked', code: 'claude-search-publication-failed', diagnostics: [{ code: 'claude-search-publication-failed', severity: 'error',
       message: 'The current search plugin selection could not be published and verified. Existing generations were preserved; review installation recovery before reopening.' }] };
   }
+}
+
+/** Native backend observation runs with the executor's actual environment immediately before spawn. */
+export async function prepareClaudeInteractiveLaunch(adapter: RunnerAdapter, input: RunnerLaunchInput, observer?: Parameters<typeof attachClaudeCodebaseObservation>[3], readConfig?: () => RunnerLaunchInput["deckConfig"]): Promise<RunnerLaunchResult> {
+  const result = await preparePluginLaunch(adapter, input);
+  return result.status === 'ready' ? attachClaudeCodebaseObservation(adapter, input, result, observer, readConfig) : result;
 }

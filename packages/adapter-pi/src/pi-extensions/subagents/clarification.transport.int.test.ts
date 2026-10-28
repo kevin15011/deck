@@ -36,7 +36,7 @@ test("child IPC rejects malformed/foreign/stale/idle messages and removes its li
   const handlers: Record<string, any> = {}, calls: any[] = [], replies: any[] = [];
   const env = { DECK_PI_CLARIFICATION_NONCE: "nonce", DECK_PI_PARENT_SESSION: "parent", DECK_PI_TASK_ID: "task", DECK_PI_CHILD_SESSION: "/child", DECK_PI_ATTEMPT: "3" };
   let idle = false;
-  const ctx = { sessionManager: { getSessionFile: () => "/child" }, isIdle: () => idle };
+  const ctx = { sessionManager: { getSessionFile: () => "/child", getSessionId: () => "native-child" }, isIdle: () => idle };
   const frame = { version: 1, nonce: "nonce", parentId: "parent", taskId: "task", sessionFile: "/child", attempt: 3, type: "clarify", id: "11111111-1111-4111-8111-111111111111", message: "Keep the existing scope" };
   const before = process.listenerCount("message");
   try {
@@ -64,5 +64,22 @@ test("child IPC rejects malformed/foreign/stale/idle messages and removes its li
   } finally {
     handlers.session_shutdown?.();
     for (const [key, descriptor] of original) { if (descriptor) Object.defineProperty(process, key, descriptor); else delete (process as any)[key]; }
+  }
+});
+
+// Protects transport selection: cross sessions use authenticated MCP, native children use IPC.
+test.each([false, true])("Setup repair IPC registration: cross=%s", cross => {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "send");
+  const tools: string[] = [];
+  try {
+    Object.defineProperty(process, "send", { configurable: true, value: () => {} });
+    installChildClarifications({ on() {}, registerTool: (tool: any) => tools.push(tool.name) } as never, {
+      DECK_PI_ROLE: "setup", DECK_PI_CLARIFICATION_NONCE: "nonce", DECK_PI_PARENT_SESSION: "parent",
+      DECK_PI_TASK_ID: "task", DECK_PI_CHILD_SESSION: "/child", DECK_PI_ATTEMPT: "1",
+      ...(cross ? { DECK_PI_CROSS_CONFIG: "/host-config" } : {}),
+    });
+    expect(tools).toEqual(cross ? [] : ["deck_prepare_project"]);
+  } finally {
+    if (descriptor) Object.defineProperty(process, "send", descriptor); else delete (process as any).send;
   }
 });

@@ -880,6 +880,7 @@ describe("persistent workspace sessions", () => {
   test.each([
     "codebase-memory-unavailable", "codebase-memory-unsupported", "codebase-memory-cancelled",
     "web-search-credential-missing", "web-search-provider-unconfigured",
+    "claude-session-skills-unverified", "claude-codebase-memory-selection-stale", "claude-web-search-selection-stale",
   ])("preparation retains bounded tool failure %s", async (reasonCode) => {
     const secret = "private-token-never-publish";
     const t = setup({ options: { childMcp: async () => { throw new Error(`${reasonCode}: ${secret}`); } } });
@@ -2165,7 +2166,7 @@ describe("managed user image attachments", () => {
     lastTurn(t.driver).finish(); await waitFor(()=>t.driver.turns.length===2);
     const imageTurn=lastTurn(t.driver); expect(imageTurn.input.prompt).toBe(""); expect(imageTurn.input.images).toHaveLength(2);
     expect(imageTurn.input.images!.map(image=>readFileSync(image.path))).toEqual([png,png]);
-    expect(imageTurn.input.rolePrompt).toContain("Inspect every supplied native image");
+    expect(imageTurn.input.rolePrompt).toContain("Inspect each supplied native image in order");
     for (const [index, image] of imageTurn.input.images!.entries()) expect(imageTurn.input.rolePrompt).toContain(`Image ${index+1} (${image.name}): ${image.path}`);
     expect(imageTurn.input.resume).toBeDefined();
     expect(t.events(id).find(e=>e.kind==="message.completed" && e.data.promptId===promptId)?.data.attachments).toEqual([a,b]);

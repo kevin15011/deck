@@ -1,3 +1,6 @@
+import { registerNativePreparationRoute } from "./preparation-route";
+import { PREPARATION_REQUEST_SCHEMA } from "@deck/core/session/preparation";
+import { PiNativePreparation } from "./preparation";
 import { personalPiToolNames } from "../pi-personal-mcp";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -52,7 +55,8 @@ const CHAIN_ITEM = {
 const PARAMETERS = {
   type: "object",
   properties: {
-    action: { type: "string", enum: ["list", "inspect", "review", "resolve", "cancel", "resume", "clarify"], description: "Session-bound execution and Lead integration control" },
+    action: { type: "string", enum: ["preparation-status", "list", "inspect", "review", "resolve", "cancel", "resume", "clarify"], description: "Session-bound execution and Lead integration control" },
+    preparation: { ...PREPARATION_REQUEST_SCHEMA, description: "Exact project repair request for a single deck-setup delegation or explicit resume; obtain snapshotId from preparation-status" },
     taskId: { type: "string", description: "Exact accepted task ID for controls" },
     message: { type: "string", maxLength: 4000, description: "Bounded clarification for an already-running child; supplements its existing authority only" },
     outcomeId: { type: "string", description: "Current outcome identity, required for resolve; stale attempts are rejected" },
@@ -69,7 +73,7 @@ const PARAMETERS = {
 
 type ToolResult = { content: { type: "text"; text: string }[]; details: Record<string, unknown>; isError?: boolean };
 type TaskItem = { agent: string; task: string; title?: string; cwd?: string };
-type Params = { agent?: string; task?: string; title?: string; tasks?: TaskItem[]; chain?: TaskItem[]; cwd?: string; action?: string; taskId?: string; outcomeId?: string; disposition?: string; summary?: string; message?: string };
+type Params = { preparation?: unknown; agent?: string; task?: string; title?: string; tasks?: TaskItem[]; chain?: TaskItem[]; cwd?: string; action?: string; taskId?: string; outcomeId?: string; disposition?: string; summary?: string; message?: string };
 
 function textResult(text: string, details: Record<string, unknown> = {}, isError = false): ToolResult {
   return { content: [{ type: "text", text }], details, ...(isError ? { isError: true } : {}) };
@@ -84,7 +88,9 @@ export function createDeckSubagentsExtension(options: DeckSubagentsOptions = {})
     }
     const agentsDir = options.agentsDir ?? fileURLToPath(new URL("../../agents/", import.meta.url));
     const packageRoot = dirname(agentsDir.replace(/[\\/]+$/, ""));
+    const preparation = new PiNativePreparation(env);
     const runner = createChildRunner({ env,
+      repair: (binding, request) => preparation.repair(binding, request),
       personalToolNames: () => personalPiToolNames(pi.getAllTools?.() ?? []),
       ...(existsSync(join(packageRoot, "package.json")) ? { packageRoot } : {}),
       memory: () => resolveMemoryHandoff(env),
@@ -131,9 +137,19 @@ export function createDeckSubagentsExtension(options: DeckSubagentsOptions = {})
       },
     });
     const openPanel = (ctx: ExtensionContext) => { try { panel.open(ctx); } catch { /* UI cannot gate outcome delivery. */ } };
+    let removePreparationRoute: (() => void) | undefined;
+    const exposePreparationRoute = () => {
+      removePreparationRoute?.();
+      removePreparationRoute = registerNativePreparationRoute(parent, parentFile, (request, cwd) => {
+        if (!context || navigationPending || context.cwd !== cwd) throw new Error("preparation-invocation-unavailable");
+        if (request !== undefined) preparation.validate(request, cwd);
+      });
+    };
     const stop = async () => {
+      removePreparationRoute?.(); removePreparationRoute = undefined;
       if (deliveryTimer) clearInterval(deliveryTimer); deliveryTimer = undefined; wake = undefined;
       try { panel.close(); } catch { /* UI teardown is independent of child settlement. */ }
+      preparation.close();
       await jobs.close();
     };
     const startDelivery = () => {
@@ -234,7 +250,10 @@ export function createDeckSubagentsExtension(options: DeckSubagentsOptions = {})
         navigationPending = false;
       }
       if (!context || ctx.sessionManager.getSessionId() !== parent || ctx.sessionManager.getSessionFile() !== parentFile) return;
-      const reopened = await jobs.reopen(); context = ctx; if (reopened) { openPanel(ctx); startDelivery(); }
+      const reopened = await jobs.reopen(); context = ctx; if (reopened) {
+        try { await preparation.open(ctx.cwd, parent, parentFile); } catch { /* Require fresh readiness before repair delegation. */ }
+        openPanel(ctx); startDelivery(); exposePreparationRoute();
+      }
     };
     const freezeLegacyMembership = (ctx: ExtensionContext) => {
       const branch = ctx.sessionManager.getBranch();
@@ -250,9 +269,10 @@ export function createDeckSubagentsExtension(options: DeckSubagentsOptions = {})
     };
     pi.on("session_start", async (_event, ctx) => {
       await stop(); recapTurn = false; responseInput = undefined; inputs.length = 0; navigationPending = false; context = ctx; parent = ctx.sessionManager.getSessionId(); parentFile = ctx.sessionManager.getSessionFile() ?? "";
+      try { await preparation.open(ctx.cwd, parent, parentFile); } catch { /* Readiness cannot disable ordinary roles. */ }
       freezeLegacyMembership(ctx);
       const snapshots = ctx.sessionManager.getEntries().filter(e => e.type === "custom" && e.customType === "deck-subagents-v1").map(e => (e as { data: unknown }).data);
-      jobs.open(parent, snapshots); openPanel(ctx); startDelivery();
+      jobs.open(parent, snapshots); openPanel(ctx); startDelivery(); exposePreparationRoute();
     });
     const beforeNavigation = async () => { navigationPending = true; recapTurn = false; responseInput = undefined; inputs.length = 0; await stop(); };
     pi.on("session_before_switch", beforeNavigation);
@@ -262,8 +282,9 @@ export function createDeckSubagentsExtension(options: DeckSubagentsOptions = {})
     // Native fork/replacement emits session_start; tree navigation stays in-process.
     pi.on("session_tree", async (_event, ctx) => {
       context = ctx; parent = ctx.sessionManager.getSessionId(); parentFile = ctx.sessionManager.getSessionFile() ?? "";
+      try { await preparation.open(ctx.cwd, parent, parentFile); } catch { /* Ordinary roles remain available. */ }
       freezeLegacyMembership(ctx);
-      jobs.open(parent, ctx.sessionManager.getEntries().filter(e => e.type === "custom" && e.customType === "deck-subagents-v1").map(e => (e as { data: unknown }).data)); openPanel(ctx); navigationPending = false; startDelivery();
+      jobs.open(parent, ctx.sessionManager.getEntries().filter(e => e.type === "custom" && e.customType === "deck-subagents-v1").map(e => (e as { data: unknown }).data)); openPanel(ctx); navigationPending = false; startDelivery(); exposePreparationRoute();
     });
     const recordMembership = (taskIds: string[]) => {
       const boundary = context?.sessionManager.getBranch().slice().reverse().find(e => e.type === "custom" && e.customType === RECAP_BOUNDARY);
@@ -273,6 +294,7 @@ export function createDeckSubagentsExtension(options: DeckSubagentsOptions = {})
     const control = async (action: string, id?: string, params: Params = {}): Promise<ToolResult> => {
       if (!context || context.sessionManager.getSessionId() !== parent || context.sessionManager.getSessionFile() !== parentFile) return textResult("No active parent session", {}, true);
       await ready(context);
+      if (action === "preparation-status") return textResult(JSON.stringify(preparation.status()));
       if (action === "list") return textResult(jobs.records.map(j => `${j.id} | ${j.title} | ${j.agent} | attempt ${j.attempt ?? 1} | ${j.state} | ${j.integration ?? "not ready"}`).join("\n") || "No subagents in this parent session", { parent, jobs: jobs.records.map(j => ({ id: j.id, title: j.title, state: j.state, agent: j.agent, attempt: j.attempt, outcomeId: j.outcomeId, integration: j.integration })) });
       if (!id) return textResult("An exact taskId is required", {}, true);
       const job = jobs.get(id);
@@ -290,7 +312,13 @@ export function createDeckSubagentsExtension(options: DeckSubagentsOptions = {})
       else if (action === "resume") {
         const agent = findAgent(discoverAgents(agentsDir), job.agent);
         if (!agent) throw new Error("Original role unavailable; continuation refused");
-        jobs.resume(id, agent); recordMembership([id]);
+        if (params.preparation) {
+          if (agent.id !== "deck-setup") throw new Error("Repair requires the installed Setup role");
+          preparation.validate(params.preparation, job.cwd);
+        }
+        jobs.resume(id, agent);
+        if (params.preparation) preparation.delegate(params.preparation, id, job.attempt ?? 1);
+        recordMembership([id]);
       } else throw new Error("Unknown control action");
       return textResult(`${action} accepted: ${job.title}`, { parent, taskId: id, title: job.title, state: job.state });
     };
@@ -354,7 +382,14 @@ export function createDeckSubagentsExtension(options: DeckSubagentsOptions = {})
             if (typeof item.task !== "string" || (item.cwd !== undefined && typeof item.cwd !== "string")) throw new Error("Invalid assignment");
             return { agent, task: item.task, title: item.title, cwd: resolve(ctx.cwd, item.cwd ?? ctx.cwd) };
           });
-          const taskIds = jobs.accept(mode, items); recordMembership(taskIds);
+          if (params.preparation) {
+            if (mode !== "single" || items[0]?.agent.id !== "deck-setup") throw new Error("Repair requires a single installed Setup role");
+            preparation.validate(params.preparation, items[0].cwd);
+            items[0].task += `\nExact authorized repair request for deck_prepare_project: ${JSON.stringify(params.preparation)}`;
+          }
+          const taskIds = jobs.accept(mode, items);
+          if (params.preparation) preparation.delegate(params.preparation, taskIds[0]!, 1);
+          recordMembership(taskIds);
           return textResult(`Background delegation accepted (${mode}). Parent: ${parent}. Tasks: ${taskIds.join(", ")}. Continue the conversation; outcomes arrive safely. Avoid edits overlapping active delegates.`, { parent, mode, taskIds });
         } catch (e) { return textResult(clean(String(e)), {}, true); }
       },

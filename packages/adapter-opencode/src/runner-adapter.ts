@@ -1,3 +1,6 @@
+import { readOpenCodeSearchFallbackOwnership } from "./native-search";
+import { PrerequisiteEvidence, pinnedHookExecutable } from "../../core/src/session/prerequisite-evidence";
+import { prepareOpenCodeNativeRole } from "./native-role";
 import { backupOpenCodeInstall, rollbackOpenCodeInstall, type OpenCodeInstallRollback } from './install-rollback';
 import { inspectOpenCodeNativeSearch } from "./native-search";
 import { beginRunnerContributions, sharedJsonContributionTargets, contributionHash, selectContributionContent, selectSearchRoute, readRunnerContributions } from "@deck/core";
@@ -324,9 +327,36 @@ class OpenCodeRunnerAdapterImpl {
     const root = (environment.XDG_CONFIG_HOME && isAbsolute(environment.XDG_CONFIG_HOME) ? join(environment.XDG_CONFIG_HOME, 'opencode') : this.#developerTeamConfigDir) || join(environment.HOME ?? homedir(), '.config', 'opencode');
     return inspectOpenCodeNativeSearch({ ...input, environment }, root);
   }
-  getSessionDriver() { return createOpenCodeSessionDriver(this.#sessionDriver); }
+  async readOwnedSearchFallbackIds(input: import("@deck/core").NativeSearchInspectionInput) {
+    const environment = input.environment ?? this.#sessionDriver?.baseEnv ?? process.env;
+    const root = (environment.XDG_CONFIG_HOME && isAbsolute(environment.XDG_CONFIG_HOME) ? join(environment.XDG_CONFIG_HOME, 'opencode') : this.#developerTeamConfigDir) || join(environment.HOME ?? homedir(), '.config', 'opencode');
+    return readOpenCodeSearchFallbackOwnership({ ...input, environment }, root).ownedFallbackServerIds ?? [];
+  }
+  getSessionDriver() { return createOpenCodeSessionDriver({ ...this.#sessionDriver, requireNativeRole: true }); }
+  readonly #preparationEvidence = new PrerequisiteEvidence();
+  readPreparationCapabilities(config: import("@deck/core").NormalizedDeckConfig) {
+    const evidence = this.#preparationEvidence, root = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
+    let entry: any;
+    for (const name of ["opencode.json", "opencode.jsonc"]) {
+      try { const parsed = parseJsonc(evidence.read(join(root, name))) as any; if (parsed.mcp?.context7 !== undefined) entry = parsed.mcp.context7; } catch { /* Missing selection is not enablement. */ }
+    }
+    return {
+      rtk: evidence.observe(config.packageInstructions.opencode?.rtk === true, () => [evidence.read(join(root, "plugins/rtk.ts")), evidence.executable("rtk", this.#sessionDriver?.baseEnv?.PATH)]),
+      context7: evidence.observe(!!entry && entry.enabled !== false, () => {
+        if (entry.type === "remote") {
+          const endpoint = new URL(entry.url);
+          if (endpoint.protocol !== "https:") throw new Error("endpoint-unverified");
+          return [entry.url, "remote-runtime-unverified"];
+        }
+        if (entry.type !== "local" || !Array.isArray(entry.command)) throw new Error("command-unverified");
+        return [entry.command.slice(1), evidence.executable(entry.command[0], this.#sessionDriver?.baseEnv?.PATH)];
+      }),
+    };
+  }
+  readPreparationGeneration() { return JSON.stringify(prepareOpenCodeNativeRole(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), "deck-lead").source); }
+  async prepareSessionNativeRole(roleId: string) { return prepareOpenCodeNativeRole(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), roleId); }
 
-  async readSessionMcpServers() {
+  async readSessionCapabilityOverrides() {
     return readOpenCodeSessionMcpServers(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"));
   }
 

@@ -1,3 +1,4 @@
+import { ROLE_TOOL_POLICY } from "@deck/core/session/role-tool-policy";
 /**
  * Role vocabulary shared by every Deck Pi extension. Pure and dependency-free so it can be bundled into each
  * extension (the bundles must not import anything outside `pi-extensions/`).
@@ -6,7 +7,7 @@ export const DECK_AGENT_PREFIX = "deck-";
 export const LEAD_ROLE = "lead";
 
 /** Roles that never mutate the workspace. Enforced by `--tools` (subagent tool) and by the tool-policy extension. */
-export const READ_ONLY_ROLES: readonly string[] = ["investigate", "quality"];
+export const READ_ONLY_ROLES: readonly string[] = ROLE_TOOL_POLICY.readOnlyRoles.map(role => role.replace(/^deck-/, ""));
 
 /** `deck-investigate` / `investigate` -> `investigate`. Empty input is the lead. */
 export function normalizeRole(value: string | undefined): string {

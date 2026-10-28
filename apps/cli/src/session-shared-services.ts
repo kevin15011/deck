@@ -1,4 +1,8 @@
-import { isCodebaseMemoryEnabled, nativeSearchEvidence, selectSearchRoute } from "@deck/core";
+import { preparationCapabilities } from "./preparation-capabilities";
+import { issueCodebaseAvailability } from "@deck/core/session/codebase-availability";
+import { validateClaudeSessionIntent } from "../../../packages/adapter-claude/src/session-skills";
+import { assertSessionCapabilityOverrides } from "@deck/core/session/role-tool-policy";
+import { isCodebaseMemoryEnabled, nativeSearchEvidence, resolveWebSearchLaunch } from "@deck/core";
 import { type PersonalMcpAvailability } from "@deck/core/session/personal-mcp";
 import type { CapabilityAvailability } from "@deck/core/session/mcp";
 /** Shared provider composition; credentials remain in host memory and spawn environment only. */
@@ -39,7 +43,7 @@ export async function resolveSessionChildMcp(
   adapter: RunnerAdapter | undefined,
   config: NormalizedDeckConfig,
   environment: Readonly<Record<string, string | undefined>> = process.env,
-  managed?: { readiness: SessionCodebaseReadiness; context: ChildMcpContext },
+  managed?: { readiness: SessionCodebaseReadiness; context: ChildMcpContext; nativeSkills?: import("@deck/core/session/driver").NativeSkillsDescriptor },
   nativeMemoryEffects?: NativeMemoryPreparationEffects,
   startGlobalTransport: typeof startGlobalMemoryTransport = startGlobalMemoryTransport,
 ): Promise<ChildMcpResolver> {
@@ -49,32 +53,34 @@ export async function resolveSessionChildMcp(
   step("native-memory");
   const memory = managed ? prepareSessionNativeMemory(adapter?.runnerId ?? "", managed.context.projectRoot, config, environment, nativeMemoryEffects) : undefined;
   step("native-mcp-config");
-  const configured = { ...await adapter?.readSessionMcpServers?.(config) };
+  const configured = { ...await adapter?.readSessionCapabilityOverrides?.(config) };
   // Deck participation follows new explicit intent. Independent native integrations stay in the native loader.
   if (!isCodebaseMemoryEnabled(config, adapter?.runnerId ?? "")) delete configured["codebase-memory"];
-  delete configured["context-mode"]; delete configured.serena;
+  assertSessionCapabilityOverrides(Object.keys(configured));
   step("capability-policy");
   // Ordinary servers, skills and plugins stay in the native loader. Only Codebase
   // needs a task binding prepared by the managed recovery service.
-  const servers: Record<string, ChildMcpServerSpec> = managed
-    ? (configured["codebase-memory"] ? { "codebase-memory": configured["codebase-memory"] } : {})
-    : configured;
+  const servers: Record<string, ChildMcpServerSpec> = configured;
   const suppressedMcpServers: string[] = [];
+  let codebaseAvailability: ChildMcpResolver["codebaseAvailability"];
   const memoryProviderIds = [...new Set(["supermemory", "adaptive-memory", ...(config.adaptiveMemory.supermemory?.mcpServerName ? [config.adaptiveMemory.supermemory.mcpServerName] : [])])];
   // Claude persists an explicit trusted selection. Codex and OpenCode use the global web
   // policy in their native install plans; their absent optional selection seam is intentional.
   const enabled = config.webSearch.enabled;
   let envOverlay: Record<string, string> | undefined = memory?.envOverlay;
   let webSearch: ChildMcpResolver["webSearch"] = { enabled: false };
-  const nativeSearch = await adapter?.inspectNativeSearch?.({ projectRoot: managed?.context.projectRoot ?? process.cwd(),
+  const nativeSearch = enabled ? await adapter?.inspectNativeSearch?.({ projectRoot: managed?.context.projectRoot ?? process.cwd(),
     modelId: managed?.context.modelId, providerId: managed?.context.providerId, runnerVersion: managed?.context.runnerVersion,
     projectConfigTrusted: managed?.context.projectConfigTrusted, environment,
-  }) ?? nativeSearchEvidence("unknown", "effective-config", { runner: adapter?.runnerId }, "native-search-detector-unavailable");
+  }) ?? nativeSearchEvidence("unknown", "effective-config", { runner: adapter?.runnerId }, "native-search-detector-unavailable")
+    : nativeSearchEvidence("unknown", "effective-config", { runner: adapter?.runnerId }, "web-search-disabled");
   const provider = enabled ? getWebSearchProviderDescriptor(config.webSearch.provider) : undefined;
   const credential = provider ? environment[provider.credentialEnvVar]?.trim() : undefined;
-  const selection = selectSearchRoute(enabled, nativeSearch, !!provider && !!credential);
+  const selection = resolveWebSearchLaunch(enabled, nativeSearch, !!provider && !!credential);
   const searchDiagnostics = [...selection.diagnostics];
-  suppressedMcpServers.push(...(nativeSearch.ownedFallbackServerIds ?? []));
+  suppressedMcpServers.push(...(enabled ? nativeSearch.ownedFallbackServerIds ?? [] :
+    await adapter?.readOwnedSearchFallbackIds?.({ projectRoot: managed?.context.projectRoot ?? process.cwd(),
+      projectConfigTrusted: managed?.context.projectConfigTrusted, environment }) ?? []));
   if (nativeSearch.unresolvedFallbackServerIds?.length) searchDiagnostics.push("web-search-unresolved-existing-route-preserved");
   if (selection.route !== "fallback") delete servers["web-search"];
   if (selection.route === "fallback" && provider && credential) {
@@ -116,8 +122,13 @@ export async function resolveSessionChildMcp(
           capabilityAvailability.push({ capabilityId: "codebase-memory", status: "ready" });
         } catch (error) {
           if (managed.context.signal.aborted || !(error instanceof SessionCodebaseReadinessError) || error.kind === "cancelled") throw error;
+          if (adapter?.runnerId === "claude") {
+            if (!managed.nativeSkills) throw new Error("claude-mcp-override-unpaired: verified generation required");
+            validateClaudeSessionIntent(managed.nativeSkills, config);
+            codebaseAvailability = issueCodebaseAvailability({ skills: managed.nativeSkills, projectRoot: managed.context.projectRoot,
+              invocationId: managed.context.taskId, route: "managed", reason: error.kind, signal: managed.context.signal });
+          } else suppressedMcpServers.push("codebase-memory");
           delete servers["codebase-memory"];
-          suppressedMcpServers.push("codebase-memory");
           capabilityAvailability.push({ capabilityId: "codebase-memory", status: "unavailable", reasonCode: `codebase-memory-${error.kind}` });
         }
       }
@@ -131,8 +142,25 @@ export async function resolveSessionChildMcp(
     throw error;
   }
 
+  const preparedCapabilities = preparationCapabilities(config, adapter?.runnerId ?? "");
+  const observations = { ...preparedCapabilities };
+  // Codebase evidence is owned by the host's current availability binding.
+  delete observations["codebase-memory"];
+  delete observations.rtk; // Fresh adapter prerequisite metadata belongs to the scope coordinator.
+  if (observations["adaptive-memory"]?.enabled && memory) observations["adaptive-memory"] = { ...observations["adaptive-memory"],
+    route: "runner-plugin",
+    availability: memory.nativeMemory.status === "ready" ? "ready" : memory.nativeMemory.status === "unavailable" ? "unavailable" : "unverified",
+    inputDigest: JSON.stringify([memory.nativeMemory.integration, memory.nativeMemory.status, memory.nativeMemory.reasonCode, memory.nativeMemory.projectScope]),
+  };
+  if (observations["web-search"]?.enabled) observations["web-search"] = { ...observations["web-search"],
+    route: selection.route,
+    availability: selection.route === "native" || selection.route === "fallback" ? "ready" : "unavailable",
+    inputDigest: JSON.stringify([selection.route, managed?.context.modelId, managed?.context.providerId, searchDiagnostics]),
+  };
   return {
-    ...(managed ? { capabilityAvailability, personalMcpAvailability, suppressedMcpServers } : {}),
+    preparationInputs: preparedCapabilities,
+    preparationCapabilities: observations,
+    ...(managed ? { capabilityAvailability, personalMcpAvailability, suppressedMcpServers, codebaseAvailability } : {}),
     ...(memory ? { nativeMemory: memory.nativeMemory } : {}),
     runnerPackages: () => Object.keys(servers), memoryProviderIds, webSearch, searchDiagnostics,
     ...(envOverlay ? { envOverlay } : {}), resolveServer: (id) => servers[id],

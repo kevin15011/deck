@@ -5,7 +5,7 @@
 > **Maintainer:** Deck maintainers.
 > **Evidence:** [CLI composition](../apps/cli/src/session-service.ts), [session host](../packages/session-host/src/session-manager.ts), and [acceptance record](../openspec/changes/cross-runner-session-core/apply-progress.md).
 
-Cross sessions assign a runner and model to each team member. A Claude Lead can delegate to Codex or OpenCode through Deck's task tools. Install and sign in to each native CLI beforehand. Cross configuration changes Deck preferences; it does not install runners or change their native model assignments. Pi remains available through its native Deck workflow and is not a cross-session driver.
+Cross sessions assign a runner and model to each team member. A Claude Lead can delegate to Codex or OpenCode through Deck's task tools. Install and sign in to each native CLI beforehand. Cross configuration changes Deck preferences; it does not install runners or change their native model assignments. Pi 1.0.0 supports delegated Setup for project preparation through the same authenticated repair service. It requires Node and a current verified Deck team install. Other Pi roles continue through the native Deck workflow.
 
 ## Start and reconnect
 

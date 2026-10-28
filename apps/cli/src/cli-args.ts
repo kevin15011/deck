@@ -53,6 +53,7 @@ export type ParsedArgs =
   | { command: "internal-session-daemon" }
   | { command: "internal-daemon-restart-helper"; intentPath:string }
   | { command: "internal-session-mcp" }
+  | { command: "internal-project-readiness"; hook?: true }
   | { command: "internal-child-anchor"; argv: string[] }
   | { command: "cross-launch"; flags: { changeId?: string } }
   | { command: "session"; sub: SessionSubcommand }
@@ -349,6 +350,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (rest.length === 2 && rest[0] === "daemon-restart-helper" && rest[1]!.startsWith("/")) return {command:"internal-daemon-restart-helper",intentPath:rest[1]!};
     if (rest.length === 1 && rest[0] === "session-daemon") return { command: "internal-session-daemon" };
     if (rest.length === 1 && rest[0] === "session-mcp") return { command: "internal-session-mcp" };
+    if (rest.length === 1 && rest[0] === "project-readiness") return { command: "internal-project-readiness" };
+    if (rest.length === 2 && rest[0] === "project-readiness" && rest[1] === "--hook") return { command: "internal-project-readiness", hook: true };
     if (rest[0] === "child-anchor") {
       const argv = rest[1] === "--" ? rest.slice(2) : rest.slice(1);
       return argv.length > 0 ? { command: "internal-child-anchor", argv } : { command: "error", message: "Usage: deck internal child-anchor -- <command> [args...]" };

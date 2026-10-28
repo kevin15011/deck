@@ -115,6 +115,13 @@ if (parsed.command === "internal-session-mcp") {
   process.exit(0);
 }
 
+if (parsed.command === "internal-project-readiness") {
+  const { claudeSessionStartContext } = await import("./internal-project-readiness");
+  const text = await claudeSessionStartContext();
+  process.stdout.write(parsed.hook ? JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text } }) : text);
+  process.exit(0);
+}
+
 if (parsed.command === "internal-daemon-restart-helper") {
   const {runWebRestartHelper}=await import("./web-daemon-restart");
   process.exit(await runWebRestartHelper(parsed.intentPath));
@@ -317,7 +324,7 @@ if (parsed.command === "claude-native-launch") {
 if (parsed.command === "claude-team-launch") {
   try {
     const adapter = getAdapterRegistry().get("claude");
-    const launch = await prepareClaudeInteractiveLaunch(adapter, { mode: "interactive", projectRoot: resolveProjectRoot() ?? process.cwd(), teamId: "developer-team", deckConfig: configStore.readRequired() });
+    const launch = await prepareClaudeInteractiveLaunch(adapter, { mode: "interactive", projectRoot: resolveProjectRoot() ?? process.cwd(), teamId: "developer-team", deckConfig: configStore.readRequired() }, undefined, () => configStore.readRequired());
     if (launch.status !== "ready") {
       console.error(launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "));
       process.exit(launch.status === "blocked" ? 1 : 2);

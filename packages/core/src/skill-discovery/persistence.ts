@@ -713,15 +713,20 @@ async function restorePriorRegistry(
   atomicReplace: AtomicReplacePortV1,
 ): Promise<void> {
   try {
+    const observed = await readRegularFile(replacement.targetPath, replacement.targetLabel);
+    if (observed.digest === replacement.oldDigest) { replacement.replaced = false; return; }
+    // A failed replacement is not ownership of every subsequent target value,
+    // including .gitignore. Unknown/partial bytes may belong to a concurrent editor.
+    if (observed.digest !== replacement.candidateDigest) throw new PersistenceError("restore_failed");
     if (replacement.oldBytes !== undefined && replacement.backupPath) {
       await atomicReplace.replace(replacement.backupPath, replacement.targetPath);
     } else {
       const current = await readRegularFile(replacement.targetPath, replacement.targetLabel);
-      if (current.digest !== replacement.oldDigest) {
+      if (current.digest === replacement.candidateDigest) {
         // This path restores an originally absent target only after a successful
         // replacement. It is never used before the atomic replacement attempt.
         await fs.rm(replacement.targetPath, { force: true });
-      }
+      } else if (current.digest !== replacement.oldDigest) throw new PersistenceError("restore_failed");
     }
     const restored = await readRegularFile(replacement.targetPath, replacement.targetLabel);
     if (restored.digest !== replacement.oldDigest) throw new PersistenceError("restore_failed");

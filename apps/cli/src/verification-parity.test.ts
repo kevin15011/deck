@@ -49,6 +49,9 @@ for (const [runner, build] of Object.entries(plans)) {
       for (const agent of getDeveloperTeamCatalog()) {
         const file = files.find(f => (`/` + f.path).endsWith(`/agents/${agent.id}.${runner === "codex" ? "toml" : "md"}`));
         expect(file, `${runner}: missing agent ${agent.id}`).toBeDefined();
+        if (runner === "codex" && ["deck-investigate", "deck-quality"].includes(agent.id)) {
+          expect(Bun.TOML.parse(file!.content)).toMatchObject({ sandbox_mode: "read-only" });
+        }
         const body = runner === "codex" ? String((Bun.TOML.parse(file!.content) as { developer_instructions: string }).developer_instructions) : file!.content;
         expect(body.split(VERIFICATION_DOCTRINE_CORE), `${runner}: ${agent.id} doctrine exactly once`).toHaveLength(2);
         expect(body, `${runner}: ${agent.id} default strict skill`).not.toContain("test-driven-development");
@@ -73,12 +76,12 @@ for (const [runner, build] of Object.entries(plans)) {
   });
 }
 
-test("cross-runner session embeds canonical role bodies without installed skills", () => {
+test("native runners select installed roles without duplicating canonical session bodies", () => {
   for (const agent of getDeveloperTeamCatalog()) {
     for (const runnerId of Object.keys(plans)) {
       expect(sessionRolePrompt(agent.id, { projectRoot, runnerId })).not.toContain("test-driven-development");
-      expect(sessionRolePrompt(agent.id, { projectRoot, runnerId }).split(VERIFICATION_DOCTRINE_CORE), `${runnerId}: ${agent.id} session doctrine`).toHaveLength(2);
-      expect(sessionRolePrompt(agent.id, { projectRoot, runnerId }), `${runnerId}: ${agent.id}`).toContain(getAgentContent(agent.id, { promptProfile: "compact" })!.agentBody);
+      expect(sessionRolePrompt(agent.id, { projectRoot, runnerId })).not.toContain(VERIFICATION_DOCTRINE_CORE);
+      expect(sessionRolePrompt(agent.id, { projectRoot, runnerId })).not.toContain(getAgentContent(agent.id, { promptProfile: "compact" })!.agentBody);
     }
   }
 });

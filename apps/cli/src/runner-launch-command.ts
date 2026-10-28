@@ -1,3 +1,5 @@
+import { DeckConfigStore } from "./deck-config-store";
+import { withNativeProjectReadiness } from "./native-project-readiness";
 import { classifyNativeCodebase, nativeCodebaseFailureCode, resolvePiAgentDir } from "@deck/adapter-pi";
 import type {
   RunnerAdapter,
@@ -132,6 +134,8 @@ export async function executeRunnerLaunchPlan(
   let raw: SpawnedRunnerResult;
   try {
     if (plan.interactiveSearchReview) releaseSearchReview = recordInteractiveSearchLaunch(plan.interactiveSearchReview);
+    await plan.launchLifecycle?.beforeSpawn(env, signal);
+    signal?.throwIfAborted();
     raw = await effects.spawn(plan.command, plan.args, {
     cwd: plan.cwd,
     env,
@@ -140,7 +144,7 @@ export async function executeRunnerLaunchPlan(
     stdinPayload: plan.stdinPayload,
     captureLimitBytes: plan.captureLimitBytes,
     sensitiveValues: secrets,
-  }); } finally { try { releaseSearchReview?.(); } finally { releaseGeneration?.(); } }
+  }); } finally { try { releaseSearchReview?.(); } finally { try { releaseGeneration?.(); } finally { plan.launchLifecycle?.afterExit(); } } }
   const limit = plan.captureLimitBytes ?? 1024 * 1024;
   const stdout = bounded(redact(raw.stdout, secrets), limit);
   const stderr = bounded(redact(raw.stderr, secrets), limit);
@@ -526,6 +530,9 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     ? { ...selectedDeckConfig, adaptiveMemory: { ...selectedDeckConfig.adaptiveMemory, enabled: false } }
     : selectedDeckConfig;
   if (codexMemoryUnavailable) inspectionDiagnostics.push("Supermemory is disabled for this launch because a verified repository identity is unavailable. Saved settings are unchanged; all Codex hooks (including user hooks and RTK) are disabled for this process to prevent unscoped memory effects.");
+  const readCurrentReadinessConfig = createNativeReadinessConfigReader(input.cliMemoryProvider, codexMemoryUnavailable,
+    new DeckConfigStore({ allowDefaultEnvironment: true, homeDir: input.processEffects?.inheritedEnv?.HOME,
+      xdgConfigHome: input.processEffects?.inheritedEnv?.XDG_CONFIG_HOME }));
   const baseLaunch = { ...input.launch, deckConfig } as RunnerLaunchInput;
   const installInput = {
     projectRoot: baseLaunch.projectRoot,
@@ -662,7 +669,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
       : { plan: executablePlan, close: async () => [] as readonly { code: string; severity: "warning"; message: string }[] };
     executablePlan = memoryTools.plan;
     try {
-      const outcome = await executeRunnerLaunchPlan(executablePlan, input.processEffects, input.signal);
+      const outcome = await executeRunnerLaunchPlan(withNativeProjectReadiness(executablePlan, input.adapter.runnerId, readCurrentReadinessConfig, undefined, config => input.adapter.readPreparationCapabilities?.(config) ?? {}, input.adapter.readPreparationGeneration?.bind(input.adapter)), input.processEffects, input.signal);
       const memoryToolsDiagnostics = await memoryTools.close();
       return {
         status: "launched",
@@ -723,7 +730,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     }
 
     try {
-      const outcome = await executeRunnerLaunchPlan(executablePlan, input.processEffects, input.signal);
+      const outcome = await executeRunnerLaunchPlan(withNativeProjectReadiness(executablePlan, input.adapter.runnerId, readCurrentReadinessConfig, undefined, config => input.adapter.readPreparationCapabilities?.(config) ?? {}, input.adapter.readPreparationGeneration?.bind(input.adapter)), input.processEffects, input.signal);
       return {
         status: "launched",
         outcome,
@@ -827,7 +834,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
       let finalAssistant: Awaited<ReturnType<typeof trustedFinalAssistantMessage>>;
       let memoryCapture: Awaited<ReturnType<typeof safeMemoryCapture>>;
       try {
-        outcome = await executeRunnerLaunchPlan(executableLaunch.plan, input.processEffects, input.signal);
+        outcome = await executeRunnerLaunchPlan(withNativeProjectReadiness(executableLaunch.plan, input.adapter.runnerId, readCurrentReadinessConfig, undefined, config => input.adapter.readPreparationCapabilities?.(config) ?? {}, input.adapter.readPreparationGeneration?.bind(input.adapter)), input.processEffects, input.signal);
         closeReason = outcome.signal ? "signal" : "normal";
         finalAssistant = await trustedFinalAssistantMessage(executableLaunch.plan, input.processEffects);
         memoryCapture = loopbackBridge
@@ -1031,4 +1038,12 @@ async function blockingExplicitRememberCapture(capture: () => Promise<{ ok: bool
       metrics: [],
     };
   }
+}
+
+/** Read trusted persisted intent on every lifecycle refresh; explicit launch overrides survive. */
+export function createNativeReadinessConfigReader(cliMemoryProvider?: string, memoryUnavailable = false, store: Pick<DeckConfigStore, "read"> = new DeckConfigStore({ allowDefaultEnvironment: true })) {
+  return () => {
+    const config = resolveLaunchDeckConfig(store.read(), cliMemoryProvider);
+    return memoryUnavailable ? { ...config, adaptiveMemory: { ...config.adaptiveMemory, enabled: false } } : config;
+  };
 }

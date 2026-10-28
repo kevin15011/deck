@@ -234,7 +234,7 @@ class ClaudeTask {
     const missing = expected.filter((n) => !actual.includes(n));
     const extra = actual.filter((n) => !expected.includes(n));
     const personal = actual.filter(id => !expected.includes(id));
-    if (missing.length > 0 || extra.some(id => (this.input.suppressedMcpServers ?? []).includes(id))) {
+    if (missing.length > 0 || actual.some(id => launch.expectedAbsentMcpServers.includes(id)) || init.tools.some(tool => launch.expectedAbsentToolPrefixes.some(prefix => tool.startsWith(prefix))) || extra.some(id => (this.input.suppressedMcpServers ?? []).includes(id))) {
       emit({ kind: "diagnostic", data: { code: "claude-isolation-violation", expected, actual, missing, extra } });
       this.fail(state, "claude-isolation-violation: the native CLI did not load exactly the Deck-computed MCP set");
       return;
@@ -250,6 +250,12 @@ class ClaudeTask {
     if (init.sessionId !== this.nativeId) {
       emit({ kind: "diagnostic", data: { code: "claude-session-id-mismatch", expected: this.nativeId, actual: init.sessionId } });
       this.fail(state, "claude-session-id-mismatch: the native CLI reported a different session id than the one assigned");
+      return;
+    }
+    if (this.input.nativeRole && !state.interruptRequested && !state.closing && !state.fatal && !state.finished) {
+      const role = this.input.nativeRole;
+      if (this.io.validatedLaunch?.({ roleId: role.roleId, generation: role.generation, nativeSessionId: this.nativeId, launchId: state.executionId }) === false)
+        this.fail(state, "claude-launch-binding-revoked");
     }
   }
 

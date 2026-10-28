@@ -99,6 +99,24 @@ export async function runSessionSmoke(options: { deck: string[]; keep?: boolean;
       if (plan.blocked) throw new Error("Smoke Claude team installation is blocked");
       await adapter.applyDeveloperTeamInstall({ projectRoot: cwd, environmentId: "claude-development", plan });
       await adapter.prepareSessionNativeSkills();
+    } else if (runner === "codex") {
+      const { buildCodexDeveloperTeamInstallPlan } = await import("../packages/adapter-codex/src/developer-team-install");
+      const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: home, existingFiles: new Map() });
+      for (const file of plan.expectedFiles) {
+        const path = join(home, file.relativePath);
+        mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+        writeFileSync(path, file.content, { mode: 0o600 });
+      }
+    } else {
+      const { createOpenCodeRunnerAdapter } = await import("../packages/adapter-opencode/src/runner-adapter");
+      const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: join(env.XDG_CONFIG_HOME!, "opencode") });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: cwd, environmentId: "opencode-development", deckConfig: config });
+      await adapter.applyDeveloperTeamInstall({ projectRoot: cwd, environmentId: "opencode-development", plan });
+      const { parseJsonc } = await import("../packages/adapter-opencode/src/model-discovery-context");
+      const role = await adapter.prepareSessionNativeRole!("deck-lead");
+      const installed = parseJsonc(readFileSync(join(role.source.root, "opencode.json"), "utf8")) as { agent: Record<string, { permission: unknown }> };
+      env.FAKE_OPENCODE_AGENTS = JSON.stringify([{ name: role.roleRef, prompt: role.instructions, permission: installed.agent[role.roleRef]!.permission }]);
+      env.FAKE_OPENCODE_PLUGINS = JSON.stringify(role.hooks.map(hook => hook.command));
     }
 
     // Own the daemon process so failure cleanup never signals a PID read from disk/status.

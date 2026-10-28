@@ -63,6 +63,12 @@ export type NativeSkillsDescriptor = {
 export type DriverImageInput = { path: string; mimeType: "image/png" | "image/jpeg" | "image/webp"; name: string };
 
 export type DriverTaskInput = {
+  /** Installed role bytes and native defaults. This is not native Setup caller attestation. */
+  nativeRoleDescriptor?: NativeRoleDescriptor;
+  /** Verified native selection; adapter checks the installed generation before each spawn. */
+  nativeRole?: { roleId: string; roleRef: string; generation: string };
+  /** Immutable host-owned SessionStart data; never a grant of repair authority. */
+  sessionStartContext?: { text: string; epoch: string; snapshotId: string };
   steeringVersion?: "0.162.1" | "2.1.296";
   /** Provenance of the original host-composed input, distinct from later genuine steering. */
   inputOrigin?: "user" | "host";
@@ -79,8 +85,22 @@ export type DriverTaskInput = {
   projectConfigTrusted?: boolean;
   /** Native names suppressed only for an unavailable managed binding or protected conflict. */
   suppressedMcpServers?: readonly string[];
+  codebaseAvailability?: import("./codebase-availability").CodebaseAvailabilityDisposition;
   approvals: "relay" | "runner-default"; credentialFile: string;
   disableNativeDelegation: boolean;
+};
+
+export type NativeRoleDescriptor = {
+  runnerId: string;
+  roleId: string;
+  roleRef: string;
+  generation: string;
+  source: { root: string; files: Readonly<Record<string, string>> };
+  instructions: string;
+  model?: string;
+  effort?: string;
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  hooks: readonly { event: string; command: string }[];
 };
 
 export type DriverApprovalRequest = { approvalId: string; tool: string; summary?: string; input?: unknown; toolKey: string; /** Full canonical unredacted action identity; memory only, at most 16 KiB UTF-8. */ identity?: string; /** Full redacted display string, at most 4096 characters; host bounds to 512. */ exactKey?: string; risk: ApprovalRisk; nativeScopes?: ("always")[]; alwaysNote?: string };
@@ -111,6 +131,8 @@ export type SupervisedChild = {
 export type SupervisedSpawn = (command: string, args: readonly string[], options?: { cwd?: string; env?: Record<string, string> }) => Promise<SupervisedChild>;
 
 export type DriverHostIo = {
+  /** Only after actual startup/session validation; generic turn.started cannot arm authority. */
+  validatedLaunch?(binding: { roleId: string; generation: string; nativeSessionId: string; launchId: string; current?(): boolean }): boolean;
   /** Synchronous durable handoff fence. A false result forbids writing input. */
   claimInput?(): boolean;
   spawn: SupervisedSpawn;

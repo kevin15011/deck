@@ -1,3 +1,7 @@
+import { readCodexSearchFallbackOwnership } from "./native-search";
+import { PrerequisiteEvidence, pinnedHookExecutable, pinnedHookRuntime } from "../../core/src/session/prerequisite-evidence";
+import { CODEX_ROOT_LEAD_BOOTSTRAP } from "./role-bootstrap";
+import { prepareCodexNativeRole } from "./native-role";
 import { inspectCodexNativeSearch } from "./native-search";
 import { CODEX_MCP_SERVER_IDS } from "./mcp-config";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, type Stats } from "node:fs";
@@ -227,15 +231,7 @@ function codexMcpCapabilityIds(
 
 const CODEX_ROLE_ASSIGNMENT_MAX_FILE_BYTES = 512 * 1024;
 const CODEX_ROLE_ASSIGNMENT_MAX_VALUE_BYTES = 1024;
-const CODEX_ROOT_LEAD_BOOTSTRAP = [
-  "This Deck-created root session is instructed to act as Deck Lead; Codex has no native root custom-agent selector.",
-  "Before acting, load and follow `.agents/skills/deck-lead/SKILL.md`.",
-  "Own the user outcome, apply proportional routing, and keep OpenSpec writing centralized through the Lead.",
-  "Do not ask the user to repeat or select a role.",
-  "When delegating to the Developer Team, name each task deck_<role>_<purpose> using lowercase snake_case, for example deck_investigate_runner_support, deck_quality_runner_skill, or deck_apply_fast_codex_launch.",
-  "Select the corresponding native agent_type explicitly, for example deck-investigate, deck-quality, or deck-apply-fast; the task name does not select the agent role.",
-  "This is instruction-level, static-compatible guidance and does not claim host-enforced role selection.",
-].join(" ");
+
 
 type CodexRoleAssignmentRead = {
   modelAssignments: import("@deck/core").DeveloperTeamModelAssignments;
@@ -557,7 +553,7 @@ function readExistingGlobalFiles(
       modes.set(virtualPath, stat.mode & 0o777);
     }
   };
-  for (const virtualPath of new Set([...empty.mutations.map((mutation) => mutation.relativePath), ".codex/config.toml", ".codex/hooks.json", CODEX_MANIFEST_PATH])) record(virtualPath);
+  for (const virtualPath of new Set([...empty.mutations.map((mutation) => mutation.relativePath), ".codex/agents/deck-quality.toml", ".codex/agents/deck-investigate.toml", ".codex/config.toml", ".codex/hooks.json", CODEX_MANIFEST_PATH])) record(virtualPath);
   const scanManagedDirectory = (virtualDirectory: string, nestedSkill: boolean): void => {
     const mapped = mapVirtualPath(roots, virtualDirectory);
     if (!inspectSafeProjectPath(mapped.root, mapped.absolute)?.isDirectory()) return;
@@ -687,9 +683,50 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const root = effectiveHome && isAbsolute(effectiveHome) ? effectiveHome : this.#roots.codexHome;
     return inspectCodexNativeSearch({ ...input, environment }, root);
   }
-  getSessionDriver() { return createCodexSessionDriver(this.#sessionDriverOptions); }
+  async readOwnedSearchFallbackIds(input: import("@deck/core").NativeSearchInspectionInput) {
+    const environment = input.environment ?? this.#sessionDriverOptions?.baseEnv ?? process.env;
+    const effectiveHome = (input.environment ?? this.#sessionDriverOptions?.baseEnv)?.CODEX_HOME;
+    const root = effectiveHome && isAbsolute(effectiveHome) ? effectiveHome : this.#roots.codexHome;
+    return readCodexSearchFallbackOwnership(root).ownedFallbackServerIds ?? [];
+  }
+  readonly #preparationEvidence = new PrerequisiteEvidence();
+  readPreparationCapabilities(config: NormalizedDeckConfig) {
+    const evidence = this.#preparationEvidence;
+    let source = "";
+    try { source = evidence.read(join(this.#roots.codexHome, "config.toml")); } catch { /* Unknown selection grants nothing. */ }
+    let context7: any;
+    try { context7 = (Bun.TOML.parse(source) as any).mcp_servers?.context7; } catch {}
+    return {
+      rtk: evidence.observe(config.packageInstructions.codex?.rtk === true, () => {
+        if (!inspectCodexOwnedHookIds(source).includes("rtk")) throw new Error("hook-missing");
+        const path = join(this.#roots.codexHome, "deck/hooks/deck-rtk-hook.cjs"), script = evidence.read(path);
+        const block = source.match(/^# deck-codex-hook:rtk:start\n([\s\S]*?)^# deck-codex-hook:rtk:end/m)?.[1];
+        const hooks = (Bun.TOML.parse(block ?? "") as any).hooks?.PreToolUse?.flatMap((group: any) => group.hooks ?? []) ?? [];
+        const command = hooks.find((hook: any) => hook.type === "command" && typeof hook.command === "string")?.command;
+        return [block, script, evidence.executable(pinnedHookExecutable(script)), evidence.executable(pinnedHookRuntime(command ?? "", path))];
+      }),
+      context7: evidence.observe(isDeckManagedCodexMcpServer(source, "context7") && context7?.enabled !== false, () => {
+        const entry = context7;
+        if (entry?.enabled === false) throw new Error("disabled");
+        if (entry?.url) {
+          const endpoint = new URL(entry.url);
+          if (endpoint.protocol !== "https:") throw new Error("endpoint-unverified");
+          const environment = this.#sessionDriverOptions?.baseEnv ?? process.env;
+          const names = Object.values(entry.env_http_headers ?? {}) as string[];
+          if (entry.bearer_token_env_var) names.push(entry.bearer_token_env_var);
+          if (names.some(name => !environment[name]?.trim())) throw new Error("credential-missing");
+          return [entry.url, names.sort(), "credentials-present"];
+        }
+        return [entry?.args ?? [], evidence.executable(entry?.command)];
+      }),
+    };
+  }
+  readPreparationGeneration() { return JSON.stringify(prepareCodexNativeRole(this.#roots.codexHome, "deck-lead").source); }
+  async prepareSessionNativeRole(roleId: string) { return prepareCodexNativeRole(this.#roots.codexHome, roleId); }
 
-  async readSessionMcpServers(deckConfig?: NormalizedDeckConfig): Promise<Record<string, ChildMcpServerSpec>> {
+  getSessionDriver() { return createCodexSessionDriver({ ...this.#sessionDriverOptions, requireNativeRole: true }); }
+
+  async readSessionCapabilityOverrides(deckConfig?: NormalizedDeckConfig): Promise<Record<string, ChildMcpServerSpec>> {
     if (deckConfig && !getEnabledCapabilityInstructionIds(deckConfig, "codex").includes("codebase-memory")) return {};
     const source = readGlobalConfigSource(this.#roots) ?? "";
     const ids = ["codebase-memory"].filter((id) => isDeckManagedCodexMcpServer(source, id as CodexMcpServerId));

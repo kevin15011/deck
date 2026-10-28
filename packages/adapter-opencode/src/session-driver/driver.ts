@@ -1,8 +1,11 @@
+import { verifyOpenCodeNativeRole } from "../native-role";
+import { ROLE_TOOL_POLICY, readOnlyMcpTools, isReadOnlyRole } from "@deck/core/session/role-tool-policy";
 import {correlatedOpenCodeEdits} from "./mapper";
 import { contextCapacity, contextIdentity, sanitizeContextObservation } from "@deck/core/session/events";
 import { openCodeProjectConfigDisabled, pendingOpenCodeProjectSources } from "../personal-mcp";
 import { prepareImages, redactImagePayload } from "./images";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import type { DriverDecision, DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
 import { validateQuestions, validateQuestionAnswers, type DriverQuestionAnswer, type Question } from "@deck/core/session/question";
 import { redactText } from "@deck/core/session/redaction";
@@ -14,6 +17,7 @@ import { DriverStartupCleanupError } from '@deck/core/session/failure';
 
 export const OPENCODE_TESTED_VERSIONS = { min: "1.18.31", maxTested: "1.18.31" } as const;
 export type OpenCodeSessionDriverOptions = OpenCodeLaunchOptions & {
+  requireNativeRole?: boolean;
   readinessMs?: number; escalationMs?: number; killGraceMs?: number;
   exec?: (command: string, args: readonly string[], options: { cwd: string; timeoutMs: number }) => Promise<{ code: number | null; stdout: string }>;
 };
@@ -22,7 +26,12 @@ const nativeExec: NonNullable<OpenCodeSessionDriverOptions["exec"]> = (cmd, args
 });
 const compare = (a: string, b: string) => { const aa = a.split(".").map(Number), bb = b.split(".").map(Number); for (let i = 0; i < 3; i++) if (aa[i] !== bb[i]) return aa[i]! - bb[i]!; return 0; };
 
-type Turn = { settle: (outcome: TurnOutcome) => void; interrupted: boolean; contextCompacted?: boolean; forced?: boolean; timer?: ReturnType<typeof setTimeout>; controller: AbortController };
+function matchesPermission(pattern: string, value: string): boolean {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  return new RegExp(`^${escaped}$`).test(value);
+}
+
+type Turn = { confirmInvocation?: (info: Record<string, unknown>) => void; settle: (outcome: TurnOutcome) => void; interrupted: boolean; contextCompacted?: boolean; forced?: boolean; timer?: ReturnType<typeof setTimeout>; controller: AbortController };
 
 class OpenCodeTask {
   private base = "";
@@ -40,6 +49,7 @@ class OpenCodeTask {
   private readonly seenQuestions = new Set<string>();
   private stream?: Promise<void>;
   private authorization = "";
+  private nativePermissions: Array<{permission:string;pattern:string;action:string}> = [];
   // This task owns one native server. Keep only validated limits, keyed by the
   // exact provider/model tuple; no cross-server or growing global cache.
   private readonly contextLimits = new Map<string, number>();
@@ -128,14 +138,31 @@ class OpenCodeTask {
         this.emit({ kind: "diagnostic", data: { code: "native-memory-capture-unverified", provider: "supermemory", runnerId: "opencode", message: "Native Supermemory recall and explicit tools are enabled. Automatic capture completion is not acknowledged by this managed server lifecycle." } });
       }
       const agents = await this.request("/agent", undefined, startupSignal);
-      const nativeAgent = Array.isArray(agents) ? agents.find(agent => record(agent) && agent.name === (config.default_agent ?? "build")) : undefined;
+      const nativeAgent = Array.isArray(agents) ? agents.find(agent => record(agent) && agent.name === (this.input.nativeRoleDescriptor?.roleRef ?? config.default_agent ?? "build")) : undefined;
       if (!record(nativeAgent) || !Array.isArray(nativeAgent.permission)) throw new Error("opencode-native-permission-policy-unavailable");
+      if (this.input.nativeRoleDescriptor) {
+        const role = this.input.nativeRoleDescriptor;
+        if (nativeAgent.prompt !== role.instructions || !role.hooks.every(hook => config.plugin?.includes(hook.command) || config.plugin?.includes(new URL(hook.command).pathname))) throw new Error("opencode-native-role-mismatch");
+      }
       const permission = [{permission:"*",pattern:"*",action:this.input.approvals === "relay" ? "ask" : "allow"}];
       // Native compilation owns defaults, precedence, agent overrides and ~/ expansion.
       // The relay may require approval for an allow; it never promotes a native deny.
       for (const rule of nativeAgent.permission) {
         if (!record(rule) || typeof rule.permission !== "string" || typeof rule.pattern !== "string" || !["ask","allow","deny"].includes(rule.action)) throw new Error("opencode-native-permission-policy-invalid");
         permission.push({permission:rule.permission,pattern:rule.pattern,action:rule.action === "allow" && this.input.approvals === "relay" ? "ask" : rule.action});
+      }
+      this.nativePermissions = [...permission];
+      if (isReadOnlyRole(this.input.nativeRoleDescriptor?.roleId ?? `deck-${this.input.memberId.replace(/^deck-/, "")}`)) {
+        const allowed = [...ROLE_TOOL_POLICY.builtins, ...readOnlyMcpTools(Object.keys(ROLE_TOOL_POLICY.mcp), (server, tool) => [`${server}_${server === "web-search" ? `tavily_${tool}` : tool}`])];
+        // Restrict the native compiled policy without overriding any existing deny.
+        // Exact known read tools retain their native rules; all other identities are denied.
+        const nativeRules = [...permission];
+        permission.length = 0;
+        permission.push({permission:"*",pattern:"*",action:"deny"});
+        for (const tool of allowed) {
+          const rules = nativeRules.filter(rule => matchesPermission(rule.permission, tool));
+          for (const rule of rules) permission.push({...rule,permission:tool});
+        }
       }
       if (this.input.disableNativeDelegation) permission.push({permission:"task",pattern:"*",action:"deny"});
       if (!this.input.disableNativeDelegation) this.emit({ kind: "diagnostic", data: { code: "native-delegation-not-disabled" } });
@@ -244,6 +271,7 @@ class OpenCodeTask {
     const p = record(raw) && record(raw.properties) ? raw.properties : {};
     const sid = p.sessionID ?? (record(p.part) ? p.part.sessionID : undefined) ?? (record(p.info) ? p.info.sessionID : undefined);
     if (sid && sid !== this.nativeId) return;
+    if (record(raw) && raw.type === "message.updated" && record(p.info) && sid === this.nativeId) this.current?.confirmInvocation?.(p.info);
     // SSE assistant updates carry a parent id but this request does not yet
     // know its native user-message id. Use the existing correlated HTTP result
     // below instead of assigning a late same-session update to a new request.
@@ -277,7 +305,10 @@ class OpenCodeTask {
       const identity = patterns.length ? JSON.stringify({ permission, patterns }) : undefined;
       const boundedIdentity = identity && Buffer.byteLength(identity, "utf8") <= 16 * 1024 ? identity : undefined;
       const supportsAlways = Array.isArray(raw.always) && raw.always.length > 0;
-      if (turn && !turn.interrupted && this.input.approvals === "relay") {
+      const readOnly = isReadOnlyRole(this.input.nativeRoleDescriptor?.roleId ?? `deck-${this.input.memberId.replace(/^deck-/, "")}`);
+      const allowed = [...ROLE_TOOL_POLICY.builtins, ...readOnlyMcpTools(Object.keys(ROLE_TOOL_POLICY.mcp), (server, tool) => [`${server}_${server === "web-search" ? `tavily_${tool}` : tool}`])];
+      const denied = (patterns.length ? patterns : ["*"]).some(pattern => this.nativePermissions.filter(rule => matchesPermission(rule.permission,permission) && matchesPermission(rule.pattern,String(pattern))).at(-1)?.action === "deny");
+      if (turn && !turn.interrupted && this.input.approvals === "relay" && !denied && (!readOnly || allowed.includes(permission))) {
         try {
           decision = await this.io.approval({
             approvalId: raw.id, tool: permission, toolKey: `opencode:${permission}`,
@@ -339,6 +370,10 @@ Patterns: ${raw.always.join("\n")}`,
   send(prompt: string, images?: readonly DriverImageInput[]): Promise<TurnOutcome> {
     if (this.closed || this.serverDead) return Promise.resolve({ status: "failed", error: "OpenCode task is closed" });
     if (this.current) return Promise.reject(new Error("An OpenCode turn is already running"));
+    if (this.input.nativeRoleDescriptor) {
+      try { verifyOpenCodeNativeRole(this.input.nativeRoleDescriptor); }
+      catch { return Promise.resolve({status:"failed",error:"The installed OpenCode team changed. Reinstall its team from Review & Install, then retry the session."}); }
+    }
     let nativeImages: ReturnType<typeof prepareImages>;
     try { nativeImages = prepareImages(images); }
     catch { return Promise.resolve({ status: "failed", error: "image-input-invalid" }); }
@@ -348,9 +383,32 @@ Patterns: ${raw.always.join("\n")}`,
     const done = new Promise<TurnOutcome>(settle => { this.current = { settle, interrupted: false, controller: new AbortController() }; });
     const turn = this.current!;
     if (this.io.claimInput?.() === false) { this.finish({ status: "interrupted" }); return done; }
+    const role = this.input.nativeRoleDescriptor;
+    // OpenCode 1.18.31 accepts caller message IDs and echoes the selected agent
+    // in message.updated. Keep native timestamp ordering and bind one exact POST.
+    const messageId = `msg_${BigInt.asUintN(48, BigInt(Date.now()) * 4096n).toString(16).padStart(12,"0")}${randomUUID().replaceAll("-", "").slice(0,14)}`;
+    if (role) {
+      let revoked = false, observed = false;
+      const current = () => {
+        if (this.current !== turn || turn.interrupted || turn.controller.signal.aborted || this.closed || this.serverDead || this.lifetime.signal.aborted) revoked = true;
+        try { verifyOpenCodeNativeRole(role); } catch { revoked = true; }
+        return observed && !revoked;
+      };
+      turn.confirmInvocation = info => {
+        if (info.id !== messageId || info.role !== "user") return;
+        if (info.agent !== role.roleRef) { revoked = true; return; }
+        if (observed || revoked) return;
+        observed = true;
+        if (!current() || this.io.validatedLaunch?.({ roleId: role.roleId, generation: role.generation, nativeSessionId: this.nativeId, launchId: messageId, current }) === false) {
+          revoked = true;
+          this.finish({ status: "failed", error: "opencode-launch-binding-revoked" });
+          void this.terminate().catch(() => {});
+        }
+      };
+    }
     this.emit({ kind: "turn.started", data: { nativeSessionId: this.nativeId, nativeThreadId: this.nativeId, model: this.input.assignment.modelId } });
     void this.request(`/session/${encodeURIComponent(this.nativeId)}/message`, {
-      system: this.input.rolePrompt, model: { providerID: modelId.slice(0, split), modelID: modelId.slice(split + 1) },
+      ...(role ? { messageID: messageId } : {}), system: this.input.rolePrompt, ...(this.input.nativeRoleDescriptor ? { agent: this.input.nativeRoleDescriptor.roleRef } : {}), model: { providerID: modelId.slice(0, split), modelID: modelId.slice(split + 1) },
       ...(this.input.assignment.thinking && this.input.assignment.thinking !== "off" ? { variant: this.input.assignment.thinking } : {}), parts: [...(prompt || !nativeImages.length ? [{ type: "text", text: prompt }] : []), ...nativeImages.map(image => ({ type: "file", mime: image.mimeType, filename: image.name, url: `data:${image.mimeType};base64,${image.data}` }))],
     }, AbortSignal.any([turn.controller.signal, this.lifetime.signal])).then(result => {
       if (this.current !== turn || this.serverDead) return;
@@ -414,6 +472,11 @@ export function createOpenCodeSessionDriver(options: OpenCodeSessionDriverOption
       return { version, status: untested ? "degraded" : "ready", ...(untested ? { reasonCode: "opencode-version-untested" } : {}), capabilities: ["native-session-resume", "approval-relay", "interrupt-abort", "native-config-inheritance", "server-basic-auth"], mcpIsolationVerified: false };
     },
     async startTask(input, io): Promise<DriverTaskHandle> {
+      if (options.requireNativeRole && !input.nativeRoleDescriptor) throw new Error("opencode-session-generation-unverified");
+      if (input.nativeRoleDescriptor) {
+        if (input.nativeRoleDescriptor.roleId !== (input.nativeRole?.roleId ?? `deck-${input.memberId.replace(/^deck-/, "")}`)) throw new Error("native-role-binding-mismatch");
+        verifyOpenCodeNativeRole(input.nativeRoleDescriptor);
+      }
       const task = new OpenCodeTask(input, io, options); await task.initialize();
       return { nativeSessionId: Promise.resolve(task.id), done: task.send(input.prompt, input.images), send: (prompt, images) => task.send(prompt, images), interrupt: () => task.interrupt(), close: () => task.close() };
     },
