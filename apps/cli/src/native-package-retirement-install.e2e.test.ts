@@ -12,7 +12,7 @@ for (const runner of ['codex', 'claude', 'opencode', 'pi']) test(`${runner}: cle
   const home = mkdtempSync(join(tmpdir(), `deck-retirement-${runner}-`));
   const root = runner === 'claude' ? join(home, 'data/deck/claude') : join(home, runner);
   mkdirSync(root, { recursive: true, mode: 0o700 });
-  const adapter: RunnerAdapter = runner === 'codex' ? createCodexRunnerAdapter({ userHome: home, codexHome: root, tools: { homeDir: home, dataRoot: join(home, 'data/deck'), resolveCommand: () => undefined, nodeCommand: process.execPath, verifyNodeRuntime: () => true } })
+  const adapter: RunnerAdapter = runner === 'codex' ? createCodexRunnerAdapter({ userHome: home, codexHome: root, journalRoot: join(home, 'journals'), tools: { homeDir: home, dataRoot: join(home, 'data/deck'), resolveCommand: () => undefined, nodeCommand: process.execPath, verifyNodeRuntime: () => true } })
     : runner === 'claude' ? createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, 'data/deck') })
     : runner === 'opencode' ? createOpenCodeRunnerAdapter({ developerTeamConfigDir: root })
     : createPiRunnerAdapter({ homeDirectory: home, env: { HOME: home, PI_CODING_AGENT_DIR: root }, piVersionProbe: () => ({ exitCode: 0, stdout: '1.0.0' }) });

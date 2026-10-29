@@ -29,12 +29,17 @@ test("native idle/busy completion automatically reviews, validates, resolves and
     const core = createFauxCore({ api: "deck-test-background", provider: "deck-test-background", models: [{ id: "fake", name: "Fake" }] });
     const contexts: any[] = [], syntheses: string[] = [], validated = new Set<string>();
     let delegate = true, slow = false, slowTool = false, activeEnded = 0, phase = 1, admissionFailure = true, omitFirstFollowThrough = true;
+    const waitForPhaseOutcomes = () => until(() => {
+      const snapshots = session!.sessionManager.getEntries().filter((e: any) => e.customType === "deck-subagents-v1") as any[];
+      const jobs = snapshots.at(-1)?.data.jobs ?? [];
+      return jobs.length === phase * 2 - 1 && jobs.every((job: any) => Boolean(job.outcomeId));
+    });
     const loader = new DefaultResourceLoader({ cwd: root, agentDir, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true, extensionFactories: [
       pi => {
         pi.registerTool({ name: "validate_result", label: "Validate result", description: "Validate delegated evidence", parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } as any,
           async execute(_id, input: { id: string }) { validated.add(input.id); return { content: [{ type: "text", text: "EVIDENCE_VALIDATED" }], details: {} }; } });
         pi.registerTool({ name: "hold_lead", label: "Lead work", description: "Existing Lead work must not be interrupted", parameters: { type: "object", properties: {} } as any,
-          async execute() { await Bun.sleep(600); activeEnded = Date.now(); return { content: [{ type: "text", text: "LEAD_WORK_FINISHED" }], details: {} }; } });
+          async execute() { await waitForPhaseOutcomes(); activeEnded = Date.now(); return { content: [{ type: "text", text: "LEAD_WORK_FINISHED" }], details: {} }; } });
         pi.registerProvider("deck-test-background", {
           api: core.api, apiKey: "fake", baseUrl: "http://127.0.0.1:1", models: [{ id: "fake", name: "Fake", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 4000 }],
           streamSimple: (model, context, options) => {
@@ -52,7 +57,7 @@ test("native idle/busy completion automatically reviews, validates, resolves and
             else if (pending && !validated.has(pending.outcomeId)) response = fauxAssistantMessage([fauxToolCall("validate_result", { id: pending.outcomeId })], { stopReason: "toolUse" });
             else if (pending) response = fauxAssistantMessage([fauxToolCall("subagent", { action: "resolve", taskId: pending.taskId, outcomeId: pending.outcomeId, disposition: "integrated", summary: "Evidence validated and integrated" })], { stopReason: "toolUse" });
             else response = async () => {
-              if (slow) { slow = false; await Bun.sleep(600); activeEnded = Date.now(); }
+              if (slow) { slow = false; await waitForPhaseOutcomes(); activeEnded = Date.now(); }
               const final = jobs.length === 0 && validated.size > 0;
               const text = final ? `LEAD_FINAL_SYNTHESIS_PHASE_${phase}` : "LEAD_CONVERSATIONAL";
               if (final) syntheses.push(text);

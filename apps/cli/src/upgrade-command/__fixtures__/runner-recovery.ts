@@ -44,7 +44,18 @@ try {
   const input = {projectRoot:home,environmentId:adapter.environmentIds[0]!,deckConfig:config};
   const initial = adapter.buildDeveloperTeamInstallPlan({...input,...(runner === 'claude' ? {capabilityIds:['codebase-memory']} : {})});
   assert(!initial.blocked, initial.diagnostics?.join('\n'));
-  await adapter.applyDeveloperTeamInstall({...input,plan:initial});
+  if (runner === 'codex') {
+    // Seed the previous release from the real generated plan. The upgrade and
+    // public rollback below retain real durable transactions and exact receipts.
+    // Re-installing that historical baseline dominates these recovery cases.
+    for (const file of initial.files) {
+      const path = join(home,'install',file.path);
+      mkdirSync(join(path,'..'),{recursive:true});
+      writeFileSync(path,file.content,{mode:0o644});
+    }
+  } else {
+    await adapter.applyDeveloperTeamInstall({...input,plan:initial});
+  }
   assert((await adapter.verifyDeveloperTeamInstall(initial)).valid);
   if (runner === 'codex') {
     // Simulate a previous owned release using its actual legacy manifest format.

@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { PassThrough } from "node:stream";
-import { render, renderToString } from "ink";
+import { render, renderToString, useInput } from "ink";
 import {
   buildCapabilityInstructionBundle,
   createAdapterRegistry,
@@ -45,7 +45,19 @@ beforeEach(() => {
   mutationState = mkdtempSync(join(tmpdir(), "dq-tui-"));
   process.env.XDG_STATE_HOME = mutationState;
 });
-afterEach(() => {
+afterEach(async () => {
+  // Publication can precede verification and reservation cleanup. Keep this
+  // test's environment and state alive until the admitted operation releases it;
+  // otherwise a late nested write can resolve the next test's state directory.
+  const paths = resolveStatePaths();
+  const pending = () => [paths.lockFile, paths.socket.path,
+    join(paths.daemonDir, "runner-mutation.json"),
+    join(paths.daemonDir, "runner-mutation.json.gate")].filter(existsSync);
+  const deadline = Date.now() + 5_000;
+  while (pending().length && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  expect(pending()).toEqual([]);
   if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME;
   else process.env.XDG_STATE_HOME = previousStateHome;
   rmSync(mutationState, {recursive:true, force:true});
@@ -689,7 +701,12 @@ describe("DeckApp synthetic runner production flow", () => {
       return await new Promise((resolve) => { releaseValidation = resolve; });
     };
     const harness = createInkHarness();
-    const instance = render(<DeckApp initialMemoryProvider={createMemoryProviderForSelection("supermemory", { token: "fixture-token-not-used" })} adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
+    let escapeReceived = false;
+    function ObserveInput() {
+      useInput((_input, key) => { if (key.escape) escapeReceived = true; });
+      return null;
+    }
+    const instance = render(<><DeckApp initialMemoryProvider={createMemoryProviderForSelection("supermemory", { token: "fixture-token-not-used" })} adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} /><ObserveInput /></>,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
     try {
       await waitForOutput(instance, harness.output, "Your AI environment, configured.");
@@ -719,7 +736,9 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input("\r");
       await waitForOutput(instance, harness.output, "Saving model configuration");
       harness.input("\r"); harness.input("j"); harness.input("\u001b");
-      await instance.waitUntilRenderFlush();
+      // Ink buffers a lone Escape while waiting for an escape sequence. A render
+      // flush does not mean input was delivered; keep validation held until it is.
+      await waitForCondition(instance, () => escapeReceived, "Escape delivered while save is held");
       expect(validationCalls).toBe(1);
       releaseValidation({ valid: false, issues: [{ agentId: "deck-lead", code: "model-unavailable", message: "Models changed. Retry discovery." }] });
       await waitForOutput(instance, harness.output, "Models changed. Retry discovery.");

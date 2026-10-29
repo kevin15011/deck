@@ -3648,18 +3648,35 @@ test('Git process leaves unrelated session queries responsive during traversal a
  execFileSync('git',['init','-q'],{cwd:t.project});
  // Enough entries to expose a synchronous traversal stall without huge data allocations.
  for(let i=0;i<80;i++){mkdirSync(join(t.project,String(i)));writeFileSync(join(t.project,String(i),'small'),'small\n');}
- let complete=false,maxStall=0,ticks=0,last=performance.now();
- const timer=setInterval(()=>{const now=performance.now();maxStall=Math.max(maxStall,now-last);last=now;ticks++;},5);
+ let complete=false, temporaryRoot='';
+ let child: ReturnType<typeof childProcess.spawn> | undefined;
+ let entered!: () => void;
+ const started=new Promise<void>(resolve=>{entered=resolve;});
+ const original=childProcess.spawn;
+ const spy=spyOn(childProcess,'spawn').mockImplementation(((...args:any[])=>{
+  const spawned=(original as any)(...args);
+  if(String(args[1]?.[0]).endsWith('git-diff-process.ts')) {
+   child=spawned; temporaryRoot=args[2].env.TMPDIR;
+   spawned.once('spawn',()=>{process.kill(spawned.pid!,'SIGSTOP');entered();});
+  }
+  return spawned;
+ }) as typeof childProcess.spawn);
+ const pending=t.manager.query('git.list',{sessionId}).finally(()=>{complete=true;});
  try {
-  const pending=t.manager.query('git.list',{sessionId}).finally(()=>{complete=true;});
-  await new Promise(resolve=>setTimeout(resolve,10));
+  // Hold the real process boundary instead of measuring scheduler pauses under
+  // parallel suite load. An unrelated query must finish before Git is released.
+  await started;
   expect(complete).toBe(false);
-  const start=performance.now();const unrelated=await t.manager.query('prompts.list',{sessionId:other});
-  const queryMs=performance.now()-start;expect(unrelated.ok).toBe(true);expect(queryMs).toBeLessThan(200);
-  expect(await pending).toMatchObject({ok:true});
-  expect(ticks).toBeGreaterThan(1);expect(maxStall).toBeLessThan(200);
-  console.log(JSON.stringify({probe:'Git manager responsiveness',queryMs,maxTimerGapMs:maxStall,ticks}));
- }finally{clearInterval(timer);}
+  expect(await t.manager.query('prompts.list',{sessionId:other})).toMatchObject({ok:true});
+  expect(complete).toBe(false);
+ } finally {
+  if(child?.pid) process.kill(child.pid,'SIGCONT');
+  spy.mockRestore();
+  await pending;
+ }
+ expect(await pending).toMatchObject({ok:true});
+ expect(temporaryRoot).not.toBe('');
+ expect(existsSync(temporaryRoot)).toBe(false);
 });
 
 test('native reader abort leaves host and unrelated queries alive, cleans resources and recovers', async () => {
