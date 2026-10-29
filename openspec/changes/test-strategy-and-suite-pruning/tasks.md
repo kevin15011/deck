@@ -139,3 +139,16 @@ R4 depends on R1. R5 follows R3.
 ### Candidate-specific acceptance decision
 
 The user accepted composite verification for U2+B0 and the bounded blocking B2 repairs after disclosure of the unresolved Pi Supermemory worker stall. For this candidate only, the green full-command requirement is satisfied by explicit acceptance of the source-bound composite evidence (7,511 pass, 11 unchanged skips, zero missing cases); the command itself remains recorded as interrupted/exit 1. See working-brief.md, “Approved bounded closure”. Future batches retain their existing acceptance requirements. Broader outstanding tasks remain open.
+
+
+### Current pruning execution (2026-10-28)
+
+- [x] B0/B3: retire the reviewed non-protected no-op phrase matrix (124 cases) and duplicate retired-output matrix (4 cases), after kept-test fault probes.
+- [x] B2: seed trust-revision history; retain real eviction/restart/replay and prove revision-fence fault detection.
+- [x] B4: replace OpenCode inventory call counts with returned-model outcomes; remove bootstrap prose pins while retaining metadata checks.
+- [x] Reclassify stale audit candidates against current source; preserve already-tiered valuable slow tests.
+- [ ] Protected candidates in B0/B3/B5: stopped for item-specific approval; see working brief. No protected deletion authorized by this execution.
+- [x] Execute the one requested full gate: 7,656 pass / 1 fail / 11 skip, exit 1, 1113.72s. Reproduced TUI fixture failure fixed; affected full file 41/0. Final typecheck recorded in attempt-36 report.
+- [ ] Green full-command acceptance: not claimed; retain composite full-run plus post-fix focused evidence for Lead review.
+
+This continuation does not mark the entire broad pruning plan complete. Protected candidates remain explicitly deferred under the current instruction; earlier completed work and historical approvals remain unchanged. No commits are requested in this continuation.
