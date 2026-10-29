@@ -1,5 +1,24 @@
 # Tasks: native/session parity (final slices)
 
+## Archive disposition — 2026-10-28
+
+This accepted closure supersedes earlier pending-work instructions. Checked original items denote evidenced implementation, not all live acceptance bullets beneath them. Legacy/no-driver/fence language remains historical; current promoted spec and archive-report.md describe approved scope.
+
+- [x] Verified installed role selection and Codex bootstrap separation (e40b0a2).
+- [x] Shared bounded readiness, catalog/exposure evidence and native delivery (ccfed70, 8ac27d0; Quality 16).
+- [x] Authenticated cross-runner Setup, including Pi; native Pi/OpenCode policy/OpenSpec/registry repairs and refresh (8ac27d0; Quality 19).
+- [x] Revoke the blanket PQ2 Codex review-role fence under user decision; retain cross-runner enforcement and document native inherited authority (004f42d, READONLY-ROLES.md).
+- [x] Supersede S7's no-driver assumption with implemented Pi session support (8ac27d0).
+- [x] Final default four-worker full gate: 7,657 pass / 0 fail / 11 skip; typecheck passes (archive-final-gate.md).
+- [x] Preserve and document the CODEX_HOME incident and test-isolation fix (26d0f3f).
+- [ ] Final live model-backed runner consumption — not verified; user accepted archive without it.
+- [ ] Native standalone Claude/Codex authenticated Setup — documented limitation.
+- [ ] Native Codex subagent MCP/sandbox enforcement parity — unsupported by role overrides; inherits parent authority.
+- [ ] Production auto-index initializer and adaptive-memory redesign — deferred.
+
+Unchecked original tasks below are historical composite tasks, superseded details or acceptance not independently established; archive closure does not mark them done. See archive-report.md for evidence and limits.
+
+
 Prerequisites (in order):
 
 1. Option A (Claude full team plugin, `task-b475cdb9…` attempt 2): integrated.
@@ -16,12 +35,12 @@ Each slice ships its own guard test. Focused `bun test <file>` runs during the s
   - The closed section set from design §3, with no project-instructions section.
   - Lead-only kinds and the forbidden-marker check.
   - Move the delegation, roster, continuity and decision text out of `session-service.ts` and `session-manager.ts`.
-- [ ] Generalize `NativeSkillsDescriptor` into `NativeRoleDescriptor`, and add `DriverTaskInput.nativeRole`.
+- [x] Generalize `NativeSkillsDescriptor` into `NativeRoleDescriptor`, and add `DriverTaskInput.nativeRole`.
 - [ ] Add `ParityLaunchShape` (with `roleTools`, `memory` and `webSearch`) and `ParityAllowEntry` (with `temporary-tracked` plus `temporary: {owner, expiresWhen, reviewBy}`).
 - [ ] Add `SESSION_PARITY_ALLOWLIST` with the 12 rows of design §5.1, and `SESSION_CAPABILITY_OVERRIDES = ["codebase-memory"]`.
 - [ ] Add `diffParity()` implementing the §5 failure rules.
 - [ ] Add `resolveWebSearchLaunch()` over `selectSearchRoute`.
-- [ ] Split `CODEX_ROOT_LEAD_BOOTSTRAP` into `roleSelection` and `delegation(native|session)`.
+- [x] Split `CODEX_ROOT_LEAD_BOOTSTRAP` into `roleSelection` and `delegation(native|session)`.
 - Acceptance: `diffParity` unit tests fail on each of these:
   - an unlisted field;
   - an unused entry;
@@ -35,15 +54,15 @@ Each slice ships its own guard test. Focused `bun test <file>` runs during the s
 
 ## S1 amendments
 
-- [ ] Add typed member capability rows to the existing Lead delegation/roster data: actual runner, new-task versus continuation binding, enablement and separately evidenced availability.
-- [ ] Keep readiness, repair instructions and project instructions forbidden in every overlay section, including handoff/notices.
-- [ ] Add typed readiness scope and independently derived parity projections. Compare complete bytes on equal scopes; allow only typed additional-participant coordination data on differing scopes.
+- [x] Add typed member capability rows to the existing Lead delegation/roster data: actual runner, new-task versus continuation binding, enablement and separately evidenced availability.
+- [x] Keep readiness, repair instructions and project instructions forbidden in every overlay section, including handoff/notices.
+- [x] Add typed readiness scope and independently derived parity projections. Compare complete bytes on equal scopes; allow only typed additional-participant coordination data on differing scopes.
 - [ ] Add the narrow evidence allow-list entry from design §8.8; mutations that drop a native hook or grant disabled tools must still fail.
 
 ## S2 amendments
 
 - [ ] Materialize Setup-only project repair visibility and explicit non-Setup denies for the selected transport.
-- [ ] Keep runtime role/invocation authentication separate from those visibility rules; do not treat an MCP tool filter as proof of identity.
+- [x] Keep runtime role/invocation authentication separate from those visibility rules; do not treat an MCP tool filter as proof of identity.
 
 
 ## S2. Shared core role tool policy, native first (D9; fixes the shared core defect)
@@ -60,9 +79,9 @@ Each slice ships its own guard test. Focused `bun test <file>` runs during the s
   - Native Claude `tools:` contains no retired ids.
 
 ## S3. Claude vertical
-- [ ] `prepareSessionRole(roleId)` reuses generation verification with `roleRef = deck-developer-team:<roleId>`. A retired server in the generation fails `claude-session-generation-unverified`.
-- [ ] `buildClaudeTurnLaunch` adds `--agent <roleRef>` and keeps `--model`/`--effort` (P1a). The overlay is the only appended text.
-- [ ] Paired Codebase overrides plus the explicitly approved typed availability omission (D3a).
+- [x] `prepareSessionRole(roleId)` reuses generation verification with `roleRef = deck-developer-team:<roleId>`. A retired server in the generation fails `claude-session-generation-unverified`.
+- [x] `buildClaudeTurnLaunch` adds `--agent <roleRef>` and keeps `--model`/`--effort` (P1a). The overlay is the only appended text.
+- [x] Paired Codebase overrides plus the explicitly approved typed availability omission (D3a).
   - Rename `readSessionMcpServers` to `readSessionCapabilityOverrides`.
   - Remove the context-mode/serena deletion and the `{codebase-memory}` filter in `session-shared-services.ts:55-61`.
   - An unpaired override fails `claude-mcp-override-unpaired`.
@@ -81,8 +100,8 @@ Each slice ships its own guard test. Focused `bun test <file>` runs during the s
     - AGENTS.md is present in both native and session.
 
 ## S4. Codex vertical
-- [ ] `prepareSessionRole` verifies the role TOML (`developer_instructions`, `model`, `model_reasoning_effort`, `sandbox_mode`), skills and hooks. The Lead uses the `roleSelection` bootstrap bytes.
-- [ ] The driver sends `developerInstructions` = verified bytes + overlay.
+- [x] `prepareSessionRole` verifies the role TOML (`developer_instructions`, `model`, `model_reasoning_effort`, `sandbox_mode`), skills and hooks. The Lead uses the `roleSelection` bootstrap bytes.
+- [x] The driver sends `developerInstructions` = verified bytes + overlay.
   - Model and effort are passed explicitly on `thread/start` and each turn: the assignment, or else the TOML values.
   - The read-only sandbox is never widened in relay.
 - [ ] Admit hooks by exact `trusted_hash` for the Deck manifest hooks. The `hooks/list` startup check fails closed.
@@ -97,7 +116,7 @@ Each slice ships its own guard test. Focused `bun test <file>` runs during the s
   - Native and session web-search shapes are equal.
 
 ## S5. OpenCode vertical
-- [ ] `prepareSessionRole` verifies the agent entry (S2 tools and permission), the prompt files and the execution plugin hash.
+- [x] `prepareSessionRole` verifies the agent entry (S2 tools and permission), the prompt files and the execution plugin hash.
 - [ ] The driver seeds permissions from `deck-<role>`, sends `agent: deck-<role>`, and puts only the overlay in `system`.
   - A startup assertion checks that the agent exists and that `developer-team-execution` is loaded.
 - [ ] Rename the MCP reader to `readSessionCapabilityOverrides`.
@@ -134,9 +153,9 @@ Each slice ships its own guard test. Focused `bun test <file>` runs during the s
 
 ## R1. Scoped preflight, honest evidence and snapshot coordination
 
-- [ ] Build trusted scope from the effective roster plus actual queued/running/selected-continuation assignments; do not enumerate all account runners.
-- [ ] Resolve capability intent through existing native/core policy for each binding before any optional probe. Preserve code-economy's current instruction-only semantics.
-- [ ] Separate project and runner keys, required-by labels, immutable observations, repair disposition and availability from enablement.
+- [x] Build trusted scope from the effective roster plus actual queued/running/selected-continuation assignments; do not enumerate all account runners.
+- [x] Resolve capability intent through existing native/core policy for each binding before any optional probe. Preserve code-economy's current instruction-only semantics.
+- [x] Separate project and runner keys, required-by labels, immutable observations, repair disposition and availability from enablement.
 - [ ] Read shared project bytes once; derive runner-scoped registry validation from authorized source snapshots. Preserve direct discovery on unsupported/unknown views without a rewrite loop.
 - [ ] Bound reads/stats, total bytes, parse depth/nodes and evaluation time. Include cache fingerprint work. Preserve independently proven findings when another component is indeterminate.
 - [ ] Do not call SessionCodebaseReadiness, native launch builders or external capability tools from the evaluator. Supply runtime evidence instead. Unknown project index state remains indeterminate.
@@ -146,13 +165,13 @@ Each slice ships its own guard test. Focused `bun test <file>` runs during the s
 
 ## R3. One project repair service with authenticated callers
 
-- [ ] Inspect existing trusted execution/session-host lifetimes and choose the smallest transport that proves actual Setup identity. Prefer their existing interfaces; consider a thin deck-prepare stdio bridge only where needed. Do not install a universal server by assumption.
+- [x] Inspect existing trusted execution/session-host lifetimes and choose the smallest transport that proves actual Setup identity. Prefer their existing interfaces; consider a thin deck-prepare stdio bridge only where needed. Do not install a universal server by assumption.
 - [ ] Extend current preparation contracts/parsers coherently for retired-key cleanup, arbitrary approved project components, epoch/scope/evidence binding and distinct requester/executor identities. Remove obsolete shape requirements encountered in this touched contract; no legacy compatibility branch.
-- [ ] Bind the exact trusted delegation and current selected Setup invocation. Reject spoofed role, runner, roster, root, operation or target data even when the tool can be called directly.
+- [x] Bind the exact trusted delegation and current selected Setup invocation. Reject spoofed role, runner, roster, root, operation or target data even when the tool can be called directly.
 - [ ] Implement project/target locking, source digest comparison, per-operation single-use authorization and handoff aggregation. Recompute affected eligibility under lock.
 - [ ] For Setup-disabled/other-enabled cases, select a verified enabled initializer binding in the host without exposing optional tools to Setup or changing its assignment. If none can enforce the project target, return a limitation.
-- [ ] Keep runner installs/credentials report-only. Assert zero installer/package-manager/user-config/Git/SDD-state writes from repair paths.
-- [ ] Implement the supported retired-policy YAML transformation with command preservation, collision handling, opaque user-data preservation, unsupported-shape rejection and idempotence.
+- [x] Keep runner installs/credentials report-only. Assert zero installer/package-manager/user-config/Git/SDD-state writes from repair paths.
+- [x] Implement the supported retired-policy YAML transformation with command preservation, collision handling, opaque user-data preservation, unsupported-shape rejection and idempotence.
 - [ ] Persist/reconcile Setup attempt identity through the host's existing ledger to prevent duplicate repair on resume. Native host supplies equivalent execution evidence.
 - Acceptance: tests cover Lead/Apply/raw-client spoofing, requester/executor mismatch, last-consumer disablement, stale generation/evidence, concurrent target modification, replay/restart/expiry, multiple operations, failed/uncertain repair not cached ready, and disabled Setup never gaining optional tools.
 
@@ -171,7 +190,7 @@ The first repair increment uses the existing authenticated session bridge and a 
 
 - [ ] After the new producer functions, remove the unused needs-init path and use one bounded OpenSpec parse/evidence source.
 - [ ] Coordinate with the existing U2+B0 owner before renaming Setup content/removing deck-init remnants and updating doctrine references.
-- [ ] Include Setup in the default catalog-derived member list.
+- [x] Include Setup in the default catalog-derived member list.
 - [ ] Update the preparation authority boundary to name the trusted coordinator, per-component scope and requester/executor binding while retaining mutation restrictions.
 - [ ] Reuse applicable OpenCode/Pi provider seams or remove them only after equivalent live responsibilities are covered.
 - Acceptance: one production readiness producer, Setup reachable without an explicit member list, structural safety/authority guards retained, generated outputs rebuilt only by their generators.
@@ -237,14 +256,14 @@ Cross-runner (all shapes):
 
 ## Approved PQ3 implementation checks
 
-- [ ] Preserve paired managed overrides; implement the explicitly accepted typed Codebase availability omission in native/session launch policy.
+- [x] Preserve paired managed overrides; implement the explicitly accepted typed Codebase availability omission in native/session launch policy.
   - Reject unlisted IDs, raw/unproven suppression, integrity failures, disabled intent and stale generation/evidence.
   - Preserve plugin/selection bytes, exact selected role, unrelated native MCP, and existing live-intent fences.
   - Check expected-absent plugin/tool identities before validated startup authority.
   - Exercise unavailable → recovery through real composition/launch with hermetic processes; ordinary work must complete without swallowing launch errors.
   - Add independent native backend observation and tests; do not claim native failure parity from the session outcome or an inferred native role.
   - Feed enabled/unavailable into the roster/native channel; retain unverified index status and report-only runtime remediation.
-- [ ] Refine the parity guard to retain actual installed declarations and effective route/omission evidence; allow only independently justified Codebase backend differences.
+- [x] Refine the parity guard to retain actual installed declarations and effective route/omission evidence; allow only independently justified Codebase backend differences.
 
 
 ## Lead continuity snapshot

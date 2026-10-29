@@ -1,5 +1,22 @@
 # Tasks — Verification doctrine and suite pruning
 
+## Archive disposition — 2026-10-28
+
+This accepted closure supersedes earlier pending-work instructions and the historical failed-final-gate status below. Checked original tasks record delivered implementation under current supported roles; obsolete legacy/profile/deck-init wording is superseded by the approved removals and authenticated Setup. It does not claim live dogfood or CI timing acceptance.
+
+- [x] U1 structural guards; U2 proportional doctrine and removal of strict-TDD/vendor/legacy surfaces (earlier accepted U2+B0 closure).
+- [x] R1/R2 tier tooling and repository policy; R4 PR/release/quarantine configuration (apply-progress.md).
+- [x] B0/B3 approved 128-case non-protected pruning; B2/B4 outcome-preserving rewrites (5ad24f8; Quality 22).
+- [x] Fixture isolation/scheduling corrections (26d0f3f, d998b3b).
+- [x] Final default four-worker full gate: 7,657 pass / 0 fail / 11 skip; typecheck passes (archive-final-gate.md).
+- [ ] U3 runtime evidence/classification wiring and optional U4 capture — deferred.
+- [ ] Nightly/fault-probe/eval harness and measured CI/budget acceptance — deferred or unverified.
+- [ ] Remaining protected B0/B3/B5 retirements — not authorized or performed.
+- [ ] Final live model-backed runner consumption — not verified; user accepted archive without it.
+
+Broader unchecked tasks remain non-completion records; archive approval is not permission to execute them.
+
+
 These are vertical slices. Each slice can ship and be reverted on its own. They come in two tracks:
 - **Track U (universal, shipped to users):** slices U1–U4. They change what every runner and the cross-runner session ship.
 - **Track R (Deck repo only):** slices R1–R5. They change only how this repository runs and prunes its own suite. They may run in parallel with Track U, except where noted.
@@ -10,9 +27,9 @@ Owners are suggestions: AF = Apply Fast, AD = Apply Deep, Q = Quality.
 
 ### U1. Guards first: content invariants and runner-parity check, with no deletions (AF)
 
-- [ ] U1.1 Add `packages/core/src/teams/developer/content-invariants.test.ts` per design §13 for both prompt profiles: required sections, ID resolution, protected-block map, banned phrases, size budgets. At first the doctrine-core and banned-phrase entries are inert. They activate in U2.
-- [ ] U1.2 Prove the protected-block check: deleting `GIT_DISCARD_PROTECTION_RULE` from one role locally makes the invariant fail. Record the run, then revert the local mutation.
-- [ ] U1.3 Add `apps/cli/src/verification-parity.test.ts` per design §8. First check whether `adapter-pi/src/capability-parity.ts` and `adapter-opencode/src/parity-consumer.test.ts` already enumerate materialized files, and reuse them if so. Export the minimal plan-level entry points it needs: Claude `expectedFiles` (or a plan API) and `sessionRolePrompt`. At first it asserts only that the four runners and the session produce role and skill outputs from the same core sources.
+- [x] U1.1 Add `packages/core/src/teams/developer/content-invariants.test.ts` per design §13 for both prompt profiles: required sections, ID resolution, protected-block map, banned phrases, size budgets. At first the doctrine-core and banned-phrase entries are inert. They activate in U2.
+- [x] U1.2 Prove the protected-block check: deleting `GIT_DISCARD_PROTECTION_RULE` from one role locally makes the invariant fail. Record the run, then revert the local mutation.
+- [x] U1.3 Add `apps/cli/src/verification-parity.test.ts` per design §8. First check whether `adapter-pi/src/capability-parity.ts` and `adapter-opencode/src/parity-consumer.test.ts` already enumerate materialized files, and reuse them if so. Export the minimal plan-level entry points it needs: Claude `expectedFiles` (or a plan API) and `sessionRolePrompt`. At first it asserts only that the four runners and the session produce role and skill outputs from the same core sources.
 - **Acceptance:**
   - Both tests pass on the current tree.
   - Rewording a role body without removing required sections passes.
@@ -20,14 +37,14 @@ Owners are suggestions: AF = Apply Fast, AD = Apply Deep, Q = Quality.
 
 ### U2. Doctrine content, stack-neutral (AF; Q because role contracts are public)
 
-- [ ] U2.1 Add `VERIFICATION_DOCTRINE_CORE` (design §5) to `@deck/core` and include it in the Lead, Apply (adaptive plus legacy general/frontend/backend), Quality and Verify bodies in both `compact` and `legacy` profiles. Keep it ≤ 1.5 KB and stack-neutral.
-- [ ] U2.2 Author `packages/core/src/skills/external/deck-verification/SKILL.md` per design §1–§3 and the retirement procedure, with stack-neutral examples only. Register it in `STANDALONE_SKILLS`.
+- [x] U2.1 Add `VERIFICATION_DOCTRINE_CORE` (design §5) to `@deck/core` and include it in the Lead, Apply (adaptive plus legacy general/frontend/backend), Quality and Verify bodies in both `compact` and `legacy` profiles. Keep it ≤ 1.5 KB and stack-neutral.
+- [x] U2.2 Author `packages/core/src/skills/external/deck-verification/SKILL.md` per design §1–§3 and the retirement procedure, with stack-neutral examples only. Register it in `STANDALONE_SKILLS`.
 - [ ] U2.3 Patch the vendor skills per design §9: the TDD description, debugging `:287,297`, simplification `:159` and review `:335`. List each patch in apply-progress.
-- [ ] U2.4 Rewrite the role content per the design §9 table: adaptive Apply/Quality, legacy apply-*, verify, orchestrator (including "integration is not verification" for both topologies), task, code-economy and deck-onboard.
+- [x] U2.4 Rewrite the role content per the design §9 table: adaptive Apply/Quality, legacy apply-*, verify, orchestrator (including "integration is not verification" for both topologies), task, code-economy and deck-onboard.
 - [ ] U2.5 Update deck-init to emit the design §4 policy schema with discovered commands only, in block-style YAML.
-- [ ] U2.6 Activate the U1 checks: the core block is required in the role map, banned phrases include stack-specific terms in the core block, and the parity test asserts `deck-verification` is in every runner, the core block is byte-identical across runners and session prompts, and the old TDD auto-trigger is absent.
-- [ ] U2.7 Phrase tests broken purely by wording go into batch B0 (R3). They are not patched one phrase at a time. If B0 is not yet approved, U2 waits on R3.4. It does not land with a red suite.
-- [ ] U2.8 Regenerate with the pinned Bun: `bun scripts/generate-skill-bundle.ts`, then `bun scripts/generate-runner-execution-assets.ts`. Run `bun run canary:install`.
+- [x] U2.6 Activate the U1 checks: the core block is required in the role map, banned phrases include stack-specific terms in the core block, and the parity test asserts `deck-verification` is in every runner, the core block is byte-identical across runners and session prompts, and the old TDD auto-trigger is absent.
+- [x] U2.7 Phrase tests broken purely by wording go into batch B0 (R3). They are not patched one phrase at a time. If B0 is not yet approved, U2 waits on R3.4. It does not land with a red suite.
+- [x] U2.8 Regenerate with the pinned Bun: `bun scripts/generate-skill-bundle.ts`, then `bun scripts/generate-runner-execution-assets.ts`. Run `bun run canary:install`.
 - **Acceptance:**
   - Content-invariant and parity tests pass. Generator freshness tests pass.
   - Each runner resolves the bare `deck-verification` ID in a canary session (Pi, OpenCode, Codex, Claude Code), recorded per runner.
@@ -59,11 +76,11 @@ Owners are suggestions: AF = Apply Fast, AD = Apply Deep, Q = Quality.
 
 ### R1. Inner-loop speedup, with no deletions (AF; independent of Track U)
 
-- [ ] R1.1 Spike on the pinned Bun 1.3.12 and on 1.4.0. Check `--changed`, `--parallel` and `--path-ignore-patterns`, and whether the CLI value merges with the `bunfig.toml` ignore list. Record the results in apply-progress.
-- [ ] R1.2 Add `scripts/test.ts` per design §11.
-- [ ] R1.3 Rename the e2e/integration files to `.e2e.test.ts(x)`/`.int.test.ts(x)`. Update the references in workflows, `baseline-health.yaml` and docs.
-- [ ] R1.4 Add the root scripts `test` (= fast), `test:fast`, `test:changed`, `test:int`, `test:e2e`, `test:full` and `test:quarantine`. Switch `release.yml` to `test:full`.
-- [ ] R1.5 Rewrite the CONTRIBUTING "Verify your change" section and the AGENTS.md "Development path" section, clearly labelled as Deck-repo conventions.
+- [x] R1.1 Spike on the pinned Bun 1.3.12 and on 1.4.0. Check `--changed`, `--parallel` and `--path-ignore-patterns`, and whether the CLI value merges with the `bunfig.toml` ignore list. Record the results in apply-progress.
+- [x] R1.2 Add `scripts/test.ts` per design §11.
+- [x] R1.3 Rename the e2e/integration files to `.e2e.test.ts(x)`/`.int.test.ts(x)`. Update the references in workflows, `baseline-health.yaml` and docs.
+- [x] R1.4 Add the root scripts `test` (= fast), `test:fast`, `test:changed`, `test:int`, `test:e2e`, `test:full` and `test:quarantine`. Switch `release.yml` to `test:full`.
+- [x] R1.5 Rewrite the CONTRIBUTING "Verify your change" section and the AGENTS.md "Development path" section, clearly labelled as Deck-repo conventions.
 - **Acceptance:**
   - The tier union equals what `bun test` discovers (wrapper self-check).
   - `test:full` pass count equals `bun test --timeout 30000` before the change.
@@ -72,15 +89,15 @@ Owners are suggestions: AF = Apply Fast, AD = Apply Deep, Q = Quality.
 
 ### R2. Deck config (AF)
 
-- [ ] R2.1 Rewrite `openspec/config.yaml` per design §10 in block-style YAML.
+- [x] R2.1 Rewrite `openspec/config.yaml` per design §10 in block-style YAML.
 - **Acceptance:** it parses with `yaml` and with `readOpenSpecInitState` (`initialized: true`).
 
 ### R3. Batch B0: retire phrase tests (AF; needs batch approval; unblocks U2)
 
-- [ ] R3.1 Fill the B0 row of design §12.1 from audit `task-535e1c2f-b9ff-47a4-be4a-8fa1a0a7d0e4`, including the per-runner TDD phrase tests that the parity test supersedes.
-- [ ] R3.2 Run the before snapshot and fault probes on any must-keep file touched at block level.
-- [ ] R3.3 Present B0 to the user.
-- [ ] R3.4 **After approval**, retire the phrase assertions in one commit and keep the behavioral tests.
+- [x] R3.1 Fill the B0 row of design §12.1 from audit `task-535e1c2f-b9ff-47a4-be4a-8fa1a0a7d0e4`, including the per-runner TDD phrase tests that the parity test supersedes.
+- [x] R3.2 Run the before snapshot and fault probes on any must-keep file touched at block level.
+- [x] R3.3 Present B0 to the user.
+- [x] R3.4 **After approval**, retire the phrase assertions in one commit and keep the behavioral tests.
 - **Acceptance:**
   - The fast-tier runtime drop is recorded.
   - Must-keep files are touched only at block level.
@@ -88,10 +105,10 @@ Owners are suggestions: AF = Apply Fast, AD = Apply Deep, Q = Quality.
 
 ### R4. Deck CI tiers and quarantine (AF; needs the Q1/Q2 decisions)
 
-- [ ] R4.1 If Q2 is approved, add `ci.yml` for pull requests and non-main pushes: tsc, `test:fast`, `test:int`, generated-asset freshness, parity test.
+- [x] R4.1 If Q2 is approved, add `ci.yml` for pull requests and non-main pushes: tsc, `test:fast`, `test:int`, generated-asset freshness, parity test.
 - [ ] R4.2 Add `nightly.yml`: `test:e2e`, `test:full --randomize --seed`, `test:quarantine` (an expired entry fails the job), fault-probe sample.
-- [ ] R4.3 Add `tests/quarantine.yaml` plus wrapper support. Protected entries need user approval.
-- [ ] R4.4 If Q1 is approved, bump the canonical Bun to 1.4.x across `packageManager`, the workflows and the generator assertion. Regenerate the assets and run release verification, as a separate commit.
+- [x] R4.3 Add `tests/quarantine.yaml` plus wrapper support. Protected entries need user approval.
+- [x] R4.4 If Q1 is approved, bump the canonical Bun to 1.4.x across `packageManager`, the workflows and the generator assertion. Regenerate the assets and run release verification, as a separate commit.
 - **Acceptance:**
   - The PR job takes ≤ 10 min.
   - Nightly is green.
@@ -149,6 +166,6 @@ The user accepted composite verification for U2+B0 and the bounded blocking B2 r
 - [x] Reclassify stale audit candidates against current source; preserve already-tiered valuable slow tests.
 - [ ] Protected candidates in B0/B3/B5: stopped for item-specific approval; see working brief. No protected deletion authorized by this execution.
 - [x] Execute the one requested full gate: 7,656 pass / 1 fail / 11 skip, exit 1, 1113.72s. Reproduced TUI fixture failure fixed; affected full file 41/0. Final typecheck recorded in attempt-36 report.
-- [ ] Green full-command acceptance: not claimed; retain composite full-run plus post-fix focused evidence for Lead review.
+- [x] Green full-command acceptance: final attempt 38 default four-worker run passed 7,657/0/11; earlier failed command remains historical evidence.
 
 This continuation does not mark the entire broad pruning plan complete. Protected candidates remain explicitly deferred under the current instruction; earlier completed work and historical approvals remain unchanged. No commits are requested in this continuation.

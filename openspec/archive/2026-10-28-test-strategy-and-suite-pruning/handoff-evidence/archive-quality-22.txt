@@ -1,0 +1,28 @@
+**Commit-ready from Quality for the bounded pruning delta, using the recorded composite evidence. No blocking code findings.** The full command remains recorded as failed; this is not a green full-suite claim.
+
+- **Retirements:** justified. The no-op matrix checked phrases and its own local catalog. The retired-output matrix repeated identical inputs four times. Reviewed fault logs show remaining guards fail when Git protection is removed or a retired capability fragment returns, then pass after restoration. Actual per-runner install tests retain output coverage.
+- **Rewrites:** no material oracle weakening. [Trust revision](/home/kevin15011/deck/packages/session-host/src/__tests__/project-trust-revision.int.test.ts:22) retains real eviction, reopen and stale-grant rejection; bypassing the revision fence failed three cases. [Inventory](/home/kevin15011/deck/packages/adapter-opencode/src/runner-adapter.inventory.test.ts:41) checks returned models and cache behavior. Bootstrap checks retain invocation/delegation metadata.
+- **TUI:** [waiting for delivered Escape](/home/kevin15011/deck/apps/cli/src/tui/app.synthetic-runner.int.test.tsx:729) fixes a real fixture race. My independent in-memory Ink probe confirmed render flush completes before Escape delivery and both input handlers receive the event. Existing behavioral assertions remain intact.
+
+**P3 advisory — evidence wording:** [report line 56](/tmp/deck36-report.md:56) and [working brief line 115](/home/kevin15011/deck/openspec/changes/test-strategy-and-suite-pruning/working-brief.md:115) describe the isolated failure as reproducing the same race. That log instead reaches a later “Deck is busy” failure while awaiting “Verification failed.” Distinguish these failures; the full-run navigation trace supports the Escape diagnosis. No source correction requested.
+
+I agree with retaining the protected content, retirement, adapter, process and web-push suites. Their authority, preservation, rollback and lifecycle checks exceed parity coverage. This does **not** establish that every assertion is valuable: personality wording/length checks in `orchestrator-content.test.ts`, for example, remain possible individual pruning candidates.
+
+Independent verification, following the focused command convention in `CONTRIBUTING.md`:
+
+| Check | Result |
+|---|---|
+| `bun test --config=/dev/null --timeout 30000` — content-invariants, config retirement, inventory and bootstrap files | 25 passed; 0.401s |
+| `bun run --config=/dev/null -` — Ink input-delivery probe | 3 assertions passed; 0.140s |
+| `git diff --check` | Passed |
+
+Reused evidence: 44/0 focused checks, post-fix TUI 41/0 plus three repeated passes, and successful final typecheck. Filesystem-writing integration tests were not independently rerun under read-only authority.
+
+Candidate matched before and after review:
+
+```text
+0b7008023b4320c5efd2d6a46a9a45eea9f1a4ce:
+370c948947b915eec28206a668775d8ff14b2d98
+```
+
+Graph coverage was stale/incomplete; current source supplied the evidence. No files or Git state were changed.

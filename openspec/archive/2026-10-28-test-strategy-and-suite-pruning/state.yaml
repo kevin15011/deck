@@ -1,0 +1,20 @@
+change: test-strategy-and-suite-pruning
+current_phase: archive
+current_status: archived
+current_artifact: archive-report.md
+current_provenance: deck-architect-under-explicit-lead-delegation
+archived_at: "2026-10-28"
+archive_target: openspec/archive/2026-10-28-test-strategy-and-suite-pruning/
+acceptance: user-approved-with-documented-limitations
+verification:
+  full_gate: passed
+  pass: 7657
+  fail: 0
+  skip: 11
+  workers: 4
+  live_model_backed_runner_consumption: not-verified
+artifacts:
+  - phase: archive
+    status: archived
+    artifact: archive-report.md
+history_note: "No prior state.yaml or events.yaml existed; prior history remains in the original artifacts."

@@ -1,0 +1,24 @@
+**Commit-ready from Quality: no remaining blockers in the uncommitted delta since `54c1388`.** The attempt-20 P2 is fixed.
+
+Complete subtree parsing in [mcp-config.ts:68](/home/kevin15011/deck/packages/adapter-codex/src/mcp-config.ts:68), together with receipt validation in [developer-team-install.ts:447](/home/kevin15011/deck/packages/adapter-codex/src/developer-team-install.ts:447), preserves customized Context7 and Codebase Memory entries.
+
+Independent verification:
+
+| Check | Result |
+|---|---|
+| `bun run -` — in-memory merger and install-plan probes | 214 assertions passed; 3.57s |
+| Two focused test files, `bun test --config=/dev/null` from `/tmp` | 67 passed, 0 failed; 6.03s |
+| `git diff --check` | Passed |
+
+The probes protect user configuration against unauthorized replacement. They cover nested approval policies, disabled tools/servers, environment tables, extra keys, dotted/inline/quoted keys, empty tables, and nonadjacent tables. Customized entries block replacement and retain their bytes; unmodified entries still migrate, upgrade, and remain idempotent. The original policy-loss failures were recorded in attempt 20.
+
+Only the four MCP implementation/test files differ from the previously reviewed candidate. Prior findings for isolation and stability fixes remain unchanged. The earlier **7,777-pass full run** is predecessor evidence; no full suite was rerun, as instructed. The focused run bypassed the filesystem-writing preload.
+
+Candidate identity matched before and after verification, computed without filesystem or Git mutations:
+
+```text
+54c1388deb2d40a43e87f791f9dc75135ca8f525:
+9f48bbdb6acfc90d0f305566e8d87a2203abde66
+```
+
+Graph coverage was stale/incomplete; current source supplied the evidence. No files or Git state were changed.

@@ -1,0 +1,24 @@
+**Commit-readiness: ready for these bounded corrections. Recommend closing P2-1 through P2-4.** No new blocking regression found.
+
+| Finding | Review result |
+|---|---|
+| **P2-1: disabled search** | [Ownership-only lookup](/home/kevin15011/deck/apps/cli/src/session-shared-services.ts:83) restores suppression without availability probes. Independent resolver-to-launch checks passed for Codex and OpenCode, preserving unowned server IDs. |
+| **P2-2: stale native config** | [Current-config reader](/home/kevin15011/deck/apps/cli/src/runner-launch-command.ts:1044) is wired into all three native lanes. The probe confirmed fresh reads and preservation of explicit memory selection and launch-local disablement. |
+| **P2-3: OpenCode refresh** | [Lifecycle refresh](/home/kevin15011/deck/packages/adapter-opencode/assets/opencode/plugins/developer-team-execution.ts:607) clears prior evidence. Independent probes passed for all four refresh events, overlapping refreshes, failure, deletion, and transforms without I/O. |
+| **P2-4: injected parity evidence** | [Closed semantic validation](/home/kevin15011/deck/packages/core/src/session/readiness-parity.ts:24) rejects the original injection with recomputed digests. Additional identifier, capability, and status/repair attacks were rejected; legitimate participant additions passed. |
+
+The **eight updated admission tests** correctly require verified generations instead of the revoked blanket fence. All eight passed. Six independent Codex checks also passed, covering read-only sandboxing, escalation refusal, and rejection of unexpected MCP tools/servers. An additional OpenCode installer-plan probe confirmed default-deny review permissions while Apply retains shell access.
+
+The **Pi fixture changes preserve every assertion, timeout, and skip condition**. They use installed role files and explicit fake-model assignments. The producer’s [Pi log](/tmp/deck20-pi.log) records **10 passed, 0 failed, 33.18s**; I did not independently rerun these filesystem-dependent cases.
+
+Focused verification, sourced from the current instruction and `CONTRIBUTING.md`:
+
+- Role-policy/Codex read-only selection: **15 passed**; one OpenCode fixture blocked by `EROFS` — 0.713s.
+- Disabled-search selection: **4 passed** — 0.905s.
+- Core parity: **6 passed**; four Codex native-admission fixtures blocked by `EROFS` — combined 0.868s.
+- Independent `bun run -` probes: suppression, config refresh, lifecycle ordering, injection rejection, and OpenCode permissions **passed**.
+- OpenCode generated bundle matched an **in-memory canonical build**; scoped `git diff --check` passed.
+
+All **23 fingerprinted paths remained unchanged** and matched producer tree `dac1929d8544c399e1154ac980ffc71f8c84c1a0`. Reviewed HEAD: `cdb55192382c7c7eb4f9647e1b5f16dd999bb2d0`; scoped SHA-256: `42b65417039259aef98b070c39449d7ea72fca4a441d9526caf88814c6acc861`.
+
+This verdict excludes concurrent Slice 3 and live native acceptance. Graph coverage was stale; conclusions rely on current source and executions. No files or Git state were changed.

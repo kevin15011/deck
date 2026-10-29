@@ -1,0 +1,28 @@
+**Slice 3 is commit-ready within the reviewed scope.** All three attempt-18 P2 findings and the P3 documentation finding are resolved. No new blocking findings.
+
+- **P2-1:** The [execution hook](/home/kevin15011/deck/packages/adapter-pi/assets/pi/extensions/developer-team-execution.ts:245) reaches the live native coordinator. Independent probes mounted both extensions across all source/generated pairings: **40 assertions passed**, including foreign-session rejection and navigation/shutdown revocation.
+- **P2-2:** [Cross-session Setup](/home/kevin15011/deck/packages/adapter-pi/src/pi-extensions/subagents/clarification.ts:49) suppresses the unhandled IPC repair tool. Both transport-selection tests passed.
+- **P2-3:** The [fixture API](/home/kevin15011/deck/packages/adapter-pi/src/session-driver/pi-session.fixture.ts:19) is repaired. [Binding tests](/home/kevin15011/deck/packages/adapter-pi/src/session-driver/driver.int.test.ts:37) require a live binding before exercising permanent revocation; assertions remain intact.
+- **P3:** The [support matrix](/home/kevin15011/deck/docs/reference/support-matrix.md:63) now describes implemented repairs and their limitations accurately.
+
+Independent verification followed the focused-only delegation and `CONTRIBUTING.md`:
+
+| Command / scope | Result |
+|---|---|
+| `bun run -` — combined-extension route probes | 40 assertions passed; 18 ms |
+| `bun test …/clarification.transport.int.test.ts -t 'Setup repair IPC registration'` | 2 passed; 293 ms |
+| `bun run -` — canonical in-memory bundle generation | Both bundles byte-identical; 559 ms |
+| Scoped `git diff --check` | Passed |
+
+Oracles were session isolation, lifecycle revocation, transport selection and canonical generation. Attempt-18 supplies the prior failure evidence.
+
+Candidate identity matched before and after verification and matches `/tmp/deck31-report.md`:
+
+```text
+cdb55192382c7c7eb4f9647e1b5f16dd999bb2d0:
+1ec1809c71a532026f0dcaac5c8848010932e7df
+```
+
+Reused matching-candidate evidence: **25 repair/transport tests**, **7 binding tests**, and successful typecheck. Filesystem-writing integration fixtures were not rerun here; no full suite or model-backed execution was performed.
+
+Graph coverage was stale/untracked, so conclusions rely on current source and executions. Adaptive memory was disabled. No files or Git state were changed.

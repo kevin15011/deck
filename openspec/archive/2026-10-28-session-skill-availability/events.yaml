@@ -1,0 +1,9 @@
+- event: archive_completed
+  occurred_on: "2026-10-28"
+  phase: archive
+  status: archived
+  artifact: archive-report.md
+  actor: deck-architect-under-explicit-lead-delegation
+  authority: "Current Lead instruction reports explicit user approval to archive now with limitations."
+  archive_target: openspec/archive/2026-10-28-session-skill-availability/
+  notes: "Additive spec promotion; final full gate passed; live consumption not verified; no staging, commit or push."
