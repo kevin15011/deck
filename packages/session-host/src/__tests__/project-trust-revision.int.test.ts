@@ -19,9 +19,18 @@ test('Quality37: evicted grant replay after reopening cannot restore revoked aut
   const f = fixture(), grant = consent(f.project.projectId, true, 0, 'original-grant');
   f.store.executeCommand(grant);
   f.store.executeCommand(consent(f.project.projectId, false, 1, 'revoke'));
-  for (let i = 0; i < 1000; i++) f.store.executeCommand({
-    type: 'project.rename', commandId: 'rename-' + i, projectId: f.project.projectId, name: f.project.name,
-  });
+  // Seed historical receipts from a real command, then exercise eviction through
+  // the production writer. Repeating 1,000 durable writes only builds history.
+  f.store.executeCommand({ type: 'project.rename', commandId: 'seed-rename', projectId: f.project.projectId, name: f.project.name });
+  const file = join(f.state, 'projects.json');
+  const stored = JSON.parse(readFileSync(file, 'utf8'));
+  const receipt = stored.registrations['seed-rename'];
+  for (let i = Object.keys(stored.registrations).length; i < 1000; i++) stored.registrations['history-' + i] = receipt;
+  writeFileSync(file, JSON.stringify(stored));
+  const atCapacity = f.reopen();
+  expect(stored.registrations['original-grant']).toBeDefined();
+  expect(atCapacity.projectTrust(f.project.projectId)).toMatchObject({ trusted: false, revision: 2 });
+  atCapacity.executeCommand({ type: 'project.rename', commandId: 'evict-oldest', projectId: f.project.projectId, name: f.project.name });
   expect(JSON.parse(readFileSync(join(f.state, 'projects.json'), 'utf8')).registrations['original-grant']).toBeUndefined();
   const reopened = f.reopen();
   expect(reopened.projectTrust(f.project.projectId)).toMatchObject({ trusted: false, revision: 2 });

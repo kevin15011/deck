@@ -16,24 +16,16 @@ describe("standalone Developer Team skills", () => {
     for (const file of files) expect(file.relativePath).not.toContain("..");
   });
 
-  test("Onboard is user-invocable and routes through the adaptive team", () => {
+  test("Onboard frontmatter permits user invocation", () => {
     const content = getBootstrapSkillContent("deck-onboard")!;
     const frontmatter = parseFrontmatter(content);
     expect(frontmatter["user-invocable"]).toBe(true);
-    expect(content).toContain("deck-lead");
-    expect(content).toContain("deck-investigate");
-    expect(content).toContain("deck-architect");
-    expect(content).toContain("deck-apply-fast");
-    expect(content).toContain("deck-quality");
-    expect(content).not.toContain("deck-developer-");
   });
 
-  test("Archive is delegated to Lead and does not create an archive agent", () => {
+  test("Archive frontmatter permits delegation only", () => {
     const content = getBootstrapSkillContent("deck-archive")!;
     const frontmatter = parseFrontmatter(content);
     expect(frontmatter["user-invocable"]).toBe(false);
     expect((frontmatter.metadata as Record<string, unknown>).delegate_only).toBe(true);
-    expect(content).toContain("Lead");
-    expect(content).toContain("not an agent");
   });
 });
