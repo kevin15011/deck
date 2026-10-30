@@ -470,6 +470,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       ...options.skillDiscovery, homeDir: home,
       configDir: options.skillDiscovery?.configDir ?? options.sessionDriver?.baseEnv?.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude"),
       projectAdmitted: projectRoot => claudeProjectConfigTrusted(home, projectRoot, options.sessionDriver?.baseEnv ?? process.env),
+      selectedPluginGeneration: () => existsSync(metadataPath) ? readSelection().contentHash : undefined,
       selectedPlugin: () => {
         if (!existsSync(metadataPath)) return undefined;
         // Catalog visibility is advisory; launch verification remains separate.

@@ -26,7 +26,7 @@ export function validateSharedMetadata(catalog: SkillRegistryFrontmatterV1): boo
   const ids = new Set(records.map(record => record.observation_id));
   const covered = new Set<string>(), seen = new Set<string>();
   for (const exposure of exposures) {
-    if (!exposure || !ids.has(exposure.observation_id) || !isSafeSkillLocator(exposure.locator)) return false;
+    if (!exposure || (exposure.descriptor_fingerprint !== undefined && (exposure.load_mode !== "filesystem" || !digest(exposure.descriptor_fingerprint))) || !ids.has(exposure.observation_id) || !isSafeSkillLocator(exposure.locator)) return false;
     const source = sources.find(source => source.owner === exposure.owner && source.source_id === exposure.source_id);
     if (!source || exposure.load_mode !== source.load_mode || !exposure.locator.startsWith(`${source.locator_base}/`)) return false;
     const key = JSON.stringify(exposure);

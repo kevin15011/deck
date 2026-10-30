@@ -103,6 +103,10 @@ An explicitly authorized refresh is separate from validation and discovery:
 deck skill-registry refresh --runner pi
 ```
 
+Shared catalog evaluation at cross-session preparation/resume and explicit registry commands uses stat fingerprints: declared roots, descriptor relative paths, sizes and modification times, effective HOME/XDG/CODEX_HOME, and declared plugin generations. Persisted fingerprints let unchanged descriptors reuse bounded metadata; changed/added descriptors are reread and removed descriptors disappear. Containment is still checked before reuse, and diagnostic-bearing descriptors are reevaluated. An unchanged catalog retains its exact bytes. Discovery itself never writes it; persistence still requires authorized preparation. Legacy native preparation retains its existing discovery path.
+
+There is no watcher. Mid-session additions appear at the next preparation/resume or on-demand discovery. Edits preserving both size and modification time can remain undetected. Older v2 catalogs without descriptor fingerprints receive them on the next authorized refresh.
+
 Partial inventory produces a usable catalog with truthful partial status; it does not prevent authorized generation. Refresh preserves edited or unknown-ownership registry bytes and can be refused when the registry is not protected by `.gitignore` or the caller has not supplied exact write authority. Shared writes bind the executor and candidate digest. Legacy native preparation cannot replace a v2 shared catalog with an executor-only projection. See [Developer Team](developer-team.md#project-workflows) for the boundary and [Runners](runners.md) for active-runner scope.
 
 ## Frontend aesthetic selection

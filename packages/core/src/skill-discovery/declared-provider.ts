@@ -8,6 +8,7 @@ import { SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA, SKILL_DISCOVERY_SOURCE_SCHEMA, 
 
 /** Host-declared exposure, never constructed from skill-authored metadata. */
 export interface DeclaredSkillRoot {
+  readonly generation?: string;
   readonly id: string;
   readonly root: string;
   readonly category: SkillDiscoverySourceCategoryV1;
@@ -71,7 +72,7 @@ export function createDeclaredSkillProvider(runnerId: RunnerId, options: Declare
             diagnostics.push(diagnostic("source_unreadable", source.id));
             continue;
           }
-          const binding: SkillDiscoverySourceBindingV1 = { kind: "filesystem", descriptorBasename: "SKILL.md", absoluteRoot: source.root,
+          const binding: SkillDiscoverySourceBindingV1 = { kind: "filesystem", descriptorBasename: "SKILL.md", absoluteRoot: source.root, generation: source.generation,
             declaration: { schema: SKILL_DISCOVERY_SOURCE_SCHEMA, sourceId: source.id, sourceCategory: source.category, scope: source.scope,
               runnerId, locatorStrategy: source.category === "project_runner" ? "project_relative" : "runner_relative", expectedContent: "skill_md",
               safeLocatorBase: source.category === "project_runner" ? relative(projectRoot, source.root).split(sep).join("/") : source.id } };

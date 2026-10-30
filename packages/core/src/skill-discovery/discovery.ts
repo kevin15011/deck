@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import * as path from "node:path";
 import { isAlias, isMap, isPair, isScalar, isSeq, parseDocument } from "yaml";
 
@@ -69,7 +70,15 @@ export type BoundedSkillDiscoveryResultV1 =
       readonly diagnostics: readonly SkillDiscoveryDiagnosticV1[];
     };
 
+/** Advisory metadata only; callers still revalidate every source and descriptor path. */
+export interface SkillDescriptorStatCache {
+  readonly previous: ReadonlyMap<string, { fingerprint: string; record: ParsedSkillDescriptorV1 }>;
+  readonly observed: Map<string, string>;
+  readonly reusable: Set<string>;
+}
+
 export interface DiscoverSkillsInputV1 {
+  readonly descriptorCache?: SkillDescriptorStatCache;
   readonly projectRoot: string;
   readonly activeRunnerId?: RunnerId;
   readonly sourceSet: SkillDiscoverySourceSetV1;
@@ -115,6 +124,7 @@ interface SanitizedField {
 }
 
 interface FileEvaluationContext {
+  readonly descriptorCache?: SkillDescriptorStatCache;
   readonly binding: Extract<SkillDiscoverySourceBindingV1, { kind: "filesystem" }>;
   readonly sourceRoot: string;
   readonly projectRoot: string;
@@ -263,6 +273,7 @@ export async function discoverSkills(
       if (binding.kind === "filesystem") {
         await evaluateFilesystemSource({
           binding,
+          descriptorCache: input.descriptorCache,
           sourceRoot: "",
           projectRoot: canonicalProjectRoot,
           activeRunnerId: input.activeRunnerId,
@@ -691,6 +702,20 @@ async function walkDirectory(
         continue;
       }
 
+      // Stat metadata is an advisory cache key, never permission to load the file.
+      const fingerprint = `sha256:${createHash("sha256").update(JSON.stringify([
+        "descriptor-stat-v1", binding.declaration, binding.absoluteRoot, sourceRoot,
+        binding.generation, resolvedEntry, logicalRelative, stats.size, stats.mtimeMs,
+        process.env.HOME, process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME, process.env.CODEX_HOME,
+      ])).digest("hex")}`;
+      context.descriptorCache?.observed.set(locator, fingerprint);
+      const cached = context.descriptorCache?.previous.get(locator);
+      if (cached?.fingerprint === fingerprint) {
+        observations.push(toFilesystemObservation(binding.declaration, locator, cached.record));
+        context.descriptorCache!.reusable.add(locator);
+        continue;
+      }
+
       const descriptor = await readDescriptor(resolvedEntry, entryPath, stats, binding.declaration.sourceId, locator, collector);
       if (!descriptor) {
         state.incomplete = true;
@@ -710,6 +735,8 @@ async function walkDirectory(
       }
 
       observations.push(toFilesystemObservation(binding.declaration, locator, parsed.record));
+      // Re-evaluate diagnostic-bearing descriptors so cached reads cannot erase warnings.
+      if (!parsed.diagnostics.length) context.descriptorCache?.reusable.add(locator);
     }
   } finally {
     try {

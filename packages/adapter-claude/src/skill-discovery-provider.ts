@@ -8,6 +8,7 @@ export interface ClaudeSkillDiscoveryOptions {
   readonly configDir: string;
   readonly projectAdmitted: (projectRoot: string) => boolean;
   readonly selectedPlugin: () => string | undefined;
+  readonly selectedPluginGeneration?: () => string | undefined;
   readonly systemRoots?: readonly string[];
   readonly exposedRoots?: DeclaredSkillProviderOptions["roots"];
   readonly inventory?: DeclaredSkillProviderOptions["inventory"];
@@ -45,7 +46,7 @@ export function createClaudeSkillDiscoveryProvider(options: ClaudeSkillDiscovery
     if (admitted) roots.push({ id: "claude-project-skills", root: join(projectRoot, ".claude", "skills"), category: "project_runner", scope: "project" });
     try {
       const plugin = options.selectedPlugin();
-      if (plugin) roots.push({ id: "claude-selected-skills", root: join(plugin, "skills"), category: "deck_materialized", scope: "runner" });
+      if (plugin) roots.push({ id: "claude-selected-skills", root: join(plugin, "skills"), generation: options.selectedPluginGeneration?.(), category: "deck_materialized", scope: "runner" });
     } catch { partial = true; }
     try {
       const settingsFiles = [join(options.configDir, "settings.json"), ...(admitted ? [join(projectRoot, ".claude/settings.json"), join(projectRoot, ".claude/settings.local.json")] : [])];
@@ -75,7 +76,7 @@ export function createClaudeSkillDiscoveryProvider(options: ClaudeSkillDiscovery
             found = true;
             const root = join(entry.installPath, "skills");
             const sourceId = `claude-plugin-${createHash("sha256").update(id + "\0" + root).digest("hex").slice(0, 32)}`;
-            if (!roots.some(source => source.id === sourceId)) roots.push({ id: sourceId, root, category: "runner_exposed", scope: "runner" });
+            if (!roots.some(source => source.id === sourceId)) roots.push({ id: sourceId, root, generation: JSON.stringify([entry.version, entry.gitCommitSha, entry.lastUpdated]), category: "runner_exposed", scope: "runner" });
             if (roots.length > 500) throw new Error("plugin-roots-budget");
           }
           if (!found) partial = true;

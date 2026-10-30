@@ -2,8 +2,8 @@ import { promises as fs } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { SKILL_DISCOVERY_V1_BOUNDS, type SkillDiscoverySourceProviderV1, type SkillDiscoverySourceBindingV1,
   type SkillRegistryRecordV1, type SharedSkillSourceV2, type SharedSkillExposureV2, type SkillRegistryFrontmatterV1 } from "./contracts";
-import { createCoreGenericProjectSources, discoverSkills } from "./discovery";
-import { canonicalizeSkillRegistry, orderSkillRegistryRecords, renderSkillRegistryBody, renderSkillRegistryMarkdown, type SkillRegistryCanonicalSnapshotV1 } from "./registry";
+import { createCoreGenericProjectSources, discoverSkills, type ParsedSkillDescriptorV1 } from "./discovery";
+import { parseSkillRegistryDocument, canonicalizeSkillRegistry, orderSkillRegistryRecords, renderSkillRegistryBody, renderSkillRegistryMarkdown, type SkillRegistryCanonicalSnapshotV1 } from "./registry";
 import { catalogDigest, sharedCatalogFingerprint, sharedSourceFingerprint } from "./shared-format";
 const within = (root: string, target: string) => { const child = relative(root, target); return child === "" || child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child); };
 export const sourceLocatorBase = (binding: SkillDiscoverySourceBindingV1, owner: string) => binding.declaration.locatorStrategy === "project_relative"
@@ -13,6 +13,19 @@ export const sourceLocatorBase = (binding: SkillDiscoverySourceBindingV1, owner:
 export async function discoverSharedSkillCatalog(input: {
   projectRoot: string; providers: readonly SkillDiscoverySourceProviderV1[]; generatedAt?: string;
 }): Promise<SkillRegistryCanonicalSnapshotV1> {
+  // Persisted rows are untrusted hints. Parsing validates their shape and fingerprint;
+  // live traversal below rechecks containment before reusing any descriptor metadata.
+  let previous: SkillRegistryFrontmatterV1 | undefined;
+  let previousDocument: string | undefined;
+  try {
+    const file = resolve(input.projectRoot, ".atl/skill-registry.md");
+    if ((await fs.stat(file)).size <= SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes) {
+      const parsed = parseSkillRegistryDocument(await fs.readFile(file, "utf8"));
+      if (parsed.ok && parsed.frontmatter?.schema_version === 2) {
+        previous = parsed.frontmatter; previousDocument = parsed.document;
+      }
+    }
+  } catch { /* Missing/invalid cache does not block bounded discovery. */ }
   const providers = [...input.providers].sort((a, b) => a.runnerId.localeCompare(b.runnerId));
   if (providers.length > 4 || new Set(providers.map(p => p.runnerId)).size !== providers.length
     || providers.some(p => !["claude", "codex", "opencode", "pi"].includes(p.runnerId))) throw new Error("shared-providers-invalid");
@@ -25,7 +38,20 @@ export async function discoverSharedSkillCatalog(input: {
   for (const provider of [core, ...providers]) {
     try {
       const sourceSet = await provider.listSources({ projectRoot: input.projectRoot });
-      const discovery = await discoverSkills({ projectRoot: input.projectRoot, activeRunnerId: provider.runnerId, sourceSet });
+      const observed = new Map<string, string>();
+      const reusable = new Set<string>();
+      const cached = new Map<string, { fingerprint: string; record: ParsedSkillDescriptorV1 }>();
+      for (const exposure of previous?.exposures ?? []) {
+        if (exposure.owner !== provider.runnerId && exposure.owner !== "core") continue;
+        if (!exposure.descriptor_fingerprint) continue;
+        const row = previous!.records.find(r => r.observation_id === exposure.observation_id);
+        if (row) cached.set(exposure.locator, { fingerprint: exposure.descriptor_fingerprint, record: {
+          name: row.name, description: row.description, taskSignals: row.task_signals ?? [],
+          technologySignals: row.technology_signals ?? [], pathSignals: row.path_signals ?? [],
+        } });
+      }
+      const discovery = await discoverSkills({ projectRoot: input.projectRoot, activeRunnerId: provider.runnerId, sourceSet,
+        descriptorCache: { previous: cached, observed, reusable } });
       partial ||= discovery.outcome !== "complete" || provider.runnerId !== "core" && !sourceSet.sources.some(s => s.kind === "opaque_inventory");
       truncated ||= discovery.outcome === "indeterminate" && discovery.reasonCode === "truncated_output";
       const bindings = [...createCoreGenericProjectSources(input.projectRoot), ...sourceSet.sources];
@@ -41,7 +67,11 @@ export async function discoverSharedSkillCatalog(input: {
         const rows = canonical.frontmatter.records.filter(r => r.locator.startsWith(`${base}/`));
         sources.push({ source_id: declaration.sourceId, owner, category: declaration.sourceCategory, scope: declaration.scope,
           locator_base: base, load_mode: binding.kind === "filesystem" ? "filesystem" : "native",
-          completeness: discovery.outcome === "complete" ? "complete" : "partial", fingerprint: catalogDigest([declaration, rows]) });
+          completeness: discovery.outcome === "complete" ? "complete" : "partial", fingerprint: catalogDigest([declaration, rows, provider.schema,
+            binding.kind === "filesystem" ? [binding.absoluteRoot, binding.generation,
+              await fs.realpath(binding.absoluteRoot).catch(() => "missing"),
+              process.env.HOME, process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME, process.env.CODEX_HOME,
+              [...observed].filter(([locator]) => locator.startsWith(`${base}/`)).sort(([a], [b]) => a.localeCompare(b))] : null]) });
         for (const row of rows) {
           let identity = `${owner}:${row.locator}`;
           if (binding.kind === "filesystem") {
@@ -55,7 +85,8 @@ export async function discoverSharedSkillCatalog(input: {
           if (!records.has(identity) && records.size >= SKILL_DISCOVERY_V1_BOUNDS.maxCandidateRecords || exposures.length >= 2000) { truncated = true; continue; }
           const record = records.get(identity) ?? row;
           records.set(identity, record);
-          exposures.push({ observation_id: record.observation_id, owner, source_id: declaration.sourceId, locator: row.locator,
+          const descriptorFingerprint = (reusable.has(row.locator) ? observed.get(row.locator) : undefined) as `sha256:${string}` | undefined;
+          exposures.push({ ...(descriptorFingerprint ? { descriptor_fingerprint: descriptorFingerprint } : {}), observation_id: record.observation_id, owner, source_id: declaration.sourceId, locator: row.locator,
             load_mode: binding.kind === "filesystem" ? "filesystem" : "native" });
         }
       }
@@ -65,7 +96,7 @@ export async function discoverSharedSkillCatalog(input: {
     }
   }
   sources.sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-  exposures.sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  exposures.sort((a,b) => a.observation_id.localeCompare(b.observation_id) || a.owner.localeCompare(b.owner) || a.source_id.localeCompare(b.source_id) || a.locator.localeCompare(b.locator));
   const base = canonicalizeSkillRegistry({ activeRunnerId: "claude", diagnostics, generatedAt: input.generatedAt }).frontmatter;
   let frontmatter: SkillRegistryFrontmatterV1 = { ...base, schema: "skill-registry-v2", schema_version: 2,
     sources, exposures, records: orderSkillRegistryRecords([...records.values()]),
@@ -79,6 +110,9 @@ export async function discoverSharedSkillCatalog(input: {
     frontmatter = { ...frontmatter, records: rows, candidate_count: rows.length, exposures: frontmatter.exposures!.filter(e => ids.has(e.observation_id)),
       sources: retainedSources, source_scope_hash: sharedSourceFingerprint(retainedSources), completeness: "truncated" };
     document = render();
+  }
+  if (previous && previousDocument && previous.fingerprint === frontmatter.fingerprint) {
+    frontmatter = previous; document = previousDocument;
   }
   return { frontmatter, document, body: renderSkillRegistryBody(frontmatter), sourceDeclarations: [] };
 }

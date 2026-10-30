@@ -103,6 +103,8 @@ export type SkillDiscoverySourceBindingV1 =
       /** Runtime-only; never serialized or logged. */
       readonly absoluteRoot: string;
       readonly descriptorBasename: "SKILL.md";
+      /** Host-provided plugin/selection generation; never model authority. */
+      readonly generation?: string;
     }
   | {
       readonly kind: "opaque_inventory";
@@ -176,6 +178,8 @@ export interface SharedSkillSourceV2 {
   readonly fingerprint: SkillDiscoveryDigestV1;
 }
 export interface SharedSkillExposureV2 {
+  /** Optional advisory stat key; absent in older v2 catalogs. */
+  readonly descriptor_fingerprint?: SkillDiscoveryDigestV1;
   readonly observation_id: string;
   readonly source_id: string;
   readonly owner: string;
