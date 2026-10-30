@@ -31,7 +31,7 @@ test('pending human decisions differ from internal worker integration and clear 
 });
 
 // Exact attempt disposition resolves discarded failure; success elsewhere cannot mask a new failure.
-test('only explicit discard resolves a failed attempt, never blocked integration or ownership',()=>{
+test('any integration resolves a failed attempt, but never unsettled ownership',()=>{
  const state=Ledger.empty('s').toState();
  state.tasks.worker={taskId:'worker',memberId:'review',attempts:[{attempt:1,runnerId:'fake',modelId:'fake',startedSeq:1,state:'failed'}]};
  state.tasks.replacement={taskId:'replacement',memberId:'review',attempts:[{attempt:1,runnerId:'fake',modelId:'fake',startedSeq:2,state:'completed'}]};
@@ -40,7 +40,7 @@ test('only explicit discard resolves a failed attempt, never blocked integration
  expect(errors()).toBe(1);
  for(const disposition of ['integrated','blocked','discarded'] as const){
   attempt.integration={seq:3,leadTaskId:'lead',leadAttempt:1,commandId:'c',state:disposition,note:'Handled',evidenceSeqs:[1]};
-  expect(errors()).toBe(disposition==='discarded'?0:1);
+  expect(errors()).toBe(0);
  }
  attempt.state='ownership-unsettled';expect(errors()).toBe(1);
  attempt.state='failed';

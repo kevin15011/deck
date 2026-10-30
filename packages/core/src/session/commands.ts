@@ -32,6 +32,7 @@ export type SessionCommandBody =
   | { type: "session.revokeGrant"; grantId: string }
   | { type: "question.answer"; questionId: string; answers: Record<string, string[]> }
   | { type: "question.dismiss"; questionId: string }
+  | { type: "task.dismiss-failure"; taskId: string; attempt: number }
   | { type: "task.cancel"; taskId: string }
   | { type: "session.release" }
   | { type: "session.rename"; title: string }
@@ -70,6 +71,7 @@ const FIELD_RULES: Record<string, (c: Record<string, unknown>) => string | null>
   "session.revokeGrant": (c) => str(c.grantId) ? null : "grantId required",
   "question.answer": (c) => !str(c.questionId) ? "questionId required" : !isQuestionAnswers(c.answers) ? "answers invalid" : null,
   "question.dismiss": (c) => str(c.questionId) ? null : "questionId required",
+  "task.dismiss-failure": (c) => str(c.taskId) && Number.isSafeInteger(c.attempt) && (c.attempt as number) > 0 ? null : "taskId and positive attempt required",
   "task.cancel": (c) => str(c.taskId) ? null : "taskId required",
   "session.release": () => null,
   "session.rename": (c) => boundedString(c.title,160) ? null : "title invalid",

@@ -16,8 +16,7 @@ export function summarizeActivity(ledger: Ledger, leadTaskId: string): ActivityS
     for (const decision of ledger.decisions()) if (decision.state === 'pending' && !(ledger.latest(decision.origin.taskId)?.attempt === decision.origin.attempt && ledger.latest(decision.origin.taskId)?.state === 'running')) add('decisions',decision.origin.taskId);
     return {attention, workers:workerActivity(tasks.map(t=>({taskId:t.taskId,memberId:t.memberId,state:t.attempts.at(-1)!.state})),blocked), errors:tasks.filter(t=>{
         const attempt=t.attempts.at(-1)!;
-        // A discard is an explicit disposition of this exact attempt, not proof
-        // of success. Integration alone never clears failure or uncertain ownership.
-        return attempt.state==='ownership-unsettled' || attempt.state==='failed' && attempt.integration?.state!=='discarded';
+        // Any recorded disposition handles this failure; uncertain ownership remains actionable.
+        return attempt.state==='ownership-unsettled' || attempt.state==='failed' && !attempt.integration;
     }).length};
 }

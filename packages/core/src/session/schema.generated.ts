@@ -2558,6 +2558,7 @@ export const SESSION_COMMAND_SCHEMA = {
         "approval.respond",
         "question.answer",
         "question.dismiss",
+        "task.dismiss-failure",
         "task.cancel",
         "session.revokeGrant",
         "session.release",
@@ -3307,6 +3308,34 @@ export const SESSION_COMMAND_SCHEMA = {
       "if": {
         "properties": {
           "type": {
+            "const": "task.dismiss-failure"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "taskId",
+          "attempt"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
             "const": "task.cancel"
           }
         },
@@ -3460,4 +3489,4 @@ export const SESSION_COMMAND_SCHEMA = {
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "ce4adf869fadcadc79bfd600e8031d9faa31418bc0a9bfa05d88eb7401952530";
+export const SESSION_SCHEMA_DIGEST = "89150d61849c3feee116b59503ed4d6247042afec769c5e4e5dd611be35ebd08";

@@ -110,3 +110,10 @@ test("project trust requires a reviewed nonnegative safe revision, including leg
  for (const expectedRevision of [-1, 0.5, "0", null, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity]) expect(validateSessionCommand({...command,expectedRevision}).ok).toBe(false);
  for (const expectedRevision of [0,1,Number.MAX_SAFE_INTEGER]) expect(validateSessionCommand({...command,expectedRevision}).ok).toBe(true);
 });
+
+test('failure dismissal requires an exact positive attempt',()=>{
+ const base={v:1,commandId:'11111111-2222-4333-8444-555555555555',type:'task.dismiss-failure',taskId:'worker'};
+ expect(validateSessionCommand({...base,attempt:1}).ok).toBe(true);
+ for(const attempt of [undefined,0,-1,1.5,'1',Infinity]) expect(validateSessionCommand({...base,attempt}).ok).toBe(false);
+ expect(validateSessionCommand({...base,taskId:'',attempt:1}).ok).toBe(false);
+});

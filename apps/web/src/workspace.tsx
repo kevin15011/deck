@@ -150,6 +150,21 @@ function TranscriptMessages({ model, visible, acknowledge }: { model: TaskModel;
     return <>{model.messages.map(event => event.autoApproval?<AutoApprovalMessage key={event.seq} detail={event.autoApproval} label={agentProfile(model.member).label}/>:event.questionResolution?<QuestionAnswerMessage key={event.seq} resolution={event.questionResolution} ts={event.ts} label={agentProfile(model.member).label}/>:<article key={event.seq}><div className="message-meta"><strong>{event.data.role === 'user' ? 'Delegation' : agentProfile(model.member).label}</strong><time dateTime={event.ts}>{time(event.ts)}</time></div><VisibleReply visible={visible} replyKey={model.key} seq={model.reply?.seq === event.seq ? event.seq : 0} acknowledge={acknowledge}><Markdown text={displayValue(event.data.text ?? event.data.error)}/></VisibleReply></article>)}</>;
 }
 
+function DismissFailure({api, sessionId, model, events}: {api?:Api; sessionId:string; model:ReturnType<typeof taskModel>; events:ViewState['events']}) {
+    const [busy,setBusy]=useState(false), [error,setError]=useState('');
+    const attempt=Number(model.task.attempt ?? 1);
+    const handled=events.some(e=>e.kind==='task.integration' && e.data.taskId===model.id && e.data.attempt===attempt);
+    if(!api || model.task.state!=='failed' || handled) return null;
+    async function dismiss(){
+        setBusy(true);setError('');
+        try {
+            const reply=await api!('/api/commands',{method:'POST',body:JSON.stringify({sessionId,command:{v:1,commandId:crypto.randomUUID(),type:'task.dismiss-failure',taskId:model.id,attempt}})});
+            if(reply.ok===false) throw new Error(reply.message ?? reply.code ?? 'Could not dismiss failure');
+        } catch(cause){setError((cause as Error).message);} finally{setBusy(false);}
+    }
+    return <div><button type="button" className="quiet" disabled={busy} onClick={()=>void dismiss()} aria-label={`Dismiss failure for ${agentProfile(model.member).label}`}>{busy?'Dismissing…':'Dismiss'}</button>{error&&<p role="alert" className="error">{error}</p>}</div>;
+}
+
 export function Subagents({ api,view, sessionId = '', visible = false, readMarkers = {}, acknowledge = () => {}, contexts }: { api?:Api;view: ViewState; sessionId?: string; visible?: boolean; readMarkers?: ReadMarkers; acknowledge?: (key: string, seq: number) => void; contexts?: ContextWindowIndex }) {
     const contextIndex = useMemo(() => contextIndexForEvents(view.events, sessionId, contexts), [view.events, sessionId, contexts]);
     const entries = Object.entries(view.tasks).filter(([id, task]) => id !== 'lead' && task.memberId !== 'lead') as TaskEntry[];
@@ -167,12 +182,12 @@ export function Subagents({ api,view, sessionId = '', visible = false, readMarke
     const detail = models.find(model => model.id === openId);
     if (detail) return <section className="subagent-content subagent-detail">
         <div className="detail-bar"><button type="button" className="quiet detail-back" onClick={() => setOpenId('')}>← Subagents</button><div className="detail-switch" role="group" aria-label="Switch subagent">{models.map(model => <button key={model.id} type="button" className="quiet detail-pick" aria-pressed={model.id === detail.id} aria-label={`${agentProfile(model.member).label} (${String(model.task.state ?? 'created')})`} title={agentProfile(model.member).label} onClick={() => setOpenId(model.id)}><Avatar memberId={model.member} size={28}/>{model.unread && <span className="pick-unread" aria-label="Unread reply"/>}</button>)}</div></div>
-        <article className="task-card detail-card"><TaskHeading model={detail}/><TaskResult model={detail} visible={visible} acknowledge={acknowledge}/></article>
+        <article className="task-card detail-card"><TaskHeading model={detail}/><DismissFailure key={`${sessionId}:${detail.id}:${detail.task.attempt}`} api={api} sessionId={sessionId} model={detail} events={view.events}/><TaskResult model={detail} visible={visible} acknowledge={acknowledge}/></article>
         <div className="detail-conversation"><h4>Conversation</h4>{api?<ProgressiveTranscript key={`${sessionId}:${detail.id}`} api={api} sessionId={sessionId} taskId={detail.id} active={visible} label={`${agentProfile(detail.member).label} conversation`}>{messages=><TranscriptMessages model={{...detail,messages}} visible={visible} acknowledge={acknowledge}/>}</ProgressiveTranscript>:<FollowTranscript className="task-transcript task-transcript--full" label={`${agentProfile(detail.member).label} conversation`} signal={detail.signal} active={visible}><TranscriptMessages model={detail} visible={visible} acknowledge={acknowledge}/></FollowTranscript>}</div>
     </section>;
     return <section className="subagent-content"><div className="panel-intro"><h2>Subagents</h2><p>Delegated work, actual assignments and results.</p></div>{!models.length && <p className="empty-note">No subagents yet. Delegated work will appear here.</p>}{models.map(model => <article className="task-card task-card--compact" data-activity={indicatorState(String(model.task.state ?? 'created'), model.approvals)} key={model.id}>
         <TaskHeading model={model} onOpen={() => setOpenId(model.id)}/>
-        <TaskResult model={model} visible={visible} acknowledge={acknowledge} preview/>
+        <TaskResult model={model} visible={visible} acknowledge={acknowledge} preview/><DismissFailure key={`${sessionId}:${model.id}:${model.task.attempt}`} api={api} sessionId={sessionId} model={model} events={view.events}/>
     </article>)}</section>;
 }
 
