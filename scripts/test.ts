@@ -1,28 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
-import { relative, resolve, dirname } from "node:path";
+import { resolve } from "node:path";
 import { parse } from "yaml";
 
-export type Tier = "fast" | "int" | "e2e";
-export function classifyTier(path: string): Tier {
-  return /\.e2e\.test\.[cm]?[jt]sx?$/.test(path) ? "e2e" : /\.int\.test\.[cm]?[jt]sx?$/.test(path) ? "int" : "fast";
-}
-export function fallbackScope(path: string): string | undefined {
-  if (["bun.lock", "bun.lockb", "bunfig.toml", "package.json", "tsconfig.json", "scripts/test.ts", "scripts/test-preload.ts"].includes(path)) return "";
-  if (/(^|\/)fixtures?\//.test(path) || /\.generated\./.test(path) || /(^|\/)package\.json$/.test(path) || !/\.[cm]?[jt]sx?$/.test(path)) {
-    return /^(?:packages|apps)\/[^/]+\//.exec(path)?.[0] ?? "";
-  }
-}
-export function selectAffected(tests: readonly string[], changed: readonly string[], graph: ReadonlyMap<string, readonly string[]>): string[] {
-  const affected = new Set(changed);
-  const reverse = new Map<string, string[]>();
-  for (const [source, imports] of graph) for (const target of imports) reverse.set(target, [...(reverse.get(target) ?? []), source]);
-  const queue = [...changed];
-  for (let i = 0; i < queue.length; i++) for (const importer of reverse.get(queue[i]!) ?? []) {
-    if (!affected.has(importer)) { affected.add(importer); queue.push(importer); }
-  }
-  const scopes = changed.map(fallbackScope).filter((s): s is string => s !== undefined);
-  return tests.filter(path => affected.has(path) || scopes.some(scope => path.startsWith(scope)));
-}
 type QuarantineEntry = { path: string; owner: string; reason: string; link: string; created: string; expires: string; approval?: string };
 export function validateQuarantine(value: unknown, now = new Date()): QuarantineEntry[] {
   if (!Array.isArray(value)) throw new Error("quarantine entries must be a list");
@@ -49,85 +28,106 @@ export function discoverTests(root: string): string[] {
   return [...new Set(git(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]))]
     .filter(path => /(?:^|[._-])(?:test|spec)\.[cm]?[jt]sx?$/.test(path) && existsSync(resolve(root, path)) && !ignores.some(g => g.match(path))).sort();
 }
-function importGraph(root: string): Map<string, string[]> {
-  const graph = new Map<string, string[]>();
-  const files = git(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
-  for (const file of files) {
-    if (!/\.[cm]?[jt]sx?$/.test(file) || !existsSync(resolve(root, file)) || file.startsWith("packages/core/src/skills/external/")) continue;
-    const imports: string[] = [];
-    try {
-      const scanner = new Bun.Transpiler({ loader: file.endsWith("tsx") ? "tsx" : file.endsWith("jsx") ? "jsx" : "ts" });
-      for (const item of scanner.scanImports(readFileSync(resolve(root, file), "utf8"))) {
-        try { imports.push(relative(root, Bun.resolveSync(item.path, dirname(resolve(root, file))))); } catch { /* Built-ins and unavailable optional dependencies have no local source. */ }
-      }
-    } catch { imports.push(...files.filter(path => dirname(path) === dirname(file))); }
-    graph.set(file, imports);
+
+export const FILE_BUDGET_MS = 2_000;
+export const RUN_BUDGET_MS = 90_000;
+
+/** Terminate the work at its deadline, including work that blocks its own event loop. */
+export async function withBudget(
+  work: { exited: Promise<number>; kill: () => void },
+  milliseconds: number,
+  label: string,
+  schedule: (callback: () => void, ms: number) => () => void = (callback, ms) => {
+    const timer = setTimeout(callback, ms);
+    return () => clearTimeout(timer);
+  },
+): Promise<number> {
+  let cancel = () => {};
+  try {
+    return await Promise.race([
+      work.exited,
+      new Promise<never>((_, reject) => {
+        cancel = schedule(() => {
+          work.kill();
+          reject(new Error(`${label} exceeded ${milliseconds / 1000}s wall-time budget`));
+        }, milliseconds);
+      }),
+    ]);
+  } finally {
+    cancel();
   }
-  return graph;
 }
+
 export async function main(args = process.argv.slice(2), root = resolve(import.meta.dir, "..")): Promise<number> {
-  let tier: Tier | "all" = "fast", changed: string | undefined;
-  let quarantine = false, list = false, selfCheck = false;
-  const passthrough: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!;
-    if (arg === "--tier") tier = args[++i] as Tier | "all";
-    else if (arg.startsWith("--tier=")) tier = arg.slice(7) as Tier | "all";
-    else if (arg === "--changed" || arg.startsWith("--changed=")) changed = arg.includes("=") ? arg.slice(10) : "HEAD";
-    else if (arg === "--quarantine") quarantine = true;
-    else if (arg === "--list") list = true;
-    else if (arg === "--self-check") selfCheck = true;
-    else if (arg !== "--") passthrough.push(arg);
+  const started = performance.now();
+  if (args.length) throw new Error("Use bun run test without arguments; use bun test <file> for focused checks");
+  const active = new Set<ReturnType<typeof Bun.spawn>>();
+  let stopped = false;
+  const killChild = (child: ReturnType<typeof Bun.spawn>) => {
+    try {
+      if (process.platform === "win32") child.kill("SIGKILL");
+      else process.kill(-child.pid, "SIGKILL");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  };
+  const killAll = () => {
+    stopped = true;
+    for (const child of active) killChild(child);
+  };
+  const run = async () => {
+    const preparation = Bun.spawn([process.execPath, "run", resolve(root, "scripts/generate-web-assets.ts")], {
+      cwd: root, stdout: "inherit", stderr: "inherit", detached: process.platform !== "win32",
+    });
+    active.add(preparation);
+    const preparationCode = await preparation.exited;
+    active.delete(preparation);
+    if (preparationCode !== 0 || stopped) return 1;
+    const all = discoverTests(root);
+    const entries = validateQuarantine(parse(readFileSync(resolve(root, "tests/quarantine.yaml"), "utf8"))?.entries ?? []);
+    for (const entry of entries) if (!all.includes(entry.path)) throw new Error(`Unknown quarantine test: ${entry.path}`);
+    const excluded = new Set(entries.map(entry => entry.path));
+    const files = all.filter(path => !excluded.has(path));
+    console.log(`Running ${files.length} fast test files; 2s per file, 90s total`);
+    let next = 0, failed = 0, completed = 0, passedTests = 0, failedTests = 0, skippedTests = 0;
+    await Promise.all(Array.from({ length: Math.min(4, files.length) }, async () => {
+      while (!stopped && next < files.length) {
+        const file = files[next++]!;
+        const fileStarted = performance.now();
+        const child = Bun.spawn([process.execPath, "test", `./${file}`], {
+          cwd: root, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: process.platform !== "win32",
+          env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", DECK_TEST_WEB_ASSETS_READY: "1" },
+        });
+        active.add(child);
+        const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
+        let code = 1;
+        try {
+          code = await withBudget({ exited: Promise.all([child.exited, output]).then(([code]) => code), kill: () => killChild(child) }, FILE_BUDGET_MS, file);
+          if (performance.now() - fileStarted > FILE_BUDGET_MS) throw new Error(`${file} exceeded 2s wall-time budget`);
+        } catch (error) {
+          code = 1;
+          console.error(String(error));
+        } finally {
+          active.delete(child);
+        }
+        const text = (await output).join("\n");
+        passedTests += Number(/(\d+) pass\b/.exec(text)?.[1] ?? 0);
+        failedTests += Number(/(\d+) fail\b/.exec(text)?.[1] ?? 0);
+        skippedTests += Number(/(\d+) skip\b/.exec(text)?.[1] ?? 0);
+        completed++;
+        if (code !== 0) { failed++; console.error(`FAIL ${file}\n${text}`); }
+      }
+    }));
+    console.log(`${completed} files, ${failed} failed; ${passedTests} tests passed, ${failedTests} failed, ${skippedTests} skipped; ${((performance.now() - started) / 1000).toFixed(2)}s wall time`);
+    return failed ? 1 : 0;
+  };
+  try {
+    const code = await withBudget({ exited: run(), kill: killAll }, RUN_BUDGET_MS, "Test run");
+    if (performance.now() - started > RUN_BUDGET_MS) throw new Error("Test run exceeded 90s wall-time budget");
+    return code;
+  } finally {
+    killAll();
   }
-  if (!["fast", "int", "e2e", "all"].includes(tier)) throw new Error(`Unknown tier: ${tier}`);
-  if (passthrough.some(arg => /^--(changed|path-ignore-patterns|preload|only|todo|bail|retry)/.test(arg))) throw new Error("Selection-altering flags must be configured through the wrapper");
-  const all = discoverTests(root);
-  const quarantinePath = resolve(root, "tests/quarantine.yaml");
-  const entries = validateQuarantine(parse(readFileSync(quarantinePath, "utf8"))?.entries ?? []);
-  for (const entry of entries) if (!all.includes(entry.path)) throw new Error(`Unknown quarantine test: ${entry.path}`);
-  const excluded = new Set(entries.map(e => e.path));
-  if (selfCheck) {
-    const union = ["fast", "int", "e2e"].flatMap(t => all.filter(path => classifyTier(path) === t));
-    if (new Set(union).size !== all.length) throw new Error("Tier partition mismatch");
-    console.log(`Tier union: ${all.length} discovered tests; fast=${all.filter(p => classifyTier(p) === "fast").length}, int=${all.filter(p => classifyTier(p) === "int").length}, e2e=${all.filter(p => classifyTier(p) === "e2e").length}`);
-    return 0;
-  }
-  let selected = all.filter(path => quarantine ? excluded.has(path) : !excluded.has(path) && (changed ? classifyTier(path) !== "e2e" : tier === "all" || classifyTier(path) === tier));
-  let reason = quarantine ? "quarantine" : `tier ${tier}`;
-  const help = Bun.spawnSync([process.execPath, "test", "--help"], { stdout: "pipe", stderr: "pipe" });
-  const flags = new TextDecoder().decode(help.stdout) + new TextDecoder().decode(help.stderr);
-  const supportsParallel = flags.includes("--parallel=");
-  let nativeChanged = false;
-  if (changed !== undefined) {
-    const paths = [...new Set([...git(root, ["diff", "--name-only", "-z", changed || "HEAD", "--"]), ...git(root, ["ls-files", "--others", "--exclude-standard", "-z"])])];
-    nativeChanged = flags.includes("--changed=") && !paths.some(path => fallbackScope(path) !== undefined);
-    selected = selectAffected(selected, paths, importGraph(root));
-    reason = `changes versus ${changed || "HEAD"}; ${nativeChanged ? "native Bun --changed with import-closure selection" : "import closure plus non-import package fallbacks"}`;
-  }
-  console.log(`Selected ${selected.length}/${all.length} files: ${reason}`);
-  if (list) { console.log(selected.join("\n")); return 0; }
-  if (!selected.length) return 0; // Never invoke bare bun test for an empty selection.
-  // Install/rollback fixtures copy complete skill trees and create 10,100 files;
-  // session-manager batches persist 200 task lifecycles. Competing workers can
-  // exhaust these workloads' existing deadlines.
-  const serialWorkloadFiles = new Set([
-    "apps/cli/src/upgrade-command/runner-recovery-composition.int.test.ts",
-    "packages/adapter-codex/src/runner-adapter.tools.int.test.ts",
-    "packages/session-host/src/__tests__/session-manager.int.test.ts",
-  ]);
-  const batches = [
-    { files: selected.filter(path => !serialWorkloadFiles.has(path)), workers: 4 },
-    { files: selected.filter(path => serialWorkloadFiles.has(path)), workers: 1 },
-  ];
-  let exitCode = 0;
-  for (const { files, workers } of batches) {
-    if (!files.length) continue;
-    console.log(`Running ${files.length} files with ${workers} worker(s)`);
-    const child = Bun.spawn([process.execPath, "test", ...(supportsParallel ? [`--parallel=${workers}`] : []), ...(nativeChanged ? [`--changed=${changed || "HEAD"}`] : []), "--timeout", "30000", ...passthrough, ...files.map(p => `./${p}`)], { cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
-    const code = await child.exited;
-    if (code !== 0 && exitCode === 0) exitCode = code;
-  }
-  return exitCode;
 }
 if (import.meta.main) {
   try { process.exitCode = await main(); } catch (error) { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; }

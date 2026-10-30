@@ -6,7 +6,7 @@ index_mode: full
 context: |
   Tech stack: TypeScript, Bun (runtime + package manager), React, Ink (CLI TUI)
   Architecture: Monorepo (apps/cli, packages/core, packages/adapter-*)
-  Testing: Bun built-in test runner, tiered by test filename suffix
+  Testing: Bun built-in test runner, fast suite with 2s per file and 90s total wall-time budgets
   Style: ES2022, ESNext modules, strict TypeScript, no explicit linter/formatter
 
 rules:
@@ -24,7 +24,7 @@ rules:
     - Keep tasks completable in one session
   apply:
     - Follow existing code patterns
-    - Verify proportionally; focused checks in the edit loop, test:changed once at handoff
+    - Verify proportionally; focused checks in the edit loop, bun run test and bunx tsc --noEmit before commit; Lead runs a short live canary for runner or installation changes
   verify:
     - Reuse Apply evidence bound to the same candidate; run only missing or invalidated checks
   archive:
@@ -37,13 +37,12 @@ testing:
     - specified_logic
   commands:
     focused: "bun test <file>"
-    affected: "bun run test:changed"
+    affected: "bun run test"
     typecheck: "bunx tsc --noEmit"
-    full: "bun run test:full"
-  tiers:
-    fast: "*.test.ts(x), in-process, median file <= 1s"
-    int: "*.int.test.ts(x), subprocess, git fixtures, composition"
-    e2e: "*.e2e.test.ts(x), binary, cross-runner, TUI/web flows"
+    full: "bun run test"
+  budgets:
+    file_seconds: 2
+    run_seconds: 90
   quarantine: tests/quarantine.yaml
   baseline_health:
     ledger: openspec/baseline-health.yaml

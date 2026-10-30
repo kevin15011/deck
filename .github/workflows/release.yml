@@ -92,7 +92,7 @@ jobs:
         run: bun test scripts/generate-pi-extension-assets.int.test.ts scripts/generate-runner-execution-assets.test.ts
 
       - name: Full test suite
-        run: bun run test:full
+        run: bun run test
 
       - name: Typecheck
         run: bunx tsc --noEmit

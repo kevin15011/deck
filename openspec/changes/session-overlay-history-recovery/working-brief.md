@@ -18,7 +18,7 @@ Restore Lead turn startup when bounded historical excerpts quote protected instr
 - Test protected markers in affected historical fields and roster summaries, including beyond display truncation; safe excerpts remain useful.
 - Direct protected-content injection still fails closed; resource limits remain enforced.
 - Startup classification distinguishes internal overlay validation from unknown runner/provider failure.
-- Focused tests during editing; test:changed, typecheck, and test:full once for final candidate. Independent targeted security review before handoff.
+- Focused files during editing; bun run test and bunx tsc --noEmit before commit; Lead runs a short live canary for runner or installation changes. Independent targeted security review before handoff.
 
 ## Constraints and progress
 

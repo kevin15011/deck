@@ -12,8 +12,7 @@
 
 ```sh
 bun test apps/cli/src/upgrade-command/__tests__/release-descriptor.test.ts
-bun run test:int
-bun test
+bun run test
 bun run bench:memory
 bun run verify:supermemory-compiled
 bun run build:dry-run

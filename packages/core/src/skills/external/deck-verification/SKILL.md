@@ -7,6 +7,11 @@ description: Use when deciding whether and how to verify a change, writing or re
 
 Verification is mandatory; tests are optional tools. Use the cheapest check that proves the required property. Project conventions and explicit user policy come first. Never export Deck's repository scripts, test suffixes, CI layout, quarantine file or budgets to a user project.
 
+For Deck repository work, run focused files while editing, then `bun run test` and
+`bunx tsc --noEmit` before commit. The fast suite fails above 2 seconds per file or
+90 seconds total wall time. Runner or installation changes additionally require a
+short live canary check by the Lead. These rules do not apply to other projects.
+
 ## Discover conventions first
 
 1. Read project instructions, contributor guidance, README and developer docs.

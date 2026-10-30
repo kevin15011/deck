@@ -59,4 +59,4 @@ Font source references checked 2026-10-28: https://fontsource.org/fonts/inter/ab
 
 ## Verification
 
-Follow openspec/config.yaml and root package scripts: focused tests during edits; browser checks for real font loading, drag/keyboard resizing, persistence and responsive modes; bun run test:changed and bunx tsc --noEmit at handoff; bun run test:full once on final candidate. Distinguish existing failures using baseline evidence. No install/restart of the running canary or daemon is requested.
+Follow openspec/config.yaml and root package scripts: focused tests during edits; browser checks for real font loading, drag/keyboard resizing, persistence and responsive modes; bun run test and bunx tsc --noEmit before commit; Lead runs a short live canary for runner or installation changes. Distinguish existing failures using baseline evidence. No install/restart of the running canary or daemon is requested.

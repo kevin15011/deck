@@ -84,13 +84,13 @@ describe("release workflow platform contract", () => {
     expect(freshness).toBeLessThan(steps.findIndex(step=>step.name==='Full test suite'));
     expect(steps[freshness]?.run).toContain('scripts/generate-pi-extension-assets.int.test.ts');
     const stepRuns = steps.map((step) => step.run).filter(Boolean);
-    expect(stepRuns).toContain("bun run test:full");
+    expect(stepRuns).toContain("bun run test");
     expect(stepRuns).toContain("bunx tsc --noEmit");
     expect(stepRuns).toContain("bun run apps/cli/src/main.tsx openspec validate --json --root . --change canonical-supermemory-conversation-memory");
     expect(stepRuns).toContain("bun run bench:memory");
     expect(stepRuns).toContain("bun run verify:supermemory-compiled");
     const order = [
-      "bun run test:full",
+      "bun run test",
       "bunx tsc --noEmit",
       "bun run apps/cli/src/main.tsx openspec validate --json --root . --change canonical-supermemory-conversation-memory",
       "bun run bench:memory",

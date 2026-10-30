@@ -14,16 +14,10 @@
     "sandbox:clean": "bash scripts/linux-install-sandbox.sh without-deck",
     "sandbox:update": "bash scripts/linux-install-sandbox.sh update",
     "deck:run": "DECK_DEBUG=1 bun run build:dry-run && DECK_DEBUG=1 ./dist/cli/deck",
-    "test": "bun run test:fast",
+    "test": "bun scripts/test.ts",
     "bench:memory": "bun run benchmarks/deckmemorybench.ts",
     "verify:supermemory-compiled": "bun run scripts/verify-supermemory-compiled-runtime.ts --dry-run",
-    "release:verify": "bun run bench:memory && bun run verify:supermemory-compiled && bun run build:dry-run",
-    "test:fast": "bun scripts/test.ts --tier fast",
-    "test:changed": "bun scripts/test.ts --changed",
-    "test:int": "bun scripts/test.ts --tier int",
-    "test:e2e": "bun scripts/test.ts --tier e2e",
-    "test:full": "bun scripts/test.ts --tier all",
-    "test:quarantine": "bun scripts/test.ts --quarantine"
+    "release:verify": "bun run bench:memory && bun run verify:supermemory-compiled && bun run build:dry-run"
   },
   "bin": {
     "deck": "./dist/cli/deck"

@@ -5,11 +5,13 @@ import "./test-isolation";
 import { resolve } from "node:path";
 
 // Run the browser build in its own process, outside Bun's test module resolver.
-const result = Bun.spawnSync([process.execPath, "run", resolve(import.meta.dir, "generate-web-assets.ts")], {
-  cwd: resolve(import.meta.dir, ".."),
-  stdout: "pipe",
-  stderr: "pipe",
-});
-if (!result.success) {
-  throw new Error(`Web asset preparation failed: ${result.stderr.toString()}`);
+if (process.env.DECK_TEST_WEB_ASSETS_READY !== "1") {
+  const result = Bun.spawnSync([process.execPath, "run", resolve(import.meta.dir, "generate-web-assets.ts")], {
+    cwd: resolve(import.meta.dir, ".."),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (!result.success) {
+    throw new Error(`Web asset preparation failed: ${result.stderr.toString()}`);
+  }
 }
