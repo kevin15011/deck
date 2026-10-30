@@ -1075,7 +1075,8 @@ function isValidSourceDeclaration(
   }
   if (declaration.sourceCategory === "project_runner" && (declaration.scope !== "project" || declaration.locatorStrategy !== "project_relative")) return false;
   if (declaration.sourceCategory === "user_runner" && (declaration.scope !== "user" || declaration.locatorStrategy !== "runner_relative")) return false;
-  if (declaration.sourceCategory === "runner_exposed" && (declaration.scope !== "runner" || declaration.locatorStrategy !== "runner_opaque")) return false;
+  if (declaration.sourceCategory === "runner_exposed" && (declaration.scope !== "runner" ||
+    !(declaration.locatorStrategy === "runner_opaque" || declaration.locatorStrategy === "runner_relative" && declaration.expectedContent === "skill_md"))) return false;
   return true;
 }
 

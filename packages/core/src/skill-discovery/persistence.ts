@@ -59,6 +59,7 @@ export interface SkillRegistryWriteAuthorityMintInputV1 {
   readonly projectRootDigest: SkillDiscoveryDigestV1;
   readonly action: SkillRegistryWriteActionV1;
   readonly activeRunnerId: RunnerId;
+  readonly candidateDigest?: import("./contracts").SkillDiscoveryDigestV1;
   readonly allowedTargets: SkillRegistryWriteTargetsV1;
 }
 
@@ -76,6 +77,7 @@ interface AuthorityStateV1 {
   readonly projectRootDigest: SkillDiscoveryDigestV1;
   readonly action: SkillRegistryWriteActionV1;
   readonly activeRunnerId: RunnerId;
+  readonly candidateDigest?: import("./contracts").SkillDiscoveryDigestV1;
   readonly allowedTargets: SkillRegistryWriteTargetsV1;
   used: boolean;
 }
@@ -148,6 +150,7 @@ export function createSkillRegistryWriteAuthority(
     projectRootDigest: input.projectRootDigest,
     action: input.action,
     activeRunnerId: input.activeRunnerId,
+    candidateDigest: input.candidateDigest,
     allowedTargets: copyTargets(input.allowedTargets),
     used: false,
   });
@@ -214,7 +217,7 @@ async function commitWrite(
 
   try {
     await hit(state, "before_candidate_validation");
-    const candidateResult = validateCandidate(plan);
+    const candidateResult = validateCandidate(plan, authorityState);
     if ("error" in candidateResult) return rejected(candidateResult.error);
     const candidate = candidateResult.candidate;
     await hit(state, "after_candidate_validation");
@@ -395,6 +398,7 @@ function validatePlan(
   if (plan.project_root_digest !== authority.projectRootDigest) return "wrong_project";
   if (plan.action !== authority.action) return "wrong_action";
   if (plan.active_runner_id !== authority.activeRunnerId) return "wrong_runner";
+  if (authority.candidateDigest && plan.candidate_digest !== authority.candidateDigest) return "candidate_digest_mismatch";
   if (!sameTargets(plan.allowed_targets, authority.allowedTargets)) return "wrong_target";
 
   const includesIgnore = targetsInclude(plan.allowed_targets, GITIGNORE_TARGET);
@@ -407,6 +411,7 @@ function validatePlan(
 
 function validateCandidate(
   plan: SkillRegistryWritePlanV1,
+  authority: AuthorityStateV1,
 ): { candidate: CandidateV1 } | { error: string } {
   if (Buffer.byteLength(plan.candidate_document, "utf8") > SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes) {
     return { error: "candidate_invalid" };
@@ -416,7 +421,8 @@ function validateCandidate(
 
   const parsed = parseSkillRegistryDocument(plan.candidate_document);
   if (!parsed.ok || !parsed.frontmatter) return { error: "candidate_invalid" };
-  if (parsed.frontmatter.completeness !== "complete") return { error: "candidate_partial" };
+  if (parsed.frontmatter.schema_version === 2 && !authority.candidateDigest) return { error: "candidate_authority_required" };
+  if (parsed.frontmatter.schema_version !== 2 && parsed.frontmatter.completeness !== "complete") return { error: "candidate_partial" };
   return { candidate: { document: plan.candidate_document, digest: computedDigest } };
 }
 
@@ -668,7 +674,7 @@ async function independentlyValidateTemporaryFile(
   }
   const parsed = parseSkillRegistryDocument(source);
   if (!parsed.ok || !parsed.frontmatter) return { error: "candidate_invalid" };
-  if (parsed.frontmatter.completeness !== "complete") return { error: "candidate_partial" };
+  if (parsed.frontmatter.schema_version !== 2 && parsed.frontmatter.completeness !== "complete") return { error: "candidate_partial" };
   return { ok: true };
 }
 

@@ -1,3 +1,4 @@
+import { createClaudeSkillDiscoveryProvider, type ClaudeSkillDiscoveryOptions } from "./skill-discovery-provider";
 import { PrerequisiteEvidence, pinnedHookExecutable } from "../../core/src/session/prerequisite-evidence";
 import { resolveWebSearchLaunch } from "@deck/core";
 import { ROLE_TOOL_POLICY, isReadOnlyRole, readOnlyMcpTools } from "@deck/core/session/role-tool-policy";
@@ -33,6 +34,7 @@ export type ClaudeSessionMcpAdapter = RunnerAdapter & {
 };
 
 type Options = ClaudeCapabilityOptions & {
+  skillDiscovery?: Pick<ClaudeSkillDiscoveryOptions, "configDir" | "systemRoots" | "exposedRoots" | "inventory">;
   homeDir?: string;
   dataRoot?: string;
   detectClaudeVersion?: () => { available: boolean; version?: string };
@@ -464,6 +466,18 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
   };
   const preparationEvidence = new PrerequisiteEvidence();
   const adapter: ClaudeSessionMcpAdapter = {
+    skillDiscovery: createClaudeSkillDiscoveryProvider({
+      ...options.skillDiscovery, homeDir: home,
+      configDir: options.skillDiscovery?.configDir ?? options.sessionDriver?.baseEnv?.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude"),
+      projectAdmitted: projectRoot => claudeProjectConfigTrusted(home, projectRoot, options.sessionDriver?.baseEnv ?? process.env),
+      selectedPlugin: () => {
+        if (!existsSync(metadataPath)) return undefined;
+        // Catalog visibility is advisory; launch verification remains separate.
+        const location = join(parent, readSelection().plugin);
+        assertTrustedAncestors(location, home);
+        return location;
+      },
+    }),
     inspectNativeSearch: async (input) => inspectClaudeNativeSearch({ ...input, environment: input.environment ?? options.sessionDriver?.baseEnv, flags: input.flags ?? options.sessionDriver?.extraArgs }, home),
     async prepareSessionNativeSkills() {
       let check = "selection-metadata";

@@ -1,3 +1,4 @@
+import { validateSharedMetadata, sharedCatalogFingerprint, sharedSourceFingerprint } from "./shared-format";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -351,8 +352,9 @@ export function renderSkillRegistryBody(frontmatter: SkillRegistryFrontmatterV1)
 /** Render the ordered frontmatter followed by the searchable body. */
 export function renderSkillRegistryMarkdown(frontmatter: SkillRegistryFrontmatterV1): string {
   const ordered = {
-    schema: SKILL_REGISTRY_SCHEMA,
-    schema_version: SKILL_REGISTRY_SCHEMA_VERSION,
+    schema: frontmatter.schema,
+    schema_version: frontmatter.schema_version,
+    ...(frontmatter.sources ? { sources: frontmatter.sources, exposures: frontmatter.exposures } : {}),
     generated_at: frontmatter.generated_at,
     fingerprint: frontmatter.fingerprint,
     fingerprint_algorithm: SKILL_REGISTRY_FINGERPRINT_ALGORITHM,
@@ -386,7 +388,7 @@ export function parseSkillRegistryDocument(source: string): SkillRegistryParseRe
   if (schema === undefined || schemaVersion === undefined) {
     return parseFailure("missing_schema", "Registry schema fields are required.", parsedYaml.diagnostics);
   }
-  if (schema !== SKILL_REGISTRY_SCHEMA || schemaVersion !== SKILL_REGISTRY_SCHEMA_VERSION) {
+  if (!((schema === SKILL_REGISTRY_SCHEMA && schemaVersion === SKILL_REGISTRY_SCHEMA_VERSION) || (schema === "skill-registry-v2" && schemaVersion === 2))) {
     return parseFailure("unsupported_schema_version", "Registry schema version is unsupported.", parsedYaml.diagnostics);
   }
 
@@ -446,8 +448,9 @@ export function parseSkillRegistryDocument(source: string): SkillRegistryParseRe
   }
 
   const frontmatter: SkillRegistryFrontmatterV1 = {
-    schema: SKILL_REGISTRY_SCHEMA,
-    schema_version: SKILL_REGISTRY_SCHEMA_VERSION,
+    schema: schema as SkillRegistryFrontmatterV1["schema"],
+    schema_version: schemaVersion as 1 | 2,
+    ...(schemaVersion === 2 ? { sources: root.sources as SkillRegistryFrontmatterV1["sources"], exposures: root.exposures as SkillRegistryFrontmatterV1["exposures"] } : {}),
     generated_at: structural.generatedAt,
     fingerprint: structural.fingerprint as SkillDiscoveryDigestV1,
     fingerprint_algorithm: SKILL_REGISTRY_FINGERPRINT_ALGORITHM,
@@ -459,6 +462,12 @@ export function parseSkillRegistryDocument(source: string): SkillRegistryParseRe
     diagnostics: diagnosticsResult.diagnostics,
     records: orderSkillRegistryRecords(records),
   };
+  if (schemaVersion === 2 && (!validateSharedMetadata(frontmatter)
+    || sharedSourceFingerprint(frontmatter.sources!) !== frontmatter.source_scope_hash
+    || sharedCatalogFingerprint(frontmatter) !== frontmatter.fingerprint)) {
+    return parseFailure("malformed_frontmatter", "Shared catalog provenance is invalid.");
+  }
+  if (schemaVersion === 1 && structural.completeness === "partial") return parseFailure("malformed_frontmatter", "Partial catalogs require schema v2.");
   const body = parsedYaml.body;
   const expectedBody = renderSkillRegistryBody(frontmatter);
   if (normalizeLf(body) !== expectedBody) {
@@ -537,6 +546,12 @@ export async function readSkillRegistryStatus(
     return indeterminateStatus("partial_source_evaluation", "Current sources were not evaluated.", parsed.diagnostics);
   }
 
+  const shared = "frontmatter" in current ? current : "snapshot" in current ? current.snapshot : undefined;
+  if (shared?.frontmatter.schema_version === 2) {
+    if (parsed.frontmatter.fingerprint !== shared.frontmatter.fingerprint) return { status: "stale", reason_code: "fingerprint_mismatch", registry_path: SKILL_REGISTRY_PATH_V1 };
+    if (shared.frontmatter.completeness !== "complete") return indeterminateStatus("partial_source_evaluation", "Shared catalog contains usable partial observations.");
+    return { status: "ready", reason_code: "fingerprint_match", registry_path: SKILL_REGISTRY_PATH_V1, fingerprint: shared.frontmatter.fingerprint, candidate_count: shared.frontmatter.candidate_count, diagnostics: shared.frontmatter.diagnostics };
+  }
   if (isCurrentEvaluation(current) && current.outcome === "indeterminate") {
     return indeterminateStatus(current.reasonCode ?? "partial_source_evaluation", "Current sources could not be fully evaluated.", [
       ...parsed.diagnostics,
@@ -605,7 +620,7 @@ function createFrontmatter(input: {
   readonly sourceDeclarations: readonly SkillDiscoverySourceDeclarationV1[];
   readonly records: readonly SkillRegistryRecordV1[];
   readonly diagnostics: readonly SkillDiscoveryDiagnosticV1[];
-  readonly completeness: "complete" | "truncated";
+  readonly completeness: "complete" | "partial" | "truncated";
   readonly generatedAt?: string;
 }): SkillRegistryFrontmatterV1 {
   const records = orderSkillRegistryRecords(input.records);
@@ -1079,7 +1094,7 @@ function readRequiredFrontmatter(root: Record<string, unknown>): {
   readonly sourceScopeHash: string;
   readonly candidateCount: number;
   readonly diagnosticCount: number;
-  readonly completeness: "complete" | "truncated";
+  readonly completeness: "complete" | "partial" | "truncated";
   readonly diagnostics: unknown[];
   readonly records: unknown[];
 } {
@@ -1107,7 +1122,7 @@ function readRequiredFrontmatter(root: Record<string, unknown>): {
     parseInteger(diagnosticCount) === undefined ||
     (parseInteger(diagnosticCount) ?? -1) < 0 ||
     privacyPolicyVersion !== SKILL_REGISTRY_PRIVACY_POLICY_VERSION ||
-    (completeness !== "complete" && completeness !== "truncated") ||
+    (completeness !== "complete" && completeness !== "partial" && completeness !== "truncated") ||
     !Array.isArray(diagnostics) ||
     !Array.isArray(records)
   ) {

@@ -163,11 +163,30 @@ export interface SkillRegistryRecordV1 {
   readonly diagnostic?: string;
 }
 
-export type SkillRegistryCompletenessV1 = "complete" | "truncated";
+export type SkillRegistryCompletenessV1 = "complete" | "partial" | "truncated";
 
+export interface SharedSkillSourceV2 {
+  readonly source_id: string;
+  readonly owner: string;
+  readonly category: SkillDiscoverySourceCategoryV1;
+  readonly scope: SkillDiscoveryScopeV1;
+  readonly locator_base: string;
+  readonly load_mode: "filesystem" | "native";
+  readonly completeness: "complete" | "partial";
+  readonly fingerprint: SkillDiscoveryDigestV1;
+}
+export interface SharedSkillExposureV2 {
+  readonly observation_id: string;
+  readonly source_id: string;
+  readonly owner: string;
+  readonly locator: string;
+  readonly load_mode: "filesystem" | "native";
+}
 export interface SkillRegistryFrontmatterV1 {
-  readonly schema: typeof SKILL_REGISTRY_SCHEMA;
-  readonly schema_version: typeof SKILL_REGISTRY_SCHEMA_VERSION;
+  readonly sources?: readonly SharedSkillSourceV2[];
+  readonly exposures?: readonly SharedSkillExposureV2[];
+  readonly schema: typeof SKILL_REGISTRY_SCHEMA | "skill-registry-v2";
+  readonly schema_version: typeof SKILL_REGISTRY_SCHEMA_VERSION | 2;
   /** Informational only; it does not determine freshness. */
   readonly generated_at: string;
   readonly fingerprint: SkillDiscoveryDigestV1;

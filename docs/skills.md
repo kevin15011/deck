@@ -88,7 +88,7 @@ For aesthetic selection and compatible combinations, see [Frontend aesthetic sel
 
 This repository's [deck-runner-evolution skill](../.agents/skills/deck-runner-evolution/SKILL.md) reviews new stable Codex, OpenCode, and Claude Code releases against Deck and maintains a [version review record](maintainers/runner-evolution/README.md). It is project-local and is not shipped in the bundled external catalog.
 
-Project-local skills are discovery candidates supplied by the project and the active runner. They are not bundled Deck content, and their discovery metadata is not authority. Discovery is bounded to generic project roots plus the selected runner's declared sources; another runner's exclusive roots are not merged in.
+The shared skill catalog is advisory metadata, not authority. Cross-session preparation and `skill-registry` commands merge the four configured providers under their own source identities. The v2 catalog retains source ownership, exposure, load mode and completeness while keeping absolute roots private. Filesystem resources are deduplicated by validated identity; distinct same-name skills remain separate. All consumers can search shared records. Loading still revalidates a live source and the consuming runner's permitted loading mechanism; native-only exposure cannot be borrowed from another runner.
 
 Read-only checks:
 
@@ -103,7 +103,7 @@ An explicitly authorized refresh is separate from validation and discovery:
 deck skill-registry refresh --runner pi
 ```
 
-Refresh can be refused when the source set is incomplete, the registry is not protected by `.gitignore`, or the caller has not supplied the exact write authority. See [Developer Team](developer-team.md#project-workflows) for the boundary and [Runners](runners.md) for active-runner scope.
+Partial inventory produces a usable catalog with truthful partial status; it does not prevent authorized generation. Refresh preserves edited or unknown-ownership registry bytes and can be refused when the registry is not protected by `.gitignore` or the caller has not supplied exact write authority. Shared writes bind the executor and candidate digest. Legacy native preparation cannot replace a v2 shared catalog with an executor-only projection. See [Developer Team](developer-team.md#project-workflows) for the boundary and [Runners](runners.md) for active-runner scope.
 
 ## Frontend aesthetic selection
 

@@ -1,3 +1,4 @@
+import { createCodexSkillDiscoveryProvider, type CodexSkillDiscoveryOptions } from "./skill-discovery-provider";
 import { readCodexSearchFallbackOwnership } from "./native-search";
 import { PrerequisiteEvidence, pinnedHookExecutable, pinnedHookRuntime } from "../../core/src/session/prerequisite-evidence";
 import { CODEX_ROOT_LEAD_BOOTSTRAP } from "./role-bootstrap";
@@ -92,6 +93,7 @@ import type { ChildMcpServerSpec } from "@deck/core/session/driver";
 import { createCodexSessionDriver, type CodexSessionDriverOptions } from "./session-driver/driver";
 
 export type CodexRunnerAdapterOptions = {
+  skillDiscovery?: Pick<CodexSkillDiscoveryOptions, "systemRoots" | "exposedRoots" | "inventory">;
   sessionDriver?: CodexSessionDriverOptions;
   preflight?: CodexPreflightEffects;
   fileEffects?: CodexFileEffects;
@@ -600,6 +602,7 @@ function capabilityLabel(capabilityId: string): string {
 }
 
 class CodexRunnerAdapter implements RunnerAdapter {
+  readonly skillDiscovery;
   readonly #sessionDriverOptions: CodexSessionDriverOptions;
   readonly runnerId = "codex";
   readonly displayName = "Codex CLI";
@@ -663,6 +666,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     this.#codebaseIndexReadiness = options.codebaseIndexReadiness ?? ((projectRoot) => existsSync(join(projectRoot, ".codebase-memory", "graph.db")) || existsSync(join(projectRoot, ".codebase-memory", "graph.db.zst")));
     this.#toolOptions = { ...options.tools, codexHome: options.codexHome ?? join(options.tools?.homeDir ?? process.env.HOME ?? "/nonexistent", ".codex") };
     this.#codexHome = options.codexHome;
+    this.skillDiscovery = createCodexSkillDiscoveryProvider({ ...options.skillDiscovery, homeDir: this.#roots.userHome, codexHome: this.#roots.codexHome });
     this.#serenaBootstrapEffects = options.serenaBootstrapEffects;
     this.#serenaProxyCommand = [...(options.serenaProxyCommand ?? ["deck", "internal", "serena-mcp"])];
     this.#deckMemoryMcpCommand = options.deckMemoryMcpCommand ? [...options.deckMemoryMcpCommand] : undefined;

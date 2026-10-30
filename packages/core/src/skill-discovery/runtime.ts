@@ -1,3 +1,4 @@
+import { resolveSharedSkillExposure } from "./shared";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -16,7 +17,7 @@ import type {
   SkillSelectionResultV1,
 } from "./contracts";
 import type { BoundedSkillDiscoveryResultV1, SkillDiscoveryObservationV1 } from "./discovery";
-import { computeSkillObservationId } from "./registry";
+import { parseSkillRegistryDocument, computeSkillObservationId } from "./registry";
 
 const MAX_QUERY_TERMS = 20;
 const MAX_QUERY_TERM_LENGTH = 128;
@@ -35,6 +36,7 @@ export interface TaskScopedSkillDiscoveryRuntimeInputV1 {
   readonly readRegistry?: () => Promise<readonly SkillRegistryRecordV1[]>;
   readonly discoverDirectly: () => Promise<BoundedSkillDiscoveryResultV1>;
   readonly provider: SkillDiscoverySourceProviderV1;
+  readonly providers?: readonly SkillDiscoverySourceProviderV1[];
   readonly nativeLoader?: SkillNativeLoadPortV1;
 }
 
@@ -81,6 +83,7 @@ export function createTaskScopedSkillDiscoveryRuntime(
   const selections = new Map<string, RuntimeCandidate>();
   const prepared = new Map<string, PreparedLoad>();
   const prepareGenerations = new Map<string, number>();
+  let sharedCatalog: import("./contracts").SkillRegistryFrontmatterV1 | undefined;
   let searchGeneration = 0;
   let selectionCompleteness: "complete" | "indeterminate" = "indeterminate";
 
@@ -100,7 +103,21 @@ export function createTaskScopedSkillDiscoveryRuntime(
     let records: SkillRegistryRecordV1[] = [];
     let diagnostics: readonly SkillDiscoveryDiagnosticV1[] = [];
 
-    if (input.registryStatus === "ready" && input.readRegistry) {
+    let currentSharedCatalog: typeof sharedCatalog;
+    try {
+      const file = path.join(input.projectRoot, ".atl/skill-registry.md");
+      if ((await fs.stat(file)).size <= 512 * 1024) {
+        const parsed = parseSkillRegistryDocument(await fs.readFile(file, "utf8"));
+        if (parsed.ok && parsed.frontmatter?.schema_version === 2) {
+          currentSharedCatalog = parsed.frontmatter;
+          records = parsed.frontmatter.records.map(copyRecord);
+          sourceMode = "registry";
+          // Persisted metadata is advisory until a current source comparison has succeeded.
+          completeness = input.registryStatus === "ready" && parsed.frontmatter.completeness === "complete" ? "complete" : "indeterminate";
+        }
+      }
+    } catch { /* Missing or edited advisory data falls back to direct discovery. */ }
+    if (sourceMode !== "registry" && input.registryStatus === "ready" && input.readRegistry) {
       try {
         records = (await input.readRegistry()).map(copyRecord);
         sourceMode = "registry";
@@ -123,7 +140,8 @@ export function createTaskScopedSkillDiscoveryRuntime(
 
     if (generation !== searchGeneration) return supersededSearch(sourceMode, completeness, diagnostics);
 
-    const activeRecords = records.filter((record) => belongsToActiveRunner(record, input.activeRunnerId));
+    sharedCatalog = currentSharedCatalog;
+    const activeRecords = sharedCatalog ? records : records.filter((record) => belongsToActiveRunner(record, input.activeRunnerId));
     for (const record of activeRecords) {
       activeNameCounts.set(record.name, (activeNameCounts.get(record.name) ?? 0) + 1);
     }
@@ -170,7 +188,7 @@ export function createTaskScopedSkillDiscoveryRuntime(
       prepared.delete(reference.selection_id);
     }
     if (!candidate) return { outcome: "rejected" };
-    const resolved = await resolveCurrentLocator(candidate.record.locator);
+    const resolved = await resolveCurrentLocator(candidate.record.locator, candidate.record.observation_id);
     if (!isCurrentSelection(reference, candidate) || prepareGenerations.get(reference.selection_id) !== prepareGeneration) return { outcome: "rejected" };
     if (resolved.outcome !== "available") return { outcome: resolved.outcome };
     if (!input.nativeLoader) return { outcome: "unsupported" };
@@ -198,7 +216,7 @@ export function createTaskScopedSkillDiscoveryRuntime(
     const candidate = selectedCandidate(reference);
     if (!loaded || !input.nativeLoader || !candidate || loaded.searchGeneration !== searchGeneration || loaded.prepareGeneration !== prepareGenerations.get(reference.selection_id)) return { outcome: "unobserved" };
     prepared.delete(reference.selection_id);
-    const resolved = await resolveCurrentLocator(candidate.record.locator);
+    const resolved = await resolveCurrentLocator(candidate.record.locator, candidate.record.observation_id);
     if (!isCurrentSelection(reference, candidate) || loaded.prepareGeneration !== prepareGenerations.get(reference.selection_id) || resolved.outcome !== "available" || resolved.loadReference !== loaded.reference) {
       return { outcome: "unobserved" };
     }
@@ -252,10 +270,20 @@ export function createTaskScopedSkillDiscoveryRuntime(
     return selectedCandidate(reference) === candidate;
   }
 
-  async function resolveCurrentLocator(locator: string): Promise<
+  async function resolveCurrentLocator(locator: string, observationId: string): Promise<
     | { readonly outcome: "available"; readonly loadReference: string }
     | { readonly outcome: "missing" | "not_exposed" | "rejected" }
   > {
+    if (sharedCatalog) {
+      const exposures = sharedCatalog.exposures!.filter(e => e.observation_id === observationId)
+        .sort((a, b) => Number(b.owner === input.activeRunnerId) - Number(a.owner === input.activeRunnerId));
+      for (const exposure of exposures) {
+        const result = await resolveSharedSkillExposure({ projectRoot: input.projectRoot, activeRunnerId: input.activeRunnerId,
+          exposure, providers: input.providers ?? [input.provider] });
+        if (result.outcome === "available") return result;
+      }
+      return { outcome: "not_exposed" };
+    }
     if (locator.startsWith("project:")) return resolveProjectLocator(input.projectRoot, locator);
     try {
       const result = await input.provider.resolveLocator({ projectRoot: input.projectRoot, locator });

@@ -1,10 +1,17 @@
-import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import type {
   SkillDiscoverySourceProviderV1,
   SkillRegistryRecordV1,
 } from "./contracts";
 import { createTaskScopedSkillDiscoveryRuntime } from "./runtime";
+
+let projectRoot: string;
+beforeEach(async () => { projectRoot = await mkdtemp(join(tmpdir(), "deck-discovery-runtime-")); });
+afterEach(async () => { await rm(projectRoot, { recursive: true, force: true }); });
 
 const singleRecord: SkillRegistryRecordV1 = {
   name: "api-helper",
@@ -35,7 +42,7 @@ describe("task-scoped skill discovery runtime", () => {
   test("searches a ready registry without exposing locators and binds exact selection to its task", async () => {
     let directDiscoveryCalls = 0;
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-1",
       taskId: "lead-task",
@@ -65,7 +72,7 @@ describe("task-scoped skill discovery runtime", () => {
   test("falls back to direct discovery, rejects name ambiguity, and reports unsupported native loading honestly", async () => {
     const resolveCalls: string[] = [];
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-2",
       taskId: "specialist-task",
@@ -115,7 +122,7 @@ describe("task-scoped skill discovery runtime", () => {
     let resolutions = 0;
     const nativeLoads: string[] = [];
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-3",
       taskId: "lead-task",
@@ -151,7 +158,7 @@ describe("task-scoped skill discovery runtime", () => {
 
   test("rejects project records outside their declared generic skill roots", async () => {
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-project-root",
       taskId: "task-project-root",
@@ -171,7 +178,7 @@ describe("task-scoped skill discovery runtime", () => {
     let attempts = 0;
     const loads: string[] = [];
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-reprepare",
       taskId: "task-reprepare",
@@ -200,7 +207,7 @@ describe("task-scoped skill discovery runtime", () => {
 
   test("does not hide same-name ambiguity behind a result limit", async () => {
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-name-limit",
       taskId: "task-name-limit",
@@ -220,7 +227,7 @@ describe("task-scoped skill discovery runtime", () => {
 
   test("keeps same-name ambiguity even when only one observation is relevance-matched", async () => {
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-filtered-name",
       taskId: "task-filtered-name",
@@ -249,7 +256,7 @@ describe("task-scoped skill discovery runtime", () => {
 
   test("rejects malformed query filters without broadening candidate matching", async () => {
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-invalid-query",
       taskId: "task-invalid-query",
@@ -274,7 +281,7 @@ describe("task-scoped skill discovery runtime", () => {
 
   test("matches target paths and extensions against declared path signals", async () => {
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-paths",
       taskId: "task-paths",
@@ -300,7 +307,7 @@ describe("task-scoped skill discovery runtime", () => {
 
   test("rejects hostile glob patterns with bounded deterministic matching", async () => {
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-hostile-glob",
       taskId: "task-hostile-glob",
@@ -325,7 +332,7 @@ describe("task-scoped skill discovery runtime", () => {
   test("preserves single-star and globstar directory-component semantics", async () => {
     const patterns = ["src/*.ts", "**/foo.ts", "src/**/foo.ts"];
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-glob-components",
       taskId: "task-glob-components",
@@ -360,6 +367,8 @@ describe("task-scoped skill discovery runtime", () => {
   test("discards an older search that completes after a newer search", async () => {
     let resolveFirst: ((value: Awaited<ReturnType<typeof directResult>>) => void) | undefined;
     let calls = 0;
+    let started!: () => void;
+    const firstStarted = new Promise<void>(resolve => { started = resolve; });
     const directResult = (name: string) => ({
       outcome: "complete" as const,
       diagnostics: [],
@@ -375,20 +384,21 @@ describe("task-scoped skill discovery runtime", () => {
       }],
     });
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-race",
       taskId: "task-race",
       registryStatus: "stale",
       discoverDirectly: () => {
         calls += 1;
-        if (calls === 1) return new Promise((resolve) => { resolveFirst = resolve; });
+        if (calls === 1) return new Promise((resolve) => { resolveFirst = resolve; started(); });
         return Promise.resolve(directResult("newer"));
       },
       provider: provider(),
     });
 
     const older = runtime.search({ schema: "skill-candidate-query-v1", terms: ["older"], limit: 1 });
+    await firstStarted;
     const newer = await runtime.search({ schema: "skill-candidate-query-v1", terms: ["newer"], limit: 1 });
     resolveFirst?.(directResult("older"));
     const stale = await older;
@@ -400,7 +410,7 @@ describe("task-scoped skill discovery runtime", () => {
 
   test("converts direct-discovery failures into bounded indeterminate results", async () => {
     const runtime = createTaskScopedSkillDiscoveryRuntime({
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       sessionId: "session-direct-failure",
       taskId: "task-direct-failure",

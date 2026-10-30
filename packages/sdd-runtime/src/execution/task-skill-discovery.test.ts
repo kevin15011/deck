@@ -1,7 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { SkillDiscoverySourceProviderV1, SkillRegistryRecordV1 } from "@deck/core";
 
 import { createTaskSkillDiscoveryHostV1, createTaskSkillDiscoverySessionV1 } from "./task-skill-discovery";
+
+let projectRoot: string;
+beforeEach(async () => { projectRoot = await mkdtemp(join(tmpdir(), "deck-discovery-runtime-")); });
+afterEach(async () => { await rm(projectRoot, { recursive: true, force: true }); });
 
 const record: SkillRegistryRecordV1 = {
   name: "lead-helper",
@@ -25,7 +32,7 @@ const provider: SkillDiscoverySourceProviderV1 = {
 describe("task skill-discovery session association", () => {
   test("owns an idempotent trusted session binding and suppresses late completion after retirement", async () => {
     const host = createTaskSkillDiscoveryHostV1({
-      projectRoot: process.cwd(), activeRunnerId: "opencode", registryStatus: "ready",
+      projectRoot, activeRunnerId: "opencode", registryStatus: "ready",
       readRegistry: async () => [record], discoverDirectly: async () => ({ outcome: "complete", observations: [], diagnostics: [] }), provider: { ...provider, resolveLocator: async () => ({ status: "available", loadReference: "native" }) },
       nativeLoader: { schema: "skill-native-load-port-v1", prepare: async () => ({ outcome: "loadable" }), load: async () => ({ outcome: "unobserved" }) },
       verifyNativeLoad: async ({ name, directory }) => name === "lead-helper" && directory === "safe-dir",
@@ -41,7 +48,7 @@ describe("task skill-discovery session association", () => {
 
   test("keeps task generations isolated and requires matching native completion metadata", async () => {
     const host = createTaskSkillDiscoveryHostV1({
-      projectRoot: process.cwd(), activeRunnerId: "opencode", registryStatus: "ready",
+      projectRoot, activeRunnerId: "opencode", registryStatus: "ready",
       readRegistry: async () => [record], discoverDirectly: async () => ({ outcome: "complete", observations: [], diagnostics: [] }), provider: { ...provider, resolveLocator: async () => ({ status: "available", loadReference: "native" }) },
       nativeLoader: { schema: "skill-native-load-port-v1", prepare: async () => ({ outcome: "loadable" }), load: async () => ({ outcome: "unobserved" }) },
       verifyNativeLoad: async ({ name, directory }) => name === "lead-helper" && directory === "safe-dir",
@@ -66,7 +73,7 @@ describe("task skill-discovery session association", () => {
   test("rejects forged bindings and invalidates prepared selections before native calls", async () => {
     let exposed = true;
     const host = createTaskSkillDiscoveryHostV1({
-      projectRoot: process.cwd(), activeRunnerId: "opencode", registryStatus: "ready",
+      projectRoot, activeRunnerId: "opencode", registryStatus: "ready",
       readRegistry: async () => exposed ? [record] : [], discoverDirectly: async () => ({ outcome: "complete", observations: [], diagnostics: [] }), provider: { ...provider, resolveLocator: async () => exposed ? { status: "available", loadReference: "native" } : { status: "missing" } },
       nativeLoader: {
         schema: "skill-native-load-port-v1",
@@ -94,7 +101,7 @@ describe("task skill-discovery session association", () => {
   test("retirement during native verification cannot return loaded", async () => {
     let releaseVerification: (() => void) | undefined;
     const host = createTaskSkillDiscoveryHostV1({
-      projectRoot: process.cwd(), activeRunnerId: "opencode", registryStatus: "ready",
+      projectRoot, activeRunnerId: "opencode", registryStatus: "ready",
       readRegistry: async () => [record], discoverDirectly: async () => ({ outcome: "complete", observations: [], diagnostics: [] }), provider: { ...provider, resolveLocator: async () => ({ status: "available", loadReference: "native" }) },
       nativeLoader: {
         schema: "skill-native-load-port-v1",
@@ -115,7 +122,7 @@ describe("task skill-discovery session association", () => {
 
   test("arms native rendezvous without awaiting final native completion", async () => {
     const host = createTaskSkillDiscoveryHostV1({
-      projectRoot: process.cwd(), activeRunnerId: "opencode", registryStatus: "ready",
+      projectRoot, activeRunnerId: "opencode", registryStatus: "ready",
       readRegistry: async () => [record], discoverDirectly: async () => ({ outcome: "complete", observations: [], diagnostics: [] }), provider: { ...provider, resolveLocator: async () => ({ status: "available", loadReference: "/tmp/lead-helper/SKILL.md" }) },
       nativeLoader: {
         schema: "skill-native-load-port-v1",
@@ -141,7 +148,7 @@ describe("task skill-discovery session association", () => {
     const session = createTaskSkillDiscoverySessionV1({
       sessionId: "session-a",
       taskId: "lead-task",
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       registryStatus: "ready",
       readRegistry: async () => [record],
@@ -158,7 +165,7 @@ describe("task skill-discovery session association", () => {
     const specialist = createTaskSkillDiscoverySessionV1({
       sessionId: "session-a",
       taskId: "specialist-task",
-      projectRoot: process.cwd(),
+      projectRoot,
       activeRunnerId: "opencode",
       registryStatus: "ready",
       readRegistry: async () => [record],

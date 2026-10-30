@@ -1,3 +1,4 @@
+import { discoverSharedSkillCatalog } from "../../../packages/core/src/skill-discovery/shared";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -5,28 +6,19 @@ import { createInterface } from "node:readline/promises";
 
 import type {
   AdapterRegistry,
-  RunnerAdapter,
   SkillDiscoveryDiagnosticV1,
-  SkillDiscoverySourceBindingV1,
   SkillDiscoverySourceProviderV1,
-  SkillDiscoverySourceSetV1,
   SkillRegistryStatusV1,
   SkillRegistryWriteActionV1,
   SkillRegistryWriteAuthorityV1,
   SkillRegistryWriteTargetsV1,
   SkillRegistryWriterV1,
 } from "@deck/core";
-import { SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA, SKILL_DISCOVERY_V1_BOUNDS } from "@deck/core";
+import { SKILL_DISCOVERY_V1_BOUNDS } from "@deck/core";
 
 import { createDefaultAdapterRegistry } from "./runner-adapters";
 import {
-  createCoreGenericProjectSources,
-  discoverSkills,
-  discoverSkillsFromProvider,
-  type BoundedSkillDiscoveryResultV1,
-} from "../../../packages/core/src/skill-discovery/discovery";
-import {
-  canonicalizeSkillRegistry,
+  parseSkillRegistryDocument,
   readSkillRegistryStatus,
   type SkillRegistryCurrentEvaluationV1,
 } from "../../../packages/core/src/skill-discovery/registry";
@@ -52,7 +44,7 @@ export interface SkillRegistryCommandDependencies {
   readonly adapterRegistry?: AdapterRegistry;
   /** Override TTY detection for deterministic command tests. */
   readonly isInteractive?: boolean;
-  /** Select one already-registered runner; selection never aggregates runners. */
+  /** Select one already-registered runner; selection never enables capabilities. */
   readonly selectRunner?: (
     runnerIds: readonly string[],
   ) => string | undefined | Promise<string | undefined>;
@@ -84,6 +76,7 @@ interface RefreshAuthorityInput {
   readonly projectRootDigest: `sha256:${string}`;
   readonly action: SkillRegistryWriteActionV1;
   readonly activeRunnerId: string;
+  readonly candidateDigest: `sha256:${string}`;
   readonly allowedTargets: SkillRegistryWriteTargetsV1;
 }
 
@@ -105,95 +98,6 @@ interface FileSnapshot {
  * path that dynamically loads and invokes the writer after explicit command
  * authorization has been converted into an opaque, exact-scope authority.
  */
-interface BoundedSourceSetResult {
-  readonly sourceSet: SkillDiscoverySourceSetV1;
-  readonly truncated: boolean;
-}
-
-function normalizeSourceSet(
-  sourceSet: SkillDiscoverySourceSetV1,
-  coreSources: readonly SkillDiscoverySourceBindingV1[] = [],
-): BoundedSourceSetResult {
-  const unavailable = (): BoundedSourceSetResult => ({
-    sourceSet: {
-      outcome: "indeterminate",
-      reasonCode: "partial_source_evaluation",
-      sources: [],
-      diagnostics: [{ code: "source_provider_unavailable", message: "The source provider was unavailable." }],
-    },
-    truncated: true,
-  });
-
-  if (!isSourceSet(sourceSet)) return unavailable();
-
-  try {
-    const sourceArray = sourceSet.sources;
-    const sourceLength = sourceArray.length;
-    if (!Number.isSafeInteger(sourceLength) || sourceLength < 0) return unavailable();
-
-    const maxCandidateRecords = SKILL_DISCOVERY_V1_BOUNDS.maxCandidateRecords;
-    const inspectedCount = Math.min(sourceLength, maxCandidateRecords + 1);
-    const coreSourceIds = new Set(coreSources.map((source) => source.declaration.sourceId));
-    const boundedSources: SkillDiscoverySourceBindingV1[] = [];
-    for (let index = 0; index < inspectedCount; index += 1) {
-      const binding = sourceArray[index];
-      if (
-        index < maxCandidateRecords &&
-        binding !== undefined &&
-        !coreSourceIds.has(binding.declaration.sourceId)
-      ) boundedSources.push(binding);
-    }
-
-    const composedSources = [...coreSources, ...boundedSources];
-
-    if (sourceLength > maxCandidateRecords) {
-      return {
-        sourceSet: {
-          outcome: "indeterminate",
-          reasonCode: "partial_source_evaluation",
-          sources: composedSources,
-          diagnostics: sourceSet.diagnostics,
-        },
-        truncated: true,
-      };
-    }
-
-    return {
-      sourceSet: { ...sourceSet, sources: composedSources },
-      truncated: false,
-    };
-  } catch {
-    return unavailable();
-  }
-}
-
-function boundedSourceProvider(
-  provider: SkillDiscoverySourceProviderV1,
-  onNormalization: (truncated: boolean) => void,
-): SkillDiscoverySourceProviderV1 {
-  return {
-    ...provider,
-    async listSources(input) {
-      const normalized = normalizeSourceSet(await provider.listSources(input));
-      onNormalization(normalized.truncated);
-      return normalized.sourceSet;
-    },
-  };
-}
-
-function markTruncatedDiscovery(
-  discovery: BoundedSkillDiscoveryResultV1,
-  truncated: boolean,
-): BoundedSkillDiscoveryResultV1 {
-  if (!truncated) return discovery;
-  return {
-    outcome: "indeterminate",
-    reasonCode: "truncated_output",
-    observations: discovery.observations,
-    diagnostics: discovery.diagnostics,
-  };
-}
-
 export async function runSkillRegistryCommand(
   args: SkillRegistryCommandArgs,
   dependencies: SkillRegistryCommandDependencies = {},
@@ -220,10 +124,9 @@ export async function runSkillRegistryCommand(
   }
 
   const adapterRegistry = dependencies.adapterRegistry ?? createDefaultAdapterRegistry();
-  let adapter: RunnerAdapter;
   try {
-    // Active-runner-only composition: one direct lookup, never list-based discovery.
-    adapter = adapterRegistry.get(activeRunnerId);
+    // Selection authenticates the executor; catalog scope is all configured providers.
+    adapterRegistry.get(activeRunnerId);
   } catch {
     return usageFailure(operation, "runner_not_registered", activeRunnerId);
   }
@@ -234,28 +137,28 @@ export async function runSkillRegistryCommand(
   }
 
   const projectRoot = rootResult.projectRoot;
-  const provider = adapter.skillDiscovery;
+  const providers = adapterRegistry.list().flatMap(adapter => adapter.skillDiscovery ? [adapter.skillDiscovery] : []);
 
   if (operation === "validate") {
-    return runValidate(projectRoot, activeRunnerId, provider);
+    return runValidate(projectRoot, activeRunnerId, providers);
   }
 
   if (operation === "discover") {
-    return runDiscover(projectRoot, activeRunnerId, provider);
+    return runDiscover(projectRoot, activeRunnerId, providers);
   }
 
-  return runRefresh(projectRoot, activeRunnerId, provider, dependencies);
+  return runRefresh(projectRoot, activeRunnerId, providers, dependencies);
 }
 
 async function runValidate(
   projectRoot: string,
   activeRunnerId: string,
-  provider?: SkillDiscoverySourceProviderV1,
+  providers: readonly SkillDiscoverySourceProviderV1[],
 ): Promise<SkillRegistryCommandResult> {
   try {
     const status = await readSkillRegistryStatus({
       projectRoot,
-      evaluateCurrent: () => evaluateCurrentSources(projectRoot, activeRunnerId, provider),
+      evaluateCurrent: () => evaluateCurrentSources(projectRoot, activeRunnerId, providers),
     });
     const json: Record<string, unknown> = {
       schema: CLI_RESULT_SCHEMA,
@@ -276,22 +179,10 @@ async function runValidate(
 async function runDiscover(
   projectRoot: string,
   activeRunnerId: string,
-  provider?: SkillDiscoverySourceProviderV1,
+  providers: readonly SkillDiscoverySourceProviderV1[],
 ): Promise<SkillRegistryCommandResult> {
-  let sourceSetTruncated = false;
-  const boundedProvider = provider
-    ? boundedSourceProvider(provider, (truncated) => {
-        sourceSetTruncated = sourceSetTruncated || truncated;
-      })
-    : undefined;
-  const discovery = boundedProvider
-    ? await discoverSkillsFromProvider({
-        projectRoot,
-        activeRunnerId,
-        provider: boundedProvider,
-      })
-    : unavailableDiscovery();
-  const boundedDiscovery = markTruncatedDiscovery(discovery, sourceSetTruncated);
+  const current = await evaluateCurrentSources(projectRoot, activeRunnerId, providers);
+  const boundedDiscovery = { outcome: current.outcome, observations: current.snapshot?.frontmatter.records ?? [], diagnostics: current.diagnostics ?? [], reasonCode: current.reasonCode };
   const diagnostics = boundDiagnostics(boundedDiscovery.diagnostics, projectRoot);
   const locators = boundedDiscovery.observations
     .map((observation) => safeLocator(observation.locator, projectRoot))
@@ -313,13 +204,13 @@ async function runDiscover(
 async function runRefresh(
   projectRoot: string,
   activeRunnerId: string,
-  provider: SkillDiscoverySourceProviderV1 | undefined,
+  providers: readonly SkillDiscoverySourceProviderV1[],
   dependencies: SkillRegistryCommandDependencies,
 ): Promise<SkillRegistryCommandResult> {
-  const current = await evaluateCurrentSources(projectRoot, activeRunnerId, provider);
+  const current = await evaluateCurrentSources(projectRoot, activeRunnerId, providers);
   const possibleTargets = await possibleWriteTargets(projectRoot);
 
-  if (current.outcome !== "complete" || !current.snapshot) {
+  if (!current.snapshot) {
     return refreshFailure(
       current.reasonCode ?? "partial_source_evaluation",
       possibleTargets,
@@ -328,7 +219,7 @@ async function runRefresh(
     );
   }
 
-  if (current.snapshot.frontmatter.completeness !== "complete") {
+  if (current.snapshot.frontmatter.schema_version !== 2 && current.snapshot.frontmatter.completeness !== "complete") {
     return refreshFailure(
       "truncated_output",
       possibleTargets,
@@ -342,6 +233,9 @@ async function runRefresh(
     return refreshFailure(snapshots.error, possibleTargets, [], "Registry persistence prerequisites were unavailable.");
   }
 
+  if (snapshots.registry.exists && (!snapshots.registry.text || parseSkillRegistryDocument(snapshots.registry.text).frontmatter?.schema_version !== 2)) {
+    return refreshFailure("registry_preserved", possibleTargets, [], "Unknown or edited registry bytes were preserved; use direct discovery.");
+  }
   const allowedTargets: SkillRegistryWriteTargetsV1 = snapshots.ignore.coversRegistry
     ? [REGISTRY_PATH]
     : [GITIGNORE_PATH, REGISTRY_PATH];
@@ -353,6 +247,7 @@ async function runRefresh(
     projectRootDigest,
     action,
     activeRunnerId,
+    candidateDigest,
     allowedTargets,
   };
 
@@ -395,8 +290,8 @@ async function runRefresh(
         command: "deck skill-registry refresh",
         active_runner_id: activeRunnerId,
         outcome: writeResult.outcome,
-        status: "ready",
-        reason_code: "fingerprint_match",
+        status: current.snapshot.frontmatter.completeness === "complete" ? "ready" : "indeterminate",
+        reason_code: current.snapshot.frontmatter.completeness === "complete" ? "fingerprint_match" : "partial_source_evaluation",
         registry_path: REGISTRY_PATH,
         registry_digest: safeDigest(writeResult.registry_digest),
         gitignore_changed: writeResult.gitignore_changed === true,
@@ -421,64 +316,19 @@ async function runRefresh(
 async function evaluateCurrentSources(
   projectRoot: string,
   activeRunnerId: string,
-  provider: SkillDiscoverySourceProviderV1 | undefined,
+  providers: readonly SkillDiscoverySourceProviderV1[],
 ): Promise<SkillRegistryCurrentEvaluationV1> {
-  if (!provider || provider.schema !== SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA || provider.runnerId !== activeRunnerId) {
-    return {
-      outcome: "indeterminate",
-      reasonCode: "partial_source_evaluation",
-      activeRunnerId,
-      diagnostics: [{ code: "source_provider_unavailable", message: "The active runner source provider was unavailable." }],
-    };
-  }
-
+  const snapshot = await discoverSharedSkillCatalog({ projectRoot, providers });
   try {
-    const sourceSet = await provider.listSources({ projectRoot });
-    const normalized = normalizeSourceSet(sourceSet, createCoreGenericProjectSources(projectRoot));
-    const sourceDeclarations = normalized.sourceSet.sources;
-    const discovery = markTruncatedDiscovery(
-      await discoverSkills({
-        projectRoot,
-        activeRunnerId,
-        sourceSet: normalized.sourceSet,
-      }),
-      normalized.truncated,
-    );
-    const snapshot = canonicalizeSkillRegistry({
-      activeRunnerId,
-      sourceDeclarations,
-      discovery,
-    });
-    return {
-      outcome: discovery.outcome,
-      ...(discovery.outcome === "indeterminate" ? { reasonCode: discovery.reasonCode } : {}),
-      activeRunnerId,
-      sourceDeclarations,
-      observations: discovery.observations,
-      diagnostics: discovery.diagnostics,
-      snapshot,
-    };
-  } catch {
-    return {
-      outcome: "indeterminate",
-      reasonCode: "partial_source_evaluation",
-      activeRunnerId,
-      diagnostics: [{ code: "source_provider_unavailable", message: "The active runner source provider was unavailable." }],
-    };
-  }
-}
-
-function unavailableDiscovery(): Extract<BoundedSkillDiscoveryResultV1, { outcome: "indeterminate" }> {
-  return {
-    outcome: "indeterminate",
-    reasonCode: "partial_source_evaluation",
-    observations: [],
-    diagnostics: [{ code: "source_provider_unavailable", message: "The active runner source provider was unavailable." }],
-  };
-}
-
-function isSourceSet(value: SkillDiscoverySourceSetV1): value is SkillDiscoverySourceSetV1 {
-  return Boolean(value && typeof value === "object" && Array.isArray(value.sources));
+    const file = path.join(projectRoot, REGISTRY_PATH);
+    if ((await fs.stat(file)).size <= SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes) {
+      const stored = parseSkillRegistryDocument(await fs.readFile(file, "utf8"));
+      if (stored.ok && stored.frontmatter?.schema_version === 2 && stored.frontmatter.fingerprint === snapshot.frontmatter.fingerprint) {
+        return { outcome: stored.frontmatter.completeness === "complete" ? "complete" : "indeterminate", snapshot: { ...snapshot, document: stored.document!, frontmatter: stored.frontmatter }, diagnostics: stored.frontmatter.diagnostics };
+      }
+    }
+  } catch { /* Missing advisory catalog is generated only after authorization. */ }
+  return { outcome: snapshot.frontmatter.completeness === "complete" ? "complete" : "indeterminate", reasonCode: "partial_source_evaluation", snapshot, diagnostics: snapshot.frontmatter.diagnostics };
 }
 
 async function resolveProjectRoot(rootInput?: string): Promise<{ projectRoot: string } | { error: string }> {
@@ -502,7 +352,7 @@ async function readRefreshSnapshots(
     }
   | { error: "gitignore_unavailable" | "path_containment" | "registry_unreadable" }
 > {
-  const registry = await readRegularFile(projectRoot, REGISTRY_PATH, false);
+  const registry = await readRegularFile(projectRoot, REGISTRY_PATH, true);
   if ("error" in registry) return registry;
   const ignore = await readRegularFile(projectRoot, GITIGNORE_PATH, true);
   if ("error" in ignore || ignore.snapshot.text === undefined) {

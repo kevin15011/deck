@@ -318,6 +318,7 @@ export class SessionManager implements SessionService {
   private async performExecute(input: { sessionId?: string; command: SessionCommand; clientId: string }): Promise<ExecuteOutcome> {
     const { command, clientId } = input;
     if (this.closing) return fail("daemon-stopping");
+    if (command.type === "task.dismiss-failure" && !clientId.startsWith("web:")) return fail("task-dismiss-user-required");
     if (command.type === "project.trust") {
       // MCP/control connections cannot consent on the user's behalf. WebService assigns
       // this identity only after device authentication and same-origin validation.
@@ -374,6 +375,7 @@ export class SessionManager implements SessionService {
       case "prompt.cancel": return this.cancelPrompt(live, command);
       case "prompt.resume": return this.resumePrompts(live, command);
       case "turn.interrupt": return this.interrupt(live, command, "interrupt");
+      case "task.dismiss-failure": return this.dismissFailure(live, command, clientId);
       case "task.cancel": return this.interrupt(live, { ...command, type: "turn.interrupt" }, "cancel", command.type);
       case "question.answer":
       case "question.dismiss": return this.questionRespond(live, command, clientId);
@@ -935,6 +937,24 @@ export class SessionManager implements SessionService {
       this.flush(live); this.refreshNotices(live);
     }
     return ok({ taskId, memberId: task.memberId, ...attempt, assignedRoleId:task.assignedRoleId,continuityRole:task.continuityRole,acceptance:task.acceptance,findings:task.findings,sourceTasks:task.sourceTasks,structuredSeq:task.structuredSeq });
+  }
+
+  private dismissFailure(live: Live, command: Extract<SessionCommand, { type: "task.dismiss-failure" }>, clientId: string): ExecuteOutcome {
+    const task = live.ledger.task(command.taskId);
+    const attempt = live.ledger.latest(command.taskId);
+    if (!task || !attempt) return fail("task-unknown");
+    if (task.memberId === LEAD_MEMBER_ID || attempt.attempt !== command.attempt || attempt.state !== "failed") return fail("task-not-dismissible");
+    if (attempt.integration) return fail("task-already-handled");
+    const outcome = { ok: true as const, data: { taskId: task.taskId, attempt: attempt.attempt } };
+    // Receipt first preserves the user command identity during replay of the integration.
+    this.append(live, [this.receiptDraft(command, outcome), { kind: "task.integration", data: {
+      commandId: command.commandId, taskId: task.taskId, attempt: attempt.attempt,
+      state: "discarded", note: "Failure dismissed by user", evidenceSeqs: [attempt.startedSeq],
+      leadTaskId: this.leadTaskId(live), leadAttempt: live.ledger.latest(this.leadTaskId(live))?.attempt ?? 1,
+      by: clientId, authority: "user",
+    } }]);
+    this.flush(live);
+    return outcome;
   }
 
   private integrateTask(live: Live, d: Record<string, unknown>, caller: Turn): ExecuteOutcome {

@@ -1,3 +1,4 @@
+import { discoverSharedSkillCatalog } from "../../../core/src/skill-discovery/shared";
 import { preparationAuthorityScope, observedPreparationCapabilities } from "@deck/core/session/preparation";
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync, mkdirSync, linkSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -164,16 +165,29 @@ export { readinessBlock as formatReadinessBlockV1 } from "@deck/core/session/rea
 
 /** The host supplies authenticated invocation and durable intent records, never model role strings. */
 export class ProjectPreparationService implements PreparationPort {
-  constructor(private readonly options: { indexBindings?: () => readonly IndexInitializerBinding[]; onProjectRead?: (path: string) => void; registryProvider?: (runnerId: string) => SkillDiscoverySourceProviderV1 | undefined } = {}) {}
-  private readonly registryEvidence = new Map<string, { digest: string; runnerId: string; stale: boolean }>();
+  constructor(private readonly options: { indexBindings?: () => readonly IndexInitializerBinding[]; onProjectRead?: (path: string) => void; registryProviders?: () => readonly SkillDiscoverySourceProviderV1[]; registryProvider?: (runnerId: string) => SkillDiscoverySourceProviderV1 | undefined } = {}) {}
+  private readonly registryEvidence = new Map<string, { digest: string; runnerId?: string; partial?: boolean; stale: boolean }>();
   private registryScope(scope: PreparationScope) { return JSON.stringify(canonicalScope(preparationAuthorityScope(scope))); }
   /** Adapter-owned launch preparation, outside the synchronous project preflight.
-   * Only the launching runner exposes sources; another runner's projection is unknown. */
+   * Shared composition evaluates all configured providers; legacy callers remain scoped. */
   async prepareRegistryEvidence(scope: PreparationScope, runnerId: string): Promise<void> {
     const key = this.registryScope(scope);
     const prior = this.registryEvidence.get(key);
     if (prior?.runnerId === runnerId) this.registryEvidence.delete(key);
     if (!scope.members.some(member => member.runnerId === runnerId)) return;
+    if (this.options.registryProviders) {
+      this.registryEvidence.delete(key);
+      try {
+        const source = read(scope.projectRoot, REGISTRY, SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes);
+        const parsed = parseSkillRegistryDocument(source);
+        if (!parsed.ok || parsed.frontmatter?.schema_version !== 2) return;
+        const candidate = await discoverSharedSkillCatalog({ projectRoot: scope.projectRoot, providers: this.options.registryProviders() });
+        if (read(scope.projectRoot, REGISTRY, SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes) !== source) return;
+        this.registryEvidence.set(key, { digest: hash(source), partial: candidate.frontmatter.completeness !== "complete", stale: candidate.frontmatter.fingerprint !== parsed.frontmatter.fingerprint });
+        if (this.registryEvidence.size > 128) this.registryEvidence.delete(this.registryEvidence.keys().next().value!);
+      } catch { /* Advisory failure never disables ordinary work. */ }
+      return;
+    }
     const provider = this.options.registryProvider?.(runnerId);
     if (!provider || provider.runnerId !== runnerId) return;
     try {
@@ -240,15 +254,15 @@ export class ProjectPreparationService implements PreparationPort {
       this.coordinators.set(key, coordinator);
     }
     let snapshot = evaluateProjectReadiness(scope, coordinator.evidence.read);
-    if (this.options.registryProvider) {
+    if (this.options.registryProvider || this.options.registryProviders) {
       const observations = snapshot.observations.map(o => o.component === "skill-registry" && ["registry-missing", "registry-invalid", "registry-truncated"].includes(o.reason) ? { ...o, repair: "project" as const } : o);
       snapshot = freeze({ ...snapshot, snapshotId: hash(JSON.stringify({ scope: snapshot.scope, observations })), observations });
     }
     const registryEvidence = this.registryEvidence.get(this.registryScope(scope));
     if (registryEvidence) {
-      const observations = snapshot.observations.map(o => o.component === "skill-registry" && o.reason === "runner-exposure-unverified" && o.evidenceDigest === registryEvidence.digest
-        ? { ...o, sourceRunnerId: registryEvidence.runnerId, status: registryEvidence.stale ? "degraded" as const : "ready" as const,
-            reason: registryEvidence.stale ? "registry-stale" : "registry-current", repair: registryEvidence.stale ? "project" as const : "none" as const } : o);
+      const observations = snapshot.observations.map(o => o.component === "skill-registry" && ["runner-exposure-unverified", "registry-truncated"].includes(o.reason) && o.evidenceDigest === registryEvidence.digest
+        ? { ...o, sourceRunnerId: registryEvidence.runnerId, status: registryEvidence.stale ? "degraded" as const : registryEvidence.partial ? "indeterminate" as const : "ready" as const,
+            reason: registryEvidence.stale ? "registry-stale" : registryEvidence.partial ? "registry-partial" : "registry-current", repair: registryEvidence.stale ? "project" as const : "none" as const } : o);
       snapshot = freeze({ ...snapshot, snapshotId: hash(JSON.stringify({ scope: snapshot.scope, observations })), observations });
     }
     if (this.uncertainRegistry.has(scope.projectRoot)) {
@@ -319,7 +333,7 @@ export class ProjectPreparationService implements PreparationPort {
         const component = "skill-registry";
         const observation = snapshot!.observations.find(o => o.component === component && ["registry-missing", "registry-invalid", "registry-truncated", "registry-stale"].includes(o.reason) && o.repair === "project");
         if (!observation || d.evidence[component] !== observation.evidenceDigest) throw new Error("preparation-finding-unavailable");
-        if (observation.sourceRunnerId && observation.sourceRunnerId !== invocation.runnerId) throw new Error("preparation-executor-unavailable");
+        if (!this.options.registryProviders && observation.sourceRunnerId && observation.sourceRunnerId !== invocation.runnerId) throw new Error("preparation-executor-unavailable");
         const effectId = hash(`${scope.projectRoot}:${component}:${observation.evidenceDigest}`);
         const previous = invocation.previous().filter(r => r.effectId === effectId).at(-1);
         const currentDigest = () => {
@@ -334,24 +348,37 @@ export class ProjectPreparationService implements PreparationPort {
         if (this.uncertainRegistry.has(scope.projectRoot)) throw new Error("preparation-effect-uncertain");
         const expectedDigest = observation.reason === "registry-missing" ? "missing" : observation.evidenceDigest;
         if (currentDigest() !== expectedDigest) throw new Error("preparation-source-changed");
-        const provider = this.options.registryProvider?.(invocation.runnerId);
-        if (!scope.members.some(m => m.runnerId === invocation.runnerId) || !provider || provider.runnerId !== invocation.runnerId) throw new Error("preparation-executor-unavailable");
-        const sourceSet = await provider.listSources({ projectRoot: scope.projectRoot });
-        live();
-        const discovery = await discoverSkills({ projectRoot: scope.projectRoot, activeRunnerId: invocation.runnerId, sourceSet });
-        live();
-        if (discovery.outcome !== "complete") throw new Error("preparation-registry-exposure-unverified");
-        const candidate = canonicalizeSkillRegistry({ activeRunnerId: invocation.runnerId, sourceDeclarations: [...createCoreGenericProjectSources(scope.projectRoot), ...sourceSet.sources], discovery });
-        if (candidate.frontmatter.completeness !== "complete") throw new Error("preparation-registry-exposure-unverified");
-        if (observation.reason === "registry-stale") {
-          const stored = parseSkillRegistryDocument(read(scope.projectRoot, REGISTRY, SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes)).frontmatter;
-          if (!stored || stored.source_scope_hash !== candidate.frontmatter.source_scope_hash || stored.fingerprint === candidate.frontmatter.fingerprint) throw new Error("preparation-registry-exposure-unverified");
+        let candidate: ReturnType<typeof canonicalizeSkillRegistry>;
+        if (this.options.registryProviders) {
+          if (!scope.members.some(m => m.runnerId === invocation.runnerId)) throw new Error("preparation-executor-unavailable");
+          // Unknown or user-edited bytes are preserved. Discovery still provides an ephemeral view.
+          if (expectedDigest !== "missing") {
+            const stored = parseSkillRegistryDocument(read(scope.projectRoot, REGISTRY, SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes));
+            if (!stored.ok || stored.frontmatter?.schema_version !== 2) throw new Error("preparation-registry-preserved");
+          }
+          candidate = await discoverSharedSkillCatalog({ projectRoot: scope.projectRoot, providers: this.options.registryProviders() });
+          live();
+        } else {
+          if (expectedDigest !== "missing" && parseSkillRegistryDocument(read(scope.projectRoot, REGISTRY, SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes)).frontmatter?.schema_version === 2) throw new Error("preparation-registry-preserved");
+          const provider = this.options.registryProvider?.(invocation.runnerId);
+          if (!scope.members.some(m => m.runnerId === invocation.runnerId) || !provider || provider.runnerId !== invocation.runnerId) throw new Error("preparation-executor-unavailable");
+          const sourceSet = await provider.listSources({ projectRoot: scope.projectRoot });
+          live();
+          const discovery = await discoverSkills({ projectRoot: scope.projectRoot, activeRunnerId: invocation.runnerId, sourceSet });
+          live();
+          if (discovery.outcome !== "complete") throw new Error("preparation-registry-exposure-unverified");
+          candidate = canonicalizeSkillRegistry({ activeRunnerId: invocation.runnerId, sourceDeclarations: [...createCoreGenericProjectSources(scope.projectRoot), ...sourceSet.sources], discovery });
+          if (candidate.frontmatter.completeness !== "complete") throw new Error("preparation-registry-exposure-unverified");
+          if (observation.reason === "registry-stale") {
+            const stored = parseSkillRegistryDocument(read(scope.projectRoot, REGISTRY, SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes)).frontmatter;
+            if (!stored || stored.source_scope_hash !== candidate.frontmatter.source_scope_hash || stored.fingerprint === candidate.frontmatter.fingerprint) throw new Error("preparation-registry-exposure-unverified");
+          }
         }
         if (currentDigest() !== expectedDigest) throw new Error("preparation-source-changed");
         const record = { effectId, delegationId: d.id, component, before: observation.evidenceDigest, after: hash(candidate.document) };
         const projectRootDigest = `sha256:${hash(scope.projectRoot)}` as const;
         const action = expectedDigest === "missing" ? "initial_generation" : "regeneration";
-        const authority = createSkillRegistryWriteAuthority({ projectRoot: scope.projectRoot, projectRootDigest, activeRunnerId: invocation.runnerId, action, allowedTargets: [REGISTRY] });
+        const authority = createSkillRegistryWriteAuthority({ projectRoot: scope.projectRoot, projectRootDigest, activeRunnerId: invocation.runnerId, candidateDigest: `sha256:${record.after}`, action, allowedTargets: [REGISTRY] });
         live();
         let reserved = false;
         try {
@@ -379,6 +406,7 @@ export class ProjectPreparationService implements PreparationPort {
           if (currentDigest() !== record.after) throw new Error("preparation-effect-uncertain");
           invocation.record({ ...record, state: "completed" }); this.uncertainRegistry.delete(scope.projectRoot);
         } catch (error) { if (reserved) invocation.record({ ...record, state: "uncertain" }); throw error; }
+        if (candidate.frontmatter.schema_version === 2) this.registryEvidence.set(this.registryScope(scope), { digest: record.after, stale: false, partial: candidate.frontmatter.completeness !== "complete" });
         return { status: "changed", snapshot: this.status(live()) };
       }
       if (request.components.length === 1 && request.components[0] === "codebase-memory-index") {
