@@ -356,7 +356,7 @@ small, .muted, .empty-note { color: var(--muted); }
 .project-tree { list-style: none; margin: .25rem 0; padding: 0; }
 .project-group { margin-bottom: .5rem; border-radius: 6px; }
 .project-group:has(> .project-row .project-toggle[aria-expanded=true]) {
-    background: color-mix(in srgb, var(--tint) 35%, transparent);
+    background: transparent;
 }
 .project-group:has(> .project-row .project-toggle[aria-expanded=true]) > .project-row {
     background: color-mix(in srgb, var(--tint) 45%, transparent);
@@ -364,8 +364,8 @@ small, .muted, .empty-note { color: var(--muted); }
 }
 .project-group > .project-sessions { position: relative; }
 .project-group > .project-sessions::before {
-    content: ''; position: absolute; top: .25rem; bottom: .25rem; left: -.5rem;
-    width: 1px; background: var(--hairline); pointer-events: none;
+    content: ''; position: absolute; top: .25rem; bottom: .25rem; left: 14px;
+    width: 1px; background: var(--border); background: color-mix(in srgb, var(--accent) 24%, var(--border)); pointer-events: none;
 }
 .project-row { display: flex; align-items: center; min-width: 0; }
 .project-toggle.quiet { display: flex; align-items: center; gap: .375rem; flex: 1; min-width: 0; min-height: 34px; padding: 2px .25rem; text-align: left; color: var(--ink); }
@@ -374,7 +374,7 @@ small, .muted, .empty-note { color: var(--muted); }
 .project-name strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 16px; font-weight: 500; }
 .project-name small { display: block; overflow-wrap: anywhere; font-size: 10px; line-height: 11px; color: var(--muted); font-weight: 400; }
 .project-new.quiet { display: flex; align-items: center; justify-content: center; flex: 0 0 28px; min-height: 34px; padding: .25rem; }
-.project-sessions { margin-left: 1.5rem; }
+.project-sessions { margin-left: 0; }
 .project-sessions .empty-note, .history-error { margin: .5rem; padding: .25rem; font-size: .75rem; }
 .history-error p { overflow-wrap: anywhere; }
 .dialog-project-path { display: block; margin-top: .25rem; font-size: .7rem; overflow-wrap: anywhere; }
@@ -1059,7 +1059,7 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .session-drawer .project-more.quiet { width: 44px; }
 .session-drawer .drag-handle { width: 24px; min-height: 44px; }
 .session-drawer .project-name strong, .session-drawer .session strong { font-size: .9rem; line-height: 1.35; }
-.session-drawer .project-sessions { margin-left: .75rem; }
+.session-drawer .project-sessions { margin-left: 0; }
 .session-drawer .session { padding: .375rem .5rem; }
 .session-drawer .session strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
 .session-drawer .project-group + .project-group { margin-top: .5rem; }
@@ -1269,7 +1269,9 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .session-row .session{display:grid;grid-template-columns:6px minmax(0,1fr) auto;column-gap:4px;padding:5px 2px}
 .session>.session-indicators{flex-wrap:nowrap;gap:4px}
 .session-row .session-label strong{display:block;white-space:normal;overflow-wrap:anywhere;-webkit-line-clamp:unset}
-.project-sessions{margin-left:8px}
+.project-sessions{margin-left:0}
+/* Indent content, leaving the full row and its canvas plane connected to chat. */
+.project-sessions .session-row > .drag-handle{margin-left:24px}
 @media (min-width:1001px){
  .workbench:not(.sidebar-collapsed){grid-template-columns:248px minmax(0,1fr)}
  .sidebar{padding-inline:6px}
@@ -1452,4 +1454,85 @@ select:focus-visible, .question-panel textarea:focus-visible {
 .content-modes button { display: flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; }
 @media (max-width: 1000px) {
     .session-identity { grid-template-rows: none; }
+}
+
+/* The moving selection shares the chat canvas; only its measured row joins the edge. */
+.sidebar, .session-drawer { isolation: isolate; }
+.sidebar { position: relative; }
+.workbench:not(.sidebar-collapsed) > .sidebar, .session-drawer {
+    border-right-color: transparent;
+    background-clip: padding-box;
+}
+.session-selection-plane {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 1; overflow: hidden; fill: var(--canvas);
+}
+/* Sortable transforms create row stacking contexts; keep all navigation above the canvas plane. */
+.navigation-scroll { position: relative; z-index: 2; }
+.session-row, .project-row { position: relative; }
+:is(.session-row, .project-row) > button,
+:is(.session-row, .project-row) > .project-actions > button { position: relative; z-index: 2; }
+.session-row > .session.selected { background: transparent; }
+.session-row > .session.selected:hover { background: var(--tint); }
+@media (prefers-contrast: more) {
+    .session-row:has(> .session.selected) { box-shadow: inset 3px 0 var(--focus); }
+}
+
+/* Scoped active paint layers leave text, focus rings and hit targets stationary. */
+.workspace-tabs, .content-modes { position: relative; isolation: isolate; }
+.moving-active-indicator { position:absolute; top:0; left:0; pointer-events:none; z-index:-1; }
+.workspace-tabs > .moving-active-indicator { background:linear-gradient(var(--action),var(--action)) bottom .5px left .75rem / calc(100% - 1.5rem) 2px no-repeat; }
+.workspace-tabs button[aria-selected=true]::after { content:none; }
+.content-modes > .moving-active-indicator { background:var(--border); border-radius:var(--control-radius, 6px); }
+.content-modes button[aria-pressed=true] { background:transparent; }
+/* Only the projects list hides its scrollbar; input scrolling remains native. */
+.navigation-scroll { scrollbar-width:none; scrollbar-gutter:auto; }
+.navigation-scroll::-webkit-scrollbar { display:none; }
+.navigation-overflow-fade { position:absolute; pointer-events:none; height:10px; z-index:3; left:0; right:0; opacity:0; }
+.navigation-overflow-fade.top { background:linear-gradient(to bottom,var(--surface),transparent); }
+.navigation-overflow-fade.bottom { background:linear-gradient(to top,var(--surface),transparent); }
+/* Outgoing views retain only their paint while native hidden/inert semantics apply. */
+.panes { isolation:isolate; }
+.chat-pane[hidden][data-view-exiting], .workspace-pane[hidden][data-view-exiting] { display:flex !important; position:absolute; inset:0; pointer-events:none; z-index:1; }
+.workspace-panel[hidden][data-view-exiting] { display:block !important; position:absolute; inset:0; pointer-events:none; z-index:1; }
+.workspace-pane { position:relative; }
+
+/* The textarea alone transfers focus paint to its rounded composer perimeter. */
+.composer-focus-ready textarea:focus-visible { outline: none; }
+.composer-focus-light { position: absolute; inset: -1px; width: calc(100% + 2px); height: calc(100% + 2px); overflow: hidden; pointer-events: none; color: var(--focus); }
+.composer.composer-input-focused { border-color: color-mix(in srgb, var(--focus) 38%, var(--border)); }
+@media (prefers-reduced-motion: reduce), (prefers-contrast: more), (forced-colors: active) {
+    .composer-input-focused { outline: 2px solid var(--focus); outline-offset: 2px; }
+}
+@media (forced-colors: active) {
+    .composer-input-focused { outline-color: Highlight; }
+}
+
+/* Static theme light pools stop before the chat-facing edge so the selected
+   navigation plane and conversation continue to share an unlit canvas. */
+@supports (background: color-mix(in srgb, black, white)) {
+    .chat-pane, .workspace-pane {
+        background-image:
+            radial-gradient(ellipse 80% 65% at 100% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 100%),
+            radial-gradient(ellipse 70% 50% at 100% 100%, color-mix(in srgb, var(--focus) 6%, transparent), transparent 100%);
+        background-repeat: no-repeat;
+    }
+    .sidebar, .session-drawer {
+        background-image: radial-gradient(ellipse 75% 60% at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 100%);
+        background-repeat: no-repeat;
+    }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
+    .chat-pane, .workspace-pane, .sidebar, .session-drawer { background-image: none; }
+}
+
+/* System colors keep selection distinct when forced colors removes gradients. */
+@media (forced-colors: active) {
+    .workspace-tabs button[aria-selected=true] { color: Highlight; }
+    .workspace-tabs button[aria-selected=true]::after {
+        content: ''; background: Highlight; forced-color-adjust: none;
+    }
+    .content-modes button[aria-pressed=true] {
+        outline: 2px solid Highlight; outline-offset: -3px;
+    }
 }

@@ -18,7 +18,8 @@ export function snapshotView(events: SessionEvent[], seq: number): ViewState {
 }
 /** Owns a single session generation. Abort and identity checks cover HTTP, live
  * frames and queued React updates; historical pages never reduce current state. */
-export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEvent, beforeChange, isFollowing, onHydrated, onView, onConnection, onError }: {
+export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEvent, beforeChange, isFollowing, onHydrated, onView, onConnection, onError, onLiveMessage }: {
+    onLiveMessage?: (row: HistoryMessage) => void;
     api: Api;
     sessionId: string;
     taskId?: string;
@@ -50,8 +51,8 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
     } | undefined>(undefined);
     const rows = useRef(messages);
     rows.current = messages;
-    const callbacks = useRef({ onEvent, beforeChange, isFollowing, onHydrated, onView, onConnection, onError });
-    callbacks.current = { onEvent, beforeChange, isFollowing, onHydrated, onView, onConnection, onError };
+    const callbacks = useRef({ onEvent, beforeChange, isFollowing, onHydrated, onView, onConnection, onError, onLiveMessage });
+    callbacks.current = { onEvent, beforeChange, isFollowing, onHydrated, onView, onConnection, onError, onLiveMessage };
     const scope = JSON.stringify([sessionId, taskId]);
     const historySession = useRef('');
     const selectedSession = useRef(scope);
@@ -203,6 +204,7 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
                             callbacks.current.beforeChange();
                             if (previous.some(item => item.historyId === row.historyId) || !boundsRef.current.after) {
                                 const next = mergeHistory(previous, [row], 'live');
+                                if (!previous.some(item => item.historyId === row.historyId)) callbacks.current.onLiveMessage?.(row);
                                 rows.current = next;
                                 setMessages(next);
                                 if (previous[0]?.historyId !== next[0]?.historyId) {

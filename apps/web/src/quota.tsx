@@ -1,3 +1,4 @@
+import { useDisclosureMotion } from './view-motion';
 import React, { useEffect, useRef, useState } from 'react';
 import type { QuotaRunner, QuotaState } from '../../../packages/core/src/session/quota';
 import { NavigationIcon } from './project-navigation';
@@ -89,12 +90,13 @@ export function quotaSummary(state: QuotaState) {
 }
 
 export function QuotaSectionView({ collapsed, onToggle, state, now, loading, message, onRefresh }: { collapsed: boolean; onToggle(): void; state: QuotaState; now: number; loading: boolean; message: string; onRefresh(runner: QuotaRunner): void }) {
-    const summary = quotaSummary(state);
+    const summary = quotaSummary(state), body = useRef<HTMLDivElement>(null);
+    useDisclosureMotion(body, !collapsed);
     return <section className="usage-section" aria-labelledby="usage-section-title">
         <button type="button" className="quiet usage-toggle" aria-expanded={!collapsed} aria-controls="usage-section-body" onClick={onToggle}>
             <NavigationIcon kind="chevron" expanded={!collapsed}/><span id="usage-section-title">Usage</span>{collapsed && summary && <span className="usage-summary">{summary}</span>}
         </button>
-        <div id="usage-section-body" className="usage-body" hidden={collapsed}>
+        <div ref={body} id="usage-section-body" className="usage-body" hidden={collapsed} inert={collapsed} aria-hidden={collapsed}>
             <QuotaContents state={state} now={now} loading={loading} onRefresh={onRefresh}/>
             <p className="quota-status muted" role="status" aria-live="polite">{loading ? 'Reading latest quota…' : message}</p>
         </div>

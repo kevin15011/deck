@@ -6,6 +6,7 @@ import { sessionIdOf, sessionName, type Project, type WorkspaceSession } from '.
 import { applyOrder, PROJECT_ORDER_KEY, sessionOrderKey, useManualOrder, type OrderStore } from './ordering';
 import { GripButton, SortableItem, SortableList, SortableRow } from './sortable';
 import { collapse, useOpenAnimation } from './motion';
+import { useSelectionMotion } from './selection-motion';
 
 /** Disclosure whose height animates; stays mounted (hidden) when closed so panel ids remain valid. */
 function Collapse({ open, id, className, label, busy, children }: { open: boolean; id: string; className: string; label: string; busy?: boolean; children: React.ReactNode }) {
@@ -80,9 +81,11 @@ export function ProjectNavigation({ orderStore, projects, projectStatuses = {}, 
     onToggle: (id: string) => void; onSession: (projectId: string, session: WorkspaceSession) => void; onAdd: () => void; onNew: (project: Project) => void; onMore: (id: string) => void; onRetry: (id: string) => void; onRefresh: () => void; onExpand: () => void; onRename?: (project: Project) => void; onRemove?: (project: Project) => void; onRenameSession?: (session: WorkspaceSession) => void; onRemoveSession?: (session: WorkspaceSession) => void;
 }) {
     const id = useId(), { saved, reorder } = useManualOrder(orderStore);
+    const root = useRef<HTMLDivElement>(null);
+    useSelectionMotion(root, collapsed);
     if (collapsed) return <div className="project-navigation navigation-rail"><button type="button" className="quiet" aria-label="Show projects" title="Show projects" onClick={onExpand}><NavigationIcon kind="folder"/></button><button type="button" className="quiet" aria-label="Add project" title="Add project" onClick={onAdd}><NavigationIcon kind="plus"/></button></div>;
     const orderedProjects = applyOrder(projects, saved(PROJECT_ORDER_KEY), item => item.projectId);
-    return <div className="project-navigation">
+    return <div ref={root} className="project-navigation">
         <div className="project-toolbar"><h2>Projects</h2><button type="button" className="quiet navigation-add" onClick={onAdd}><NavigationIcon kind="plus"/>Add project</button><button type="button" className="quiet navigation-refresh" aria-label="Refresh sessions" title="Refresh projects and sessions" onClick={onRefresh}><NavigationIcon kind="refresh"/></button></div>
         <div className="navigation-scroll"><SortableList className="project-tree" label="Projects" ids={orderedProjects.map(item => item.projectId)} onReorder={(from, to) => reorder(PROJECT_ORDER_KEY, orderedProjects.map(item => item.projectId), from, to)}>{orderedProjects.map(project => {
             const history = histories[project.projectId], open = expanded.has(project.projectId), suffix = distinguishingPath(project, projects), panelId = `${id}-${project.projectId}`;

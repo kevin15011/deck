@@ -215,3 +215,313 @@ Chromium with fake inference only; selector-only updates in other browser
 harnesses were typechecked, not all executed. Lead successfully rebuilt and
 installed canary and checked its version after adoption. No active-session
 restart or commit was performed.
+
+## Selected-session sidebar experiment
+User requested a checkpoint before trying a concave active-session shape inspired
+by their attached sidebar reference. Checkpoint verified:
+`eabf230699fa0868fbc0cebad1bffee1d70e6854` (`feat(web): refine controls and unify session navigation`).
+It includes only approved UI and this brief; unrelated setup edits remain outside
+the commit, including mixed setup text in session-controls.tsx.
+
+Apply the concave transition to the selected session row, suggesting attachment
+to the content surface. Preserve the full-width text sidebar, row geometry,
+status/work icons, action buttons and scrolling; do not copy the reference's
+icon-only navigation or palette. Use theme variables, support selected rows at
+list boundaries and adjacent projects, and keep a distinct keyboard focus ring.
+Prefer a small CSS-only paint change with non-intercepting decorative layers.
+If any motion is added, existing GSAP and reduced-motion constraints apply.
+Keep this experiment uncommitted and separate from the checkpoint for review.
+Validate light/dark/colored themes, first/middle/last rows, long names, desktop
+and mobile drawer, selection changes and keyboard/action interaction. Lead owns
+this brief and will update canary after visual review. No unrelated setup edits.
+
+### Sidebar preview implemented
+Attempt 8 adds 42 CSS lines only, uncommitted. Lead reviewed the diff, desktop
+capture and report; CSS SHA-256 matches
+2ac882b90c0c9274f3df662546ef77fedd13c4bfa231d1e8daec4e670be8c287.
+18 Chromium desktop/drawer scenes pass across dark/light/eva01 and first/middle/
+last selections. Before/after row boxes match exactly; focus, actions, scrolling
+and indicators remain available. Five focused navigation tests pass. CSS bundle
+and browser checks cover this experiment; earlier full suite is historical.
+The 17px/27px gutter bridge has unverified scrollbar portability outside Chromium.
+Evidence: /tmp/deck-concave-verification.md; captures /tmp/deck-concave-after/.
+Canary rebuilt for preview; no active-service restart. User visual acceptance
+pending; checkpoint eabf230 remains intact and this experiment remains uncommitted.
+
+### Sidebar correction requested
+User rejects the continuous vertical stripe/border between sidebar and chat:
+the selected row must visually merge with the actual chat background. Supersede
+the 17px/27px surface-colored gutter bridge; use the adjoining content's actual
+paint and handle scrollbar/padding geometry without a mismatched vertical rail.
+User also explicitly requests GSAP animation between selected sessions. Animate
+the concave selection treatment with restrained Apple-inspired motion (~300–400ms,
+no decorative bounce), retarget rapid selections from current presentation,
+preserve independent keyboard focus, and settle immediately for reduced motion.
+Support row size changes, scrolling, project expansion, collapse and unmount;
+do not animate text/icons or block navigation. Keep experiment uncommitted.
+Validate the user's one-dark-like screenshot theme in addition to light/dark,
+actual boundary colors, rapid switching, scrolling and cleanup. Lead owns canary.
+
+### Sidebar scrollbar placement
+User explicitly requests moving the sidebar scrollbar to the LEFT to free the
+chat-facing edge for the seamless concave join. Adopt this placement for the
+sidebar scroll region (and drawer where applicable), preserving LTR text/icon
+order, action positions, keyboard navigation and scroll behavior. Do not move
+conversation/workspace scrollbars. If CSS direction is used on the scroll host,
+restore content direction explicitly and verify mixed text and horizontal keys.
+This supplements the pending GSAP/join correction, not a separate redesign.
+
+### Motion correction reviewed; scrollbar choice pending
+Attempt 9 replaces the rail with a measured canvas-colored SVG selection plane
+and 360ms GSAP retargeting. Lead reviewed source/report/One Dark Pro capture and
+matched seven candidate hashes. Reported 24 scenes, 12 pixel-matched desktop
+joins, lifecycle checks, types and 4,509 tests pass. The left scrollbar request
+has not yet been implemented. User subsequently proposed hiding the sidebar
+scrollbar with conditional top/bottom overflow fades and asked for an opinion;
+Lead recommended fades but has not treated that discussion as a selected option.
+Clarify this preference before completing scrollbar work and canary delivery.
+Evidence: /tmp/deck-selection-verification.md and /tmp/deck-selection-candidate.json.
+
+## Approved motion coverage and overflow affordances
+User explicitly chooses hidden sidebar scrollbar with conditional top/bottom
+overflow fades, superseding the earlier left-scrollbar direction. Scope is the
+projects/sessions list (and its mobile drawer), not chat/workspace scrollbars.
+Fades appear only where more content exists, remain subtle/non-interactive and
+must not conceal names, status/work indicators or focus. Preserve wheel, trackpad,
+touch and keyboard scroll and the seamless selection/chat join.
+
+User also requires a persistent AGENTS.md rule: all Web UI movement, entrance,
+exit, expansion/collapse and view/tab transitions use GSAP with the established
+Apple-inspired motion and accessibility/lifecycle safeguards. Lead added it.
+Correct the specifically identified gaps now: Chat/Both/Workspace view changes,
+Usage expansion/collapse, workspace tab content transitions and sliding active
+indicators for workspace tabs and panel-view buttons. Preserve current data,
+scroll positions, editable state, focus/ARIA, resizing and navigation semantics.
+Fast switching retargets current presentation and never blocks actions. Reduced
+motion is immediate or minimal fade. Review relevant existing motion ownership
+to avoid two systems animating the same property. This scope does not require
+rewriting unrelated interactions merely to audit the entire app in one pass.
+Same implementation owner; Lead owns AGENTS.md and OpenSpec. Keep new work
+uncommitted relative to checkpoint eabf230; no setup or unrelated edits.
+Verify actual animations, rapid reversal, cleanup, overflow edges and expansion
+after resize/content changes in desktop/mobile and multiple themes. Independent
+targeted review follows effects changes; Lead updates canary after verification.
+
+## Approved composer focus treatment
+User confirmed replacing the composer's rectangular textarea focus outline with
+two soft luminous segments travelling around the rounded composer perimeter in
+the same direction, exactly half a path apart, with a short fading trail.
+Use GSAP and the active theme accent/focus palette, not a fixed blue. Activate
+while the message input has focus and stop/clean up on blur or unmount. Track
+composer resize/autogrow without changing its geometry or intercepting pointer
+events. Preserve send/attachment/stop controls and their own keyboard outlines.
+Reduced motion uses a static visible focus treatment; forced colors/high contrast
+must retain an unmistakable accessible focus fallback. Remove only the redundant
+textarea rectangle once its replacement is present, not global focus indicators.
+Keep input semantics, IME, keyboard submission and selection behavior unchanged.
+This supplements pending panel/Usage/tab motion and sidebar fades, without
+cancelling them. Same Apply owner; no new commit before user review.
+
+## Approved ambient theme depth
+User requests subtle ambient background illumination inspired by their supplied
+mobile UI reference, for BOTH desktop and mobile. Add broad, soft, low-opacity
+light pools derived from each active theme's accent and canvas/surface palette.
+Do not impose the reference's orange color or change theme identities/fonts.
+Lighting should give depth to the app background/content surfaces while keeping
+text, status/work/attention icons and controls legible. Preserve the selected
+sidebar-to-chat seam by sharing background composition or deriving its paint
+consistently; do not reintroduce a visible rail or mismatched selection patch.
+Use bounded static gradients rather than continuously moving decorative lights
+or expensive animated blur. Any introduced entrance/intensity transition uses
+GSAP per AGENTS.md. Respect high contrast/forced colors and reduced transparency;
+provide a restrained/solid fallback. Preserve foreground hierarchy, scrolling,
+focus glow and current motion work; no layout changes. Validate actual full UI
+desktop/mobile in light/dark and colored themes. Reference attachment:
+/home/kevin15011/.local/state/deck/sessions/20261030T151526-fd2deb/attachments/2b6f91b8-4686-4498-b1b4-c87b5c17b309.image.
+Same implementation owner; keep these refinements uncommitted for user review.
+
+## Final ambient and motion delivery — 2026-10-30
+Accepted apply-fast attempts 10–13: GSAP panel/tab/indicator and Usage motion,
+hidden sidebar scrollbar with conditional edge fades, two opposite theme-colored
+composer focus lights, and static theme-derived ambient desktop/mobile lighting.
+The AGENTS.md motion rule remains in force. Checkpoint eabf230 is preserved;
+these refinements remain uncommitted and foreign setup changes are preserved.
+
+Independent Quality attempt 2 identified two P2 defects: Usage opening skipped
+its collapsed starting height after React committed hidden=false, and forced
+colors removed the workspace selection gradient. Lead reviewed attempt 13 fixes:
+explicit settled disclosure state preserves live reversals; system Highlight
+selection fallbacks cover workspace tabs and desktop panel modes. All 20 current
+manifest hashes match /tmp/deck-p2-candidate.json. Lead independently reran
+`bun apps/web/view-motion-acceptance.ts`: PASS opening intermediate height,
+reversals, reduced motion, retained state, semantics and unmount. Both findings
+are resolved on this evidence plus source review and reported four forced-color
+application scenes. Current TypeScript and 3 quota tests passed in implementation.
+The earlier full 4509-test result remains historical supporting evidence.
+
+Ambient evidence: /tmp/deck-ambient-verification.md; four themes at desktop/mobile
+with solid accessibility fallbacks and pixel-matched sidebar join. Latest repair
+evidence: /tmp/deck-p2-verification.md. Browser coverage is Linux Chromium with
+fake inference, not all engines or physical devices.
+
+Lead ran `bun run canary:install` successfully and checked `deck-canary --version`.
+No active shared session service was restarted. Canary installation includes the
+current working tree; this does not claim unrelated concurrent changes were audited.
+
+## Composer focus visual refinement — 2026-10-30
+User accepts the overall UI but rejects the focus effect as clearly shaped lines
+that distract. Replace the segmented luminous strokes/trails with two small,
+soft diffuse low-intensity light pools, opposite each other, traveling in the
+same direction more slowly using GSAP. Retain active theme color, accessibility
+fallbacks, responsive geometry, focus/visibility lifecycle and cleanup. Avoid a
+hard bright core, visible tail lengths or a conspicuous full perimeter outline.
+Keep a discernible accessible focus state; reduced-motion/forced-color fallbacks
+remain static. Scope is composer effect only; no ambient/sidebar/layout changes.
+Use current apple-design direction and GSAP conventions. Same apply-fast owner;
+keep uncommitted and update canary after proportionate visual/browser validation.
+Reference: attachments/ed5c6c41-020a-440c-9ea7-97c1eb81ae66.image.
+
+## User message entrance — 2026-10-30
+User additionally requests GSAP animation when their message appears in chat.
+Animate newly inserted user message bubbles with a restrained short fade and
+small translation per Apple motion conventions. Do not replay history on mount,
+session switching or rerenders; avoid duplicate animation on optimistic/server
+reconciliation. Preserve immediate sending, scroll anchoring, keyboard focus and
+reduced-motion behavior. Agent messages remain unchanged. This extends current
+apply-fast refinement scope; it does not replace the pending softer composer glow.
+
+## Session switch responsiveness investigation — 2026-10-30
+User reports longstanding session/chat-switch stalls, predating current motion.
+Investigate attempt 2 provides source-only hypotheses, not measured causes:
+serial summary/history requests, synchronous transcript mount and event reduction.
+No optimization is accepted from this report alone. Investigator lacks shell/browser
+execution, so apply-deep owns isolated measurement with no production edits while
+apply-fast finishes the overlapping user-message entrance work. Measure network
+wait versus main-thread render/layout and realistic short/long-history switching;
+record candidate changes and preserve setup files. Use evidence to select a bounded
+fix, not speculative caching, content-visibility or a rewrite.
+
+## Sidebar reorder regression — 2026-10-30
+User reports that reordering sessions makes the selected sidebar row contents
+disappear. Screenshot shows selected background remains but title/controls vanish.
+Reproduce with actual session drag/reorder and preserve the selected row title,
+status indicators, controls and hit targets after drop and cancelled drag. Inspect
+selection SVG layering, drag ghost/state cleanup, React identity and GSAP inline
+styles; do not assume cause from screenshot. Prioritize a bounded regression fix
+with browser reproduction and rapid reorder/selection coverage. Other pending
+user-message entrance and session-switch performance work remain active.
+
+## Sidebar parent-child hierarchy — 2026-10-30
+User reports people cannot distinguish which sessions belong to a folder/project.
+Authorized visual refinement: clearer indentation of child sessions relative to
+project headers, with a subtle theme-derived vertical grouping guide for expanded
+projects if useful. Keep session status/work/attention icons and action controls
+visible, selected concave seamless join intact, long names usable, and desktop/
+mobile consistency. Avoid relying on color alone; alignment provides hierarchy.
+Apply after/in coordination with pending reorder regression under same apply-fast
+owner. Revalidate drag targets, collapsed/expanded groups, selected first/last child
+and multiple adjacent projects. Keep uncommitted; preserve all unrelated edits.
+Pending delivery to apply-fast: task was running attempt16 when request arrived;
+continue same task with this requirement on next completion before canary delivery.
+
+## New One Dark blood-red variant — 2026-10-30
+User requests an additional theme like One Dark Pro with blood-red rather than
+blue accents. Working name: One Dark Blood; stable id one-dark-blood. Preserve
+One Dark Pro unchanged and reuse its dark neutral surface/typography hierarchy.
+Use deep blood-red chromatic accents with contrast-adjusted hover/focus/action
+variants, readable button text and distinct semantic success/warning/error states.
+Theme-derived ambient and composer lighting must pick up new tokens naturally.
+Register in selector/persistence through existing theme conventions; verify desktop
+and mobile, custom fonts and actual contrast. Known literal locations: theme.ts
+registry, themes.css One Dark Pro block and additional placeholder/readiness
+selectors; theme.test.tsx currently asserts exact theme catalog. Graph UI theme
+search returned zero, scope coverage gives no completeness proof; source fallback
+is necessary. Deliver to same apply-fast owner together with pending sidebar
+hierarchy on completion of running attempt16. Keep uncommitted for user review.
+
+## Measured switch stall and bounded correction
+Apply-deep attempt1 measured116 isolated switches on fixed snapshots. Initial
+history page is40 rows (120 is accumulated window). Dense Markdown40-row mount
+produced ~1.16s longest main-thread task; local summary/history medians2.3/10.7ms,
+reduction0.1ms. Historical committed UI also reproduces. Synthetic loopback
+workload, not the user's session or cold-backend proof. Report:
+/tmp/deck-session-switch-perf-1793388205/REPORT.md.
+Proceed with bounded interruptible initial history rendering experiment under
+same performance owner. Preserve fetched data/cursors, complete eventual content,
+scroll anchors, bottom following, keyboard/focus, live updates and new-user motion.
+Do not trade away access to older messages or stale-session isolation. Compare
+fixed baseline/candidate timings and long tasks; no claimed improvement without
+measurement. Own transcript/main/history helper scope; apply-fast owns sidebar/
+theme files separately. No new framework, backend protocol or speculative cache.
+
+## Accepted visual refinements through attempt17
+Lead reviewed attempt17 report and desktop One Dark Blood screenshot; all8 scoped
+file hashes match /tmp/deck-hierarchy-candidate.json. Accepted24px child indentation
+and vertical grouping guide, independent crimson One Dark Blood theme with
+unchanged original One Dark Pro. Reported15 focused tests/types and Chromium
+18 application scenes, persisted picker/font previews, representative contrast,
+20 reorder checkpoints and9 seamless-join checks pass. Preceding accepted changes
+include softer18s composer light pools, live-only user-message entrance, and
+reorder stacking fix with actual blank-label red/green paint evidence.
+These changes remain uncommitted and await combined canary delivery after the
+concurrently edited transcript performance work stabilizes; no current combined
+full-suite or performance outcome is claimed.
+
+## Transcript independent review follow-up
+Quality attempt3 independently verified fixed-candidate hashes, queue invariants
+and reported matched medians. One P2: formatting remains active in hidden chat,
+where zero geometry invalidates reading-anchor correction. Modeled callback
+reproduction supports it; apply-deep continues for browser red/green and bounded
+visibility/resume correction. Final combined full suite pending: review environment
+preload was read-only (EROFS), not a demonstrated test failure. No canary until
+correction and writable verification. Progressive formatting itself introduces
+no deliberate animation and review found no GSAP-rule conflict.
+
+## Combined canary delivery after hidden-pane correction
+Accepted apply-deep attempt3 visibility/hydration/route-ready activation guard.
+Lead reviewed narrow source patch and all3 task hashes; independently reran
+`bun apps/web/transcript-rendering-acceptance.ts` PASS, including desktop/mobile
+hidden anchors, hydration/reversal, selection/copy, paging, rapid session switches,
+streaming, live-user entrance, reduced motion and zero browser errors. Quality P2
+hidden-pane issue resolved on actual browser red/green plus independent rerun.
+Implementation stable candidate full gate passed4509 tests (47.83s suite wall),
+11 focused tests and TypeScript; detailed report /tmp/deck-hidden-chat-anchor/REPORT.md.
+Lead rerun log /tmp/deck-lead-final-transcript.log.
+
+Lead installed via `bun run canary:install` successfully and checked version.
+Combined delivery includes One Dark Blood, sidebar hierarchy/reorder fix, soft
+composer lights, user-message entrance and interruptible transcript formatting.
+No active services restarted, no new commit; checkpoint eabf230 preserved.
+Performance tradeoff remains: dense initial paint702->278ms, longest task554->130ms
+in matched synthetic tests; full formatting754->1346ms, source available meanwhile.
+Single exceptionally large Markdown message may still block. Chromium coverage
+is desktop/mobile emulation, not every engine/device or real cold backend.
+
+## User correction: seamless selected row and border-only sheen
+The latest screenshot shows hierarchy indentation/group styling compromises the
+selected session's visual integration with chat. Restore a continuous concave
+selected surface through the sidebar edge while keeping project-child alignment
+clear; prefer indenting row contents instead of clipping/insetting the active
+selection surface. Preserve reorder stacking fix, status/actions and mobile.
+Reference attachments/a6db57fb-269e-4a12-98cd-ee3f3266ddd4.image.
+
+Composer direction supersedes diffuse light pools: user wants a subtle moving
+border sheen, strictly confined to the thin rounded border. No outward glow,
+interior spots, particles or sharp segmented streaks. Preserve two opposite
+highlights/same direction unless geometry warrants equivalent smooth restrained
+continuity; theme-derived color, low intensity, GSAP and accessibility lifecycle
+remain. Validate close-up desktop/mobile captures: no paint beyond border band.
+Keep uncommitted; update canary after focused visual/browser verification.
+
+## Border sheen and seamless selection delivery — attempt18
+Accepted full-width group surface with indentation moved to row contents;
+transparent expanded group preserves concave selected canvas join. Composer radial
+modulation is masked to thin rounded border, without outer/interior light pools.
+Lead reviewed sidebar/composer screenshots and8 matching source hashes in
+/tmp/deck-correction-candidate.json. Independently reran composer acceptance PASS;
+467 changed pixels, zero outside allowed border rasterization band. Reported
+desktop/mobile themes, reorder checks,7 focused tests and TypeScript pass.
+Prior full-suite evidence remains historical; no new full-suite claim for paint delta.
+Lead successfully ran canary:install and checked installed version. No active
+service restart or commit. Report /tmp/deck-correction-verification.md; Lead check
+/tmp/deck-lead-border-check.log. Chromium-only browser evidence.

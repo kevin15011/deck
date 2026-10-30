@@ -5,7 +5,7 @@ import { animateIn, duration, ease, gsap, reducedMotion, type Preset } from './m
  * panel reveals, ambient loops and the sidebar width. Keeps components free of animation code.
  */
 const entrances: { selector: string; preset: Preset; vars?: gsap.TweenVars }[] = [
-    { selector: '.message, .question-answer', preset: 'rise' },
+    { selector: '.question-answer', preset: 'rise' },
     { selector: '.activity-list > *, .activity-row', preset: 'rise' },
     { selector: '.prompt-queue, .prompt-queue li', preset: 'rise' },
     { selector: '.approvals .approval', preset: 'pop' },
@@ -58,17 +58,6 @@ export function installMotion(root: Document = document): () => void {
             if (record.type === 'attributes') {
                 const target = record.target as HTMLElement;
                 if (record.attributeName === 'open' && target instanceof HTMLDialogElement && target.open && record.oldValue === null && !reducedMotion()) reveal(target, 'pop');
-                else if (record.attributeName === 'hidden' && !target.hidden && record.oldValue !== null && target.classList.contains('workspace-panel') && settled) animateIn(target, 'rise', { duration: duration.fast });
-                else if (record.attributeName === 'class' && target.classList.contains('app-body') && settled && !reducedMotion()) {
-                    const was = (record.oldValue ?? '').split(/\s+/).includes('workspace-collapsed'), now = target.classList.contains('workspace-collapsed');
-                    if (was !== now) {
-                        const columns = (collapsed: boolean) => `minmax(0px, 1fr) minmax(0px, ${collapsed ? 0 : 1}fr)`, grids = target.querySelectorAll('.panes, .view-nav'), hidden = target.querySelectorAll<HTMLElement>('.workspace-pane, .workspace-tabs');
-                        // The panel stays painted while it closes; CSS hides it once the class settles.
-                        if (now) gsap.set(hidden, { visibility: 'visible' });
-                        gsap.fromTo(grids, { gridTemplateColumns: columns(was) }, { gridTemplateColumns: columns(now), duration: duration.base, ease: ease.out, clearProps: 'gridTemplateColumns', onComplete: () => { gsap.set(hidden, { clearProps: 'visibility' }); } });
-                        if (!now) animateIn(target.querySelector('.workspace-pane'), 'fade', { duration: duration.base });
-                    }
-                }
                 else if (record.attributeName === 'class' && target.classList.contains('workbench') && settled && !reducedMotion()) {
                     const was = (record.oldValue ?? '').split(/\s+/).includes('sidebar-collapsed'), now = target.classList.contains('sidebar-collapsed');
                     if (was !== now) gsap.fromTo(target, { gridTemplateColumns: `${was ? 60 : 224}px minmax(0px, 1fr)` }, { gridTemplateColumns: `${now ? 60 : 224}px minmax(0px, 1fr)`, duration: duration.base, ease: ease.out, clearProps: 'gridTemplateColumns' });

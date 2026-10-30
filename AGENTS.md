@@ -16,6 +16,19 @@
 
 ## Development path (Deck repository conventions)
 
+### Web UI motion
+
+Every Web UI change involving movement, appearance, disappearance, expansion,
+collapse, view changes or tab/selection transitions MUST use GSAP for its animation.
+This includes panel content and active indicators in tabs and view selectors.
+Use the Apple-inspired motion conventions: immediate feedback, restrained easing,
+interruptible transitions from the current visual state, and no decorative bounce.
+Respect `prefers-reduced-motion` with immediate state changes or a minimal fade;
+never delay input, focus, navigation or access to controls for an animation.
+Clean up owned tweens, listeners and observers on unmount, and avoid simultaneous
+CSS and GSAP animation of the same properties. Verify transitions in the browser,
+including rapid reversals, keyboard interaction and reduced motion.
+
 For a canary development path, run `bun run canary:install`, then launch `deck-canary <runner> developer`. Focused verification starts with the tests affected by the change. Use [CONTRIBUTING.md](CONTRIBUTING.md) for commands, [architecture](docs/architecture.md) for boundaries, [runners](docs/runners.md) and the [support matrix](docs/reference/support-matrix.md) for runner status, and [OpenSpec configuration](openspec/config.yaml) for SDD context.
 
 For this repository, run focused test files while editing, then `bun run test` and `bunx tsc --noEmit` before committing. The fast suite has a 90-second wall-time budget and a 2-second budget per file; exceeding either fails the run. Runner or installation changes additionally require a short live canary check by the Lead. Reuse unchanged evidence and rerun only invalidated checks. Quarantine is tracked in `tests/quarantine.yaml`, expires within 14 days, and requires user approval for protected tests. These are Deck-repo conventions, not defaults for user projects.

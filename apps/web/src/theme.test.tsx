@@ -7,7 +7,7 @@ import { DeckBrand } from './deck-logo';
 import { ThemeDialog, themeMatches } from './theme-select';
 
 test('theme registry has unique stable IDs; only registered values are accepted and dark is default', () => {
-    expect(THEMES.map(theme => [theme.id, theme.label])).toEqual([['dark', 'Dark'], ['light', 'Light'], ['green', 'Green'], ['eva01', 'EVA-01'], ['cyberpunk', 'Cyberpunk'], ['github', 'GitHub Dark'], ['github-light', 'GitHub Light'], ['one-dark-pro', 'One Dark Pro'], ['dracula', 'Dracula'], ['catppuccin-mocha', 'Catppuccin Mocha'], ['catppuccin-latte', 'Catppuccin Latte'], ['tokyo-night', 'Tokyo Night'], ['nord', 'Nord'], ['gruvbox-dark', 'Gruvbox Dark'], ['monokai-pro', 'Monokai Pro'], ['rose-pine', 'Rosé Pine'], ['night-owl', 'Night Owl'], ['solarized-light', 'Solarized Light']]);
+    expect(THEMES.map(theme => [theme.id, theme.label])).toEqual([['dark', 'Dark'], ['light', 'Light'], ['green', 'Green'], ['eva01', 'EVA-01'], ['cyberpunk', 'Cyberpunk'], ['github', 'GitHub Dark'], ['github-light', 'GitHub Light'], ['one-dark-pro', 'One Dark Pro'], ['one-dark-blood', 'One Dark Blood'], ['dracula', 'Dracula'], ['catppuccin-mocha', 'Catppuccin Mocha'], ['catppuccin-latte', 'Catppuccin Latte'], ['tokyo-night', 'Tokyo Night'], ['nord', 'Nord'], ['gruvbox-dark', 'Gruvbox Dark'], ['monokai-pro', 'Monokai Pro'], ['rose-pine', 'Rosé Pine'], ['night-owl', 'Night Owl'], ['solarized-light', 'Solarized Light']]);
     expect(new Set(THEMES.map(theme => theme.id)).size).toBe(THEMES.length);
     for (const { id } of THEMES) expect(resolveTheme(id)).toBe(id);
     for (const invalid of [null, undefined, '', 'unknown', 'Green', '__proto__', 'toString', {}, 0]) expect(resolveTheme(invalid)).toBe('dark');

@@ -8,6 +8,7 @@ export const THEMES = [
     { id: 'github', label: 'GitHub Dark', swatch: ['#0d1117', '#4493f8'] },
     { id: 'github-light', label: 'GitHub Light', swatch: ['#ffffff', '#1f883d'] },
     { id: 'one-dark-pro', label: 'One Dark Pro', swatch: ['#282c34', '#61afef'] },
+    { id: 'one-dark-blood', label: 'One Dark Blood', swatch: ['#282c34', '#982b3a'] },
     { id: 'dracula', label: 'Dracula', swatch: ['#282a36', '#bd93f9'] },
     { id: 'catppuccin-mocha', label: 'Catppuccin Mocha', swatch: ['#1e1e2e', '#cba6f7'] },
     { id: 'catppuccin-latte', label: 'Catppuccin Latte', swatch: ['#eff1f5', '#8839ef'] },

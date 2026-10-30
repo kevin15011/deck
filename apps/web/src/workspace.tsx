@@ -1,3 +1,4 @@
+import { useActiveIndicator } from './view-motion';
 import { workerActivity } from '../../../packages/core/src/session/activity-summary';
 import { ProgressiveTranscript } from './progressive-transcript';
 import { AutoApprovalMessage } from './approvals';
@@ -22,8 +23,9 @@ export function activeSubagentCount(view: Pick<ViewState,'tasks'|'approvals'|'qu
 }
 export const hasWorkingSubagent = (view: Pick<ViewState,'tasks'|'approvals'|'questions'>) => activeSubagentCount(view)>0;
 export function Tabs({ active, onChange, subagentsWorking = false, activeSubagents = subagentsWorking ? 1 : 0, subagentsFresh = true }: { active: WorkspaceTab; onChange: (tab: WorkspaceTab) => void; subagentsWorking?: boolean; activeSubagents?:number; subagentsFresh?:boolean }) {
-    const statusId=useId();
-    return <div className="workspace-tabs" role="tablist" aria-label="Workspace views" onKeyDown={event => {
+    const statusId=useId(), tabsRef=useRef<HTMLDivElement>(null);
+    useActiveIndicator(tabsRef, active, '[aria-selected="true"]');
+    return <div ref={tabsRef} className="workspace-tabs" role="tablist" aria-label="Workspace views" onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
         const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button')).filter(button => button.offsetParent !== null);
         const at = buttons.indexOf(event.target as HTMLButtonElement);

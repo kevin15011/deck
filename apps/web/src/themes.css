@@ -51,6 +51,58 @@
     --md-rule: var(--border);
     --md-task: var(--action);
 }
+/* One Dark Blood: One Dark neutral surfaces with independent crimson actions. */
+:root[data-theme=one-dark-blood] {
+    color-scheme: dark;
+    --canvas: #21252b;
+    --surface: #282c34;
+    --logo-ink: #d7dae0;
+    --card: #2c313a;
+    --console: #21252b;
+    --input: #1e2227;
+    --soft: #abb2bf;
+    --quiet: #9da5b4;
+    --accent: #ef858c;
+    --link: #ef858c;
+    --action-hover: #ae3545;
+    --focus: #ef858c;
+    --terracotta: #ef858c;
+    --hairline: #2c313a;
+    --accent-border: color-mix(in srgb, #ef858c 45%, transparent);
+    --ink: #d7dae0;
+    --muted: #9da5b4;
+    --action: #982b3a;
+    --on-action: #ffffff;
+    --border: #3e4451;
+    --tint: #2c313a;
+    --warning: #e5c07b;
+    --warning-bg: color-mix(in srgb, #e5c07b 12%, #282c34);
+    --warning-border: color-mix(in srgb, #e5c07b 40%, transparent);
+    --error: #e37b83;
+    --danger: var(--error);
+    --error-bg: color-mix(in srgb, #e06c75 12%, #282c34);
+    --error-border: color-mix(in srgb, #e06c75 40%, transparent);
+    --backdrop: color-mix(in srgb, #21252b 80%, transparent);
+    --success: #98c379;
+    --md-text: var(--ink);
+    --md-heading: #e37b83;
+    --md-link: #ef858c;
+    --md-inline: #98c379;
+    --md-inline-bg: var(--console);
+    --md-code: var(--ink);
+    --md-code-bg: var(--console);
+    --md-toolbar: var(--soft);
+    --md-em: #c77bde;
+    --md-strong: #e5c07b;
+    --md-quote: var(--muted);
+    --md-quote-border: var(--border);
+    --md-unordered: #c77bde;
+    --md-ordered: #d19a66;
+    --md-table-head: var(--ink);
+    --md-table-bg: var(--surface);
+    --md-rule: var(--border);
+    --md-task: var(--action);
+}
 /* Dracula: draculatheme.com official spec. */
 :root[data-theme=dracula] {
     color-scheme: dark;
@@ -623,6 +675,8 @@
     --md-rule: var(--border);
     --md-task: var(--action);
 }
+:root[data-theme=one-dark-blood] input::placeholder,
+:root[data-theme=one-dark-blood] textarea::placeholder,
 :root[data-theme=one-dark-pro] input::placeholder,
 :root[data-theme=one-dark-pro] textarea::placeholder,
 :root[data-theme=dracula] input::placeholder,
@@ -647,6 +701,8 @@
 :root[data-theme=solarized-light] textarea::placeholder,
 :root[data-theme=github-light] input::placeholder,
 :root[data-theme=github-light] textarea::placeholder { color: var(--muted); opacity: 1; }
+:root[data-theme=one-dark-blood] .connection-dot.ready,
+:root[data-theme=one-dark-blood] .session-readiness.ready,
 :root[data-theme=one-dark-pro] .connection-dot.ready,
 :root[data-theme=one-dark-pro] .session-readiness.ready,
 :root[data-theme=dracula] .connection-dot.ready,
