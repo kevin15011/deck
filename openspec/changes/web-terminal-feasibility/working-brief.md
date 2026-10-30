@@ -47,3 +47,10 @@ Use an isolated unprivileged fixture to verify pinned Bun PTY behavior, controll
 - [Upstream sudo manual](https://github.com/sudo-project/sudo/blob/main/docs/sudo.man.in): terminal authentication and policy behavior.
 
 No implementation estimate, sudo compatibility certification, remote-terminal exposure or production security approval is implied by this study.
+
+## Product direction (2026-10-26, user conversation)
+
+- One host-owned terminal resource with two entry points: a global "Terminals" view (any cwd, outside projects) and a session dock that starts at the project root and links terminals to that project. Browser disconnect does not close a terminal; explicit close does.
+- Interactive prompts, wizards and sudo work through the real PTY; the UI adds waiting-for-input/exit status, push notifications and a mobile key bar. Saved "Actions" (per-project and global commands) open their own PTY tab. Agent bridges are user-initiated only: "Run in terminal" (paste without Enter) and "Send output to chat".
+- Mobile access over Tailscale Serve is required from the first usable slice. Decision: reuse the existing Tailscale Serve identity binding (`tailscale-user-login`, device records bound to `tailscaleIdentity`) and its WireGuard/HTTPS transport instead of building a separate per-device terminal grant or Deck-managed TLS. Remaining minimal guards: terminal capability disabled by default behind one config switch; terminal endpoints refuse Funnel and non-Serve remote requests; revoking a device closes its live terminals. The user rejected a Tailscale login allow-list for terminal use (out of scope; do not add).
+- Status: direction agreed; implementation not started and not authorized yet (including the Phase 0 PTY spike).
