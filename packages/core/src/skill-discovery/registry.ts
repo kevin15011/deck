@@ -370,8 +370,21 @@ export function renderSkillRegistryMarkdown(frontmatter: SkillRegistryFrontmatte
   return `---\n${yaml}\n---\n${renderSkillRegistryBody(frontmatter)}`;
 }
 
-/** Parse a bounded V1 registry document without performing discovery or writes. */
+// Exact-byte memoization avoids repeated YAML parsing during one preparation/repair.
+// Bounded to eight documents; clones prevent callers from mutating cached validation.
+const parsedDocuments = new Map<string, SkillRegistryParseResultV1>();
 export function parseSkillRegistryDocument(source: string): SkillRegistryParseResultV1 {
+  const cached = parsedDocuments.get(source);
+  if (cached) return structuredClone(cached);
+  const parsed = parseRegistryDocumentUncached(source);
+  if (parsed.ok) {
+    if (parsedDocuments.size >= 8) parsedDocuments.delete(parsedDocuments.keys().next().value!);
+    parsedDocuments.set(source, structuredClone(parsed));
+  }
+  return parsed;
+}
+/** Parse a bounded registry document without performing discovery or writes. */
+function parseRegistryDocumentUncached(source: string): SkillRegistryParseResultV1 {
   if (typeof source !== "string") return parseFailure("malformed_frontmatter", "Registry content is invalid.");
   if (Buffer.byteLength(source, "utf8") > SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes) {
     return parseFailure("malformed_frontmatter", "Registry content exceeds the maximum file size.");

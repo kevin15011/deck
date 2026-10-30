@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { isCodebaseMemoryEnabled, type NormalizedDeckConfig, type RunnerLaunchPlan } from "@deck/core";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import { ProjectPreparationService } from "../../../packages/sdd-runtime/src/execution/project-preparation";
-import { composeSessionStartContextV1 } from "../../../packages/sdd-runtime/src/execution/session-start-context";
+import { composeSkillSessionStartContext } from "../../../packages/sdd-runtime/src/execution/session-start-context";
 
 /** A launch owns the coordinator until all native children have exited. The transport
  * only returns observations for the fixed root/runner; it cannot grant repair authority. */
@@ -17,11 +17,12 @@ export async function startNativeProjectReadiness(input: {
   validateGeneration?(): void;
   onProjectRead?(path: string): void;
   prerequisites?(config: NormalizedDeckConfig): import("@deck/core/session/preparation").PreparationMember["capabilities"];
+  registryProviders?: () => readonly import("@deck/core").SkillDiscoverySourceProviderV1[];
   codebaseAvailability?(): "ready" | "unavailable" | "unverified";
 }) {
   const root = realpathSync(input.projectRoot), epoch = randomUUID(), sessionId = randomUUID();
-  const service = new ProjectPreparationService({ onProjectRead: input.onProjectRead });
-  const snapshot = () => {
+  const service = new ProjectPreparationService({ onProjectRead: input.onProjectRead, registryProviders: input.registryProviders });
+  const snapshot = async () => {
     input.validateGeneration?.();
     const config = input.config();
     const capabilities = { ...preparationCapabilities(config, input.runnerId), ...input.prerequisites?.(config), "codebase-memory": { enabled: isCodebaseMemoryEnabled(config, input.runnerId), availability: isCodebaseMemoryEnabled(config, input.runnerId) ? input.codebaseAvailability?.() ?? "unverified" as const : "unverified" as const } };
@@ -29,16 +30,18 @@ export async function startNativeProjectReadiness(input: {
       policyDigest: createHash("sha256").update(JSON.stringify([input.generation, capabilities])).digest("hex"),
       members: DEVELOPER_TEAM_AGENTS.map(role => ({ memberId: role.id, runnerId: input.runnerId, bindingId: `${role.id}@${input.runnerId}`, capabilities })),
     };
+    await service.prepareRegistryEvidence(scope, input.runnerId);
+    input.validateGeneration?.();
     const preparation = service.status(scope);
-    return { root, epoch, generation: input.generation, preparation, text: composeSessionStartContextV1(preparation, input.runnerId) };
+    return { root, epoch, generation: input.generation, preparation, text: composeSkillSessionStartContext(preparation, input.runnerId) };
   };
-  const initial = snapshot(), token = randomUUID();
-  const server = createServer((request, response) => {
+  const initial = await snapshot(), token = randomUUID();
+  const server = createServer(async (request, response) => {
     // Caller-supplied role, roster, root, and component data are never used.
     if (request.method !== "POST" || request.url !== "/readiness" || request.headers.authorization !== `Bearer ${token}` || request.headers["transfer-encoding"] || Number(request.headers["content-length"] ?? 0) !== 0) {
       response.writeHead(403).end(); return;
     }
-    try { const body = JSON.stringify(snapshot()); response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(body); }
+    try { const body = JSON.stringify(await snapshot()); response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(body); }
     catch { response.writeHead(503).end(); }
   });
   server.requestTimeout = 2000; server.headersTimeout = 2000;
@@ -70,7 +73,8 @@ export function withNativeProjectReadiness(plan: RunnerLaunchPlan, runnerId: str
       signal?.throwIfAborted();
       try {
         const generation = readGeneration ? createHash("sha256").update(readGeneration()).digest("hex") : plan.generationReference?.selectionHash ?? randomUUID();
-        context = await startNativeProjectReadiness({ projectRoot: plan.cwd, runnerId, config, codebaseAvailability, prerequisites, validateGeneration: () => {
+        const adapters = (await import("./runner-adapters")).createDefaultAdapterRegistry().list();
+        context = await startNativeProjectReadiness({ registryProviders: () => adapters.flatMap(a => a.skillDiscovery ? [a.skillDiscovery] : []), projectRoot: plan.cwd, runnerId, config, codebaseAvailability, prerequisites, validateGeneration: () => {
           try { if (readGeneration && createHash("sha256").update(readGeneration()).digest("hex") !== generation) generationRevoked = true; }
           catch { generationRevoked = true; }
           const reference = plan.generationReference;

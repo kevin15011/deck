@@ -14,9 +14,9 @@ import type {
   SkillRegistryWriteTargetsV1,
   SkillRegistryWriterV1,
 } from "@deck/core";
-import { SKILL_DISCOVERY_V1_BOUNDS } from "@deck/core";
+import { SKILL_DISCOVERY_V1_BOUNDS } from "../../../packages/core/src/skill-discovery/contracts";
 
-import { createDefaultAdapterRegistry } from "./runner-adapters";
+
 import {
   parseSkillRegistryDocument,
   readSkillRegistryStatus,
@@ -111,7 +111,7 @@ export async function runSkillRegistryCommand(
       return usageFailure(operation, "runner_required");
     }
 
-    const adapterRegistry = dependencies.adapterRegistry ?? createDefaultAdapterRegistry();
+    const adapterRegistry = dependencies.adapterRegistry ?? (await import("./runner-adapters")).createDefaultAdapterRegistry();
     const runnerIds = adapterRegistry.list().map((adapter) => adapter.runnerId);
     activeRunnerId = await selectInteractiveRunner(runnerIds, dependencies.selectRunner);
     if (!activeRunnerId || !runnerIds.includes(activeRunnerId)) {
@@ -123,7 +123,7 @@ export async function runSkillRegistryCommand(
     return usageFailure(operation, "invalid_runner");
   }
 
-  const adapterRegistry = dependencies.adapterRegistry ?? createDefaultAdapterRegistry();
+  const adapterRegistry = dependencies.adapterRegistry ?? (await import("./runner-adapters")).createDefaultAdapterRegistry();
   try {
     // Selection authenticates the executor; catalog scope is all configured providers.
     adapterRegistry.get(activeRunnerId);

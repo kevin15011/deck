@@ -2,7 +2,7 @@ import { preparationCapabilities } from "./preparation-capabilities";
 import { preparationAuthorityScope } from "@deck/core/session/preparation";
 import { validateClaudeSessionIntent } from "../../../packages/adapter-claude/src/session-skills";
 import { renderSessionOverlay, type SessionOverlaySection } from "@deck/core/session/overlay";
-import { composeSessionStartContextV1 } from "../../../packages/sdd-runtime/src/execution/session-start-context";
+import { composeSkillSessionStartContext } from "../../../packages/sdd-runtime/src/execution/session-start-context";
 import { createHash } from "node:crypto";
 import { ProjectPreparationService } from "../../../packages/sdd-runtime/src/execution/project-preparation";
 import { isCodebaseMemoryEnabled } from "@deck/core";
@@ -81,7 +81,7 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
       };
       return { ...scope, policyDigest: createHash("sha256").update(JSON.stringify(preparationAuthorityScope(scope).members)).digest("hex") };
     },
-    sessionStartContext: composeSessionStartContextV1,
+    sessionStartContext: composeSkillSessionStartContext,
     paths: services.paths, broker: services.broker, credentials: services.credentials, supervisor: services.supervisor,
     clock: services.clock, logger: services.logger, drivers,
     config: (): CrossRunnerConfig | undefined => options.configStore.read().crossRunner,

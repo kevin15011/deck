@@ -66,7 +66,7 @@ describe("authorized skill registry persistence", () => {
     const projectRoot = await createProject({ ignore: "*.log\n" });
     const candidate = registryDocument("new");
 
-    const result = await createSkillRegistryWriter({ projectRoot }).commit(
+    const result = await createSkillRegistryWriter({ isTracked: () => false, projectRoot }).commit(
       writePlan(projectRoot, candidate, {
         allowed_targets: [".gitignore", ".atl/skill-registry.md"],
         expected_registry_digest: "missing",
@@ -89,7 +89,7 @@ describe("authorized skill registry persistence", () => {
     const projectRoot = await createProject({ ignore: undefined });
     const candidate = registryDocument("new");
 
-    const result = await createSkillRegistryWriter({ projectRoot }).commit(
+    const result = await createSkillRegistryWriter({ isTracked: () => false, projectRoot }).commit(
       writePlan(projectRoot, candidate, { expected_registry_digest: "missing" }),
       authority(projectRoot),
     );
@@ -128,7 +128,7 @@ describe("authorized skill registry persistence", () => {
     const oldDocument = await readRegistry(projectRoot);
     const candidate = "---\nschema: skill-registry-v1\n---\npartial\n";
 
-    const result = await createSkillRegistryWriter({ projectRoot }).commit(
+    const result = await createSkillRegistryWriter({ isTracked: () => false, projectRoot }).commit(
       writePlan(projectRoot, candidate, {
         expected_registry_digest: computeSkillRegistryPersistenceDigest(oldDocument),
       }),
@@ -149,7 +149,7 @@ describe("authorized skill registry persistence", () => {
     const stale = registryDocument("old");
     await fs.writeFile(path.join(projectRoot, ".atl", "skill-registry.md"), registryDocument("changed"));
 
-    const result = await createSkillRegistryWriter({ projectRoot }).commit(
+    const result = await createSkillRegistryWriter({ isTracked: () => false, projectRoot }).commit(
       writePlan(projectRoot, registryDocument("new"), {
         expected_registry_digest: computeSkillRegistryPersistenceDigest(stale),
       }),
@@ -179,23 +179,23 @@ describe("authorized skill registry persistence", () => {
     ];
 
     for (const [reasonCode, plan] of mismatches) {
-      const result = await createSkillRegistryWriter({ projectRoot }).commit(plan, authority(projectRoot));
+      const result = await createSkillRegistryWriter({ isTracked: () => false, projectRoot }).commit(plan, authority(projectRoot));
       expect(result.outcome).toBe("rejected");
       expect(result.reason_code).toBe(reasonCode);
       expect(await readRegistry(projectRoot)).toBe(oldDocument);
     }
 
     const replayAuthority = authority(projectRoot);
-    const first = await createSkillRegistryWriter({ projectRoot }).commit(basePlan, replayAuthority);
+    const first = await createSkillRegistryWriter({ isTracked: () => false, projectRoot }).commit(basePlan, replayAuthority);
     expect(first.outcome).toBe("committed");
-    const replay = await createSkillRegistryWriter({ projectRoot }).commit(
+    const replay = await createSkillRegistryWriter({ isTracked: () => false, projectRoot }).commit(
       { ...basePlan, expected_registry_digest: computeSkillRegistryPersistenceDigest(candidate) },
       replayAuthority,
     );
     expect(replay.outcome).toBe("rejected");
     expect(replay.reason_code).toBe("authority_replayed");
 
-    const flagOnly = await createSkillRegistryWriter({ projectRoot }).commit(
+    const flagOnly = await createSkillRegistryWriter({ isTracked: () => false, projectRoot }).commit(
       { ...basePlan, expected_registry_digest: computeSkillRegistryPersistenceDigest(candidate) },
       { activeRunnerId: "opencode", action: "regeneration" } as never,
     );
@@ -209,7 +209,7 @@ describe("authorized skill registry persistence", () => {
     cleanupPaths.push(outsideRoot);
     await fs.symlink(outsideRoot, path.join(projectRoot, ".atl"));
 
-    const result = await createSkillRegistryWriter({ projectRoot }).commit(
+    const result = await createSkillRegistryWriter({ isTracked: () => false, projectRoot }).commit(
       writePlan(projectRoot, registryDocument("new"), { expected_registry_digest: "missing" }),
       authority(projectRoot),
     );
@@ -245,7 +245,7 @@ describe("authorized skill registry persistence", () => {
       const oldDocument = await readRegistry(projectRoot);
       const candidate = registryDocument(`new-${failpoint}`);
 
-      const result = await createSkillRegistryWriter({
+      const result = await createSkillRegistryWriter({ isTracked: () => false,
         projectRoot,
         failpoint: async (current) => {
           if (current === failpoint) throw new Error(`injected ${failpoint}`);
@@ -295,7 +295,7 @@ describe("authorized skill registry persistence", () => {
       },
     };
 
-    const result = await createSkillRegistryWriter({ projectRoot, atomicReplace }).commit(
+    const result = await createSkillRegistryWriter({ isTracked: () => false, projectRoot, atomicReplace }).commit(
       writePlan(projectRoot, candidate, {
         expected_registry_digest: computeSkillRegistryPersistenceDigest(oldDocument),
       }),
@@ -316,7 +316,7 @@ describe("authorized skill registry persistence", () => {
     const prior = registryDocument("old");
     const projectRoot = await createProject({ ignore: "/.atl/\n", ...(existing ? { registry: prior } : {}) });
     const concurrent = registryDocument("external-editor");
-    const result = await createSkillRegistryWriter({ projectRoot, atomicReplace: {
+    const result = await createSkillRegistryWriter({ isTracked: () => false, projectRoot, atomicReplace: {
       async replace(_temporary, target) { await fs.writeFile(target, concurrent); throw new Error("replacement rejected after concurrent edit"); },
       async syncDirectory() {},
     } }).commit(writePlan(projectRoot, registryDocument("candidate"), {
@@ -331,7 +331,7 @@ describe("authorized skill registry persistence", () => {
     const priorIgnore = "existing-rule\n";
     const projectRoot = await createProject({ ignore: priorIgnore, registry: registryDocument("old") });
     const concurrent = "external-editor-rule\n";
-    const result = await createSkillRegistryWriter({ projectRoot, atomicReplace: {
+    const result = await createSkillRegistryWriter({ isTracked: () => false, projectRoot, atomicReplace: {
       async replace(temporary, target) {
         if (path.basename(temporary).includes(".backup-")) { await fs.rename(temporary, target); return; }
         await fs.writeFile(target, concurrent);
@@ -380,7 +380,7 @@ describe("authorized skill registry persistence", () => {
       },
     };
 
-    const result = await createSkillRegistryWriter({ projectRoot, atomicReplace }).commit(
+    const result = await createSkillRegistryWriter({ isTracked: () => false, projectRoot, atomicReplace }).commit(
       writePlan(projectRoot, registryDocument("new"), {
         allowed_targets: [".gitignore", ".atl/skill-registry.md"],
         expected_registry_digest: computeSkillRegistryPersistenceDigest(oldDocument),
@@ -413,7 +413,7 @@ describe("authorized skill registry persistence", () => {
       },
     };
 
-    const result = await createSkillRegistryWriter({ projectRoot, atomicReplace }).commit(
+    const result = await createSkillRegistryWriter({ isTracked: () => false, projectRoot, atomicReplace }).commit(
       writePlan(projectRoot, registryDocument("new"), {
         expected_registry_digest: computeSkillRegistryPersistenceDigest(oldDocument),
       }),

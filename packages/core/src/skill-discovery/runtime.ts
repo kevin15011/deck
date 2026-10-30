@@ -1,3 +1,4 @@
+import { rankSkillCandidates, type SkillRelevanceContext } from "./relevance";
 import { resolveSharedSkillExposure } from "./shared";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
@@ -38,6 +39,7 @@ export interface TaskScopedSkillDiscoveryRuntimeInputV1 {
   readonly provider: SkillDiscoverySourceProviderV1;
   readonly providers?: readonly SkillDiscoverySourceProviderV1[];
   readonly nativeLoader?: SkillNativeLoadPortV1;
+  readonly relevance?: Omit<SkillRelevanceContext, "activeRunnerId">;
 }
 
 export interface TaskScopedSkillDiscoveryRuntimeV1 {
@@ -145,9 +147,9 @@ export function createTaskScopedSkillDiscoveryRuntime(
     for (const record of activeRecords) {
       activeNameCounts.set(record.name, (activeNameCounts.get(record.name) ?? 0) + 1);
     }
-    const matched = activeRecords
-      .filter((record) => matches(record, normalized))
-      .map((record) => ({ record, public: publicCandidate(record), searchGeneration: generation }));
+    const ranked = rankSkillCandidates(activeRecords, { ...input.relevance, activeRunnerId: input.activeRunnerId }, sharedCatalog?.exposures);
+    const matched = ranked.filter(item => matches(item.record, normalized))
+      .map(item => ({ record: item.record, public: { ...publicCandidate(item.record), match_reasons: item.reasons, availability: item.availability, source_owners: item.owners }, searchGeneration: generation }));
     const visible = matched.slice(0, normalized.limit);
     if (generation !== searchGeneration) return supersededSearch(sourceMode, completeness, diagnostics);
     selectionCompleteness = completeness;

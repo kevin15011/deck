@@ -25,7 +25,7 @@
 
 import { platform, arch } from "node:process";
 import { spawn } from "node:child_process";
-import { sanitizeRunnerEnv } from "@deck/core";
+import { sanitizeRunnerEnv } from "../../../../packages/core/src/config/env-sanitizer";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -176,8 +176,8 @@ export function getDefaultReleaseCachePath(): string {
  * Returns non-zero exitCode when HTTP status is non-2xx (404, 403, rate limit, etc.)
  * to prevent 404 responses from being parsed as "no upgrade available".
  */
-export function curlReleasesApi(extraArgs: readonly string[] = []): { exitCode: number; stdout: string; stderr: string } {
-  const result = spawnSync("curl", [
+export function curlReleasesApi(extraArgs: readonly string[] = [], transport: typeof spawnSync = spawnSync): { exitCode: number; stdout: string; stderr: string } {
+  const result = transport("curl", [
     "-s",
     "-L",
     "-w",
@@ -219,9 +219,10 @@ function parseReleasesApiResponse(result: CurlResult): CurlResult {
 export function curlReleaseJsonAsset(
   tag: string,
   extraArgs: readonly string[] = [],
+  transport: typeof spawnSync = spawnSync,
 ): { exitCode: number; stdout: string; stderr: string } {
   const url = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${tag}/release.json`;
-  const result = spawnSync("curl", ["-s", "-L", ...extraArgs, url]);
+  const result = transport("curl", ["-s", "-L", ...extraArgs, url]);
   return {
     exitCode: result.exitCode ?? 1,
     stdout: (result.stdout ?? "") as string,

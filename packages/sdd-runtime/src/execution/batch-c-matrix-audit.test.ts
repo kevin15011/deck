@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 
 test("Batch C matrix uses independent executable contract cases", async () => {
-  const source = await Bun.file(new URL("./batch-c-authoritative-matrix.test.ts", import.meta.url)).text();
+  const source = (await Promise.all(["./batch-c-authoritative-matrix.test.ts", "./batch-c-authoritative-matrix-continuation.test.ts", "./batch-c-authoritative-matrix-fixture.ts"]
+    .map(file => Bun.file(new URL(file, import.meta.url)).text()))).join("\n");
   const blocks = source.match(/^test\("C-[\s\S]*?^\}\);/gm) ?? [];
   const ids = blocks.map((block) => block.match(/^test\("(C-[A-Z]+-\d+)/)?.[1]);
 

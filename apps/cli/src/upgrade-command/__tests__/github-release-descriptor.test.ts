@@ -191,17 +191,15 @@ describe("github-release / descriptor-aware path (T2.2)", () => {
 
   describe("curl wrappers", () => {
     it("curlReleasesApi returns the expected shape on failure", () => {
-      // No network: exitCode should be non-zero (or 0 with no output on
-      // environments that have a stub DNS). Either way the call must
-      // not throw.
-      const result = curlReleasesApi(["--connect-timeout", "1", "--max-time", "1"]);
+      // Fake only the process/network edge; exercise the real HTTP parser.
+      const result = curlReleasesApi([], () => ({ exitCode: 0, stdout: "missing\n404", stderr: "" }));
       expect(typeof result.exitCode).toBe("number");
       expect(typeof result.stdout).toBe("string");
       expect(typeof result.stderr).toBe("string");
     });
 
     it("curlReleaseJsonAsset returns the expected shape on failure", () => {
-      const result = curlReleaseJsonAsset("v0.0.0", ["--connect-timeout", "1", "--max-time", "1"]);
+      const result = curlReleaseJsonAsset("v0.0.0", [], () => ({ exitCode: 7, stdout: "", stderr: "connection refused" }));
       expect(typeof result.exitCode).toBe("number");
       expect(typeof result.stdout).toBe("string");
       expect(typeof result.stderr).toBe("string");

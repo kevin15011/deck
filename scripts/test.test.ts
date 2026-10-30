@@ -68,3 +68,20 @@ test("run deadline prevents isolated retries and later batches", async () => {
   }, () => stopped);
   expect(started).toEqual(["one", "two", "three", "four"]);
 });
+
+// Protects work-conserving scheduling without increasing the four-process limit.
+test("a free worker starts the next file while another file remains pending", async () => {
+  const { runWithTolerance } = await import("./test");
+  let unblock!: () => void;
+  const pending = new Promise<void>(resolve => { unblock = resolve; });
+  const started: string[] = [];
+  const work = runWithTolerance(["slow", "a", "b", "c", "next"], async file => {
+    started.push(file);
+    if (file === "slow") await pending;
+    return { code: 0, text: "", overBudget: false };
+  }, () => false);
+  await Promise.resolve(); await Promise.resolve();
+  expect(started).toContain("next");
+  unblock();
+  expect(await work).toHaveLength(5);
+});

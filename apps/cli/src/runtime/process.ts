@@ -8,7 +8,7 @@
  */
 
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync, SpawnOptions as NodeSpawnOptions, ChildProcess, type SpawnSyncReturns } from "node:child_process";
-import { sanitizeRunnerEnv } from "@deck/core";
+import { sanitizeRunnerEnv } from "../../../../packages/core/src/config/env-sanitizer";
 
 // ============================================================================
 // Types

@@ -132,7 +132,7 @@ export type SessionRolePromptContext = {
 export type SessionManagerOptions = {
   projectPreparation?: PreparationPort;
   preparationScope?: (input: { projectRoot: string; sessionId: string; epoch: string; members: CrossTeamAssignments }) => PreparationScope;
-  sessionStartContext?: (snapshot: import("@deck/core/session/preparation").PreparationSnapshot, runnerId: string) => string;
+  sessionStartContext?: (snapshot: import("@deck/core/session/preparation").PreparationSnapshot, runnerId: string, context?: { roleId: string; taskText: string }) => string;
   paths: StatePaths;
   broker: ApprovalBroker;
   questionBroker?: QuestionBroker;
@@ -2034,7 +2034,7 @@ export class SessionManager implements SessionService {
       }
       if (readinessScope) await this.options.projectPreparation?.prepareRegistryEvidence?.(readinessScope, assignment.runnerId);
       const readinessSnapshot = readinessScope && this.options.projectPreparation?.status(readinessScope);
-      const sessionStartContext = (assignment.runnerId === "claude" || (assignment.runnerId === "codex" || assignment.runnerId === "opencode" || assignment.runnerId === "pi") && nativeRoleDescriptor) && readinessSnapshot && this.options.sessionStartContext ? { text: this.options.sessionStartContext(readinessSnapshot, assignment.runnerId), snapshotId: readinessSnapshot.snapshotId, epoch: this.preparationEpoch } : undefined;
+      const sessionStartContext = (assignment.runnerId === "claude" || (assignment.runnerId === "codex" || assignment.runnerId === "opencode" || assignment.runnerId === "pi") && nativeRoleDescriptor) && readinessSnapshot && this.options.sessionStartContext ? { text: this.options.sessionStartContext(readinessSnapshot, assignment.runnerId, { roleId: roleId ?? "", taskText: turn.prompt }), snapshotId: readinessSnapshot.snapshotId, epoch: this.preparationEpoch } : undefined;
       this.options.credentials.issue({ attempt: turn.attempt, epoch: this.preparationEpoch, sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId, allowedTools: child.mcp.sessionTools }, credentialFile);
       for (const id of child.skipped) this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: { code: "child-mcp-server-unresolved", server: id } });
       const approvals = this.approvalMode(live.meta, live.ledger).approvalMode === "relay" ? "relay" : "runner-default";

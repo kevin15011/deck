@@ -310,6 +310,9 @@ export interface SkillCandidateQueryV1 {
 
 /** Privacy-safe candidate projection; locators and load references stay runtime-private. */
 export interface SkillCandidateV1 {
+  readonly match_reasons?: readonly string[];
+  readonly availability?: "filesystem-revalidation-required" | "native-revalidation-required" | "not-exposed";
+  readonly source_owners?: readonly string[];
   readonly observation_id: string;
   readonly name: string;
   readonly source_category: SkillDiscoverySourceCategoryV1;

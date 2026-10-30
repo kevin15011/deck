@@ -2,7 +2,7 @@
 import { expect } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getDefaultDeckConfig } from '@deck/core';
+import { getDefaultDeckConfig } from '@deck/core/config/deck-config';
 import type { DriverTaskInput, RunnerSessionDriver, TurnOutcome } from '@deck/core/session/driver';
 import { ProjectPreparationService } from '../../../sdd-runtime/src/execution/project-preparation';
 import { composeSessionStartContextV1 } from '../../../sdd-runtime/src/execution/session-start-context';

@@ -60,7 +60,7 @@ export async function withBudget(
   }
 }
 
-type FileResult = { code: number; text: string; overBudget: boolean };
+type FileResult = { code: number; text: string; overBudget: boolean; durationMs?: number };
 
 /** Drain each parallel batch before retrying overruns alone, under the run deadline. */
 export async function runWithTolerance(
@@ -70,9 +70,23 @@ export async function runWithTolerance(
   warn: (message: string) => void = console.warn,
 ): Promise<(FileResult & { file: string })[]> {
   const results: (FileResult & { file: string })[] = [];
-  for (let next = 0; next < files.length && !stopped(); next += 4) {
-    const batch = await Promise.all(files.slice(next, next + 4).map(async file => ({ ...await runFile(file), file })));
-    for (const first of batch) {
+  let next = 0;
+  while (next < files.length && !stopped()) {
+    let pause = false;
+    const wave: (FileResult & { file: string })[] = [];
+    const initial = files.slice(next, next + 4);
+    next += initial.length;
+    await Promise.all(initial.map(async first => {
+      let file: string | undefined = first;
+      while (file) {
+        const result = { ...await runFile(file), file };
+        wave.push(result);
+        if (result.overBudget) pause = true;
+        file = !pause && !stopped() ? files[next++] : undefined;
+      }
+    }));
+    // An overrun pauses admission; drain all workers before its isolated retry.
+    for (const first of wave.sort((a, b) => files.indexOf(a.file) - files.indexOf(b.file))) {
       if (stopped()) return results;
       let result = first;
       if (first.overBudget) {
@@ -136,8 +150,10 @@ export async function main(args = process.argv.slice(2), root = resolve(import.m
         } finally {
           active.delete(child);
         }
-        return { code, overBudget, text: (await output).join("\n") };
+        return { code, overBudget, durationMs: performance.now() - fileStarted, text: (await output).join("\n") };
     }, () => stopped);
+    console.log("Slowest test files (wall time including startup):");
+    for (const result of [...results].sort((a, b) => (b.durationMs ?? 0) - (a.durationMs ?? 0)).slice(0, 10)) console.log(`${result.durationMs?.toFixed(0)}ms ${result.file}`);
     for (const { file, code, text, overBudget } of results) {
         passedTests += Number(/(\d+) pass\b/.exec(text)?.[1] ?? 0);
         failedTests += Number(/(\d+) fail\b/.exec(text)?.[1] ?? 0);
