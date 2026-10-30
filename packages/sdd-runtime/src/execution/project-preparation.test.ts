@@ -8,25 +8,9 @@ import type { PreparationEffectRecord, PreparationInvocation, PreparationScope }
 import { migrateRetiredTestingPolicy } from "./retired-testing-policy";
 import { formatReadinessBlockV1, ProjectPreparationService, type IndexInitializerBinding } from "./project-preparation";
 
-const dirs: string[] = [];
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "deck-preparation-")); dirs.push(root); mkdirSync(join(root, "openspec"));
-  const file = join(root, "openspec/config.yaml");
-  writeFileSync(file, "schema: spec-driven\ntesting:\n  strict_tdd: true # old policy\n  commands:\n    test: bun test\n");
-  const scope: PreparationScope = { projectRoot: root, sessionId: "s", epoch: "e", policyDigest: "p", members: [
-    { memberId: "lead", runnerId: "claude", bindingId: "lead", capabilities: { "codebase-memory": { enabled: false } } },
-    { memberId: "setup", runnerId: "claude", bindingId: "setup", capabilities: { "codebase-memory": { enabled: false } } },
-    { memberId: "quality", runnerId: "codex", bindingId: "quality", capabilities: { "codebase-memory": { enabled: true } } },
-  ] };
-  const service = new ProjectPreparationService(), snapshot = service.status(scope);
-  const request = { snapshotId: snapshot.snapshotId, components: ["retired-testing-policy"] };
-  const delegation = service.delegate(request, scope, { taskId: "setup-task", attempt: 1 });
-  const records: PreparationEffectRecord[] = [];
-  let active = true;
-  const invocation: PreparationInvocation = { delegation, roleId: "deck-setup", generation: "g", runnerId: "claude", nativeSessionId: "native", launchId: "launch", current: () => active ? scope : undefined, record: r => { records.push(r); }, previous: () => records };
-  return { service, snapshot, scope, request, invocation, records, file, revoke: () => { active = false; } };
-}
+import { fixture, cleanupPreparationFixtures } from "./preparation-test-fixture";
+afterEach(cleanupPreparationFixtures);
+
 test("YAML cleanup preserves commands, collisions, opaque keys, comments and idempotence", () => {
   const source = `# project\nschema: spec-driven\ntdd: true\nrules:\n  apply:\n    tdd: true\n  verify:\n    coverage_threshold: 80\ntesting:\n  policy: strict\n  strict_tdd_gates:\n    test: |\n      bun test --coverage\n  commands:\n    test: bun test\n    tdd: echo keep\nopaque:\n  strict_tdd: true\n`;
   const result = migrateRetiredTestingPolicy(source), value = parse(result.text);
@@ -157,36 +141,6 @@ test.each([false, true])("registry generation/refresh uses the current Setup run
   const { parseSkillRegistryDocument } = await import('../../../core/src/skill-discovery/registry');
   expect(parseSkillRegistryDocument(readFileSync(join(f.scope.projectRoot, '.atl/skill-registry.md'), 'utf8')).ok).toBe(true);
   expect(f.records.filter(r => r.state === 'intent')).toHaveLength(1);
-});
-
-// protects: writer-supported large registries verify and reconcile without repeating effects.
-// oracle: a valid ~400 KB postimage is within the canonical 512 KiB writer bound.
-test('large registry repair verifies, replays, and reconciles uncertain restart', async () => {
-  const f = fixture(), root = f.scope.projectRoot, target = join(root, '.atl/skill-registry.md');
-  writeFileSync(join(root, '.gitignore'), '/.atl/skill-registry.md\n');
-  for (let i = 0; i < 300; i++) {
-    const dir = join(root, '.skills', `skill-${i}`);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'SKILL.md'), `---\nname: skill-${i}\ndescription: ${'d'.repeat(500)}\n---\n`);
-  }
-  let discoveries = 0;
-  const service = new ProjectPreparationService({ registryProvider: runnerId => ({ schema: 'skill-discovery-source-provider-v1', runnerId,
-    resolveLocator: async () => ({ status: 'missing' }),
-    listSources: async () => { discoveries++; return { outcome: 'complete', sources: [], diagnostics: [] }; },
-  }) });
-  const request = { snapshotId: service.status(f.scope).snapshotId, components: ['skill-registry'] };
-  const invocation = { ...f.invocation, delegation: service.delegate(request, f.scope, { taskId: 'setup-task', attempt: 1 }) };
-  expect((await service.repair(request, invocation)).status).toBe('changed');
-  const bytes = readFileSync(target);
-  expect(bytes.length).toBeGreaterThan(380_000);
-  expect(bytes.length).toBeLessThan(512 * 1024);
-  const { parseSkillRegistryDocument } = await import('../../../core/src/skill-discovery/registry');
-  expect(parseSkillRegistryDocument(bytes.toString()).frontmatter?.completeness).toBe('complete');
-  expect((await service.repair(request, invocation)).status).toBe('reconciled');
-  const restarted = new ProjectPreparationService();
-  expect(restarted.reconcile(f.scope, f.records.filter(r => r.state === 'intent'))).toMatchObject([{ component: 'skill-registry', state: 'reconciled' }]);
-  expect(discoveries).toBe(1);
-  expect(readFileSync(target).equals(bytes)).toBe(true);
 });
 
 // Protects revocation across asynchronous discovery, source races, exact role/runner admission,

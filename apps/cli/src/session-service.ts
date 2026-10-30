@@ -1,4 +1,5 @@
 import { preparationCapabilities } from "./preparation-capabilities";
+import { preparationAuthorityScope } from "@deck/core/session/preparation";
 import { validateClaudeSessionIntent } from "../../../packages/adapter-claude/src/session-skills";
 import { renderSessionOverlay, type SessionOverlaySection } from "@deck/core/session/overlay";
 import { composeSessionStartContextV1 } from "../../../packages/sdd-runtime/src/execution/session-start-context";
@@ -75,10 +76,10 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
       const byRunner = new Map([...new Set(Object.values(input.members).map(a => a.runnerId))].map(runnerId => [runnerId, {
         ...preparationCapabilities(config, runnerId), ...list.find(adapter => adapter.runnerId === runnerId)?.readPreparationCapabilities?.(config),
       }]));
-      return { projectRoot: input.projectRoot, sessionId: input.sessionId, epoch: input.epoch,
-        policyDigest: createHash("sha256").update(JSON.stringify(Object.entries(input.members).map(([id, a]) => [id, a.runnerId, byRunner.get(a.runnerId)!]))).digest("hex"),
+      const scope = { projectRoot: input.projectRoot, sessionId: input.sessionId, epoch: input.epoch, policyDigest: "",
         members: Object.entries(input.members).map(([memberId, a]) => ({ memberId, runnerId: a.runnerId, bindingId: `${memberId}@${a.runnerId}`, capabilities: byRunner.get(a.runnerId)! })),
       };
+      return { ...scope, policyDigest: createHash("sha256").update(JSON.stringify(preparationAuthorityScope(scope).members)).digest("hex") };
     },
     sessionStartContext: composeSessionStartContextV1,
     paths: services.paths, broker: services.broker, credentials: services.credentials, supervisor: services.supervisor,

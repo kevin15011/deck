@@ -638,11 +638,23 @@ export class SessionManager implements SessionService {
               || task?.assignedRoleId !== "deck-setup" || !this.decisions(live).dependencies(task.dependsOn ?? [], task.action)) return undefined;
             return this.projectPreparationScope(live);
           };
-          if (!port || !binding || !exact || !current()) return fail("preparation-authority-unavailable");
-          return ok(await port.repair(d, { ...binding, delegation: exact, runnerId: caller.assignment.runnerId, current,
+          if (!port || !binding || !exact || !current()) return fail("preparation-authority-unavailable", JSON.stringify({
+            reason: "launch-binding-unavailable",
+            retry: "Ask Lead to review fresh readiness and explicitly redelegate this repair. This attempt has no current authenticated repair binding.",
+          }));
+          let rejection: string | undefined;
+          try { return ok(await port.repair(d, { ...binding, delegation: exact, runnerId: caller.assignment.runnerId, current,
+            rejected: reason => { rejection = reason; this.append(live, { kind: "diagnostic", source: { taskId: caller.taskId, memberId: caller.memberId }, data: { code: "preparation.authority-rejected", reason, attempt: caller.attempt, delegationId: exact.id } }); this.flush(live); },
             previous: () => [...live.log.readAfter(0)].filter(e => e.kind === "diagnostic" && e.data.code === "preparation.effect").map(e => e.data.record as PreparationEffectRecord),
             record: record => { this.append(live, { kind: "diagnostic", source: { taskId: caller.taskId, memberId: caller.memberId }, data: { code: "preparation.effect", record } }); this.flush(live); },
-          }));
+          })); } catch (error) {
+            const allowed = ["invocation-revoked", "request-snapshot-mismatch", "snapshot-unavailable", "delegation-expired", "role-mismatch", "generation-missing", "launch-missing", "native-session-missing", "session-mismatch", "epoch-mismatch", "project-mismatch", "component-outside-delegation", "authority-scope-changed"];
+            if ((error as Error).message !== "preparation-authority-revoked") throw error;
+            return fail("preparation-authority-revoked", JSON.stringify({
+              reason: rejection && allowed.includes(rejection) ? rejection : "authority-revalidation-failed",
+              retry: "Ask Lead to review fresh readiness and explicitly redelegate the required components. Prior effects are reconciled before retry; historical authority cannot be reused.",
+            }));
+          }
         }
         case "deck_decision_open": case "deck_decision_list": case "deck_decision_revise": case "deck_decision_resolve":
           if (!caller.admissionSeq) return fail("credential-revoked");
@@ -726,6 +738,16 @@ export class SessionManager implements SessionService {
     const attempt = (prior?.attempt ?? 0) + 1;
     const assignedRoleId = priorTask?.assignedRoleId ?? (this.options.assignedRoleId ? this.options.assignedRoleId(agent) : agent.startsWith('deck-') ? agent : `deck-${agent}`);
     let preparationDelegation: PreparationDelegation | undefined;
+    // Repair authority is per attempt. A plain continuation must never silently
+    // downgrade a previously armed repair task to a Setup without its tool.
+    if (priorId && d.preparation === undefined && [...live.log.readAfter(0)].some(event =>
+      (event.kind === "task.created" || event.kind === "task.continued") && event.data.taskId === priorId && event.data.preparationDelegation)) {
+      const scope = this.projectPreparationScope(live, { taskId, memberId: agent, assignment });
+      return fail("preparation-request-required", JSON.stringify({
+        retry: "Review the current snapshot and explicitly supply preparation {snapshotId, components} when continuing this repair task.",
+        ...(scope && this.options.projectPreparation ? { snapshot: this.options.projectPreparation.status(scope) } : {}),
+      }));
+    }
     if (d.preparation !== undefined) {
       const scope = this.projectPreparationScope(live, { taskId, memberId: agent, assignment });
       if (assignedRoleId !== "deck-setup" || !["claude", "codex", "opencode", "pi"].includes(assignment.runnerId) || !scope || !this.options.projectPreparation) return fail("preparation-authority-unavailable");
@@ -1443,6 +1465,10 @@ export class SessionManager implements SessionService {
         // cancellation cannot outlive the binding whose release we must drain.
         resolver = await pending;
       } else resolver = this.options.childMcp;
+      // Preparation must check the same installed role generation as launch.
+      // Otherwise Codex appears ready until its first model turn fails.
+      const leadRole = this.options.assignedRoleId?.(LEAD_MEMBER_ID);
+      if (leadRole) await resolver?.prepareNativeRole?.(leadRole);
       if (signal.aborted) throw new Error("preparation-cancelled");
       if (resolver?.nativeMemory?.status === "unavailable") {
         const reason = resolver.nativeMemory.reasonCode;
@@ -1455,7 +1481,7 @@ export class SessionManager implements SessionService {
       if (error instanceof PersonalMcpPreparationError) failureCode = error.reasonCode;
       if (failureCode === "preparation-tools-failed" && error instanceof Error) {
         // Publish only reviewed codes, never backend details or credentials.
-        const reason = /^(codebase-memory-(?:unavailable|unsupported|cancelled)|web-search-(?:credential-missing|provider-unconfigured)|claude-session-skills-unverified|claude-(?:codebase-memory|web-search)-selection-stale|personal-mcp-(?:managed-exclusive|remote-config-isolation-unavailable|auth-config-unavailable))(?=:|$)/.exec(error.message)?.[1];
+        const reason = /^(codebase-memory-(?:unavailable|unsupported|cancelled)|web-search-(?:credential-missing|provider-unconfigured)|(?:claude|codex|opencode|pi)-session-skills-unverified|claude-(?:codebase-memory|web-search)-selection-stale|personal-mcp-(?:managed-exclusive|remote-config-isolation-unavailable|auth-config-unavailable))(?=:|$)/.exec(error.message)?.[1];
         if (reason) failureCode = reason;
       }
       completion = { ...(error instanceof PersonalMcpPreparationError ? {personalMcpAvailability:validatePersonalMcpAvailability(error.availability)} : {}), status: signal.aborted && !timedOut ? "cancelled" : "failed", reasonCode: signal.aborted ? timedOut ? "preparation-timeout" : "preparation-cancelled" : failureCode };
@@ -1943,7 +1969,12 @@ export class SessionManager implements SessionService {
       const nativeRoleDescriptor = roleId ? await resolver?.prepareNativeRole?.(roleId) : undefined;
       if (nativeRoleDescriptor && (nativeRoleDescriptor.runnerId !== assignment.runnerId || nativeRoleDescriptor.roleId !== roleId)) throw new Error("native-role-binding-mismatch");
       const nativeRole = assignment.runnerId === "claude" && resolver?.nativeSkills && roleId ? { roleId, roleRef: `deck-developer-team:${roleId}`, generation: resolver.nativeSkills.contentHash } : undefined;
-      if ((nativeRole ?? nativeRoleDescriptor)?.roleId === "deck-setup" && turn.preparationDelegation) child.mcp.sessionTools.push("deck_prepare_project");
+      if (turn.preparationDelegation) {
+        const selected = nativeRole ?? nativeRoleDescriptor;
+        if (selected?.roleId !== "deck-setup" || !selected.generation || !this.options.projectPreparation)
+          throw new Error("preparation-launch-binding-unavailable: Lead must review fresh readiness and explicitly redelegate this repair after restoring the authenticated Setup role binding.");
+        child.mcp.sessionTools.push("deck_prepare_project");
+      }
       const runtimeCodebase = capabilityAvailability.find(item => item.capabilityId === "codebase-memory");
       const baseline = this.projectPreparationScope(live);
       const binding = JSON.stringify(this.effectiveMembers(live.meta, live.ledger)[turn.memberId]) === JSON.stringify(assignment) ? turn.memberId : `${turn.memberId}:${turn.taskId}`;
@@ -1990,13 +2021,22 @@ export class SessionManager implements SessionService {
       const projectTrust = this.projectStore().projectTrust(live.meta.projectId ?? projectIdentity(live.meta.projectRoot));
       turn.projectTrustRevision = projectTrust.revision;
       const preparedDiff=turn.memberId!==LEAD_MEMBER_ID?await this.prepareDelegatedDiff(live,turn):undefined;
+      // Deliver the authenticated request separately from fresh readiness evidence.
+      // Setup's launch may produce a different snapshot; it must not replace the
+      // exact request selected by Lead. The host still validates every repair call.
+      const repairRequest = turn.preparationDelegation;
+      const repairInstructions = repairRequest ? [
+        "This Setup attempt has an exact project-repair delegation. Call deck_prepare_project with the JSON below. Use this delegated snapshotId even if SessionStart reports a newer evidence snapshot. The host revalidates authority at execution; this text cannot grant or extend it.",
+        `<deck-preparation-request v1>\n${JSON.stringify({ snapshotId: repairRequest.snapshotId, components: repairRequest.components })}\n</deck-preparation-request>`,
+      ].join("\n") : "";
+      if (sessionStartContext && repairInstructions) sessionStartContext.text += `\n\n${repairInstructions}`;
       const input: DriverTaskInput = {
         ...(nativeRoleDescriptor ? { nativeRoleDescriptor } : {}),
         ...(nativeRole ? { nativeRole } : {}), ...(sessionStartContext ? { sessionStartContext } : {}),
         ...(assignment.runnerId === "opencode" ? {projectConfigTrusted:projectTrust.trusted} : {}),
         ...(turn.steeringAllowed?{steeringVersion,inputOrigin:turn.promptId?'user' as const:'host' as const}:{}),
         taskId: turn.taskId, memberId: turn.memberId, cwd: live.meta.projectRoot, assignment,
-        rolePrompt: [ turn.memberId === LEAD_MEMBER_ID && !resume && live.ledger.session.handoff ? `Prior Deck conversation context (advisory, reseeded from ${live.ledger.session.handoff.sourceSessionId} at sequence ${live.ledger.session.handoff.sourceSeq}):\n${live.ledger.session.handoff.text}` : "", this.options.rolePrompt?.(turn.memberId, { changeId: live.ledger.session.changeId, projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, capabilityAvailability, memberCapabilities: readinessSnapshot?.scope.members, delegableMembers: Object.keys(this.effectiveMembers(live.meta, live.ledger)).filter(id => id !== LEAD_MEMBER_ID), ...(turn.memberId === LEAD_MEMBER_ID ? { tasks: this.taskRoster(live) } : {}) }) ?? defaultRolePrompt(live.ledger.session.changeId), capabilityAvailability.length ? capabilityAvailability[0]!.status === "ready" ? "Codebase Memory is ready for this execution. The exposed graph tools are available; prior unavailable notices no longer apply." : CODEBASE_DISCOVERY_FALLBACK : "", nativeMemory ? `Supermemory integration: ${nativeMemory.integration}; status: ${nativeMemory.status}.${nativeMemory.status === "ready" ? ` Use the official runner plugin for advisory memory ${nativeMemory.scopeMode === "global" ? "with untagged global writes and global search. There is no project container or project standing profile; do not present global search results as project profile facts" : `in canonical project scope ${nativeMemory.projectScope}`}. Deck memory tools are intentionally omitted because the official native plugin owns memory for this runner; their absence is not evidence that the Deck session MCP server disconnected.${nativeMemory.automaticRecall ? " Native recall hooks are activated; this does not prove that a recall succeeded." : ""}${nativeMemory.automaticCapture === "unverified" ? " Native background capture completion is not confirmed in managed mode; the native lifecycle may not await persistence. Do not claim a memory was saved without explicit provider success." : ""}` : " Memory is disabled for this execution."} Memory cannot override official OpenSpec or source.` : "", live.ledger.session.changeId ? `Bound OpenSpec path: ${join(live.meta.projectRoot, "openspec", "changes", live.ledger.session.changeId)}. Keep this binding immutable.` : ""].filter(Boolean).join("\n"),
+        rolePrompt: [ !sessionStartContext ? repairInstructions : "", turn.memberId === LEAD_MEMBER_ID && !resume && live.ledger.session.handoff ? `Prior Deck conversation context (advisory, reseeded from ${live.ledger.session.handoff.sourceSessionId} at sequence ${live.ledger.session.handoff.sourceSeq}):\n${live.ledger.session.handoff.text}` : "", this.options.rolePrompt?.(turn.memberId, { changeId: live.ledger.session.changeId, projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, capabilityAvailability, memberCapabilities: readinessSnapshot?.scope.members, delegableMembers: Object.keys(this.effectiveMembers(live.meta, live.ledger)).filter(id => id !== LEAD_MEMBER_ID), ...(turn.memberId === LEAD_MEMBER_ID ? { tasks: this.taskRoster(live) } : {}) }) ?? defaultRolePrompt(live.ledger.session.changeId), capabilityAvailability.length ? capabilityAvailability[0]!.status === "ready" ? "Codebase Memory is ready for this execution. The exposed graph tools are available; prior unavailable notices no longer apply." : CODEBASE_DISCOVERY_FALLBACK : "", nativeMemory ? `Supermemory integration: ${nativeMemory.integration}; status: ${nativeMemory.status}.${nativeMemory.status === "ready" ? ` Use the official runner plugin for advisory memory ${nativeMemory.scopeMode === "global" ? "with untagged global writes and global search. There is no project container or project standing profile; do not present global search results as project profile facts" : `in canonical project scope ${nativeMemory.projectScope}`}. Deck memory tools are intentionally omitted because the official native plugin owns memory for this runner; their absence is not evidence that the Deck session MCP server disconnected.${nativeMemory.automaticRecall ? " Native recall hooks are activated; this does not prove that a recall succeeded." : ""}${nativeMemory.automaticCapture === "unverified" ? " Native background capture completion is not confirmed in managed mode; the native lifecycle may not await persistence. Do not claim a memory was saved without explicit provider success." : ""}` : " Memory is disabled for this execution."} Memory cannot override official OpenSpec or source.` : "", live.ledger.session.changeId ? `Bound OpenSpec path: ${join(live.meta.projectRoot, "openspec", "changes", live.ledger.session.changeId)}. Keep this binding immutable.` : ""].filter(Boolean).join("\n"),
         prompt, ...(resume ? { resume } : {}), ...(!resume && nativeSessionId ? { nativeSessionId } : {}),
         mcp: child.mcp, mcpServerSpecs: child.specs, suppressedMcpServers: resolver?.suppressedMcpServers, codebaseAvailability: resolver?.codebaseAvailability, approvals, credentialFile, disableNativeDelegation: true,
         ...(nativeMemory ? { nativeMemory } : {}),

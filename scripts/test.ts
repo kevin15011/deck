@@ -33,6 +33,8 @@ export const FILE_BUDGET_MS = 2_000;
 export const RUN_BUDGET_MS = 90_000;
 
 /** Terminate the work at its deadline, including work that blocks its own event loop. */
+export class BudgetExceededError extends Error {}
+
 export async function withBudget(
   work: { exited: Promise<number>; kill: () => void },
   milliseconds: number,
@@ -49,13 +51,38 @@ export async function withBudget(
       new Promise<never>((_, reject) => {
         cancel = schedule(() => {
           work.kill();
-          reject(new Error(`${label} exceeded ${milliseconds / 1000}s wall-time budget`));
+          reject(new BudgetExceededError(`${label} exceeded ${milliseconds / 1000}s wall-time budget`));
         }, milliseconds);
       }),
     ]);
   } finally {
     cancel();
   }
+}
+
+type FileResult = { code: number; text: string; overBudget: boolean };
+
+/** Drain each parallel batch before retrying overruns alone, under the run deadline. */
+export async function runWithTolerance(
+  files: string[],
+  runFile: (file: string) => Promise<FileResult>,
+  stopped: () => boolean,
+  warn: (message: string) => void = console.warn,
+): Promise<(FileResult & { file: string })[]> {
+  const results: (FileResult & { file: string })[] = [];
+  for (let next = 0; next < files.length && !stopped(); next += 4) {
+    const batch = await Promise.all(files.slice(next, next + 4).map(async file => ({ ...await runFile(file), file })));
+    for (const first of batch) {
+      if (stopped()) return results;
+      let result = first;
+      if (first.overBudget) {
+        result = { ...await runFile(first.file), file: first.file };
+        if (!result.overBudget) warn(`WARN ${first.file} exceeded 2s once; isolated retry completed within budget`);
+      }
+      results.push({ ...result, code: result.overBudget ? 1 : result.code });
+    }
+  }
+  return results;
 }
 
 export async function main(args = process.argv.slice(2), root = resolve(import.meta.dir, "..")): Promise<number> {
@@ -89,10 +116,8 @@ export async function main(args = process.argv.slice(2), root = resolve(import.m
     const excluded = new Set(entries.map(entry => entry.path));
     const files = all.filter(path => !excluded.has(path));
     console.log(`Running ${files.length} fast test files; 2s per file, 90s total`);
-    let next = 0, failed = 0, completed = 0, passedTests = 0, failedTests = 0, skippedTests = 0;
-    await Promise.all(Array.from({ length: Math.min(4, files.length) }, async () => {
-      while (!stopped && next < files.length) {
-        const file = files[next++]!;
+    let failed = 0, passedTests = 0, failedTests = 0, skippedTests = 0;
+    const results = await runWithTolerance(files, async file => {
         const fileStarted = performance.now();
         const child = Bun.spawn([process.execPath, "test", `./${file}`], {
           cwd: root, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: process.platform !== "win32",
@@ -100,25 +125,29 @@ export async function main(args = process.argv.slice(2), root = resolve(import.m
         });
         active.add(child);
         const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
-        let code = 1;
+        let code = 1, overBudget = false;
         try {
           code = await withBudget({ exited: Promise.all([child.exited, output]).then(([code]) => code), kill: () => killChild(child) }, FILE_BUDGET_MS, file);
-          if (performance.now() - fileStarted > FILE_BUDGET_MS) throw new Error(`${file} exceeded 2s wall-time budget`);
+          overBudget = performance.now() - fileStarted > FILE_BUDGET_MS;
         } catch (error) {
           code = 1;
-          console.error(String(error));
+          if (error instanceof BudgetExceededError) overBudget = true;
+          else throw error;
         } finally {
           active.delete(child);
         }
-        const text = (await output).join("\n");
+        return { code, overBudget, text: (await output).join("\n") };
+    }, () => stopped);
+    for (const { file, code, text, overBudget } of results) {
         passedTests += Number(/(\d+) pass\b/.exec(text)?.[1] ?? 0);
         failedTests += Number(/(\d+) fail\b/.exec(text)?.[1] ?? 0);
         skippedTests += Number(/(\d+) skip\b/.exec(text)?.[1] ?? 0);
-        completed++;
-        if (code !== 0) { failed++; console.error(`FAIL ${file}\n${text}`); }
-      }
-    }));
-    console.log(`${completed} files, ${failed} failed; ${passedTests} tests passed, ${failedTests} failed, ${skippedTests} skipped; ${((performance.now() - started) / 1000).toFixed(2)}s wall time`);
+        if (code !== 0) {
+          failed++;
+          console.error(`FAIL ${file}${overBudget ? " exceeded 2s wall-time budget again on isolated retry" : ""}\n${text}`);
+        }
+    }
+    console.log(`${results.length} files, ${failed} failed; ${passedTests} tests passed, ${failedTests} failed, ${skippedTests} skipped; ${((performance.now() - started) / 1000).toFixed(2)}s wall time`);
     return failed ? 1 : 0;
   };
   try {

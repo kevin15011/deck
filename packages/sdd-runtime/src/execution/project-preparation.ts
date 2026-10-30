@@ -287,10 +287,25 @@ export class ProjectPreparationService implements PreparationPort {
     const snapshot = this.snapshots.get(request.snapshotId);
     const live = () => {
       const scope = invocation.current();
-      if (!scope || !snapshot || Date.now() > d.expiresAt || invocation.roleId !== "deck-setup" || !invocation.generation || !invocation.launchId || !invocation.nativeSessionId
-        || d.snapshotId !== request.snapshotId || d.sessionId !== scope.sessionId || d.epoch !== scope.epoch || d.projectRoot !== scope.projectRoot
-        || request.components.some(c => !d.components.includes(c)) || JSON.stringify(canonicalScope(preparationAuthorityScope(scope))) !== JSON.stringify(canonicalScope(preparationAuthorityScope(snapshot.scope)))) throw new Error("preparation-authority-revoked");
-      return scope;
+      const reason = !scope ? "invocation-revoked"
+        : d.snapshotId !== request.snapshotId ? "request-snapshot-mismatch"
+        : !snapshot ? "snapshot-unavailable"
+        : Date.now() > d.expiresAt ? "delegation-expired"
+        : invocation.roleId !== "deck-setup" ? "role-mismatch"
+        : !invocation.generation ? "generation-missing"
+        : !invocation.launchId ? "launch-missing"
+        : !invocation.nativeSessionId ? "native-session-missing"
+        : d.sessionId !== scope.sessionId ? "session-mismatch"
+        : d.epoch !== scope.epoch ? "epoch-mismatch"
+        : d.projectRoot !== scope.projectRoot ? "project-mismatch"
+        : request.components.some(c => !d.components.includes(c)) ? "component-outside-delegation"
+        : JSON.stringify(canonicalScope(preparationAuthorityScope(scope))) !== JSON.stringify(canonicalScope(preparationAuthorityScope(snapshot.scope))) ? "authority-scope-changed"
+        : undefined;
+      if (reason) {
+        invocation.rejected?.(reason);
+        throw new Error("preparation-authority-revoked");
+      }
+      return scope!;
     };
     const scope = live(), key = join(scope.projectRoot, request.components[0] === "skill-registry" ? REGISTRY : TARGET);
     const prior = locks.get(key) ?? Promise.resolve();

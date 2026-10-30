@@ -27,6 +27,8 @@ export type PreparationInvocation = {
   nativeSessionId: string; launchId: string;
   /** Must revalidate credential, exact turn, dependencies and current scope on every call. */
   current(): PreparationScope | undefined;
+  /** Host-only diagnostic sink. Reasons are never repair authority; hosts may expose only allow-listed recovery causes. */
+  rejected?(reason: string): void;
   record(record: PreparationEffectRecord): void;
   previous(): readonly PreparationEffectRecord[];
 };
@@ -58,10 +60,13 @@ export function parsePreparationRequest(value: unknown): PreparationRequest {
   return { snapshotId: v.snapshotId, components: [...v.components] };
 }
 
-/** Runtime observations are not repair authority. Intent, roster and prerequisite
- * inputs remain exact; collecting evidence at Setup launch cannot revoke itself. */
+/** Runtime observations are not repair authority. Intent, roster and input digests
+ * remain exact; collecting evidence at Setup launch cannot revoke itself. */
 export function preparationAuthorityScope(scope: PreparationScope): PreparationScope {
-  return { ...scope, members: scope.members.map(({ runtimeEvidence: _runtime, runtimeEvidencePeers: _peers, ...member }) => member) };
+  return { ...scope, members: scope.members.map(({ runtimeEvidence: _runtime, runtimeEvidencePeers: _peers, ...member }) => ({
+    ...member,
+    capabilities: Object.fromEntries(Object.entries(member.capabilities).map(([id, { availability: _availability, prerequisites: _prerequisites, ...intent }]) => [id, intent])),
+  })) };
 }
 export function observedPreparationCapabilities(member: PreparationMember): PreparationMember["capabilities"] {
   const records = member.runtimeEvidencePeers ?? (member.runtimeEvidence ? [member.runtimeEvidence] : []);

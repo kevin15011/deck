@@ -33,3 +33,38 @@ test("completed work preserves exit status and cancels its deadline", async () =
     () => () => { cleared = true; })).toBe(7);
   expect(cleared).toBe(true);
 });
+
+// Protects isolated retries, one-off warnings, and persistent failures without real delays.
+test("budget spikes retry alone once and retain real failures", async () => {
+  const { runWithTolerance } = await import("./test");
+  let active = 0;
+  const attempts = new Map<string, number>();
+  const warnings: string[] = [];
+  const results = await runWithTolerance(["spike", "slow", "failure", "normal", "later"], async file => {
+    const attempt = (attempts.get(file) ?? 0) + 1;
+    attempts.set(file, attempt);
+    if (attempt === 2) expect(active).toBe(0);
+    active++;
+    await Promise.resolve();
+    active--;
+    return { code: file === "failure" ? 1 : 0, text: file, overBudget: file === "slow" || (file === "spike" && attempt === 1) };
+  }, () => false, message => warnings.push(message));
+  expect(attempts.get("spike")).toBe(2);
+  expect(attempts.get("slow")).toBe(2);
+  expect(attempts.get("failure")).toBe(1);
+  expect(results.filter(result => result.code !== 0).map(result => result.file)).toEqual(["slow", "failure"]);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("spike");
+});
+
+test("run deadline prevents isolated retries and later batches", async () => {
+  const { runWithTolerance } = await import("./test");
+  let stopped = false;
+  const started: string[] = [];
+  await runWithTolerance(["one", "two", "three", "four", "later"], async file => {
+    started.push(file);
+    stopped = true;
+    return { code: 1, text: "", overBudget: true };
+  }, () => stopped);
+  expect(started).toEqual(["one", "two", "three", "four"]);
+});
