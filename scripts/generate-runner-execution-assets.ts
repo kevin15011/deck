@@ -13,7 +13,7 @@ const entries = [
     output: "packages/adapter-pi/assets/pi/extensions/developer-team-execution.generated.js",
   },
   {
-    input: "packages/adapter-codex/assets/codex/hooks/developer-team-execution.ts",
+    input: "packages/adapter-codex/assets/codex/hooks/developer-team-execution-entry.ts",
     output: "packages/adapter-codex/assets/codex/hooks/developer-team-execution.generated.js",
   },
 ] as const;

@@ -16,7 +16,7 @@ export type CodexConfigMergeResult =
 export const CODEX_HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "Stop"] as const;
 export type CodexHookEvent = (typeof CODEX_HOOK_EVENTS)[number];
 /** Stable ownership identities; each owns exactly one marker-delimited block. */
-export const CODEX_OWNED_HOOK_IDS = ["memory-bridge", "rtk", "supermemory"] as const;
+export const CODEX_OWNED_HOOK_IDS = ["memory-bridge", "rtk", "supermemory", "readiness"] as const;
 export type CodexOwnedHookId = (typeof CODEX_OWNED_HOOK_IDS)[number];
 
 export type CodexOwnedHook = Readonly<{

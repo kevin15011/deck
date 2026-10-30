@@ -861,11 +861,11 @@ class CodexRunnerAdapter implements RunnerAdapter {
   async inspectProject(projectRoot: string): Promise<RunnerProjectInspection> {
     return inspectCodexProject(projectRoot, this.#preflight);
   }
-  /** True when the global Codex config carries Deck-owned RTK or Supermemory hook blocks. */
+  /** True when the global Codex config carries Deck-owned executable hook blocks. */
   #deckHooksMaterialized(): boolean {
     try {
       const source = readGlobalConfigSource(this.#roots);
-      return source !== null && inspectCodexOwnedHookIds(source).some((id) => id === "rtk" || id === "supermemory");
+      return source !== null && inspectCodexOwnedHookIds(source).some((id) => id === "rtk" || id === "supermemory" || id === "readiness");
     } catch { return false; }
   }
   getLaunchPolicyDiagnostics() { return [CODEX_DEVELOPER_BYPASS_DIAGNOSTIC]; }
@@ -1469,6 +1469,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       contextModeCommand: tools.contextMode.command(),
       context7Command: tools.context7.command(),
       codebaseMemoryCommand: tools.codebase.command(),
+      executionNodeCommand: nodeCommand,
       // A reviewed install includes enabled package instructions as well as explicit capability toggles.
       // Launch-time reconciliation omits capabilityIds and must never repair an unowned entry.
       repairSelectedToolIds: input.capabilityIds === undefined ? undefined : mcpCapabilityIds,

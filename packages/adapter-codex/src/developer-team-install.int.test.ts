@@ -552,3 +552,15 @@ for (const id of ["context7", "codebase-memory"] as const) {
     });
   }
 }
+
+// Protects the new readiness registration against edited-hook takeover.
+test("readiness hook receipts permit upgrade but reject edited commands", () => {
+  const original = buildCodexDeveloperTeamInstallPlan({projectRoot:"/fixture",existingFiles:new Map()});
+  const files = new Map(original.expectedFiles.map(file=>[file.relativePath,file.content]));
+  const upgrade = buildCodexDeveloperTeamInstallPlan({projectRoot:"/fixture",existingFiles:files,executionNodeCommand:"/verified/node"});
+  expect(upgrade.blocked).toBe(false);
+  files.set(".codex/config.toml", files.get(".codex/config.toml")!.replace("'node'", "'unowned-command'"));
+  const edited = buildCodexDeveloperTeamInstallPlan({projectRoot:"/fixture",existingFiles:files});
+  expect(edited.blocked).toBe(true);
+  expect(edited.diagnostics.some(d=>d.code === "trusted-hook-config-collision")).toBe(true);
+});

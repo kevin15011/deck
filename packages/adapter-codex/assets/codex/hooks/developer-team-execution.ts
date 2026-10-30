@@ -20,6 +20,7 @@ export async function forwardCodexTrustedHook(
   value: unknown,
   options: {
     endpoint?: string;
+    readiness?: boolean;
     token?: string;
     environment?: Readonly<Record<string, string | undefined>>;
     post?: (endpoint: string, token: string, body: string) => Promise<BridgeResponse>;
@@ -31,7 +32,7 @@ export async function forwardCodexTrustedHook(
     return { decision: "block", reason: "invalid-evidence" };
   }
   let readiness: string | undefined;
-  if (input.hook_event_name === "SessionStart") {
+  if (input.hook_event_name === "SessionStart" && options.readiness !== false) {
     try {
       readiness = await loadPreparedSessionStartContext(input.cwd as string, options.environment);
       if (readiness === undefined) process.stderr.write("deck-preparation: native-snapshot-unavailable\n");

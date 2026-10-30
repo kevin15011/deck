@@ -76,6 +76,7 @@ export type BuildCodexInstallPlanInput = {
   rtkHook?: { nodeCommand: string; rtkBinary: string };
   /** Present only when the pinned official Codex Supermemory hook artifact is verified. */
   supermemoryHooks?: { nodeCommand: string; recallScript: string; flushScript: string };
+  executionNodeCommand?: string;
   confirmedModels?: readonly string[];
   confirmedReasoningByModel?: Readonly<Record<string, readonly string[]>>;
 };
@@ -104,7 +105,7 @@ export const CODEX_EXECUTION_HOOK_PATH = ".codex/deck/hooks/developer-team-execu
 const RTK_HOOK_SCRIPT_PATH = CODEX_RTK_HOOK_SCRIPT_PATH;
 
 function isPreservedRuntimePath(path: string): boolean {
-  return path === ".codex/config.toml" || path === CODEX_EXECUTION_HOOK_PATH || path === RTK_HOOK_SCRIPT_PATH;
+  return path === ".codex/config.toml" || path === CODEX_EXECUTION_HOOK_PATH || path === ".codex/deck/hooks/package.json" || path === RTK_HOOK_SCRIPT_PATH;
 }
 
 function shellQuote(value: string): string {
@@ -356,6 +357,8 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
   }
 
   if (materializationScope === "full") {
+    // Node 18 needs an explicit module boundary for the generated ESM hook.
+    add(".codex/deck/hooks/package.json", '{"type":"module"}\n', "bridge-hook", "deck-file", "deck-codex-hook-v1");
     add(
       CODEX_EXECUTION_HOOK_PATH,
       readFileSync(typeof executionHookAssetPath === "string" ? executionHookAssetPath : new URL("../assets/codex/hooks/developer-team-execution.generated.js", import.meta.url), "utf-8"),
@@ -452,7 +455,10 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         diagnostics.push(...mcp.diagnostics.map((message) => ({ code: "mcp-config-collision", severity: "error" as const, message })));
       } else {
         const memoryPlugin = input.memoryProvider === "supermemory";
-        const hookBlocks: CodexOwnedHookBlock[] = [];
+        const hookBlocks: CodexOwnedHookBlock[] = [{
+          id: "readiness",
+          hooks: [{ event: "SessionStart", command: `${shellQuote(input.executionNodeCommand ?? "node")} ${shellQuote(posix.join(input.codexHome ?? posix.join(input.projectRoot, ".codex"), CODEX_EXECUTION_HOOK_PATH.slice(".codex/".length)))}`, timeout: 10 }],
+        }];
         // The loopback bridge belongs to Deck's own runtime; the official plugin owns memory alone when selected.
         if (!memoryPlugin) hookBlocks.push(CODEX_MEMORY_BRIDGE_HOOK_BLOCK);
         if (input.rtkHook) {
@@ -492,7 +498,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         const hooks = mergeCodexOwnedHooks(mcp.content, hookBlocks);
         // Never replace an unowned known hook block whose bytes differ from Deck's canonical rendering.
         // Covers replacement of selected blocks and removal of deselected known blocks.
-        const editedHookIds = hooks.status === "blocked" ? [] : (["memory-bridge", "rtk", "supermemory"] as const).filter(id => {
+        const editedHookIds = hooks.status === "blocked" ? [] : (["memory-bridge", "rtk", "supermemory", "readiness"] as const).filter(id => {
           const selector = { kind: "text" as const, start: `# deck-codex-hook:${id}:start`, end: `# deck-codex-hook:${id}:end` };
           const old = selectContributionContent(configSource, selector);
           if (old === undefined || old === selectContributionContent(hooks.content, selector)) return false;
@@ -565,7 +571,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
       const provenFile = selector.kind === "file" && priorHashes[file.relativePath] === (before === undefined ? undefined : hash(before));
       const value = selectContributionContent(file.content, selector); if (value === undefined) continue;
       // A marked Deck hook block already byte-identical to the desired block is adopted; older installs wrote no receipt.
-      const identicalHook = selector.kind === "text" && ["memory-bridge", "rtk", "supermemory"].some(id => selector.start === `# deck-codex-hook:${id}:start`) && old === value;
+      const identicalHook = selector.kind === "text" && ["memory-bridge", "rtk", "supermemory", "readiness"].some(id => selector.start === `# deck-codex-hook:${id}:start`) && old === value;
       if (old !== undefined && !dedicated && !provenFile && !identicalHook && !(selector.kind === "toml" && adoptedMcpIds.has(selector.header.replace(/^mcp_servers\./, ""))) && (!prior || prior.hash !== hash(old))) continue;
       contributions.push({ ...target, id, hash: hash(value), encoding: selector.kind === "toml-key" ? "canonical-json-v1" : "bytes", ownership: prior?.ownership ?? (old === undefined ? "new-write" : dedicated ? "dedicated-location" : "prior-record"), scope: "global" });
     }

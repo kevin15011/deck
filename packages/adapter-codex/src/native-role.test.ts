@@ -46,7 +46,7 @@ test.each([{resume:false,earlyComplete:true},{resume:false,roleId:"deck-setup"},
   const h=harness((child,index,m)=>{
     if(m.method==="initialize")child.stdout({id:m.id,result:{}});
     if(m.method==="config/read")child.stdout({id:m.id,result:{config:{features:Object.fromEntries(ISOLATION_FEATURES.map(f=>[f,false])),mcp_servers:{personal:{command:"foreign"}}}}});
-    if(m.method==="hooks/list")child.stdout({id:m.id,result:{data:[{cwd:input.cwd,errors:[],hooks:role.hooks.filter(()=>!(index===2 && hookFault==="missing")).map((hook,i)=>({key:`owned-${i}`,currentHash:index===2 && hookFault==="hash"?"changed":`hash-${i}`,eventName:hook.event,command:hook.command,source:memory?"sessionFlags":"user",handlerType:"command",enabled:true,trustStatus:index===2?"trusted":"untrusted"}))}]}});
+    if(m.method==="hooks/list")child.stdout({id:m.id,result:{data:[{cwd:input.cwd,errors:[],hooks:role.hooks.filter(()=>!(index===2 && hookFault==="missing")).map((hook,i)=>({key:`owned-${i}`,currentHash:index===2 && hookFault==="hash"?"changed":`hash-${i}`,eventName:hook.event,command:hook.command,source:memory && hook.event!=="sessionStart"?"sessionFlags":"user",handlerType:"command",enabled:true,trustStatus:index===2?"trusted":"untrusted"}))}]}});
     if(m.method==="thread/start"||m.method==="thread/resume")child.stdout({id:m.id,result:{thread:{id:"thread"}}});
     if(m.method==="mcpServerStatus/list")child.stdout({id:m.id,result:{data:[{name:"deck-session-task-context7",runtimeStatus:"connected",tools:{"query-docs":{}}}],nextCursor:null}});
     if(m.method==="turn/start") { expect(bindings).toHaveLength(0); child.stdout({id:m.id,result:{turn:{id:"turn"}}});if(earlyComplete)queueMicrotask(()=>child.stdout({method:"turn/completed",params:{threadId:"thread",turn:{id:"turn",status:"completed"}}}));}
@@ -80,8 +80,12 @@ test.each([{resume:false,earlyComplete:true},{resume:false,roleId:"deck-setup"},
     expect(h.spawns.at(-1)!.options?.env?.CODEX_HOME).toBe(root);
     const environment = h.spawns.at(-1)!.options!.env!;
     expect(readPreparedSessionStartContext(input.cwd, environment)).toBe(input.sessionStartContext.text);
-    if (!resume && !memory && roleId === "deck-apply-deep") {
-      const command = [process.execPath, join(import.meta.dir, "../../../apps/cli/src/main.tsx"), "internal", "codex-memory-hook"];
+    if (roleId === "deck-apply-deep") {
+      // Discover the executable through the installed config, as Codex does.
+      const config = Bun.TOML.parse(readFileSync(join(root, "config.toml"), "utf8")) as any;
+      const hook = config.hooks.SessionStart.flatMap((group: any) => group.hooks).find((hook: any) => hook.command.includes("developer-team-execution.js"));
+      expect(hook).toBeDefined();
+      const command = ["/bin/sh", "-c", hook.command];
       const invoke = (env: Record<string,string>) => Bun.spawnSync(command, {cwd: input.cwd, env, stdin: Buffer.from(JSON.stringify({session_id:"thread",cwd:input.cwd,hook_event_name:"SessionStart"})), stdout:"pipe", stderr:"pipe"});
       const env = {...environment}; delete env.DECK_CODEX_BRIDGE_ENDPOINT; delete env.DECK_CODEX_BRIDGE_TOKEN;
       const result = invoke(env);

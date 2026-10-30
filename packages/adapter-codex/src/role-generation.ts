@@ -10,6 +10,7 @@ let generation: string | undefined;
 export function codexRoleGeneration(): string {
   return generation ??= createHash("sha256").update(JSON.stringify({
     schema: 1,
+    sessionStartDelivery: 1,
     manifest: buildDeveloperTeamManifest({team:DEVELOPER_TEAM}).manifest,
     capabilities: translateCodexCapabilityInstructions(buildCapabilityInstructionBundle(["adaptive-memory", "codebase-memory", "code-economy", "rtk", "web-search"])),
     roleSelection: CODEX_ROLE_SELECTION,
