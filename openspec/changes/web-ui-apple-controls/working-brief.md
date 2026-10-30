@@ -525,3 +525,111 @@ Prior full-suite evidence remains historical; no new full-suite claim for paint 
 Lead successfully ran canary:install and checked installed version. No active
 service restart or commit. Report /tmp/deck-correction-verification.md; Lead check
 /tmp/deck-lead-border-check.log. Chromium-only browser evidence.
+
+## Immediate session feedback and longer composer sheen
+User requests immediate session selection/focus animation on click, independent
+of summary/history network wait, and a pleasant distinctive loading treatment
+in chat during switching. Provide immediate sidebar/header target feedback and
+a restrained theme-colored GSAP loading motif with target session identity.
+No stale content mislabeled as target, no send/control actions against wrong
+session, no blocked navigation or decorative delay after data ready. Preserve
+route validation, generation/abort races, error/retry, deep links/back navigation,
+scroll restoration and reduced motion. Keep technical Activity unchanged.
+This is feedback latency work, alongside existing interruptible formatting.
+User also approves current composer border sheen but asks luminous segment
+slightly longer. Increase its spatial extent modestly, retaining same intensity,
+speed, theme color, opposite phase and strict border-only clipping.
+New edits remain separate from checkpoint6239156; no new commit until requested.
+
+## Immediate selection and longer sheen delivered
+Accepted apply-fast20: masked sheen radius72->90 (+25%), unchanged opacity/speed,
+reported browser lifecycle and zero outside-border pixels; matching source hash.
+Accepted apply-deep6 after independent Quality4 findings: loading/error/Retry is
+a single region outside pane visibility boundaries; mobile approvals are guarded
+by current target data ownership. Lead read scoped patch, checked9 hashes and
+independently reran DECK_SWITCH_P2_ONLY=1 browser acceptance PASS; log at
+/tmp/deck-lead-switch-final.log. Report /tmp/deck-switch-p2/REPORT.md records actual
+RED/GREEN,4509 full tests, types and transcript regression passing.
+User sees target selection/header immediately while requests remain pending,
+with GSAP loading and safe stale-content/action isolation. Existing known mobile
+Close-origin pointer obstruction reproduces on baseline; canonical navigation
+is not claimed passing (keyboard alternative documented separately).
+Lead installed canary successfully and checked version. No active services
+restarted and no new commit; these changes remain beyond checkpoint6239156.
+
+## Mobile parity correction
+User accepts desktop but reports mobile feels neglected: ambient illumination
+is barely noticeable, loading is not seen when switching sessions, and selected
+session is unclear inside hamburger drawer. Reproduce actual mobile drawer
+selection and loading with held/fast requests and inspect selected-state paint.
+Strengthen mobile-only ambient visibility while keeping readable theme contrast;
+make current session clearly identifiable without hiding status/actions. Preserve
+desktop appearance and existing hierarchy/concave selection/reorder behavior.
+Loading must appear for pending target transitions in visible mobile pane after
+drawer selection; do not fake latency or impose minimum duration. Validate actual
+mobile route flow, themes and reduced motion. No commit until requested; Lead
+updates canary after combined verification.
+
+## Mobile header simplification
+User explicitly requests removing Lead identity from the MOBILE header: avatar
+and Lead/runner/model metadata. Preserve session title and necessary controls,
+status/permissions, desktop header and agent-message metadata. Include this in
+ongoing mobile visual refinement under same apply-fast owner. Mobile loading
+investigation is cancelled by user confirmation that loading already appears;
+leave accepted loading behavior intact.
+
+## Overlay glass and mobile drawer motion follow-up
+
+User requests GSAP animation for the mobile hamburger drawer (verify existing
+behavior before replacing it) and consistent theme-aware translucent glass with
+backdrop blur for all surfaces layered above the page: drawer, popups, modals,
+dropdowns and floating windows. Preserve readable contrast, status indicators,
+focus handling, dismissal and controls; provide solid reduced-transparency and
+forced-colors fallbacks. Animate drawer entrance/exit interruptibly with GSAP,
+respect reduced motion and avoid animating blur or competing CSS transitions.
+Inventory actual overlay surfaces, including portal-rendered surfaces, before
+claiming complete coverage. Verify desktop/mobile and rapid open/close behavior.
+Continue same apply-fast task after running attempt22 (mobile header removal)
+finishes; this follow-up is queued, not yet implemented or delegated. Keep prior
+mobile ambient/selection changes. Do not resume cancelled loading investigation.
+No commit or push; canary update follows accepted final visual verification.
+
+## Empty conversation welcome and first-send transition
+
+User authorized a more striking Gemini-inspired empty conversation composition,
+with Deck identity and theme/font compatibility, desktop and mobile. No suggested
+prompts/cards. Group the Deck logo, prominent greeting and existing composer near
+the top of the empty conversation. On first user send, use a coordinated GSAP
+transition: greeting/logo exit, composer moves to its normal bottom chat position,
+and normal chat takes over. Do not delay sending or access to controls. Preserve
+composer DOM/focus, draft, attachments, IME and pending-send behavior where possible;
+avoid duplicate active inputs. Coordinate with existing new-message entrance and
+scroll handling. Only genuinely empty loaded conversations show welcome, never
+loading/error states or previously populated histories. Honor reduced motion,
+interrupt rapid session changes, clean up animation ownership, and preserve all
+current chat functionality. Verify first-send success/failure, session switches,
+mobile keyboard/viewport and desktop layouts. Continue the existing apply-fast
+UI owner after the overlay glass/drawer work; do not discard that authorized work.
+This scope is recorded pending delivery to the running owner.
+
+## Welcome review follow-up
+
+Welcome candidate attempt24 reviewed against its four source hashes and mobile
+screenshot; independent Quality attempt5 found no further welcome lifecycle
+issues in modeled execution. One drawer P2 remains: enabling reduced motion
+mid-slide must cancel motion and settle current intent immediately. Accepted
+finding evidence57558/57559; continued same apply-fast owner for targeted fix
+and live browser preference checks before canary. Earlier glass and mobile
+visual changes remain adopted. No claim of physical-device coverage.
+
+## Canary delivery after welcome and mobile refinements
+
+Accepted apply-fast25 live reduced-motion correction after source/hash review and
+Lead independent `bun run apps/web/drawer-motion-acceptance.ts` PASS (6.44s;
+live entrance/exit, native focus, reversal, initial reduction, unmount/remount).
+Quality5 drawer finding addressed. Broader overlay rerun timed out locating the
+fixture session before drawer interaction; no passing claim for that rerun.
+Prior representative overlay and welcome browser evidence remains bounded as
+reported. `bun run canary:install` completed successfully with current worktree.
+No active service restart, commit or push. Mobile parity/header, glass/drawer,
+welcome/first-send transition and longer composer sheen are included locally.

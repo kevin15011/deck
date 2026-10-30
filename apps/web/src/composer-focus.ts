@@ -26,7 +26,7 @@ export function attachComposerFocus(input: HTMLTextAreaElement) {
     band.setAttribute('mask', `url(#${mask.id})`); svg.append(band);
     const pools = [0, .5].map(() => {
         const circle = document.createElementNS(ns, 'circle');
-        circle.setAttribute('r', '72'); circle.setAttribute('fill', `url(#${gradientId})`);
+        circle.setAttribute('r', '90'); circle.setAttribute('fill', `url(#${gradientId})`);
         band.append(circle); return circle;
     });
     composer.append(svg); composer.classList.add('composer-focus-ready');
