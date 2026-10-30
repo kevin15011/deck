@@ -6,6 +6,7 @@ import type { RunnerQualifiedAssignment } from '../../../packages/core/src/sessi
 export type Assignment = RunnerQualifiedAssignment;
 export type Project = { projectId: string; path: string; name: string; createdAt: string; available: boolean };
 export type WorkspaceSession = ApprovalSummary & {
+    activity?: import('../../../packages/core/src/session/activity-summary').ActivitySummary; statusCheckedAt?:number;
     id?: string; sessionId?: string; projectId?: string; title?: string; projectRoot?: string; state?: string; changeId?: string; running?: boolean; createdAt?: string;
     grants?:SessionGrant[]; lastSeq?: number; leadActivity?: LeadActivity; predecessorSessionId?: string; generation?: number; assignmentRevision?: number; currentLeadTaskId?: string;
     members?: Record<string, Assignment>; sharedWorkspace?: boolean; sharedActiveSessions?: number; released?: boolean; releasing?: boolean; removing?: boolean; preparationStatus?: Preparation['status'];

@@ -471,6 +471,12 @@ export class WebService {
           }
           return this.response({ok:false,code:'attachment-invalid'},400);
         }
+        if (path === '/api/projects/status' && r.method === 'GET') {
+          const projectIds = url.searchParams.getAll('projectId');
+          if (!projectIds.length || projectIds.length > 100 || projectIds.some(id=>!safeId(id))) return this.response({ok:false,code:'projects-status-invalid'},400);
+          const outcome = await this.options.service.query?.('projects.status', {projectIds}) ?? {ok:false as const,code:'query-unavailable'};
+          return this.response(outcome, outcome.ok ? 200 : 400);
+        }
         if (path === '/api/sessions/status' && r.method === 'GET') {
           const sessionIds = url.searchParams.getAll('sessionId');
           if (url.searchParams.getAll('projectId').length !== 1 || sessionIds.length < 1 || sessionIds.length > 100 || sessionIds.some(id => !safeId(id))) return this.response({ ok: false, code: 'sessions-status-invalid' }, 400);

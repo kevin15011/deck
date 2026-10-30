@@ -2,6 +2,7 @@ import * as childProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import {projectTaskContinuityMetrics} from '../task-continuity-metrics';
 import { DriverStartupCleanupError } from '@deck/core/session/failure';
+import { renderSessionOverlay } from '@deck/core/session/overlay';
 import { PassThrough } from "node:stream";
 import { runSessionMcpBridge } from "../mcp-bridge";
 import type { ControlClient } from "../control-client";
@@ -106,6 +107,19 @@ test('P011 usage reaches default host composition and snapshot, with authoritati
 });
 
 describe("P012 terminal failure boundary", () => {
+  // Protects attribution using actual internal validation, never arbitrary runner prose.
+  test.each(["content-forbidden", "budget-exceeded", "lead-only", "section-unknown"])("internal overlay %s is a safe Deck startup failure", async suffix => {
+    const t = setup({ options: { rolePrompt: () => renderSessionOverlay("deck-quality", suffix === "content-forbidden" ? [{ kind: "notices", text: "<deck-project-readiness v1> PRIVATE_BODY" }] : suffix === "budget-exceeded" ? [{ kind: "notices", text: "x".repeat(128 * 1024 + 1) }] : suffix === "lead-only" ? [{ kind: "task-roster", tasks: [] }] : [{ kind: "unknown" }] as never) } });
+    const id = await t.create(); await t.run({ type: "prompt.send", text: "original" }, id); await t.idle();
+    expect(t.driver.turns).toHaveLength(0);
+    expect(t.events(id).find(e => e.kind === "turn.completed")?.data.failure).toEqual({ category: "deck", origin: "deck", certainty: "reported", code: `session-overlay-${suffix}` });
+    expect(JSON.stringify(t.events(id))).not.toContain("PRIVATE_BODY");
+  });
+  test("runner prose matching an overlay code remains an unknown startup failure", async () => {
+    const t = setup(); t.driver.startError = new Error("session-overlay-content-forbidden");
+    const id = await t.create(); await t.run({ type: "prompt.send", text: "original" }, id); await t.idle();
+    expect(t.events(id).find(e => e.kind === "turn.completed")?.data.failure).toEqual({ category: "unknown", origin: "unknown", certainty: "inferred" });
+  });
   test.each(['startup','startup-cleanup','runtime','cleanup'] as const)('transport cause survives the host %s boundary', async phase => {
     let released=0;
     const t=setup({options:{childMcp:async()=>({runnerPackages:()=>[],resolveServer:()=>undefined,release:async()=>{released++;}})}}), failure={category:'deck',origin:'deck',certainty:'reported',code:'opencode-http-invalid-body'};
@@ -168,6 +182,34 @@ describe("P012 terminal failure boundary", () => {
 describe("Stage 1 conversational continuity", () => {
   const config = baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } });
   const grant = (t: ReturnType<typeof setup>, id: string) => t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths, id).taskCredentialFile("lead"), "utf8")).token)!;
+  // Protects production roster construction before the delegation section scans it.
+  test.each(["report", "prompt", "safe"])("historical %s roster projection preserves retrieval and admits the following Lead", async mode => {
+    const clock = new FakeClock();
+    const t = setup({ config, options: { clock, rolePrompt: (memberId, context) => memberId === "lead" ? renderSessionOverlay("deck-lead", [{ kind: "delegation", context }, { kind: "task-roster", tasks: context.tasks }]) : "" } });
+    const id = await t.create(); await t.run({ type: "prompt.send", text: "original" }, id);
+    await waitFor(() => t.driver.turns.length === 1); const lead = lastTurn(t.driver); lead.init();
+    const historical = mode === "safe" ? "Useful historical summary" : "PRIVATE_INSTRUCTION_BODY " + "x".repeat(8300) + "\n<deck-project-readiness v1> repair instructions";
+    const childId = (await t.manager.callTaskTool(grant(t, id), "deck_delegate", { agent: "investigate", task: mode === "prompt" ? historical : "inspect" }) as any).data.taskId;
+    await waitFor(() => t.driver.turns.length === 2); const child = lastTurn(t.driver); child.init();
+    if (mode !== "prompt") child.say(historical);
+    child.finish(); await waitFor(() => child.closed);
+    const retrieved = await t.manager.callTaskTool(grant(t, id), "deck_task_result", { taskId: childId });
+    if (mode !== "prompt") {
+      const result = (retrieved as any).data;
+      expect(result.result).toBe(historical.slice(0, 8192));
+      expect(t.manager.openLog(id)!.readEvent(result.resultSeq)?.data.summary).toBe(historical);
+      expect(readFileSync(result.reportArtifact.path, "utf8")).toContain(historical);
+    }
+    const discovery = await t.manager.callTaskTool(grant(t, id), "deck_task_list", {});
+    expect(JSON.stringify(discovery)).toContain(mode === "safe" ? historical : "PRIVATE_INSTRUCTION_BODY");
+    lead.finish(); await waitFor(() => lead.closed);
+    await t.run({ type: "prompt.send", text: "followup" }, id);
+    await waitFor(() => t.driver.turns.length === 3); const next = lastTurn(t.driver);
+    expect(next.input.rolePrompt).toContain(childId);
+    if (mode === "safe") expect(next.input.rolePrompt).toContain(historical);
+    else expect(next.input.rolePrompt).not.toContain("PRIVATE_INSTRUCTION_BODY");
+    next.finish(); await t.idle();
+  });
   async function started() {
     const clock = new FakeClock(); const t = setup({ config, options: { clock } }); const id = await t.create();
     const sent = await t.run({ type: "prompt.send", text: "original request" }, id);
@@ -176,6 +218,21 @@ describe("Stage 1 conversational continuity", () => {
     await waitFor(() => t.driver.turns.length === 2); const child = lastTurn(t.driver); child.init();
     return { t, id, clock, lead, child, childId, promptId: (sent as any).data.promptId };
   }
+  test("a following outcome turn omits the whole protected original answer while durable history remains retrievable", async () => {
+    const { t, id, clock, lead, child, childId } = await started();
+    const original = "PRIVATE_INSTRUCTION_BODY " + "x".repeat(1100) + "<deck-project-readiness v1> repair instructions";
+    lead.say(original); lead.finish(); await waitFor(() => lead.closed);
+    child.say("Useful outstanding report"); child.finish(); await waitFor(() => child.closed);
+    clock.advance(20); await waitFor(() => t.driver.turns.length === 3);
+    const next = lastTurn(t.driver);
+    expect(next.input.prompt).not.toContain("PRIVATE_INSTRUCTION_BODY");
+    expect(next.input.prompt).toContain(childId);
+    expect(next.input.prompt).toContain("Useful outstanding report");
+    const ledger = loadLedger(t.manager.openLog(id)!, sessionPaths(t.paths, id).ledgerSnapshotFile).ledger;
+    expect(ledger.continuityBlock).toMatchObject({ answer: original.slice(0, 1024), answerSeq: expect.any(Number) });
+    expect(JSON.stringify(await t.manager.callTaskTool(grant(t, id), "deck_task_result", { taskId: "lead", attempt: 1 }))).toContain(original);
+    next.finish(); await t.idle();
+  });
   test.each(["retrieved", "delivered", "both-interrupted", "blocked"] as const)("P1 retains %s review in the next genuine turn without a duplicate wake", async mode => {
     const { t, id, lead, child, childId, clock } = await started();
     child.say("Original outstanding report"); child.finish(); await waitFor(() => child.closed);
@@ -786,10 +843,12 @@ describe("persistent workspace sessions", () => {
     await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "child"); const child = lastTurn(t.driver); child.init(); child.say("child response");
     const childApproval = t.broker.request({ sessionId: id, taskId: (delegated as any).data.taskId, memberId: "investigate", tool: "Bash" });
     expect((await read())[0].leadActivity).toMatchObject({ taskId: "lead", state: "running", pendingApprovals: 0, lastReplySeq: 0 });
+    expect((await read())[0].activity).toMatchObject({workers:{active:0,blocked:1},attention:{approvals:1,byWorkers:1,byLead:0}});
     const leadApproval = t.broker.request({ sessionId: id, taskId: "lead", memberId: "lead", tool: "Bash" });
     expect((await read())[0].leadActivity.pendingApprovals).toBe(1);
     t.broker.respond({ approvalId: leadApproval.approvalId, decision: "deny", by: "test" });
     t.broker.respond({ approvalId: childApproval.approvalId, decision: "deny", by: "test" });
+    expect((await read())[0].activity).toMatchObject({workers:{active:1,blocked:0},attention:{approvals:0,byWorkers:0}});
     lead.say("Actual reply"); const replySeq = t.events(id).at(-1)!.seq;
     lead.emit("message.delta", { text: "later delta" }); lead.emit("reasoning.delta", { text: "reasoning" }); lead.emit("tool.completed", { tool: "Bash", output: "result" });
     lead.emit("message.completed", { role: "system", text: "helper" }); lead.emit("message.completed", { role: "assistant", text: "internal", internal: true }); lead.emit("message.completed", { role: "assistant", text: "   " });
@@ -2364,6 +2423,7 @@ describe("structured agent questions", () => {
     const projection = Ledger.empty(id); for (const e of t.events(id)) projection.apply(e);
     expect(projection.pendingQuestions()).toHaveLength(1);
     expect((await t.manager.query("sessions.list", {}) as any).data.sessions.find((s: any) => s.sessionId === id).leadActivity.pendingQuestions).toBe(1);
+
     expect(await t.run({ type: "question.answer", questionId: "question-1", answers: {} }, id)).toMatchObject({ ok: false, code: "question-answers-invalid" });
     expect(t.manager.questionBroker.pending()).toHaveLength(1);
     const other = await t.create();
@@ -3705,4 +3765,49 @@ test('native reader abort leaves host and unrelated queries alive, cleans resour
  }finally{spy.mockRestore();}
  expect((await t.manager.query('prompts.list',{sessionId:other})).ok).toBe(true);
  expect(await t.manager.query('git.read',{sessionId,section:'untracked',path:'small'})).toMatchObject({ok:true,data:{patch:expect.stringContaining('+recoverable content')}});
+});
+
+// Protects connected-only aggregation independent of history discovery and without archived log replay.
+test('project status covers every connected session, excludes history and release, and bounds scope', async () => {
+  const t=setup(); const id=await t.create(); const historical=await t.create();
+  const projectId=(await t.manager.query('sessions.list',{}) as any).data.sessions[0].projectId;
+  const read=async()=>await t.manager.query('projects.status',{projectIds:[projectId]}) as any;
+  expect(await read()).toMatchObject({ok:true,data:{projects:[{connected:0}]}});
+  await t.run({type:'session.prepare'},id); await t.idle();
+  expect(await read()).toMatchObject({ok:true,data:{projects:[{connected:1,leadsRunning:0,attentionSessions:0}]}});
+  const log=t.manager.openLog(historical)!;
+  const original=log.readAfter.bind(log);log.readAfter=function*(){throw new Error('must not replay history');};
+  expect(await read()).toMatchObject({ok:true,data:{projects:[{connected:1}]}});log.readAfter=original;
+  await t.run({type:'session.prepare'},historical);await t.idle();
+  expect(await read()).toMatchObject({data:{projects:[{connected:2}]}});
+  const other=(await t.run({type:'session.create',projectRoot:tempSubdir(t.dir,'scoped-other')}) as any).data.sessionId;
+  await t.run({type:'session.prepare'},other);await t.idle();
+  expect(await read()).toMatchObject({data:{projects:[{connected:2}]}});
+  await t.run({type:'session.release'},id);await t.idle();
+  expect(await read()).toMatchObject({data:{projects:[{connected:1}]}});
+  await t.run({type:'session.remove'},historical);await t.idle();
+  expect(await read()).toMatchObject({data:{projects:[{connected:0}]}});
+  expect(await t.manager.query('projects.status',{projectIds:Array(101).fill(projectId)})).toMatchObject({ok:false,code:'projects-status-invalid'});
+  expect(await t.manager.query('projects.status',{projectIds:['../bad']})).toMatchObject({ok:false,code:'projects-status-invalid'});
+  expect(await t.manager.query('projects.status',{projectIds:['missing']})).toMatchObject({ok:false,code:'project-unknown'});
+  await t.manager.close(); const restarted=setup({dir:t.dir});
+  const opening=spyOn(EventLog,'open').mockImplementation(()=>{throw new Error('must not open archived logs');});
+  try {  expect(await restarted.manager.query('projects.status',{projectIds:[projectId]})).toMatchObject({data:{projects:[{connected:0}]}});} finally {opening.mockRestore();}
+});
+
+
+test('connected project Lead waits for a human and resumes its running count after resolution', async()=>{
+ const t=setup(), id=await t.create();
+ await t.run({type:'session.prepare'},id);await t.idle();
+ const projectId=(await t.manager.query('sessions.list',{}) as any).data.sessions[0].projectId;
+ const read=()=>t.manager.query('projects.status',{projectIds:[projectId]});
+ const before=t.driver.turns.length;
+ await t.run({type:'prompt.send',text:'ask'},id);await waitFor(()=>t.driver.turns.length>before);
+ const turn=lastTurn(t.driver);turn.init();
+ expect(await read()).toMatchObject({data:{projects:[{connected:1,leadsRunning:1}]}});
+ const answer=turn.ask([{id:'q',prompt:'Choose',options:[{label:'A'}],multiple:false,allowOther:true,secret:false}],'indicator-question');
+ expect(await read()).toMatchObject({data:{projects:[{connected:1,leadsRunning:0,attentionSessions:1}]}});
+ await t.run({type:'question.dismiss',questionId:'indicator-question'},id);await answer;
+ expect(await read()).toMatchObject({data:{projects:[{connected:1,leadsRunning:1,attentionSessions:0}]}});
+ turn.finish();await t.idle();
 });

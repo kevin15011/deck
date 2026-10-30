@@ -1,4 +1,6 @@
-import { renderSessionOverlay } from "@deck/core/session/overlay";
+import { summarizeActivity } from './activity-summary';
+import type { ActivitySummary, ProjectActivity } from '@deck/core/session/activity-summary';
+import { renderSessionOverlay, sessionHistoryExcerpt, SessionOverlayError } from "@deck/core/session/overlay";
 import type { PreparationPort, PreparationScope, PreparationDelegation, PreparationEffectRecord } from "@deck/core/session/preparation";
 import { listGitChanges, readGitDiff, readGitContent, browseProject } from './git-diff';
 import { developerRoleContinuity } from "@deck/core/teams/developer/catalog";
@@ -222,6 +224,7 @@ type Live = {
 };
 
 export type SessionSummary = {
+  activity: ActivitySummary;
   grants: Omit<SessionGrant, "matchKey">[];
   approvalMode: ApprovalMode; approvalModeSource: "session" | "default";
   sessionId: string; projectRoot: string; changeId?: string; state: string; createdAt: string; updatedAt: string; lastSeq: number;
@@ -509,6 +512,7 @@ export class SessionManager implements SessionService {
       case "directories.list":
         try { return ok(this.projectStore().directories((args ?? {}) as never)); } catch { return fail("directory-invalid", "Select a directory inside your home folder."); }
       case "sessions.list": return this.sessionPage(args);
+      case "projects.status": return this.projectStatuses(args);
       case "sessions.status": return this.sessionStatuses(args);
       case "prompts.list": {
         const id = (args as { sessionId?: unknown } | null)?.sessionId;
@@ -849,10 +853,10 @@ export class SessionManager implements SessionService {
   }
 
   /** Read-only discovery: never acknowledge completions or inspect question/answer events. */
-  private delegatedTasks(live: Live, newestRelevant = false) {
+  private delegatedTasks(live: Live, newestRelevant = false, projection: "discovery" | "overlay" = "discovery") {
     const active = (state: string) => state === "running" || state === "queued" || state === "created";
     const selected = live.ledger.tasks().filter(task => task.memberId !== LEAD_MEMBER_ID)
-      .map(task => ({ task, latest: live.ledger.latest(task.taskId)!, result: [...task.attempts].reverse().find(attempt => attempt.result?.trim())?.result }))
+      .map(task => ({ task, latest: live.ledger.latest(task.taskId)!, result: [...task.attempts].reverse().find(attempt => attempt.result?.trim()) }))
       .filter(row => row.latest)
       .sort((a, b) => newestRelevant
         ? Number(active(b.latest.state)) - Number(active(a.latest.state)) || b.latest.startedSeq - a.latest.startedSeq
@@ -868,7 +872,9 @@ export class SessionManager implements SessionService {
       }
     }
     return rows.map(({ task, latest, result }) => {
-      const text = bounded(result?.trim() || prompts.get(task.taskId) || "", 8192);
+      const original = result?.result?.trim() || prompts.get(task.taskId) || "";
+      // Discovery keeps original summaries; only the launch roster omits protected history.
+      const text = bounded(projection === "overlay" ? sessionHistoryExcerpt(original, undefined, { truncated: result?.resultTruncated, safe: result?.resultHistorySafe }) ?? "" : original, 8192);
       const summary = bounded((text.split(/[\r\n\u2028\u2029]/u)[0] ?? "").replace(/\s+/gu, " ").trim(), 120);
       return {
         taskId: task.taskId, memberId: task.memberId, state: latest.state, attempt: latest.attempt,
@@ -882,7 +888,7 @@ export class SessionManager implements SessionService {
   }
 
   private taskRoster(live: Live): NonNullable<SessionRolePromptContext["tasks"]> {
-    return this.delegatedTasks(live).map(({ taskId, memberId, state, attempt, summary }) =>
+    return this.delegatedTasks(live, false, "overlay").map(({ taskId, memberId, state, attempt, summary }) =>
       ({ taskId, memberId, state, attempt, ...(summary ? { summary } : {}) }));
   }
 
@@ -1327,6 +1333,33 @@ export class SessionManager implements SessionService {
     return ok({ sessions, ...(last && start + limit < filtered.length ? { nextCursor: `${last.createdAt}|${last.sessionId}` } : {}) });
   }
 
+  /** Only live, prepared sessions can be connected. Never open historical logs here. */
+  private projectStatuses(args: unknown): ExecuteOutcome {
+    const ids = (args as {projectIds?:unknown} | null)?.projectIds;
+    if (!Array.isArray(ids) || !ids.length || ids.length > 100 || !ids.every(id=>typeof id === "string")) return fail("projects-status-invalid");
+    try { for (const id of ids) assertSafeSegment(id, "project id"); } catch { return fail("projects-status-invalid"); }
+    const projects: ProjectActivity[] = [];
+    for (const projectId of new Set(ids as string[])) {
+      if (!this.projectStore().get(projectId)) return fail("project-unknown");
+      const row: ProjectActivity = {projectId,connected:0,leadsRunning:0,leadsStarting:0,workers:{active:0,queued:0,blocked:0,unsettled:0},attentionSessions:0,attention:{approvals:0,questions:0,decisions:0,byLead:0,byWorkers:0,unowned:0},errors:0};
+      for (const live of this.sessions.values()) {
+        if ((live.meta.projectId ?? projectIdentity(live.meta.projectRoot)) !== projectId || this.readiness(live).status !== "ready" || live.ledger.session.releasePending || live.ledger.session.removalPending || live.ledger.session.removed || live.ledger.session.state === "ended") continue;
+        const summary = this.summarize(live.ledger.sessionId);
+        if (!summary) return fail("projects-status-unavailable");
+        row.connected++;
+        if (summary.leadActivity.state === "running" && !summary.leadActivity.pendingApprovals && !summary.leadActivity.pendingQuestions) row.leadsRunning++;
+        if (["created","queued","preparing"].includes(summary.leadActivity.state)) row.leadsStarting++;
+        const activity = summary.activity;
+        for (const key of Object.keys(row.workers) as Array<keyof typeof row.workers>) row.workers[key] += activity.workers[key];
+        for (const key of Object.keys(row.attention) as Array<keyof typeof row.attention>) row.attention[key] += activity.attention[key];
+        if (activity.attention.approvals + activity.attention.questions + activity.attention.decisions) row.attentionSessions++;
+        row.errors += activity.errors;
+      }
+      projects.push(row);
+    }
+    return ok({projects});
+  }
+
   /** Refresh sidebar sessions already discovered by the client without opening event streams. */
   private sessionStatuses(args: unknown): ExecuteOutcome {
     const input = args as { projectId?: unknown; sessionIds?: unknown } | null;
@@ -1336,14 +1369,14 @@ export class SessionManager implements SessionService {
       for (const id of input.sessionIds) assertSafeSegment(id as string, "session id");
     } catch { return fail("sessions-status-invalid"); }
     if (!this.projectStore().get(input.projectId, true)) return fail("project-unknown");
-    const sessions: Array<Pick<SessionSummary, "grants" | "approvalMode" | "approvalModeSource" | "sessionId" | "leadActivity" | "lastSeq" | "state" | "running" | "activeTasks" | "updatedAt" | "generation" | "currentLeadTaskId" | "preparationStatus" | "released" | "releasing" | "removing">> = [];
+    const sessions: Array<Pick<SessionSummary, "activity" | "grants" | "approvalMode" | "approvalModeSource" | "sessionId" | "leadActivity" | "lastSeq" | "state" | "running" | "activeTasks" | "updatedAt" | "generation" | "currentLeadTaskId" | "preparationStatus" | "released" | "releasing" | "removing">> = [];
     for (const id of new Set(input.sessionIds as string[])) {
       const meta = this.sessions.get(id)?.meta ?? this.readMeta(sessionPaths(this.options.paths, id));
       if (!meta || (meta.projectId ?? projectIdentity(meta.projectRoot)) !== input.projectId) continue;
       // Cache the verified projection once. Subsequent polls never replay the log.
       if (!this.load(id)) continue;
       const summary = this.summarize(id);
-      if (summary) sessions.push({ grants: summary.grants, approvalMode: summary.approvalMode, approvalModeSource: summary.approvalModeSource, sessionId: id, leadActivity: summary.leadActivity, lastSeq: summary.lastSeq, state: summary.state, running: summary.running, activeTasks: summary.activeTasks, updatedAt: summary.updatedAt, generation: summary.generation, currentLeadTaskId: summary.currentLeadTaskId,preparationStatus:summary.preparationStatus,released:summary.released,releasing:summary.releasing,removing:summary.removing });
+      if (summary) sessions.push({ activity: summary.activity, grants: summary.grants, approvalMode: summary.approvalMode, approvalModeSource: summary.approvalModeSource, sessionId: id, leadActivity: summary.leadActivity, lastSeq: summary.lastSeq, state: summary.state, running: summary.running, activeTasks: summary.activeTasks, updatedAt: summary.updatedAt, generation: summary.generation, currentLeadTaskId: summary.currentLeadTaskId,preparationStatus:summary.preparationStatus,released:summary.released,releasing:summary.releasing,removing:summary.removing });
     }
     return ok({ sessions });
   }
@@ -2080,7 +2113,7 @@ export class SessionManager implements SessionService {
         void turn.closeHandle.catch(() => {});
       }
       if (!turn.controller.signal.aborted && error instanceof PersonalMcpPreparationError) this.publishMcpAvailability(live, turn.memberId, assignment.runnerId, validatePersonalMcpAvailability(error.availability));
-      outcome = turn.controller.signal.aborted ? { status: "interrupted" } : { status: "failed", error: `Unable to start the turn: ${bounded((error as Error).message)}`, failure: sanitizeTurnFailure((error as {failure?: unknown})?.failure) ?? { category: "unknown", origin: "unknown", certainty: "inferred" }, ...((error as {reasonCode?: string}).reasonCode === "native-session-not-found" ? { reasonCode: "native-session-not-found" as const } : {}) };
+      outcome = turn.controller.signal.aborted ? { status: "interrupted" } : { status: "failed", error: `Unable to start the turn: ${bounded((error as Error).message)}`, failure: error instanceof SessionOverlayError ? { category: "deck", origin: "deck", certainty: "reported", code: error.code } : sanitizeTurnFailure((error as {failure?: unknown})?.failure) ?? { category: "unknown", origin: "unknown", certainty: "inferred" }, ...((error as {reasonCode?: string}).reasonCode === "native-session-not-found" ? { reasonCode: "native-session-not-found" as const } : {}) };
     }
     let drained = true;
     try { await this.closeTurnHandle(turn); }
@@ -2461,6 +2494,7 @@ export class SessionManager implements SessionService {
       const preparation = cached?.preparation?.state;
       const leadState = preparation?.generation === (ledger.session.generation ?? 0) && preparation.status === "preparing" ? "preparing" : leadAttempt?.state ?? "idle";
       return {
+        activity: summarizeActivity(ledger, currentLeadTaskId),
         released:!!ledger.session.released,releasing:!!ledger.session.releasePending,removing:!!ledger.session.removalPending,preparationStatus:cached ? this.readiness(cached).status : ledger.session.releasePending ? ledger.session.releaseFailure ? "failed" : "releasing" : "unprepared",
         sessionId, projectRoot: meta.projectRoot, projectId: meta.projectId ?? projectIdentity(meta.projectRoot), title: ledger.session.title ?? meta.title ?? `Session ${meta.createdAt.slice(0, 10)}`,
         ...(meta.predecessorSessionId ? { predecessorSessionId: meta.predecessorSessionId } : {}), generation: ledger.session.generation ?? 0, assignmentRevision: ledger.session.assignmentRevision ?? 0,

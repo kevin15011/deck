@@ -1,3 +1,4 @@
+import { workerActivity } from '../../../packages/core/src/session/activity-summary';
 import { ProgressiveTranscript } from './progressive-transcript';
 import { AutoApprovalMessage } from './approvals';
 import { QuestionAnswerMessage } from './question-answer';
@@ -15,12 +16,12 @@ export type WorkspaceTab = 'chat' | 'activity' | 'subagents' | 'git';
 export type Api = (path: string, init?: RequestInit) => Promise<any>;
 const tabNames: Record<WorkspaceTab, string> = { chat: 'Chat', activity: 'Activity', subagents: 'Subagents', git: 'Review' };
 /** Current projection only: replies/history and read markers never imply execution. */
-export function hasWorkingSubagent(view: Pick<ViewState,'tasks'|'approvals'|'questions'>): boolean {
-    const owners=(events: ViewState['approvals'])=>new Set(Object.values(events).map(event=>String(event.source.taskId??event.data.taskId??'')));
-    const approvals=owners(view.approvals),questions=owners(view.questions);
-    return Object.entries(view.tasks).some(([id,task])=>task.memberId!=='lead' && !/^lead(?:-g[1-9]\d*)?$/.test(id) && indicatorState(String(task.state??'created'),approvals.has(id)?1:0,questions.has(id)?1:0)==='working');
+export function activeSubagentCount(view: Pick<ViewState,'tasks'|'approvals'|'questions'>): number {
+    const blocked=new Set([...Object.values(view.approvals),...Object.values(view.questions)].map(event=>String(event.source.taskId??event.data.taskId??'')));
+    return workerActivity(Object.entries(view.tasks).map(([taskId,task])=>({taskId,memberId:String(task.memberId??''),state:String(task.state??'created')})),blocked).active;
 }
-export function Tabs({ active, onChange, subagentsWorking = false }: { active: WorkspaceTab; onChange: (tab: WorkspaceTab) => void; subagentsWorking?: boolean }) {
+export const hasWorkingSubagent = (view: Pick<ViewState,'tasks'|'approvals'|'questions'>) => activeSubagentCount(view)>0;
+export function Tabs({ active, onChange, subagentsWorking = false, activeSubagents = subagentsWorking ? 1 : 0, subagentsFresh = true }: { active: WorkspaceTab; onChange: (tab: WorkspaceTab) => void; subagentsWorking?: boolean; activeSubagents?:number; subagentsFresh?:boolean }) {
     const statusId=useId();
     return <div className="workspace-tabs" role="tablist" aria-label="Workspace views" onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -28,7 +29,7 @@ export function Tabs({ active, onChange, subagentsWorking = false }: { active: W
         const at = buttons.indexOf(event.target as HTMLButtonElement);
         const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (at + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
         event.preventDefault(); buttons[next]?.click(); buttons[next]?.focus();
-    }}>{(Object.keys(tabNames) as WorkspaceTab[]).map(tab => <button className={tab === 'chat' ? 'chat-tab' : undefined} key={tab} type="button" role="tab" id={`tab-${tab}`} aria-label={tab==='subagents'?'Subagents':undefined} aria-describedby={tab==='subagents'?statusId:undefined} aria-selected={active === tab} aria-controls={`panel-${tab}`} tabIndex={active === tab ? 0 : -1} onClick={() => onChange(tab)}>{tab==='subagents'?<><span className="subagents-tab-title">Subagents<span className="tab-working" aria-hidden="true">{subagentsWorking && <StatusIndicator state="running"/>}</span></span><span id={statusId} className="sr-only" role="status">{subagentsWorking?'Subagents working':'No subagents working'}</span></>:tabNames[tab]}</button>)}</div>;
+    }}>{(Object.keys(tabNames) as WorkspaceTab[]).map(tab => <button className={tab === 'chat' ? 'chat-tab' : undefined} key={tab} type="button" role="tab" id={`tab-${tab}`} aria-label={tab==='subagents'?'Subagents':undefined} aria-describedby={tab==='subagents'?statusId:undefined} aria-selected={active === tab} aria-controls={`panel-${tab}`} tabIndex={active === tab ? 0 : -1} onClick={() => onChange(tab)}>{tab==='subagents'?<><span className="subagents-tab-title">Subagents<span className="tab-working" aria-hidden="true">{activeSubagents > 0 && <>{subagentsFresh && <StatusIndicator state="running"/>}<span className="tab-worker-count">{activeSubagents}</span></>}{!subagentsFresh && <span className="tab-stale">stale</span>}</span></span><span id={statusId} className="sr-only" role="status">{subagentsFresh ? `${activeSubagents} active subagents` : `Stale: ${activeSubagents} last known active subagents`}</span></>:tabNames[tab]}</button>)}</div>;
 }
 function displayValue(value: unknown): string {
     return typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value, null, 2);

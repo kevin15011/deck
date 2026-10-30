@@ -81,6 +81,18 @@ test("sidebar status polling authenticates and bounds session IDs before dispatc
   expect(queries).toHaveLength(1);
 });
 
+test("project summaries authenticate and bound scope before dispatch", async () => {
+  const queries: unknown[]=[];
+  const f=fixture({service:{execute:async()=>({ok:true}),openLog:()=>undefined,hasRunningWork:()=>false,query:async(name:string,args:unknown)=>{queries.push({name,args});return {ok:true,data:{projects:[]}};}}});
+  const route='/api/projects/status?projectId=p&projectId=q';
+  expect((await fetch(`${f.base}${route}`)).status).toBe(401);
+  const {cookie}=await pair(f),headers={Cookie:cookie};
+  expect((await fetch(`${f.base}${route}`,{headers})).status).toBe(200);
+  expect(queries).toEqual([{name:'projects.status',args:{projectIds:['p','q']}}]);
+  for(const route of ['/api/projects/status','/api/projects/status?projectId=..%2Fbad',`/api/projects/status?${Array(101).fill('projectId=p').join('&')}`]) expect((await fetch(`${f.base}${route}`,{headers})).status).toBe(400);
+  expect(queries).toHaveLength(1);
+});
+
 test("workspace query endpoints require authentication and forward bounded explicit parameters", async () => {
   const queries: unknown[] = [];
   const f = fixture({ service: {

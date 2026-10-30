@@ -11,6 +11,7 @@
     "./web-search-capability": "./src/web-search-capability.ts",
     "./developer-team-catalog": "./src/developer-team-catalog.ts",
     "./team-catalog": "./src/team-catalog.ts",
+    "./session/activity-summary": "./src/session/activity-summary.ts",
     "./session/start-context": "./src/session/start-context.ts",
     "./session/readiness-parity": "./src/session/readiness-parity.ts",
     "./session/preparation": "./src/session/preparation.ts",
