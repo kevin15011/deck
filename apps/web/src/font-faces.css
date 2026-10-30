@@ -1,0 +1,9 @@
+@font-face { font-family: 'Deck Inter'; src: url('/fonts/inter.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: 'Deck Geist'; src: url('/fonts/geist.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: 'Deck JetBrains Mono'; src: url('/fonts/jetbrains-mono.woff2') format('woff2'); font-weight: 100 800; font-display: swap; }
+@font-face { font-family: 'Deck Fira Code'; src: url('/fonts/fira-code.woff2') format('woff2'); font-weight: 300 700; font-display: swap; }
+@font-face { font-family: 'Deck Nunito Sans'; src: url('/fonts/nunito-sans.woff2') format('woff2'); font-weight: 200 1000; font-display: swap; }
+@font-face { font-family: 'Deck Space Grotesk'; src: url('/fonts/space-grotesk.woff2') format('woff2'); font-weight: 300 700; font-display: swap; }
+@font-face { font-family: 'Deck Source Serif 4'; src: url('/fonts/source-serif-4.woff2') format('woff2'); font-weight: 200 900; font-display: swap; }
+@font-face { font-family: 'Deck Lora'; src: url('/fonts/lora.woff2') format('woff2'); font-weight: 400 700; font-display: swap; }
+@font-face { font-family: 'Deck IBM Plex Mono'; src: url('/fonts/ibm-plex-mono.woff2') format('woff2'); font-weight: 400; font-display: swap; }
