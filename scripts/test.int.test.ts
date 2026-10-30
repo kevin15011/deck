@@ -34,3 +34,21 @@ test("working-tree import selection executes only the affected test and propagat
     expect(await main(["--tier", "e2e"], root)).toBe(0);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// A failed parallel batch must not hide required install tests or be overwritten
+// by the successful serial batch's exit status.
+test("install batch runs after a failed parallel batch and preserves its failure", async () => {
+  const root = mkdtempSync(join(tmpdir(), "deck-tier-batches-"));
+  try {
+    mkdirSync(join(root, "tests"));
+    writeFileSync(join(root, "bunfig.toml"), "[test]\n");
+    writeFileSync(join(root, "tests/quarantine.yaml"), "entries: []\n");
+    writeFileSync(join(root, "regular.test.ts"), `import {test,expect} from 'bun:test';import {writeFileSync} from 'node:fs';test('regular failure',()=>{writeFileSync('parallel-finished','yes');expect(false).toBe(true)});`);
+    const directory = join(root, "packages/adapter-codex/src");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "runner-adapter.tools.int.test.ts"), `import {test,expect} from 'bun:test';import {existsSync,writeFileSync} from 'node:fs';test('serial effect',()=>{expect(existsSync('parallel-finished')).toBe(true);writeFileSync('serial-finished','yes')});`);
+    expect(Bun.spawnSync(["git", "init", "-q"], { cwd: root }).exitCode).toBe(0);
+    expect(await main(["--tier", "all"], root)).toBe(1);
+    expect(await Bun.file(join(root, "serial-finished")).text()).toBe("yes");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

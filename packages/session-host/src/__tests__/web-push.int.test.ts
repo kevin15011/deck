@@ -50,19 +50,21 @@ function fixture(extra: Record<string, unknown> = {}) {
   const paths = resolveStatePaths({ env: { XDG_STATE_HOME: root } });
   ensureStateLayout(paths);
   const sent: any[] = [];
+  const firstDelivery = Promise.withResolvers<void>();
   const p = new WebPush({
     paths,
     isDeviceActive: () => true,
     isCurrent: () => true,
     send: async (...args: any[]) => {
       sent.push(args);
+      firstDelivery.resolve();
       return 201;
     },
     ...extra,
   });
   hosts.push(p);
   p.subscribe('d', 'https://deck.test', subscription());
-  return { p, paths, sent };
+  return { p, paths, sent, firstDelivery: firstDelivery.promise };
 }
 async function drain() {
   await Bun.sleep(40);
@@ -370,9 +372,9 @@ test('lost hidden-tab release cannot discard repeated new completions behind a s
  p.accept(event(2));now+=2100;await Bun.sleep(2100);expect(sent).toHaveLength(2);
 });
 test('a live foreground acknowledgement suppresses only the event actually received',async()=>{
- const {p,sent}=fixture();p.presence('d','https://deck.test','reading','s',1,0);p.accept(event(1));await drain();
+ const {p,sent,firstDelivery}=fixture();p.presence('d','https://deck.test','reading','s',1,0);p.accept(event(1));await drain();
  p.presence('d','https://deck.test','reading','s',2,1);await drain();expect(sent).toHaveLength(0);
- p.presence('d','https://deck.test','background',null,1,0);p.accept(event(2));await Bun.sleep(2150);expect(sent).toHaveLength(1);
+ p.presence('d','https://deck.test','background',null,1,0);p.accept(event(2));await firstDelivery;await drain();expect(sent).toHaveLength(1);
  expect(p.status('d','https://deck.test').delivery).toMatchObject({suppressed:1,sent:1});
 });
 
@@ -381,9 +383,9 @@ test('bounded diagnostics distinguish provider acceptance, rejection and network
  const {p}=fixture({send:async()=>{throw new Error('https://provider.test/private-endpoint secret-key raw-error');}});p.accept(event(1));await drain();const d=p.status('d','https://deck.test').delivery;expect(d.lastOutcome).toBe('transport-error');expect(JSON.stringify(d)).not.toMatch(/private-endpoint|secret-key|raw-error|provider\.test/);
 });
 test('multi-tab acknowledgement ordering cannot acknowledge future completions or let stale release clear a new view',async()=>{
- const {p,sent}=fixture();p.presence('d','https://deck.test','one','s',2,2);p.presence('d','https://deck.test','one',null,1,0);p.presence('d','https://deck.test','two',null,1,0);
+ const {p,sent,firstDelivery}=fixture();p.presence('d','https://deck.test','one','s',2,2);p.presence('d','https://deck.test','one',null,1,0);p.presence('d','https://deck.test','two',null,1,0);
  p.accept(event(2));await drain();expect(p.status('d','https://deck.test').delivery.suppressed).toBe(1);
- p.accept(event(3));await Bun.sleep(2100);expect(sent).toHaveLength(1);expect(sent[0][1].seq).toBe(3);
+ p.accept(event(3));await firstDelivery;await drain();expect(sent).toHaveLength(1);expect(sent[0][1].seq).toBe(3);
 });
 
 test('distinct decisions and results survive the same Lead attempt, unseen approvals and restart',async()=>{

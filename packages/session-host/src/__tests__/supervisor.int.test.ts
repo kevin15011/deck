@@ -94,9 +94,9 @@ describe("Supervisor (daemon side of the anchor)", () => {
     const mark = join(dir, "marks");
     const proc = run(makeSupervisor(), ["stubborn"], { FAKE_MARK: mark });
     const info = await childInfo(collect(proc));
-    const started = Date.now();
+    const started = performance.now();
     await proc.terminateGroup(400);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(350);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(350);
     const exit = await proc.exited;
     expect(exit.ok).toBe(false);
     expect(readFileSync(mark, "utf8")).toContain("cli:SIGTERM");

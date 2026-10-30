@@ -32,9 +32,15 @@ test("discovery bounds timeout, malformed frames, errors and output without leak
   const home = await mkdtemp(join(tmpdir(), "deck-claude-model-failures-"));
   try {
     const command = join(home, "claude");
-    for (const [body, message] of [["setInterval(()=>{},1000)", "timed out"], ["process.stdout.write('not JSON\\n');setInterval(()=>{},1000)", "malformed"], ["process.stdout.write('x'.repeat(1024*1024+1));setInterval(()=>{},1000)", "bound"], ["process.stderr.write('secret-test');process.exit(2)", "failed"]]) {
+    await writeFile(command, `#!${process.execPath}\nsetInterval(()=>{},1000)`, { mode: 0o700 });
+    // The real deadline is tested independently of fixture startup/output.
+    await expect(discoverClaudeModels({ command, home, projectRoot: home, timeoutMs: 150 })).rejects.toThrow("timed out");
+    // Freeze only the discovery deadline for framing/exit cases. Bun's test
+    // watchdog still bounds failures; process I/O and cleanup remain real.
+    const frozenDeadline = () => () => {};
+    for (const [body, message] of [["process.stdout.write('not JSON\\n');setInterval(()=>{},1000)", "malformed"], ["process.stdout.write('x'.repeat(1024*1024+1));setInterval(()=>{},1000)", "bound"], ["process.stderr.write('secret-test');process.exit(2)", "failed"]]) {
       await writeFile(command, `#!${process.execPath}\n${body}`, { mode: 0o700 });
-      await expect(discoverClaudeModels({ command, home, projectRoot: home, timeoutMs: 150 })).rejects.toThrow(message);
+      await expect(discoverClaudeModels({ command, home, projectRoot: home, timeoutMs: 150 }, frozenDeadline)).rejects.toThrow(message);
     }
     const controller = new AbortController(); controller.abort();
     await expect(discoverClaudeModels({ command, home, projectRoot: home, signal: controller.signal })).rejects.toThrow("cancelled");

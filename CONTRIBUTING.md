@@ -104,6 +104,11 @@ candidate; rerun checks whose inputs changed. The final full gate is `bun run te
 Use `--list` to inspect a selection and `bun scripts/test.ts --self-check` to check the tier partition.
 Affected selection follows imports; fixtures, generated files and manifests expand to the owning
 package, while shared test configuration and lockfile changes expand to all fast and integration tests.
+The wrapper runs four workers, then runs the Codex tools, public runner-recovery
+composition, and session-manager integration files with one worker. These fixtures copy
+complete installed skill trees, create large filesystem fixtures, and persist 200-task
+lifecycle batches; parallel contention can exceed their existing deadlines. They remain
+required, with unchanged assertions and timeouts.
 The wrapper preserves vendor exclusions from `bunfig.toml`. Quarantine entries require ownership,
 an issue link and expiry within 14 days; protected tests require explicit user approval.
 

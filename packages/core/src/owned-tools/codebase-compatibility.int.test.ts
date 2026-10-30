@@ -1,6 +1,6 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCodebaseCompatibilityInspector } from "./codebase-native-artifact";
@@ -22,17 +22,29 @@ test("same-version, same-size wrong bytes are rejected and shared bytes remain u
   expect(readFileSync(path, "utf8")).toBe(wrong);
 });
 
-test("verified shared reuse caches positive and negative hashes but invalidates on identity changes", async () => {
+test("verified shared reuse caches positive and negative hashes but invalidates on identity changes", () => {
   const { path, root } = fixture(); let hashes = 0;
   const inspect = createCodebaseCompatibilityInspector({ hashFile: (path) => { hashes++; return sha(readFileSync(path)); } });
-  await Bun.sleep(2100);
-  expect(inspect(path, release)).toBe(true); expect(inspect(path, release)).toBe(true); expect(hashes).toBe(1);
-  writeFileSync(path, binary.replace("build A", "build B"));
-  await Bun.sleep(2100);
-  expect(inspect(path, release)).toBe(false); expect(inspect(path, release)).toBe(false); expect(hashes).toBe(2);
-  writeFileSync(join(root, "replacement"), binary, { mode: 0o700 }); renameSync(join(root, "replacement"), path);
-  expect(inspect(path, release)).toBe(true); expect(hashes).toBe(3);
-  chmodSync(path, 0o600); expect(inspect(path, release)).toBe(false);
+  // Cache eligibility uses wall time against filesystem timestamps, not elapsed
+  // sleep time. Pin that clock beyond the exact identity's settling window.
+  const clock = spyOn(Date, "now");
+  const settle = () => {
+    const stat = statSync(path);
+    clock.mockReturnValue(Math.ceil(Math.max(stat.mtimeMs, stat.ctimeMs)) + 2001);
+  };
+  try {
+    settle();
+    expect(inspect(path, release)).toBe(true); expect(inspect(path, release)).toBe(true); expect(hashes).toBe(1);
+    const previous = statSync(path);
+    writeFileSync(path, binary.replace("build A", "build B"));
+    // Force a distinct identity even on filesystems that coalesce fast writes.
+    utimesSync(path, previous.atime, new Date(previous.mtimeMs + 1000));
+    settle();
+    expect(inspect(path, release)).toBe(false); expect(inspect(path, release)).toBe(false); expect(hashes).toBe(2);
+    writeFileSync(join(root, "replacement"), binary, { mode: 0o700 }); renameSync(join(root, "replacement"), path);
+    expect(inspect(path, release)).toBe(true); expect(hashes).toBe(3);
+    chmodSync(path, 0o600); expect(inspect(path, release)).toBe(false);
+  } finally { clock.mockRestore(); }
 });
 
 test("cache is bounded and separates release identities and symlink targets", () => {

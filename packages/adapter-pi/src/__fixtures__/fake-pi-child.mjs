@@ -57,8 +57,7 @@ if (task.includes("HOLD")) {
     process.exit(0);
   }, 250);
 } else if (task.includes("DESCENDANT")) {
-  const descendant = spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'], { stdio: ["ignore", "inherit", "inherit"] });
-  log({ descendantPid: descendant.pid });
+  spawn(process.execPath, ["-e", 'const fs = require("node:fs"); process.on("SIGTERM", () => {}); fs.appendFileSync(process.env.FAKE_PI_LOG, JSON.stringify({descendantPid:process.pid}) + "\\n"); setInterval(() => {}, 1000)'], { stdio: ["ignore", "inherit", "inherit"] });
   setInterval(() => {}, 1000);
 } else if (task.includes("SLEEP") || task.includes("IGNORE_TERM")) {
   emit({ type: "agent_start" });

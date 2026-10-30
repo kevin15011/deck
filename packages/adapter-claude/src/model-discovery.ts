@@ -61,7 +61,10 @@ export function claudeModelSettings(home: string, projectRoot: string, configDir
   return settings;
 }
 
-export async function discoverClaudeModels(input: { command?: string; home: string; projectRoot: string; configDir?: string; timeoutMs?: number; signal?: AbortSignal }): Promise<readonly ClaudeModelInfo[]> {
+export async function discoverClaudeModels(input: { command?: string; home: string; projectRoot: string; configDir?: string; timeoutMs?: number; signal?: AbortSignal }, scheduleDeadline: (expire: () => void, milliseconds: number) => () => void = (expire, milliseconds) => {
+  const timer = setTimeout(expire, milliseconds);
+  return () => clearTimeout(timer);
+}): Promise<readonly ClaudeModelInfo[]> {
   if (input.signal?.aborted) throw new Error("Claude model discovery was cancelled.");
   const command = input.command ?? Bun.which("claude");
   if (!command || !isAbsolute(command)) throw new Error("Installed Claude executable was not found.");
@@ -91,7 +94,7 @@ export async function discoverClaudeModels(input: { command?: string; home: stri
         groupCleanup = new Promise((done) => { setTimeout(() => { kill("SIGKILL"); child.stdout.destroy(); child.stderr.destroy(); setTimeout(done, 10); }, 100); });
       };
       const abort = () => stop(new Error("Claude model discovery was cancelled."));
-      const timer = setTimeout(() => stop(new Error("Claude model discovery timed out.")), Math.min(input.timeoutMs ?? 8000, 15000));
+      const cancelDeadline = scheduleDeadline(() => stop(new Error("Claude model discovery timed out.")), Math.min(input.timeoutMs ?? 8000, 15000));
       input.signal?.addEventListener("abort", abort, { once: true });
       child.stdout.on("data", (chunk: Buffer) => {
         if (stopped) return;
@@ -111,7 +114,7 @@ export async function discoverClaudeModels(input: { command?: string; home: stri
       child.stderr.on("data", (chunk: Buffer) => { bytes += chunk.length; if (bytes > 1024 * 1024) stop(new Error("Claude model metadata exceeded its output bound.")); });
       child.on("error", () => stop(new Error("Claude model discovery command failed.")));
       child.stdin.on("error", () => { if (!stopped) stop(new Error("Claude metadata control request failed.")); });
-      child.on("close", async () => { clearTimeout(timer); if (!stopped) stop(new Error("Claude model discovery command failed.")); await groupCleanup; input.signal?.removeEventListener("abort", abort); if (input.signal?.aborted) failure = new Error("Claude model discovery was cancelled."); if (result && !failure) resolve(result); else reject(failure ?? new Error("Claude model discovery command failed.")); });
+      child.on("close", async () => { cancelDeadline(); if (!stopped) stop(new Error("Claude model discovery command failed.")); await groupCleanup; input.signal?.removeEventListener("abort", abort); if (input.signal?.aborted) failure = new Error("Claude model discovery was cancelled."); if (result && !failure) resolve(result); else reject(failure ?? new Error("Claude model discovery command failed.")); });
       child.stdin.write(JSON.stringify({ type: "control_request", request_id: id, request: { subtype: "initialize", hooks: {} } }) + "\n");
       if (input.signal?.aborted) abort();
     });

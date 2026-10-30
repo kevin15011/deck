@@ -107,8 +107,27 @@ export async function main(args = process.argv.slice(2), root = resolve(import.m
   console.log(`Selected ${selected.length}/${all.length} files: ${reason}`);
   if (list) { console.log(selected.join("\n")); return 0; }
   if (!selected.length) return 0; // Never invoke bare bun test for an empty selection.
-  const child = Bun.spawn([process.execPath, "test", ...(supportsParallel ? ["--parallel=4"] : []), ...(nativeChanged ? [`--changed=${changed || "HEAD"}`] : []), "--timeout", "30000", ...passthrough, ...selected.map(p => `./${p}`)], { cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
-  return await child.exited;
+  // Install/rollback fixtures copy complete skill trees and create 10,100 files;
+  // session-manager batches persist 200 task lifecycles. Competing workers can
+  // exhaust these workloads' existing deadlines.
+  const serialWorkloadFiles = new Set([
+    "apps/cli/src/upgrade-command/runner-recovery-composition.int.test.ts",
+    "packages/adapter-codex/src/runner-adapter.tools.int.test.ts",
+    "packages/session-host/src/__tests__/session-manager.int.test.ts",
+  ]);
+  const batches = [
+    { files: selected.filter(path => !serialWorkloadFiles.has(path)), workers: 4 },
+    { files: selected.filter(path => serialWorkloadFiles.has(path)), workers: 1 },
+  ];
+  let exitCode = 0;
+  for (const { files, workers } of batches) {
+    if (!files.length) continue;
+    console.log(`Running ${files.length} files with ${workers} worker(s)`);
+    const child = Bun.spawn([process.execPath, "test", ...(supportsParallel ? [`--parallel=${workers}`] : []), ...(nativeChanged ? [`--changed=${changed || "HEAD"}`] : []), "--timeout", "30000", ...passthrough, ...files.map(p => `./${p}`)], { cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+    const code = await child.exited;
+    if (code !== 0 && exitCode === 0) exitCode = code;
+  }
+  return exitCode;
 }
 if (import.meta.main) {
   try { process.exitCode = await main(); } catch (error) { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; }
