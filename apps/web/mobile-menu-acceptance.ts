@@ -70,7 +70,7 @@ try{
   }
   await options('More options for Current conversation','Options for session Current conversation');await screenshot(`menu-${width}-session-options`);await page.keyboard.press('Escape');
   await options(/^More options for Deck workspace /,'Options for Deck workspace');await screenshot(`menu-${width}-project-options`);await page.keyboard.press('Escape');
-  if(phase==='before')await drawer.getByRole('button',{name:'Deck menu',exact:true}).click();
+  if(phase==='before')await drawer.getByRole('button',{name:'Settings',exact:true}).click();
   await screenshot(`menu-${width}-secondary`);
   await drawer.getByRole(phase==='before'?'menuitem':'button',{name:'Install Deck',exact:true}).click();const install=page.getByRole('dialog',{name:'Install Deck',exact:true});await install.waitFor();await screenshot(`menu-${width}-install`);
   await page.goBack();await drawer.waitFor();await page.keyboard.press('Escape');await drawer.waitFor({state:'hidden'});
@@ -90,9 +90,9 @@ try{
  await page.setViewportSize({width:1440,height:1000});await selectTheme(page,'light');
  await page.getByRole('navigation',{name:'Sessions',exact:true}).waitFor();await screenshot('desktop-1440');checks.push('desktop-visual');
  const sidebar=page.getByRole('navigation',{name:'Sessions',exact:true});assert.equal(Math.round((await sidebar.boundingBox())!.width),224);
- await sidebar.getByRole('button',{name:'Deck menu',exact:true}).click();await sidebar.getByRole('menuitem',{name:'Install Deck',exact:true}).click();
+ await sidebar.getByRole('button',{name:'Settings',exact:true}).click();await sidebar.getByRole('menuitem',{name:'Install Deck',exact:true}).click();
  await page.getByRole('dialog',{name:'Install Deck',exact:true}).waitFor();await screenshot('desktop-install-1440');await page.keyboard.press('Escape');
- await sidebar.getByRole('button',{name:'Deck menu',exact:true}).evaluate(el=>{if(el!==document.activeElement)throw Error('Desktop menu focus was not restored');});checks.push('desktop-menu-install-focus');
+ await sidebar.getByRole('button',{name:'Settings',exact:true}).evaluate(el=>{if(el!==document.activeElement)throw Error('Desktop menu focus was not restored');});checks.push('desktop-menu-install-focus');
  if(phase==='after'){
   await page.setViewportSize({width:390,height:844});await selectTheme(page,'dark');await open();await drawer.locator('.navigation-scroll').evaluate(el=>el.scrollTop=0);await settle();await screenshot('menu-390-dark');await close();
   await open();const current=drawer.getByRole('button',{name:'Current conversation',exact:true});await current.scrollIntoViewIfNeeded();await settle();await current.click();await drawer.waitFor({state:'hidden'});

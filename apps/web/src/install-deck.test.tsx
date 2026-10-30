@@ -4,7 +4,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {DeckMenu,installHelp,InstallDeckDialog} from './install-deck';
 test('install is a menu item, hidden in standalone, and has no chat/banner/permission action',()=>{
  expect(renderToStaticMarkup(<DeckMenu hidden onInstall={()=>{}}/>)).toBe('');
- const html=renderToStaticMarkup(<DeckMenu hidden={false} onInstall={()=>{}}/>);expect(html).toContain('Deck menu');expect(html).toContain('aria-haspopup="menu"');expect(html).not.toContain('Install Deck');expect(html).not.toContain('Notification');
+ const html=renderToStaticMarkup(<DeckMenu hidden={false} onInstall={()=>{}}/>);expect(html).toContain('Settings');expect(html).toContain('aria-haspopup="menu"');expect(html).not.toContain('Install Deck');expect(html).not.toContain('Notification');
 });
 test('manual guidance is platform appropriate and install status never promises global detection',()=>{
  expect(installHelp(true)).toContain('In Safari');expect(installHelp(true)).toContain('Share');expect(installHelp(false)).toContain('if available');expect(installHelp(false,false)).toContain('HTTPS');

@@ -39,6 +39,7 @@ function ambientSync(root: ParentNode): void {
 }
 
 function reveal(element: HTMLElement, preset: Preset, vars?: gsap.TweenVars): void {
+    if (element.hasAttribute('data-control-motion')) return;
     if (element instanceof HTMLDialogElement) {
         animateIn(element, 'fade', { duration: duration.base });
         gsap.fromTo(element, { '--backdrop-o': 0 }, { '--backdrop-o': 1, duration: duration.base, ease: ease.out });

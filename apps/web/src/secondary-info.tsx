@@ -1,4 +1,5 @@
 import { useDismissLayer } from './dismiss-layer';
+import { createSurfaceMotion, useControlFeedback } from './control-motion';
 import React, { createContext, useCallback, useContext, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DeckHistory } from './navigation';
@@ -57,6 +58,7 @@ function InfoTrigger({title,label,children,resetKey='',className='',accessibleLa
 
 function InfoSurface({id,title,trigger,controls,children}:{id:string;title:string;trigger:HTMLButtonElement;controls:Controls;children:React.ReactNode}) {
     const dialog=useRef<HTMLDialogElement>(null),closeButton=useRef<HTMLButtonElement>(null),latest=useRef(controls);latest.current=controls;
+    useControlFeedback(dialog);
     const [modal,setModal]=useState(()=>window.matchMedia('(max-width: 1000px)').matches||!('showPopover' in HTMLElement.prototype));
     const opener=useRef<HTMLElement|null>(trigger);opener.current=trigger;
     useDismissLayer({open:!modal,roots:[dialog,opener],onDismiss:()=>latest.current.close()});
@@ -71,6 +73,7 @@ function InfoSurface({id,title,trigger,controls,children}:{id:string;title:strin
             panel.style.left=`${modal?v.left+8:p.left}px`;panel.style.top=`${modal?v.top+v.height-rect.height-8:p.top}px`;panel.style.visibility='visible';
         };
         if(modal)panel.showModal();else panel.showPopover();position();closeButton.current?.focus({preventScroll:true});
+        const motion=createSurfaceMotion(panel,()=>{});motion.update(true);
         const observer=new ResizeObserver(position);observer.observe(panel);observer.observe(trigger);
         window.addEventListener('resize',position);document.addEventListener('scroll',position,true);window.visualViewport?.addEventListener('resize',position);window.visualViewport?.addEventListener('scroll',position);
         let releaseClick:undefined|(()=>void);
@@ -99,6 +102,7 @@ function InfoSurface({id,title,trigger,controls,children}:{id:string;title:strin
         const wheel=(event:WheelEvent|TouchEvent)=>{if(modal&&!panel.contains(event.target as Node))consume(event);};
         document.addEventListener('pointerdown',outside,true);window.addEventListener('keydown',key,true);document.addEventListener('wheel',wheel,{capture:true,passive:false});document.addEventListener('touchmove',wheel,{capture:true,passive:false});
         return()=>{
+            motion.dispose();
             observer.disconnect();window.removeEventListener('resize',position);document.removeEventListener('scroll',position,true);window.visualViewport?.removeEventListener('resize',position);window.visualViewport?.removeEventListener('scroll',position);
             document.removeEventListener('pointerdown',outside,true);window.removeEventListener('keydown',key,true);document.removeEventListener('wheel',wheel,true);document.removeEventListener('touchmove',wheel,true);
             if(modal)panel.close();else if(panel.matches(':popover-open'))panel.hidePopover();
@@ -108,5 +112,5 @@ function InfoSurface({id,title,trigger,controls,children}:{id:string;title:strin
             }
         };
     },[id,modal,trigger]);
-    return <dialog ref={dialog} id={id} popover={modal?undefined:'manual'} className="secondary-info-panel" data-modal={modal} aria-modal={modal?true:undefined} aria-labelledby={`${id}-title`} style={{visibility:'hidden'}} onCancel={event=>{event.preventDefault();event.stopPropagation();controls.close();}} onClick={event=>event.stopPropagation()}><header><h2 id={`${id}-title`}>{title}</h2><button ref={closeButton} type="button" className="quiet secondary-info-close" aria-label={`Close ${title}`} onClick={()=>controls.close()}><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></header><div className="secondary-info-body">{children}</div></dialog>;
+    return <dialog ref={dialog} data-control-motion id={id} popover={modal?undefined:'manual'} className="secondary-info-panel" data-modal={modal} aria-modal={modal?true:undefined} aria-labelledby={`${id}-title`} style={{visibility:'hidden'}} onCancel={event=>{event.preventDefault();event.stopPropagation();controls.close();}} onClick={event=>event.stopPropagation()}><header><h2 id={`${id}-title`}>{title}</h2><button ref={closeButton} type="button" className="quiet secondary-info-close" aria-label={`Close ${title}`} onClick={()=>controls.close()}><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></header><div className="secondary-info-body">{children}</div></dialog>;
 }

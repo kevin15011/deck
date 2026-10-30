@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { THEMES, type Theme } from './theme';
 import { createThemeReveal } from './theme-reveal';
+import { useControlFeedback, useSurfacePresence } from './control-motion';
 
 /** Owns one reveal controller; the circular reveal starts from the element that chose the theme. */
 export function useThemeReveal(onChange: (theme: Theme) => void) {
@@ -44,6 +45,11 @@ export function themeMatches(theme: { id: string; label: string }, query: string
 export function ThemeDialog({ value, onChange, onClose }: { value: Theme; onChange: (theme: Theme) => void; onClose: () => void }) {
     const choose = useThemeReveal(onChange);
     const dialog = useRef<HTMLDialogElement>(null), search = useRef<HTMLInputElement>(null), list = useRef<HTMLDivElement>(null);
+    const [closing, setClosing] = useState(false);
+    const present = useSurfacePresence(dialog, !closing);
+    useControlFeedback(dialog, present);
+    const close = () => setClosing(true);
+    useLayoutEffect(() => { if (closing && !present) onClose(); }, [closing, present, onClose]);
     const id = useId(), [query, setQuery] = useState(''), [highlighted, setHighlighted] = useState<Theme>(value);
     const themes = THEMES.filter(theme => themeMatches(theme, query));
     const active = themes.find(theme => theme.id === highlighted)?.id ?? themes[0]?.id;
@@ -69,19 +75,19 @@ export function ThemeDialog({ value, onChange, onClose }: { value: Theme; onChan
             (index + (event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : 1) + themes.length) % themes.length;
         setHighlighted(themes[next]!.id);
     };
-    return <dialog ref={dialog} className="workspace-dialog theme-dialog" aria-labelledby={`${id}-title`}
+    return <dialog ref={dialog} data-control-motion inert={closing} aria-hidden={closing || undefined} className="workspace-dialog theme-dialog" aria-labelledby={`${id}-title`}
         onKeyDownCapture={event => {
             // Search inputs otherwise consume the first Escape just to clear their value.
             if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
-            event.preventDefault(); event.stopPropagation(); onClose();
+            event.preventDefault(); event.stopPropagation(); close();
         }}
-        onCancel={event => { event.preventDefault(); event.stopPropagation(); onClose(); }}
+        onCancel={event => { event.preventDefault(); event.stopPropagation(); close(); }}
         onClick={event => {
             if (event.target !== event.currentTarget) return;
             const bounds = event.currentTarget.getBoundingClientRect();
-            if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();
+            if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) close();
         }}>
-        <div className="dialog-heading"><h2 id={`${id}-title`}>Theme</h2><button type="button" className="quiet" aria-label="Close theme picker" onClick={onClose}>✕</button></div>
+        <div className="dialog-heading"><h2 id={`${id}-title`}>Theme</h2><button type="button" className="quiet" aria-label="Close theme picker" onClick={close}>✕</button></div>
         <input ref={search} autoFocus type="search" role="combobox" aria-label="Search themes" placeholder="Search themes"
             aria-autocomplete="list" aria-expanded="true" aria-controls={`${id}-list`} aria-activedescendant={active ? `${id}-${active}` : undefined}
             value={query} onChange={event => setQuery(event.currentTarget.value)} onKeyDown={navigate}/>
@@ -100,6 +106,6 @@ export function ThemeDialog({ value, onChange, onClose }: { value: Theme; onChan
             </button>)}
         </div>
         {!themes.length && <p role="status" className="muted">No themes match</p>}
-        <div className="dialog-actions"><button type="button" onClick={onClose}>Done</button></div>
+        <div className="dialog-actions"><button type="button" onClick={close}>Done</button></div>
     </dialog>;
 }

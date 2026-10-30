@@ -68,7 +68,7 @@ const id = (result.data as any).sessionId;
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 async function openNotifications(page: Page) {
   const mobile = (page.viewportSize()?.width ?? 1440) <= 1000;
-  await page.getByRole('button', {name:mobile ? 'Open sessions' : 'Deck menu',exact:true}).click();
+  await page.getByRole('button', {name:mobile ? 'Open sessions' : 'Settings',exact:true}).click();
   await page.getByRole(mobile ? 'button' : 'menuitem', {name:/Notifications/}).click();
 }
 try {

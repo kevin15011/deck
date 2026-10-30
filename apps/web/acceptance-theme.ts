@@ -11,8 +11,8 @@ export async function selectTheme(page: Page, value: string) {
         if (!await drawer.isVisible()) await page.getByRole('button', { name: 'Open sessions', exact: true }).click();
         await drawer.getByRole('button', { name: /^Theme/ }).click();
     } else if (!await dialog.isVisible()) {
-        const menu = page.getByRole('menu', { name: 'Deck', exact: true });
-        if (!await menu.isVisible()) await page.getByRole('button', { name: 'Deck menu', exact: true }).click();
+        const menu = page.getByRole('menu', { name: 'Settings', exact: true });
+        if (!await menu.isVisible()) await page.getByRole('button', { name: 'Settings', exact: true }).click();
         await menu.getByRole('menuitem', { name: /^Theme/ }).click();
     }
     await dialog.getByRole('combobox', { name: 'Search themes' }).fill(theme.id);

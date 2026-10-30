@@ -41,7 +41,7 @@ test('blocked storage getters and operations never prevent theme switching', () 
 test('theme menu entry summarizes the active theme instead of listing every theme', () => {
     // The popup stays closed until opened, so the collapsed trigger renders no theme names.
     const closed = renderToStaticMarkup(<DeckMenu hidden onInstall={() => {}} theme="github" onTheme={() => {}}/>);
-    expect(closed).toContain('aria-label="Deck menu"');
+    expect(closed).toContain('aria-label="Settings"');
     expect(closed).not.toContain('<select');
     const inline = renderToStaticMarkup(<DeckMenu inline hidden onInstall={() => {}} theme="github" onTheme={() => {}}/>);
     expect(inline).toContain('aria-haspopup="dialog"');

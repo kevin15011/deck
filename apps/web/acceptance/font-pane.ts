@@ -32,7 +32,7 @@ const page = await browser.newPage({viewport:{width:1440,height:900}});
 const requests:string[]=[]; page.on('request',request=>requests.push(request.url()));
 try {
  await page.goto(host.status().url!);
- await page.getByRole('button',{name:'Deck menu'}).click();
+ await page.getByRole('button',{name:'Settings'}).click();
  await page.getByRole('menuitem',{name:/Font/}).click();
  for (const [label,family] of [['Inter','Deck Inter'],['Geist','Deck Geist'],['JetBrains Mono','Deck JetBrains Mono'],['Fira Code','Deck Fira Code'],['Nunito Sans','Deck Nunito Sans'],['Space Grotesk','Deck Space Grotesk'],['Source Serif 4','Deck Source Serif 4'],['Lora','Deck Lora'],['IBM Plex Mono','Deck IBM Plex Mono']]) {
   await page.getByRole('radio',{name:label,exact:true}).check();
@@ -41,18 +41,18 @@ try {
  }
  await page.reload();
  assert.equal(await page.evaluate(()=>document.documentElement.dataset.font),'ibm-plex-mono');
- await page.getByRole('button',{name:'Deck menu'}).click(); await page.getByRole('menuitem',{name:/Font/}).click();
+ await page.getByRole('button',{name:'Settings'}).click(); await page.getByRole('menuitem',{name:/Font/}).click();
  assert(await page.getByRole('radio',{name:'IBM Plex Mono'}).isChecked());
  await page.getByRole('radio',{name:'Fira Code',exact:true}).check();
  await page.getByRole('button',{name:'Close font picker'}).click();
- assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')), 'Deck menu');
+ assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')), 'Settings');
  const divider=page.getByRole('separator',{name:'Resize conversation and workspace'});
  await divider.focus(); await page.keyboard.press('ArrowRight');
  assert.equal(await divider.getAttribute('aria-valuenow'),'52');
  const box=await divider.boundingBox(); assert(box); await page.mouse.move(box.x+6,box.y+100);await page.mouse.down();await page.mouse.move(box.x+80,box.y+100);await page.mouse.up();
  const ratio=await divider.getAttribute('aria-valuenow'); assert(Number(ratio)>52);
  await page.reload(); assert.equal(await divider.getAttribute('aria-valuenow'),ratio); assert.equal(await page.evaluate(()=>document.documentElement.dataset.font),'fira-code');
- await page.getByRole('button',{name:'Deck menu'}).click(); await page.getByRole('menuitem',{name:/Font/}).click();
+ await page.getByRole('button',{name:'Settings'}).click(); await page.getByRole('menuitem',{name:/Font/}).click();
  assert(await page.getByRole('radio',{name:'Fira Code'}).isChecked()); await page.getByRole('button',{name:'Close font picker'}).click();
  for (const width of [1001,1100,1280]) for (const collapsed of [false,true]) for (const key of ['Home','End']) {
   await page.setViewportSize({width,height:900});

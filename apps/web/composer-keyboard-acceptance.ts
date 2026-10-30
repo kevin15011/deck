@@ -134,8 +134,8 @@ try {
         const { context, page, input } = await fresh();
         await page.keyboard.press('Escape'); await expect(page.getByText('Press Esc again to interrupt', { exact: true })).toBeVisible();
         await page.waitForTimeout(1100); await expect(page.getByText('Press Esc again to interrupt', { exact: true })).toHaveCount(0);
-        await page.keyboard.press('Escape'); await page.getByRole('button', { name: 'Deck menu', exact: true }).click();
-        await page.keyboard.press('Escape'); await expect(page.getByRole('menu', { name: 'Deck', exact: true })).toHaveCount(0);
+        await page.keyboard.press('Escape'); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+        await page.keyboard.press('Escape'); await expect(page.getByRole('menu', { name: 'Settings', exact: true })).toHaveCount(0);
         await input.focus(); await page.keyboard.press('Escape'); await expect(page.getByText('Press Esc again to interrupt', { exact: true })).toBeVisible(); assert.equal(interrupts().length, 0);
         await page.keyboard.press('Escape'); await expect.poll(()=>interrupts().length).toBe(1);
         await context.close(); console.log('PASS hint expiration and menu dismissal resets double Esc');

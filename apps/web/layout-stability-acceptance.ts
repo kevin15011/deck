@@ -122,7 +122,7 @@ try{
             }finally{await copyContext.close();}
         }
     });
-    await check('usage section sits above the Deck menu, folds with persisted state at 390 and 1440',async()=>{
+    await check('usage section sits above Settings, folds with persisted state at 390 and 1440',async()=>{
         await page.evaluate(()=>localStorage.removeItem('deck.usage-collapsed'));
         for(const width of [390,1440]){
             await page.setViewportSize({width,height:844});await select('one');
@@ -131,7 +131,7 @@ try{
             const nav=page.getByRole('navigation',{name:width<1000?'Mobile sessions':'Sessions',exact:true});
             const section=nav.locator('.usage-section'),toggle=section.getByRole('button',{name:/^Usage/});await toggle.waitFor();
             const order=await nav.evaluate(root=>{const usage=root.querySelector('.usage-section')!,menu=root.querySelector('.deck-menu')!;return usage.compareDocumentPosition(menu)&Node.DOCUMENT_POSITION_FOLLOWING&&usage.getBoundingClientRect().bottom<=menu.getBoundingClientRect().top+1;});
-            assert(order,'usage section renders directly above the Deck menu');
+            assert(order,'usage section renders directly above the Settings');
             if(await toggle.getAttribute('aria-expanded')==='false')await toggle.click();
             await section.getByRole('progressbar',{name:'Claude 5-hour usage',exact:true}).waitFor();
             assert.equal(await section.getByRole('progressbar').count(),3);
@@ -359,12 +359,12 @@ try{
     await check('notifications menu dialog preserves settings, attention and focus at 390, 320 and 1440',async()=>{
         for(const width of [390,320,1440]){
             pushEnabled=false;await page.setViewportSize({width,height:844});await select('one');
-            const mobile=width<=1000,trigger=page.getByRole('button',{name:mobile?'Open sessions':'Deck menu',exact:true});
+            const mobile=width<=1000,trigger=page.getByRole('button',{name:mobile?'Open sessions':'Settings',exact:true});
             assert.equal(await page.locator('.app-header [aria-label="Notifications"]').count(),0);
             await trigger.locator('.menu-attention').waitFor();
             if(!mobile){await page.getByRole('button',{name:'Collapse sidebar',exact:true}).click();assert(await trigger.locator('.menu-attention').isVisible());await page.getByRole('button',{name:'Expand sidebar',exact:true}).click();}
             const requests=await page.evaluate(()=>(window as any).__permissionRequests);await trigger.click();
-            const menu=mobile?page.locator('.session-drawer'):page.getByRole('menu',{name:'Deck',exact:true});
+            const menu=mobile?page.locator('.session-drawer'):page.getByRole('menu',{name:'Settings',exact:true});
             const action=menu.getByRole(mobile?'button':'menuitem',{name:/Notifications/});assert.match(await action.innerText(),/Off/);
             await action.click();const dialog=page.getByRole('dialog',{name:'Notifications',exact:true});await dialog.waitFor();assert.equal(await menu.isVisible(),false);
             assert.match(await dialog.innerText(),/authorization expired/);assert.equal(await page.evaluate(()=>(window as any).__permissionRequests),requests);
@@ -378,7 +378,7 @@ try{
         await page.setViewportSize({width:1440,height:1000});await select('one');
     });
     await check('outside dismissal preserves a Send click while summary requests are slow',async()=>{
-        await page.locator('#prompt').fill('Send through outside dismissal');await page.getByRole('button',{name:'Deck menu',exact:true}).click();await page.getByRole('menu',{name:'Deck',exact:true}).waitFor();await page.waitForTimeout(400);summaryDelay=300;
+        await page.locator('#prompt').fill('Send through outside dismissal');await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('menu',{name:'Settings',exact:true}).waitFor();await page.waitForTimeout(400);summaryDelay=300;
         const button=await page.getByRole('button',{name:'Send prompt',exact:true}).boundingBox();assert(button);await page.mouse.move(button.x+button.width/2,button.y+button.height/2);await page.mouse.down();await page.waitForTimeout(60);await page.mouse.up();
         await page.waitForFunction(()=>document.querySelector<HTMLTextAreaElement>('#prompt')?.value==='',null,{timeout:3000});assert.equal(sent,1);sent=0;summaryDelay=0;
     });
@@ -387,7 +387,7 @@ try{
         await page.locator('.app-header h1').dispatchEvent('pointerdown');await page.locator('.session-permissions-panel').waitFor({state:'hidden'});await toggle.click();await page.keyboard.press('Escape');await page.locator('.session-permissions-panel').waitFor({state:'hidden'});assert(await toggle.evaluate(el=>el===document.activeElement));
     });
     await check('Deck theme choices and MCP share the menu surface',async()=>{
-        const toggle=page.getByRole('button',{name:'Deck menu',exact:true});await toggle.click();const menu=page.getByRole('menu',{name:'Deck',exact:true});await menu.waitFor();
+        const toggle=page.getByRole('button',{name:'Settings',exact:true});await toggle.click();const menu=page.getByRole('menu',{name:'Settings',exact:true});await menu.waitFor();
         const style=await menu.evaluate(el=>{const s=getComputedStyle(el);return {bg:s.backgroundColor,radius:s.borderRadius,shadow:s.boxShadow};});assert.equal(style.radius,'8px');
         const choice=menu.getByRole('menuitem',{name:/^Theme/});assert.equal(await choice.evaluate(el=>parseFloat(getComputedStyle(el).fontSize)),await page.evaluate(()=>parseFloat(getComputedStyle(document.documentElement).fontSize)*.8));assert((await choice.boundingBox())!.height>=40);
         await page.locator('.app-header h1').dispatchEvent('pointerdown');await menu.waitFor({state:'hidden'});await toggle.click();await page.keyboard.press('Escape');await menu.waitFor({state:'hidden'});
@@ -399,9 +399,9 @@ try{
         for(const width of [1440,768,390,320]){
             await page.setViewportSize({width,height:844});
             const mobile=width<=1000;
-            const trigger=page.getByRole('button',{name:mobile?'Open sessions':'Deck menu',exact:true});
+            const trigger=page.getByRole('button',{name:mobile?'Open sessions':'Settings',exact:true});
             await trigger.click();
-            const container=mobile?page.locator('.session-drawer'):page.getByRole('menu',{name:'Deck',exact:true});
+            const container=mobile?page.locator('.session-drawer'):page.getByRole('menu',{name:'Settings',exact:true});
             await container.getByRole(mobile?'button':'menuitem',{name:/^Theme/}).click();
             await picker.waitFor();
             assert.equal(await container.isVisible(),false,'navigation closes before picker opens');
@@ -449,7 +449,7 @@ try{
     await check('session switch reserves header controls and composer geometry',async()=>{
         const before=await Promise.all(['.app-header','.app-header h1','#conversation','.composer'].map(rect));
         await page.evaluate(()=>{(window as any).__samples=[];const start=performance.now();function sample(){(window as any).__samples.push(['.app-header','.app-header h1','#conversation','.composer'].map(selector=>{const r=document.querySelector(selector)?.getBoundingClientRect();return r?{x:r.x,y:r.y,width:r.width,height:r.height}:null}));if(performance.now()-start<1200)requestAnimationFrame(sample);}sample();});
-        await page.getByRole('button',{name:'Deck menu',exact:true}).click();await page.getByRole('menu',{name:'Deck',exact:true}).waitFor();
+        await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('menu',{name:'Settings',exact:true}).waitFor();
         await page.locator('.sidebar [data-session-id="two"] .session').click();await page.waitForTimeout(1300);
         const samples=await page.evaluate(()=>(window as any).__samples) as (typeof before|null[])[];
         for(const sample of samples)for(let i=0;i<before.length;i++){assert(sample[i],`missing box ${i}`);for(const axis of ['x','y','width','height'] as const){if(i===1&&axis==='width')continue;assert(Math.abs(sample[i]![axis]-before[i]![axis])<1.1,`box ${i} ${axis}: ${JSON.stringify(sample)} vs ${JSON.stringify(before)}`);}}

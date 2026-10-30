@@ -32,11 +32,11 @@ test('compact mobile controls collapse to one header toggle that names the sessi
     expect(unprepared).toContain('class="quiet session-compact-toggle action"');
     expect(unprepared).toContain('aria-expanded="false"');
     expect(unprepared).toContain('aria-label="Session: Prepare this session before sending."');
-    expect(unprepared).toContain('<span>Prepare</span>');
+    expect(unprepared).toContain('<span>Session</span>');
     expect(unprepared).not.toContain('Close session'); // Actions stay inside the closed panel.
     const ready = renderToStaticMarkup(<SessionControls {...props} compact preparation={{ status: 'ready', generation: 0 }}/>);
     expect(ready).toContain('session-compact-toggle ready');
-    expect(ready).toContain('<span>Ready</span>');
+    expect(ready).toContain('<span>Session</span>');
     expect(ready).toContain('class="session-compact-chevron"');
     expect(ready).toMatch(/<svg class="session-compact-chevron"[^>]*aria-hidden="true"/);
 });
