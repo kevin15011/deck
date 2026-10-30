@@ -38,6 +38,7 @@ export class DriverStartupCleanupError extends Error {
 
 // This is a serialization allowlist, not a native protocol classifier. Adapters own interpretation.
 const CODES = new Set([
+  "session-overlay-budget-exceeded", "session-overlay-content-forbidden", "session-overlay-section-unknown", "session-overlay-lead-only",
   ...Object.keys(RUNNER_TRANSPORT_FAILURES),
   "serverOverloaded", "flexUnavailable", "usageLimitExceeded", "rateLimitExceeded", "contextWindowExceeded", "sessionBudgetExceeded", "unauthorized", "badRequest",
   "httpConnectionFailed", "responseStreamConnectionFailed", "responseStreamDisconnected", "responseTooManyFailedAttempts",

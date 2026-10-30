@@ -3,7 +3,7 @@ import { renderSessionOverlay, assertSessionOverlay } from "./overlay";
 test("closed overlay rejects unknown, member-only misuse and forbidden content before truncation", () => {
   expect(() => renderSessionOverlay("deck-lead", [{ kind: "project-instructions" }] as never)).toThrow("section-unknown");
   expect(() => renderSessionOverlay("deck-quality", [{ kind: "decision-guidance" }])).toThrow("lead-only");
-  for (const kind of ["notices", "handoff"] as const) for (const text of ["<deck-project-readiness v1>", "CRITICAL_SAFETY_GIT_DISCARD_PROTECTION", "## Package Instructions", "Project repair candidates require an exact Setup delegation"]) expect(() => renderSessionOverlay("deck-lead", [{ kind, text }])).toThrow("content-forbidden");
+  for (const kind of ["notices", "handoff"] as const) for (const text of ["<deck-project-readiness v1>", "CRITICAL_SAFETY_GIT_DISCARD_PROTECTION", "Adaptive Developer Team Contract", "Runtime-Enforced Team Contract", "<project.instructions", "# AGENTS.md", "# Deck Agent Guide", "## Package Instructions", "## Context Authority", "## Proportional TDD", "Project repair candidates require an exact Setup delegation"]) expect(() => renderSessionOverlay("deck-lead", [{ kind, text }])).toThrow("content-forbidden");
   expect(() => renderSessionOverlay("deck-lead", [{ kind: "task-roster", tasks: [{ taskId: "t", memberId: "q", state: "done", attempt: 1, summary: "x".repeat(130) + "<deck-project-readiness" }] }])).toThrow("content-forbidden");
   expect(() => assertSessionOverlay("x".repeat(128 * 1024 + 1))).toThrow("budget-exceeded");
   expect(() => renderSessionOverlay("deck-lead", Array.from({ length: 33 }, () => ({ kind: "session-notice" as const })))).toThrow("budget-exceeded");

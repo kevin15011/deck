@@ -68,31 +68,46 @@ export type SessionOverlaySection =
 const KINDS = ["session-notice", "delegation", "task-roster", "continuity", "decision-guidance", "memory-status", "change-binding", "handoff", "images", "notices"];
 const LEAD_ONLY = ["delegation", "task-roster", "continuity", "decision-guidance"];
 const FORBIDDEN = /CRITICAL_SAFETY_GIT_DISCARD_PROTECTION|Adaptive Developer Team Contract|Runtime-Enforced Team Contract|<deck-project-readiness|<project.instructions|# (?:AGENTS\.md|Deck Agent Guide)|## (?:Package Instructions|Context Authority|Proportional TDD)|Project repair candidates require an exact Setup delegation/i;
+
+/** Only for derived excerpts of durable history. Drop the entire source field,
+ * including possible instruction bodies; inspect before any display truncation.
+ * Never apply to arbitrary overlay sections or modify the original record.
+ * A previously clipped source needs a check recorded from its complete original. */
+export function sessionHistoryExcerpt(value: string | undefined, limit?: number, source?: { truncated?: boolean; safe?: boolean }): string | undefined {
+  if (source?.safe === false || (source?.truncated && source.safe !== true)) return undefined;
+  return value === undefined || FORBIDDEN.test(value) ? undefined : limit === undefined ? value : value.slice(0, limit);
+}
+
+export class SessionOverlayError extends Error {
+  constructor(readonly code: "session-overlay-budget-exceeded" | "session-overlay-content-forbidden" | "session-overlay-section-unknown" | "session-overlay-lead-only") {
+    super(code);
+  }
+}
 export function assertSessionOverlay(text: string): void {
-  if (Buffer.byteLength(text) > 128 * 1024) throw new Error("session-overlay-budget-exceeded");
-  if (FORBIDDEN.test(text)) throw new Error("session-overlay-content-forbidden");
+  if (Buffer.byteLength(text) > 128 * 1024) throw new SessionOverlayError("session-overlay-budget-exceeded");
+  if (FORBIDDEN.test(text)) throw new SessionOverlayError("session-overlay-content-forbidden");
 }
 function checkOverlayInput(value: unknown): void {
   let nodes = 0, bytes = 0;
   const visit = (item: unknown, depth: number): void => {
-    if (++nodes > 4096 || depth > 16) throw new Error("session-overlay-budget-exceeded");
+    if (++nodes > 4096 || depth > 16) throw new SessionOverlayError("session-overlay-budget-exceeded");
     if (typeof item === "string") {
-      if (item.length > 128 * 1024) throw new Error("session-overlay-budget-exceeded");
+      if (item.length > 128 * 1024) throw new SessionOverlayError("session-overlay-budget-exceeded");
       bytes += Buffer.byteLength(item);
-      if (bytes > 128 * 1024) throw new Error("session-overlay-budget-exceeded");
+      if (bytes > 128 * 1024) throw new SessionOverlayError("session-overlay-budget-exceeded");
       assertSessionOverlay(item);
     } else if (item && typeof item === "object") {
-      if (Array.isArray(item) && item.length > 512) throw new Error("session-overlay-budget-exceeded");
+      if (Array.isArray(item) && item.length > 512) throw new SessionOverlayError("session-overlay-budget-exceeded");
       for (const [key, child] of Object.entries(item)) { visit(key, depth + 1); visit(child, depth + 1); }
     }
   };
   visit(value, 0);
 }
 export function renderSessionOverlay(roleId: string, sections: readonly SessionOverlaySection[]): string {
-  if (sections.length > 32) throw new Error("session-overlay-budget-exceeded");
+  if (sections.length > 32) throw new SessionOverlayError("session-overlay-budget-exceeded");
   const rendered = sections.map(section => {
-    if (!KINDS.includes(section.kind)) throw new Error("session-overlay-section-unknown");
-    if (LEAD_ONLY.includes(section.kind) && roleId !== "deck-lead") throw new Error("session-overlay-lead-only");
+    if (!KINDS.includes(section.kind)) throw new SessionOverlayError("session-overlay-section-unknown");
+    if (LEAD_ONLY.includes(section.kind) && roleId !== "deck-lead") throw new SessionOverlayError("session-overlay-lead-only");
     // Validate input before formatting, redaction or truncation can hide forbidden content.
     checkOverlayInput(section);
     switch (section.kind) {

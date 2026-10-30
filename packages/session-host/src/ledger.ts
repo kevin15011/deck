@@ -1,4 +1,5 @@
 import { byteExcerpt } from "./task-handoff";
+import { sessionHistoryExcerpt } from "@deck/core/session/overlay";
 import { projectTaskEvidence, type TaskContinuityState, type AttemptContinuityState } from "./task-evidence";
 import { isSessionGrantKind, isApprovalToolKey, isApprovalRisk, type SessionGrant } from "@deck/core/session/approval";
 import { isApprovalMode, type ApprovalMode } from "@deck/core/session/commands";
@@ -22,7 +23,8 @@ import type { CrossTeamAssignments } from "@deck/core/session/assignments";
 import type { EventLog, EventDraft } from "./event-log";
 import { writePrivateFile } from "./paths";
 
-export const LEDGER_SNAPSHOT_VERSION = 16 as const;
+// Older snapshots lack full-source overlay checks; rebuild them from durable events.
+export const LEDGER_SNAPSHOT_VERSION = 17 as const;
 const RESULT_LIMIT = 8192;
 const isRestartPause = (reason?: string): boolean => reason === "daemon-stopped" || reason === "daemon-restart" || reason?.startsWith("web-restart-forced:") === true;
 
@@ -41,11 +43,13 @@ const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
 export type SessionLifecycleState = "created" | "running" | "idle" | "stopping" | "ended" | "recovered";
 export type AttemptAccounting = { seq: number; leadTaskId: string; leadAttempt: number; promptId?: string };
 export type TaskIntegration = AttemptAccounting & { commandId: string; state: TaskIntegrationState; note: string; evidenceSeqs: number[]; findingResolutions?: import("@deck/core/session/task-handoff").FindingResolution[] };
-export type ContinuityBlock = { promptId: string; taskId: string; attempt: number; startedSeq: number; answer?: string; answerTruncated?: boolean; answerSeq?: number };
+export type ContinuityBlock = { promptId: string; taskId: string; attempt: number; startedSeq: number; answer?: string; answerTruncated?: boolean; answerSeq?: number; answerHistorySafe?: boolean };
 export type TaskAttempt = AttemptContinuityState & {
   attempt: number; runnerId: string; modelId: string; thinking?: string; nativeSessionId?: string;
   state: TaskState; reason?: string; continuity?: "native" | "reseeded"; startedSeq: number; endedSeq?: number; unsettledSeq?: number; result?: string; resultSeq?: number; resultTruncated?: boolean;
   delivery?: AttemptAccounting; retrieval?: AttemptAccounting; integration?: TaskIntegration; integrations?: TaskIntegration[];
+  /** Derived from the complete event summary before RESULT_LIMIT clips it. */
+  resultHistorySafe?: boolean;
 };
 /** Native session confirmed by the runner (a `turn.started` was seen): only then may a later turn resume it. */
 export type LeadRecoveryMessage = {role:"user"|"assistant";text:string;seq:number;truncated:boolean};
@@ -428,6 +432,7 @@ export class Ledger {
           this.state.lastLeadReplySeq = event.seq;
           const block = this.state.continuityBlock;
           if (block && block.taskId === task.taskId && block.attempt === task.attempts.at(-1)?.attempt) {
+            block.answerHistorySafe = sessionHistoryExcerpt(d.text) !== undefined;
             block.answer = d.text.slice(0, 1024); block.answerTruncated = d.text.length > 1024; block.answerSeq = event.seq;
           }
         }
@@ -541,7 +546,7 @@ export class Ledger {
       task.nativeConfirmed = false;
       const block = this.state.continuityBlock;
       if (block && block.taskId === taskId && block.attempt === previous.attempt) {
-        block.attempt = attemptNo; delete block.answer; delete block.answerSeq; delete block.answerTruncated;
+        block.attempt = attemptNo; delete block.answer; delete block.answerSeq; delete block.answerTruncated; delete block.answerHistorySafe;
       }
     }
     // D-12: runner/model/thinking come from the recorded attempt, never from current config.
@@ -566,6 +571,7 @@ export class Ledger {
     if(typeof d.reportArtifactUnavailable==='string')attempt.reportArtifactUnavailable=d.reportArtifactUnavailable;
     if(d.reportArtifact)attempt.reportArtifact=structuredClone(d.reportArtifact) as TaskAttempt["reportArtifact"];
     if (summary !== undefined) {
+      attempt.resultHistorySafe = sessionHistoryExcerpt(summary) !== undefined;
       attempt.result = summary.slice(0, RESULT_LIMIT); attempt.resultSeq = event.seq; attempt.resultTruncated = summary.length > RESULT_LIMIT;
     }
   }

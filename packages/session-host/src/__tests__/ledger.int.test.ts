@@ -5,9 +5,53 @@ import { createHash } from "node:crypto";
 import type { SessionEvent } from "@deck/core/session/events";
 import { EventLog, type EventDraft } from "../event-log";
 import { Ledger, loadLedger, saveLedgerSnapshot, type RebuildReason } from "../ledger";
+import { continuityContext } from "../continuity";
+import { renderSessionOverlay } from "@deck/core/session/overlay";
 import { cleanupTempDirs, tempDir } from "./test-helpers";
 
 afterEach(cleanupTempDirs);
+
+// Protects whole-source omission across both ledger limits, snapshot recovery and
+// replay. The durable events are the oracle, never the clipped ledger excerpt.
+test.each([false, true])("history replay checks complete sources before clipping (protected=%s)", protectedText => {
+  const dir = tempDir(), log = openLog(dir), file = join(dir, "snapshot.json");
+  const answer = "ANSWER_BODY " + "a".repeat(1100) + (protectedText ? "<deck-project-readiness v1> instructions" : "safe answer end");
+  const report = "REPORT_BODY " + "r".repeat(8300) + (protectedText ? "CRITICAL_SAFETY_GIT_DISCARD_PROTECTION instructions" : "safe report end");
+  log.appendMany([
+    created("lead", { memberId: "lead" }), state("lead", "running"),
+    { kind: "prompt.queued", data: { promptId: "p", text: "request", textHash: "hash", by: "user" } },
+    { kind: "prompt.dispatched", data: { promptId: "p", taskId: "lead", attempt: 1 } },
+    { kind: "message.completed", source: { taskId: "lead" }, data: { role: "assistant", text: answer } },
+    state("lead", "completed"), created("child"), state("child", "running"),
+    { kind: "task.result", source: { taskId: "child" }, data: { summary: report } }, state("child", "completed"),
+  ]);
+  const check = (ledger: Ledger) => {
+    const before = ledger.toState(), text = continuityContext(ledger);
+    expect(() => renderSessionOverlay("deck-lead", [{ kind: "notices", text }])).not.toThrow();
+    const context = JSON.parse(text.split("\n").slice(1).join("\n"));
+    expect(context.answerSeq).toBe(5); expect(context.outcomes[0].resultSeq).toBe(9);
+    if (protectedText) {
+      expect(text).not.toContain("ANSWER_BODY"); expect(text).not.toContain("REPORT_BODY");
+    } else {
+      expect(context.originalAnswer).toContain("ANSWER_BODY"); expect(context.outcomes[0].result).toContain("REPORT_BODY");
+    }
+    expect(ledger.continuityBlock?.answer).toBe(answer.slice(0, 1024));
+    expect(ledger.latest("child")?.result).toBe(report.slice(0, 8192));
+    expect(ledger.toState()).toEqual(before);
+  };
+  try {
+    const initial = loadLedger(log, file).ledger; check(initial);
+    saveLedgerSnapshot(initial, log, file); check(loadLedger(log, file).ledger);
+    // Simulate a valid v16 snapshot: no full-source check was recorded there.
+    const old = JSON.parse(readFileSync(file, "utf8")); old.v = 16;
+    delete old.state.continuityBlock.answerHistorySafe; delete old.state.tasks.child.attempts[0].resultHistorySafe;
+    old.digest = createHash("sha256").update(JSON.stringify({ seq: old.seq, eventHash: old.eventDigest, state: old.state })).digest("hex");
+    writeFileSync(file, JSON.stringify(old));
+    const rebuilt = loadLedger(log, file); check(rebuilt.ledger); expect(rebuilt.source).toBe("rebuilt");
+    saveLedgerSnapshot(rebuilt.ledger, log, file); expect(loadLedger(log, file).source).toBe("snapshot");
+    expect(log.readEvent(5)?.data.text).toBe(answer); expect(log.readEvent(9)?.data.summary).toBe(report);
+  } finally { log.close(); }
+});
 
 const created = (taskId: string, extra: Record<string, unknown> = {}): EventDraft => ({
   kind: "task.created", source: { taskId }, data: { taskId, memberId: "architect", runnerId: "codex", modelId: "m1", thinking: "high", ...extra },
