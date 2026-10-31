@@ -96,6 +96,7 @@ export type DriverTaskInput = {
 };
 
 export type NativeRoleDescriptor = {
+  preparation?: readonly RunnerPreparationFinding[];
   runnerId: string;
   roleId: string;
   roleRef: string;

@@ -132,15 +132,16 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     let admitted = 0;
     // Fence admission synchronously with restart acceptance. All transports share the same gate,
     // including commands already admitted before the service reports a running native turn.
-    const admit = async (effect: () => CommandOutcome | Promise<CommandOutcome>): Promise<CommandOutcome> => {
+    const safeQueries = new Set(["session.summary", "decisions.list", "task.result", "projects.list", "directories.list", "sessions.list", "projects.status", "sessions.status", "prompts.list", "project.trust", "session.readiness", "project.files", "project.content", "git.list", "git.read", "git.content", "web.status", "web.devices"]);
+    const admit = async (effect: () => CommandOutcome | Promise<CommandOutcome>, duringMutation = false): Promise<CommandOutcome> => {
       if (draining) return { ok: false, code: "daemon-stopping", message: "The daemon is shutting down" };
-      if (runnerMutationActive(paths, probe)) return {ok:false,code:"runner-mutation-active",message:"Runner maintenance is in progress; retry when it finishes."};
+      if (!duringMutation && runnerMutationActive(paths, probe)) return {ok:false,code:"runner-mutation-active",message:"Runner maintenance is in progress; retry when it finishes."};
       admitted++;
       try { return await effect(); } finally { admitted--; }
     };
     const guardedService: SessionService = {
-      execute: (input) => admit(() => svc.execute(input)), openLog: (id) => svc.openLog(id), hasRunningWork: () => svc.hasRunningWork(),
-      query: (name, args) => admit(() => svc.query?.(name, args) ?? { ok: false, code: "query-unknown" }),
+      execute: (input) => admit(() => svc.execute(input), input.command.type === "session.prepare.cancel" || input.command.type === "session.attach"), openLog: (id) => svc.openLog(id), hasRunningWork: () => svc.hasRunningWork(),
+      query: (name, args) => admit(() => svc.query?.(name, args) ?? { ok: false, code: "query-unknown" }, safeQueries.has(name)),
       uploadAttachment: (input) => {
         if (draining) return { ok: false, code: "daemon-stopping" };
         if (runnerMutationActive(paths, probe)) return {ok:false,code:"runner-mutation-active"};
@@ -160,7 +161,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       query: (name, args) => name === "runner-mutation.acquire"
         ? Promise.resolve(!draining && !isBusy() && svc.hasActiveSessions?.() === false && acquireRunnerMutationMarker(paths,args) ? {ok:true} : {ok:false,code:"runner-mutation-deferred"})
         : name === "runner-mutation.release" ? Promise.resolve({ok:releaseRunnerMutationMarker(paths,args)} as CommandOutcome)
-        : name.startsWith("web.") ? admit(() => web?.query(name, args) ?? { ok: false, code: "web-unavailable" }) : guardedService.query!(name, args),
+        : name.startsWith("web.") ? admit(() => web?.query(name, args) ?? { ok: false, code: "web-unavailable" }, safeQueries.has(name)) : guardedService.query!(name, args),
     };
 
     const startedAt = clock.now();

@@ -22,7 +22,7 @@ import {
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 
-import { CODEX_MEMORY_BRIDGE_HOOK_BLOCK, codexHooksFeatureDisabled, mergeCodexOwnedHooks, mergeCodexProjectConfig, type CodexOwnedHookBlock } from "./codex-config";
+import { codexHookSemanticHash, matchesCodexHookContribution, type CodexHookContribution, equivalentCodexToml, CODEX_MEMORY_BRIDGE_HOOK_BLOCK, codexHooksFeatureDisabled, mergeCodexOwnedHooks, mergeCodexProjectConfig, type CodexOwnedHookBlock } from "./codex-config";
 import { rtkHookScript } from "@deck/core";
 import { translateCodexCapabilityInstructions, validateCodexInstructionTranslation } from "./instruction-translation";
 import { codexMcpReceiptCoversServer, buildCodexMcpServers, inspectCodexSupermemoryMcpState, mergeCodexMcpServers } from "./mcp-config";
@@ -229,6 +229,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
   const adoptedMcpIds = new Set<string>();
   const mutations: CodexMutation[] = [];
   const expected = new Map<string, CodexExpectedFile>();
+  const preserved = new Set<string>();
   const ownershipReleases: string[] = [];
   const ownershipReleaseChecks: CodexOwnershipReleaseCheck[] = [];
   const add = (
@@ -243,11 +244,16 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
     expected.set(relativePath, { relativePath, hash: hash(content), content, mode, kind });
     const existing = input.existingFiles.get(relativePath);
     if (existing === content) return;
+    if (existing !== undefined && kind === "role" && equivalentCodexToml(existing, content)) {
+      expected.set(relativePath, { relativePath, hash: hash(existing), content: existing, mode, kind });
+      return;
+    }
     if (existing !== undefined && (ownershipKind === "deck-file" || ownershipKind === "deck-manifest")) {
       const priorHash = priorHashes[relativePath];
       if (ownershipKind === "deck-file" && priorHash !== hash(existing)) {
-        blocked = true;
-        diagnostics.push({ code: "unowned-collision", severity: "error", message: `Refusing to overwrite ${relativePath}; durable ownership evidence does not match its current bytes.` });
+        preserved.add(relativePath);
+        expected.delete(relativePath);
+        diagnostics.push({ code: "unowned-collision", severity: "warning", message: `Preserved customized ${relativePath}; independent Deck content can still refresh.` });
         return;
       }
       if (ownershipKind === "deck-manifest" && priorManifestSource === undefined) {
@@ -367,7 +373,13 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
       "deck-codex-hook-v1",
     );
     const configSource = input.existingFiles.get(".codex/config.toml") ?? "";
-    const config = mergeCodexProjectConfig(configSource, { multiAgent: true });
+    let config = mergeCodexProjectConfig(configSource, { multiAgent: true });
+    const featureSelector = { kind: "toml-key" as const, table: "features", key: "multi_agent" };
+    const currentFeature = selectContributionContent(configSource, featureSelector);
+    if (config.status !== "blocked" && currentFeature === "false" && !priorContributions.some(entry => entry.selector.kind === "toml-key" && entry.selector.table === "features" && entry.selector.key === "multi_agent" && entry.hash === hash(currentFeature))) {
+      config = { status: "unchanged", content: configSource, ownedRanges: [] };
+      diagnostics.push({ code: "codex-feature-preserved", severity: "warning", message: "Preserved the user's disabled multi_agent setting." });
+    }
     if (config.status === "blocked") {
       blocked = true;
       diagnostics.push(...config.diagnostics.map((message) => ({ code: "toml-merge-blocked", severity: "error" as const, message })));
@@ -448,7 +460,12 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         }
       }
       const ownedServerIds = priorContributions.filter(entry => entry.selector.kind === "toml" && entry.selector.header.startsWith("mcp_servers.") && selectContributionContent(config.content, entry.selector) !== undefined && hash(selectContributionContent(config.content, entry.selector)!) === entry.hash && codexMcpReceiptCoversServer(config.content, selectContributionContent(config.content, entry.selector)!, entry.selector.header.slice("mcp_servers.".length))).map(entry => (entry.selector as { header: string }).header.slice("mcp_servers.".length));
-      const mcp = mergeCodexMcpServers(config.content, desiredMcp.servers, { repairSelectedToolIds: input.repairSelectedToolIds, ownedServerIds, recordedServerIds: priorContributions.filter(entry => entry.selector.kind === "toml").map(entry => (entry.selector as { header: string }).header.replace(/^mcp_servers\./, "")), allowLegacyMigration: true });
+      let mcp = mergeCodexMcpServers(config.content, desiredMcp.servers, { repairSelectedToolIds: input.repairSelectedToolIds, ownedServerIds, recordedServerIds: priorContributions.filter(entry => entry.selector.kind === "toml").map(entry => (entry.selector as { header: string }).header.replace(/^mcp_servers\./, "")), allowLegacyMigration: true });
+      if (mcp.status === "blocked" && mcp.collisions.length) {
+        const collisions = mcp.collisions;
+        diagnostics.push(...mcp.diagnostics.map(message => ({ code: "mcp-config-collision", severity: "warning" as const, message })));
+        mcp = mergeCodexMcpServers(config.content, desiredMcp.servers.filter(server => !collisions.includes(server.id)), { ownedServerIds });
+      }
       if (mcp.status !== "blocked") for (const id of mcp.adoptedServerIds ?? []) adoptedMcpIds.add(id);
       if (mcp.status === "blocked") {
         blocked = true;
@@ -485,8 +502,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
               ],
             });
           } else {
-            blocked = true;
-            diagnostics.push({ code: "supermemory-plugin-not-ready", severity: "error", message: "Supermemory is selected but the pinned official Codex plugin hooks are not installed and verified. Install them through the Deck TUI (Review & Install) and rerun; Deck does not register the Supermemory MCP server as a fallback." });
+            diagnostics.push({ code: "supermemory-plugin-not-ready", severity: "warning", message: "Supermemory hooks are unavailable; ordinary content can refresh without enabling memory. Configure the optional plugin to use it." });
           }
         }
         if (codexHooksFeatureDisabled(configSource) && hookBlocks.length > 0) {
@@ -495,19 +511,29 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         if (input.existingFiles.has(".codex/hooks.json") && hookBlocks.length > 0) {
           diagnostics.push({ code: "codex-hooks-json-coexistence", severity: "info", message: "Your Codex hooks.json exists beside Deck's inline [hooks] entries in config.toml; Codex loads both and may warn. Deck leaves hooks.json untouched." });
         }
-        const hooks = mergeCodexOwnedHooks(mcp.content, hookBlocks);
+        let hooks = mergeCodexOwnedHooks(mcp.content, hookBlocks);
         // Never replace an unowned known hook block whose bytes differ from Deck's canonical rendering.
         // Covers replacement of selected blocks and removal of deselected known blocks.
         const editedHookIds = hooks.status === "blocked" ? [] : (["memory-bridge", "rtk", "supermemory", "readiness"] as const).filter(id => {
           const selector = { kind: "text" as const, start: `# deck-codex-hook:${id}:start`, end: `# deck-codex-hook:${id}:end` };
           const old = selectContributionContent(configSource, selector);
           if (old === undefined || old === selectContributionContent(hooks.content, selector)) return false;
-          return !priorContributions.some(entry => entry.selector.kind === "text" && entry.selector.start === selector.start && entry.hash === hash(old));
+          return !priorContributions.some(entry => entry.selector.kind === "text" && entry.selector.start === selector.start && matchesCodexHookContribution(entry, old));
         });
         if (editedHookIds.length) {
-          blocked = true;
-          diagnostics.push({ code: "trusted-hook-config-collision", severity: "error", message: `Deck hook block(s) ${editedHookIds.join(", ")} in Codex config.toml were edited and have no Deck ownership record. Deck will not overwrite them; restore or remove those blocks before retrying.` });
-        } else if (hooks.status === "blocked") {
+          diagnostics.push({ code: "trusted-hook-config-collision", severity: "warning", message: `Preserved customized Deck hook block(s) ${editedHookIds.join(", ")}. They are not authorized for automatic hook trust.` });
+          if (hooks.status !== "blocked") {
+            let content = hooks.content;
+            for (const id of editedHookIds) {
+              const selector = { kind: "text" as const, start: `# deck-codex-hook:${id}:start`, end: `# deck-codex-hook:${id}:end` };
+              const old = selectContributionContent(configSource, selector)!;
+              const next = selectContributionContent(content, selector);
+              content = next === undefined ? `${content}\n${old}\n` : content.replace(next, old);
+            }
+            hooks = { ...hooks, content };
+          }
+        }
+        if (hooks.status === "blocked") {
           blocked = true;
           diagnostics.push(...hooks.diagnostics.map((message) => ({ code: "trusted-hook-config-collision", severity: "error" as const, message })));
         } else {
@@ -520,7 +546,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
 
   for (const priorPath of Object.keys(priorHashes)) {
     if (priorPath === "AGENTS.md") continue;
-    if (priorPath === manifestPath || expected.has(priorPath)) continue;
+    if (priorPath === manifestPath || expected.has(priorPath) || preserved.has(priorPath)) continue;
     if (materializationScope === "content-only" && isPreservedRuntimePath(priorPath)) continue;
     const existing = input.existingFiles.get(priorPath);
     if (existing === undefined) continue;
@@ -548,11 +574,12 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
   const retainedLegacyAgentsHash = ownershipReleases.includes(AGENTS_OWNERSHIP_RELEASE) ? undefined : priorHashes[AGENTS_OWNERSHIP_RELEASE];
   const ownedFiles = Object.fromEntries([
     ...Object.entries(preservedRuntimeHashes),
+    ...Object.entries(priorHashes).filter(([path]) => preserved.has(path)),
     ...(retainedLegacyAgentsHash ? [["AGENTS.md", retainedLegacyAgentsHash] as const] : []),
     ...[...expected.values()].filter((file) => file.relativePath !== "AGENTS.md" && file.relativePath !== ".codex/config.toml").map((file) => [file.relativePath, file.hash] as const),
   ].sort(([left], [right]) => left.localeCompare(right)));
   const runtimeConfigPath = join(input.codexHome ?? join(input.projectRoot, ".codex"), "config.toml");
-  const contributions: RunnerContribution[] = priorContributions.filter(entry => entry.sourceItemId?.startsWith("package:") || (materializationScope === "content-only" && isPreservedRuntimePath(`.codex/${relative(input.codexHome ?? join(input.projectRoot, ".codex"), entry.path).split("\\").join("/")}`)));
+  const contributions: CodexHookContribution[] = priorContributions.filter(entry => entry.sourceItemId?.startsWith("package:") || [...preserved].some(path => entry.path === (path.startsWith(".codex/") ? join(input.codexHome ?? join(input.projectRoot, ".codex"), path.slice(7)) : join(input.projectRoot, path))) || (materializationScope === "content-only" && isPreservedRuntimePath(`.codex/${relative(input.codexHome ?? join(input.projectRoot, ".codex"), entry.path).split("\\").join("/")}`)));
   for (const file of expected.values()) {
     if (file.relativePath === "AGENTS.md") continue;
     const path = file.relativePath.startsWith(".codex/") ? join(input.codexHome ?? join(input.projectRoot, ".codex"), file.relativePath.slice(7)) : join(input.projectRoot, file.relativePath);
@@ -570,10 +597,16 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
       const dedicated = file.relativePath.startsWith(".codex/deck/");
       const provenFile = selector.kind === "file" && priorHashes[file.relativePath] === (before === undefined ? undefined : hash(before));
       const value = selectContributionContent(file.content, selector); if (value === undefined) continue;
-      // A marked Deck hook block already byte-identical to the desired block is adopted; older installs wrote no receipt.
-      const identicalHook = selector.kind === "text" && ["memory-bridge", "rtk", "supermemory", "readiness"].some(id => selector.start === `# deck-codex-hook:${id}:start`) && old === value;
-      if (old !== undefined && !dedicated && !provenFile && !identicalHook && !(selector.kind === "toml" && adoptedMcpIds.has(selector.header.replace(/^mcp_servers\./, ""))) && (!prior || prior.hash !== hash(old))) continue;
-      contributions.push({ ...target, id, hash: hash(value), encoding: selector.kind === "toml-key" ? "canonical-json-v1" : "bytes", ownership: prior?.ownership ?? (old === undefined ? "new-write" : dedicated ? "dedicated-location" : "prior-record"), scope: "global" });
+      // Semantically equivalent desired hooks can reconstruct receipts from older installs.
+      const identicalFile = selector.kind === "file" && old === value;
+      const identicalHook = selector.kind === "text" && !diagnostics.some(entry => entry.code === "trusted-hook-config-collision") && ["memory-bridge", "rtk", "supermemory", "readiness"].some(id => selector.start === `# deck-codex-hook:${id}:start`) && old !== undefined && codexHookSemanticHash(old) === codexHookSemanticHash(value);
+      if (old !== undefined && !dedicated && !provenFile && !identicalFile && !identicalHook && !(selector.kind === "toml" && adoptedMcpIds.has(selector.header.replace(/^mcp_servers\./, ""))) && (!prior || !(selector.kind === "text" ? matchesCodexHookContribution(prior, old) : prior.hash === hash(old)))) continue;
+      // Native Codex may add unrelated tables inside a trailing marker. Preserve the
+      // original raw cleanup receipt while the executable settings remain identical.
+      const hookSemanticHash = selector.kind === "text" ? codexHookSemanticHash(value) : undefined;
+      const priorHook = prior as CodexHookContribution | undefined;
+      const receiptHash = hookSemanticHash && priorHook?.hookSemanticHash === hookSemanticHash ? priorHook.hash : hash(value);
+      contributions.push({ ...target, id, hash: receiptHash, ...(hookSemanticHash ? { hookSemanticHash } : {}), encoding: selector.kind === "toml-key" ? "canonical-json-v1" : "bytes", ownership: prior?.ownership ?? (old === undefined ? "new-write" : dedicated ? "dedicated-location" : "prior-record"), scope: "global" });
     }
   }
   const manifestContent = `${JSON.stringify({

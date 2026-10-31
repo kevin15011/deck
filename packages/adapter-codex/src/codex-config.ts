@@ -1,4 +1,31 @@
+import { canonicalContributionJson, contributionHash, type RunnerContribution } from "@deck/core";
 import { parseTOML, type AST } from "toml-eslint-parser";
+
+/** Compare parsed fields, preserving array order (hook order is significant). */
+export function equivalentCodexToml(left: string, right: string): boolean {
+  const canonical = (value: any): any => Array.isArray(value) ? value.map(canonical)
+    : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+  try { return JSON.stringify(canonical(Bun.TOML.parse(left))) === JSON.stringify(canonical(Bun.TOML.parse(right))); }
+  catch { return false; }
+}
+
+/** Hook authority excludes native preference tables placed inside trailing marker comments.
+ * Keep the raw receipt for generic cleanup; the semantic digest authorizes hooks only.
+ */
+export type CodexHookContribution = RunnerContribution & { hookSemanticHash?: string };
+export function codexHookSemanticHash(source: string): string {
+  const hooks = (Bun.TOML.parse(source) as Record<string, unknown>).hooks;
+  if (!hooks || typeof hooks !== "object") throw new Error("Missing hook settings");
+  return contributionHash(canonicalContributionJson(hooks));
+}
+export function matchesCodexHookContribution(entry: CodexHookContribution, source: string): boolean {
+  return entry.hash === contributionHash(source) ||
+    (entry.hookSemanticHash !== undefined && entry.hookSemanticHash === codexHookSemanticHash(source));
+}
+function equivalentHookSettings(left: string, right: string): boolean {
+  try { return codexHookSemanticHash(left) === codexHookSemanticHash(right); }
+  catch { return false; }
+}
 
 export const TOML_PARSER_DECISION = Object.freeze({
   packageName: "toml-eslint-parser",
@@ -130,13 +157,21 @@ export function mergeCodexOwnedHooks(source: string, desired: readonly CodexOwne
     const replacement = rendered.get(block.id);
     if (!known) { out.push(...lines.slice(block.from, block.to + 1)); continue; }
     present.add(block.id);
+    const original = lines.slice(block.from, block.to + 1).join("");
+    // Marker comments are not a TOML boundary: native Codex may append tables
+    // before the closing comment. Those tables never belong to a hook update.
+    const unrelated = parse(original).body[0]!.body.filter(node => node.type === "TOMLTable"
+      ? node.resolvedKey[0] !== "hooks" : keyPartName(node.key.keys[0]!) !== "hooks")
+      .map(node => original.slice(node.range[0], node.range[1])).join("\n");
     if (replacement === undefined) {
+      if (unrelated) out.push(`${unrelated}\n`);
       // Drop the separating blank line owned with the block: after it when content follows, before it at end of file.
       if (cursor >= lines.length) { if (out.length > 0 && out[out.length - 1]!.trim() === "") out.pop(); }
       else if (lines[cursor]!.trim() === "") cursor += 1;
       continue;
     }
-    out.push(replacement);
+    const updated = unrelated ? replacement.replace(blockEnd(block.id), `\n${unrelated}\n${blockEnd(block.id)}`) : replacement;
+    out.push(equivalentHookSettings(original, replacement) ? original : updated);
   }
   out.push(...lines.slice(cursor));
   let content = out.join("");

@@ -36,6 +36,7 @@ export async function inspectCodexProject(projectRoot: string, effects: CodexPre
   const trust = await effects.inspectTrust?.(projectRoot) ?? "indeterminate";
   const snapshot = await effects.readProject?.(projectRoot) ?? { config: null, roles: [], skills: [], agentsInstructions: false };
   const diagnostics: import("@deck/core").RunnerDiagnostic[] = [];
+  if (versionAtLeast(probe.version, "0.162.2")) diagnostics.push({ code: "codex-version-untested", severity: "warning", message: `Codex ${probe.version} is newer than the tested release; ordinary turns remain available. Optional steering requires its tested protocol.` });
   if (snapshot.config !== null) {
     try {
       parseTOML(snapshot.config, { tomlVersion: "1.0.0" });

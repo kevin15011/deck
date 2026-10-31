@@ -839,7 +839,10 @@ export interface RunnerAdapter {
    * excluded from cross assignments.
    */
   getSessionDriver?(): RunnerSessionDriver;
-  prepareSessionNativeRole?(roleId: string): Promise<import("./session/driver").NativeRoleDescriptor>;
+  /** Hold installation use through native child exit, including preparation and refresh. */
+  trackNativeInstallationProcess?(pid: number): () => void;
+  withNativeInstallationUse?<T>(effect: () => Promise<T>): Promise<T>;
+  prepareSessionNativeRole?(roleId: string, config?: NormalizedDeckConfig): Promise<import("./session/driver").NativeRoleDescriptor>;
 
   /** Resolve the selected managed Codebase identity for task-scoped readiness. Ordinary customizations stay native. */
   readSessionCapabilityOverrides?(config?: NormalizedDeckConfig): Promise<Record<string, ChildMcpServerSpec>>;

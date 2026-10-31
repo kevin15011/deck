@@ -69,7 +69,9 @@ export function buildCodexLaunch(input: DriverTaskInput, options: CodexLaunchOpt
   codexMemoryHooks(input);
   const args = ["app-server", "--stdio", "-c", "features.default_mode_request_user_input=true"];
   if (input.disableNativeDelegation) for (const feature of ISOLATION_FEATURES) args.push("-c", `features.${feature}=false`);
-  if (input.nativeMemory?.status === "ready" || input.nativeRoleDescriptor) {
+  if (input.nativeRoleDescriptor?.preparation?.some(finding => finding.code === "codex-hooks-preserved")) {
+    args.push("-c", "features.hooks=false");
+  } else if (input.nativeMemory?.status === "ready" || input.nativeRoleDescriptor) {
     args.push("-c", "features.hooks=true");
     const hooks = codexMemoryHooks(input);
     hooks.state = Object.fromEntries(inheritedHooks.flatMap(hook => {

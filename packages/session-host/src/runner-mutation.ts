@@ -117,6 +117,15 @@ async function runAdmitted<T>(root:string,effect:()=>T|Promise<T>):Promise<T>{
   const scope={root,active:true};
   try{return await admitted.run(scope,effect);}finally{scope.active=false;}
 }
+/** Daemon-owned admission, captured synchronously before preparation registers as work.
+ * The closure carries trusted async context; no caller-supplied role or task id grants admission.
+ */
+export function reservePreparationMutation(paths: StatePaths): (<T>(effect: () => Promise<T>) => Promise<T>) | undefined {
+  ensureStateLayout(paths);
+  const identity = { pid: process.pid, token: randomUUID() };
+  if (!acquireRunnerMutationMarker(paths, identity)) return undefined;
+  return effect => withReservationCleanup(paths, () => runAdmitted(paths.root, effect), () => finishReservation(paths, identity));
+}
 export async function withIdleRunnerMutation<T>(effect: () => T | Promise<T>, options: { paths?: StatePaths } = {}): Promise<T> {
   const paths = options.paths ?? resolveStatePaths();
   const scope=admitted.getStore();

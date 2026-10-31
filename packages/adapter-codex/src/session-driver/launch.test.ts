@@ -21,3 +21,13 @@ test('review threads default-deny personal and unknown MCPs and allow only canon
   expect(servers['deck-task']).toBeUndefined();
   expect(servers.context7.enabled_tools).toEqual(['resolve-library-id','query-docs']);
 });
+
+// R1: native trust must not revive a script rejected during preparation.
+test('rejected role hooks disable native hooks even with previously trusted metadata', () => {
+  const launch = buildCodexLaunch({ ...input, nativeRoleDescriptor: {
+    runnerId: 'codex', roleId: 'deck-lead', roleRef: 'lead', generation: 'g', source: { root: '/isolated', files: {} }, instructions: '', hooks: [],
+    preparation: [{ kind: 'W', code: 'codex-hooks-preserved', item: 'hooks', message: 'rejected' }],
+  } }, {}, [{ key: 'trusted', currentHash: 'hash', eventName: 'sessionStart', command: 'edited-script', handlerType: 'command', source: 'user' }]);
+  expect(launch.args).toContain('features.hooks=false');
+  expect(launch.args).not.toContain('features.hooks=true');
+});

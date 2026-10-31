@@ -1,3 +1,4 @@
+import { reservePreparationMutation } from "./runner-mutation";
 import { summarizeActivity } from './activity-summary';
 import type { ActivitySummary, ProjectActivity } from '@deck/core/session/activity-summary';
 import { renderSessionOverlay, sessionHistoryExcerpt, SessionOverlayError } from "@deck/core/session/overlay";
@@ -1446,13 +1447,17 @@ export class SessionManager implements SessionService {
     }
     if(reopening) { this.append(live,{kind:"session.reopened",data:{state:"idle",epoch,prepared:false}}); live.stopping=false; }
     if ([...this.preparationJobs.values()].some(owner => owner === live)) return fail("session-preparing");
+    const refreshIdle = !this.hasRunningWork();
     const job: PreparationJob = {epoch,reopening,state: { preparationId: randomUUID(), status: "preparing", phase: "checking-runner", generation: live.ledger.session.generation ?? 0 }, controller: new AbortController(), done: Promise.resolve() };
     live.preparation = job;
     live.nativeMcpAvailability = undefined;
     const result = { ok: true as const, data: { preparation: this.readiness(live) } };
     this.append(live, [{ kind: "diagnostic", data: { code: "session.preparation", ...job.state,commandId:command.commandId,outcome:result } },this.receiptDraft(command,result)]); this.flush(live);
+    // No await between the idle observation and reservation: this preparation must not
+    // count itself as competing work, while all other work remains excluded.
+    const admitted = refreshIdle ? reservePreparationMutation(this.options.paths) : undefined;
     this.preparationJobs.set(job, live);
-    job.done = Promise.resolve().then(() => this.runPreparation(live, job)).finally(() => { this.preparationJobs.delete(job); });
+    job.done = Promise.resolve().then(() => admitted ? admitted(() => this.runPreparation(live, job)) : this.runPreparation(live, job)).finally(() => { this.preparationJobs.delete(job); });
     return result;
   }
   private async runPreparation(live: Live, job: PreparationJob): Promise<void> {
@@ -1488,7 +1493,7 @@ export class SessionManager implements SessionService {
       // Preparation must check the same installed role generation as launch.
       // Otherwise Codex appears ready until its first model turn fails.
       const leadRole = this.options.assignedRoleId?.(LEAD_MEMBER_ID);
-      if (leadRole) await resolver?.prepareNativeRole?.(leadRole);
+      const preparedRole = leadRole ? await resolver?.prepareNativeRole?.(leadRole) : undefined;
       if (signal.aborted) throw new Error("preparation-cancelled");
       if (resolver?.nativeMemory?.status === "unavailable") {
         const reason = resolver.nativeMemory.reasonCode;
@@ -1496,12 +1501,12 @@ export class SessionManager implements SessionService {
         throw new Error(failureCode);
       }
       const capabilityAvailability = reviewedCapabilityAvailability(resolver, assignment.runnerId);
-      completion = { status: "ready", preparationFindings: resolver?.nativeSkills?.preparation?.slice(0, 16), personalMcpRunnerId: assignment.runnerId, personalMcpAvailability: validatePersonalMcpAvailability(resolver?.personalMcpAvailability), capabilityAvailability, reasonCode: capabilityAvailability.find(item => item.status === "unavailable")?.reasonCode, checkedAt: new Date(this.clock.now()).toISOString() };
+      completion = { status: "ready", preparationFindings: [...resolver?.nativeSkills?.preparation ?? [], ...preparedRole?.preparation ?? []].slice(0, 16), personalMcpRunnerId: assignment.runnerId, personalMcpAvailability: validatePersonalMcpAvailability(resolver?.personalMcpAvailability), capabilityAvailability, reasonCode: capabilityAvailability.find(item => item.status === "unavailable")?.reasonCode, checkedAt: new Date(this.clock.now()).toISOString() };
     } catch (error) {
       if (error instanceof PersonalMcpPreparationError) failureCode = error.reasonCode;
       if (failureCode === "preparation-tools-failed" && error instanceof Error) {
         // Publish only reviewed codes, never backend details or credentials.
-        const reason = /^(codebase-memory-(?:unavailable|unsupported|cancelled)|web-search-(?:credential-missing|provider-unconfigured)|(?:claude|codex|opencode|pi)-session-skills-unverified|claude-(?:codebase-memory|web-search)-selection-stale|personal-mcp-(?:managed-exclusive|remote-config-isolation-unavailable|auth-config-unavailable))(?=:|$)/.exec(error.message)?.[1];
+        const reason = /^(codebase-memory-(?:unavailable|unsupported|cancelled)|web-search-(?:credential-missing|provider-unconfigured)|codex-session-preparation-blocked|(?:claude|codex|opencode|pi)-session-skills-unverified|claude-(?:codebase-memory|web-search)-selection-stale|personal-mcp-(?:managed-exclusive|remote-config-isolation-unavailable|auth-config-unavailable))(?=:|$)/.exec(error.message)?.[1];
         if (reason) failureCode = reason;
       }
       completion = { ...(error instanceof PersonalMcpPreparationError ? {personalMcpAvailability:validatePersonalMcpAvailability(error.availability)} : {}), status: signal.aborted && !timedOut ? "cancelled" : "failed", reasonCode: signal.aborted ? timedOut ? "preparation-timeout" : "preparation-cancelled" : failureCode };

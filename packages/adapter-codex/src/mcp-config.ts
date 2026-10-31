@@ -352,6 +352,9 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
         if (legacy && !proven.has(server.id)) adoptedServerIds.push(server.id);
       }
       else collisions.push(server.id);
+    } else if (managed.has(server.id)) {
+      // The entire parsed table matches the current contribution; formatting is not ownership.
+      adoptedServerIds.push(server.id);
     }
   }
   if (collisions.length > 0) return {
@@ -368,7 +371,7 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
       return `Existing user MCP server '${id}' conflicts in ${differences.join(", ")}. Back up your Codex config.toml, then align this entry with the selected tool or rename it before retrying. Deck will not overwrite it.`;
     }),
   };
-  if (missing.length === 0 && replaceManaged.size === 0) return { status: source === originalSource ? "unchanged" : "updated", content: source, configured: desired.map((server) => server.id) };
+  if (missing.length === 0 && replaceManaged.size === 0) return { status: source === originalSource ? "unchanged" : "updated", content: source, configured: desired.map((server) => server.id), adoptedServerIds };
   const base = stripManagedServerBlocks(source, replaceManaged);
   const separator = base.length === 0 || base.endsWith("\n") ? "" : "\n";
   const content = `${base}${separator}${missing.map(render).join("\n")}`;

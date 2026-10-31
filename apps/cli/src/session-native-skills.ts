@@ -19,11 +19,14 @@ export async function prepareSessionNativeSkills(adapter: RunnerAdapter | undefi
 }
 
 /** Preparation errors must include a recovery path before a runner is spawned. */
-export async function prepareSessionNativeRole(adapter: RunnerAdapter, roleId: string) {
+export async function prepareSessionNativeRole(adapter: RunnerAdapter, roleId: string, config?: NormalizedDeckConfig, onWarning?: (message: string) => void) {
   try {
     if (!adapter.prepareSessionNativeRole) throw new Error("native-role-verifier-unavailable");
-    return await adapter.prepareSessionNativeRole(roleId);
+    const role = await adapter.prepareSessionNativeRole(roleId, config);
+    for (const finding of role.preparation ?? []) if (finding.kind === "W") onWarning?.(`${finding.code}: ${finding.message}`);
+    return role;
   } catch (cause) {
+    if (adapter.runnerId === "codex") throw new Error("codex-session-preparation-blocked: The role or hook trust boundary could not be validated after preparation. Review the preserved conflicting item or unsafe path, then retry.", { cause });
     throw new Error(`${adapter.runnerId}-session-skills-unverified: The installed team could not be verified against this Deck build. Reinstall the ${adapter.runnerId === "codex" ? "Codex" : adapter.runnerId} team from Review & Install, then retry the session.`, { cause });
   }
 }

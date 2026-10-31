@@ -27,3 +27,9 @@ describe("inspectCodexProject", () => {
     expect(result.diagnostics.some((diagnostic) => diagnostic.code === "codex-config-malformed")).toBe(true);
   });
 });
+
+test("a newer Codex is admitted with a compatibility warning", async () => {
+ const result = await inspectCodexProject('/p', { probe: async () => ({ found: true, version: '0.200.0', help: 'Usage: codex' }) });
+ expect(result.state).toBe('degraded');
+ expect(result.diagnostics.some(item => item.code === 'codex-version-untested')).toBe(true);
+});

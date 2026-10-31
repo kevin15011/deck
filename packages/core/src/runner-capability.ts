@@ -204,6 +204,8 @@ export type DeveloperTeamInstallPlanInput = {
 };
 
 export type RunnerDeveloperTeamInstallPlan = {
+  /** Safe reconciliation of a previously installed generation; never authorizes first installation. */
+  automaticRefresh?: boolean;
   files: readonly DeveloperTeamInstallFile[];
   /** Paths whose durable runner-sync ownership must be released after apply and verification succeed. */
   ownershipReleases?: readonly string[];

@@ -1,7 +1,9 @@
+import { withCodexInstallationUse, withCodexInstallationMutation, trackCodexInstallationProcess, CodexInstallationBusyError } from "./installation-use";
 import { createCodexSkillDiscoveryProvider, type CodexSkillDiscoveryOptions } from "./skill-discovery-provider";
 import { readCodexSearchFallbackOwnership } from "./native-search";
 import { PrerequisiteEvidence, pinnedHookExecutable, pinnedHookRuntime } from "../../core/src/session/prerequisite-evidence";
 import { CODEX_ROOT_LEAD_BOOTSTRAP } from "./role-bootstrap";
+import type { RunnerPreparationFinding } from "@deck/core/session/driver";
 import { prepareCodexNativeRole } from "./native-role";
 import { inspectCodexNativeSearch } from "./native-search";
 import { CODEX_MCP_SERVER_IDS } from "./mcp-config";
@@ -64,6 +66,8 @@ import {
   parseSkillDescriptor,
   type WebSearchProviderDescriptorV1,
 } from "@deck/core";
+
+const refreshQueues = new Map<string, Promise<unknown>>();
 
 function requireDeckConfig(config: NormalizedDeckConfig | undefined, context: string): NormalizedDeckConfig {
   if (!config) throw new Error(`Codex ${context} requires caller-resolved global Deck config.`);
@@ -720,7 +724,31 @@ class CodexRunnerAdapter implements RunnerAdapter {
     };
   }
   readPreparationGeneration() { return JSON.stringify(prepareCodexNativeRole(this.#roots.codexHome, "deck-lead").source); }
-  async prepareSessionNativeRole(roleId: string) { return prepareCodexNativeRole(this.#roots.codexHome, roleId); }
+  async prepareSessionNativeRole(roleId: string, config?: NormalizedDeckConfig) {
+    const root = this.#roots.codexHome;
+    const pending = refreshQueues.get(root) ?? Promise.resolve();
+    const next = pending.catch(() => {}).then(async () => {
+      const findings: RunnerPreparationFinding[] = [];
+      // Caller-resolved intent is required; readiness observations do not enable capabilities.
+      if (config) {
+        const plan = this.buildDeveloperTeamInstallPlan({ projectRoot: this.#roots.userHome, environmentId: "codex-development", deckConfig: config });
+        for (const entry of plan.diagnosticEntries ?? []) if (entry.severity === "warning") findings.push({ kind: "W", code: entry.code, item: "codex-installation", message: entry.message });
+        if (plan.blocked) throw new Error(`codex-preparation-boundary: ${plan.diagnostics.join("; ")}`);
+        let refreshed = true;
+        try { await this.applyDeveloperTeamInstall({ projectRoot: this.#roots.userHome, environmentId: "codex-development", plan }); }
+        catch (error) {
+          if (!(error instanceof CodexInstallationBusyError)) throw error;
+          refreshed = false;
+          findings.push({ kind: "W", code: "codex-refresh-deferred", item: "codex-installation", message: error.message });
+        }
+        if (refreshed && plan.files.length) findings.push({ kind: "H", code: "codex-content-refreshed", item: "codex-installation", message: "Refreshed owned Codex content; customized files remain intact." });
+      }
+      const role = prepareCodexNativeRole(root, roleId);
+      return { ...role, preparation: [...findings, ...role.preparation ?? []] };
+    });
+    refreshQueues.set(root, next);
+    try { return await next; } finally { if (refreshQueues.get(root) === next) refreshQueues.delete(root); }
+  }
 
   getSessionDriver() { return createCodexSessionDriver({ ...this.#sessionDriverOptions, requireNativeRole: true }); }
 
@@ -869,12 +897,22 @@ class CodexRunnerAdapter implements RunnerAdapter {
   #deckHooksMaterialized(): boolean {
     try {
       const source = readGlobalConfigSource(this.#roots);
-      return source !== null && inspectCodexOwnedHookIds(source).some((id) => id === "rtk" || id === "supermemory" || id === "readiness");
+      if (source === null) return false;
+      // Markers alone never authorize automatic execution of a customized hook.
+      const descriptor = prepareCodexNativeRole(this.#roots.codexHome, "deck-lead");
+      return descriptor.hooks.length > 0;
     } catch { return false; }
   }
   getLaunchPolicyDiagnostics() { return [CODEX_DEVELOPER_BYPASS_DIAGNOSTIC]; }
   async buildLaunchPlan(input: RunnerLaunchInput): Promise<RunnerLaunchResult> {
-    return this.#withWebSearchCredential(await this.#buildBaseLaunchPlan(input), input);
+    const launch = this.#withWebSearchCredential(await this.#buildBaseLaunchPlan(input), input);
+    if (launch.status !== "ready") return launch;
+    // Never silently execute an edited script under a previously trusted command.
+    if (readGlobalConfigSource(this.#roots)?.includes("# deck-codex-hook:") && !this.#deckHooksMaterialized()) return {
+      ...launch, plan: { ...launch.plan, args: [...launch.plan.args, "-c", "features.hooks=false"] },
+      diagnostics: [...launch.diagnostics, { code: "codex-hooks-preserved", severity: "warning", message: "Installed hooks could not be authenticated. They are preserved and disabled for this launch; ordinary work remains available." }],
+    };
+    return launch;
   }
   /**
    * Hands the shared Web Search credential to the Codex child process only when Web Search is enabled and the global
@@ -894,7 +932,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const provider = this.resolveWebSearchProvider(input.deckConfig.webSearch.provider);
     let token: string | undefined;
     try { token = this.#webSearchCredential()?.trim(); } catch { /* actionable below */ }
-    if (!isWebSearchProviderDescriptor(provider) || !token || /[\0\r\n]/.test(token)) return { status: "blocked", code: "web-search-fallback-unavailable", diagnostics: [{ code: "web-search-fallback-unavailable", severity: "error", message: "Configure a supported Deck search provider and credential before opening Codex." }] };
+    if (!isWebSearchProviderDescriptor(provider) || !token || /[\0\r\n]/.test(token)) return { ...launch, diagnostics: [...diagnostics, { code: "web-search-fallback-unavailable", severity: "warning", message: "Search fallback is unavailable. Configure its provider and credential to use it; ordinary work can continue." }], plan: { ...launch.plan, args: [...overrides, ...launch.plan.args] } };
     if (search.availability === "unknown") diagnostics.push(...["native-search-detection-defect", "native-search-possible-duplicate"].map(code => ({ code, severity: "warning" as const, message: "Native search availability is unknown; the configured fallback is selected and may duplicate an existing search tool." })));
     const id = search.unresolvedFallbackServerIds?.includes(provider.semanticServerId) ? "deck-interactive-web-search" : provider.semanticServerId;
     const source = readGlobalConfigSource(this.#roots);
@@ -1527,13 +1565,17 @@ class CodexRunnerAdapter implements RunnerAdapter {
     }
     // The native planner may omit a retired model, an unsupported effort, or a reasoning-only assignment.
     // Never treat a successful file write as proof that the requested assignment survived regeneration.
-    const plannedRole = (agentId: string) => native.expectedFiles.find((file) => file.relativePath === `.codex/agents/${agentId}.toml`)?.content;
+    const plannedRole = (agentId: string): Record<string, unknown> => {
+      const source = native.expectedFiles.find(file => file.relativePath === `.codex/agents/${agentId}.toml`)?.content
+        ?? existing.files.get(`.codex/agents/${agentId}.toml`);
+      try { return Bun.TOML.parse(source ?? "") as Record<string, unknown>; } catch { return {}; }
+    };
     const lostAssignmentFields = [...new Set([
       ...Object.entries(modelAssignments)
-        .filter(([agentId, modelId]) => !plannedRole(agentId)?.includes(`\nmodel = ${JSON.stringify(nativeCodexModelSlug(modelId))}\n`))
+        .filter(([agentId, modelId]) => plannedRole(agentId).model !== nativeCodexModelSlug(modelId))
         .map(([agentId]) => agentId),
       ...Object.entries(thinkingAssignments)
-        .filter(([agentId, effort]) => !plannedRole(agentId)?.includes(`\nmodel_reasoning_effort = ${JSON.stringify(effort)}\n`))
+        .filter(([agentId, effort]) => plannedRole(agentId).model_reasoning_effort !== effort)
         .map(([agentId]) => agentId),
     ])];
     if (lostAssignmentFields.length > 0) {
@@ -1550,6 +1592,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       kind: mutation.relativePath.includes("/skills/") ? "skill" as const : mutation.relativePath.includes("/agents/") ? "agent" as const : "other" as const,
     }));
     const plan = {
+      automaticRefresh: existing.files.has(CODEX_MANIFEST_PATH) && !native.blocked && input.capabilityIds === undefined && unconfirmedAssignmentChanges.length === 0,
       files,
       ownershipReleases: native.ownershipReleases,
       diagnostics: native.diagnostics.map((diagnostic) => diagnostic.message),
@@ -1600,7 +1643,16 @@ class CodexRunnerAdapter implements RunnerAdapter {
     ];
   }
 
+  trackNativeInstallationProcess(pid: number): () => void {
+    return trackCodexInstallationProcess(this.#roots.codexHome, pid);
+  }
+  withNativeInstallationUse<T>(effect: () => Promise<T>): Promise<T> {
+    return withCodexInstallationUse(this.#roots.codexHome, effect);
+  }
   async applyDeveloperTeamInstall(input: DeveloperTeamApplyInput): Promise<DeveloperTeamApplyResult> {
+    return withCodexInstallationMutation(this.#roots.codexHome, () => this.#applyDeveloperTeamInstall(input));
+  }
+  async #applyDeveloperTeamInstall(input: DeveloperTeamApplyInput): Promise<DeveloperTeamApplyResult> {
     const native = this.#nativePlans.get(input.plan as object);
     const operation = this.#planOperations.get(input.plan as object);
     if (!native || !operation) throw new Error("Codex apply requires the exact reviewed immutable plan.");
@@ -1809,8 +1861,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       if (sha256(content) !== expected.hash) problems.push(`Drifted: ${expected.relativePath}`);
       if ((stat.mode & 0o777) !== expected.mode) problems.push(`Mode drifted: ${expected.relativePath}`);
       if (expected.kind === "config") {
-        const semantic = mergeCodexProjectConfig(content, { multiAgent: true });
-        if (semantic.status === "blocked" || semantic.content !== content) problems.push(`Invalid config semantics: ${expected.relativePath}`);
+        try { Bun.TOML.parse(content); } catch { problems.push(`Invalid config semantics: ${expected.relativePath}`); }
       }
       if ((expected.kind === "agent-skill" || expected.kind === "bootstrap-skill")
         && (!content.startsWith("---\n") || !parseSkillDescriptor(content, expected.relativePath.split("/").at(-2)).ok)) {

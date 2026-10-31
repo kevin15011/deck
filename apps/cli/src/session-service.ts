@@ -98,7 +98,7 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
       catch (error) { await resolver.release?.(); throw error; }
       return { ...resolver, ...(nativeSkills ? { nativeSkills, validateLaunch } : {}),
         ...(adapter?.runnerId === "codex" || adapter?.runnerId === "opencode" || adapter?.runnerId === "pi" ? { prepareNativeRole: async (roleId: string) => {
-          return prepareSessionNativeRole(adapter, roleId);
+          return prepareSessionNativeRole(adapter, roleId, options.configStore.read(), message => services.logger.warn("codex.preparation-warning", { message }));
         } } : {}),
       };
     },

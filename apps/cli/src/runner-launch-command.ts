@@ -42,7 +42,7 @@ export type RunnerProcessEffects = {
   spawn(
     command: string,
     args: readonly string[],
-    options: { cwd: string; env: Record<string, string>; stdio: "inherit" | "pipe"; stdin: "inherit" | "closed"; stdinPayload?: RunnerLaunchPlan["stdinPayload"]; captureLimitBytes?: number; sensitiveValues?: readonly string[] },
+    options: { cwd: string; env: Record<string, string>; stdio: "inherit" | "pipe"; stdin: "inherit" | "closed"; stdinPayload?: RunnerLaunchPlan["stdinPayload"]; captureLimitBytes?: number; sensitiveValues?: readonly string[]; onSpawn?: (pid: number) => (() => void) | undefined },
   ): Promise<SpawnedRunnerResult>;
 };
 
@@ -278,13 +278,31 @@ export function createNodeRunnerProcessEffects(nodeSpawner: typeof nodeSpawn = n
     removeFile: async (path) => { await rm(path, { force: true }); },
     spawn(command, args, options) {
       return new Promise((resolve) => {
-        const child = nodeSpawner(command, [...args], {
-          cwd: options.cwd,
-          env: options.env,
-          stdio: options.stdio === "inherit"
-            ? "inherit"
-            : [options.stdinPayload ? "pipe" : options.stdin === "inherit" ? "inherit" : "ignore", "pipe", "pipe"],
-        });
+        // The shell cannot touch the installation until its lease exists. EOF on parent
+        // death refuses launch; after exec the PID and process birth identity stay the same.
+        const gated = !!options.onSpawn;
+        const stdio = options.stdio === "inherit"
+          ? ["inherit", "inherit", "inherit"] as const
+          : [options.stdinPayload ? "pipe" : options.stdin === "inherit" ? "inherit" : "ignore", "pipe", "pipe"] as const;
+        const child = nodeSpawner(gated ? "/bin/sh" : command, gated
+          ? ["-c", 'IFS= read -r grant <&3 && [ "$grant" = launch ] || exit 125; exec 3<&-; exec "$@"', "deck-launch-gate", command, ...args]
+          : [...args], { cwd: options.cwd, env: options.env, stdio: [...stdio, ...(gated ? ["pipe" as const] : [])] });
+        const gate = child.stdio[3] as import("node:stream").Writable | null;
+        gate?.on("error", () => {});
+        let releaseInstallationUse: (() => void) | undefined;
+        try {
+          if (gated) {
+            if (child.pid === undefined) throw new Error('native-child-pid-unavailable');
+            releaseInstallationUse = options.onSpawn!(child.pid);
+            if (!releaseInstallationUse) throw new Error('native-child-lease-unavailable');
+            gate!.end("launch\n");
+          }
+        } catch (error) {
+          gate?.end(); child.kill();
+          child.once('error', () => {});
+          child.once('close', () => { releaseInstallationUse?.(); resolve({ exitCode: 1, stdout: '', stderr: String(error) }); });
+          return;
+        }
         const requestedLimit = options.captureLimitBytes ?? 1024 * 1024;
         const limit = requestedLimit + Math.max(0, ...(options.sensitiveValues ?? []).map((value) => Buffer.byteLength(value)));
         let stdout: Buffer = Buffer.alloc(0);
@@ -306,6 +324,7 @@ export function createNodeRunnerProcessEffects(nodeSpawner: typeof nodeSpawn = n
         process.once("SIGINT", onSigint);
         process.once("SIGTERM", onSigterm);
         const cleanup = () => {
+          releaseInstallationUse?.(); releaseInstallationUse = undefined;
           process.off("SIGINT", onSigint);
           process.off("SIGTERM", onSigterm);
         };
@@ -501,6 +520,18 @@ function conciseLaunchSummary(context: {
 /** Generic CLI-owned install/verify/consent/spawn orchestration. */
 export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunRunnerLaunchResult> {
   input.signal?.throwIfAborted();
+  if (!input.installOnly && !input.dryRun && input.adapter.withNativeInstallationUse) {
+    return input.adapter.withNativeInstallationUse(() => runRunnerLaunchReserved({ ...input, processEffects: {
+      ...input.processEffects,
+      spawn: (command, args, options) => input.processEffects.spawn(command, args, { ...options,
+        onSpawn: pid => input.adapter.trackNativeInstallationProcess?.(pid),
+      }),
+    } }));
+  }
+  return runRunnerLaunchReserved(input);
+}
+async function runRunnerLaunchReserved(input: RunRunnerLaunchInput): Promise<RunRunnerLaunchResult> {
+  input.signal?.throwIfAborted();
   // The native Claude lane is separate. No Claude Developer Team adapter is verified yet;
   // never let a newly registered adapter inherit this legacy Deck memory-host pipeline.
   if (input.adapter.runnerId === "claude") {
@@ -597,7 +628,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   }
   if (input.dryRun) return { status: "dry-run", diagnostics: [preview] };
 
-  if (safeMutations.length > 0 && !input.yes) {
+  if (safeMutations.length > 0 && !input.yes && !(input.adapter.runnerId === "codex" && plan.automaticRefresh && !input.installOnly)) {
     if (!input.interactive || !input.confirm) return { status: "blocked", message: "Mutation requires --yes in non-interactive mode." };
     const confirmationQuestion = input.installOnly
       ? "Apply these changes? [y/N]"
@@ -607,18 +638,24 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   if (launch?.status === "unsupported") return { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
   if (launch?.status === "blocked") return { status: "blocked", message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
   const backup = input.adapter.backupDeveloperTeamFiles(plan);
-  let applyResult: Awaited<ReturnType<RunnerAdapter["applyDeveloperTeamInstall"]>>;
+  let refreshDeferred = false;
+  let applyResult: Awaited<ReturnType<RunnerAdapter["applyDeveloperTeamInstall"]>> = { results: [], changedCount: 0, unchangedCount: 0 };
   try {
     applyResult = await input.adapter.applyDeveloperTeamInstall({ projectRoot: baseLaunch.projectRoot, environmentId: input.adapter.environmentIds[0]!, plan });
   } catch (error) {
-    const rollback = error && typeof error === "object" && "rollback" in error
-      ? (error as { rollback?: { conflicts?: readonly string[] } }).rollback
-      : undefined;
-    const conflicts = rollback?.conflicts ?? [];
-    const message = error instanceof Error ? error.message : "Runner installation failed safely.";
-    return { status: "blocked", message: conflicts.length > 0 ? `${message}; rollback conflicts: ${conflicts.join(", ")}` : message };
+    if (!input.installOnly && input.adapter.runnerId === "codex" && error && typeof error === "object" && "code" in error && ["codex-installation-in-use", "runner-mutation-deferred"].includes(String(error.code))) {
+      refreshDeferred = true;
+      await input.presentPreview("Codex content refresh deferred while another invocation is active; launching with installed content.");
+    } else {
+      const rollback = error && typeof error === "object" && "rollback" in error
+        ? (error as { rollback?: { conflicts?: readonly string[] } }).rollback
+        : undefined;
+      const conflicts = rollback?.conflicts ?? [];
+      const message = error instanceof Error ? error.message : "Runner installation failed safely.";
+      return { status: "blocked", message: conflicts.length > 0 ? `${message}; rollback conflicts: ${conflicts.join(", ")}` : message };
+    }
   }
-  const verified = await input.adapter.verifyDeveloperTeamInstall(plan);
+  const verified = refreshDeferred ? { valid: true, diagnostics: [] } : await input.adapter.verifyDeveloperTeamInstall(plan);
   if (!verified.valid) {
     const rollbackTarget = applyResult.operation ? { payload: applyResult.operation, diagnostics: [] } : backup;
     try {
