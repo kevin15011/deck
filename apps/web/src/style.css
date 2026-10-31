@@ -516,7 +516,7 @@ small, .muted, .empty-note { color: var(--muted); }
 .composer-actions { display: flex; flex: 0 0 auto; align-items: center; gap: .375rem; }
 .composer-actions button { width: 36px; height: 36px; padding: 0; font-size: 1.1rem; line-height: 1; }
 .composer-actions svg { width: 18px; height: 18px; vertical-align: middle; }
-.jump-latest { margin-left: auto; flex: none; font-size: .75rem; padding: .5rem 1rem; white-space: nowrap; box-shadow: 0 2px 8px #3022191a; }
+.jump-latest { color: var(--ink); margin-left: auto; flex: none; font-size: .75rem; padding: .5rem 1rem; white-space: nowrap; box-shadow: 0 2px 8px #3022191a; }
 .workspace-pane { background: var(--canvas); border-left: 1px solid var(--border); min-width: 0; min-height: 0; }
 .workspace-panel { height: 100%; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .activity-view { height: 100%; min-height: 0; position: relative; overflow: hidden; }
@@ -1562,7 +1562,7 @@ select:focus-visible, .question-panel textarea:focus-visible {
 }
 :is(.workspace-dialog, .session-drawer, .image-preview, .deck-menu-items,
     .project-menu, .directory-popup, .approval-scope-choices, .secondary-info-panel,
-    .session-controls-panel, .composer-interrupt-hint, .composer-reconnect,
+    .session-controls-panel, .composer-interrupt-hint, .composer-reconnect, .prompt-queue,
     .message-copy-error, .jump-latest, .transcript-latest, .activity-jump),
 .session-permissions:not(.session-controls-panel .session-permissions) > .session-permissions-panel,
 .conversation-float-stack > .approvals.pending, .mobile-approval-overlay > .approvals.pending,
