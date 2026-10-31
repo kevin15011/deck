@@ -39,6 +39,11 @@ function hasPreferenceArgv(rel: string, text: string): boolean {
   if (rel === "packages/adapter-pi/src/pi-codebase-guard.ts") {
     text = text.replace("realpathSync(process.argv[1]!)", "");
   }
+  // Native tool restrictions are authorization evidence, not Deck preference selection.
+  if (rel === "packages/adapter-pi/src/pi-extensions/tool-policy/native-mcp.ts") {
+    text = text.replace('process.argv.findIndex(arg => arg === "--tools")', "");
+    text = text.replace('process.argv[toolsIndex + 1]', "");
+  }
   return /process\.argv/.test(text);
 }
 
@@ -101,6 +106,14 @@ describe("production Deck preference source audit", () => {
     expect(hasPreferenceArgv("packages/adapter-pi/src/runner-adapter.ts", source)).toBe(true);
   });
 
+  test("native tool restriction exception cannot hide preference reads", () => {
+    const path="packages/adapter-pi/src/pi-extensions/tool-policy/native-mcp.ts";
+    const source=readFileSync(join(repoRoot,path),"utf8");
+    expect(hasPreferenceArgv(path,source)).toBe(false);
+    expect(hasPreferenceArgv(path,source+'\nprocess.argv[2]')).toBe(true);
+    expect(hasPreferenceArgv('packages/adapter-pi/src/runner-adapter.ts',source)).toBe(true);
+  });
+
   test("requires explicit Deck config on preference-sensitive Core contracts", () => {
     const offenders = ["packages/core/src/runner-adapter.ts", "packages/core/src/runner-capability.ts"].filter((rel) => {
       const text = readFileSync(join(repoRoot, rel), "utf8");
@@ -118,10 +131,8 @@ describe("production Deck preference source audit", () => {
     expect(offenders).toEqual([]);
   });
 
-  test("forbids migration-candidate config resolvers outside migration modules", () => {
+  test("forbids retired migration-candidate config resolvers", () => {
     const permitted = new Set([
-      "apps/cli/src/runtime/paths.ts",
-      "apps/cli/src/upgrade-command/xdg-migration.ts",
       "apps/cli/src/__tests__/global-config-production-audit.test.ts",
     ]);
     const offenders = files(repoRoot).filter((rel) => {

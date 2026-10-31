@@ -16,7 +16,17 @@ export type AttentionItem = {
     summary?: string;
     replyId?: string;
     othersActive?: boolean;
+    approvalId?: string;
+    tool?: string;
+    risk?: 'normal' | 'high';
 };
+/** Push tool names are identifiers, never summaries, commands, paths or input. */
+export function approvalPushFields(data: Record<string, unknown>): {approvalId?: string; tool: string; risk: 'normal' | 'high'} {
+    const raw = typeof data.tool === 'string' ? data.tool : '';
+    const tool = /^[A-Za-z][A-Za-z0-9_.:-]{0,79}$/.test(raw) && redactText(raw,80) === raw ? raw : 'Tool';
+    const approvalId = typeof data.approvalId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(data.approvalId) ? data.approvalId : undefined;
+    return {...(approvalId ? {approvalId} : {}),tool,risk:data.risk === 'normal' ? 'normal' : 'high'};
+}
 const graphemes = (s: string) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)].map(x => x.segment);
 const SUMMARY_INPUT_LIMIT = 8192;
 type ProseNode = { type: string; value?: string; alt?: string | null; children?: ProseNode[] };
@@ -146,8 +156,19 @@ export function deriveAttention(i: AttentionInput): AttentionItem[] {
         out.push({ sessionId: l.sessionId, kind, key, seq, revision, ts, ...(summary ? { summary } : {}), ...(othersActive ? { othersActive } : {}) }); };
     for (const q of l.pendingQuestions())
         add('question', `question:${q.questionId}`, q.seq);
-    for (const a of l.pendingApprovals())
+    for (const a of l.pendingApprovals()) {
         add('approval', `approval:${a.approvalId}`, a.seq);
+        const item = out.at(-1);
+        if (item?.key !== `approval:${a.approvalId}`) continue;
+        // Ledger retains only identity/sequence; use the exact request event.
+        for (const event of i.events(a.seq - 1)) {
+            if (event.seq > a.seq) break;
+            if (event.seq === a.seq && event.kind === 'approval.requested' && event.data.approvalId === a.approvalId) {
+                Object.assign(item, approvalPushFields(event.data));
+                break;
+            }
+        }
+    }
     for (const d of l.decisions())
         if (d.state === 'pending' && !i.running.has(`${d.origin.taskId}:${d.origin.attempt}`))
             add('decision', `decision:${d.decisionId}`, d.questionSeq, d.questionRevision, summarize(d.question));

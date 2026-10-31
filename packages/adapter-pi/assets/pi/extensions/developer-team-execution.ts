@@ -1,3 +1,5 @@
+import { routeNativePreparation } from "../../../src/pi-extensions/subagents/preparation-route";
+import { loadPreparedSessionStartContext } from "@deck/core/session/start-context";
 import { createHash } from "node:crypto";
 import {
   createInvocationAuthorizationServiceV1,
@@ -22,6 +24,7 @@ type PiExtensionApi = { on(event: string, handler: (event: any, context: any) =>
 type PiQaInvocationV1 = Readonly<{ invocationId: string; digest: `sha256:${string}`; reference: unknown }>;
 
 export interface PiDeveloperTeamExecutionExtensionOptionsV1 {
+  readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly authorizationService?: InvocationAuthorizationServiceV1;
   readonly bridge?: DeveloperTeamRunnerHostBridgeV1;
   readonly invocationAuthorization?: "static-compatible" | "invocation-required";
@@ -199,6 +202,18 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
   const settledQaInvocationKeys = new Set<string>();
 
   return function registerDeveloperTeamExecutionExtension(pi: PiExtensionApi): void {
+    let readiness: string | undefined;
+    pi.on("session_start", async (_event, context) => {
+      readiness = undefined;
+      try {
+        readiness = await loadPreparedSessionStartContext(context.cwd, options.environment);
+        if (readiness === undefined) process.stderr.write("deck-preparation: native-snapshot-unavailable\n");
+      } catch { process.stderr.write("deck-preparation: session-start-context-unverified\n"); }
+    });
+    pi.on("session_shutdown", async () => { readiness = undefined; });
+    pi.on("before_agent_start", async event => readiness
+      ? { systemPrompt: [event.systemPrompt, readiness].filter(Boolean).join("\n\n") }
+      : undefined);
     pi.on("input", async (event, context) => {
       const text = typeof event?.text === "string" ? event.text : undefined;
       const sessionId = context?.sessionManager?.getSessionId?.();
@@ -224,6 +239,11 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
         if (event.toolName !== "subagent" || typeof event.toolCallId !== "string" || typeof sessionId !== "string" || sessionId.length === 0) {
           return { block: true, reason: "invalid-evidence" };
         }
+        // The native tool owns exact delegation and authenticated child repair. This
+        // route exists only while that extension has a live matching parent session.
+        try {
+          if (routeNativePreparation(sessionId, context?.sessionManager?.getSessionFile?.(), input.preparation, context.cwd)) return roleAdvisoryOutput;
+        } catch { return { block: true, reason: "invalid-evidence" }; }
         if (!preparationAuthorizationService) {
           return { block: true, reason: "modification-not-authorized:AUTHZ_PROVIDER_MISSING" };
         }

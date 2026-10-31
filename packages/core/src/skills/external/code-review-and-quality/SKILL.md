@@ -332,7 +332,7 @@ Part of code review is dependency review:
 - "LGTM" without evidence of actual review
 - Security-sensitive changes without security-focused review
 - Large PRs that are "too big to review properly" (split them)
-- No regression tests with bug fix PRs
+- Missing regression tests for reproducible bug fixes or protected risk; do not request tests for prose, markup, styles, constants, pass-throughs or generated contents (see deck-verification)
 - Review comments without severity labels — makes it unclear what's required vs optional
 - Accepting "I'll fix it later" — it never happens
 

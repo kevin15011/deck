@@ -7,15 +7,9 @@ import {
 } from "./installation-plan";
 
 describe("buildPiInstallationPlan", () => {
-  test("uses the serena-agent source and managed MCP install kind for Serena", () => {
-    expect(PI_INSTALLABLE_TOOLS).toContainEqual(
-      expect.objectContaining({
-        id: "serena",
-        source: "serena-agent",
-        installKind: "shared-binary-plus-mcp",
-        required: false,
-      }),
-    );
+  test("excludes retired tools even when selected by legacy inputs", () => {
+    expect(PI_INSTALLABLE_TOOLS.some(tool => tool.id === 'serena' || tool.id === 'context-mode')).toBe(false);
+    expect(buildPiInstallationPlan({ requiredTools: [], selectedOptionalToolIds: ['serena', 'context-mode'] })).toEqual([]);
   });
 
   test("plans only the selected optional tools (Deck owns subagents and MCP configuration)", () => {
@@ -96,6 +90,6 @@ describe("PI_INSTALLABLE_TOOLS boundary", () => {
     expect(INTERNAL_INSTALLABLE_BOUNDARY[0]).toBe("pi-mermaid");
 
     // 6 optional tools (context-mode, codebase-memory-mcp, rtk, serena, context7, web-search); pi-mermaid is NOT in this catalog
-    expect(PI_INSTALLABLE_TOOLS).toHaveLength(6);
+    expect(PI_INSTALLABLE_TOOLS).toHaveLength(4);
   });
 });

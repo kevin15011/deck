@@ -45,6 +45,8 @@ function sourceHashes() {
     for (const path of ['bun.lock', 'package.json']) if (existsSync(join(repo, path))) paths.add(path);
     return Object.fromEntries([...paths].sort().map(p => [p, sha256(readFileSync(join(repo, p)))]));
 }
+// External checkout read boundary; default reads and hashes every file on every call.
+export const manifestSources = { readHashes: sourceHashes };
 export function harnessHashes() { const paths = [...readdirSync(import.meta.dir).filter(n => n.endsWith('.ts') && !n.endsWith('.test.ts') && n !== 'test-support.ts'), ...readdirSync(join(import.meta.dir, 'capture-replay')).filter(n => /\.(?:ts|mjs|cjs)$/.test(n)).map(n => 'capture-replay/' + n), 'fixtures/scorer-calibration.json'].sort(); return Object.fromEntries(paths.map(p => [p, sha256(readFileSync(join(import.meta.dir, p)))])); }
 export function bindingsFor(run: string, mode: string, repeats: number) {
     const bindings: Record<string, string> = {};
@@ -78,7 +80,7 @@ export function draftManifest(input: {
     if (input.accountSharedWithProduction !== undefined && typeof input.accountSharedWithProduction !== 'boolean')
         fail('invalid_account_declaration');
     const bindings = bindingsFor(run, input.mode, repeats);
-    const m: Manifest = { processing, schema: 'deck-memory-live-run-v1', run, evalRoot: root, mode: input.mode, repeats, tracks: input.mode === 'pilot' ? ['R'] : ['R', 'N'], requestBudget: budget, liveApproved: false, cleanupApproved: false, ...(input.accountSharedWithProduction === undefined ? {} : { accountSharedWithProduction: input.accountSharedWithProduction }), cleanupRequestBudget: 7 * Object.keys(bindings).length, datasetHash: dataset().hash, sourceHashes: sourceHashes(), sourceCommit: sourceCommit(), harnessHashes: harnessHashes(), bindings };
+    const m: Manifest = { processing, schema: 'deck-memory-live-run-v1', run, evalRoot: root, mode: input.mode, repeats, tracks: input.mode === 'pilot' ? ['R'] : ['R', 'N'], requestBudget: budget, liveApproved: false, cleanupApproved: false, ...(input.accountSharedWithProduction === undefined ? {} : { accountSharedWithProduction: input.accountSharedWithProduction }), cleanupRequestBudget: 7 * Object.keys(bindings).length, datasetHash: dataset().hash, sourceHashes: manifestSources.readHashes(), sourceCommit: sourceCommit(), harnessHashes: harnessHashes(), bindings };
     return m;
 }
 export function prepare(input: Parameters<typeof draftManifest>[0]): Manifest {
@@ -109,7 +111,7 @@ export function validateManifest(m: Manifest) {
     validateProcessingPlan(m.processing!);
     if (Object.hasOwn(m, 'dedicatedEvalAccount'))
         fail('obsolete_dedicated_account_declaration');
-    if (m.datasetHash !== dataset().hash || JSON.stringify(m.sourceHashes) !== JSON.stringify(sourceHashes()))
+    if (m.datasetHash !== dataset().hash || JSON.stringify(m.sourceHashes) !== JSON.stringify(manifestSources.readHashes()))
         fail('manifest_or_frozen_inputs_invalid');
     if (m.sourceCommit !== sourceCommit() || JSON.stringify(m.harnessHashes) !== JSON.stringify(harnessHashes()))
         fail('harness_or_commit_changed_since_manifest');

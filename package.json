@@ -1,9 +1,9 @@
 {
   "name": "deck",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.3.12",
+  "packageManager": "bun@1.4.0",
   "scripts": {
     "deck": "bun run --cwd apps/cli deck",
     "build": "bun run bench:memory && bun run verify:supermemory-compiled && bun run scripts/build-binaries.ts",
@@ -14,7 +14,7 @@
     "sandbox:clean": "bash scripts/linux-install-sandbox.sh without-deck",
     "sandbox:update": "bash scripts/linux-install-sandbox.sh update",
     "deck:run": "DECK_DEBUG=1 bun run build:dry-run && DECK_DEBUG=1 ./dist/cli/deck",
-    "test": "bun test --timeout 30000",
+    "test": "bun scripts/test.ts",
     "bench:memory": "bun run benchmarks/deckmemorybench.ts",
     "verify:supermemory-compiled": "bun run scripts/verify-supermemory-compiled-runtime.ts --dry-run",
     "release:verify": "bun run bench:memory && bun run verify:supermemory-compiled && bun run build:dry-run"

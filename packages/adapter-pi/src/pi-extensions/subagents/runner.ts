@@ -1,14 +1,17 @@
+import { acquireInstallationUse } from "../../../../core/src/installation-use";
+import { verifyInstalledPiRole, verifiedPiGeneration } from "./verified-role";
 import { randomUUID } from "node:crypto";
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { PI_READ_ONLY_BUILTIN_TOOLS, PI_READ_ONLY_MEMORY_TOOLS } from "../../pi-mcp-catalog";
 import { isThinkingLevel, PI_THINKING_LEVEL_NAMES } from "../shared/thinking";
 import type { DeckAgent } from "./agents";
 import { claimExecution, executionGroupSettled } from "./execution-lease";
 import { CHILD_SUPERVISOR_SOURCE } from "./supervisor";
+import { readChildInvocationId } from "./storage";
 import { validateClarification, MAX_CLARIFICATIONS, type Clarify } from "./clarification";
 
 const DEFAULT_KILL_GRACE_MS = 5_000;
@@ -21,6 +24,9 @@ export type { MemoryHandoff } from "../shared/memory-handoff";
 import type { MemoryHandoff } from "../shared/memory-handoff";
 
 export type ChildRunnerOptions = {
+  /** Trusted host callback, never a model tool argument. Identity alone grants no repair. */
+  repair?: (binding: VerifiedPiInvocation, request: unknown) => Promise<unknown>;
+  onVerifiedInvocation?: (binding: VerifiedPiInvocation) => void;
   /** Resolves the `pi` executable. Default: the running Pi (`process.execPath`), else `pi`. */
   personalToolNames?: () => readonly string[];
   piInvocation?: (args: readonly string[]) => PiInvocation;
@@ -37,6 +43,13 @@ export type ChildRunnerOptions = {
   killGraceMs?: number;
   timeoutMs?: number;
 };
+
+export type VerifiedPiInvocation = Readonly<{
+  roleId: string; generation: string; nativeSessionId: string; launchId: string;
+  parentId: string; taskId: string; attempt: number;
+  /** Revalidates owned generation and live process; revocation is permanent. */
+  current(): boolean;
+}>;
 
 export type ChildUsage = { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; turns: number };
 
@@ -138,21 +151,33 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
   const active = new Set<{ terminate: () => void }>();
 
   async function run(request: ChildRunRequest): Promise<ChildResult> {
-    const { agent, task } = request;
+    const { task } = request;
+    let agent = request.agent;
+    let generation: string | undefined;
+    if (options.packageRoot) {
+      try { agent = verifyInstalledPiRole(options.packageRoot, agent); generation = verifiedPiGeneration(options.packageRoot, agent); }
+      catch (error) { return failure(agent,task,(error as Error).message); }
+    }
     if (request.signal?.aborted) return failure(agent, task, "Subagent cancelled before spawn", { aborted: true });
     if (agent.thinking !== undefined && !isThinkingLevel(agent.thinking)) {
       return failure(agent, task, `Invalid thinking level "${agent.thinking}" for ${agent.id}. Expected one of: ${PI_THINKING_LEVEL_NAMES.join(", ")}.`);
     }
-    const tools = agent.readOnly ? [...new Set([...(agent.tools.length > 0 ? agent.tools : READ_ONLY_FALLBACK_TOOLS), ...options.personalToolNames?.() ?? []])] : undefined;
+    const tools = agent.readOnly ? [...new Set([...(options.packageRoot ? agent.tools : agent.tools.length > 0 ? agent.tools : READ_ONLY_FALLBACK_TOOLS), ...options.personalToolNames?.() ?? []])] : undefined;
     const args: string[] = ["--mode", "json", "-p", ...(request.sessionFile ? ["--session", request.sessionFile] : ["--no-session"])];
     if (agent.model) args.push("--model", agent.model);
     if (agent.thinking) args.push("--thinking", agent.thinking);
-    if (tools) args.push("--tools", tools.join(","));
+    if (tools) args.push(...(tools.length ? ["--tools", tools.join(",")] : ["--no-tools"]));
     if (options.packageRoot) args.push("--extension", options.packageRoot);
 
+    let installation: ReturnType<typeof acquireInstallationUse> | undefined;
+    let releaseChildInstallation: (() => void) | undefined;
     let promptDir: string | undefined;
     let lease: ReturnType<typeof claimExecution> | undefined;
     try {
+      if(options.packageRoot) {
+        installation=acquireInstallationUse(dirname(dirname(options.packageRoot)));
+        verifyInstalledPiRole(options.packageRoot,agent);
+      }
       promptDir = mkdtempSync(join(tmpdir(), "deck-pi-subagent-"));
       if (agent.body.trim()) {
         const promptFile = join(promptDir, `prompt-${agent.id.replace(/[^\w.-]+/g, "_")}.md`);
@@ -172,6 +197,11 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
       const containmentNonce = needsContainment ? randomUUID() : undefined;
       const clarificationNonce = request.sessionFile && request.parentId && request.taskId ? randomUUID() : undefined;
       const clarificationIdentity = { version: 1, nonce: clarificationNonce, parentId: request.parentId, taskId: request.taskId, sessionFile: request.sessionFile, attempt: request.attempt ?? 1 };
+      let expectedNativeId: string | undefined;
+      if (generation && clarificationNonce) {
+        try { expectedNativeId = readChildInvocationId(request.sessionFile!, request.parentId!, request.taskId!, request.cwd); }
+        catch { /* Existing jobs stay functional; an unverified header grants no invocation binding. */ }
+      }
       let contained = !needsContainment;
       if (request.sessionFile) lease = claimExecution(request.sessionFile, request.parentId, request.taskId, needsContainment);
 
@@ -190,7 +220,7 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
             // across Node and Bun; retain the nonce/PID-bound startup proof.
             stdio: ["ignore", "pipe", "pipe", "ipc"],
             serialization: "json",
-            env: { ...childEnv(options.env ?? process.env, agent.role, options.memory?.()), DECK_PI_SUPERVISOR_NONCE: supervisorNonce, DECK_PI_CONTAINMENT: containmentNonce ?? "", DECK_PI_CLARIFICATION_NONCE: clarificationNonce ?? "", DECK_PI_CHILD_SESSION: request.sessionFile ?? "", DECK_PI_ATTEMPT: String(request.attempt ?? 1), ...(request.parentId ? { DECK_PI_PARENT_SESSION: request.parentId } : {}), ...(request.taskId ? { DECK_PI_TASK_ID: request.taskId } : {}) },
+            env: { ...childEnv(options.env ?? process.env, agent.role, options.memory?.()), DECK_PI_SUPERVISOR_NONCE: supervisorNonce, DECK_PI_INSTALLATION_GATE: installation ? "1" : "0", DECK_PI_CONTAINMENT: containmentNonce ?? "", DECK_PI_CLARIFICATION_NONCE: clarificationNonce ?? "", DECK_PI_CHILD_SESSION: request.sessionFile ?? "", DECK_PI_ATTEMPT: String(request.attempt ?? 1), ...(request.parentId ? { DECK_PI_PARENT_SESSION: request.parentId } : {}), ...(request.taskId ? { DECK_PI_TASK_ID: request.taskId } : {}) },
           });
         } catch (error) {
           state.spawnError = true;
@@ -199,13 +229,24 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
           return;
         }
 
-        try { if (proc.pid) lease?.spawned(proc.pid); }
+        try {
+          if (proc.pid) lease?.spawned(proc.pid);
+          if (installation) {
+            if(!supervised || !proc.pid)throw new Error("Pi installation protection unavailable");
+            releaseChildInstallation=installation.trackProcess(proc.pid);
+            proc.send({type:"deck_installation_ready",nonce:supervisorNonce});
+          }
+        }
         catch (e) {
           // Claim metadata could not be committed. Stop only the just-spawned owned group.
           try { if (proc.pid && process.platform !== "win32") process.kill(-proc.pid, "SIGKILL"); else proc.kill("SIGKILL"); } catch {}
           state.errorMessage = String(e);
         }
         let transportClosed = false;
+        let verified: VerifiedPiInvocation | undefined;
+        let repairActive: { id: string; cancelled: boolean } | undefined;
+        let invocationBound = false;
+        let invocationRevoked = false;
         let sent = 0;
         const pending = new Map<string, { resolve: (value: { delivery: "accepted"; clarificationId: string }) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
         const closeTransport = () => {
@@ -234,7 +275,13 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
         proc.on("message", (value: unknown) => {
           if (!value || typeof value !== "object") return;
           const control = value as Record<string, unknown>;
+          if (supervised && control.type === "deck_worker_disconnect" && control.nonce === supervisorNonce) {
+            invocationRevoked = true;
+            closeTransport();
+            return;
+          }
           if (supervised && control.type === "deck_child_exit" && control.nonce === supervisorNonce) {
+            invocationRevoked = true;
             terminal = { code: typeof control.code === "number" ? control.code : null, signal: control.signal as NodeJS.Signals | undefined, error: typeof control.error === "string" ? control.error : undefined };
             // Hand terminal cleanup to the still-live anchor. Never kill a reaped numeric PGID.
             ownsLiveGroup = false;
@@ -242,7 +289,32 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
             return;
           }
           if (clarificationNonce && !transportClosed && Object.entries(clarificationIdentity).every(([key, v]) => control[key] === v)) {
-            if (control.type === "clarification_ready") request.onClarifyReady?.(deliver);
+            if (control.type === "invocation_closed") { invocationRevoked = true; closeTransport(); return; }
+            if (control.type === "clarification_ready") {
+              if (invocationBound && control.nativeSessionId !== expectedNativeId) invocationRevoked = true;
+              request.onClarifyReady?.(deliver);
+              if (!invocationBound && generation && options.packageRoot && expectedNativeId && control.nativeSessionId === expectedNativeId) {
+                invocationBound = true;
+                const current = () => {
+                  if (transportClosed || !proc.connected || proc.exitCode !== null || proc.signalCode !== null || request.signal?.aborted) invocationRevoked = true;
+                  try { if (verifiedPiGeneration(options.packageRoot!, agent) !== generation || readChildInvocationId(request.sessionFile!, request.parentId!, request.taskId!, request.cwd) !== expectedNativeId) invocationRevoked = true; }
+                  catch { invocationRevoked = true; }
+                  return contained && !invocationRevoked;
+                };
+                { verified = Object.freeze({ roleId: agent.id, generation, nativeSessionId: control.nativeSessionId,
+                  launchId: supervisorNonce, parentId: request.parentId!, taskId: request.taskId!, attempt: request.attempt ?? 1, current }); if (current()) options.onVerifiedInvocation?.(verified); }
+              }
+            }
+            if (control.type === "preparation_cancel" && repairActive?.id === control.id && repairActive) repairActive.cancelled = true;
+            if (control.type === "preparation_request" && typeof control.id === "string" && /^[0-9a-f-]{36}$/.test(control.id)) {
+              const reply = (result: unknown, error?: string) => { if (proc.connected && !transportClosed) proc.send({ ...clarificationIdentity, type: "preparation_result", id: control.id, result, error }, () => {}); };
+              if (repairActive || !verified?.current() || verified.roleId !== "deck-setup" || !options.repair) reply(undefined, "preparation-authority-revoked");
+              else {
+                const active = { id: control.id, cancelled: false }; repairActive = active;
+                const binding = verified;
+                Promise.resolve().then(() => options.repair!({ ...binding, current: () => !active.cancelled && binding.current() }, control.request)).then(result => reply(result), () => reply(undefined, "preparation-rejected")).finally(() => { repairActive = undefined; });
+              }
+            }
             if (control.type === "clarification_ack" && typeof control.id === "string" && ["accepted", "rejected"].includes(String(control.delivery))) {
               const p = pending.get(control.id);
               if (p) { clearTimeout(p.timer); pending.delete(control.id);
@@ -257,6 +329,7 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
           try {
             if (!supervised || message.version !== 1 || message.nonce !== containmentNonce || message.pid !== proc.pid) return;
             lease?.contained(); contained = true;
+            if (verified?.current()) options.onVerifiedInvocation?.(verified);
           } catch { /* Missing/invalid startup proof keeps the lease fenced. */ }
         });
         let buffer = "";
@@ -379,6 +452,8 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
     } catch (error) {
       return failure(agent, task, error instanceof Error ? error.message : String(error));
     } finally {
+      releaseChildInstallation?.();
+      installation?.release();
       try { lease?.release(); } catch { /* Keep uncertain ownership locked; never blindly reclaim. */ }
       if (promptDir) {
         try { rmSync(promptDir, { recursive: true, force: true }); } catch { /* best effort */ }

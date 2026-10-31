@@ -146,12 +146,44 @@ describe("staged verification scheduler", () => {
   });
 });
 
-describe("TDD and generated source discipline", () => {
+describe("Verification doctrine and generated source discipline", () => {
   const completed = () => transitionStagedVerificationV1(passAffected(), {
     stage: "broad",
     status: "passed",
     evidence: [evidence("broad-check")],
   }, policy()).state;
+
+  test("accepts a trustworthy baseline for other behavior changes", () => {
+    expect(validateVerificationDisciplineV1(completed(), {
+      behaviorChanged: true,
+      changeKind: "other",
+      baselineEvidence: evidence("baseline"),
+      generatedOutputsChanged: [], canonicalSourcesChanged: [], directGeneratedEdit: false,
+    }).code).toBe("accepted");
+  });
+
+  test("requires red-first for reproducible bugs and specified logic", () => {
+    for (const changeKind of ["reproducible_bug_fix", "specified_logic"] as const) {
+      expect(validateVerificationDisciplineV1(completed(), {
+        behaviorChanged: true, changeKind, baselineEvidence: evidence("baseline"),
+        generatedOutputsChanged: [], canonicalSourcesChanged: [], directGeneratedEdit: false,
+      }).code).toBe("verification-evidence-required");
+    }
+  });
+
+  test("rejects a failed baseline for other behavior changes", () => {
+    expect(validateVerificationDisciplineV1(completed(), {
+      behaviorChanged: true, changeKind: "other", baselineEvidence: { ...evidence("baseline"), resultCode: "failed" },
+      generatedOutputsChanged: [], canonicalSourcesChanged: [], directGeneratedEdit: false,
+    }).code).toBe("verification-evidence-required");
+  });
+
+  test("rejects other behavior changes without baseline evidence", () => {
+    expect(validateVerificationDisciplineV1(completed(), {
+      behaviorChanged: true, changeKind: "other",
+      generatedOutputsChanged: [], canonicalSourcesChanged: [], directGeneratedEdit: false,
+    }).code).toBe("verification-evidence-required");
+  });
 
   test("requires prior failing-test and deterministic canonical regeneration evidence", () => {
     const rejected = validateVerificationDisciplineV1(completed(), {
@@ -172,7 +204,7 @@ describe("TDD and generated source discipline", () => {
     ]);
   });
 
-  test("accepts complete TDD and canonical generation evidence", () => {
+  test("accepts complete red-first and canonical generation evidence", () => {
     const digest = sha("deterministic");
     expect(validateVerificationDisciplineV1(completed(), {
       behaviorChanged: true,

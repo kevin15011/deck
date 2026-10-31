@@ -19,7 +19,6 @@ export class PushAttentionStore {
     private metadataDirty = false;
     private ioHealthy = true;
     private closed = false;
-    private legacy?: any;
     private missingIndex = false;
     private indexId?: string;
     private expectedIndexId?: string;
@@ -37,27 +36,20 @@ export class PushAttentionStore {
         this.indexFile = join(dir, 'push-attention.sqlite');
         this.openIndex();
         if (!existsSync(this.file)) return;
-        let legacy: any;
         try {
             assertPrivateFile(this.file);
             if (statSync(this.file).size > 16 * 1024 * 1024) throw Error();
             const s = JSON.parse(readFileSync(this.file, 'utf8'));
-            if (![1, 2].includes(s.v) || !Array.isArray(s.devices) || s.devices.length > 128) throw Error();
+            if (s.v !== 2 || !Array.isArray(s.devices) || s.devices.length > 128) throw Error();
             for (const [key, d] of s.devices) {
                 const ids = JSON.parse(key);
                 if (!Array.isArray(ids) || ids.length !== 2 || !ids.every(x => typeof x === 'string') || !integer(d.since) || !Array.isArray(d.viewed) || d.viewed.length > 64) throw Error();
                 for (const [id, seq] of d.viewed) if (typeof id !== 'string' || id.length > 64 || !integer(seq)) throw Error();
-                if (s.v === 1) {
-                    if (!Array.isArray(d.delivered) || d.delivered.length > 512) throw Error();
-                    for (const [id, r] of d.delivered)
-                        if (typeof id !== 'string' || id.length > 1024 || !integer(r.revision) || !integer(r.seq) || !integer(r.at) || (r.expires !== undefined && !integer(r.expires)) || !['sent', 'suppressed', 'failed'].includes(r.outcome)) throw Error();
-                } else if (typeof d.epoch !== 'string' || !/^[a-f0-9-]{32,64}$/.test(d.epoch)) throw Error();
-                // Stable migration identity makes interrupted migration replay idempotent.
-                const epoch = s.v === 2 ? d.epoch : createHash('sha256').update(JSON.stringify([key, d.since])).digest('hex');
+                if (typeof d.epoch !== 'string' || !/^[a-f0-9-]{32,64}$/.test(d.epoch)) throw Error();
+                const epoch = d.epoch;
                 this.devices.set(key, { since: d.since, epoch, viewed: new Map(d.viewed) });
             }
-            if (s.v === 1) legacy = s;
-            else {
+            {
                 if(typeof s.indexId!=='string' || !/^[a-f0-9-]{36}$/.test(s.indexId))throw Error();
                 this.expectedIndexId=s.indexId;
                 if(this.indexId && this.indexId!==s.indexId){this.missingIndex=true;this.fail('read');}
@@ -66,20 +58,6 @@ export class PushAttentionStore {
             // Corrupt metadata establishes fresh floors via sync; index I/O failure never does.
             this.devices.clear(); this.saveMetadata();
         }
-        if (legacy) {
-            this.legacy=legacy;
-            try { this.migrate(); } catch { this.fail('write'); }
-        }
-    }
-    private migrate() {
-        if(!this.legacy)return;
-        if(!this.db)throw Error();
-        this.db.transaction(()=>{
-            for(const [key,d] of this.legacy.devices)if(this.devices.has(key))for(const [id,r] of d.delivered)
-                this.put(this.auth(key),id,{...r,expires:r.expires??r.at+86400000+1});
-        })();
-        this.legacy=undefined;
-        this.saveMetadata();
     }
     private fail(kind: 'read' | 'write') {
         if (kind === 'read') this.readFailures = Math.min(Number.MAX_SAFE_INTEGER, this.readFailures + 1);
@@ -131,7 +109,6 @@ export class PushAttentionStore {
             if (!this.db) this.openIndex();
             if (!this.db) return false;
             if(this.expectedIndexId && this.indexId!==this.expectedIndexId){this.missingIndex=true;this.fail('read');return false;}
-            this.migrate();
             if(!this.ioHealthy)this.db.query('SELECT 1').get();
             for (const v of this.cache.values()) if (v.dirty) { this.put(v.auth, v.id, v.receipt!); v.dirty = false; }
             if (this.metadataDirty && !this.saveMetadata()) return false;
@@ -192,7 +169,7 @@ export class PushAttentionStore {
         }
     }
     private saveMetadata(): boolean {
-        if(this.legacy || this.missingIndex || !this.indexId){this.metadataDirty=true;return false;}
+        if(this.missingIndex || !this.indexId){this.metadataDirty=true;return false;}
         try {
             writePrivateFile(this.file, JSON.stringify({ v: 2, indexId:this.indexId, devices: [...this.devices].map(([key, d]) => [key, { since: d.since, epoch: d.epoch, viewed: [...d.viewed] }]) }));
             this.metadataDirty = false; return true;

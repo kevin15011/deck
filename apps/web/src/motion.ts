@@ -83,23 +83,4 @@ export function useFlip<T extends HTMLElement>(ref: RefObject<T | null>, key: un
     });
 }
 
-/** Delegated press/hover feedback for every button and link-like control in the document. */
-export function installInteractionMotion(root: Document = document): () => void {
-    if (!isBrowser) return () => {};
-    const interactive = (event: Event): HTMLElement | undefined => {
-        const target = event.target instanceof Element ? event.target.closest<HTMLElement>('button, [role="tab"], [role="menuitem"], summary, label.file-picker, a[href]') : null;
-        return target && !target.hasAttribute('disabled') && target.getAttribute('aria-disabled') !== 'true' && !target.closest('[data-no-motion]') ? target : undefined;
-    };
-    const press = (event: PointerEvent) => { const node = interactive(event); if (node && !reducedMotion()) gsap.to(node, { scale: 0.95, duration: duration.instant, ease: ease.out, overwrite: 'auto' }); };
-    const release = (event: Event) => { const node = interactive(event); if (node) gsap.to(node, { scale: 1, duration: duration.base, ease: 'elastic.out(1, 0.55)', overwrite: 'auto', clearProps: 'transform' }); };
-    const enter = (event: PointerEvent) => { if (event.pointerType === 'touch') return; const node = interactive(event); if (node && !reducedMotion() && !node.matches(':active')) gsap.to(node, { y: -1, duration: duration.fast, ease: ease.out, overwrite: 'auto' }); };
-    const leave = (event: PointerEvent) => { const node = interactive(event); if (node) gsap.to(node, { y: 0, scale: 1, duration: duration.fast, ease: ease.out, overwrite: 'auto', clearProps: 'transform' }); };
-    root.addEventListener('pointerdown', press, true); root.addEventListener('pointerup', release, true); root.addEventListener('pointercancel', release, true);
-    root.addEventListener('pointerover', enter, true); root.addEventListener('pointerout', leave, true);
-    return () => {
-        root.removeEventListener('pointerdown', press, true); root.removeEventListener('pointerup', release, true); root.removeEventListener('pointercancel', release, true);
-        root.removeEventListener('pointerover', enter, true); root.removeEventListener('pointerout', leave, true);
-    };
-}
-
 export { gsap, Flip };

@@ -126,8 +126,11 @@ export class ProcessingGate {
         return entry.task;
     }
     refresh() {
-        const writes = this.t.events.map((e, i) => ({ e, i })).filter(({ e }) => e.endpoint === '/v3/documents');
-        for (const { e, i } of writes) {
+        // Recheck mutable receipts on every refresh, without allocating a copy of
+        // the full event log (most events are reads).
+        for (let i = 0, length = this.t.events.length; i < length; i++) {
+            const e = this.t.events[i]!;
+            if (e.endpoint !== '/v3/documents') continue;
             if (e.completed === false && e.acceptedAtMs === undefined) continue; // In-flight writes are not lost acknowledgements.
             if (!safeDocumentId(e.documentId) || !e.contentHash || e.writeStartedAtMs === undefined || e.acceptedAtMs === undefined || e.status === undefined || e.status < 200 || e.status >= 300 || e.error) {
                 if (!this.errors.some(x => x.attempt === i)) this.errors.push({ attempt: i, reason: 'write_or_revision_unresolvable' });
@@ -145,14 +148,21 @@ export class ProcessingGate {
             d.status = 'timed_out'; d.reason = 'processing_deadline'; d.monitoringEndedAtMs = this.clock.now();
         }
     }
-    private unhealthy() { return this.errors.length > 0 || this.t.aborted || [...this.documents.values()].some(d => !['pending', 'done'].includes(d.status)); }
+    hasInvalidProcessing() {
+        if (this.errors.length) return true;
+        for (const d of this.documents.values()) if (d.status !== 'pending' && d.status !== 'done') return true;
+        return false;
+    }
+    private unhealthy() { return this.t.aborted || this.hasInvalidProcessing(); }
     /** Explicit sampling is retained for isolated/offline clocks. With background
-     * monitoring active, this only notifies the same scheduler, never creates a second consumer. */
-    async sample(_afterAttempt = -1, horizon = Infinity, runDeadlineAtMs = Infinity) {
-        if (this.background) { this.notify(); return this.snapshot(); }
+     * monitoring active, this only notifies the same scheduler, never creates a second consumer. Pass report=false when only progress is needed. */
+    async sample(_afterAttempt?: number, horizon?: number, runDeadlineAtMs?: number): Promise<ReturnType<ProcessingGate['snapshot']>>;
+    async sample(_afterAttempt: number, horizon: number, runDeadlineAtMs: number, report: false): Promise<void>;
+    async sample(_afterAttempt = -1, horizon = Infinity, runDeadlineAtMs = Infinity, report = true): Promise<ReturnType<ProcessingGate['snapshot']> | void> {
+        if (this.background) { this.notify(); return report ? this.snapshot() : undefined; }
         this.refresh();
         this.expire(runDeadlineAtMs);
-        if (this.unhealthy()) return this.snapshot();
+        if (this.unhealthy()) return report ? this.snapshot() : undefined;
         const due = [...this.documents.values()].filter(d => d.status === 'pending' && d.nextPollAtMs <= this.clock.now()).sort((a, b) => a.nextPollAtMs - b.nextPollAtMs || a.latestAttempt - b.latestAttempt);
         // Cooperative callers share the same in-flight slots and immutable lifetime.
         for (let at = 0; at < due.length; at += this.plan.statusConcurrency) {
@@ -160,7 +170,7 @@ export class ProcessingGate {
             if (this.unhealthy() || this.clock.now() + this.plan.requestTimeoutMs > horizon) break;
             await Promise.all(due.slice(at, at + this.plan.statusConcurrency).map(d => this.launch(d, horizon, runDeadlineAtMs)));
         }
-        return this.snapshot();
+        return report ? this.snapshot() : undefined;
     }
     private async poll(d: Document, horizon: number, runDeadlineAtMs: number, controller: AbortController) {
             if (d.status !== 'pending' || this.unhealthy() || this.clock.now() + this.plan.requestTimeoutMs > horizon) return;
@@ -216,8 +226,11 @@ export class ProcessingGate {
             }
     }
     /** Fill idle time with due polls, returning at the query horizon even if not ready.
-     * Status-only waves are bounded; transport waits include headers and body. */
-    async monitorUntil(targetAtMs: number, runDeadlineAtMs = Infinity, stopWhenReady = false) {
+     * Status-only waves are bounded; transport waits include headers and body.
+     * Suppressing a report skips only pure snapshot construction, not polling or expiry. */
+    async monitorUntil(targetAtMs: number, runDeadlineAtMs?: number, stopWhenReady?: boolean): Promise<ReturnType<ProcessingGate['snapshot']>>;
+    async monitorUntil(targetAtMs: number, runDeadlineAtMs: number, stopWhenReady: boolean, report: false): Promise<void>;
+    async monitorUntil(targetAtMs: number, runDeadlineAtMs = Infinity, stopWhenReady = false, report = true): Promise<ReturnType<ProcessingGate['snapshot']> | void> {
         const horizon = Math.min(targetAtMs, runDeadlineAtMs);
         if (this.background) {
             while (this.clock.now() < horizon) {
@@ -225,10 +238,10 @@ export class ProcessingGate {
                 if (this.unhealthy() || stopWhenReady && [...this.documents.values()].every(d => d.status === 'done')) break;
                 await this.clock.sleep(Math.min(250, horizon - this.clock.now()));
             }
-            this.expire(runDeadlineAtMs); return this.snapshot();
+            this.expire(runDeadlineAtMs); return report ? this.snapshot() : undefined;
         }
         while (this.clock.now() < horizon) {
-            await this.sample(-1, stopWhenReady ? Infinity : horizon, runDeadlineAtMs);
+            await this.sample(-1, stopWhenReady ? Infinity : horizon, runDeadlineAtMs, false);
             if (this.unhealthy()) break;
             const pending = [...this.documents.values()].filter(d => d.status === 'pending');
             if (stopWhenReady && !pending.length) break;
@@ -243,12 +256,12 @@ export class ProcessingGate {
             if (wake > now) await this.clock.sleep(wake - now);
         }
         this.expire(runDeadlineAtMs);
-        return this.snapshot();
+        return report ? this.snapshot() : undefined;
     }
     async waitForAll(runDeadlineAtMs = Infinity) {
         this.refresh(); this.gateStartedAtMs = this.clock.now();
         this.deadlineAtMs = Math.min(runDeadlineAtMs, Math.max(this.gateStartedAtMs, ...[...this.documents.values()].map(d => d.processingDeadlineAtMs)));
-        await this.monitorUntil(this.deadlineAtMs, runDeadlineAtMs, true);
+        await this.monitorUntil(this.deadlineAtMs, runDeadlineAtMs, true, false);
         this.expire(runDeadlineAtMs);
         for (const d of this.documents.values()) if (d.status === 'pending') { d.status = 'invalid'; d.reason = 'invalid_peer'; d.monitoringEndedAtMs = this.clock.now(); }
         return this.snapshot();

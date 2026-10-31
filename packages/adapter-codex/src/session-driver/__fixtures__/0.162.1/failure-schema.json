@@ -1,0 +1,220 @@
+{
+  "provenance": {
+    "command": "codex app-server generate-json-schema --out /tmp/p012-codex-schema",
+    "version": "codex-cli 0.162.1",
+    "capturedAt": "2026-10-22",
+    "schema": "v2/ErrorNotification.json",
+    "sha256": "63518d8faae38b8eb73518d59b113f77603d238dd0cf36260b4232f381f43f8c",
+    "note": "Selected original schema definitions; no runtime payloads or credentials."
+  },
+  "CodexErrorInfo": {
+    "anyOf": [
+      {
+        "enum": [
+          "contextWindowExceeded",
+          "sessionBudgetExceeded",
+          "usageLimitExceeded",
+          "rateLimitExceeded",
+          "flexUnavailable",
+          "serverOverloaded",
+          "cyberPolicy",
+          "misalignmentPolicyViolation",
+          "tooManyDenials",
+          "internalServerError",
+          "unauthorized",
+          "badRequest",
+          "threadRollbackFailed",
+          "sandboxError",
+          "other"
+        ],
+        "type": "string"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "httpConnectionFailed": {
+            "properties": {
+              "httpStatusCode": {
+                "format": "uint16",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "httpConnectionFailed"
+        ],
+        "title": "HttpConnectionFailedCodexErrorInfo",
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "description": "Failed to connect to the response SSE stream.",
+        "properties": {
+          "responseStreamConnectionFailed": {
+            "properties": {
+              "httpStatusCode": {
+                "format": "uint16",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "responseStreamConnectionFailed"
+        ],
+        "title": "ResponseStreamConnectionFailedCodexErrorInfo",
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "description": "The response SSE stream disconnected in the middle of a turn before completion.",
+        "properties": {
+          "responseStreamDisconnected": {
+            "properties": {
+              "httpStatusCode": {
+                "format": "uint16",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "responseStreamDisconnected"
+        ],
+        "title": "ResponseStreamDisconnectedCodexErrorInfo",
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "description": "Reached the retry limit for responses.",
+        "properties": {
+          "responseTooManyFailedAttempts": {
+            "properties": {
+              "httpStatusCode": {
+                "format": "uint16",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "responseTooManyFailedAttempts"
+        ],
+        "title": "ResponseTooManyFailedAttemptsCodexErrorInfo",
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "description": "Returned when `turn/start` or `turn/steer` is submitted while the current active turn cannot accept same-turn steering, for example `/review` or manual `/compact`.",
+        "properties": {
+          "activeTurnNotSteerable": {
+            "properties": {
+              "turnKind": {
+                "$ref": "#/definitions/NonSteerableTurnKind"
+              }
+            },
+            "required": [
+              "turnKind"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "activeTurnNotSteerable"
+        ],
+        "title": "ActiveTurnNotSteerableCodexErrorInfo",
+        "type": "object"
+      },
+      {
+        "type": [
+          "string",
+          "object"
+        ]
+      }
+    ],
+    "description": "This translation layer make sure that we expose codex error code in camel case.\n\nWhen an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant."
+  },
+  "TurnError": {
+    "properties": {
+      "additionalDetails": {
+        "default": null,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "codexErrorInfo": {
+        "anyOf": [
+          {
+            "$ref": "#/definitions/CodexErrorInfo"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "message": {
+        "type": "string"
+      },
+      "misalignment": {
+        "anyOf": [
+          {
+            "$ref": "#/definitions/MisalignmentErrorDetails"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Optional public explanation and continuation instruction for a misalignment block."
+      }
+    },
+    "required": [
+      "message"
+    ],
+    "type": "object"
+  },
+  "ErrorNotification": {
+    "properties": {
+      "error": {
+        "$ref": "#/definitions/TurnError"
+      },
+      "threadId": {
+        "type": "string"
+      },
+      "turnId": {
+        "type": "string"
+      },
+      "willRetry": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "error",
+      "threadId",
+      "turnId",
+      "willRetry"
+    ]
+  }
+}

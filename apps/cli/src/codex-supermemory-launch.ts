@@ -123,7 +123,7 @@ export function assertCodexSupermemoryReady(projectRoot: string, effects: CodexS
   const foreign = [
     [join(codexHome, "hooks.json"), "your Codex hooks.json"],
     [join(projectRoot, ".codex", "hooks.json"), "the project's Codex hooks"],
-    [join(projectRoot, ".codex", "config.toml"), "the project's Codex configuration (a previous per-project Deck install can cause this; remove it with --cleanup-legacy)"],
+    [join(projectRoot, ".codex", "config.toml"), "the project's Codex configuration"],
   ] as const;
   for (const [path, label] of foreign) {
     if (/supermemory/i.test(readBounded(path) ?? "")) throw new Error(`Codex Supermemory launch blocked: ${label} already register a Supermemory plugin or MCP server that would double-integrate with Deck's official plugin; preserve it and remove the conflict explicitly before retrying.`);

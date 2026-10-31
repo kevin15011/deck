@@ -1,5 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 type Api = (path: string, init?: RequestInit) => Promise<any>;
+// Shared with service-worker.js: this cache holds one opt-in boolean only.
+const PREFERENCES_CACHE = 'deck-notification-preferences';
+const preferencesURL = (origin: string) => new URL('/__deck_notification_preferences__', origin).href;
+export async function readApprovalNotificationPreference(store?: CacheStorage, origin?: string): Promise<boolean> {
+  try {
+    const cache = await (store ?? caches).open(PREFERENCES_CACHE);
+    return (await (await cache.match(preferencesURL(origin ?? location.origin)))?.json())?.approvalActions === true;
+  } catch { return false; }
+}
+export async function writeApprovalNotificationPreference(enabled: boolean, store?: CacheStorage, origin?: string): Promise<void> {
+  const cache = await (store ?? caches).open(PREFERENCES_CACHE);
+  await cache.put(preferencesURL(origin ?? location.origin), new Response(JSON.stringify({approvalActions: enabled}), {headers:{'Content-Type':'application/json'}}));
+}
 export function pushSetupHint(): string | undefined {
   const ios =
     /iPad|iPhone|iPod/.test(navigator.userAgent) ||
@@ -59,6 +72,18 @@ async function worker() {
   });
   return navigator.serviceWorker.ready;
 }
+/** Recheck after worker startup: navigation/blur may invalidate the original view. */
+export async function notifySessionViewed(
+  sessionId: string,
+  isViewing: () => boolean,
+  container: ServiceWorkerContainer = navigator.serviceWorker,
+) {
+  if (!sessionId || !isViewing()) return;
+  try {
+    const registration = await container.ready;
+    if (isViewing()) registration.active?.postMessage({type:'deck.session-viewed', sessionId});
+  } catch { /* Local notification cleanup never blocks presence or chat. */ }
+}
 /** Each tab owns its own lease; a background tab can never clear another tab's presence. */
 export function usePushPresence(
   api: Api,
@@ -74,8 +99,11 @@ export function usePushPresence(
   sequence.current = seenSeq;
   useEffect(() => {
     if (!enabled || pushSetupHint()) return;
+    let active = true;
+    const isViewing = () => active && conversationVisible && document.visibilityState === 'visible' && document.hasFocus();
     let ackTimer: ReturnType<typeof setTimeout> | undefined;
     const send = () => {
+      void notifySessionViewed(sessionId, isViewing);
       void api('/api/push/presence', {
         method: 'POST',
         keepalive: true,
@@ -124,6 +152,7 @@ export function usePushPresence(
     window.addEventListener('pageshow', send);
     window.addEventListener('online', send);
     return () => {
+      active = false;
       acknowledge.current = undefined;
       clearTimeout(ackTimer);
       window.removeEventListener('pageshow', send);
@@ -140,7 +169,7 @@ export function usePushPresence(
     acknowledge.current?.();
   }, [seenSeq]);
 }
-export function PushNotifications({ api }: { api: Api }) {
+export function usePushNotifications(api: Api) {
   const hint = pushSetupHint();
   const [enabled, setEnabled] = useState(false),
     [registered, setRegistered] = useState(false),
@@ -154,9 +183,11 @@ export function PushNotifications({ api }: { api: Api }) {
     [denied, setDenied] = useState(
       !hint && Notification.permission === 'denied',
     );
-  const details = useRef<HTMLDetailsElement>(null);
+  const [needsReconnect,setNeedsReconnect]=useState(false);
+  const [approvalActions,setApprovalActions]=useState(false);
   const refresh = async () => {
     if (hint) return;
+    setApprovalActions(await readApprovalNotificationPreference());
     try {
       const [status, registration] = await Promise.all([
         api('/api/push'),
@@ -164,6 +195,7 @@ export function PushNotifications({ api }: { api: Api }) {
       ]);
       setDelivery(status.delivery);
       const subscription = await registration.pushManager.getSubscription();
+      setNeedsReconnect((!!subscription && !status.enabled) || (status.enabled && (!subscription || Notification.permission !== 'granted')));
       if (status.enabled && Notification.permission !== 'granted')
         await api('/api/push', { method: 'DELETE' });
       setRegistered(status.enabled && Notification.permission === 'granted');
@@ -179,6 +211,7 @@ export function PushNotifications({ api }: { api: Api }) {
           : '',
       );
     } catch {
+      setNeedsReconnect(true);
       setMessage(
         'Notifications are unavailable. You can retry when Deck is connected.',
       );
@@ -224,6 +257,7 @@ export function PushNotifications({ api }: { api: Api }) {
       });
       setRegistered(true);
       setEnabled(true);
+      setNeedsReconnect(false);
       setMessage('Notifications are on for this browser.');
     } catch {
       await subscription?.unsubscribe().catch(() => {});
@@ -242,6 +276,7 @@ export function PushNotifications({ api }: { api: Api }) {
       await api('/api/push', { method: 'DELETE' });
       setRegistered(false);
       setEnabled(false);
+      setNeedsReconnect(false);
       const registration = await navigator.serviceWorker.getRegistration('/');
       await (await registration?.pushManager.getSubscription())?.unsubscribe();
       setMessage('Notifications are off for this browser.');
@@ -253,40 +288,37 @@ export function PushNotifications({ api }: { api: Api }) {
       setBusy(false);
     }
   }
-  return (
-    <details
-      className="push-control"
-      ref={details}
-      onToggle={() => {
-        if (details.current?.open) void refresh();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          details.current!.open = false;
-          details.current!.querySelector('summary')?.focus();
-        }
-      }}
-    >
-      <summary aria-label="Notifications" title="Notifications">
-        <svg
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-        >
-          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
-        </svg>
-        {enabled && <span className="push-enabled" />}
-      </summary>
-      <section className="push-settings" aria-label="Browser notifications">
-        <h2>Notifications</h2>
+  async function changeApprovalActions(value: boolean) {
+    setBusy(true);
+    const previous=approvalActions;
+    setApprovalActions(value);
+    try {
+      await writeApprovalNotificationPreference(value);
+      setApprovalActions(value);
+      setMessage(value ? 'Approval actions are on for this browser where supported.' : 'Approval actions are off for this browser.');
+    } catch {
+      setApprovalActions(previous);
+      setMessage('Could not save approval actions. Check browser storage settings and retry.');
+    }
+    finally { setBusy(false); }
+  }
+  return {hint,enabled,registered,busy,loading,message,delivery,denied,enable,disable,refresh,approvalActions,changeApprovalActions,attention:denied||needsReconnect};
+}
+export function NotificationsDialog({settings,onClose}:{settings:ReturnType<typeof usePushNotifications>;onClose:()=>void}) {
+  const {hint,enabled,registered,busy,loading,message,delivery,denied,enable,disable,refresh,approvalActions,changeApprovalActions}=settings;
+  const dialog=useRef<HTMLDialogElement>(null);
+  useLayoutEffect(()=>{const node=dialog.current!;node.showModal();return()=>node.close();},[]);
+  return <dialog ref={dialog} className="workspace-dialog notifications-dialog" aria-labelledby="notifications-title"
+    onCancel={event=>{event.preventDefault();event.stopPropagation();onClose();}}
+    onClick={event=>{if(event.target!==event.currentTarget)return;const b=event.currentTarget.getBoundingClientRect();if(event.clientX<b.left||event.clientX>b.right||event.clientY<b.top||event.clientY>b.bottom)onClose();}}>
+      <div className="dialog-heading"><h2 id="notifications-title">Notifications</h2><button type="button" className="quiet" aria-label="Close notifications" onClick={onClose}>✕</button></div>
+      <section className="notification-settings" aria-label="Browser notifications">
         <p>
           Get a private alert when the Lead is ready, a question or approval
           needs you, or work needs attention.
         </p>
         <p>
-          Message text, commands and errors stay in Deck. Alerts use your
+          Commands, paths, tool input and errors stay in Deck. Alerts use your
           browser’s push service, even when this tab is closed. Enabling keeps
           this browser signed in for 180 days.
         </p>
@@ -329,6 +361,11 @@ export function PushNotifications({ api }: { api: Api }) {
                 Allow notifications in this site’s browser settings, then retry.
               </p>
             )}
+            <label className="approval-checkbox notification-approval-setting">
+              <input type="checkbox" checked={approvalActions} disabled={busy || loading} aria-describedby="notification-approvals-help" onChange={event=>void changeApprovalActions(event.currentTarget.checked)}/>
+              <span>Answer approvals from notifications</span>
+            </label>
+            <p id="notification-approvals-help">Allow once and Deny for normal-risk requests on supported Chromium browsers. Tool names appear in these alerts. Other requests open Deck.</p>
           </>
         )}
         {message && <p role="status">{message}</p>}
@@ -345,8 +382,8 @@ export function PushNotifications({ api }: { api: Api }) {
           </div>
         )}
       </section>
-    </details>
-  );
+      <div className="dialog-actions"><button type="button" onClick={onClose}>Done</button></div>
+    </dialog>;
 }
 
 export function pushDeliveryText(

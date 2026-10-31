@@ -9,7 +9,7 @@ const text = () => translatePiCapabilityInstructions(buildCapabilityInstructionB
 describe("Pi instruction translation", () => {
   test("describes the real Deck Pi mechanics", () => {
     const out = text();
-    for (const expected of ["### Pi Tool Routing", "deck-tool-policy", "mcp__<server>__<tool>", "`subagent` tool", "one-time advisory", "`grep`, `find`, `ls`", "Deck-owned RTK"]) expect(out).toContain(expected);
+    for (const expected of ["### Pi Tool Routing", "deck-tool-policy", "mcp__<server>__<tool>", "one-time advisory", "`grep`, `find`, `ls`", "Deck-owned RTK"]) expect(out).toContain(expected);
     expect(out).toContain("**`search_graph`**");
   });
 

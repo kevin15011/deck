@@ -1,0 +1,24 @@
+{
+  "source": "openspec/changes/session-skill-availability",
+  "destination": "openspec/archive/2026-10-28-session-skill-availability",
+  "original_sha256": {
+    "lead-handoff.md": "c63ea723b2447e4da23b782e122235251c353005cb3a4a95eff5c7df0ea4fdfa",
+    "implementation-route.md": "83cc8239b2058889dfd0a92d4e4f8ffb2a0d31debd1b575954bacef421a5df49",
+    "tasks.md": "8721926e0dd1da2b4e7b59b5a2d7a70e86ccca4f9a7b04e0165ff8ecab54d97b",
+    "design.md": "080a509599955a6d0242438e315ef32d8cb45fb3e1cbb7abe5d1c7fb82d5806e",
+    "proposal.md": "8205a92a550979ab100852057eba5242f706cace5360f9074791749782eb6ef5",
+    "apply-progress.md": "69e169b186e1989158f62e841ab14fcf012d4fca3ce24124d83bea01c04c8a96",
+    "spec.md": "99bbc4d1dd031e7e8d4d5ce59d1cc8115f09d5f52b0a8e350c7a3e5c32f1b12e",
+    "legacy-inventory.md": "c638927ff59102d10cbefe6e41d3b2ff08abf976471a4aa0d58e60dc2056fadf",
+    "working-brief.md": "92ae0e6f138a12b355322dea0ac2427d91196dc310de3cc2d68ea739c3cd1c3b",
+    "handoff-evidence/pq-review-attempt-9.md": "930be4e568b2f0bb4093ff2ab0c6c233be203f4a3751ce5de7d9d1eec64f108f",
+    "handoff-evidence/pq6-correction.md": "90b6fb90f2ecbe637614f32461da6ad2e612bc4b2d0e2daa449dc4c825d669bd",
+    "handoff-evidence/partial-parity-coverage.md": "b2add4a296ddd8a8fd7a6557b73594b9af9242e92cfefe612c8cf01eb7d90a41",
+    "handoff-evidence/codebase-availability-route.md": "ac266c3bb8444f7b7048f27400cf3420853dd381182eed48be142e2030eb538d",
+    "handoff-evidence/claude-generation-verification-fix.md": "22c3595eee4d41fba2e36036f0a0abff8cd5c301f5f1c12fa292f44d22401ae6"
+  },
+  "modified_original_files": [
+    "tasks.md"
+  ],
+  "note": "Original historical files other than tasks.md preserved byte-for-byte; new archive artifacts recorded separately."
+}

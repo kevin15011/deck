@@ -325,7 +325,7 @@ describe("mergeAndWrite", () => {
       cleanup(dir);
     }
   });
-  test("removes stale context-mode plugin when mcp.context-mode is present (MCP wins)", () => {
+  test("preserves an unproven legacy plugin beside its MCP entry", () => {
     const existing: OpenCodeConfig = {
       plugin: ["context-mode", "other-plugin"],
       mcp: {
@@ -334,9 +334,9 @@ describe("mergeAndWrite", () => {
       },
     };
     const merged = mergeConfig(existing, {}, []);
-    // MCP is authoritative - plugin entry should be removed
+    // Names/templates cannot authorize deleting a shared plugin entry.
     expect(merged.plugin).toBeDefined();
-    expect(merged.plugin).not.toContain("context-mode");
+    expect(merged.plugin).toContain("context-mode");
     expect(merged.plugin).toContain("other-plugin");
     // MCP entries preserved
     expect(merged.mcp).toBeDefined();

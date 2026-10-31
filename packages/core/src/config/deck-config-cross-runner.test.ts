@@ -41,6 +41,7 @@ describe("crossRunner config (XR-2.1, XR-2.2, D-5)", () => {
       approvals: { claude: "runner-default", opencode: "runner-default", codex: "runner-default" },
       maxConcurrentTasks: 4,
       executionBudget: { lead: 2, delegated: 4 },
+      continuity: {mode:"policy",autoNativeMaxAgeMs:300000,autoNativeMaxInputTokens:80000,nativeHardCapInputTokens:160000,handoffMaxBytes:32768},
       web: { port: 7421, trustedProxy: null, allowedOrigins: [], allowFunnel: false, tailscaleServeAccess: false },
       claudeTosAcknowledgedAt: null,
     });
@@ -77,24 +78,11 @@ describe("crossRunner config (XR-2.1, XR-2.2, D-5)", () => {
     expect(c.crossRunner?.members).toEqual({});
   });
 
-  test("legacy string member normalizes to qualified shape using defaultRunner or claude", () => {
-    const a = validateDeckConfig({ version: 1, crossRunner: { enabled: true, members: { lead: "sonnet" } } });
-    expect(a.crossRunner?.members.lead).toEqual({ runnerId: "claude", modelId: "sonnet" });
-    const b = validateDeckConfig({ version: 1, crossRunner: { defaultRunner: "codex", members: { lead: "gpt-x" } } });
-    expect(b.crossRunner?.members.lead).toEqual({ runnerId: "codex", modelId: "gpt-x" });
-    expect(b.crossRunner?.defaultRunner).toBe("codex");
-  });
-
-  test("legacy shape emits CROSS_ASSIGNMENT_LEGACY_SHAPE warning", () => {
-    const d = diagnoseDeckConfigDeprecations({ version: 1, crossRunner: { members: { lead: "sonnet", dev: { runnerId: "codex", modelId: "x" } } } });
-    expect(d).toEqual([expect.objectContaining({ code: "CROSS_ASSIGNMENT_LEGACY_SHAPE", severity: "warning", fieldPath: "crossRunner.members.lead" })]);
-  });
-
   test("write persists the qualified shape (round-trip)", () => {
     const root = mkdtempSync(join(tmpdir(), "deck-cross-cfg-"));
     roots.push(root);
     const path = join(root, "config.json");
-    writeDeckConfigFileAtomic(path, { version: 1, crossRunner: { enabled: true, members: { lead: "sonnet" } } });
+    writeDeckConfigFileAtomic(path, { version: 1, crossRunner: { enabled: true, members: { lead: { runnerId: "claude", modelId: "sonnet" } } } });
     const raw = JSON.parse(readFileSync(path, "utf-8"));
     expect(raw.crossRunner.members.lead).toEqual({ runnerId: "claude", modelId: "sonnet" });
     expect(diagnoseDeckConfigDeprecations(raw)).toEqual([]);

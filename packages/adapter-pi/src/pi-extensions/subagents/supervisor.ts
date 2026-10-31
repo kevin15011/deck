@@ -22,6 +22,11 @@ const finish = (code, signal, error) => {
   // Parent must relinquish signal ownership before allowing anchor cleanup.
   // A dead parent closes IPC and triggers endGroup; never exit/reap this anchor early.
 };
+if (process.env.DECK_PI_INSTALLATION_GATE === "1") {
+  await new Promise(resolve => process.on("message", message => {
+    if(message?.type === "deck_installation_ready" && message.nonce === nonce) resolve();
+  }));
+}
 try {
   const env = { ...process.env, DECK_PI_GROUP_PID: String(process.pid) };
   delete env.DECK_PI_SUPERVISOR_NONCE;
@@ -35,12 +40,15 @@ try {
   worker.stderr.pipe(process.stderr, { end: false });
   worker.on("message", message => {
     if (!process.connected) return;
-    if (message?.type === "deck_child_exit" || message?.type === "deck_cleanup") return;
+    if (message?.type === "deck_child_exit" || message?.type === "deck_cleanup" || message?.type === "deck_worker_disconnect") return;
     if (message?.version === 1 && message.nonce === process.env.DECK_PI_CONTAINMENT) {
       if (message.pid !== worker.pid) return;
       message = { ...message, pid: process.pid };
     }
     process.send(message, () => {});
+  });
+  worker.once("disconnect", () => {
+    if (process.connected) process.send({ type: "deck_worker_disconnect", nonce }, () => {});
   });
   worker.once("exit", async (code, signal) => {
     // Exit is not EOF: descendants can still own pipes. Never promote partial output to success.

@@ -77,11 +77,11 @@ describe("configured capability composition", () => {
 
     for (const planned of plan.filter(({ agent }) => agent.id !== "deck-lead")) {
       expect(planned.content, planned.agent.id).toContain("Codebase Memory");
-      expect(planned.content, planned.agent.id).toContain("Context Mode Package");
+      expect(planned.content, planned.agent.id).not.toMatch(/context.mode/i);
     }
   });
 
-  test("Serena agent-surface instructions reach both Apply roles", () => {
+  test("retired Serena instructions reach no Apply role", () => {
     const plan = buildPromptGenerationPlan({
       configDir: "/tmp/.config/opencode",
       projectRoot: "/tmp/project",
@@ -89,7 +89,7 @@ describe("configured capability composition", () => {
     });
 
     for (const id of ["deck-apply-fast", "deck-apply-deep"]) {
-      expect(plan.find(({ agent }) => agent.id === id)!.content).toContain("Serena");
+      expect(plan.find(({ agent }) => agent.id === id)!.content).not.toContain("Serena");
     }
     expect(plan.find(({ agent }) => agent.id === "deck-quality")!.content).not.toContain("Serena Package");
   });

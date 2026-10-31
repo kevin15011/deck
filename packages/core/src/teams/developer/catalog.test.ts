@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  DEVELOPER_TEAM_LEGACY_AGENT_IDS,
   getDeveloperTeamCatalog,
-  resolveLegacyDeveloperTeamAgentId,
 } from "./catalog";
 
 describe("Developer Team catalog (canonical)", () => {
@@ -53,16 +51,5 @@ describe("Developer Team catalog (canonical)", () => {
       expect(agent.description).toBeTruthy();
       expect(agent.skillId).toBe(agent.id);
     }
-  });
-
-  test("interprets legacy IDs without adding them to the desired inventory", () => {
-    expect(resolveLegacyDeveloperTeamAgentId("deck-developer-orchestrator")).toBe("deck-lead");
-    expect(resolveLegacyDeveloperTeamAgentId("deck-developer-design")).toBe("deck-architect");
-    expect(resolveLegacyDeveloperTeamAgentId("deck-developer-apply-backend")).toBe("deck-apply-deep");
-    expect(resolveLegacyDeveloperTeamAgentId("deck-init")).toBe("deck-setup");
-    expect(resolveLegacyDeveloperTeamAgentId("unknown")).toBeUndefined();
-
-    const desired = new Set(getDeveloperTeamCatalog().map((agent) => agent.id));
-    expect(DEVELOPER_TEAM_LEGACY_AGENT_IDS.every((id) => !desired.has(id))).toBe(true);
   });
 });

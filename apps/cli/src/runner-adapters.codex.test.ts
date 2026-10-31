@@ -39,7 +39,7 @@ describe("default AdapterRegistry", () => {
   });
 });
 
-test("Codex composition probes the current executable in a canary-only environment", async () => {
+test("Codex composition keeps retired Serena inert in a canary-only environment", async () => {
   const root = await mkdtemp(join(tmpdir(), "deck-codex-active-proxy-"));
   const executable = join(root, "deck-canary");
   const output = join(root, "args.json");
@@ -61,8 +61,9 @@ test("Codex composition probes the current executable in a canary-only environme
     await mkdir(join(root, ".codex"));
     await writeFile(join(root, ".codex", "config.toml"), `[mcp_servers.serena]\ncommand = ${JSON.stringify(executable)}\nargs = ["/project with spaces/main.tsx", "internal", "serena-mcp"]\nenv_vars = ["HOME", "PATH", "XDG_DATA_HOME"]\n`);
     const inventory = await registry.get("codex").getCapabilityInventory({ projectRoot: root, environmentId: "codex-development", runnerId: "codex", deckConfig: (await import("@deck/core")).getDefaultDeckConfig() });
-    expect((await readFile(output, "utf8")).trim().split("\n")).toEqual(["/project with spaces/main.tsx", "internal", "serena-mcp", "--probe"]);
-    expect(inventory.capabilities.find(item => item.capabilityId === "serena")?.diagnostics).toContain("serena: MCP ready");
+    expect(existsSync(output)).toBe(false);
+    expect(await readFile(join(root, ".codex", "config.toml"), "utf8")).toContain("mcp_servers.serena");
+    expect(inventory.capabilities.find(item => item.capabilityId === "serena")).toBeUndefined();
   } finally {
     process.execPath = previous;
     process.argv[1] = previousArg;

@@ -1,3 +1,4 @@
+import { assertNoContributionSymlink, contributionId, type RunnerContribution, type ContributionTarget } from "@deck/core";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, posix, sep } from "node:path";
 
@@ -39,6 +40,7 @@ export function createNodePiFileIO(): PiFileIO {
     exists: (path) => existsSync(path),
     readText: (path) => {
       try {
+        assertNoContributionSymlink(path);
         return readFileSync(path, "utf-8");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
@@ -196,8 +198,8 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
   };
   const conflict = (entry: PiPlanConflict, code: string) => {
     plan.conflicts.push(entry);
-    plan.diagnostics.push({ code, severity: "error", message: entry.message });
-    plan.blocked = true;
+    plan.diagnostics.push({ code, severity: entry.reason === "invalid" ? "error" : "warning", message: entry.message });
+    if (entry.reason === "invalid") plan.blocked = true;
   };
   const addChange = (change: PiPlannedChange, write?: PlannedWrite, del?: PlannedDelete) => {
     plan.changes.push(change);
@@ -249,13 +251,21 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
       continue;
     }
     const diskHash = hashContent(disk);
-    if (diskHash === postimage) continue;
+    if (diskHash === postimage || file.relPath.endsWith(".json") && fileOwnershipHash(file.relPath,disk) === fileOwnershipHash(file.relPath,file.content)) {
+      if (!matchesOwnedHash(file.relPath, manifest.files[file.relPath], disk) && !matchesOwnedHash(file.relPath, manifest.files[file.relPath], file.content)) {
+        delete nextFiles[file.relPath];
+        plan.diagnostics.push({code:"PI_FILE_UNRECEIPTED",severity:"warning",message:`Preserved unreceipted Pi file ${absolute}; it remains user-owned.`});
+      }
+      continue;
+    }
     const owned = manifest.files[file.relPath];
     if (owned === undefined) {
+      delete nextFiles[file.relPath];
       conflict({ relPath: file.relPath, reason: "foreign", message: `A file Deck does not own already exists at ${absolute}; Deck will not overwrite it.` }, "PI_FILE_FOREIGN");
       continue;
     }
     if (!matchesOwnedHash(file.relPath, owned, disk)) {
+      delete nextFiles[file.relPath];
       conflict({ relPath: file.relPath, reason: "modified", message: `${absolute} was modified after Deck wrote it; Deck will not overwrite it. Restore or remove the file to continue.` }, "PI_FILE_MODIFIED");
       continue;
     }
@@ -394,15 +404,17 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
           continue;
         }
         const currentHash = hashJsonValue(current);
-        if (currentHash === postimage) continue;
+        if (currentHash === postimage) {
+          if (!manifest.mcp.servers[name]) delete nextMcpOwned[name];
+          continue;
+        }
         const owned = manifest.mcp.servers[name];
         if (owned !== undefined && owned === currentHash) {
           servers[name] = entry;
           mutated = true;
-        } else if (owned === undefined && legacyDeckMcpEntry(name, current)) {
-          servers[name] = entry;
-          mutated = true;
+
         } else {
+          delete nextMcpOwned[name];
           conflict({ relPath: `mcp.json#${name}`, reason: owned === undefined ? "foreign" : "modified", message: owned === undefined
             ? `${paths.mcp} already defines an MCP server named "${name}" that Deck does not own; Deck will not replace it.`
             : `The Deck-owned MCP server "${name}" in ${paths.mcp} was modified after Deck wrote it; Deck will not overwrite it.` }, "PI_MCP_ENTRY_CONFLICT");
@@ -451,7 +463,18 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
     addChange({ kind: "mcp", action: mcpRead.file.present ? "update" : "create", relPath: "mcp.json", path: paths.mcp, preimage: pre, postimage: hashContent(nextMcpText) }, { path: paths.mcp, content: nextMcpText, mode: 0o600, expectedPre: pre });
   }
 
+  const contributions: RunnerContribution[] = manifest.contributions?.filter(entry => entry.sourceItemId?.startsWith("package:")) ?? [];
+  const receipt = (target: ContributionTarget, hash: string, encoding: RunnerContribution["encoding"]) => contributions.push({ ...target, id: contributionId(target), hash, encoding, ownership: "prior-record", scope: "global" });
+  for (const [relPath] of Object.entries(nextFiles)) {
+    const path = resolveInside(agentDir, relPath);
+    const content = plan.writes.find(write => write.path === path)?.content ?? io.readText(path);
+    if (content !== undefined) receipt({ path, selector: { kind: "file" } }, hashContent(content), "bytes");
+  }
+  for (const [name, hash] of Object.entries(nextMcpOwned)) receipt({ path: paths.mcp, selector: { kind: "json", keys: ["mcpServers", name] } }, hash, "canonical-json-v1");
+  if (desired.packageEntry) receipt({ path: paths.settings, selector: { kind: "json-array", keys: ["packages"], identity: canonicalJson(desired.packageEntry) } }, hashJsonValue(desired.packageEntry), "canonical-json-v1");
+  for (const exclusion of nextOwnedExclusions) receipt({ path: paths.settings, selector: { kind: "json-array", keys: ["skills"], identity: canonicalJson(exclusion) } }, hashJsonValue(exclusion), "canonical-json-v1");
   const nextManifest: PiManifestV1 = {
+    contributions,
     schema: createEmptyPiManifest().schema,
     files: nextFiles,
     settings: {

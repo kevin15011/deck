@@ -28,9 +28,9 @@ function hash(s: string): number {
  */
 const BASELINE_HASHES: Record<string, Record<string, number>> = {
   "adaptive-memory": {
-    agent: -1094390567, // Managed recall rules intentionally added in feat(memory): expose managed project recall; all surfaces share common content
-    session: -1094390567, // Managed recall rules intentionally added in feat(memory): expose managed project recall; all surfaces share common content
-    skill: -1094390567, // Managed recall rules intentionally added in feat(memory): expose managed project recall; all surfaces share common content
+    agent: -777727741, // A1: remove the retired Context Mode sentence; managed recall/capture policy is otherwise byte-identical
+    session: -777727741, // A1: remove the retired Context Mode sentence; managed recall/capture policy is otherwise byte-identical
+    skill: -777727741, // A1: remove the retired Context Mode sentence; managed recall/capture policy is otherwise byte-identical
   },
   "codebase-memory": {
     agent: 392768171,

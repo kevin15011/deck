@@ -37,10 +37,17 @@ for (const database of databases) for (const suffix of suffixes) {
             else if (kind === 'hardlink') linkSync(sentinel, path);
             else if (kind === 'directory') mkdirSync(path, { mode: 0o600 });
             else { privateWrite(path, 'SYNTHETIC_SIDECAR'); chmodSync(path, kind === 'public-mode' ? 0o644 : 0o400); }
-            const result = child(m, 'acquire', database, suffix);
-            expect(result.error?.message ?? null).toBeNull();
-            expect(result.signal).toBeNull(); expect(result.status).toBe(0);
-            expect(JSON.parse(result.stdout)).toEqual({ reason: 'run_authority_unsafe_file' });
+            if (kind === 'fifo') {
+                // Keep a killable process for the potentially blocking open boundary.
+                const result = child(m, 'acquire', database, suffix);
+                expect(result.error?.message ?? null).toBeNull();
+                expect(result.signal).toBeNull(); expect(result.status).toBe(0);
+                expect(JSON.parse(result.stdout)).toEqual({ reason: 'run_authority_unsafe_file' });
+            } else {
+                // These real filesystem fixtures cannot block; exercise the same
+                // authority rejection without starting a fresh runtime for each one.
+                expect(() => { const authority = RunAuthority.acquire(m, 'cleanup'); authority.close(); }).toThrow('run_authority_unsafe_file');
+            }
             expect(unchanged(sentinel)).toEqual(before);
             expect(existsSync(sentinel + '-absent')).toBe(false);
         }, 10000);

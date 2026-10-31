@@ -42,7 +42,6 @@ export type SessionPreparationOperationV1 =
   | { readonly component: "openspec"; readonly action: "inspect" | "merge"; readonly target: "openspec/config.yaml" }
   | { readonly component: "skill_registry"; readonly action: "validate" | "discover" | "refresh"; readonly target: ".atl/skill-registry.md" }
   | { readonly component: "codebase_memory"; readonly action: "index_repository"; readonly target: ".codebase-memory" }
-  | { readonly component: "serena"; readonly action: "onboard_project"; readonly target: ".serena" }
   | { readonly component: `capability:${string}`; readonly action: "initialize_project"; readonly target: string }
   | { readonly component: "owned_ignore"; readonly action: "reconcile"; readonly target: ".gitignore" };
 
@@ -242,9 +241,8 @@ function parseOperation(value: unknown): SessionPreparationOperationV1 {
   const valid = exact("openspec", ["inspect", "merge"], "openspec/config.yaml")
     || exact("skill_registry", ["validate", "discover", "refresh"], ".atl/skill-registry.md")
     || exact("codebase_memory", ["index_repository"], ".codebase-memory")
-    || exact("serena", ["onboard_project"], ".serena")
     || exact("owned_ignore", ["reconcile"], ".gitignore")
-    || (/^capability:[a-z0-9][a-z0-9-]{0,63}$/.test(component) && action === "initialize_project");
+    || (/^capability:[a-z0-9][a-z0-9-]{0,63}$/.test(component) && component !== "capability:serena" && component !== "capability:context-mode" && action === "initialize_project");
   if (!valid) throw new Error("invalid-evidence: authorization.operation");
   return deepFreeze({ component, action, target }) as SessionPreparationOperationV1;
 }

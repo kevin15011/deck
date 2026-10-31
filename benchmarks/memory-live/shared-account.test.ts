@@ -9,7 +9,7 @@ import { execute } from './run';
 import { cleanup } from './cleanup';
 import * as security from './security';
 import { testScratch, confirmSyntheticCleanup, syntheticConfirmation } from './test-support';
-const scratch = testScratch();
+const scratch = testScratch({ smallCorpus: true });
 const plan = (shared?: boolean, budget?: number) => { const run = newRunId(); return prepare({ run, evalRoot: scratch.root(run), mode: 'pilot', budget, ...(shared === undefined ? {} : { accountSharedWithProduction: shared }) }); };
 test('shared account live declaration must be exactly true and preparation accepts only the bare flag', async () => {
     const missing = plan(), declared = plan(true), denied = plan(false);

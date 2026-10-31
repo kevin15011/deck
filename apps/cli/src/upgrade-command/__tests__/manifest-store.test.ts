@@ -154,7 +154,7 @@ describe("manifest-store", () => {
             owner: "deck",
             checksum: {
               algorithm: "sha256",
-              value: "0".repeat(64),
+              value: "a".repeat(64),
             },
             deckVersion: "0.9.0",
             kind: "config",
@@ -165,7 +165,7 @@ describe("manifest-store", () => {
       expect(v2.schemaVersion).toBe(2);
       expect(v2.files).toHaveLength(1);
       expect(v2.files[0]?.path).toBe("/etc/deck/config.json");
-      expect(v2.files[0]?.checksum.value).toBe("0".repeat(64));
+      expect(v2.files[0]?.checksum.value).toBe("a".repeat(64));
       expect(v2.files[0]?.kind).toBe("config");
       expect(v2.files[0]?.deck_version).toBe("0.9.0");
     });
@@ -177,6 +177,7 @@ describe("manifest-store", () => {
           {
             path: "/etc/a",
             deck_version: "0.5.0",
+            checksum: { value: "a".repeat(64) },
           },
         ],
       };
@@ -187,7 +188,7 @@ describe("manifest-store", () => {
     it("marks unknown kind as 'content'", () => {
       const v1 = {
         schemaVersion: 1 as const,
-        files: [{ path: "/etc/a", kind: "weird" }],
+        files: [{ path: "/etc/a", kind: "weird", checksum: { value: "a".repeat(64) } }],
       };
       const v2 = migrateManifestV1ToV2(v1 as never);
       expect(v2.files[0]?.kind).toBe("content");
@@ -204,7 +205,7 @@ describe("manifest-store", () => {
           {
             path: "/etc/deck/config.json",
             owner: "deck",
-            checksum: { algorithm: "sha256", value: "0".repeat(64) },
+            checksum: { algorithm: "sha256", value: "a".repeat(64) },
             deckVersion: "0.9.0",
             kind: "config",
           },

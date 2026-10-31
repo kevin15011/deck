@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -6,11 +6,17 @@ import {
   hasWebSearchProviderCredential,
   isWebSearchProviderDescriptor,
   resolveWebSearchReadiness,
+  assertNoContributionSymlink,
+  beginRunnerContributions,
+  contributionHash,
+  canonicalContributionJson,
+  type NativeSearchEvidence,
   type WebSearchProviderDescriptorV1,
   type WebSearchReadinessResult,
 } from "@deck/core";
 
 export type OpenCodeWebSearchReadinessInput = Readonly<{
+  nativeSearch?: NativeSearchEvidence;
   enabled: boolean;
   provider?: WebSearchProviderDescriptorV1 | string;
   credentialEnvironment?: Readonly<Record<string, string | undefined>>;
@@ -84,6 +90,7 @@ export function resolveOpenCodeWebSearchReadiness(
   input: OpenCodeWebSearchReadinessInput,
 ): OpenCodeWebSearchReadiness {
   const readiness = resolveWebSearchReadiness({
+    nativeSearch: input.nativeSearch,
     enabled: input.enabled,
     runnerSupported: input.runnerSupported ?? true,
     providerConfigured: isWebSearchProviderDescriptor(input.provider),
@@ -116,11 +123,15 @@ export function writeOpenCodeWebSearchMcpConfig(options: {
   if (!isWebSearchProviderDescriptor(provider)) {
     return fail("Web Search provider selection is unavailable; no changes were written.");
   }
+  try { assertNoContributionSymlink(path); }
+  catch { return fail("Unsafe Web Search configuration path; no changes were written."); }
 
   let config: Record<string, unknown> = {};
+  let preimage: string | undefined;
   if (existsSync(path)) {
     try {
-      const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+      preimage = readFileSync(path, "utf8");
+      const parsed: unknown = JSON.parse(preimage);
       if (!isRecord(parsed)) return fail("OpenCode MCP config must be a JSON object; no changes were written.");
       config = parsed;
     } catch {
@@ -134,7 +145,7 @@ export function writeOpenCodeWebSearchMcpConfig(options: {
   }
   const mcp = (currentMcp as Record<string, unknown> | undefined) ?? {};
   const existing = mcp[provider.semanticServerId];
-  if (existing !== undefined && !isExactEntry(existing, provider) && !isDisabledExactEntry(existing, provider)) {
+  if (existing !== undefined && !isExactEntry(existing, provider)) {
     return fail("Existing Web Search MCP entry differs from Deck's reviewed semantic configuration; no changes were written.", [provider.semanticServerId]);
   }
   if (isExactEntry(existing, provider)) {
@@ -153,9 +164,18 @@ export function writeOpenCodeWebSearchMcpConfig(options: {
     },
   };
 
+  let accounting: ReturnType<typeof beginRunnerContributions> | undefined;
+  const temporary = `${path}.${process.pid}.tmp`;
   try {
+    accounting = beginRunnerContributions({ runnerId: "opencode", root: dirname(path), manifestPath: join(dirname(path), "deck/manifest.json"), deckVersion: "0.13.0",
+      targets: [{ path, selector: { kind: "json", keys: ["mcp", provider.semanticServerId] }, sourceItemId: "capability:web-search",
+        expectedHash: contributionHash(canonicalContributionJson(nextConfig.mcp[provider.semanticServerId])) }] });
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(nextConfig, null, 2)}\n`, "utf8");
+    writeFileSync(temporary, `${JSON.stringify(nextConfig, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    assertNoContributionSymlink(path);
+    if ((existsSync(path) ? readFileSync(path, "utf8") : undefined) !== preimage) throw new Error("Web Search configuration changed during apply");
+    renameSync(temporary, path);
+    accounting.commit();
     return {
       ok: true,
       status: existsSync(path) && existing !== undefined ? "updated" : "created",
@@ -164,6 +184,7 @@ export function writeOpenCodeWebSearchMcpConfig(options: {
       diagnostics: [],
     };
   } catch {
+    accounting?.abandon();
     return fail("OpenCode Web Search MCP configuration could not be written; no credential was persisted.");
-  }
+  } finally { if (existsSync(temporary)) unlinkSync(temporary); }
 }

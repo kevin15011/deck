@@ -130,10 +130,33 @@ export function conversationEvents(events: SessionEvent[], taskId = 'lead'): Con
         seen.add(promptId);messages.push({...accepted,kind:'message.completed',source:{taskId:String(fence.data.taskId),memberId:'lead'},ts:fence.ts,data:{role:'user',text:original.data.text,promptId,steering:true,steeringSeq:fence.seq,steeringRunnerId:fence.data.runnerId,historical:accepted.data.eligible!==true,...(accepted.data.stale?{decisionReply:{stale:true}}:{})}});
     }
     const order=(event:SessionEvent)=>event.data.role==='user'&&event.data.steering===true&&!event.source.runnerId&&Number.isSafeInteger(event.data.steeringSeq)&&Number(event.data.steeringSeq)>0&&Number(event.data.steeringSeq)<=event.seq?Number(event.data.steeringSeq):event.seq;
-    if(messages.some(e=>e.data.steering===true&&!e.source.runnerId))return messages.map(e=>{
+    if(messages.some(e=>e.data.steering===true&&!e.source.runnerId))return projectPromptDelivery(messages.map(e=>{
         const fence=fences.get(order(e));return e.data.role==='user'&&e.data.steering===true&&!e.source.runnerId&&fence&&fence.data.promptId===e.data.promptId?{...e,ts:fence.ts}:e;
-    }).sort((a,b)=>order(a)-order(b));
-    return messages;
+    }).sort((a,b)=>order(a)-order(b)), events);
+    return projectPromptDelivery(messages, events);
 }
 
 export { activityEvents } from './activity';
+
+
+/** Join durable delivery receipts independently of conversation paging/order. */
+export function projectPromptDelivery<T extends SessionEvent>(messages: T[], events: SessionEvent[]): T[] {
+    const controls = new Map<string, SessionEvent[]>();
+    for (const event of events) if (['prompt.dispatched','prompt.handoff','prompt.requeued','prompt.state'].includes(event.kind)) {
+        const id = String(event.data.promptId ?? '');
+        controls.set(id, [...(controls.get(id) ?? []), event]);
+    }
+    return messages.flatMap(message => {
+        if (message.data.role !== 'user' || !message.data.promptId) return [message];
+        const receipts = (controls.get(String(message.data.promptId)) ?? []).sort((a,b)=>a.seq-b.seq);
+        const dispatch = receipts.filter(e=>e.kind==='prompt.dispatched').at(-1);
+        const gated = message.data.handoff !== undefined || dispatch?.data.handoff === 'gated';
+        if (!gated) return [message];
+        const bubbleDispatch = receipts.filter(e=>e.kind==='prompt.dispatched' && e.data.reseeded!==true).at(-1);
+        if (bubbleDispatch && bubbleDispatch.seq > message.seq) return [];
+        const latest = receipts.filter(e=>e.seq > (dispatch?.seq ?? 0)).at(-1);
+        if (latest?.kind === 'prompt.requeued' || latest?.kind === 'prompt.state' && latest.data.state === 'cancelled') return [];
+        const handoff = receipts.filter(e=>e.kind==='prompt.handoff' && e.seq > (dispatch?.seq??0)).at(-1)?.data.state ?? message.data.handoff ?? 'pending';
+        return [{...message,data:{...message.data,handoff}}];
+    });
+}

@@ -63,15 +63,10 @@ function allActionIds(plan: PiRunnerReviewPlan | undefined): string[] {
 }
 
 describe("Pi Runner dashboard reducer", () => {
-  test("preselects all fresh packages without authorizing Serena or enabling a provider", () => {
+  test("keeps Codebase opt-in and retired packages absent without enabling a provider", () => {
     const configured = validateDeckConfig({});
     const expectedDefaults = {
-      "codebase-memory": true,
-      "code-economy": true,
-      "context-mode": true,
-      rtk: true,
-      "adaptive-memory": true,
-      serena: true,
+      "codebase-memory": false, "code-economy": true, rtk: true, "adaptive-memory": true,
     };
 
     expect(createDefaultPiRunnerDashboardState().packageInstructions).toEqual(expectedDefaults);
@@ -80,11 +75,11 @@ describe("Pi Runner dashboard reducer", () => {
     expect(loadRunnerPackageInstructionsFromConfig(configured, "opencode")).toEqual(expectedDefaults);
   });
 
-  test("only user review confirmation authorizes selected Serena in the current operation", () => {
+  test("review confirmation cannot authorize retired Serena", () => {
     const state = reduce(createDefaultPiRunnerDashboardState(), { type: "set-runner", runnerScope: "codex", operationId: "current" });
     const operation = state.currentOperation!;
     const builder: PlanBuilderFn = (candidate) => {
-      expect(candidate.explicitlySelectedCapabilities.serena).toBe(true);
+      expect(candidate.explicitlySelectedCapabilities.serena).toBeUndefined();
       expect(candidate.currentOperation?.explicitlySelected).toBe(true);
       return { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } };
     };
@@ -103,7 +98,7 @@ describe("Pi Runner dashboard reducer", () => {
     expect(reviewed.explicitlySelectedCapabilities.serena).toBeUndefined();
   });
 
-  test("all available packages start selected for every runner and receipts retain omissions", () => {
+  test("Codebase stays opt-in for every runner and receipts retain omissions", () => {
     for (const runner of ["pi", "opencode", "claude", "codex"] as const) {
       const adapter = getAdapter(runner);
       const supported = adapter.packageInstructionIds ?? [];
@@ -115,7 +110,7 @@ describe("Pi Runner dashboard reducer", () => {
       });
       const visible = getPackageInstructionSummaries(fresh, { getSupportedPackageInstructionIds: () => supported });
       expect(visible.length).toBeGreaterThan(0);
-      expect(visible.every((entry) => entry.selected)).toBe(true);
+      expect(visible.every((entry) => entry.selected === (entry.capabilityId !== "codebase-memory"))).toBe(true);
       expect(fresh.explicitlySelectedCapabilities.serena).toBeUndefined();
       expect(fresh.adaptiveMemory.provider).toBe("none");
       const saved = validateDeckConfig({ packageInstructions: { [runner]: { serena: false, rtk: false } } });
@@ -124,8 +119,8 @@ describe("Pi Runner dashboard reducer", () => {
         packageInstructions: loadRunnerPackageInstructionsFromConfig(saved, runner, supported),
         selectedCapabilities: getInitialExtraCapabilitySelection(adapter.ui, []),
       });
-      expect(hydrated.packageInstructions.serena).toBe(false);
-      expect(hydrated.selectedCapabilities.serena).toBe(false);
+      expect(hydrated.packageInstructions.serena).not.toBe(true);
+      expect(hydrated.explicitlySelectedCapabilities.serena).toBeUndefined();
       expect(hydrated.packageInstructions.rtk).toBe(false);
       const active = reduce(hydrated, { type: "set-runner", runnerScope: runner, operationId: "saved-false" });
       const reviewed = reduce(active, { type: "enter-review", inventory, operation: active.currentOperation, confirmSelectedPackages: true });
@@ -239,26 +234,16 @@ describe("Pi Runner dashboard reducer", () => {
     expect(state.adaptiveMemory.status).toContain("runtime API token");
   });
 
-  test("keeps Serena explicit authorization separate from defaults and config state", () => {
+  test("clearing legacy Serena selection removes transient authorization", () => {
     const state = createDefaultPiRunnerDashboardState({
       operationId: "pi-operation-1",
       currentOperation: { runner: "pi", operationId: "pi-operation-1", explicitlySelected: false },
-      selectedCapabilities: { serena: true },
-      packageInstructions: { serena: true },
-      capabilityStatuses: { serena: "ready" },
+      selectedCapabilities: { serena: true }, packageInstructions: { serena: true },
     });
-
-    expect(state.selectedCapabilities.serena).toBe(true);
-    expect(state.explicitlySelectedCapabilities.serena).toBeUndefined();
-
     const selected = reduce(state, { type: "toggle-capability", capabilityId: "serena" });
     expect(selected.selectedCapabilities.serena).toBe(false);
     expect(selected.explicitlySelectedCapabilities.serena).toBeUndefined();
-
-    const reselected = reduce(selected, { type: "toggle-capability", capabilityId: "serena" });
-    expect(reselected.selectedCapabilities.serena).toBe(true);
-    expect(reselected.explicitlySelectedCapabilities.serena).toBe(true);
-    expect(reselected.currentOperation).toEqual({ runner: "pi", operationId: "pi-operation-1", explicitlySelected: true });
+    expect(selected.currentOperation?.explicitlySelected).toBe(false);
   });
 
   test("does not treat a state/config projection as an explicit Serena selection", () => {
@@ -373,8 +358,8 @@ describe("Pi Runner dashboard reducer", () => {
     state = reduce(state, { type: "toggle-capability", capabilityId: "pi-hud" });
 
     expect(state.selectedCapabilities.rtk).toBe(false);
-    expect(state.selectedCapabilities["context-mode"]).toBe(false);
-    expect(state.selectedCapabilities["codebase-memory-mcp"]).toBe(false);
+    expect(state.selectedCapabilities["context-mode"]).toBe(true);
+    expect(state.selectedCapabilities["codebase-memory-mcp"]).toBe(true);
     expect(state.selectedCapabilities.serena).toBe(true);
     expect(state.selectedCapabilities["pi-hud"]).toBe(true);
 
@@ -465,10 +450,10 @@ describe("Pi Runner dashboard reducer", () => {
     expect(firstRevision).toBe(state.planRevision);
     expect(allActionIds(state.plan).some((id) => id.includes("supermemory"))).toBe(true);
 
-    // Toggle OFF first (context-mode is already true by default), then back ON to invalidate
-    state = reduce(state, { type: "set-capability", capabilityId: "context-mode", selected: false });
+    // Toggle OFF first (rtk is already true by default), then back ON to invalidate
+    state = reduce(state, { type: "set-capability", capabilityId: "rtk", selected: false });
     expect(state.plan).toBeUndefined();
-    state = reduce(state, { type: "set-capability", capabilityId: "context-mode", selected: true });
+    state = reduce(state, { type: "set-capability", capabilityId: "rtk", selected: true });
     expect(state.plan).toBeUndefined();
     expect(state.planGeneratedForRevision).toBeUndefined();
 
@@ -478,7 +463,7 @@ describe("Pi Runner dashboard reducer", () => {
     state = reduce(state, { type: "regenerate-plan", inventory }, piPlanBuilder);
     expect(state.planGeneratedForRevision).toBe(state.planRevision);
     expect(state.planGeneratedForRevision).not.toBe(firstRevision);
-    expect(state.plan?.groups.automaticInstalls.some((action) => action.capabilityId === "context-mode")).toBe(true);
+    expect(state.plan?.groups.automaticInstalls.some((action) => action.capabilityId === "rtk")).toBe(true);
   });
 
   test("contains plan-builder failures in a non-ready plan and never starts installation", () => {
@@ -501,7 +486,7 @@ describe("Pi Runner dashboard reducer", () => {
 
   test("toggle-package-instruction actualiza packageInstructions y invalida plan", () => {
     let state = createDefaultPiRunnerDashboardState({
-      packageInstructions: { "codebase-memory": false, "context-mode": false },
+      packageInstructions: { "codebase-memory": false, "rtk": false },
     });
     const initialRevision = state.planRevision;
 
@@ -510,8 +495,8 @@ describe("Pi Runner dashboard reducer", () => {
     expect(state.plan).toBeUndefined();
     expect(state.planRevision).toBe(initialRevision + 1);
 
-    state = reduce(state, { type: "toggle-package-instruction", packageId: "context-mode" });
-    expect(state.packageInstructions["context-mode"]).toBe(true);
+    state = reduce(state, { type: "toggle-package-instruction", packageId: "rtk" });
+    expect(state.packageInstructions["rtk"]).toBe(true);
     expect(state.packageInstructions["codebase-memory"]).toBe(true);
     expect(state.planRevision).toBe(initialRevision + 2);
 
@@ -545,7 +530,7 @@ describe("Pi Runner dashboard reducer", () => {
 
     const projected = reduce(state, { type: "set-package-instruction", packageId: "serena", enabled: true });
 
-    expect(projected.packageInstructions.serena).toBe(true);
+    expect(projected.packageInstructions.serena).toBe(false);
     expect(projected.selectedCapabilities.serena).toBe(false);
     expect(projected.explicitlySelectedCapabilities.serena).toBeUndefined();
     expect(projected.currentOperation).toEqual(operation);

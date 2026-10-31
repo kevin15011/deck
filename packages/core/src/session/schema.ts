@@ -112,6 +112,7 @@ const COMMAND_VARIANTS: ReadonlyArray<[string, Json, string[]]> = [
   ["approval.respond", { approvalId: nonEmptyString, decision: { enum: ["allow", "allow-once", "deny"] }, scope: { enum: ["once", "session", "always"] }, grant: { enum: ["exact", "tool"] }, confirmed: { type: "boolean" } }, ["approvalId", "decision"]],
   ["question.answer", { questionId: nonEmptyString, answers: questionAnswers }, ["questionId", "answers"]],
   ["question.dismiss", { questionId: nonEmptyString }, ["questionId"]],
+  ["task.dismiss-failure", { taskId: nonEmptyString, attempt: { type: "integer", minimum: 1 } }, ["taskId", "attempt"]],
   ["task.cancel", { taskId: nonEmptyString }, ["taskId"]],
   ["session.revokeGrant", { grantId: nonEmptyString }, ["grantId"]],
   ["session.release", {}, []],

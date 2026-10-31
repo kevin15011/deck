@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createDeckConfigStore, DeckConfigMigrationConflictError } from "./deck-config-store";
+import { createDeckConfigStore } from "./deck-config-store";
 import { installGlobalConfigRealEnvSentinel } from "../../../packages/core/src/config/global-config-real-env-sentinel.test-helper";
 
 installGlobalConfigRealEnvSentinel();
@@ -37,109 +37,16 @@ describe("DeckConfigStore", () => {
     expect(store.paths.canonicalPath).toBe(join(xdg, "deck", "config.json"));
   });
 
-  test("imports one unique valid global-field projection and preserves legacy sources", () => {
+  test("ignores retired config locations without importing or modifying them", () => {
     const home = root();
     const xdg = join(home, "xdg");
-    const projectRoot = join(home, "repo");
     const legacy = join(home, ".deck", "config.json");
-    writeJson(legacy, { adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "custom-sm", searchMode: "documents" } }, webSearch: { enabled: true, provider: "tavily" } });
-
-    const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg, projectRoot });
-    const config = store.read();
-
-    expect(config.webSearch).toEqual({ enabled: true, provider: "tavily" });
-    expect(config.adaptiveMemory.supermemory?.mcpServerName).toBe("custom-sm");
-    expect(existsSync(legacy)).toBe(true);
-    expect(existsSync(store.paths.canonicalPath)).toBe(true);
-  });
-
-  test("migration imports cross members and the recorded Claude acknowledgement", () => {
-    const home = root();
-    const xdg = join(home, "xdg");
-    const crossRunner = { enabled: true, members: { lead: { runnerId: "claude", modelId: "opus", thinking: "high" } }, claudeTosAcknowledgedAt: "2026-10-12T00:00:00.000Z" };
-    writeJson(join(home, ".deck", "config.json"), { crossRunner });
-    const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
-    expect(store.read().crossRunner).toMatchObject(crossRunner);
-    expect(JSON.parse(readFileSync(store.paths.canonicalPath, "utf8")).crossRunner).toMatchObject(crossRunner);
-  });
-
-  test("distinct cross member projections require the existing explicit migration selection", () => {
-    const home = root();
-    const xdg = join(home, "xdg");
-    const candidate = join(home, ".deck", "config.json");
-    writeJson(join(xdg, ".deck", "config.json"), { crossRunner: { members: { lead: { runnerId: "codex", modelId: "first" } } } });
-    writeJson(candidate, { crossRunner: { members: { lead: { runnerId: "codex", modelId: "selected" } } } });
-    const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
-    expect(() => store.read()).toThrow(DeckConfigMigrationConflictError);
-    expect(store.selectMigration({ action: "adopt", candidatePath: candidate }).crossRunner?.members.lead?.modelId).toBe("selected");
-  });
-
-  test("deduplicates identical valid projections across legacy candidates", () => {
-    const home = root();
-    const xdg = join(home, "xdg");
-    const value = { packageInstructions: { opencode: { serena: true } } };
-    writeJson(join(xdg, ".deck", "config.json"), value);
-    writeJson(join(home, ".config", ".deck", "config.json"), value);
-
-    const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
-    expect(store.read().packageInstructions.opencode.serena).toBe(true);
-  });
-
-  test("blocks mutation on distinct valid projections with redacted candidate metadata", () => {
-    const home = root();
-    const xdg = join(home, "xdg");
-    writeJson(join(xdg, ".deck", "config.json"), { webSearch: { enabled: true, provider: "tavily" } });
-    writeJson(join(home, ".deck", "config.json"), { orchestratorPersonality: "guia" });
-
-    const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
-    expect(() => store.patch((existing) => ({ ...existing, webSearch: { enabled: false } }))).toThrow(DeckConfigMigrationConflictError);
-    try {
-      store.read();
-    } catch (error) {
-      expect(error).toBeInstanceOf(DeckConfigMigrationConflictError);
-      const conflict = error as DeckConfigMigrationConflictError;
-      expect(conflict.conflict.candidates).toHaveLength(2);
-      expect(JSON.stringify(conflict.conflict)).not.toContain("tavily");
-      expect(JSON.stringify(conflict.conflict)).not.toContain("guia");
-    }
-  });
-
-  test("reports invalid sources by path and code only and imports the remaining unique valid projection", () => {
-    const home = root();
-    const xdg = join(home, "xdg");
-    writeJson(join(home, ".deck", "config.json"), { webSearch: { enabled: true, provider: "tavily" } });
-    writeJson(join(xdg, ".deck", "config.json"), { webSearch: { apiKey: "not-persisted" } });
-
-    const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
-    const discovery = store.discover();
-    expect(discovery.invalidCandidates[0]).toMatchObject({ code: "DECK_CONFIG_SECRET_FIELD" });
-    expect(JSON.stringify(discovery.invalidCandidates)).not.toContain("not-persisted");
-    expect(store.read().webSearch.enabled).toBe(true);
-  });
-
-  test("canonical existence wins and reports differing legacy candidates without merging", () => {
-    const home = root();
-    const xdg = join(home, "xdg");
-    writeJson(join(xdg, "deck", "config.json"), { webSearch: { enabled: false }, adaptiveMemory: { activeProvider: "none" } });
-    writeJson(join(home, ".deck", "config.json"), { webSearch: { enabled: true, provider: "tavily" } });
-
+    writeJson(legacy, { webSearch: { enabled: true, provider: "tavily" } });
+    const before = readFileSync(legacy, "utf8");
     const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
     expect(store.read().webSearch.enabled).toBe(false);
-    expect(store.discover().differingLegacyCandidates).toHaveLength(1);
-  });
-
-  test("keep/adopt migration selection writes canonical without exposing candidate values", () => {
-    const home = root();
-    const xdg = join(home, "xdg");
-    const candidate = join(home, ".deck", "config.json");
-    writeJson(join(xdg, ".deck", "config.json"), { webSearch: { enabled: true, provider: "tavily" } });
-    writeJson(candidate, { orchestratorPersonality: "guia" });
-    const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
-
-    const result = store.selectMigration({ action: "adopt", candidatePath: candidate });
-
-    expect(result.orchestratorPersonality).toBe("guia");
-    expect(readFileSync(store.paths.canonicalPath, "utf8")).toContain("orchestratorPersonality");
+    expect(store.discover().canonicalExists).toBe(false);
+    expect(readFileSync(legacy, "utf8")).toBe(before);
   });
 
   test("ordinary repo, workspace, and nested cwd preference writes share one global config and create no local config", () => {
@@ -190,11 +97,8 @@ describe("DeckConfigStore", () => {
   test("reports invalid config values without echoing attacker-controlled values", () => {
     const home = root();
     const xdg = join(home, "xdg");
-    writeJson(join(xdg, ".deck", "config.json"), { version: "not-secret-version", adaptiveMemory: { activeProvider: "supermemory", supermemory: { searchMode: "secret-mode" } } });
+    writeJson(join(xdg, "deck", "config.json"), { version: "not-secret-version", adaptiveMemory: { activeProvider: "supermemory", supermemory: { searchMode: "secret-mode" } } });
     const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
-    const discovery = store.discover();
-    expect(discovery.invalidCandidates[0]?.code).toBe("DECK_CONFIG_UNSUPPORTED_VERSION");
-    expect(JSON.stringify(discovery)).not.toContain("not-secret-version");
-    expect(JSON.stringify(discovery)).not.toContain("secret-mode");
+    expect(() => store.read()).toThrow("version");
   });
 });

@@ -19,7 +19,7 @@ This reference lists parser-backed Deck commands. The CLI parser is authoritativ
 | `deck claude native resume session-id` | Resume a native Claude session by ID. |
 | `deck claude native resume --last` | Resume the latest native Claude session. |
 
-OpenCode and Codex developer launchers accept `--install-only`, `--dry-run`, `--yes`, `--verbose`, and `--memory=supermemory` or `--memory=none`. Codex also accepts `--cleanup-legacy` and `--local-only`. Codex exec and resume forms are:
+OpenCode and Codex developer launchers accept `--install-only`, `--dry-run`, `--yes`, `--verbose`, and `--memory=supermemory` or `--memory=none`. Codex also accepts `--local-only`. Codex exec and resume forms are:
 
 ```sh
 deck codex developer exec -- Review the current diff
@@ -36,7 +36,6 @@ Pi launch options:
 | `deck pi developer` | Install or refresh the global Deck package for Pi when needed, then start Pi's normal interactive TUI as the Deck lead session (Pi >= 1.0.0). |
 | `deck pi developer --continue` | Continue the current Developer Team session. |
 | `deck pi developer --resume` | Open the resume picker for a Developer Team session. |
-| `deck pi developer --cleanup-legacy` | One-time, opt-in removal of unmodified legacy Deck files from earlier versions (project `.pi/agents|skills`, `.deck/pi/profiles`, loose files in the Pi agent directory including older-version `deck-*` agents/skills that are demonstrably Deck-authored, Deck-added project package entries). Items are backed up under the Deck state directory first and restored on failure; modified files are kept. |
 | `deck pi developer --memory=none` | Explicitly disable adaptive memory for this launch. |
 | `deck pi developer --memory=supermemory` | Select Supermemory Adaptive Memory for the launch; Deck runtime handles supported supervised effects and optional external MCP remains scoped recall-only and unobservable to Deck runtime metrics. |
 

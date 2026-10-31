@@ -1,0 +1,24 @@
+schema: spec-registry-v1
+changeId: session-context-latency-investigation
+name: Session latency and context investigation
+currentPhase: apply
+status: completed
+exploration_context: sdd
+next_action: "Combined UX/nativecontext estimate canary d2eafd2 installed, expected digest 10daee171e51c200933697e2d0c00338aa819661226e0792c06527e32f2875b2. Verify /tmp/deck-context-ux-restart-iam5zxau/result.json and live daemon after idle-only restart; activation pending."
+artifacts:
+  exploration: working-brief.md
+  apply_progress: preparation-progress.md
+  preconditions: preconditions.md
+provenance:
+  - phase: apply
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-22T12:10:58Z"
+    registryWrite: non-deferred
+    note: "User authorized proceeding. Bounded cross-runner preparation measurement implemented and tested; isolated fresh/warm preparation compared without inference. No daemon activation or claimed performance fix."
+  - phase: explore
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-22T11:07:27Z"
+    registryWrite: non-deferred
+    note: "User prioritized P-008 research on the branch from updated main. Source fallback for stale graph coverage, four synthetic driver characterizations, and 122 existing tests; no product changes or original-machine root-cause claim."

@@ -12,7 +12,7 @@ test("D-REACH-07 packaged hook assets and runtime dependencies are embedded inpu
   const openCodeEntry = await Bun.file(new URL("../../../adapter-opencode/assets/opencode/plugins/developer-team-execution.ts", import.meta.url)).arrayBuffer();
   const piEntry = await Bun.file(new URL("../../../adapter-pi/assets/pi/extensions/developer-team-execution.ts", import.meta.url)).arrayBuffer();
   const codexAsset = await Bun.file(new URL("../../../adapter-codex/assets/codex/hooks/developer-team-execution.generated.js", import.meta.url)).text();
-  const codexEntry = await Bun.file(new URL("../../../adapter-codex/assets/codex/hooks/developer-team-execution.ts", import.meta.url)).arrayBuffer();
+  const codexEntry = await Bun.file(new URL("../../../adapter-codex/assets/codex/hooks/developer-team-execution-entry.ts", import.meta.url)).arrayBuffer();
   expect(openCodePackage.dependencies["@deck/sdd-runtime"]).toBe("workspace:*");
   expect(piPackage.dependencies["@deck/sdd-runtime"]).toBe("workspace:*");
   expect(codexPackage.dependencies["@deck/sdd-runtime"]).toBe("workspace:*");

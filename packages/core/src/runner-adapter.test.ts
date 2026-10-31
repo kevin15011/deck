@@ -76,7 +76,7 @@ describe("runner-adapter / detection facet (T2.9)", () => {
     // The omission is the contract — this must type-check.
     expect(adapter.detectDeckInstall).toBeUndefined();
     expect(adapter.getSessionDriver).toBeUndefined();
-    expect(adapter.readSessionMcpServers).toBeUndefined();
+    expect(adapter.readSessionCapabilityOverrides).toBeUndefined();
   });
 
   it("accepts an adapter that implements detectDeckInstall", async () => {

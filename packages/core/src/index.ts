@@ -1,7 +1,5 @@
 // Backward-compatible re-exports from old flat paths
 export * from "./developer-team-catalog";
-export * from "./explorer-prompt";
-export * from "./orchestrator-prompt";
 
 // Re-export team-catalog but hide TeamEntry (conflicts with runner-capability)
 export { getTeamById, getTeamsForEnvironment, ALL_TEAMS, DEVELOPER_TEAM } from "./team-catalog";
@@ -99,7 +97,6 @@ export * from "./model-reasoning-capability";
 // Developer Team manifest builder
 export {
   buildDeveloperTeamManifest,
-  buildDeveloperTeamManifestLegacy,
   getDeveloperTeamAgentIds,
   isManifestModelComplete,
   type ManifestBuildResult,
@@ -237,3 +234,13 @@ export * from "./serena-bootstrap";
 export * from "./owned-tools/rtk-artifact";
 export * from "./owned-tools/codebase-native-artifact";
 export * from "./owned-tools/rtk-hook";
+
+export * from "./runner-contributions";
+
+export * from "./package-retirement";
+
+export * from "./native-search";
+export * from "./runner-generation-references";
+
+export type { GitCatalog, GitDocument, GitContent, GitFile } from "./session/git-diff";
+export type { ProjectBrowse, ProjectContent, ProjectEntry, ProjectListing } from "./session/project-files";

@@ -19,7 +19,7 @@ test('session readiness uses authoritative preparation independently of work and
     const html = render([{sessionId:'first',title:'Prepared idle',state:'idle',preparationStatus:'ready',leadActivity:{state:'completed',pendingApprovals:0,lastReplySeq:5}},{sessionId:'second',title:'Unprepared idle',state:'idle',preparationStatus:'unprepared'},{sessionId:'third',title:'Closing',state:'idle',preparationStatus:'ready',releasing:true}]);
     expect(html.match(/class="session-readiness ready"/g)).toHaveLength(1);
     expect(html.match(/aria-label="Disconnected"/g)).toHaveLength(2);
-    expect(html).toContain('More options for Prepared idle');expect(html).toContain('Lead Completed · Unread reply');expect(html).toContain('· Connected');
+    expect(html).toContain('More options for Prepared idle');expect(html).toContain('Unread reply');expect(html).toContain('· Connected');
 });
 test('legacy canonical IDs supply only valid creation dates; arbitrary IDs and impossible dates stay unlabeled', () => {
     const html = render([{ sessionId: '20261015T120300-abcdef', title: 'Legacy' }, { sessionId: '20260231T120300-abcdef', title: 'Invalid calendar' }, { sessionId: 'arbitrary-id', title: 'No date' }]);

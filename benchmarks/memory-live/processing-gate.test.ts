@@ -7,7 +7,7 @@ import { cleanup } from './cleanup';
 import { NamespaceTransport, simulatedWire } from './namespace-transport';
 import { privateWrite, sha256 } from './security';
 import { testScratch } from './test-support';
-const scratch = testScratch();
+const scratch = testScratch({ smallCorpus: true });
 const plan = () => { const run = newRunId(); return prepare({ run, evalRoot: scratch.root(run), mode: 'pilot', accountSharedWithProduction: true }); };
 test('processing completion precedes quality and success retains all namespaces awaiting reconciliation', async () => {
     const m = plan(), fake = simulatedWire(); let deletes = 0, statusReads = 0;

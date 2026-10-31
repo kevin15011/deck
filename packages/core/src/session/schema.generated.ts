@@ -82,6 +82,8 @@ export const SESSION_EVENT_SCHEMA = {
         "prompt.steered",
         "prompt.queued",
         "prompt.dispatched",
+        "prompt.handoff",
+        "prompt.requeued",
         "prompt.state",
         "prompt.queue"
       ]
@@ -1793,6 +1795,56 @@ export const SESSION_EVENT_SCHEMA = {
                 "maxLength": 512,
                 "pattern": "\\S"
               },
+              "findingResolutions": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "taskId",
+                    "findingId",
+                    "state",
+                    "reason",
+                    "evidenceSeqs"
+                  ],
+                  "properties": {
+                    "taskId": {
+                      "type": "string"
+                    },
+                    "findingId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "state": {
+                      "enum": [
+                        "resolved",
+                        "wontfix",
+                        "open",
+                        "blocker"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "evidenceSeqs": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 16,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      }
+                    }
+                  }
+                }
+              },
               "evidenceSeqs": {
                 "type": "array",
                 "minItems": 1,
@@ -2506,6 +2558,7 @@ export const SESSION_COMMAND_SCHEMA = {
         "approval.respond",
         "question.answer",
         "question.dismiss",
+        "task.dismiss-failure",
         "task.cancel",
         "session.revokeGrant",
         "session.release",
@@ -3255,6 +3308,34 @@ export const SESSION_COMMAND_SCHEMA = {
       "if": {
         "properties": {
           "type": {
+            "const": "task.dismiss-failure"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "taskId",
+          "attempt"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
             "const": "task.cancel"
           }
         },
@@ -3408,4 +3489,4 @@ export const SESSION_COMMAND_SCHEMA = {
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "5e1227b9623c31dd8323e816a9a265fca02682ebcd3bacd74c7a4800ee70ed0b";
+export const SESSION_SCHEMA_DIGEST = "89150d61849c3feee116b59503ed4d6247042afec769c5e4e5dd611be35ebd08";

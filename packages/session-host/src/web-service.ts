@@ -1,3 +1,4 @@
+import { quotaEventForWeb, type QuotaStore } from "./quota";
 /** Loopback browser transport with authenticated device actions and a CLI-injected lifecycle capability. */
 import type {WebRestart} from "./web-restart";
 import type {RestartRequest} from "@deck/core/session/daemon-restart";
@@ -53,6 +54,7 @@ export type WebServiceOptions = {
   now?: () => number;
   push?: Pick<WebPushOptions, "send">;
   restart?:WebRestart;
+  quota?:QuotaStore;
   maxReplayEvents?: number;
   maxQueuedBytes?: number;
 };
@@ -117,6 +119,8 @@ export class WebService {
     }
   }
   get clientCount() { return this.sockets.size; }
+  /** Remote web/PWA clients cannot relaunch the daemon, so a live listener must keep it running. */
+  get listening() { return this.server !== undefined; }
   private get stateFile() { return join(this.options.paths.webDir, "listener.json"); }
   start() { if (existsSync(this.stateFile)) {
     assertPrivateFile(this.stateFile);
@@ -160,6 +164,7 @@ export class WebService {
             },
             isReplyDisplayed:(deviceId,sessionId,replyId)=>this.replies?.isDisplayed(deviceId,sessionId,replyId)??false,
             attentionSessions:this.options.service.pushAttentionSessions ? ()=>this.options.service.pushAttentionSessions!() : undefined,
+            sessionName:id=>this.options.service.pushSessionName?.(id),
             isCurrent:attention=>this.options.service.isPushAttentionCurrent?.(attention)??false,
             ...this.options.push});
           this.unsubscribePush = this.options.service.subscribeEvents?.(event=>{
@@ -360,6 +365,15 @@ export class WebService {
         const device = this.device(r, s);
         if (!device)
           return this.response({ ok: false, code: 'device-required' }, 401);
+        if (path === '/api/quota' && r.method === 'GET') return this.options.quota ? this.response({ ok: true, ...this.options.quota.read() }) : this.response({ok:false,code:'quota-unavailable'},503);
+        const quotaRefresh = /^\/api\/quota\/(claude|codex)\/refresh$/.exec(path);
+        if (quotaRefresh && r.method === 'POST') {
+          await this.json(r);
+          if (!this.device(r,s)) return this.response({ok:false,code:'device-required'},401);
+          if (!this.options.quota) return this.response({ok:false,code:'quota-unavailable'},503);
+          const result = await this.options.quota.refresh(quotaRefresh[1] as 'claude'|'codex');
+          return this.response(result,result.ok?200:result.code==='quota-cooldown'?429:503);
+        }
         if(path==='/api/daemon/restart'&&r.method==='GET')return this.response(this.options.restart?{ok:true,...await this.options.restart.preflight(device.id)}:{ok:true,available:false,code:'restart-unavailable',recoveryCommand:'deck daemon restart'});
         if(path==='/api/daemon/restart'&&r.method==='POST'){
           const body=await this.json(r);if(!this.device(r,s))return this.response({ok:false,code:'device-required'},401);
@@ -457,6 +471,12 @@ export class WebService {
           }
           return this.response({ok:false,code:'attachment-invalid'},400);
         }
+        if (path === '/api/projects/status' && r.method === 'GET') {
+          const projectIds = url.searchParams.getAll('projectId');
+          if (!projectIds.length || projectIds.length > 100 || projectIds.some(id=>!safeId(id))) return this.response({ok:false,code:'projects-status-invalid'},400);
+          const outcome = await this.options.service.query?.('projects.status', {projectIds}) ?? {ok:false as const,code:'query-unavailable'};
+          return this.response(outcome, outcome.ok ? 200 : 400);
+        }
         if (path === '/api/sessions/status' && r.method === 'GET') {
           const sessionIds = url.searchParams.getAll('sessionId');
           if (url.searchParams.getAll('projectId').length !== 1 || sessionIds.length < 1 || sessionIds.length > 100 || sessionIds.some(id => !safeId(id))) return this.response({ ok: false, code: 'sessions-status-invalid' }, 400);
@@ -498,6 +518,21 @@ export class WebService {
           if (!safeId(readiness[1]!)) return this.response({ ok: false, code: 'session-invalid' }, 400);
           const outcome = await this.options.service.query?.('session.readiness', { sessionId: readiness[1] }) ?? { ok: false as const, code: 'query-unavailable' };
           return this.response(outcome, outcome.ok ? 200 : 404);
+        }
+        const files = /^\/api\/sessions\/([^/]+)\/files(\/content)?$/.exec(path);
+        if(files && r.method === 'GET') {
+          if(!safeId(files[1]!) || [...url.searchParams.keys()].some(key=>!['path','showIgnored','cursor'].includes(key)) || url.searchParams.getAll('path').length!==1 || url.searchParams.getAll('showIgnored').length>1 || url.searchParams.getAll('cursor').length>1 || url.searchParams.has('cursor')&&(!!files[2]||!url.searchParams.get('cursor')||url.searchParams.get('cursor')!.length>8192||!/^[A-Za-z0-9_-]+$/.test(url.searchParams.get('cursor')!)) || !['true','false',null].includes(url.searchParams.get('showIgnored')))
+            return this.response({ok:false,code:'git-invalid'},400);
+          const outcome=await this.options.service.query?.(files[2]?'project.content':'project.files',{sessionId:files[1],path:url.searchParams.get('path'),showIgnored:url.searchParams.get('showIgnored')==='true',...(url.searchParams.has('cursor')?{cursor:url.searchParams.get('cursor')}:{})}) ?? {ok:false as const,code:'git-unavailable'};
+          return this.response(outcome,outcome.ok?200:outcome.code==='session-unknown'?404:outcome.code==='git-limit'?413:outcome.code==='git-busy'?429:400);
+        }
+        const git = /^\/api\/sessions\/([^/]+)\/git(\/diff|\/content)?$/.exec(path);
+        if (git && r.method === 'GET') {
+          if (!safeId(git[1]!) || [...url.searchParams.keys()].some(key => !['section','path'].includes(key))
+            || (git[2] ? url.searchParams.getAll('section').length !== 1 || url.searchParams.getAll('path').length !== 1 : url.searchParams.size !== 0))
+            return this.response({ok:false,code:'git-invalid'},400);
+          const outcome = await this.options.service.query?.(git[2] === '/content' ? 'git.content' : git[2] ? 'git.read' : 'git.list', {sessionId:git[1], ...(git[2]?{section:url.searchParams.get('section'),path:url.searchParams.get('path')}:{})}) ?? {ok:false as const,code:'git-unavailable'};
+          return this.response(outcome, outcome.ok ? 200 : outcome.code === 'session-unknown' ? 404 : outcome.code === 'git-limit' ? 413 : outcome.code === 'git-stale' ? 409 : outcome.code === 'git-busy' ? 429 : outcome.code === 'git-unavailable' ? 503 : 400);
         }
         const artifacts = /^\/api\/sessions\/([^/]+)\/openspec(\/artifact)?$/.exec(path);
         if (artifacts && r.method === 'GET') {
@@ -558,7 +593,7 @@ export class WebService {
           for (const e of log.readAfter(after)) {
             if (events.length >= (this.options.maxReplayEvents ?? 1000))
               break;
-            events.push(e);
+            events.push(quotaEventForWeb(e));
           }
           const seq = events.at(-1)?.seq ?? Math.min(after, log.lastSeq);
           return this.response({ events, seq, hasMore: seq < log.lastSeq });
@@ -589,7 +624,7 @@ export class WebService {
     }
     const send = (e: SessionEvent) => { if(!this.records.some(d=>d.id===ws.data.deviceId&&this.activeDevice(d))){this.disconnectDevice(ws.data.deviceId);return false;} if (e.seq <= ws.data.after)
       return; const history=ws.data.chat?this.history(log):undefined;history?.apply(e);
-      const value = JSON.stringify({ type: 'event', event: e, ...(history ? {message:history.messageAt(e,ws.data.taskId)} : {}) }); if (ws.getBufferedAmount() + Buffer.byteLength(value) > (this.options.maxQueuedBytes ?? 1024 * 1024) || ws.send(value) === -1) {
+      const value = JSON.stringify({ type: 'event', event: quotaEventForWeb(e), ...(history ? {message:history.messageAt(e,ws.data.taskId)} : {}) }); if (ws.getBufferedAmount() + Buffer.byteLength(value) > (this.options.maxQueuedBytes ?? 1024 * 1024) || ws.send(value) === -1) {
       ws.send(JSON.stringify({ type: 'resync' }));
       ws.close(1013, 'Resync required');
       ws.data.unsubscribe?.();

@@ -32,6 +32,7 @@ export type SessionSubcommand =
   | { action: "prune"; dryRun: boolean; json: boolean; maxAgeDays?: number; keep?: number };
 
 export type ParsedArgs =
+  | { command: "runner-cleanup"; runner?: string; review: boolean; json: boolean; output?: string }
   | { command: "tui" }
   | { command: "doctor" }
   | { command: "claude-native-launch"; launch: { mode: "interactive" } | { mode: "resume-by-id"; sessionId: string } | { mode: "resume-latest" } }
@@ -52,6 +53,7 @@ export type ParsedArgs =
   | { command: "internal-session-daemon" }
   | { command: "internal-daemon-restart-helper"; intentPath:string }
   | { command: "internal-session-mcp" }
+  | { command: "internal-project-readiness"; hook?: true }
   | { command: "internal-child-anchor"; argv: string[] }
   | { command: "cross-launch"; flags: { changeId?: string } }
   | { command: "session"; sub: SessionSubcommand }
@@ -104,8 +106,6 @@ export type ParsedArgs =
         continue?: boolean;
         resume?: boolean;
       };
-      /** Opt-in removal of legacy Deck artifacts left by earlier versions (backed up first). */
-      cleanupLegacy?: boolean;
       /** Legacy CLI memory override. Undefined means no memory; Supermemory is the only supported backend. */
       memoryProvider?: string;
     }
@@ -119,9 +119,10 @@ export type ParsedArgs =
         | { mode: "resume-by-id"; sessionId: string }
         | { mode: "resume-latest" };
       installOnly?: boolean;
+
       dryRun?: boolean;
       localOnly?: boolean;
-      cleanupLegacy?: boolean;
+
       verbose?: boolean;
       yes?: boolean;
       memoryProvider?: "supermemory" | "none";
@@ -166,7 +167,7 @@ export function serializeCodexExecPrompt(tokens: readonly string[]): { ok: true;
  */
 function parseCodexArgs(rest: string[]): ParsedArgs {
   if (rest[0] !== "developer") {
-    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--verbose] [--cleanup-legacy] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck installs globally and writes nothing into projects; use --dry-run or --verbose for details." };
+    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--verbose] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck installs globally and writes nothing into projects; use --dry-run or --verbose for details." };
   }
 
   const tokens = rest.slice(1);
@@ -174,7 +175,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
   const deckFlagRegion = separatorIndex >= 0 ? tokens.slice(0, separatorIndex) : tokens;
   const dryRun = deckFlagRegion.includes("--dry-run");
   const localOnly = deckFlagRegion.includes("--local-only");
-  const cleanupLegacy = deckFlagRegion.includes("--cleanup-legacy");
+
   const verbose = deckFlagRegion.includes("--verbose");
   const yes = deckFlagRegion.includes("--yes");
   const installOnly = deckFlagRegion.includes("--install-only");
@@ -187,7 +188,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
       memoryProvider = value;
     }
   }
-  const deckFlags = new Set(["--dry-run", "--local-only", "--yes", "--install-only", "--cleanup-legacy", "--verbose"]);
+  const deckFlags = new Set(["--dry-run", "--local-only", "--yes", "--install-only", "--verbose"]);
   const filtered = [
     ...deckFlagRegion.filter((token) => !deckFlags.has(token) && !token.startsWith("--memory=")),
     ...(separatorIndex >= 0 ? ["--", ...tokens.slice(separatorIndex + 1)] : []),
@@ -224,7 +225,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
     ...(installOnly ? { installOnly: true } : {}),
     ...(dryRun ? { dryRun: true } : {}),
     ...(localOnly ? { localOnly: true } : {}),
-    ...(cleanupLegacy ? { cleanupLegacy: true } : {}),
+
     ...(verbose ? { verbose: true } : {}),
     ...(yes ? { yes: true } : {}),
     ...(memoryProvider ? { memoryProvider } : {}),
@@ -312,6 +313,20 @@ function parseSessionArgs(rest: string[]): ParsedArgs {
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
+  if (argv[0] === "runner" && argv[1] === "cleanup") {
+    let runner: string | undefined, output: string | undefined; let review = false, json = false;
+    for (let i = 2; i < argv.length; i++) {
+      const arg = argv[i];
+      if (arg === "--runner" && argv[i + 1] && !argv[i + 1]!.startsWith("--")) runner = argv[++i];
+      else if (arg === "--output" && argv[i + 1] && !argv[i + 1]!.startsWith("--")) output = argv[++i];
+      else if (arg === "--review") review = true;
+      else if (arg === "--plan") { /* planning is the default */ }
+      else if (arg === "--json") json = true;
+      else return { command: "error", message: "Usage: deck runner cleanup [--runner codex|claude|opencode|pi] [--plan|--review] [--json] [--output path]. Bulk confirmation is not supported." };
+    }
+    if (runner && !["codex", "claude", "opencode", "pi"].includes(runner)) return { command: "error", message: "Unsupported cleanup runner." };
+    return { command: "runner-cleanup", runner, review, json, output };
+  }
   // argv[0] is typically the runtime, argv[1] is the script
   // We skip those — the caller should pass only the user args
   const args = argv.slice(0);
@@ -335,6 +350,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (rest.length === 2 && rest[0] === "daemon-restart-helper" && rest[1]!.startsWith("/")) return {command:"internal-daemon-restart-helper",intentPath:rest[1]!};
     if (rest.length === 1 && rest[0] === "session-daemon") return { command: "internal-session-daemon" };
     if (rest.length === 1 && rest[0] === "session-mcp") return { command: "internal-session-mcp" };
+    if (rest.length === 1 && rest[0] === "project-readiness") return { command: "internal-project-readiness" };
+    if (rest.length === 2 && rest[0] === "project-readiness" && rest[1] === "--hook") return { command: "internal-project-readiness", hook: true };
     if (rest[0] === "child-anchor") {
       const argv = rest[1] === "--" ? rest.slice(2) : rest.slice(1);
       return argv.length > 0 ? { command: "internal-child-anchor", argv } : { command: "error", message: "Usage: deck internal child-anchor -- <command> [args...]" };
@@ -605,7 +622,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (rest.length === 0) {
     return {
       command: "error",
-      message: "Usage: deck pi <team> [--continue | --resume] [--memory=supermemory|none] [--cleanup-legacy]\nAvailable teams: developer",
+      message: "Usage: deck pi <team> [--continue | --resume] [--memory=supermemory|none]\nAvailable teams: developer",
     };
   }
 
@@ -624,12 +641,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let shouldContinue = false;
   let shouldResume = false;
   let memoryProvider: string | undefined;
-  let cleanupLegacy = false;
+
 
   for (const flag of flags) {
-    if (flag === "--cleanup-legacy") {
-      cleanupLegacy = true;
-    } else if (flag === "--continue") {
+    if (flag === "--continue") {
       shouldContinue = true;
     } else if (flag.startsWith("--continue=")) {
       const value = parseBooleanFlag(flag.slice("--continue=".length));
@@ -676,7 +691,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       ...(shouldContinue ? { continue: true } : {}),
       ...(shouldResume ? { resume: true } : {}),
     },
-    ...(cleanupLegacy ? { cleanupLegacy: true } : {}),
+
     ...(memoryProvider ? { memoryProvider } : {}),
   };
 }

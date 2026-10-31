@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createOpenCodeRunnerAdapter } from "./runner-adapter";
+import { getDefaultDeckConfig } from '@deck/core';
 
 describe("opencode / detectDeckInstall (T2.10)", () => {
   let tmpHome: string;
@@ -98,5 +99,23 @@ describe("opencode / detectDeckInstall (T2.10)", () => {
     expect(status.managedPaths).toContain(join(root, "opencode.json"));
 
     rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it("detects the same explicit root that installation and repair use", async () => {
+    const root = join(tmpHome, 'custom-opencode'); mkdirSync(root);
+    writeFileSync(join(root, 'opencode.json'), '{"agent":{}}');
+    const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: root });
+    expect((await adapter.detectDeckInstall!({})).managedPaths).toContain(join(root, 'opencode.json'));
+  });
+
+  it("uses the effective environment override for native installation plans", () => {
+    const previous = process.env.OPENCODE_CONFIG_DIR;
+    const root = join(tmpHome, 'environment-opencode');
+    process.env.OPENCODE_CONFIG_DIR = root;
+    try {
+      const adapter = createOpenCodeRunnerAdapter();
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: tmpHome, environmentId: 'opencode-development', deckConfig: getDefaultDeckConfig(), capabilityIds: [] });
+      expect(plan.mutationPreview?.some(entry => entry.path === join(root, 'opencode.json'))).toBe(true);
+    } finally { if (previous === undefined) delete process.env.OPENCODE_CONFIG_DIR; else process.env.OPENCODE_CONFIG_DIR = previous; }
   });
 });

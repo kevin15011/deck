@@ -164,7 +164,7 @@ describe("buildDeveloperTeamManifest — memoryBundle flow", () => {
     // is set when a memoryProvider with valid auth probe is passed, but in a unit test
     // context we cannot easily mock the full provider + auth probe flow.
     //
-    // The positive path is covered by developer-team-install.test.ts which tests
+    // The positive path is covered by developer-team-install.int.test.ts which tests
     // buildOpenCodeDeveloperTeamInstallPlan with memoryInjection directly.
     // That test verifies plan.memoryBundle is non-null when memoryInjection is provided.
     //

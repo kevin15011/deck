@@ -28,6 +28,8 @@ export async function buildWebAssets(): Promise<WebAssets> {
     }
     if (!assets['/app.js'] || !assets['/app.css'])
         throw new Error('Web build did not emit JavaScript and CSS');
+    assets['/app.css'] = { ...assets['/app.css']!, body: String(assets['/app.css']!.body) + '\n' + await readFile(resolve(import.meta.dir, '../apps/web/src/font-faces.css'), 'utf8') };
+    for (const font of ['inter', 'geist', 'jetbrains-mono', 'fira-code', 'nunito-sans', 'space-grotesk', 'source-serif-4', 'lora', 'ibm-plex-mono']) assets[`/fonts/${font}.woff2`] = { body: new Uint8Array(await readFile(resolve(import.meta.dir, `../apps/web/src/assets/fonts/${font}.woff2`))), contentType: 'font/woff2' };
     assets['/service-worker.js'] = {body: await readFile(resolve(import.meta.dir, '../apps/web/src/service-worker.js'), 'utf8'), contentType: 'text/javascript; charset=utf-8'};
     assets['/manifest.webmanifest'] = {body: JSON.stringify({id:'/',name:'Deck workspace',short_name:'Deck',start_url:'/',scope:'/',display:'standalone',icons:[{src:'/icon.svg',sizes:'any',type:'image/svg+xml',purpose:'any'},...[192,512].map(size=>({src:`/icon-${size}.png`,sizes:`${size}x${size}`,type:'image/png',purpose:'any'}))]}),contentType:'application/manifest+json'};
     for(const size of [180,192,512])assets[size===180?'/apple-touch-icon.png':`/icon-${size}.png`]={body:new Uint8Array(await readFile(resolve(import.meta.dir,`../apps/web/src/assets/pwa/icon-${size}.png`))),contentType:'image/png'};

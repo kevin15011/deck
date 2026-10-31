@@ -76,3 +76,12 @@ test.each(['2.1.295','2.1.297'])('runtime init drift %s never exposes steering',
 test('older host inputs retain the original stdin lifecycle and no steering surface',async()=>{
  const t=await started('2.1.296',false);expect(t.child.stdinEnded).toBe(true);expect(t.handle.steer).toBeUndefined();t.finish();await t.handle.done;
 });
+test('overflow resolves pending no-query input as unconfirmed and removes its target without replay',async()=>{
+ const t=await started(),pending=t.handle.steer!(t.message);
+ t.child.stdout('x'.repeat(16*1024*1024+1));
+ expect(await pending).toEqual({state:'unknown',reason:'native-transport-unconfirmed'});
+ expect(t.handle.steeringTarget?.()).toBeUndefined();
+ expect(await t.handle.done).toMatchObject({status:'failed',error:'claude-line-too-long'});
+ expect(t.child.stdin).toHaveLength(2);expect(t.child.terminations).toHaveLength(1);
+ await t.handle.close();
+});

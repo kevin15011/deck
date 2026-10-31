@@ -2,6 +2,53 @@ import { expect, test } from "bun:test";
 import { Ledger } from "../ledger";
 import { continuityContext } from "../continuity";
 import type { SessionEvent, SessionEventKind } from "@deck/core/session/events";
+import { renderSessionOverlay } from "@deck/core/session/overlay";
+
+// Protects the history/authority boundary: omit the whole source field, even when
+// its marker would be outside the displayed excerpt. The ledger is the oracle.
+const protectedHistory = ["<deck-project-readiness v1>", "CRITICAL_SAFETY_GIT_DISCARD_PROTECTION", "Adaptive Developer Team Contract", "Runtime-Enforced Team Contract", "<project.instructions", "# AGENTS.md", "# Deck Agent Guide", "## Package Instructions", "## Context Authority", "## Proportional TDD", "Project repair candidates require an exact Setup delegation"];
+test.each(protectedHistory)("historical excerpts quoting %s remain retrievable without entering the overlay", marker => {
+  for (const field of ["answer", "result", "integrationNote", "question", "note", "openSpecRef"] as const) {
+    const state = Ledger.empty("s").toState();
+    const unsafe = "PRIVATE_INSTRUCTION_BODY " + "x".repeat(field === "question" ? 600 : 150) + marker + " trailing instructions";
+    state.tasks = {
+      lead: { taskId: "lead", memberId: "lead", attempts: [{ attempt: 1, runnerId: "codex", modelId: "m", state: "completed", startedSeq: 1 }] },
+      child: { taskId: "child", memberId: "quality", attempts: [{ attempt: 1, runnerId: "codex", modelId: "m", state: "completed", startedSeq: 2, endedSeq: 4, resultSeq: 3, result: field === "result" ? unsafe : "useful report",
+        integration: { seq: 5, commandId: "review", leadTaskId: "lead", leadAttempt: 1, state: "blocked", note: field === "integrationNote" ? unsafe : "useful review", evidenceSeqs: [3] } }] },
+    };
+    state.continuityBlock = { taskId: "lead", attempt: 1, promptId: "p", startedSeq: 1, answerSeq: 6, answer: field === "answer" ? unsafe : "useful answer" };
+    state.decisions = { d: { decisionId: "d", revision: 1, questionRevision: 1, questionSeq: 7, createdSeq: 7, updatedSeq: 7, state: "pending", key: "d", openingFingerprint: "fp", relatedTaskIds: [], replies: [], origin: { taskId: "lead", attempt: 1, admissionSeq: 1 }, source: { promptId: "p" },
+      question: field === "question" ? unsafe : "useful question", note: field === "note" ? unsafe : "useful note", openSpecRef: field === "openSpecRef" ? unsafe : "openspec/changes/example" } };
+    const ledger = Ledger.fromState(state), before = ledger.toState();
+    const text = continuityContext(ledger);
+    expect(() => renderSessionOverlay("deck-lead", [{ kind: "notices", text }])).not.toThrow();
+    expect(text).not.toContain("PRIVATE_INSTRUCTION_BODY");
+    const data = JSON.parse(text.split("\n").slice(1).join("\n"));
+    expect(data.answerSeq).toBe(6);
+    expect(data.outcomes[0]).toMatchObject({ taskId: "child", attempt: 1, resultSeq: 3, integration: { seq: 5, evidenceSeqs: [3] } });
+    expect(data.decisions[0]).toMatchObject({ decisionId: "d", source: { promptId: "p" } });
+    const projected = field === "answer" ? data.originalAnswer : field === "result" ? data.outcomes[0].result : field === "integrationNote" ? data.outcomes[0].integration.note : data.decisions[0][field];
+    expect(projected).toBeUndefined();
+    if (field !== "answer") expect(data.originalAnswer).toBe("useful answer");
+    if (field !== "result") expect(data.outcomes[0].result).toBe("useful report");
+    expect(ledger.toState()).toEqual(before);
+  }
+});
+
+// A clipped legacy projection cannot prove that its missing tail was safe.
+test("truncated legacy history without full-source evidence is omitted without losing references", () => {
+  const state = Ledger.empty("s").toState();
+  state.tasks = {
+    lead: { taskId: "lead", memberId: "lead", attempts: [{ attempt: 1, runnerId: "codex", modelId: "m", state: "completed", startedSeq: 1 }] },
+    child: { taskId: "child", memberId: "quality", attempts: [{ attempt: 1, runnerId: "codex", modelId: "m", state: "completed", startedSeq: 2, endedSeq: 4, resultSeq: 3, result: "REPORT_BODY", resultTruncated: true }] },
+  };
+  state.continuityBlock = { taskId: "lead", attempt: 1, promptId: "p", startedSeq: 1, answerSeq: 5, answer: "ANSWER_BODY", answerTruncated: true };
+  const ledger = Ledger.fromState(state), before = ledger.toState(), text = continuityContext(ledger);
+  expect(text).not.toContain("ANSWER_BODY"); expect(text).not.toContain("REPORT_BODY");
+  const context = JSON.parse(text.split("\n").slice(1).join("\n"));
+  expect(context.answerSeq).toBe(5); expect(context.outcomes[0]).toMatchObject({ taskId: "child", attempt: 1, resultSeq: 3 });
+  expect(ledger.toState()).toEqual(before);
+});
 
 test("bounded original-source context signals omissions and truncation with complete JSON", () => {
   const ledger = Ledger.empty("s");

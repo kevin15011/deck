@@ -5,6 +5,11 @@ import type { CostLedger } from './cost-guard';
 import { isCanonicalSupermemoryProjectScope } from '../../packages/core/src/memory/canonical-supermemory-project';
 import { sha256, validRun, FAKE_SECRETS, CANARIES, scrub, fail, foreignCanary } from './security';
 import { validateFilters, nativeOrRuntimeId, rejectAccountEndpoint, namespaceConfiguration } from './request-policy';
+export type TransportTiming = { now(): number; schedule(ms: number, callback: () => void): () => void };
+const realTransportTiming: TransportTiming = {
+    now: () => performance.now(),
+    schedule: (ms, callback) => { const timer = setTimeout(callback, ms); return () => clearTimeout(timer); },
+};
 export type Wire = (url: URL, init: RequestInit) => Promise<Response>;
 /** Closed, content-free classification; never retain a native exception or body. */
 export class TransportFailure extends Error {
@@ -102,6 +107,7 @@ export class NamespaceTransport {
     #now: () => number;
     #deadlineAtMs: number;
     #requestTimeoutMs: number;
+    #timing: TransportTiming;
     constructor(input: {
         run: string;
         bindings: Record<string, string>;
@@ -119,6 +125,7 @@ export class NamespaceTransport {
         now?: () => number;
         deadlineAtMs?: number;
         requestTimeoutMs?: number;
+        timing?: TransportTiming;
     }) {
         if (!validRun(input.run) || !Number.isSafeInteger(input.budget) || input.budget < 1)
             fail('invalid_transport_manifest');
@@ -130,6 +137,7 @@ export class NamespaceTransport {
                 fail('invalid_namespace_binding');
         this.#run = input.run;
         this.#now = input.now ?? Date.now;
+        this.#timing = input.timing ?? realTransportTiming;
         this.#deadlineAtMs = input.deadlineAtMs ?? Infinity;
         this.#requestTimeoutMs = input.requestTimeoutMs ?? 15000;
         this.#costLedger = input.costLedger;
@@ -278,7 +286,7 @@ export class NamespaceTransport {
             fail('namespace_visibility_unknown');
     }
     fetch = async (input: URL | string, init: RequestInit = {}) => {
-        const start = performance.now(), before = this.events.length;
+        const start = this.#timing.now(), before = this.events.length;
         let body: any = {};
         let endpoint = 'invalid-url';
         try {
@@ -320,7 +328,7 @@ export class NamespaceTransport {
             if (this.events.length === before) {
                 const reason = e instanceof Error && /^[a-z_]+$/.test(e.message) ? e.message : 'request_rejected';
                 const category = reason === 'eval_credential_egress_blocked' ? 'credential' : reason === 'synthetic_secret_egress_blocked' ? 'secret' : endpoint === '/v3/settings' ? 'account_settings' : ['account_endpoint_forbidden', 'account_modification_forbidden'].includes(reason) ? 'account_scope' : reason === 'namespace_not_in_run_allowlist' ? 'legacy_or_inactive_scope' : ['request_budget_exhausted', 'estimated_cost_guard_stopped'].includes(reason) ? 'budget' : 'endpoint_or_schema';
-                this.blocked.push({ endpoint: this.sanitize(endpoint), method, phase: this.phase, tag: '', preHash: sha256(this.sanitize(String(body?.containerTag ?? body?.containerTags ?? ''))), postHash: '', requestHash: sha256(this.sanitize(JSON.stringify(body))), durationMs: performance.now() - start, inputTokenEstimate: 0, blocked: true, error: reason, category, profileWithQuery: endpoint === '/v4/profile' && !!body?.q });
+                this.blocked.push({ endpoint: this.sanitize(endpoint), method, phase: this.phase, tag: '', preHash: sha256(this.sanitize(String(body?.containerTag ?? body?.containerTags ?? ''))), postHash: '', requestHash: sha256(this.sanitize(JSON.stringify(body))), durationMs: this.#timing.now() - start, inputTokenEstimate: 0, blocked: true, error: reason, category, profileWithQuery: endpoint === '/v4/profile' && !!body?.q });
             }
             throw e;
         }
@@ -445,8 +453,8 @@ export class NamespaceTransport {
         if (url.pathname === '/v3/documents' || configurationWrite)
             this.writeIntents.add(tag);
         this.#changed?.();
-        const start = performance.now();
-        let egressEnded = 0;
+        const start = this.#timing.now();
+        let egressEnded: number | undefined;
         let done!: () => void;
         const pending = new Promise<void>(resolve => { done = resolve; });
         this.#pending.add(pending);
@@ -454,7 +462,7 @@ export class NamespaceTransport {
             // Identity/account override headers are never forwarded, including all x-sm-* headers.
             const headers = new Headers({ accept: 'application/json', 'content-type': 'application/json', authorization: `Bearer ${key}` });
             if (this.#now() >= this.#deadlineAtMs) fail('evaluation_deadline');
-            const { response, text } = await boundedWire(this.#wire, url, { ...init, method, body: method === 'GET' || method === 'DELETE' && !configurationWrite ? undefined : mapped, redirect: 'error', headers }, Math.min(this.#requestTimeoutMs, this.#deadlineAtMs - this.#now()));
+            const { response, text } = await boundedWire(this.#wire, url, { ...init, method, body: method === 'GET' || method === 'DELETE' && !configurationWrite ? undefined : mapped, redirect: 'error', headers }, Math.min(this.#requestTimeoutMs, this.#deadlineAtMs - this.#now()), this.#timing);
             event.status = response.status;
             if (response.status >= 300 && response.status < 400)
                 fail('redirect_rejected');
@@ -490,7 +498,7 @@ export class NamespaceTransport {
                 else
                     this.violations.push({ kind: 'write_ack_without_owned_id', hash: sha256(tag) });
             }
-            egressEnded = performance.now();
+            egressEnded = this.#timing.now();
             if (url.pathname === '/v3/documents' && response.ok)
                 await this.verifyFirstWrite(tag);
             const responseHeaders = new Headers();
@@ -502,7 +510,7 @@ export class NamespaceTransport {
             return new Response([204, 205].includes(response.status) ? null : raw, { status: response.status, headers: responseHeaders });
         }
         catch (e) {
-            egressEnded ||= performance.now();
+            egressEnded ??= this.#timing.now();
             event.error = e instanceof Error && ['redirect_rejected', 'namespace_visibility_unknown'].includes(e.message) ? e.message : 'egress_failed';
             if (e instanceof TransportFailure) { event.transportFailure = e.kind; throw e; }
             throw new Error(event.error);
@@ -518,7 +526,7 @@ export class NamespaceTransport {
                     event.error = 'namespace_visibility_unknown';
                 }
             }
-            event.durationMs = (egressEnded || performance.now()) - start;
+            event.durationMs = (egressEnded ?? this.#timing.now()) - start;
             event.completed = true;
             try { this.#changed?.(); } finally { this.#pending.delete(pending); done(); }
         }
@@ -561,9 +569,9 @@ export function simulatedWire(): Wire {
 
 /** Bound both headers and body consumption, even for a test wire that ignores abort.
  * A timed-out attempt remains charged. Late resolution cannot mutate event/ownership state. */
-async function boundedWire(wire: Wire, url: URL, init: RequestInit, timeoutMs: number) {
+async function boundedWire(wire: Wire, url: URL, init: RequestInit, timeoutMs: number, timing: TransportTiming) {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) fail('evaluation_deadline');
-    const timeout = new AbortController(), timer = setTimeout(() => timeout.abort(), Math.max(1, timeoutMs));
+    const timeout = new AbortController(), cancelTimeout = timing.schedule(Math.max(1, timeoutMs), () => timeout.abort());
     const signal = AbortSignal.any([timeout.signal, ...(init.signal ? [init.signal] : [])]);
     let abort!: () => void;
     try {
@@ -574,5 +582,5 @@ async function boundedWire(wire: Wire, url: URL, init: RequestInit, timeoutMs: n
             aborted,
             (async () => { try { const response = await wire(url, { ...init, signal }); return { response, text: await response.text() }; } catch { throw new TransportFailure(signal.aborted ? abortKind() : 'network'); } })(),
         ]);
-    } finally { clearTimeout(timer); if (abort) signal.removeEventListener('abort', abort); }
+    } finally { cancelTimeout(); if (abort) signal.removeEventListener('abort', abort); }
 }

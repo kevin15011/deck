@@ -1,4 +1,4 @@
-import { parseTOML, type AST } from "toml-eslint-parser";
+import { getStaticTOMLValue, parseTOML, type AST } from "toml-eslint-parser";
 import {
   isWebSearchProviderDescriptor,
   WEB_SEARCH_CAPABILITY_ID,
@@ -21,7 +21,7 @@ export type CodexMcpServer =
   | { id: CodexMcpServerId; transport: "streamable-http"; url: string; bearerTokenEnvVar?: string; envHttpHeaders?: Readonly<Record<string, string>>; httpHeaders?: Readonly<Record<string, string>> };
 
 export type CodexMcpMergeResult =
-  | { status: "unchanged" | "updated"; content: string; configured: readonly CodexMcpServerId[] }
+  | { status: "unchanged" | "updated"; content: string; configured: readonly CodexMcpServerId[]; adoptedServerIds?: readonly string[] }
   | { status: "blocked"; content: string; collisions: readonly CodexMcpServerId[]; diagnostics: readonly string[] };
 
 const SECRET = /(?:token|secret|password|credential|api[-_]?key)/i;
@@ -67,22 +67,27 @@ function scalar(value: unknown): unknown {
 
 function existingServers(source: string): Map<string, object> {
   const ast = parseTOML(source, { tomlVersion: "1.0.0" });
-  const result = new Map<string, object>();
-  for (const node of ast.body[0]?.body ?? []) {
-    if (node.type !== "TOMLTable" || node.resolvedKey.length < 2 || node.resolvedKey[0] !== "mcp_servers") continue;
-    const fields = Object.fromEntries(node.body.map((entry) => [entry.key.keys.map((key) => key.type === "TOMLBare" ? key.name : key.value).join("."), scalar(entry.value)]));
-    const serverId = String(node.resolvedKey[1]);
-    if (node.resolvedKey.length === 2) {
-      result.set(serverId, { ...(result.get(serverId) ?? {}), ...fields });
-      continue;
+  // Compare the complete subtree, including dotted keys, inline tables and nested
+  // tool policies. A partial projection must never authorize legacy adoption.
+  const document = getStaticTOMLValue(ast) as Record<string, unknown>;
+  const servers = document.mcp_servers;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) return new Map();
+  return new Map(Object.entries(servers).map(([id, value]) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Invalid MCP server table.");
     }
-    if (node.resolvedKey.length === 3) {
-      const server = { ...(result.get(serverId) ?? {}) } as Record<string, unknown>;
-      server[String(node.resolvedKey[2])] = fields;
-      result.set(serverId, server);
-    }
-  }
-  return result;
+    return [id, value];
+  }));
+}
+
+/** A receipt span must account for the entire server, including nonadjacent tables. */
+export function codexMcpReceiptCoversServer(source: string, receiptContent: string, id: string): boolean {
+  try {
+    const full = existingServers(source).get(id);
+    const recorded = existingServers(receiptContent).get(id);
+    return full !== undefined && recorded !== undefined
+      && JSON.stringify(canonical(full)) === JSON.stringify(canonical(recorded));
+  } catch { return false; }
 }
 
 export function inspectCodexMcpServerIds(source: string): readonly string[] {
@@ -216,7 +221,7 @@ function validate(server: CodexMcpServer): void {
     }
   }
   const serialized = JSON.stringify(server);
-  if (/(?:sk-|Bearer\s+)[A-Za-z0-9._-]{8,}/i.test(serialized)) throw new Error(`Inline credentials are forbidden for ${server.id}.`);
+  if (/\b(?:sk-|Bearer\s+)[A-Za-z0-9._-]{8,}/i.test(serialized)) throw new Error(`Inline credentials are forbidden for ${server.id}.`);
 }
 
 function render(server: CodexMcpServer): string {
@@ -310,7 +315,7 @@ function repairSelectedToolServers(source: string, desired: readonly CodexMcpSer
   return source;
 }
 
-export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpServer[], options: { repairSelectedToolIds?: readonly string[] } = {}): CodexMcpMergeResult {
+export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpServer[], options: { repairSelectedToolIds?: readonly string[]; ownedServerIds?: readonly string[]; recordedServerIds?: readonly string[]; allowLegacyMigration?: boolean } = {}): CodexMcpMergeResult {
   const originalSource = source;
   let existing: Map<string, object>;
   for (const server of desired) {
@@ -319,20 +324,37 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
     }
   }
   try {
-    if (options.repairSelectedToolIds?.length) source = repairSelectedToolServers(source, desired, options.repairSelectedToolIds);
+    if (options.repairSelectedToolIds?.length) source = repairSelectedToolServers(source, desired, options.repairSelectedToolIds.filter(id => options.ownedServerIds?.includes(id)));
     existing = existingServers(source);
   } catch { return { status: "blocked", content: originalSource, collisions: [], diagnostics: ["Malformed TOML cannot be changed safely."] }; }
   const managed = managedServerIds(source);
   const desiredIds = new Set<string>(desired.map((server) => server.id));
-  const replaceManaged = new Set<string>([...managed].filter((id) => !desiredIds.has(id)));
+  const proven = new Set(options.ownedServerIds ?? []);
+  const replaceManaged = new Set<string>([...managed].filter((id) => !desiredIds.has(id) && proven.has(id)));
+  const adoptedServerIds: string[] = [];
   const collisions: CodexMcpServerId[] = [];
   const missing: CodexMcpServer[] = [];
   for (const server of desired) {
     const present = existing.get(server.id);
     if (!present) missing.push(server);
     else if (JSON.stringify(canonical(present)) !== JSON.stringify(canonical(normalized(server)))) {
-      if (managed.has(server.id)) { replaceManaged.add(server.id); missing.push(server); }
+      // Older installs wrote these exact marked shapes before contribution receipts existed.
+      // Never let legacy recognition override a recorded digest or adopt custom launch fields.
+      const legacy = options.allowLegacyMigration !== false && !options.recordedServerIds?.includes(server.id)
+        && server.transport === "stdio"
+        && source.includes(`# deck-codex-mcp:${server.id}\n[mcp_servers.${server.id}]\n`)
+        && JSON.stringify(canonical(present)) === JSON.stringify(canonical(
+          server.id === "codebase-memory" ? { command: server.command }
+          : server.id === "context7" ? { url: "https://mcp.context7.com/mcp", env_http_headers: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } }
+          : undefined));
+      if (managed.has(server.id) && (proven.has(server.id) || legacy)) {
+        replaceManaged.add(server.id); missing.push(server);
+        if (legacy && !proven.has(server.id)) adoptedServerIds.push(server.id);
+      }
       else collisions.push(server.id);
+    } else if (managed.has(server.id)) {
+      // The entire parsed table matches the current contribution; formatting is not ownership.
+      adoptedServerIds.push(server.id);
     }
   }
   if (collisions.length > 0) return {
@@ -349,12 +371,12 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
       return `Existing user MCP server '${id}' conflicts in ${differences.join(", ")}. Back up your Codex config.toml, then align this entry with the selected tool or rename it before retrying. Deck will not overwrite it.`;
     }),
   };
-  if (missing.length === 0 && replaceManaged.size === 0) return { status: source === originalSource ? "unchanged" : "updated", content: source, configured: desired.map((server) => server.id) };
+  if (missing.length === 0 && replaceManaged.size === 0) return { status: source === originalSource ? "unchanged" : "updated", content: source, configured: desired.map((server) => server.id), adoptedServerIds };
   const base = stripManagedServerBlocks(source, replaceManaged);
   const separator = base.length === 0 || base.endsWith("\n") ? "" : "\n";
   const content = `${base}${separator}${missing.map(render).join("\n")}`;
   try { existingServers(content); } catch { return { status: "blocked", content: originalSource, collisions: [], diagnostics: ["The MCP TOML edit did not reparse."] }; }
-  return { status: "updated", content, configured: desired.map((server) => server.id) };
+  return { status: "updated", content, configured: desired.map((server) => server.id), adoptedServerIds };
 }
 
 export function buildCodexMcpServers(input: {
@@ -370,6 +392,8 @@ export function buildCodexMcpServers(input: {
   deckMemoryCommand?: readonly string[];
   /** Absolute, verified Context Mode executable; a bare PATH name is never written. */
   contextModeCommand?: string;
+  /** Absolute verified shared Context7 executable. */
+  context7Command?: string;
   /** Absolute, verified Codebase Memory executable (shared install or Deck-owned pinned release). */
   codebaseMemoryCommand?: string;
   /** Provider selection is validated by the CLI composition root. */
@@ -385,7 +409,7 @@ export function buildCodexMcpServers(input: {
   /** Absolute resolved executable for the provider command; a bare PATH name is used only when absent. */
   webSearchCommand?: string;
 }): { servers: readonly CodexMcpServer[]; gaps: readonly string[] } {
-  const selected = new Set(input.packageIds);
+  const selected = new Set(input.packageIds.filter(id => id !== "context-mode" && id !== "serena"));
   const servers: CodexMcpServer[] = [];
   const gaps: string[] = [];
   if (selected.has("context-mode")) {
@@ -393,7 +417,12 @@ export function buildCodexMcpServers(input: {
     else gaps.push("context-mode-not-ready");
   }
   if (selected.has("codebase-memory")) {
-    if (isAbsolutePinnedCommand(input.codebaseMemoryCommand)) servers.push({ id: "codebase-memory", transport: "stdio", command: input.codebaseMemoryCommand });
+    if (isAbsolutePinnedCommand(input.codebaseMemoryCommand)) servers.push({
+      id: "codebase-memory",
+      transport: "stdio",
+      command: input.codebaseMemoryCommand,
+      envVars: ["CBM_RUNTIME_DIR", "CBM_CACHE_DIR", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "TMPDIR"],
+    });
     else gaps.push("codebase-memory-not-ready");
   }
   if (selected.has("serena")) {
@@ -411,7 +440,10 @@ export function buildCodexMcpServers(input: {
       gaps.push("serena-proxy-not-ready");
     }
   }
-  if (selected.has("context7")) servers.push({ id: "context7", transport: "streamable-http", url: "https://mcp.context7.com/mcp", envHttpHeaders: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } });
+  if (selected.has("context7")) {
+    if (isAbsolutePinnedCommand(input.context7Command)) servers.push({ id: "context7", transport: "stdio", command: input.context7Command });
+    else gaps.push("context7-not-ready");
+  }
   // The official plugin owns memory and derives its repository tag per launch, so a global install needs no project scope.
   if (input.memoryProvider === "supermemory") gaps.push("supermemory-raw-mcp-disabled");
   // Explicit memory tools ride the Deck loopback host; the entry is inert without the loopback variables.

@@ -1,63 +1,106 @@
+import { useWelcomeMotion } from './welcome-motion';
+import { useDrawerMotion } from './drawer-motion';
+import { SessionLoading } from './session-loading';
+import { useUserMessageMotion } from './user-message-motion';
+import { useActiveIndicator, useViewMotion } from './view-motion';
+import { ApprovalChip } from './session-approvals';
+import { validProjectActivities, type ProjectActivity } from '../../../packages/core/src/session/activity-summary';
+import type { ProjectStatus } from './session-indicators';
+import { GitDiff } from './git-diff';
+import { QuotaSection } from './quota';
 import {useDeckHistory,type ChatAnchor,type DeckOverlay,routeURL,sameRoute} from './navigation';
 import {RestartDeckDialog} from './restart-deck';
 import {useInstallDeck,DeckMenu,InstallDeckDialog} from './install-deck';
-import { UnreadReplies, DisplayedReply, useLeadReplies, validReplyId } from './lead-replies';
-import type { LeadReply } from '../../../packages/core/src/session/lead-replies';
-import { PushNotifications, usePushPresence, sessionFromURL } from './push-notifications';
+import { DisplayedReply, useDisplayedReplies, validReplyId } from './lead-replies';
+import { usePushNotifications, NotificationsDialog, usePushPresence, sessionFromURL } from './push-notifications';
 import { DraftBoundary, DraftStore } from './draft-boundary';
 import { useChatHistory } from './chat-history';
+import { TurnFailureMessage } from './turn-failure';
 import { Approvals, AutoApprovalMessage } from './approvals';
 import { QuestionAnswerMessage } from './question-answer';
 import { QuestionDock, type Question, type QuestionDrafts } from './questions';
 import { Avatar, agentProfile } from './subagent-parts';
 import {CurrentTurnAction,SteeringStatus,steeringRunnerLabel} from "./steering";
-import { Decisions, DecisionOrigin, useDecisions, replySelectionStale, type DecisionSelection, type DecisionView } from "./decisions";
+import { Decisions, DecisionHistory, DecisionOrigin, useDecisions, replySelectionStale, type DecisionSelection, type DecisionView } from "./decisions";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { sessionGrants, conversationEvents, emptyState, pairingToken, type ViewState } from './state';
-import { Markdown } from './markdown';
+import { projectPromptDelivery, sessionGrants, conversationEvents, emptyState, pairingToken, type ViewState } from './state';
+import { TranscriptMarkdown, useTranscriptRendering } from './transcript-rendering';
+import { MessageCopy } from './message-copy';
 import { MessageInput } from './message-input';
+import { chooseEscapeAction, composerEnterSubmits, recallAndRestore, interruptAndRecall, useComposerKeyboard } from './composer-keyboard';
 import { installMobileViewport } from './mobile-viewport';
 import { leadProgress, LeadProgress, type PendingPrompt } from './lead-progress';
-import { Activity, OpenSpec, Subagents, Tabs, hasWorkingSubagent, type WorkspaceTab } from './workspace';
+import { projectContextWindows } from './context-window';
+import { SecondaryInfoProvider } from './secondary-info';
+import { Activity, Subagents, Tabs, activeSubagentCount, type WorkspaceTab } from './workspace';
 import { NavigationIcon, ProjectNavigation, type ProjectHistory } from './project-navigation';
 import { WorkspaceDialog, type WorkspaceDialogKind } from './workspace-dialogs';
 import { SessionControls, useSessionPreparation } from './session-controls';
 import { sessionIdOf, sessionName, type Project, type WorkspaceSession } from './workspace-types';
 import { attachmentURL, clipboardImages, imageDisplayName, imageMimeType, insertPastedText, ImageDraftStrip, ImagePicker, ImagePreview, ImageReferences, publicImages, useImageDrafts, type ImageAttachment, type PreviewImage } from './image-attachments';
-import { PromptQueue, usePromptInbox } from './prompt-queue';
+import { PromptQueue, usePromptInbox, type QueuedPrompt } from './prompt-queue';
 import { leadActivityFromEvents, useReadMarkers, VisibleReply } from './status-indicator';
 import { installMotion } from './motion-dom';
 import { DeckBrand } from './deck-logo';
 import { readTheme, persistTheme, type Theme } from './theme';
-import { ThemeSelect } from './theme-select';
+import {readFont,readSplit,savePreference,type Font} from './preferences';
 import './style.css';
+import './themes.css';
 installMotion();
 const initialToken = pairingToken(window.location, window.history);
 const initialTheme = readTheme();
 document.documentElement.dataset.theme = initialTheme;
+const initialFont = readFont();
+document.documentElement.dataset.font = initialFont;
 export function App() {
     useLayoutEffect(() => installMobileViewport(document.documentElement), []);
     const navigation=useDeckHistory(),nav=navigation.controller,route=navigation.entry.route;
     const install=useInstallDeck();
     const [routeReady,setRouteReady]=useState('');
+    const [routeFailure,setRouteFailure]=useState<{key:string;message:string}>();
     const [restoreTarget,setRestoreTarget]=useState<{key:string;generation:number;session:string;anchor?:ChatAnchor;reply?:string;opener?:HTMLElement}>();
+    const restoredFocus=useRef<{key:string;generation:number;focus:()=>void}|undefined>(undefined);
     const overlayOpeners=useRef(new Map<string,HTMLElement>()),lastRoute=useRef(navigation.entry);
     const dialogToken=useRef(0),dialogGeneration=useRef(0);
     const dialogRenderToken=dialogToken.current,dialogRenderGeneration=dialogGeneration.current;
     const { markers: readMarkers, acknowledge } = useReadMarkers();
     const [hydratedSession, setHydratedSession] = useState('');
     const historiesRef = useRef<Record<string, ProjectHistory>>({});
+    const [font,setFont] = useState<Font>(initialFont);
+    const [split,setSplit] = useState(readSplit);
+    useLayoutEffect(()=>{ document.documentElement.dataset.font=font; savePreference('deck.font',font); },[font]);
+    useEffect(()=>savePreference('deck.pane-split',String(split)),[split]);
     const [theme, setTheme] = useState<Theme>(initialTheme);
     useLayoutEffect(() => {
         persistTheme(theme);
     }, [theme]);
     const [paired, setPaired] = useState(false), [selected, setSelected] = useState(''), [view, setView] = useState<ViewState>(emptyState), [error, setError] = useState(''), [connection, setConnection] = useState('Connecting'), [busy, setBusy] = useState(false), [code, setCode] = useState(''), [connecting, setConnecting] = useState(true);
     const [closingSession, setClosingSession] = useState('');
+    const [reconnectAttempt, setReconnectAttempt] = useState('');
+    const [connectionNotice, setConnectionNotice] = useState({session:'',text:''});
+    useEffect(() => {
+        setConnectionNotice({session:selected,text:''});
+        if (connection === 'Connected') { setReconnectAttempt(''); return; }
+        const timer = setTimeout(() => setConnectionNotice({session:selected,text:connection}), 1500);
+        return () => clearTimeout(timer);
+    }, [selected, connection === 'Connected']);
+    const visibleConnection = connectionNotice.session === selected && connectionNotice.text ? connection : '';
+    // Opening/closing a presentation overlay does not invalidate the already resolved chat.
+    const overlayTransition = lastRoute.current.key !== navigation.entry.key && routeReady === lastRoute.current.key
+        && selected === (route.session ?? '') && !!(lastRoute.current.route.overlay || route.overlay)
+        && sameRoute({...lastRoute.current.route,overlay:undefined},{...route,overlay:undefined})
+        && JSON.stringify(lastRoute.current.route.anchor) === JSON.stringify(route.anchor);
+    const routeInteractive = routeReady === navigation.entry.key || overlayTransition;
+    // The route is immediate presentation intent; selected owns validated data.
+    const targetSession = route.session ?? '';
+    const routeLoadError = routeFailure?.key === navigation.entry.key ? routeFailure.message : undefined;
+    const sessionOpening = targetSession !== selected || !!targetSession && (!routeInteractive || hydratedSession !== targetSession || !!routeLoadError);
     const [actionSession, setActionSession] = useState<WorkspaceSession>();
     const removedSessions = useRef(new Set<string>()), removingSessions = useRef(new Set<string>()), sessionMutation = useRef(0);
     const [projects, setProjects] = useState<Project[]>([]), [projectId, setProjectId] = useState(''), [dialogKind, setDialogKind] = useState<WorkspaceDialogKind>(), [reconnectRevision, setReconnectRevision] = useState(0);
     const activeProjectId = useRef(projectId), projectsRef = useRef(projects); activeProjectId.current = projectId; projectsRef.current = projects;
+    const [projectStatuses, setProjectStatuses] = useState<Record<string, ProjectStatus>>({});
     const [histories, setHistories] = useState<Record<string, ProjectHistory>>({}), [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set()), [creationProject, setCreationProject] = useState<Project>();
     const expandedProjectIds = useRef(new Set<string>()), historyRequests = useRef(new Map<string, number>()), loadingProjects = useRef(new Set<string>());
     historiesRef.current = histories;
@@ -73,6 +116,8 @@ export function App() {
     const [questionDrafts,setQuestionDrafts]=useState<Record<string,QuestionDrafts>>(Object.create(null));
     const [queueErrors,setQueueErrors]=useState<Record<string,string>>({});
     const [pendingPrompts, setPendingPrompts] = useState<Record<string, PendingPrompt>>({});
+    const recalledPrompts = useRef(new Set<string>());
+    const composerDock = useRef<HTMLDivElement>(null);
     const conversation = useRef<HTMLElement>(null), drawer = useRef<HTMLDialogElement>(null), dialogReturnFocus = useRef<HTMLElement | null>(null);
     const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('deck.sidebar-collapsed') === 'true'; } catch { return false; } });
     const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 1000px)').matches);
@@ -81,15 +126,19 @@ export function App() {
     const following = useRef(true), restored = useRef('');
     const drafts = useRef(new DraftStore());
     useEffect(() => { const media = window.matchMedia('(max-width: 1000px)'); const update = () => setNarrow(media.matches); media.addEventListener('change', update); return () => media.removeEventListener('change', update); }, []);
-    useEffect(() => { if (narrow && drawerOpen) drawer.current?.showModal(); else drawer.current?.close(); }, [narrow, drawerOpen]);
-    const [workspaceCollapsed, setWorkspaceCollapsed] = useState(() => { try { return localStorage.getItem('deck.workspace-collapsed') === 'true'; } catch { return false; } });
-    useEffect(() => { try { localStorage.setItem('deck.workspace-collapsed', String(workspaceCollapsed)); } catch { /* Preferences are optional. */ } }, [workspaceCollapsed]);
+    useDrawerMotion(drawer, drawerOpen);
+    const [contentMode, setContentMode] = useState<'chat'|'both'|'workspace'>(() => { try {
+        const saved=localStorage.getItem('deck.content-mode');
+        return saved==='chat'||saved==='both'||saved==='workspace'?saved:localStorage.getItem('deck.workspace-collapsed')==='true'?'chat':'both';
+    } catch { return 'both'; } });
+    const workspaceCollapsed = contentMode === 'chat';
+    useEffect(() => { try { localStorage.setItem('deck.content-mode', contentMode); } catch {} }, [contentMode]);
     useEffect(() => { try { localStorage.setItem('deck.sidebar-collapsed', String(collapsed)); } catch { /* Preferences are optional. */ } }, [collapsed]);
     const api = useCallback(async (path: string, init?: RequestInit) => { const r = await fetch(path, { ...init, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...init?.headers } }); if (r.status === 401) {
         setPaired(false);
         throw new Error('Pair this browser to continue.');
     } const data = await r.json(); if (!r.ok || data.ok === false)
-        throw Object.assign(new Error(data.message ?? data.error?.message ?? data.error ?? data.code ?? 'Request failed. Try again.'),{status:r.status}); return data; }, []);
+        throw Object.assign(new Error(data.message ?? data.error?.message ?? data.error ?? data.code ?? 'Request failed. Try again.'),{status:r.status,code:data.code??data.error?.code}); return data; }, []);
     const decisionData = useDecisions(api, selected, connection === 'Connected', view.events);
     const [decisionSelection, setDecisionSelection] = useState<DecisionSelection>();
     const decisionEpoch = useRef(0);
@@ -124,7 +173,7 @@ export function App() {
             const query = new URLSearchParams({ projectId: id, limit: '30', ...(cursor ? { cursor } : {}) });
             const reply = await api(`/api/sessions?${query}`);
             if (historyRequests.current.get(id) !== version) return;
-            const incoming = (reply.data.sessions as WorkspaceSession[]).filter(session => !removedSessions.current.has(sessionIdOf(session))).map(session => { const old = sessionMetadata.current.get(sessionIdOf(session)); return old && (old.lastSeq ?? 0) > (session.lastSeq ?? 0) ? { ...session, ...old } : session; });
+            const incoming = (reply.data.sessions as WorkspaceSession[]).filter(session => !removedSessions.current.has(sessionIdOf(session))).map(session => { const old = sessionMetadata.current.get(sessionIdOf(session)); session = {...session, statusCheckedAt:Date.now()}; return old && (old.lastSeq ?? 0) > (session.lastSeq ?? 0) ? { ...session, ...old } : session; });
             for (const session of incoming) sessionMetadata.current.set(sessionIdOf(session), session);
             setHistories(previous => {
                 const old = previous[id], combined = cursor ? [...(old?.sessions ?? []), ...incoming] : [...incoming, ...(old?.sessions ?? [])];
@@ -160,19 +209,49 @@ export function App() {
                             return { ...previous, [id]: { ...old, sessions: old.sessions.map(session => {
                                 const update = updates.get(sessionIdOf(session));
                                 if (!update || (update.lastSeq ?? 0) < (session.lastSeq ?? 0)) return session;
-                                const merged = { ...session, ...update, leadActivity: update.leadActivity ? { ...update.leadActivity, lastReplySeq: Math.max(update.leadActivity.lastReplySeq, session.leadActivity?.lastReplySeq ?? 0) } : session.leadActivity };
+                                const merged = { ...session, ...update, statusCheckedAt:Date.now(), leadActivity: update.leadActivity ? { ...update.leadActivity, lastReplySeq: Math.max(update.leadActivity.lastReplySeq, session.leadActivity?.lastReplySeq ?? 0) } : session.leadActivity };
                                 sessionMetadata.current.set(sessionIdOf(session), merged); return merged;
                             }).filter(session => !removedSessions.current.has(sessionIdOf(session))) } };
                         });
                     }
                 }
-            } catch { /* Existing history stays usable; the next status poll retries. */ }
+            } catch { if (!closed) setHistories(old=>Object.fromEntries(Object.entries(old).map(([id,history])=>[id,{...history,sessions:history.sessions.map(session=>({...session,statusCheckedAt:undefined}))}]))); }
             finally { pending = false; }
         }
         void refreshStatuses(); const timer = setInterval(() => void refreshStatuses(), 3000);
         document.addEventListener('visibilitychange', refreshStatuses); window.addEventListener('focus', refreshStatuses);
         return () => { closed = true; controller.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', refreshStatuses); window.removeEventListener('focus', refreshStatuses); };
     }, [paired]);
+    useEffect(() => {
+        if (!paired) return;
+        let closed=false, pending=false;
+        const controller=new AbortController();
+        async function refreshProjects() {
+            if (pending || document.visibilityState !== 'visible') return;
+            pending=true;
+            try {
+                for (let offset=0; offset<projects.length; offset+=100) {
+                    const ids=projects.slice(offset,offset+100).map(p=>p.projectId), query=new URLSearchParams();
+                    ids.forEach(id=>query.append('projectId',id));
+                    const mutation=sessionMutation.current;
+                    try {
+                        const response=await api(`/api/projects/status?${query}`,{signal:controller.signal});
+                        if (closed) return;
+                        if (mutation!==sessionMutation.current) continue;
+                        if (!validProjectActivities(response.data?.projects, ids)) throw new Error('Project status unavailable');
+                        const rows=response.data.projects as ProjectActivity[];
+                        setProjectStatuses(old=>({...old,...Object.fromEntries(ids.map(id=>{const summary=rows.find(row=>row.projectId===id);return [id,summary?{summary,checkedAt:Date.now()}:{...old[id],stale:true}];}))}));
+                    } catch {
+                        if (!closed) setProjectStatuses(old=>({...old,...Object.fromEntries(ids.map(id=>[id,{...old[id],stale:true}]))}));
+                    }
+                }
+            } finally {pending=false;}
+        }
+        void refreshProjects();
+        const timer=setInterval(()=>void refreshProjects(),3000);
+        window.addEventListener('focus',refreshProjects); document.addEventListener('visibilitychange',refreshProjects);
+        return ()=>{closed=true;controller.abort();clearInterval(timer);window.removeEventListener('focus',refreshProjects);document.removeEventListener('visibilitychange',refreshProjects);};
+    }, [paired, projects]);
     function expandProject(id: string, open = true) {
         const next = new Set(expandedProjectIds.current);
         if (open) next.add(id); else next.delete(id);
@@ -212,14 +291,16 @@ export function App() {
     useEffect(() => { if (!paired)
         return; void load(); const timer = setInterval(() => void load(), 10000); return () => clearInterval(timer); }, [paired, projectId]);
     const anchor = useRef<ChatAnchor|undefined>(undefined);
+    const formattingAnchor = useRef<{ id: number; height: number } | undefined>(undefined);
     const historyRows=useRef<ReturnType<typeof useChatHistory>['messages']>([]);
     const captureAnchor = () => {
-        const element=conversation.current;if(!element||!element.clientHeight||following.current)return;
+        const element=conversation.current;if(!element||!element.clientHeight||following.current||element.scrollHeight-element.scrollTop-element.clientHeight<80)return;
         const top=element.getBoundingClientRect().top;
         const row=[...element.querySelectorAll<HTMLElement>('[data-history-id]')].find(row=>row.getBoundingClientRect().bottom>top);
         if(row){const message=historyRows.current.find(item=>item.historyId===Number(row.dataset.historyId));if(message)anchor.current={id:message.historyId,seq:message.seq,offset:row.getBoundingClientRect().top-top};}
     };
-    const history = useChatHistory({api,sessionId:selected,enabled:paired,revision:reconnectRevision,
+    const enterUserMessage = useUserMessageMotion(conversation, selected);
+    const history = useChatHistory({onLiveMessage:row=>enterUserMessage(selected,row.historyId),api,sessionId:selected,enabled:paired,revision:reconnectRevision,
         beforeChange:captureAnchor,isFollowing:()=>following.current,onHydrated:setHydratedSession,onView:setView,onConnection:setConnection,onError:setError,
         onEvent:event=>{
             if(selectedSession.current!==selected)return;
@@ -235,20 +316,37 @@ export function App() {
       const message=row?historyRows.current.find(item=>item.historyId===Number(row.dataset.historyId)):undefined;
       return row&&message?{id:message.historyId,seq:message.seq,offset:row.getBoundingClientRect().top-top}:undefined;
     };
-    const messages=useMemo(()=>history.messages.flatMap(event=>conversationEvents([...(event.request?[event.request]:[]),event]).map(row=>({...row,historyId:event.historyId}))),[history.messages]);
-    const unreadReplies=useLeadReplies(api,paired,selected,history.messages.map(row=>row.seq),view.events.filter(e=>e.kind==='turn.completed').at(-1)?.seq??0);
-    const visibleReplyMap=useMemo(()=>new Map(unreadReplies.visibleReplies.map(reply=>[reply.displayMessageSeq,reply])),[unreadReplies.visibleReplies]);
-    function openReply(reply:LeadReply){
-      const project=sessionMetadata.current.get(reply.sessionId)?.projectId??nav.current.route.project;
-      nav.navigate({project,session:reply.sessionId,tab:'chat',reply:reply.replyId},nav.current.route.overlay?.kind==='unread'?'replace':'push');
-    }
+    const messages=useMemo(()=>projectPromptDelivery(history.messages.flatMap(event=>conversationEvents([...(event.request?[event.request]:[]),event]).map(row=>({...row,historyId:event.historyId}))),view.events),[history.messages,view.events]);
+    // Hidden panes have no usable anchor geometry. Resume only after route
+    // restoration; the queue yields until after the view's layout effects.
+    const formattingActive = route.session === selected && routeInteractive && hydratedSession === selected
+        && (narrow ? mobileTab === 'chat' : contentMode !== 'workspace');
+    const transcriptRenderer = useTranscriptRendering(messages, selected, formattingActive, conversation, () => {
+        captureAnchor();
+        const saved = anchor.current, row = saved && !following.current ? conversation.current?.querySelector<HTMLElement>(`[data-history-id="${saved.id}"]`) : undefined;
+        formattingAnchor.current = row?.querySelector('[data-markdown-pending]') ? { id: saved!.id, height: row.getBoundingClientRect().height } : undefined;
+    }, () => {
+        const element = conversation.current;
+        const before = formattingAnchor.current, saved = anchor.current; formattingAnchor.current = undefined;
+        // Source and formatted text have different line heights. Keep a reader
+        // inside the same part of that row rather than preserving a pixel offset
+        // that could now point into another message.
+        if (before && saved?.id === before.id && saved.offset < 0 && before.height > 0) {
+            const row = element?.querySelector<HTMLElement>(`[data-history-id="${saved.id}"]`);
+            if (row) anchor.current = { ...saved, offset: saved.offset * row.getBoundingClientRect().height / before.height };
+        }
+        if (element && following.current && restored.current === selected) element.scrollTop = element.scrollHeight;
+        else restoreAnchor();
+    });
+    const displayedReplies=useDisplayedReplies(api,paired,selected,history.messages.map(row=>row.seq),view.events.filter(e=>e.kind==='turn.completed').at(-1)?.seq??0);
+    const visibleReplyMap=useMemo(()=>new Map(displayedReplies.visibleReplies.map(reply=>[reply.displayMessageSeq,reply])),[displayedReplies.visibleReplies]);
     function openOverlay(overlay:DeckOverlay,tab=nav.current.route.tab){
       const opener=document.activeElement instanceof HTMLElement?document.activeElement:undefined;
       nav.navigate({...nav.current.route,tab,overlay});if(opener){overlayOpeners.current.set(nav.current.key,opener);while(overlayOpeners.current.size>50)overlayOpeners.current.delete(overlayOpeners.current.keys().next().value!);}
     }
     function closeOverlay(){nav.closeOverlay();}
     function applySession(id:string){
-      if(id!==selectedSession.current){setDecisionSelection(undefined);setOrigin(undefined);anchor.current=undefined;historyGesture.current=false;touchY.current=undefined;setOpenQuestion('');selectedSession.current=id;setHydratedSession('');setView(emptyState());setConnection('Reconnecting');setError('');restored.current='';following.current=true;setUnseen(false);}
+      if(id!==selectedSession.current){setDecisionSelection(undefined);setOrigin(undefined);anchor.current=undefined;historyGesture.current=false;touchY.current=undefined;setOpenQuestion('');setReconnectAttempt('');selectedSession.current=id;setHydratedSession('');setView(emptyState());setConnection('Reconnecting');setError('');restored.current='';following.current=true;setUnseen(false);}
       setSelected(id);
     }
     // Route resolution has one owner. Polls and completion callbacks never enter it.
@@ -256,12 +354,16 @@ export function App() {
       if(!paired)return;
       const entry=nav.current,generation=nav.generation,controller=new AbortController();
       const current=()=>!controller.signal.aborted&&nav.generation===generation&&nav.current.key===entry.key;
-      history.cancel();setRestoreTarget(undefined);setRouteReady('');setReplyHighlight(undefined);setPreviewImage(undefined);setOrigin(undefined);
+      history.cancel();restoredFocus.current=undefined;setRestoreTarget(undefined);setRouteReady('');setRouteFailure(undefined);setReplyHighlight(undefined);setPreviewImage(undefined);setOrigin(undefined);
       if(dialogGeneration.current!==generation){++dialogToken.current;setDialogKind(undefined);dialogReturnFocus.current=null;}
       const departed=lastRoute.current;lastRoute.current=entry;
       const returning=departed.route.overlay&&(departed.parent===entry.key||departed.key===entry.key&&!entry.route.overlay&&sameRoute({...departed.route,overlay:undefined},entry.route));
       const opener=returning?overlayOpeners.current.get(departed.key):undefined;
       const focus=()=>requestAnimationFrame(()=>{if(!current())return;if(opener?.isConnected&&opener.getClientRects().length)opener.focus({preventScroll:true});else if(!entry.route.overlay)conversation.current?.focus({preventScroll:true});});
+      if(overlayTransition){setRouteReady(entry.key);if(returning)focus();return()=>controller.abort();}
+      // Mobile selection closes its drawer and presents the target tab at once.
+      setMobileTab(entry.route.tab);if(entry.route.tab!=='chat')setWorkspaceTab(entry.route.tab);
+      if((entry.route.session??'')!==selectedSession.current)setError('');
       void(async()=>{try{
         let project=entry.route.project||projectsRef.current[0]?.projectId||'',id=entry.route.session??'';
         if(id){
@@ -275,7 +377,7 @@ export function App() {
           following.current=false;anchor.current=entry.route.anchor;restored.current=id;
           setRestoreTarget({key:entry.key,generation,session:id,opener,...(entry.route.anchor?{anchor:entry.route.anchor}:{}),...(entry.route.reply?{reply:entry.route.reply}:{})});
         }else{setRouteReady(entry.key);focus();}
-      }catch(cause){if(!current())return;if((cause as {status?:number}).status!==404){applySession(entry.route.session??'');setRouteReady(entry.key);setError('Could not open this view. Reconnect to retry.');return;}applySession('');setRouteReady(entry.key);setError('This session is no longer available.');nav.navigate({project:projectsRef.current.find(p=>p.projectId===entry.route.project)?.projectId??projectsRef.current[0]?.projectId??'',tab:'chat'},'replace');}})();
+      }catch(cause){if(!current())return;if((cause as {status?:number}).status!==404){setRouteFailure({key:entry.key,message:'Could not open this view. Try again.'});return;}applySession('');setRouteReady(entry.key);setError('This session is no longer available.');nav.navigate({project:projectsRef.current.find(p=>p.projectId===entry.route.project)?.projectId??projectsRef.current[0]?.projectId??'',tab:'chat'},'replace');}})();
       return()=>controller.abort();
     },[paired,navigation.generation,reconnectRevision]);
     useEffect(()=>{
@@ -296,9 +398,14 @@ export function App() {
           if(target.anchor)viewport.scrollTop+=row.getBoundingClientRect().top-viewport.getBoundingClientRect().top-target.anchor.offset;
           else row.scrollIntoView({block:'start',behavior:'instant'});
           if(highlight)setReplyHighlight(highlight);
-          if(!nav.current.route.overlay)row.querySelector<HTMLElement>('article')?.focus({preventScroll:true});
-          if(!target.anchor&&!nav.current.route.overlay)row.focus({preventScroll:true});
-          if(target.opener?.isConnected&&target.opener.getClientRects().length)target.opener.focus({preventScroll:true});
+          // Geometry is available behind the loading state, but focus must wait
+          // for the commit which removes visibility/inert from the target rows.
+          const overlay=!!nav.current.route.overlay;
+          restoredFocus.current={key:target.key,generation:target.generation,focus:()=>{
+            if(!overlay)row.querySelector<HTMLElement>('article')?.focus({preventScroll:true});
+            if(!target.anchor&&!overlay)row.focus({preventScroll:true});
+            if(target.opener?.isConnected&&target.opener.getClientRects().length)target.opener.focus({preventScroll:true});
+          }};
           const wrapper=row.closest<HTMLElement>('[data-history-id]')??row;
           const saved=target.anchor??{id:Number(wrapper.dataset.historyId),seq:seq!,offset:wrapper.getBoundingClientRect().top-viewport.getBoundingClientRect().top};
           setRouteReady(target.key);nav.annotate(target.key,{anchor:saved});setRestoreTarget(undefined);
@@ -306,6 +413,11 @@ export function App() {
       }catch(cause){if(!current())return;const missing=(cause as {status?:number}).status===404;setError(target.reply?(missing?'This exact reply is no longer available.':'Could not load this exact reply. Reconnect to retry.'):(cause as Error).message);if(target.reply&&missing)nav.annotate(target.key,{reply:undefined});setRouteReady(target.key);setRestoreTarget(undefined);}})();
       return()=>controller.abort();
     },[restoreTarget,hydratedSession,connection,selected]);
+    useLayoutEffect(()=>{
+      const pending=restoredFocus.current;
+      if(!pending||sessionOpening||routeReady!==pending.key||nav.current.key!==pending.key||nav.generation!==pending.generation)return;
+      restoredFocus.current=undefined;pending.focus();
+    },[routeReady,sessionOpening,navigation.generation]);
     useEffect(()=>{
       if(route.overlay?.kind==='drawer'&&!narrow){closeOverlay();return;}
       if(route.overlay?.kind==='install'&&install.hidden){closeOverlay();return;}
@@ -316,7 +428,6 @@ export function App() {
         if(attachment)setPreviewImage({sessionId:selected,name:attachment.name,src:attachmentURL(selected,attachment.attachmentId)});else nav.navigate({...nav.current.route,overlay:undefined},'replace');
       }
     },[route.overlay,narrow,install.hidden,routeReady,hydratedSession,selected,decisionData.loading,decisionData.decisions,history.messages]);
-    useEffect(()=>{if(!drawerOpen&&drawer.current?.open)drawer.current.close();},[drawerOpen]);
     useEffect(()=>{
       const viewport=conversation.current;if(!viewport)return;
       let timer:ReturnType<typeof setTimeout>|undefined;
@@ -326,7 +437,7 @@ export function App() {
       return()=>{clearTimeout(timer);viewport.removeEventListener('scroll',scroll);viewport.removeEventListener('scrollend',save);};
     },[selected,routeReady,navigation.entry.key]);
     const restoreAnchor=()=>{
-        const element=conversation.current,saved=anchor.current;if(!element||!element.clientHeight||!saved||following.current)return;
+        const element=conversation.current,saved=anchor.current;if(!element||!element.clientHeight||!saved||following.current||element.scrollHeight-element.scrollTop-element.clientHeight<80)return;
         const row=element.querySelector<HTMLElement>(`[data-history-id="${saved.id}"]`);
         if(row)element.scrollTop+=row.getBoundingClientRect().top-element.getBoundingClientRect().top-saved.offset;
     };
@@ -334,18 +445,24 @@ export function App() {
     const historyGesture=useRef(false),touchY=useRef<number|undefined>(undefined);
     function navigateHistory(direction:'older'|'newer') {
         const element=conversation.current;if(!element)return;
-        if(direction==='newer'&&!history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<80){following.current=true;anchor.current=undefined;historyGesture.current=false;setUnseen(false);return;}
-        historyGesture.current=true;following.current=false;
-        if(direction==='older'&&element.scrollTop<200){historyGesture.current=false;void history.older();}
+        const distance=element.scrollHeight-element.scrollTop-element.clientHeight;
+        // Wheel/touch/key intent arrives before scrolling, including tiny gestures at the tail.
+        if(distance<80&&!history.after){following.current=true;anchor.current=undefined;historyGesture.current=false;setUnseen(false);return;}
+        historyGesture.current=true;
+        if(distance>=80){following.current=false;captureAnchor();}
+        if(direction==='older'&&distance>=80&&element.scrollTop<200){historyGesture.current=false;void history.older();}
         if(direction==='newer'&&history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<200){historyGesture.current=false;void history.newer();}
     }
-    async function jumpLatest(){history.cancel();setRestoreTarget(undefined);setReplyHighlight(undefined);nav.annotate(nav.current.key,{reply:undefined,anchor:undefined});const owner=selected,generation=nav.generation;anchor.current=undefined;following.current=true;await history.latest();if(selectedSession.current!==owner||nav.generation!==generation)return;if(conversation.current)conversation.current.scrollTop=conversation.current.scrollHeight;setUnseen(false);}
+    function followLatest(){history.cancel();setRestoreTarget(undefined);setReplyHighlight(undefined);nav.annotate(nav.current.key,{reply:undefined,anchor:undefined});anchor.current=undefined;historyGesture.current=false;following.current=true;if(conversation.current)conversation.current.scrollTop=conversation.current.scrollHeight;setUnseen(false);}
+    async function jumpLatest(){followLatest();const owner=selected,generation=nav.generation;await history.latest();if(selectedSession.current!==owner||nav.generation!==generation)return;if(conversation.current)conversation.current.scrollTop=conversation.current.scrollHeight;setUnseen(false);}
+    function followOwnSend(){if(history.after||restoreTarget)void jumpLatest();else followLatest();}
 
     const promptInbox=usePromptInbox(api,selected,paired&&connection==='Connected',view.events);
-    const progress = useMemo(() => leadProgress(view.events, { sessionId: selected, pending: pendingPrompts[selected] ? {...pendingPrompts[selected],background:pendingPrompts[selected]?.background||promptInbox.inbox.paused} : undefined, connection }), [view.events, selected, pendingPrompts, connection, promptInbox.inbox.paused]);
+    const contextWindows = useMemo(() => projectContextWindows(view.events, selected), [view.events, selected]);
+    const progress = useMemo(() => leadProgress(view.events, { sessionId: selected, pending: pendingPrompts[selected] ? {...pendingPrompts[selected],background:pendingPrompts[selected]?.background||promptInbox.inbox.paused} : undefined, connection:connection === 'Connected' ? connection : visibleConnection || 'Connected' }), [view.events, selected, pendingPrompts, connection, visibleConnection, promptInbox.inbox.paused]);
     useLayoutEffect(() => {
         const element = conversation.current;
-        if (!element || !selected || (narrow && mobileTab !== 'chat')) return;
+        if (!element || !selected || (narrow ? mobileTab !== 'chat' : contentMode === 'workspace')) return;
         if (restored.current !== selected) {
             if (hydratedSession !== selected) return;
             element.scrollTop = element.scrollHeight;
@@ -353,13 +470,30 @@ export function App() {
             restored.current = selected;
         } else if (following.current) element.scrollTop = element.scrollHeight;
         else if(!history.loading) setUnseen(true);
-    }, [messages, selected, narrow, mobileTab, hydratedSession, connection, progress?.label]);
+    }, [messages, selected, narrow, mobileTab, contentMode, hydratedSession, connection, progress?.label, pendingPrompts]);
     useLayoutEffect(() => {
         const element = conversation.current;
-        if (!element || hydratedSession !== selected || (narrow && mobileTab !== 'chat')) return;
+        if (!element || hydratedSession !== selected || (narrow ? mobileTab !== 'chat' : contentMode === 'workspace')) return;
         const observer = new ResizeObserver(() => { if (following.current && restored.current === selected) element.scrollTop = element.scrollHeight; else restoreAnchor(); });
         observer.observe(element); if(element.firstElementChild)observer.observe(element.firstElementChild); return () => observer.disconnect();
-    }, [selected, hydratedSession, narrow, mobileTab]);
+    }, [selected, hydratedSession, narrow, mobileTab, contentMode]);
+    useLayoutEffect(() => {
+        const dock = composerDock.current, viewport = conversation.current, pane = dock?.parentElement;
+        if (!dock || !viewport || !pane || (narrow ? mobileTab !== 'chat' : contentMode === 'workspace')) return;
+        const measure = () => {
+            const height = dock.getBoundingClientRect().height;
+            if (!height) return;
+            // Padding belongs to the scroller, not a separate layout row. Resize and
+            // auxiliary panels follow the same tail/reading-anchor policy as messages.
+            pane.style.setProperty('--composer-height', `${height}px`);
+            if (following.current && restored.current === selected) viewport.scrollTop = viewport.scrollHeight;
+            else restoreAnchor();
+        };
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(dock);
+        return () => observer.disconnect();
+    }, [paired, selected, narrow, mobileTab, contentMode]);
     function selectSession(id:string,mode:'push'|'replace'='push'){
       const project=sessionMetadata.current.get(id)?.projectId??activeProjectId.current;
       nav.navigate({project,tab:'chat',...(id?{session:id}:{})},mode);
@@ -409,6 +543,8 @@ export function App() {
     }, [delegationSeq, selected, hydratedSession, narrow, workspaceTab]);
     function changeTab(tab: WorkspaceTab) { if(narrow)nav.navigate({...nav.current.route,tab,overlay:undefined});else {setMobileTab(tab);if(tab!=='chat')setWorkspaceTab(tab);} }
     const activeTab = narrow ? mobileTab : workspaceTab;
+    const targetMetadata = sessionMetadata.current.get(targetSession);
+    const targetName = targetSession ? targetMetadata ? sessionName(targetMetadata) : `Session ${targetSession.slice(0,12)}` : projects.find(item=>item.projectId===route.project)?.name ?? 'Choose a project';
     const currentSession = sessions.find(session => sessionIdOf(session) === selected) ?? sessionMetadata.current.get(selected);
     const project = projects.find(item => item.projectId === projectId);
     const recordedAssignment = view.events.filter(event => event.kind === 'session.assignment').at(-1)?.data;
@@ -426,12 +562,21 @@ export function App() {
         }) }])));
     }, [selected, hydratedSession, view.seq, leadTaskId]);
     const latestReplySeq = messages.filter(event => event.kind === 'message.completed' && (event.data.role === undefined || event.data.role === 'assistant') && typeof event.data.text === 'string' && event.data.text.trim()).at(-1)?.seq ?? 0;
-    const chatVisible = routeReady===navigation.entry.key && !route.overlay && hydratedSession === selected && (!narrow || mobileTab === 'chat') && !dialogKind && !drawerOpen;
+    const [sessionControlsRevision, setSessionControlsRevision] = useState(0);
+    useLayoutEffect(() => {
+        if (sessionControlsRevision) dialogReturnFocus.current = document.querySelector<HTMLElement>('.session-header-controls .session-compact-toggle');
+    }, [sessionControlsRevision]);
+    const sessionControls = (compact: boolean) => selected ? <SessionControls key={`${selected}:${sessionControlsRevision}`} history={<DecisionHistory key={selected} sessionId={selected} decisions={decisionData.decisions} omittedTerminal={decisionData.omittedTerminal} connected={connection==='Connected'} busy={busy} loading={decisionData.loading} onReply={()=>{}} onClear={()=>{}} onAction={()=>{}} onOrigin={decisionOrigin} onRefresh={decisionData.refresh}/>} compact={compact} approvalMode={view.approvalMode??currentSession?.approvalMode} approvalModeSource={view.approvalModeSource??currentSession?.approvalModeSource} onApprovals={mode=>changeApprovals(selected,mode)} grants={sessionGrants(view,currentSession)} onRevokeGrant={grantId=>revokeGrant(selected,grantId)} showPrimary={compact || (narrow ? mobileTab !== 'chat' : contentMode === 'workspace')} connected={connection === 'Connected'} ended={ended} closing={closing} releaseFailed={releaseFailed} removing={removing} working={working} busy={busy||!routeInteractive} preparation={readiness.preparation} error={readiness.error} sharedActive={Math.max(0, (currentSession?.sharedActiveSessions ?? 0) - (currentSession?.running ? 1 : 0))} predecessor={currentSession?.predecessorSessionId} onReconnect={() => setReconnectRevision(value => value + 1)} onPrepare={() => void lifecycle('session.prepare')} onCancel={() => void lifecycle('session.prepare.cancel')} onClose={() => removing && currentSession ? void removeSession(currentSession) : void lifecycle('session.release')} onAssignments={() => { setSessionControlsRevision(value => value + 1); showDialog('assignments'); }} onPredecessor={() => { if (currentSession?.predecessorSessionId) selectSession(currentSession.predecessorSessionId); }}/> : null;
+    const chatVisible = routeInteractive && !route.overlay && hydratedSession === selected && (narrow ? mobileTab === 'chat' : contentMode !== 'workspace') && !dialogKind && !drawerOpen;
 
     const approvals = Object.values(view.approvals);
     const ended = (view.events.length ? view.state : currentSession?.state) === 'ended';
     const working = (view.events.length ? view.state === 'running' : currentSession?.state === 'running') || Object.values(view.tasks).some(task => ['queued', 'running'].includes(String(task.state))) || approvals.length > 0 || promptInbox.inbox.queued.length > 0 || !!promptInbox.inbox.active;
-    usePushPresence(api, paired, selected, chatVisible && connection === 'Connected', view.seq);
+    const notifications=usePushNotifications(api);
+    const [notificationsOpen,setNotificationsOpen]=useState(false);
+    const notificationsReturnFocus=useRef<HTMLElement|null>(null);
+    const openNotifications=()=>{notificationsReturnFocus.current=narrow?document.querySelector('[aria-label="Open sessions"]'):document.querySelector('.deck-menu-toggle');drawer.current?.close();if(drawerOpen)closeOverlay();void notifications.refresh();setNotificationsOpen(true);};
+    usePushPresence(api, paired, selected, chatVisible && !notificationsOpen && connection === 'Connected', view.seq);
     const preparationSignal = view.events.filter(event => event.kind === 'session.assignment' || event.kind === 'session.reopened' || (event.kind === 'diagnostic' && event.data.code === 'session.preparation')).at(-1)?.seq ?? 0;
     const readiness = useSessionPreparation(api, selected, paired && connection === 'Connected', generation, preparationSignal);
     const removing = currentSession?.removing === true || removingSessions.current.has(selected);
@@ -439,10 +584,31 @@ export function App() {
     const releasePending = releaseEvent ? releaseEvent.data.phase === 'releasing' : currentSession?.releasing === true;
     const releaseFailed = (removing || releasePending) && readiness.preparation?.status === 'failed';
     const closing = removing || releasePending || closingSession === selected || readiness.preparation?.status === 'releasing' || (!readiness.preparation && currentSession?.releasing === true);
-    const canCompose = !!selected && !closing && !ended && connection === 'Connected' && readiness.preparation?.status === 'ready' && readiness.preparation.generation === generation;
+    const preparationStatus = readiness.preparation?.generation === generation ? readiness.preparation.status : currentSession?.preparationStatus;
+    // Stream connectivity gates delivery, never the mounted composer or its draft.
+    // Unknown readiness uses the composer shell until authoritative setup arrives.
+    const canCompose = !!selected && !closing && !ended && (!preparationStatus || preparationStatus === 'ready');
+    const welcome = canCompose && !sessionOpening && hydratedSession === selected && !history.loading
+        && !history.error && !history.before && !history.after && messages.length === 0
+        && !pendingPrompts[selected] && !promptInbox.inbox.active && !promptInbox.inbox.queued.length;
+    useWelcomeMotion(composerDock, welcome, selected);
+    const leadRunning = view.tasks[leadTaskId]?.state === 'running' && !!progress && progress.phase !== 'connection';
+    const escapeAction = chooseEscapeAction(promptInbox.inbox.queued.filter(prompt => !recalledPrompts.current.has(JSON.stringify([selected,prompt.promptId]))), leadRunning ? leadTaskId : undefined, promptInbox.inbox.active && !recalledPrompts.current.has(JSON.stringify([selected,promptInbox.inbox.active.promptId])) ? promptInbox.inbox.active : undefined);
+    const escapeTarget = chatVisible && canCompose && !busy && connection === 'Connected' && escapeAction
+        ? JSON.stringify([selected, escapeAction.kind, escapeAction.kind === 'recall' ? escapeAction.prompt.promptId : [escapeAction.taskId, view.tasks[leadTaskId]?.attempt]]) : undefined;
+    const { touchEnter, actionHint } = useComposerKeyboard(escapeTarget, () => { void recallOrInterrupt(); });
+    const [composerNotice, setComposerNotice] = useState<{sessionId:string;text:string}>();
+    useEffect(() => {
+        if (!composerNotice) return;
+        const timer = setTimeout(() => setComposerNotice(undefined), 3500);
+        return () => clearTimeout(timer);
+    }, [composerNotice]);
+    const keyboardStatus = actionHint ? escapeAction?.kind === 'recall' ? 'Press Esc again to recall your unread message' : 'Press Esc again to interrupt'
+        : composerNotice?.sessionId === selected ? composerNotice.text : '';
+
     useEffect(()=>{++decisionEpoch.current;setDecisionError({sessionId:selected,text:''});if(!canCompose)setDecisionSelection(undefined);},[selected,canCompose]);
     const draftImages=imageDrafts.drafts[selected]??[];
-    const canSend = canCompose && routeReady===navigation.entry.key && route.session===selected && !busy && draftImages.every(item=>item.status==='ready');
+    const canSend = canCompose && !sessionOpening && readiness.preparation?.status === 'ready' && readiness.preparation.generation === generation && routeInteractive && route.session===selected && !busy && draftImages.every(item=>item.status==='ready');
     useEffect(() => {
         if(!selected || !readiness.preparation) return;
         const preparationStatus = closing ? 'releasing' : readiness.preparation.status;
@@ -472,11 +638,12 @@ export function App() {
         } catch (cause) { setError((cause as Error).message); }
     }
     const navigationHistories = {...histories, ...(histories[projectId] ? {[projectId]: {...histories[projectId], sessions: sessions.map(session => sessionIdOf(session) === selected ? {...session, preparationStatus: connection !== 'Connected' ? 'unprepared' as const : releaseFailed ? 'failed' as const : closing ? 'releasing' as const : readiness.preparation?.status ?? session.preparationStatus} : session)}} : {})};
-    const sessionButtons = <ProjectNavigation projects={projects} projectId={projectId} histories={navigationHistories} expanded={expandedProjects} selected={selected} busy={busy} readMarkers={readMarkers} collapsed={collapsed && !narrow} onToggle={id => {const open=!expandedProjectIds.current.has(id);expandProject(id,open);if(open&&!selected)nav.navigate({...nav.current.route,project:id},nav.current.route.overlay?.kind==='drawer'?'replace':'push');}} onSession={selectProjectSession} onAdd={() => showDialog('project')} onNew={target => showDialog('session', target)} onMore={id => void loadHistory(id, histories[id]?.nextCursor)} onRetry={id => void loadHistory(id)} onRefresh={() => void load()} onExpand={() => setCollapsed(false)} onRename={target => showDialog('rename-project', target)} onRemove={target => void removeProject(target)} onRenameSession={target => {setActionSession(target);showDialog('rename-session');}} onRemoveSession={target => void removeSession(target)}/>;
+    const sessionButtons = <ProjectNavigation projectStatuses={projectStatuses} projects={projects} projectId={route.project || projectId} histories={navigationHistories} expanded={expandedProjects} selected={targetSession} busy={busy} readMarkers={readMarkers} collapsed={collapsed && !narrow} onToggle={id => {const open=!expandedProjectIds.current.has(id);expandProject(id,open);if(open&&!selected)nav.navigate({...nav.current.route,project:id},nav.current.route.overlay?.kind==='drawer'?'replace':'push');}} onSession={selectProjectSession} onAdd={() => showDialog('project')} onNew={target => showDialog('session', target)} onMore={id => void loadHistory(id, histories[id]?.nextCursor)} onRetry={id => void loadHistory(id)} onRefresh={() => void load()} onExpand={() => setCollapsed(false)} onRename={target => showDialog('rename-project', target)} onRemove={target => void removeProject(target)} onRenameSession={target => {setActionSession(target);showDialog('rename-session');}} onRemoveSession={target => void removeSession(target)}/>;
     async function mutate(body: Record<string, unknown>, sessionId?: string) {
         if (commandInFlight.current) throw new Error('Another request is still pending.');
         commandInFlight.current = true; setBusy(true); setError('');
         const commandId = crypto.randomUUID(), prompt = body.type === 'prompt.send';
+        if(prompt&&sessionId===selectedSession.current)followOwnSend();
         if(['session.rename','session.remove','session.release','session.setApprovals','session.revokeGrant'].includes(String(body.type))) ++sessionMutation.current;
         if (prompt && sessionId) setPendingPrompts(previous => ({ ...previous, [sessionId]: { commandId, afterSeq: view.seq, phase: 'sending', background: promptInbox.inbox.paused || !!promptInbox.inbox.active || promptInbox.inbox.queued.length>0 || (!!progress && progress.phase!=='connection') } }));
         try {
@@ -511,11 +678,54 @@ export function App() {
         try { await mutate(body, sessionId); return true; }
         catch (cause) { if (selectedSession.current === sessionId) setError((cause as Error).message); return false; }
     }
+    async function interruptLead() {
+        if(commandInFlight.current)return;
+        const sessionId=selected;
+        try {
+            const result=await interruptAndRecall({active:promptInbox.inbox.active,
+                interrupt:()=>mutate({type:'turn.interrupt',taskId:leadTaskId},sessionId),
+                readInbox:async()=>(await api(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`)).data,
+                recall:prompt=>restorePrompt(prompt),
+            });
+            setComposerNotice({sessionId,text:result==='recalled'?'Lead turn interrupted. Unread message restored; your draft is kept.':result==='unconfirmed'?'Lead turn interrupted. Message recovery could not be confirmed; check the paused queue.':'Lead turn interrupted.'});
+        }catch(cause){setComposerNotice({sessionId,text:`Stop or message recovery failed: ${(cause as Error).message}`});}
+    }
+    async function queueMutation(type:'prompt.cancel'|'prompt.resume',promptId?:string) {
+        const sessionId=selected;
+        try { return await mutate({type,...(promptId?{promptId}:{})},sessionId); }
+        finally { if(selectedSession.current===sessionId)promptInbox.refresh(); }
+    }
     async function queueCommand(type:'prompt.cancel'|'prompt.resume',promptId?:string) {
         const sessionId=selected;setQueueErrors(previous=>({...previous,[sessionId]:''}));
-        try{await mutate({type,...(promptId?{promptId}:{})},sessionId);}
+        try { await queueMutation(type,promptId); }
         catch(cause){const message=(cause as Error).message;setQueueErrors(previous=>({...previous,[sessionId]:message==='prompt-already-started'?'This message has already started. It was not interrupted.':message}));}
-        finally{if(selectedSession.current===sessionId)promptInbox.refresh();}
+    }
+    async function restorePrompt(prompt:QueuedPrompt) {
+        const sessionId = selected, navigationGeneration = nav.generation;
+        if(recalledPrompts.current.has(JSON.stringify([sessionId,prompt.promptId])))return 'unconfirmed' as const;
+        try {
+            const result = await recallAndRestore({
+                sessionId, prompt, drafts: drafts.current, restoreImages: imageDrafts.restore,
+                cancel: () => queueMutation('prompt.cancel', prompt.promptId),
+                focus: text => requestAnimationFrame(() => {
+                    if (selectedSession.current !== sessionId || nav.generation !== navigationGeneration || drafts.current.get(sessionId) !== text) return;
+                    const input = document.getElementById('prompt') as HTMLTextAreaElement | null;
+                    if (!input || input.disabled || input.value !== text) return;
+                    input.focus({preventScroll:true}); input.setSelectionRange(text.length, text.length);
+                }),
+            });
+            if (result === 'recalled') recalledPrompts.current.add(JSON.stringify([sessionId,prompt.promptId]));
+            setComposerNotice({sessionId,text:result === 'recalled' ? 'Unread message recalled. Your draft is kept.' : result === 'already-started' ? 'This message was already read or delivery started. It could not be recalled.' : 'Recall could not be confirmed. Your draft is unchanged.'});
+            return result;
+        } catch (cause) {
+            setComposerNotice({sessionId,text:`Could not recall message: ${(cause as Error).message}`});
+            return 'unconfirmed' as const;
+        }
+    }
+    async function recallOrInterrupt() {
+        if (commandInFlight.current || !escapeTarget || !escapeAction) return;
+        if (escapeAction.kind === 'interrupt') await interruptLead();
+        else await restorePrompt(escapeAction.prompt);
     }
     async function lifecycle(type: 'session.prepare' | 'session.prepare.cancel' | 'session.release') {
         const sessionId = selected;
@@ -540,66 +750,72 @@ export function App() {
     finally {
         setBusy(false);
     } }
+    const motionRoot = useRef<HTMLDivElement>(null), modesRef = useRef<HTMLDivElement>(null);
+    useActiveIndicator(modesRef, contentMode, '[aria-pressed="true"]', !connecting && paired && !narrow);
+    useViewMotion(motionRoot, `${connecting}:${paired}:${narrow}:${contentMode}:${activeTab}`);
+    const workspaceTabs = <Tabs subagentsFresh={!!selected && hydratedSession===selected && connection==='Connected'} active={activeTab} onChange={changeTab} activeSubagents={selected && hydratedSession===selected ? activeSubagentCount(view) : 0}/>;
     if (connecting) return <main className="pair"><p className="eyebrow">DECK / LOCAL WORKSPACE</p><h1 role="status">Opening your workspace…</h1></main>;
     if (!paired && ['127.0.0.1', 'localhost'].includes(window.location.hostname))
         return <main className="pair"><p className="eyebrow">DECK / LOCAL WORKSPACE</p><h1>Could not open your workspace</h1><p role="alert">{error || 'Local access is unavailable.'}</p><button onClick={() => window.location.reload()}>Retry</button></main>;
     if (!paired)
         return <main className="pair"><p className="eyebrow">DECK / LOCAL WORKSPACE</p><h1>Pair this browser</h1><p>Use the pairing code from your Deck terminal to open your sessions.</p><form onSubmit={pair}><label htmlFor="code">Pairing code</label><input id="code" autoComplete="one-time-code" value={code} onChange={e => setCode(e.target.value)} required={!initialToken} aria-describedby={error ? 'pair-error' : undefined}/><button disabled={busy}>{busy ? 'Pairing…' : 'Pair browser'}</button></form>{error && <p id="pair-error" role="alert">{error}</p>}</main>;
-    return <div className={`workbench ${collapsed ? 'sidebar-collapsed' : ''}`}>
-        <a className="skip" href="#conversation">Skip to conversation</a>
-        <nav className="sidebar" aria-label="Sessions"><DeckBrand/>{sessionButtons}<DeckMenu hidden={install.hidden} onRestart={()=>openOverlay({kind:'restart'})} onInstall={()=>{openOverlay({kind:'install'});install.activate();}}/></nav>
-        <dialog ref={drawer} className="session-drawer" aria-labelledby="drawer-title" onCancel={event=>{event.preventDefault();closeOverlay();}} onClose={()=>{if(nav.current.route.overlay?.kind==='drawer')closeOverlay();}} onClick={event => {
+    return <SecondaryInfoProvider scopeKey={`${selected}:${navigation.entry.key}`} navigation={nav} activeId={navigation.secondary} blocked={!!dialogKind||!!route.overlay||!!previewImage||!!origin}><div className={`workbench ${collapsed ? 'sidebar-collapsed' : ''}`}>
+        <a className="skip" href={narrow ? mobileTab==='chat'?'#conversation':`#panel-${mobileTab}` : contentMode==='workspace'?`#panel-${workspaceTab}`:'#conversation'}>Skip to {narrow ? mobileTab==='chat'?'conversation':'workspace' : contentMode==='workspace'?'workspace':'conversation'}</a>
+        <nav className="sidebar" aria-label="Sessions"><DeckBrand/>{sessionButtons}{!narrow&&!collapsed&&<QuotaSection api={api}/>}<DeckMenu onNotifications={openNotifications} notificationsEnabled={notifications.enabled} notificationsAttention={notifications.attention} hidden={install.hidden} onRestart={()=>openOverlay({kind:'restart'})} onInstall={()=>{openOverlay({kind:'install'});install.activate();}} theme={theme} onTheme={setTheme} font={font} onFont={setFont}/></nav>
+        <dialog ref={drawer} data-control-motion className="session-drawer" aria-labelledby="drawer-title" onCancel={event=>{event.preventDefault();closeOverlay();}} onClose={()=>{if(nav.current.route.overlay?.kind==='drawer')closeOverlay();}} onClick={event => {
             if (event.target !== event.currentTarget) return;
             const bounds = event.currentTarget.getBoundingClientRect();
             if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeOverlay();
-        }}><div className="drawer-heading"><h2 id="drawer-title">Workspace</h2><button className="quiet drawer-close" type="button" onClick={closeOverlay} aria-label="Close sessions"><NavigationIcon kind="close"/></button></div><nav aria-label="Mobile sessions">{sessionButtons}<DeckMenu inline hidden={install.hidden} onRestart={()=>openOverlay({kind:'restart'})} onInstall={()=>{openOverlay({kind:'install'});install.activate();}}/></nav></dialog>
-        <div className={`app-body${!narrow && workspaceCollapsed ? ' workspace-collapsed' : ''}`}><header className="app-header"><button className="sidebar-toggle quiet" type="button" aria-label={narrow ? 'Open sessions' : collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={narrow ? drawerOpen : !collapsed} onClick={() => narrow ? openOverlay({kind:'drawer'}) : setCollapsed(value => !value)}><NavigationIcon kind="menu"/></button><div className="session-identity"><h1>{selected ? currentSession ? sessionName(currentSession) : 'Session conversation' : project?.name ?? 'Choose a project'}</h1>{lead && <p className="lead-identity">Lead <strong>{String(lead.runnerId ?? 'Runner pending')}</strong><span title={String(lead.modelId ?? 'Model pending')}>{String(lead.modelId ?? 'Model pending')}</span></p>}</div><div className="connection"><span className={`connection-dot${canCompose&&routeReady===navigation.entry.key ? ' ready' : ''}`} aria-hidden="true"/><span>{selected ? routeReady!==navigation.entry.key ? 'Opening view…' : connection !== 'Connected' ? connection : canCompose ? 'Connected' : 'Disconnected' : 'Ready'}</span><small>{selected ? closing ? 'Closing' : ended ? 'Not prepared' : readiness.preparation?.status === 'ready' ? view.state : 'Not prepared' : 'Local'}</small></div>{!narrow && <button type="button" className="workspace-toggle quiet" aria-label={workspaceCollapsed ? 'Show workspace panel' : 'Hide workspace panel'} title={workspaceCollapsed ? 'Show workspace panel' : 'Hide workspace panel'} aria-expanded={!workspaceCollapsed} aria-controls="session-workspace" onClick={() => setWorkspaceCollapsed(value => !value)}><NavigationIcon kind="panel"/></button>}<PushNotifications api={api}/><ThemeSelect value={theme} onChange={setTheme}/></header>
-        {error && <p className="error app-error" role="alert">{error}</p>}
-        {selected && <SessionControls key={selected} approvalMode={view.approvalMode??currentSession?.approvalMode} approvalModeSource={view.approvalModeSource??currentSession?.approvalModeSource} onApprovals={mode=>changeApprovals(selected,mode)} grants={sessionGrants(view,currentSession)} onRevokeGrant={grantId=>revokeGrant(selected,grantId)} showPrimary={narrow && mobileTab !== 'chat'} connected={connection === 'Connected'} ended={ended} closing={closing} releaseFailed={releaseFailed} removing={removing} working={working} busy={busy||routeReady!==navigation.entry.key} preparation={readiness.preparation} error={readiness.error} sharedActive={Math.max(0, (currentSession?.sharedActiveSessions ?? 0) - (currentSession?.running ? 1 : 0))} predecessor={currentSession?.predecessorSessionId} onReconnect={() => setReconnectRevision(value => value + 1)} onPrepare={() => void lifecycle('session.prepare')} onCancel={() => void lifecycle('session.prepare.cancel')} onClose={() => removing && currentSession ? void removeSession(currentSession) : void lifecycle('session.release')} onAssignments={() => showDialog('assignments')} onPredecessor={() => { if (currentSession?.predecessorSessionId) selectSession(currentSession.predecessorSessionId); }}/>}
-        <Approvals key={`approvals:${selected}`} events={approvals} busy={busy||connection!=='Connected'||routeReady!==navigation.entry.key} onRespond={body=>mutate(body,selected)}/>
-        <div className="view-nav"><div className="conversation-title"><span className="chat-label"><Avatar memberId="lead" size={32}/>Conversation <small>You and the Lead</small></span><UnreadReplies loading={unreadReplies.loading} open={route.overlay?.kind==='unread'} onToggle={open=>open?openOverlay({kind:'unread'}):closeOverlay()} page={unreadReplies.page} error={unreadReplies.error} onOpen={openReply} onMore={unreadReplies.more} onFirst={unreadReplies.first} cursor={unreadReplies.cursor} onRefresh={unreadReplies.refresh} sessionLabel={id=>{const session=sessionMetadata.current.get(id);return session?sessionName(session):id;}}/></div><Tabs active={activeTab} onChange={changeTab} subagentsWorking={!!selected && hydratedSession===selected && hasWorkingSubagent(view)}/></div>
-        {narrow && mobileTab !== 'chat' && <LeadProgress progress={progress} mobile/>}
-        <div className="panes"><main id="panel-chat" className="chat-pane" hidden={narrow && mobileTab !== 'chat'} aria-labelledby="tab-chat"><section id="conversation" ref={conversation} tabIndex={-1} className="conversation" aria-label="Conversation" onWheelCapture={event=>navigateHistory(event.deltaY<0?'older':'newer')} onKeyDownCapture={event=>{if(['ArrowUp','PageUp','Home'].includes(event.key))navigateHistory('older');if(['ArrowDown','PageDown','End'].includes(event.key))navigateHistory('newer');}} onTouchStartCapture={event=>{touchY.current=event.touches[0]?.clientY;}} onTouchMoveCapture={event=>{const next=event.touches[0]?.clientY;if(next!==undefined&&touchY.current!==undefined)navigateHistory(next>touchY.current?'older':'newer');touchY.current=next;}} onPointerDownCapture={()=>{historyGesture.current=true;}} onScroll={event => {
+        }}><div className="drawer-heading"><h2 id="drawer-title">Workspace</h2><button className="quiet drawer-close" type="button" onClick={closeOverlay} aria-label="Close sessions"><NavigationIcon kind="close"/></button></div><nav aria-label="Mobile sessions">{sessionButtons}{narrow&&drawerOpen&&<QuotaSection api={api}/>}<DeckMenu inline onNotifications={openNotifications} notificationsEnabled={notifications.enabled} notificationsAttention={notifications.attention} onOpenTheme={()=>{drawer.current?.close();closeOverlay();}} onCloseTheme={()=>document.querySelector<HTMLElement>('[aria-label="Open sessions"]')?.focus({preventScroll:true})} hidden={install.hidden} onRestart={()=>openOverlay({kind:'restart'})} onInstall={()=>{openOverlay({kind:'install'});install.activate();}} theme={theme} onTheme={setTheme} font={font} onFont={setFont}/></nav></dialog>
+        {notificationsOpen&&<NotificationsDialog settings={notifications} onClose={()=>{setNotificationsOpen(false);requestAnimationFrame(()=>notificationsReturnFocus.current?.focus({preventScroll:true}));}}/>}
+        <div ref={motionRoot} style={{"--pane-split": `${split}%`} as React.CSSProperties} className={`app-body${sessionOpening ? ' session-opening' : ''}${!narrow ? ` content-${contentMode}` : ''}`}><header className="app-header"><div className="layout-controls" role="group" aria-label="Workspace layout"><button className="sidebar-toggle quiet" type="button" aria-label={narrow ? 'Open sessions' : collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={narrow ? drawerOpen : !collapsed} onClick={() => narrow ? openOverlay({kind:'drawer'}) : setCollapsed(value => !value)}><NavigationIcon kind="menu"/>{narrow&&notifications.attention&&<span className="menu-attention" role="img" aria-label="Notifications need attention"/>}</button>{!narrow && <div ref={modesRef} className="content-modes" role="group" aria-label="Content view">{(['chat','both','workspace'] as const).map(mode=><button type="button" className="quiet" key={mode} aria-label={mode==='chat'?'Chat':mode==='both'?'Both':'Workspace'} title={mode==='chat'?'Chat only':mode==='both'?'Chat and workspace':'Workspace only'} aria-pressed={contentMode===mode} onClick={()=>setContentMode(mode)}><NavigationIcon kind={mode==='chat'?'chat-layout':mode==='both'?'both-layout':'workspace-layout'}/></button>)}</div>}</div><div className="session-identity"><Avatar memberId="lead" size={32}/><div className="session-identity-text"><h1>{targetName}</h1><p className={`lead-identity${lead?'':' control-placeholder'}`} aria-hidden={!lead || undefined}>Lead <strong>{String(lead?.runnerId ?? 'Runner pending')}</strong><span title={String(lead?.modelId ?? 'Model pending')}>{String(lead?.modelId ?? 'Model pending')}</span></p></div></div><div className="connection"><span className={`connection-dot${preparationStatus==='ready'&&connection==='Connected'&&routeInteractive ? ' ready' : ''}`} aria-hidden="true"/><span className="connection-label">{sessionOpening ? 'Opening' : selected ? connection !== 'Connected' ? visibleConnection : preparationStatus === 'ready' ? 'Connected' : 'Not prepared' : 'Ready'}</span><small>{sessionOpening ? '' : selected ? closing ? 'Closing' : ended ? 'Not prepared' : preparationStatus === 'ready' ? working ? 'Working' : hydratedSession===selected ? view.state : currentSession?.state??'' : 'Not prepared' : 'Local'}</small></div>{selected && <div className="session-header-controls" inert={sessionOpening} aria-hidden={sessionOpening || undefined} onKeyDownCapture={event => { if (event.key === 'Escape' && event.target instanceof Element && event.target.closest('dialog:modal')) event.stopPropagation(); }}><ApprovalChip mode={view.approvalMode ?? currentSession?.approvalMode}/>{sessionControls(true)}</div>}</header>
+        {error && !sessionOpening && <p className="error app-error" role="alert">{error}</p>}
+
+        {narrow && <div className="view-nav">{workspaceTabs}</div>}
+        <div className="panes">{!narrow && contentMode==='both' && <div className="pane-divider" role="separator" tabIndex={0} aria-label="Resize conversation and workspace" aria-orientation="vertical" aria-controls="panel-chat" aria-valuemin={25} aria-valuemax={75} aria-valuenow={Math.round(split)} onKeyDown={event=>{const value=event.key==='Home'?25:event.key==='End'?75:event.key==='ArrowLeft'?split-2:event.key==='ArrowRight'?split+2:undefined;if(value!==undefined){event.preventDefault();setSplit(Math.max(25,Math.min(75,value)));}}} onPointerDown={event=>{if(event.button!==0)return;event.currentTarget.setPointerCapture(event.pointerId);event.preventDefault();}} onPointerMove={event=>{if(!event.currentTarget.hasPointerCapture(event.pointerId))return;const bounds=event.currentTarget.parentElement!.getBoundingClientRect();if(bounds.width)setSplit(Math.max(25,Math.min(75,(event.clientX-bounds.left)/bounds.width*100)));}} onPointerUp={event=>{if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);}}/>}{narrow&&mobileTab!=='chat'&&!sessionOpening&&hydratedSession===targetSession&&approvals.length>0&&<div className="mobile-approval-overlay"><Approvals key={`mobile-approvals:${selected}`} events={approvals} busy={busy||connection!=='Connected'||!routeInteractive} onRespond={body=>mutate(body,selected)}/></div>}<main id="panel-chat" className="chat-pane" hidden={narrow ? mobileTab !== 'chat' : contentMode === 'workspace'} aria-labelledby="tab-chat"><section id="conversation" ref={conversation} tabIndex={-1} className="conversation" aria-label="Conversation" onWheelCapture={event=>navigateHistory(event.deltaY<0?'older':'newer')} onKeyDownCapture={event=>{if(['ArrowUp','PageUp','Home'].includes(event.key))navigateHistory('older');if(['ArrowDown','PageDown','End'].includes(event.key))navigateHistory('newer');}} onTouchStartCapture={event=>{touchY.current=event.touches[0]?.clientY;}} onTouchMoveCapture={event=>{const next=event.touches[0]?.clientY;if(next!==undefined&&touchY.current!==undefined)navigateHistory(next>touchY.current?'older':'newer');touchY.current=next;}} onScroll={event => {
             const element=event.currentTarget;
             if(history.loading)return;
             following.current=!history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<80;
             if(following.current){anchor.current=undefined;setUnseen(false);}else {captureAnchor();setUnseen(true);}
             if(historyGesture.current){if(element.scrollTop<200){historyGesture.current=false;void history.older();}else if(history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<200){historyGesture.current=false;void history.newer();}}
         }}>
-        <div className="history-content"><div className="history-navigation" role="status">{history.before?<button type="button" className="quiet" disabled={history.loading} onClick={()=>{following.current=false;void history.older();}}>{history.loading?'Loading history…':'Older messages'}</button>:messages.length>0?<span>Beginning of conversation</span>:null}{history.error&&<span role="alert">{history.error}</span>}</div>
-        {!messages.length && <div className="empty"><DeckBrand large/><h2>{selected ? 'What are we working on?' : 'Your work, across runners'}</h2><p>{selected ? 'Send a message to the Lead. Follow the tools, delegated work and documents in the workspace alongside it.' : 'Choose a session to continue the conversation and see its work.'}</p></div>}
-        {messages.map(event => <div className="history-row" key={event.historyId} data-history-id={event.historyId}>{event.autoApproval ? <AutoApprovalMessage key={event.seq} detail={event.autoApproval}/>:event.questionResolution ? <QuestionAnswerMessage key={event.seq} resolution={event.questionResolution} ts={event.ts}/>:event.kind === 'turn.completed' ? <article key={event.seq} className="message failed-message" role="alert"><p className="message-meta">Turn failed</p><p>{typeof event.data.error === 'string' && event.data.error ? event.data.error : 'The runner could not complete this turn. Try again.'}</p></article> : <article id={`message-${event.seq}`} tabIndex={-1} className={`message ${event.data.role === 'user' ? 'user' : 'lead'}${event.seq===replyHighlight?' exact-reply':''}`}><div className="message-meta"><strong>{event.data.role === 'user' ? 'You' : 'Lead'}</strong>{event.data.role !== 'user' && <span>{event.source.runnerId ?? view.tasks[event.source.taskId ?? 'lead']?.runnerId as string ?? ''}{(event.data.modelId ?? view.tasks[event.source.taskId ?? 'lead']?.modelId) ? ` · ${String(event.data.modelId ?? view.tasks[event.source.taskId ?? 'lead']?.modelId)}` : ''}</span>}<time dateTime={event.ts}>{new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><DisplayedReply reply={visibleReplyMap.get(event.seq)} visible={chatVisible} root={conversation} onDisplayed={unreadReplies.displayed}><VisibleReply visible={chatVisible} replyKey={selected} seq={event.seq === latestReplySeq ? event.seq : 0} acknowledge={acknowledge}><Markdown text={String(event.data.text ?? event.data.delta ?? '')}/>{event.data.role==='user' && !event.source.runnerId && event.data.steering===true && event.data.historical===true && <p className="decision-note" role="status">Accepted by {steeringRunnerLabel(event.data.steeringRunnerId)} for its original turn.</p>}{event.data.role==='user' && (event.data.decisionReply as {stale?:boolean}|undefined)?.stale && <p className="decision-note" role="status">Reply to a changed or closed question. The text was delivered for clarification.</p>}<ImageReferences attachments={publicImages(event.data.attachments)} onPreview={previewAttachment}/></VisibleReply></DisplayedReply></article>}</div>)}
+        <div className="history-content" aria-busy={sessionOpening} inert={sessionOpening} aria-hidden={sessionOpening || undefined}><div className="history-navigation" role="status">{history.before?<button type="button" className="quiet" disabled={history.loading} onClick={()=>{following.current=false;void history.older();}}>{history.loading?'Loading history…':'Older messages'}</button>:messages.length>0?<span>Beginning of conversation</span>:null}{history.error&&<span role="alert">{history.error}</span>}</div>
+        {!selected && !sessionOpening && !messages.length && <div className="empty"><DeckBrand large/><h2>{selected ? 'What are we working on?' : 'Your work, across runners'}</h2><p>{selected ? 'Send a message to the Lead. Follow the tools, delegated work and documents in the workspace alongside it.' : 'Choose a session to continue the conversation and see its work.'}</p></div>}
+        {messages.map(event => <div className="history-row" key={event.historyId} data-history-id={event.historyId}>{event.autoApproval ? <AutoApprovalMessage key={event.seq} detail={event.autoApproval}/>:event.questionResolution ? <QuestionAnswerMessage key={event.seq} resolution={event.questionResolution} ts={event.ts}/>:event.kind === 'turn.completed' ? <TurnFailureMessage key={event.seq} data={event.data}/> : <article id={`message-${event.seq}`} tabIndex={-1} className={`message ${event.data.role === 'user' ? 'user' : 'lead'}${event.seq===replyHighlight?' exact-reply':''}`}><div className="message-meta"><strong>{event.data.role === 'user' ? 'You' : 'Lead'}</strong>{event.data.role !== 'user' && <span>{event.source.runnerId ?? view.tasks[event.source.taskId ?? 'lead']?.runnerId as string ?? ''}{(event.data.modelId ?? view.tasks[event.source.taskId ?? 'lead']?.modelId) ? ` · ${String(event.data.modelId ?? view.tasks[event.source.taskId ?? 'lead']?.modelId)}` : ''}</span>}<time dateTime={event.ts}>{new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time><MessageCopy text={String(event.data.text ?? event.data.delta ?? '')}/></div><DisplayedReply reply={visibleReplyMap.get(event.seq)} visible={chatVisible} root={conversation} onDisplayed={displayedReplies.displayed}><VisibleReply visible={chatVisible} replyKey={selected} seq={event.seq === latestReplySeq ? event.seq : 0} acknowledge={acknowledge}><TranscriptMarkdown key={`${selected}:${event.historyId}`} id={event.historyId} renderer={transcriptRenderer} text={String(event.data.text ?? event.data.delta ?? '')}/>{event.data.role==='user' && !event.source.runnerId && event.data.steering===true && event.data.historical===true && <p className="decision-note" role="status">Accepted by {steeringRunnerLabel(event.data.steeringRunnerId)} for its original turn.</p>}{event.data.role==='user' && (!event.data.handoff||event.data.handoff==='delivered') && (event.data.decisionReply as {stale?:boolean}|undefined)?.stale && <p className="decision-note" role="status">Reply to a changed or closed question. The text was delivered for clarification.</p>}{event.data.role==='user' && ['pending','sending','unknown'].includes(String(event.data.handoff)) && <p className="decision-note" role="status">{event.data.handoff==='unknown' ? <>Delivery unconfirmed <button type="button" className="quiet" onClick={()=>{followOwnSend();const session=selected,prior=drafts.current.get(session)??'';drafts.current.set(session,String(event.data.text??'')+(prior?'\n\n'+prior:''));imageDrafts.restore(session,publicImages(event.data.attachments));requestAnimationFrame(()=>document.getElementById('prompt')?.focus({preventScroll:true}));}}>Send again</button></> : 'Sending…'}</p>}<ImageReferences attachments={publicImages(event.data.attachments)} onPreview={previewAttachment}/></VisibleReply></DisplayedReply></article>}</div>)}
         {history.after&&<button type="button" className="quiet" disabled={history.loading} onClick={()=>{following.current=false;void history.newer();}}>Newer messages</button>}</div>
-        {origin?.sessionId === selected && <DecisionOrigin decision={origin.decision} events={view.events} onClose={closeOverlay}/>}
+        {origin?.sessionId === selected && <DecisionOrigin decision={origin.decision} api={api} sessionId={selected} events={[...view.events,...history.messages]} onClose={closeOverlay}/>}
         </section>
-        <div className="conversation-feedback">{(unseen||history.after) && <button type="button" className="jump-latest" onClick={()=>void jumpLatest()}>Jump to latest ↓</button>}</div>
-        <LeadProgress progress={progress}/>
+        <div className="conversation-feedback" inert={sessionOpening} aria-hidden={sessionOpening || undefined}><div className="conversation-float-stack"><Approvals key={`approvals:${selected}`} events={narrow&&mobileTab!=='chat'?[]:approvals} busy={busy||connection!=='Connected'||!routeInteractive} onRespond={body=>mutate(body,selected)}/>{(unseen||history.after) && <div className="conversation-float-actions"><button type="button" className="jump-latest" onClick={()=>void jumpLatest()}>Jump to latest ↓</button></div>}{canCompose && <>{keyboardStatus && <div className="composer-interrupt-hint" role="status">{keyboardStatus}</div>}{reconnectAttempt===selected && connection!=='Connected' && <div className="composer-reconnect" role="status"><span>Connect to this session to send. Your draft is kept.</span><button type="button" onClick={()=>setReconnectRevision(value=>value+1)}>Reconnect</button></div>}</>}<LeadProgress progress={progress} events={view.events} sessionId={selected} contexts={contextWindows}/></div></div>
+        <div className="conversation-welcome" data-control-motion aria-hidden={!welcome}>
+            <DeckBrand large/><h2>What will we build today?</h2><p>Bring your next idea to life with Deck.</p>
+        </div>
+        <div className="composer-dock" ref={composerDock} inert={sessionOpening} aria-hidden={sessionOpening || undefined}>
         {/* Connection changes remount docks so secret DOM values and refs are wiped; ordinary drafts live above them. */}
-        <div className="question-docks">{Object.values(view.questions).sort((a,b)=>a.seq-b.seq).map(event=>{const id=String(event.data.questionId), draftKey=`${selected}:${id}`, member=String(event.source.memberId??view.tasks[String(event.data.taskId)]?.memberId??'lead');return <QuestionDock key={`${draftKey}:${connection}:${reconnectRevision}`} open={openQuestion===draftKey} onToggle={()=>setOpenQuestion(old=>old===draftKey?'':draftKey)} questionId={id} questions={event.data.questions as Question[]} label={member==='lead'?'The Lead':agentProfile(member).label} drafts={questionDrafts[draftKey]??Object.create(null)} onDrafts={draft=>setQuestionDrafts(old=>Object.assign(Object.create(null),old,{[draftKey]:draft}))} onCommand={body=>mutate(body,selected)} busy={busy||connection!=='Connected'||routeReady!==navigation.entry.key}/>;})}</div>
-        <PromptQueue key={`queue:${selected}`} items={promptInbox.inbox.queued} paused={promptInbox.inbox.paused&&!ended} pauseReason={promptInbox.inbox.pauseReason} failed={promptInbox.failed} connected={connection==='Connected'&&canCompose&&routeReady===navigation.entry.key} busy={busy} sending={pendingPrompts[selected]?.phase==='sending'&&!!pendingPrompts[selected]?.background} error={queueErrors[selected]||promptInbox.error} onCancel={id=>void queueCommand('prompt.cancel',id)} onResume={()=>void queueCommand('prompt.resume')} onImage={previewAttachment}/>
-        {selected && <Decisions key={`decisions:${selected}`} decisions={decisionData.decisions} connected={connection==='Connected'&&!ended&&!closing&&canCompose&&routeReady===navigation.entry.key} busy={busy} error={decisionError.sessionId===selected ? decisionError.text||decisionData.error : decisionData.error} loading={decisionData.loading} omittedTerminal={decisionData.omittedTerminal} selection={selectedDecision} stale={staleDecision} onReply={decision=>{setDecisionSelection({sessionId:selected,decisionId:decision.decisionId,revision:decision.revision,questionRevision:decision.questionRevision,question:decision.question});focusComposer();}} onClear={()=>{setDecisionSelection(undefined);focusComposer();}} onAction={(decision,type)=>void decisionAction(decision,type)} onOrigin={decisionOrigin} onRefresh={decisionData.refresh}/>}
+        <div className="question-docks">{Object.values(view.questions).sort((a,b)=>a.seq-b.seq).map(event=>{const id=String(event.data.questionId), draftKey=`${selected}:${id}`, member=String(event.source.memberId??view.tasks[String(event.data.taskId)]?.memberId??'lead');return <QuestionDock key={`${draftKey}:${connection}:${reconnectRevision}`} open={openQuestion===draftKey} onToggle={()=>setOpenQuestion(old=>old===draftKey?'':draftKey)} questionId={id} questions={event.data.questions as Question[]} label={member==='lead'?'The Lead':agentProfile(member).label} drafts={questionDrafts[draftKey]??Object.create(null)} onDrafts={draft=>setQuestionDrafts(old=>Object.assign(Object.create(null),old,{[draftKey]:draft}))} onCommand={body=>mutate(body,selected)} busy={busy||connection!=='Connected'||!routeInteractive}/>;})}</div>
+        <PromptQueue key={`queue:${selected}`} items={promptInbox.inbox.queued} paused={promptInbox.inbox.paused&&!ended} pauseReason={promptInbox.inbox.pauseReason} failed={promptInbox.failed} connected={connection==='Connected'&&canCompose&&routeInteractive} busy={busy} sending={pendingPrompts[selected]?.phase==='sending'&&!!pendingPrompts[selected]?.background} error={queueErrors[selected]||promptInbox.error} onEdit={prompt=>void restorePrompt(prompt)} onCancel={id=>void queueCommand('prompt.cancel',id)} onResume={()=>void queueCommand('prompt.resume')} onImage={previewAttachment}/>
+        {selected && <Decisions key={`decisions:${selected}`} decisions={decisionData.decisions} connected={connection==='Connected'&&!ended&&!closing&&canCompose&&routeInteractive} busy={busy} error={decisionError.sessionId===selected ? decisionError.text||decisionData.error : decisionData.error} loading={decisionData.loading} omittedTerminal={decisionData.omittedTerminal} selection={selectedDecision} stale={staleDecision} onReply={decision=>{setDecisionSelection({sessionId:selected,decisionId:decision.decisionId,revision:decision.revision,questionRevision:decision.questionRevision,question:decision.question});focusComposer();}} onClear={()=>{setDecisionSelection(undefined);focusComposer();}} onAction={(decision,type)=>void decisionAction(decision,type)} onOrigin={decisionOrigin} onRefresh={decisionData.refresh}/>}
         <SteeringStatus deliveries={promptInbox.inbox.deliveries??[]} omitted={promptInbox.inbox.omittedDeliveries}/>
-        <ImageDraftStrip items={draftImages} error={imageDrafts.errors[selected]} submitted={new Set(submittedImages[selected]??[])} onRemove={id=>imageDrafts.remove(selected,[id])} onRetry={id=>imageDrafts.retry(selected,id)} onPreview={item=>setPreviewImage({sessionId:selected,name:imageDisplayName(item.file.name),file:item.file})}/>
-        <DraftBoundary key={`composer:${selected}`} sessionId={selected} drafts={drafts.current}>{(text,setText)=><><CurrentTurnAction runnerId={promptInbox.inbox.steeringRunnerId} available={canCompose&&promptInbox.inbox.steeringAvailable===true&&!promptInbox.inbox.paused&&!promptInbox.inbox.queued.length&&!draftImages.length} disabled={!canSend||staleDecision||!text.trim()}/>{canCompose ? <form id="prompt-composer" className="composer" onSubmit={async event => {
+        <ImageDraftStrip items={draftImages} error={imageDrafts.errors[selected]} submitted={new Set(submittedImages[selected]??[])} onRemove={id=>imageDrafts.remove(selected,[id])} onRetry={id=>imageDrafts.retry(selected,id)} onPreview={item=>setPreviewImage({sessionId:selected,name:imageDisplayName(item.file?.name??item.attachment?.name??'Image'),file:item.file,src:item.src})}/>
+        <DraftBoundary key={`composer:${selected}`} sessionId={selected} drafts={drafts.current}>{(text,setText)=><><CurrentTurnAction runnerId={promptInbox.inbox.steeringRunnerId} available={canCompose&&promptInbox.inbox.steeringAvailable===true&&!promptInbox.inbox.paused&&!promptInbox.inbox.queued.length&&!draftImages.length} disabled={!canSend||staleDecision||!text.trim()}/>{canCompose ? <div className="composer-wrap"><form id="prompt-composer" className="composer" onSubmit={async event => {
             event.preventDefault();const submitter=(event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement|null;const currentTurn=submitter?.name==='delivery'&&submitter.value==='current-turn';const session=selected,prompt=text,images=[...draftImages],ids=images.map(item=>item.draftId);
             if(!canSend||staleDecision||(!prompt.trim()&&!images.length))return;
+            if(connection!=='Connected'){setReconnectAttempt(selected);return;}
             setSubmittedImages(previous=>({...previous,[session]:ids}));
             try{if(await command({type:'prompt.send',text:prompt,...(currentTurn?{delivery:'current-turn'}:{}),...(selectedDecision?{decisionTarget:{decisionId:selectedDecision.decisionId,revision:selectedDecision.revision}}:{}),...(images.length?{attachmentIds:images.map(item=>item.attachment!.attachmentId)}:{})})){
                 if(selectedSession.current===session)setDecisionSelection(undefined);
                 if(drafts.current.get(session)===prompt){drafts.current.set(session,'');}imageDrafts.consume(session,ids);
             }}finally{setSubmittedImages(previous=>({...previous,[session]:[]}));}
-        }}><label htmlFor="prompt">Message the lead</label><MessageInput id="prompt" value={text} onChange={event => setText(event.target.value)} disabled={!selected || ended || route.session!==selected} placeholder="Describe the next step…" aria-describedby={staleDecision ? "composer-help decision-target-status" : "composer-help"} aria-invalid={staleDecision || undefined} onPaste={event=>{
+        }}><label htmlFor="prompt">Message the lead</label><MessageInput id="prompt" enterKeyHint={touchEnter ? 'enter' : 'send'} value={text} onChange={event => setText(event.target.value)} disabled={!selected || ended || sessionOpening || route.session!==selected} placeholder="Describe the next step…" aria-describedby={staleDecision ? "composer-help decision-target-status" : "composer-help"} aria-invalid={staleDecision || undefined} onPaste={event=>{
             const files=clipboardImages(event.clipboardData);if(!files.length)return;event.preventDefault();const session=selected,input=event.currentTarget,pasted=event.clipboardData.getData('text/plain');
             if(pasted){const inserted=insertPastedText(input.value,input.selectionStart,input.selectionEnd,pasted);setText(inserted.text);requestAnimationFrame(()=>{if(selectedSession.current===session&&document.activeElement===input)input.setSelectionRange(inserted.caret,inserted.caret);});}
             imageDrafts.add(session,files);
-        }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }}/><div className="composer-actions"><ImagePicker sessionId={selected} disabled={!canCompose||routeReady!==navigation.entry.key} onFiles={(files,owner)=>imageDrafts.add(owner,files)}/><span id="composer-help">{selected ? staleDecision ? 'Clear or update the changed reply target before sending.' : ended ? 'This session has ended.' : busy ? 'Saving message… Your draft is kept.' : draftImages.some(item=>item.status==='uploading') ? 'Uploading images…' : draftImages.some(item=>item.status==='error') ? 'Retry or remove failed images before sending.' : promptInbox.inbox.paused ? 'New messages wait until you resume the queue.' : working || promptInbox.inbox.active || promptInbox.inbox.queued.length ? 'Messages queue after current work · Enter to send' : 'Enter to send · Shift + Enter for a new line' : 'Choose a session to send a message.'}</span><button type="button" className="quiet" aria-label="Interrupt" title="Interrupt" disabled={!selected || busy || ended || !working || routeReady!==navigation.entry.key} onClick={() => void command({ type: 'turn.interrupt', taskId: leadTaskId })}><svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button><button aria-label="Send prompt" title="Send prompt" disabled={!canSend || staleDecision || (!text.trim()&&!draftImages.length)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></div></form> : <div className="composer-gate" aria-label="Session connection"><p>{!selected ? 'Choose a session or create one to start.' : releaseFailed ? 'Session resources could not be fully released. You can retry.' : removing ? 'Removing session… Waiting for its resources to stop.' : closing ? 'Closing session… History and drafts are kept.' : connection !== 'Connected' ? 'Connect to this session to continue.' : readiness.preparation?.status === 'preparing' ? 'Checking session setup…' : readiness.preparation?.status === 'failed' ? 'Session preparation failed. You can retry.' : 'Prepare the session before sending a message.'}</p>{selected && <button type="button" disabled={busy || (closing && !releaseFailed)} onClick={() => {
+        }} onKeyDown={event => { if (composerEnterSubmits({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing, defaultPrevented: event.defaultPrevented }, touchEnter)) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }}/><div className="composer-actions"><ImagePicker sessionId={selected} disabled={!canCompose||!routeInteractive} onFiles={(files,owner)=>imageDrafts.add(owner,files)}/><span id="composer-help">{selected ? staleDecision ? 'Clear or update the changed reply target before sending.' : ended ? 'This session has ended.' : busy ? 'Saving message… Your draft is kept.' : draftImages.some(item=>item.status==='uploading') ? 'Uploading images…' : draftImages.some(item=>item.status==='error') ? 'Retry or remove failed images before sending.' : promptInbox.inbox.paused ? 'New messages wait until you resume the queue.' : working || promptInbox.inbox.active || promptInbox.inbox.queued.length ? touchEnter ? 'Messages queue after current work · Use Send to send' : 'Messages queue after current work · Enter to send' : touchEnter ? 'Enter for a new line · Use Send to send' : 'Enter to send · Shift + Enter for a new line' : 'Choose a session to send a message.'}</span><button type="button" className="quiet" aria-label="Interrupt" title="Interrupt" disabled={!selected || busy || ended || !working || !routeInteractive} onClick={() => void interruptLead()}><svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button><button aria-label="Send prompt" title="Send prompt" disabled={!canSend || staleDecision || (!text.trim()&&!draftImages.length)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></div></form></div> : <div className="composer-gate" aria-label="Session connection"><p>{!selected ? 'Choose a session or create one to start.' : releaseFailed ? 'Session resources could not be fully released. You can retry.' : removing ? 'Removing session… Waiting for its resources to stop.' : closing ? 'Closing session… History and drafts are kept.' : readiness.preparation?.status === 'preparing' ? 'Checking session setup…' : readiness.preparation?.status === 'failed' ? 'Session preparation failed. You can retry.' : 'Prepare the session before sending a message.'}</p>{selected && <button type="button" disabled={busy || connection !== 'Connected' || (closing && !releaseFailed)} onClick={() => {
             if (releaseFailed) { if(removing && currentSession) void removeSession(currentSession); else void lifecycle('session.release'); }
-            else if (connection !== 'Connected') setReconnectRevision(value => value + 1);
             else if (readiness.preparation?.status === 'preparing') void lifecycle('session.prepare.cancel');
             else void lifecycle('session.prepare');
-        }}>{releaseFailed ? removing ? 'Retry removal' : 'Retry close' : closing ? removing ? 'Removing session…' : 'Closing session…' : connection !== 'Connected' ? 'Reconnect' : readiness.preparation?.status === 'preparing' ? 'Cancel preparation' : readiness.preparation?.status === 'failed' ? 'Retry preparation' : 'Prepare session'}</button>}{!!text && <small>Your draft is kept for this session.</small>}</div>}</>}</DraftBoundary></main>
-        <aside className="workspace-pane" id="session-workspace" aria-label="Session workspace" hidden={narrow && mobileTab === 'chat'}><div className="workspace-panel" id="panel-activity" role="tabpanel" aria-labelledby="tab-activity" hidden={workspaceTab !== 'activity'} tabIndex={0}><Activity events={view.events} sessionId={selected} visible={paired && connection === 'Connected' && (narrow ? mobileTab === 'activity' : !workspaceCollapsed && workspaceTab === 'activity')}/></div><div className="workspace-panel" id="panel-subagents" role="tabpanel" aria-labelledby="tab-subagents" hidden={workspaceTab !== 'subagents'} tabIndex={0}><Subagents api={api} view={view} sessionId={selected} visible={hydratedSession === selected && !dialogKind && !drawerOpen && (narrow ? mobileTab === 'subagents' : !workspaceCollapsed && workspaceTab === 'subagents')} readMarkers={readMarkers} acknowledge={acknowledge}/></div><div className="workspace-panel" id="panel-openspec" role="tabpanel" aria-labelledby="tab-openspec" hidden={workspaceTab !== 'openspec'} tabIndex={0}><OpenSpec key={selected} sessionId={selected} visible={paired && (narrow ? mobileTab === 'openspec' : !workspaceCollapsed && workspaceTab === 'openspec')} api={api}/></div></aside></div>
-        </div><ImagePreview image={previewImage} onClose={()=>{if(nav.current.route.overlay?.kind==='image')closeOverlay();else setPreviewImage(undefined);}}/><RestartDeckDialog open={route.overlay?.kind==='restart'} onClose={closeOverlay}/><InstallDeckDialog open={route.overlay?.kind==='install'} onClose={closeOverlay} help={install.help} status={install.status} pending={install.pending}/><WorkspaceDialog kind={dialogKind} project={dialogKind === 'session' || dialogKind === 'rename-project' ? creationProject : project} session={dialogKind === 'rename-session' ? actionSession : effectiveSession} api={api} mutate={mutate} returnFocus={dialogReturnFocus} onClose={() => setDialogKind(undefined)} onProject={next => { ++catalogRequest.current; setProjects(previous => previous.some(item => item.projectId === next.projectId) ? previous.map(item => item.projectId === next.projectId ? next : item) : [...previous, next]); if(dialogRenderToken===dialogToken.current&&dialogRenderGeneration===nav.generation&&dialogKind!=='rename-project'){expandProject(next.projectId);nav.navigate({project:next.projectId,tab:'chat'});} void load(); }} onCreated={id => { if(dialogRenderToken!==dialogToken.current||dialogRenderGeneration!==nav.generation){void load();return;} if (creationProject) { setProjectId(creationProject.projectId); expandProject(creationProject.projectId); void loadHistory(creationProject.projectId, undefined, true); } selectSession(id); void load(creationProject?.projectId); }} onRenamed={(id,title) => { ++sessionMutation.current; renameSessionView(id,title); if(actionSession?.projectId) void loadHistory(actionSession.projectId,undefined,true); }} onTrustChanged={() => {void load();void readiness.refresh();}} onAssigned={() => { if (projectId) void loadHistory(projectId, undefined, true); void load(); void readiness.refresh(); }}/></div>;
+        }}>{releaseFailed ? removing ? 'Retry removal' : 'Retry close' : closing ? removing ? 'Removing session…' : 'Closing session…' : readiness.preparation?.status === 'preparing' ? 'Cancel preparation' : readiness.preparation?.status === 'failed' ? 'Retry preparation' : 'Prepare session'}</button>}{!!text && <small>Your draft is kept for this session.</small>}</div>}</>}</DraftBoundary></div></main>
+        <aside className="workspace-pane" id="session-workspace" aria-label="Session workspace" inert={sessionOpening} aria-busy={sessionOpening} hidden={narrow ? mobileTab === 'chat' : contentMode === 'chat'}>{!narrow && workspaceTabs}<div className="workspace-panel" id="panel-git" role="tabpanel" aria-labelledby="tab-git" hidden={workspaceTab !== 'git'} tabIndex={0}><GitDiff key={selected} api={api} sessionId={selected} narrow={narrow} visible={paired && (narrow ? mobileTab === 'git' : !workspaceCollapsed && workspaceTab === 'git')}/></div><div className="workspace-panel" id="panel-activity" role="tabpanel" aria-labelledby="tab-activity" hidden={workspaceTab !== 'activity'} tabIndex={0}><Activity events={view.events} sessionId={selected} visible={paired && connection === 'Connected' && (narrow ? mobileTab === 'activity' : !workspaceCollapsed && workspaceTab === 'activity')}/></div><div className="workspace-panel" id="panel-subagents" role="tabpanel" aria-labelledby="tab-subagents" hidden={workspaceTab !== 'subagents'} tabIndex={0}><Subagents api={api} view={view} sessionId={selected} contexts={contextWindows} visible={hydratedSession === selected && !dialogKind && !drawerOpen && (narrow ? mobileTab === 'subagents' : !workspaceCollapsed && workspaceTab === 'subagents')} readMarkers={readMarkers} acknowledge={acknowledge}/></div></aside>{sessionOpening && targetSession && <SessionLoading key={navigation.entry.key} name={targetName} error={routeLoadError || (selected===targetSession && hydratedSession!==selected ? error : undefined)} onRetry={()=>setReconnectRevision(value=>value+1)}/>}</div>
+        </div><ImagePreview image={previewImage} onClose={()=>{if(nav.current.route.overlay?.kind==='image')closeOverlay();else setPreviewImage(undefined);}}/><RestartDeckDialog open={route.overlay?.kind==='restart'} onClose={closeOverlay}/><InstallDeckDialog open={route.overlay?.kind==='install'} onClose={closeOverlay} help={install.help} status={install.status} pending={install.pending}/><WorkspaceDialog kind={dialogKind} project={dialogKind === 'session' || dialogKind === 'rename-project' ? creationProject : project} session={dialogKind === 'rename-session' ? actionSession : effectiveSession} api={api} mutate={mutate} returnFocus={dialogReturnFocus} onClose={() => setDialogKind(undefined)} onProject={next => { ++catalogRequest.current; setProjects(previous => previous.some(item => item.projectId === next.projectId) ? previous.map(item => item.projectId === next.projectId ? next : item) : [...previous, next]); if(dialogRenderToken===dialogToken.current&&dialogRenderGeneration===nav.generation&&dialogKind!=='rename-project'){expandProject(next.projectId);nav.navigate({project:next.projectId,tab:'chat'});} void load(); }} onCreated={id => { if(dialogRenderToken!==dialogToken.current||dialogRenderGeneration!==nav.generation){void load();return;} if (creationProject) { setProjectId(creationProject.projectId); expandProject(creationProject.projectId); void loadHistory(creationProject.projectId, undefined, true); } selectSession(id); void load(creationProject?.projectId); }} onRenamed={(id,title) => { ++sessionMutation.current; renameSessionView(id,title); if(actionSession?.projectId) void loadHistory(actionSession.projectId,undefined,true); }} onTrustChanged={() => {void load();void readiness.refresh();}} onAssigned={() => { if (projectId) void loadHistory(projectId, undefined, true); void load(); void readiness.refresh(); }}/></div></SecondaryInfoProvider>;
 }
 if (typeof document !== 'undefined')
     createRoot(document.getElementById('root')!).render(<App />);

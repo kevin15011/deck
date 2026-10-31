@@ -1,0 +1,20 @@
+/* Keep hydration geometry available for exact-position restoration while the
+   departing transcript and all of its controls are unavailable to the user. */
+.app-body.session-opening .history-content,
+.app-body.session-opening .conversation-feedback,
+.app-body.session-opening .composer-dock,
+.app-body.session-opening .workspace-panel,
+.app-body.session-opening .session-header-controls,
+.app-body.session-opening .lead-identity { visibility: hidden; }
+/* One status outside pane visibility/inert boundaries also serves Workspace
+   and mobile Activity without changing the selected presentation. */
+.app-body.session-opening .panes { position: relative; }
+.session-loading { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; padding: 24px; background: var(--canvas); }
+.session-loading-status { display: grid; justify-items: center; gap: 8px; width: min(100%, 340px); text-align: center; }
+.session-loading-status svg { width: 120px; height: 36px; margin-bottom: 12px; overflow: hidden; fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.session-loading-track { opacity: .16; }
+.session-loading-trace { stroke-dasharray: 14 100; stroke-dashoffset: -40; opacity: .8; }
+.session-loading-status p { margin: 0; color: var(--muted); font-size: 13px; }
+.session-loading-status strong { max-width: 100%; color: var(--ink); font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+.session-loading-status small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.session-loading-status button { margin-top: 8px; }

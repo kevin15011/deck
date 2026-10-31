@@ -1,3 +1,4 @@
+import { selectTheme } from './acceptance-theme';
 /** Opt-in real streaming/browser regression; native effects are deterministic FakeDriver events. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -40,7 +41,7 @@ try{
    seed.say(Array.from({length:28},(_,i)=>`Historical paragraph ${i+1}. This completed passage should remain still and selectable while the Lead writes a new response.`).join('\n\n'));seed.finish();await wait(()=>!manager.hasRunningWork(),'seed completion');
    await page.goto(`${host.status().url}/?session=${sessionId}`);await page.locator('.app-header').waitFor();
    await wait(async()=>{const input=page.getByLabel('Message the lead');if(await input.count()&&await input.isEnabled())return true;const prepare=page.locator('.composer-gate').getByRole('button',{name:'Prepare session',exact:true});if(await prepare.isVisible()&&await prepare.isEnabled())await prepare.click();return false;},'composer');
-   await page.getByRole('combobox',{name:'Theme',exact:true}).selectOption(width===390?'cyberpunk':width===320?'dark':'light');await Bun.sleep(850);
+   await selectTheme(page,width===390?'cyberpunk':width===320?'dark':'light');await Bun.sleep(850);
    await page.getByLabel('Message the lead').fill('Draft retained during streaming');
    await page.locator('#conversation').evaluate(el=>el.scrollTop=el.scrollHeight);await Bun.sleep(50);
    await command({type:'prompt.send',text:'Write a deterministic streamed response'},sessionId);const turn=driver.turns.at(-1)!;

@@ -1,11 +1,16 @@
 import React from 'react';
 import { expect, test } from 'bun:test';
 import { renderToStaticMarkup as render } from 'react-dom/server';
-import { ApprovalCard, ApprovalConfirmation, SessionPermissions, AutoApprovalMessage, approvalView } from './approvals';
+import { Approvals, ApprovalCard, ApprovalConfirmation, SessionPermissions, AutoApprovalMessage, approvalView } from './approvals';
 import type { SessionEvent } from '../../../packages/core/src/session/events';
 const event=(data:Record<string,unknown>):SessionEvent=>({v:1,sessionId:'s',seq:1,kind:'approval.requested',ts:'2026-01-01T00:00:00Z',source:{taskId:'lead'},data:{approvalId:'a',tool:'Bash',summary:'Run a command',...data}});
 const base={toolKey:'claude:Bash',exactKey:'cat "a file.txt" && echo <safe>',risk:'normal',grantKinds:['exact','tool'],allowedScopes:['once','session']};
 const noop=()=>{};
+test('floating approvals show one request at a time and announce the stack',()=>{
+ const html=render(<Approvals events={[event(base),event({...base,approvalId:'second',tool:'Write'})]} onRespond={async()=>{}}/>);
+ expect(html).toContain('1 of 2');expect(html).toContain('Next request');expect(html).toContain('aria-live="polite"');
+ expect(html.match(/class="approval"/g)).toHaveLength(1);
+});
 test('legacy and once-only approvals expose only allow once and deny',()=>{
  for(const data of [{},{allowedScopes:['once']}]){const html=render(<ApprovalCard event={event(data)} onRespond={async()=>{}}/>);expect(html).toContain('Allow once');expect(html).toContain('Deny');expect(html).not.toContain('Allow for this session');expect(html).not.toContain('Always allow');}
 });

@@ -29,9 +29,9 @@ Cross sessions are an **experimental**, separate execution surface. Native insta
 | Claude | 2.1.296 | Runner default (unrestricted); relay opt-in | Explicit strict MCP file; only verified configured memory hooks admitted; native delegation excluded |
 | Codex | 0.162.1 | Runner default (unrestricted); relay opt-in | Effective-config and hook inventory verified; only reviewed configured memory hooks admitted; unrelated inherited entries and native delegation disabled |
 | OpenCode | 1.18.31 | Runner default (unrestricted); relay opt-in | Private configuration directory; verified configured memory loader and explicit MCP set checked through the native server; native task tool denied |
-| Pi | No driver | — | Native Pi workflow remains separate |
+| Pi (Setup only) | 1.0.0 | Session setting; relay supported | Delegated Setup uses the shared project-repair service; other roles use native Pi. Requires Node and a current verified Deck team install. |
 
-Versions below a driver's minimum block startup; newer untested versions report degraded readiness. Unknown native events remain available as bounded, redacted raw events. Native authentication remains owned by the native CLI. Exact verification and platform limitations are recorded in [apply progress](../../openspec/changes/cross-runner-session-core/apply-progress.md).
+Versions below a driver's minimum block startup; newer untested versions report degraded readiness. Pi Setup currently requires exactly 1.0.0. Native authentication remains owned by the native CLI. Exact verification and platform limitations are recorded in [apply progress](../../openspec/changes/cross-runner-session-core/apply-progress.md).
 
 The browser workspace supports persistent projects and session history, explicit preparation, linked continuation after close, and per-session member assignments. Lead assignment changes preserve Deck history through bounded context transfer into a fresh native generation; this is not native conversation migration between runners. Global Lead and delegated execution pools are separate, and concurrent sessions in one project share its physical files.
 
@@ -49,7 +49,7 @@ Pi and OpenCode are operational Deck runners. Codex and Claude carry the full te
 | Model discovery and per-role assignment | Supported | Supported | Supported | Supported |
 | Adaptive-memory runner configuration | Runner-specific; Deck loopback memory through the `deck-memory` extension (see below) | Runner-specific | Runner-specific; the pinned official plugin hooks receive the stored profile credential in the started process only | Runner-specific; official Supermemory plugin |
 | Explicit memory tools (on-demand search and save) | Supported; `memory_search` and `memory_save` tools registered by `deck-memory` over the Deck loopback host (read-only roles get search only; no Supermemory credential in Pi) | Supported; the official plugin's `supermemory` tool | Limited to the pinned official plugin's exposed capabilities; Deck does not add a competing memory MCP or loopback beside its recall/flush hooks | Supported; the official plugin's Supermemory MCP tools |
-| Shared tool installs (RTK, Codebase Memory, Context Mode) | Supported; Deck-owned pinned binaries, MCP commands pinned to absolute paths | Supported | Supported; Deck-owned pinned binaries, MCP and hooks pinned to verified absolute paths | Supported; pinned shared tools |
+| Shared tool installs (RTK, explicitly enabled Codebase Memory) | Supported; Deck-owned pinned binaries, MCP commands pinned to absolute paths | Supported | Supported; Deck-owned pinned binaries, MCP and hooks pinned to verified absolute paths | Supported; pinned shared tools |
 | Tool interception: RTK command rewrite | Supported in Deck sessions; the `deck-tool-policy` extension rewrites `bash` commands in `tool_call`, pinned to the owned RTK binary | Runner-specific; OpenCode hook | Runner-specific; marker-owned `PreToolUse` hook | Runner-specific; plugin `PreToolUse` hook |
 | Tool interception: Grep/Glob graph guidance | Advisory; the search always runs and one concise Codebase Memory note is appended to its result, at most once per session (code-structure searches only) | Not shipped | Not shipped | Advisory; the Codebase Memory integration adds graph context and the search still runs |
 | Tool interception: read-only role enforcement | Enforced for Investigate and Quality children (`tool_call` block plus a `--tools` allowlist); these roles have no shell | Not documented as enforced | Instruction-level only (no sandbox override) | Not documented as enforced |
@@ -59,6 +59,12 @@ Pi and OpenCode are operational Deck runners. Codex and Claude carry the full te
 Project-local discovery is always scoped to the active runner. Pi and OpenCode can share a capability ID while using different configuration files, package systems, model discovery, and verification effects.
 
 ### Pi in detail
+
+Native Pi Setup can execute an exact project repair delegated through `subagent` with a `preparation` request from `preparation-status`. The parent verifies the installed role, child session, containment and current invocation; repairs use the shared preparation service and a durable journal beside the parent session. Cancellation, navigation, changed configuration or generation revoke the invocation. Resume requires a fresh explicit repair delegation. The native catalog supports retired testing-policy cleanup, additive OpenSpec initialization/merge for supported shapes, and bounded skill-registry generation and stale refresh using evidence from the registry’s source runner. Malformed or unsupported OpenSpec shapes and unverifiable source inventories remain explicit limitations.
+
+Native OpenCode Setup uses `deck_preparation_status`, then `deck_delegate_preparation` with the exact snapshot and components, followed by native `task` selection of `deck-setup`. The plugin correlates the parent task metadata, child session and current Setup tool invocation before accepting `deck_prepare_project`; cancellation, completion, changed roles or generation revoke authority. It shares Pi's durable preparation coordinator and supports the same bounded policy, OpenSpec and source-qualified registry repairs. Plugin restart requires a fresh delegation; background tasks whose parent call has completed cannot repair through this lane.
+
+Native standalone Claude and Codex Setup do not expose authenticated project repair without trusted child/current-invocation lifecycle evidence. Use delegated Setup in a cross-runner session for authenticated repair; role names and readiness snapshots alone do not authorize mutation.
 
 - **Global install.** `Review & Install` and `deck pi developer` write one manifest-owned package under `<agent dir>/deck/package` (agents, skills, prompts, and the `deck-*` extensions), a lead profile under `<agent dir>/deck/profiles`, one `packages` entry in `settings.json`, and the Deck servers in `mcp.json`. Nothing is written into `<project>/.pi`, and the install writes no Deck files into `<project>/.deck` (only Pi's session store for `--continue`/`--resume` lives under `<project>/.deck/pi/sessions`).
 - **Deck-session activation guard.** Deck extensions are inert unless `DECK_PI_SESSION`, `DECK_PI_ROLE` or `DECK_PI_CHILD` is set by a Deck launch; a plain `pi` lists the Deck skills and extension names but runs none of the extension code.
@@ -82,10 +88,8 @@ Project-local discovery is always scoped to the active runner. Pi and OpenCode c
 
 | Capability | Product status | Boundary |
 |---|---|---|
-| Context Mode | Supported | Shared binary and MCP capability; effect and persistence are runner-specific. |
-| Codebase Memory | Supported | Shared binary/MCP integration where the active runner exposes the required surface. |
+| Codebase Memory | Explicit opt-in | Shared binary/MCP integration where the active runner exposes the required surface. |
 | RTK | Supported | Optional shared binary; OpenCode uses its hook integration, Pi uses a Deck-owned pinned binary through a `tool_call` rewrite, and Codex uses a Deck-owned pinned binary with a `PreToolUse` rewrite hook. |
-| Serena | Supported | MCP and symbol-editing capability; Pi can require manual verification when automatic installation is unavailable. |
 | Context7 | Supported | MCP server configuration is validated by the active adapter. |
 | Supermemory | Supported with route limits | OpenCode, Claude, and Codex use the pinned official plugin with a profile credential injected into the started process only; Pi uses Deck's loopback memory runtime through the `deck-memory` extension (no Supermemory credential in Pi configuration, no raw MCP entry). A raw Supermemory MCP entry is never registered beside a plugin. |
 | Developer Team | Supported | Seven canonical roles plus separate Onboard and Archive lifecycle skills. |

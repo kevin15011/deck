@@ -1,6 +1,8 @@
+import { isReadOnlyRole, ROLE_TOOL_POLICY } from "@deck/core/session/role-tool-policy";
 import type { DriverTaskInput } from "@deck/core/session/driver";
 import { isAbsolute } from "node:path";
 import { object } from "./rpc";
+import { createHash } from "node:crypto";
 
 /** App-server has no --ignore-user-config in 0.162.1 (that flag belongs to exec). */
 export const ISOLATION_FEATURES = ["multi_agent", "multi_agent_v2"] as const;
@@ -22,7 +24,7 @@ export function codexMemoryHooks(input: DriverTaskInput): Record<string, unknown
 }
 export function isAdmittedCodexMemoryHook(hook: CodexHookMetadata, input: DriverTaskInput): boolean {
   const nativeEvent = hook.eventName === "userPromptSubmit" ? "UserPromptSubmit" : hook.eventName === "stop" ? "Stop" : undefined;
-  const group = nativeEvent ? (codexMemoryHooks(input)[nativeEvent] as { hooks: { command: string }[] }[])[0] : undefined;
+  const group = nativeEvent ? (codexMemoryHooks(input)[nativeEvent] as { hooks: { command: string }[] }[] | undefined)?.[0] : undefined;
   return !!group && hook.source === "sessionFlags" && hook.handlerType === "command" && hook.async !== true && hook.command === group.hooks[0]?.command;
 }
 /** Installed owned blocks spell the default matcher explicitly; native layers keep that syntax. */
@@ -40,33 +42,58 @@ function toml(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(toml).join(",")}]`;
   return `{${Object.entries(object(value)).map(([key, v]) => `${JSON.stringify(key)}=${toml(v)}`).join(",")}}`;
 }
+export const isCodexReadOnlyTask = (input: DriverTaskInput): boolean => isReadOnlyRole(input.nativeRoleDescriptor?.roleId ?? input.nativeRole?.roleId ?? `deck-${input.memberId.replace(/^deck-/, "")}`);
+export function codexReadOnlyTools(input: DriverTaskInput, id: string): readonly string[] | undefined {
+  const prefix = `deck-session-${input.taskId}-`;
+  return ROLE_TOOL_POLICY.mcp[id.startsWith(prefix) ? id.slice(prefix.length) : id];
+}
 /** Only Deck additions/suppressions travel through stdin. Personal config stays native. */
 export function codexThreadMcpConfig(input: DriverTaskInput, nativeIds: readonly string[] = []): Record<string, unknown> {
-  const servers: Record<string, unknown> = Object.fromEntries((input.suppressedMcpServers ?? []).filter(id => nativeIds.includes(id)).map(id => [id, { enabled: false }]));
+  const readOnly = isCodexReadOnlyTask(input);
+  const servers: Record<string, unknown> = Object.fromEntries((readOnly ? nativeIds : input.suppressedMcpServers ?? []).filter(id => nativeIds.includes(id)).map(id => [id, { enabled: false }]));
   for (const id of input.mcp.servers) {
+    const allowed = readOnly ? codexReadOnlyTools(input, id) : undefined;
+    if (readOnly && !allowed) { if (nativeIds.includes(id)) servers[id] = { enabled: false }; continue; }
     const spec = input.mcpServerSpecs[id]; if (!spec) throw new Error("codex-mcp-spec-missing");
     servers[id] = spec.transport === "http" ? { enabled: true, url: spec.url, ...(spec.envHttpHeaders ? { env_http_headers: spec.envHttpHeaders } : {}) } : { enabled: true, command: spec.command, args: spec.args, env: spec.env };
   }
-  return { mcp_servers: servers };
+  if (readOnly) for (const id of input.mcp.servers) if (codexReadOnlyTools(input, id)) Object.assign(servers[id] as object, { enabled_tools: codexReadOnlyTools(input, id) });
+  return { mcp_servers: servers, ...(readOnly ? { "features.apps": false, "features.plugins": false } : {}) };
 }
-export function buildCodexLaunch(input: DriverTaskInput, options: CodexLaunchOptions = {}, inheritedHooks: readonly CodexHookMetadata[] = []) {
+export function isAdmittedCodexRoleHook(hook: CodexHookMetadata, input: DriverTaskInput): boolean {
+  return (hook.source === "user" || isAdmittedCodexMemoryHook(hook, input)) && hook.handlerType === "command" && hook.async !== true
+    && !!input.nativeRoleDescriptor?.hooks.some(expected => expected.event === hook.eventName && expected.command === hook.command);
+}
+export function buildCodexLaunch(input: DriverTaskInput, options: CodexLaunchOptions = {}, inheritedHooks: readonly CodexHookMetadata[] = [], files?: Pick<import("@deck/core/session/driver").DriverHostIo, "writePrivateFile">) {
   // Under development in Codex 0.162.1; supervised questions use io.question in both approval modes.
   codexMemoryHooks(input);
   const args = ["app-server", "--stdio", "-c", "features.default_mode_request_user_input=true"];
   if (input.disableNativeDelegation) for (const feature of ISOLATION_FEATURES) args.push("-c", `features.${feature}=false`);
-  if (input.nativeMemory?.status === "ready") {
+  if (input.nativeRoleDescriptor?.preparation?.some(finding => finding.code === "codex-hooks-preserved")) {
+    args.push("-c", "features.hooks=false");
+  } else if (input.nativeMemory?.status === "ready" || input.nativeRoleDescriptor) {
     args.push("-c", "features.hooks=true");
     const hooks = codexMemoryHooks(input);
     hooks.state = Object.fromEntries(inheritedHooks.flatMap(hook => {
-      if (isAdmittedCodexMemoryHook(hook, input)) return [[hook.key, { enabled: true, trusted_hash: hook.currentHash }]];
+      if (isAdmittedCodexMemoryHook(hook, input) || isAdmittedCodexRoleHook(hook, input)) return [[hook.key, { enabled: true, trusted_hash: hook.currentHash }]];
       const event = hook.eventName === "userPromptSubmit" ? "UserPromptSubmit" : hook.eventName === "stop" ? "Stop" : undefined;
-      const expected = event ? (codexMemoryHooks(input)[event] as {hooks:{command:string}[]}[])[0]?.hooks[0]?.command : undefined;
+      const expected = event ? (codexMemoryHooks(input)[event] as {hooks:{command:string}[]}[] | undefined)?.[0]?.hooks[0]?.command : undefined;
       return expected && hook.command === expected ? [[hook.key, { enabled: false }]] : [];
     }));
     args.push("-c", `hooks=${toml(hooks)}`);
   }
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(options.baseEnv ?? process.env)) if (typeof value === "string") env[key] = value;
+  for (const key of Object.keys(env)) if (key.startsWith("DECK_SESSION_START_")) delete env[key];
+  if (input.sessionStartContext) {
+    if (!input.nativeRoleDescriptor || !files) throw new Error("codex-session-context-unverified");
+    const value = JSON.stringify({ ...input.sessionStartContext, root: input.cwd, generation: input.nativeRoleDescriptor.generation });
+    env.DECK_SESSION_START_CONTEXT = files.writePrivateFile("session-start-context.json", value);
+    env.DECK_SESSION_START_DIGEST = createHash("sha256").update(value).digest("hex");
+    env.DECK_SESSION_START_EPOCH = input.sessionStartContext.epoch;
+    env.DECK_SESSION_START_GENERATION = input.nativeRoleDescriptor.generation;
+  }
+  if (input.nativeRoleDescriptor) env.CODEX_HOME = input.nativeRoleDescriptor.source.root;
   if (input.nativeMemory?.scopeMode === "global") for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
   return { command: options.executable ?? "codex", args, env };
 }

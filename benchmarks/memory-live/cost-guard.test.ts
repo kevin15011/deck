@@ -2,7 +2,7 @@ import { expect, test, spyOn } from 'bun:test';
 import { prepare, validateManifest } from './manifest';
 import { RunAuthority } from './run-authority';
 import { NamespaceTransport, simulatedWire } from './namespace-transport';
-import { testScratch, confirmSyntheticCleanup, syntheticConfirmation } from './test-support';
+import { boundaryTest, testScratch, confirmSyntheticCleanup, syntheticConfirmation } from './test-support';
 import { execute } from './run';
 import * as security from './security';
 import { readFileSync } from 'node:fs';
@@ -10,7 +10,7 @@ import { join } from 'node:path';
 const scratch = testScratch();
 const input = (suffix: string) => ({ run: '20261021_' + suffix, evalRoot: scratch.root('20261021_' + suffix), mode: 'pilot' as const, repeats: 1, budget: 822, processing: { pollIntervalMs: 300000 }, accountSharedWithProduction: true });
 const limits = { ceilingUsd: .25, stopUsd: .20, cleanupReserveUsd: .05 };
-test('live rejects a missing cost guard before root or credential access; historical plans work offline', async () => {
+boundaryTest('live rejects a missing cost guard before root or credential access; historical plans work offline', async () => {
     const m = prepare(input('bb0001')); m.liveApproved = true;
     const reader = spyOn(security, 'readEvalKey').mockImplementation(() => { throw new Error('CREDENTIAL_READER_MUST_NOT_RUN'); });
     try {
@@ -21,7 +21,7 @@ test('live rejects a missing cost guard before root or credential access; histor
     const { rescore } = await import('./rescore');
     const before = readFileSync(join(m.evalRoot, 'results.json'), 'utf8');
     m.sourceCommit = 'changed'; m.harnessHashes = {};
-    expect(rescore(m)).toMatchObject({ cases: 50, networkRequests: 0 });
+    expect(rescore(m)).toMatchObject({ cases: 2, networkRequests: 0 });
     expect(readFileSync(join(m.evalRoot, 'results.json'), 'utf8')).toBe(before);
 }, 60000);
 test('forecast serializes real R captures and controls, freezes inputs and retains 850 total', async () => {
@@ -38,7 +38,7 @@ test('forecast serializes real R captures and controls, freezes inputs and retai
     expect(() => validateLiveCostGuard({ ...m, costGuard: { ...g, stopUsd: NaN } })).toThrow();
     expect(JSON.parse(readFileSync(join(m.evalRoot, 'plan.json'), 'utf8')).costGuard).toEqual(g);
 });
-test('pre-egress projection latches stop, never refunds lost acknowledgements, cleanup remains independent', async () => {
+boundaryTest('pre-egress projection latches stop, never refunds lost acknowledgements, cleanup remains independent', async () => {
     const { prepareGuarded, CostLedger } = await import('./cost-guard');
     const m = await prepareGuarded(input('bb0003'), limits);
     const ledger = new CostLedger(m.costGuard!);
@@ -57,7 +57,7 @@ test('pre-egress projection latches stop, never refunds lost acknowledgements, c
     expect(ledger.snapshot()).toMatchObject({ stopped: true, stopReason: 'ingestion_token_budget', cleanupRequestsUsed: 1 });
 });
 
-test('all invalid guard shapes reject before credential read; plan approval alone cannot change limits', async () => {
+boundaryTest('all invalid guard shapes reject before credential read; plan approval alone cannot change limits', async () => {
     const { prepareGuarded } = await import('./cost-guard');
     const m = await prepareGuarded(input('bb0004'), limits);
     m.liveApproved = true;
@@ -67,7 +67,7 @@ test('all invalid guard shapes reject before credential read; plan approval alon
     // A valid guard advances to the root gate, still before any credential access.
     await expect(execute(m, { live: true })).rejects.toThrow('test_scratch_cannot_be_live');
 });
-test('concurrent requests reserve synchronously; exact stop threshold blocks next effect including optional operations', async () => {
+boundaryTest('concurrent requests reserve synchronously; exact stop threshold blocks next effect including optional operations', async () => {
     const { prepareGuarded, CostLedger } = await import('./cost-guard');
     const m = await prepareGuarded(input('bb0005'), limits);
     const g = m.costGuard!;
@@ -112,7 +112,7 @@ test('guarded simulation matches forecast content bytes and keeps failed writes 
     expect(failed.costProgress!.evaluationUsedUsd).toBeLessThan(.20);
 }, 60000);
 
-test('retention finalizer persists and signals a seeded cost stop without cleanup; no blocked write is sent', async () => {
+boundaryTest('retention finalizer persists and signals a seeded cost stop without cleanup; no blocked write is sent', async () => {
     const { prepareGuarded, CostLedger } = await import('./cost-guard');
     const m = await prepareGuarded(input('bb0008'), limits);
     const reserve = CostLedger.prototype.reserve;
@@ -179,12 +179,12 @@ test('historical scoped recovery carries reservations across invocations and sto
     } finally { stderr.mockRestore(); }
 });
 
-test('an explicit guarded request budget is unapproved configuration and never increases cleanup', async () => {
+boundaryTest('an explicit guarded request budget is unapproved configuration and never increases cleanup', async () => {
     const { prepareGuarded } = await import('./cost-guard');
     const m = await prepareGuarded({ ...input('bb0011'), budget: 850 }, limits);
     expect(m.requestBudget).toBe(850); expect(m.cleanupRequestBudget).toBe(28); expect(m.liveApproved).toBe(false);
 });
-test('forecast includes accepted-empty namespace preflight and bounds all revision monitoring', async () => {
+boundaryTest('forecast includes accepted-empty namespace preflight and bounds all revision monitoring', async () => {
     const { prepareGuarded } = await import('./cost-guard');
     const m = await prepareGuarded(input('bb0012'), limits), g = m.costGuard!;
     expect(g.executionForecast.preflightRequests).toBe(6 * Object.keys(m.bindings).length);

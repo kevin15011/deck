@@ -42,7 +42,7 @@ describe("buildAdaptiveMemoryInstructionBundle canonical Supermemory conversatio
       expect(markdown).toContain("unless those are themselves the historical fact being sought");
       expect(markdown).toContain("Preserve requested names, conventions, rationale, decisions, and discoveries as separate query facets");
       expect(markdown).toContain("do not insert facts or proper nouns the user did not provide");
-      expect(markdown).toContain("Context Mode remains for local/indexed documentation, command output, and current session knowledge");
+      expect(markdown).not.toMatch(/context.mode|serena/i);
 
       expect(markdown).toContain("Do not");
       expect(markdown).toContain("topic keys");

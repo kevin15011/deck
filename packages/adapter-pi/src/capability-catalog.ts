@@ -263,17 +263,15 @@ const FULL_CAPABILITY_CATALOG: Record<CapabilityId, CapabilityToolMapping | Inte
 // ---------------------------------------------------------------------------
 
 export const PI_RUNNER_CAPABILITY_CATALOG: Record<
-  Exclude<CapabilityId, InternalCapabilityId>,
+  Exclude<CapabilityId, InternalCapabilityId | "context-mode" | "serena">,
   CapabilityToolMapping
 > = {
-  "context-mode": FULL_CAPABILITY_CATALOG["context-mode"] as CapabilityToolMapping,
   "codebase-memory-mcp": FULL_CAPABILITY_CATALOG["codebase-memory-mcp"] as CapabilityToolMapping,
   rtk: FULL_CAPABILITY_CATALOG.rtk as CapabilityToolMapping,
-  serena: FULL_CAPABILITY_CATALOG.serena as CapabilityToolMapping,
   context7: FULL_CAPABILITY_CATALOG.context7 as CapabilityToolMapping,
   "web-search": FULL_CAPABILITY_CATALOG["web-search"] as CapabilityToolMapping,
   "pi-hud": FULL_CAPABILITY_CATALOG["pi-hud"] as CapabilityToolMapping,
-} as const satisfies Record<Exclude<CapabilityId, InternalCapabilityId>, CapabilityToolMapping>;
+} as const satisfies Record<Exclude<CapabilityId, InternalCapabilityId | "context-mode" | "serena">, CapabilityToolMapping>;
 
 /**
  * Internal-only capability entries.
@@ -290,21 +288,19 @@ export const INTERNAL_CAPABILITY_ENTRIES: Record<InternalCapabilityId, InternalC
  * Dashboard selectors and capability summaries should use this array.
  * REQ-DASH-001: runner-mermaid must not appear in user-facing capability summaries.
  */
-export const PI_RUNNER_CAPABILITY_IDS = Object.keys(PI_RUNNER_CAPABILITY_CATALOG) as Exclude<
-  CapabilityId,
-  InternalCapabilityId
->[];
+export const PI_RUNNER_CAPABILITY_IDS = Object.keys(PI_RUNNER_CAPABILITY_CATALOG) as Exclude<CapabilityId, InternalCapabilityId | "context-mode" | "serena">[];
 
 /**
  * All capability IDs including internal ones.
  * Use PI_RUNNER_CAPABILITY_IDS for user-facing display.
  */
-export const ALL_PI_RUNNER_CAPABILITY_IDS = Object.keys(FULL_CAPABILITY_CATALOG) as CapabilityId[];
+export const ALL_PI_RUNNER_CAPABILITY_IDS = Object.keys(FULL_CAPABILITY_CATALOG).filter(id => !["context-mode", "serena"].includes(id)) as CapabilityId[];
 
 /**
  * Returns the capability entry, or undefined if not found.
  */
 export function getPiRunnerCapability(capabilityId: CapabilityId): (CapabilityToolMapping | InternalCapabilityToolMapping) | undefined {
+  if (capabilityId === "serena" || capabilityId === "context-mode") return undefined;
   return FULL_CAPABILITY_CATALOG[capabilityId];
 }
 
@@ -314,6 +310,7 @@ export function getPiRunnerCapability(capabilityId: CapabilityId): (CapabilityTo
 export function getUserFacingCapability(
   capabilityId: CapabilityId,
 ): CapabilityToolMapping | undefined {
+  if (capabilityId === "serena" || capabilityId === "context-mode") return undefined;
   const entry = FULL_CAPABILITY_CATALOG[capabilityId];
   if (entry && !entry.isInternal) {
     return entry as CapabilityToolMapping;
@@ -374,11 +371,9 @@ export const PI_RUNNER_CAPABILITY_CONTRIBUTION = defineRunnerCapabilityContribut
   mappings: [
     ...protectedControlMappings,
     { capabilityId: "code-economy", runnerId: "pi", status: "supported", adapterSource: "@deck/adapter-pi", installKind: "native-instruction-composition", provisionMode: "native-instruction-composition", parityChecks: ["instruction-bundle-present"] },
-    { capabilityId: "context-mode", runnerId: "pi", status: "shared", adapterSource: "context-mode", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-binary-plus-mcp", detectors: { commands: ["context-mode"], mcpServerNames: ["context-mode"] }, parityChecks: ["binary-usable", "mcp-config-present", "no-unnecessary-reinstall"] },
     { capabilityId: "codebase-memory", runnerId: "pi", status: "shared", adapterSource: "codebase-memory-mcp", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-binary-plus-mcp", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present", "no-unnecessary-reinstall"] },
     { capabilityId: "codebase-memory-mcp", runnerId: "pi", status: "shared", adapterSource: "codebase-memory-mcp", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-binary-plus-mcp", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present"] },
     { capabilityId: "rtk", runnerId: "pi", status: "shared", adapterSource: "rtk", installKind: "shared-binary", provisionMode: "reuse-shared-binary", detectors: { commands: ["rtk"] }, parityChecks: ["binary-usable", "no-unnecessary-reinstall"] },
-    { capabilityId: "serena", runnerId: "pi", status: "shared", adapterSource: "serena", installKind: "python-tool", provisionMode: "python-tool", detectors: { commands: ["serena"], mcpServerNames: ["serena"] }, parityChecks: ["binary-usable", "mcp-config-present", "instruction-bundle-present"] },
     { capabilityId: "context7", runnerId: "pi", status: "shared", adapterSource: "@upstash/context7-mcp", installKind: "npm-package-plus-mcp", provisionMode: "npm-package-plus-mcp", detectors: { mcpServerNames: ["context7"] }, parityChecks: ["mcp-config-present"] },
     { capabilityId: "web-search", runnerId: "pi", status: "supported", adapterSource: "@deck/provider-tavily", installKind: "native-mcp", provisionMode: "native-mcp", implementationId: TAVILY_IMPLEMENTATION_ID, detectors: { mcpServerNames: [TAVILY_MCP_SERVER_ID] }, parityChecks: ["mcp-config-present", "instruction-bundle-present"] },
     { capabilityId: "supermemory-tool-bindings", runnerId: "pi", status: "shared", adapterSource: "supermemory", installKind: "mcp-server", provisionMode: "mcp-server", detectors: { mcpServerNames: ["supermemory"] }, parityChecks: ["mcp-config-present"] },

@@ -133,18 +133,18 @@ try {
     await closeDialog();
     await page.emulateMedia({ reducedMotion: 'no-preference' });
 
-    // Collapsible workspace panel.
+    // Header content modes replace the old independent workspace toggle.
     const paneWidth = () => page.evaluate(() => Math.round(document.querySelector('.workspace-pane')!.getBoundingClientRect().width));
     const open = await paneWidth();
     assert.ok(open > 300, 'workspace panel is open by default');
-    await page.getByRole('button', { name: 'Hide workspace panel' }).click();
+    await page.getByRole('group', { name: 'Content view', exact: true }).getByRole('button', { name: 'Chat', exact: true }).click();
     await page.waitForTimeout(600);
     assert.equal(await paneWidth(), 0, 'workspace panel collapses');
     assert.equal(await page.locator('.workspace-pane').isVisible(), false, 'collapsed panel is hidden from the accessibility tree');
     await page.reload();
-    await page.getByRole('button', { name: 'Show workspace panel' }).waitFor();
+    await page.getByRole('group', { name: 'Content view', exact: true }).getByRole('button', { name: 'Chat', exact: true }).waitFor();
     assert.equal(await paneWidth(), 0, 'collapsed state survives reload');
-    await page.getByRole('button', { name: 'Show workspace panel' }).click();
+    await page.getByRole('group', { name: 'Content view', exact: true }).getByRole('button', { name: 'Both', exact: true }).click();
     await page.waitForTimeout(600);
     assert.equal(await paneWidth(), open, 'workspace panel expands back');
     await page.getByRole('tab', { name: 'Subagents' }).waitFor();

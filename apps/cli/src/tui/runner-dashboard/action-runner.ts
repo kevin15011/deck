@@ -1475,6 +1475,10 @@ function writeDeckConfigAction(
         enabled: webSearchEnabled,
         ...(webSearchProvider ? { provider: webSearchProvider } : {}),
       },
+      capabilities: { "codebase-memory": {
+        enabled: current.capabilities?.["codebase-memory"].enabled ?? false,
+        runners: { ...current.capabilities?.["codebase-memory"].runners, [currentRunner]: currentPackageInstructions["codebase-memory"] === true },
+      } },
       packageInstructions: {
         ...current.packageInstructions,
         [currentRunner]: {

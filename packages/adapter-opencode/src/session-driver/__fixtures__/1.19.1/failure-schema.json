@@ -1,0 +1,37 @@
+{
+  "provenance": {
+    "executable": "opencode",
+    "version": "1.19.1",
+    "capturedAt": "2026-10-22",
+    "sha256": "541bb0aa88d0b317967efbc947aa54506606c257d3b6ed1dee644756879fb4be",
+    "note": "Message-domain NamedError declarations selected from the installed local executable; not provider-turn recordings and not the separate provider-auth HTTP route error."
+  },
+  "serialization": {
+    "byteOffset": 105040285,
+    "declaration": "toObject(){return{name:e,data:this.data}}"
+  },
+  "declarations": {
+    "ProviderAuthError": {
+      "byteOffset": 104933507,
+      "declaration": "create(\"ProviderAuthError\",{providerID:Q.String,message:Q.String})"
+    },
+    "APIError": {
+      "byteOffset": 104933703,
+      "declaration": "create(\"APIError\",{message:Q.String,statusCode:Q.optional(cx),isRetryable:Q.Boolean,responseHeaders:Q.optional(Q.Record(Q.String,Q.String)),responseBody:Q.optional(Q.String),metadata:Q.optional(Q.Record(Q.String,Q.String))})"
+    },
+    "ContextOverflowError": {
+      "byteOffset": 104933934,
+      "declaration": "create(\"ContextOverflowError\",{message:Q.String,responseBody:Q.optional(Q.String)})"
+    },
+    "ContentFilterError": {
+      "byteOffset": 104934024,
+      "declaration": "create(\"ContentFilterError\",{message:Q.String})"
+    }
+  },
+  "localContextOverflow": {
+    "byteOffset": 96758273,
+    "constructionByteOffset": 96758313,
+    "note": "Local compaction branch. The NamedError also permits wrapped upstream failures; its name and message do not establish origin. No runtime payloads included.",
+    "excerpt": "if(D===\"compact\")return T.message.error=new Fe.ContextOverflowError({message:x?\"Conversation history too large to compact - exceeds model context limit\":\"Session too large to compact - context exceeds model limit even after stripping media\"}).toObject()"
+  }
+}

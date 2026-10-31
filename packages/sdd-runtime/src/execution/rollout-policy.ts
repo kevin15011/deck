@@ -19,7 +19,7 @@ export type RolloutControlsV1 = Readonly<{
   }>;
   registryWriter: "distributed-compatible" | "centralized";
   routePolicy: "legacy-triage" | "shadow-risk-lanes" | "risk-lanes";
-  promptProfile: "legacy" | "compact";
+  promptProfile: "compact";
   telemetry: "off" | "local-safe";
 }>;
 
@@ -43,15 +43,6 @@ export type RolloutGateDecisionV1 = Readonly<{
   effectiveCohortPercent: RolloutCohortPercentV1;
   reasonCodes: readonly string[];
   efficiency: readonly RolloutEfficiencyV1[];
-  evidenceDigest: Sha256Digest;
-}>;
-
-export type PromptProfileActivationV1 = Readonly<{
-  schema: "prompt-profile-activation-v1";
-  status: RolloutGateStatusV1;
-  requestedProfile: "legacy" | "compact";
-  effectiveProfile: "legacy" | "compact";
-  reasonCodes: readonly string[];
   evidenceDigest: Sha256Digest;
 }>;
 
@@ -326,66 +317,6 @@ export function evaluateRolloutGateV1(input: Readonly<{
     efficiency: efficiencyReport,
     evidenceDigest,
   });
-}
-
-export function evaluateCompactPromptActivationV1(input: Readonly<{
-  requestedProfile: "legacy" | "compact";
-  rolloutDecision: RolloutGateDecisionV1;
-  runtimeParity: boolean;
-  adapterParity: boolean;
-  goldenInvariants: boolean;
-  providerFiltering: boolean;
-  deterministicGeneration: boolean;
-  generatedSourceClean: boolean;
-  byteReductionPercent: number;
-  tokenReductionPercent: number;
-}>): PromptProfileActivationV1 {
-  const reasons: string[] = [];
-  const reductionEvidenceValid = isFiniteNonNegative(input.byteReductionPercent)
-    && isFiniteNonNegative(input.tokenReductionPercent);
-  if (input.requestedProfile === "compact") {
-    if (input.rolloutDecision.status !== "eligible") reasons.push("rollout-not-eligible");
-    if (!input.runtimeParity) reasons.push("runtime-parity-unproven");
-    if (!input.adapterParity) reasons.push("adapter-parity-unproven");
-    if (!input.goldenInvariants) reasons.push("golden-invariants-unproven");
-    if (!input.providerFiltering) reasons.push("provider-filtering-unproven");
-    if (!input.deterministicGeneration) reasons.push("deterministic-generation-unproven");
-    if (!input.generatedSourceClean) reasons.push("generated-source-dirty");
-    if (!reductionEvidenceValid) {
-      reasons.push("invalid-prompt-reduction-evidence");
-    } else if (input.byteReductionPercent < 30 || input.tokenReductionPercent < 30) {
-      reasons.push("prompt-reduction-below-threshold");
-    }
-  }
-  const reasonCodes = Object.freeze(reasons);
-  const status: RolloutGateStatusV1 = reasonCodes.length === 0 ? "eligible" : "rollout-paused";
-  const effectiveProfile = input.requestedProfile === "compact" && status === "eligible"
-    ? "compact"
-    : "legacy";
-  const evidenceDigest = sha256Digest({
-    input: reductionEvidenceValid ? input : {
-      requestedProfile: input.requestedProfile,
-      rolloutEvidenceDigest: input.rolloutDecision.evidenceDigest,
-      reductionEvidence: "invalid",
-    },
-    status,
-    effectiveProfile,
-    reasonCodes,
-  });
-  return deepFreeze({
-    schema: "prompt-profile-activation-v1",
-    status,
-    requestedProfile: input.requestedProfile,
-    effectiveProfile,
-    reasonCodes,
-    evidenceDigest,
-  });
-}
-
-export function resolvePromptProfileActivationV1(
-  _activation: PromptProfileActivationV1 | undefined,
-): "legacy" | "compact" {
-  return "compact";
 }
 
 function previousCohortStep(value: RolloutCohortPercentV1): RolloutCohortPercentV1 {

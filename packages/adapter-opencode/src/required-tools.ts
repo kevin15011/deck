@@ -115,10 +115,8 @@ export type ReviewOpenCodeToolsOptions = {
 
 const OPENCODE_TOOLS: readonly { id: InstallableOpenCodeToolId; name: string }[] = [
   { id: "rtk", name: "RTK" },
-  { id: "context-mode", name: "context-mode" },
   { id: "codebase-memory", name: "codebase-memory" },
   { id: "context7", name: "Context7" },
-  { id: "serena", name: "Serena" },
 ];
 
 type ConfigSnapshot = {

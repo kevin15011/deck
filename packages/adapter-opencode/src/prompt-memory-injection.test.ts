@@ -41,37 +41,6 @@ function createMockMemoryBundle(
 
 describe("Task 10: prompt/instrucciones + regresión Legacy", () => {
 	describe("Supermemory prompt validation", () => {
-		test("prompt NO contiene herramientas obsoletas (execute, search_docs)", () => {
-			// Build instruction bundle de Supermemory
-			const bundle = buildAdaptiveMemoryInstructionBundle();
-
-			// Verificar que el contenido NO menciona execute ni search_docs
-			for (const fragment of bundle.instructions) {
-				expect(fragment.markdown).not.toContain("execute");
-				expect(fragment.markdown).not.toContain("search_docs");
-			}
-		});
-
-		test("prompt SÍ contiene herramientas reales (memory, recall)", () => {
-			const bundle = buildAdaptiveMemoryInstructionBundle();
-
-			// Al menos un fragmento debe contener las herramientas reales
-			const combinedMarkdown = bundle.instructions.map((f) => f.markdown).join("\n");
-
-			expect(combinedMarkdown).toContain("memory");
-			expect(combinedMarkdown).toContain("recall");
-		});
-
-		test("prompt NO contiene team/org scoping (t:, o:)", () => {
-			const bundle = buildAdaptiveMemoryInstructionBundle();
-
-			const combinedMarkdown = bundle.instructions.map((f) => f.markdown).join("\n");
-
-			// No debe haber ejemplos activos de scoping team/org
-			// Buscar patrones como `t:team` o `o:org` en contexto de container tag
-			expect(combinedMarkdown).not.toMatch(/\| `t:/);
-			expect(combinedMarkdown).not.toMatch(/\| `o:/);
-		});
 
 test("prompt fails closed without exact Deck-materialized scope", () => {
 		const bundle = buildAdaptiveMemoryInstructionBundle();

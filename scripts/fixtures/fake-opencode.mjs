@@ -5,6 +5,7 @@ const argv = process.argv.slice(2);
 if (process.env.FAKE_OPENCODE_LOG) appendFileSync(process.env.FAKE_OPENCODE_LOG, JSON.stringify({ argv, home: process.env.HOME, configDir: process.env.OPENCODE_CONFIG_DIR, disableProjectConfig: process.env.OPENCODE_DISABLE_PROJECT_CONFIG, disableClaudeCode: process.env.OPENCODE_DISABLE_CLAUDE_CODE, config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}"), passwordConfigured: (process.env.OPENCODE_SERVER_PASSWORD?.length ?? 0) >= 32 }) + "\n");
 if (argv.includes("--version")) { console.log("1.18.31"); process.exit(0); }
 const config = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}");
+config.plugin = [...new Set([...(config.plugin ?? []), ...JSON.parse(process.env.FAKE_OPENCODE_PLUGINS ?? "[]")])];
 const authorization = "Basic " + Buffer.from("opencode:" + process.env.OPENCODE_SERVER_PASSWORD).toString("base64");
 const streams = new Set();
 const session = { id: "fake-session" };
@@ -18,7 +19,7 @@ const server = createServer(async (req, res) => {
   // Supplied fixture content represents the post-native-load effective config.
   // Plugins are retained as declarations; this fake never executes plugin files.
   if (req.url === "/config") result = config;
-  else if (req.url === "/agent") result = [{ name: config.default_agent ?? "build", permission: Object.entries(config.permission ?? {}).flatMap(([permission, rule]) => typeof rule === "string" ? [{ permission, pattern: "*", action: rule }] : Object.entries(rule).map(([pattern, action]) => ({ permission, pattern, action }))) }];
+  else if (req.url === "/agent") result = JSON.parse(process.env.FAKE_OPENCODE_AGENTS ?? JSON.stringify([{ name: config.default_agent ?? "build", permission: {} }])).map(agent => ({ name: agent.name, prompt: agent.prompt, permission: Object.entries({ ...agent.permission, ...config.permission }).flatMap(([permission, rule]) => typeof rule === "string" ? [{ permission, pattern: "*", action: rule }] : Object.entries(rule).map(([pattern, action]) => ({ permission, pattern, action }))) }));
   else if (req.url === "/mcp") result = Object.fromEntries(Object.keys(config.mcp || {}).map(id => [id, { status: config.mcp[id].enabled === false ? "disabled" : "connected" }]));
   else if (req.url === "/session" || req.url === "/session/fake-session") result = session;
   else if (req.url === "/permission") result = [];

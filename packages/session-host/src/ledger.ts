@@ -1,3 +1,6 @@
+import { byteExcerpt } from "./task-handoff";
+import { sessionHistoryExcerpt } from "@deck/core/session/overlay";
+import { projectTaskEvidence, type TaskContinuityState, type AttemptContinuityState } from "./task-evidence";
 import { isSessionGrantKind, isApprovalToolKey, isApprovalRisk, type SessionGrant } from "@deck/core/session/approval";
 import { isApprovalMode, type ApprovalMode } from "@deck/core/session/commands";
 import type { Question } from "@deck/core/session/question";
@@ -17,11 +20,13 @@ import type { ImageAttachment } from "@deck/core/session/commands";
 import type { TaskIntegrationState } from "@deck/core/session/mcp";
 import type { SessionEvent } from "@deck/core/session/events";
 import type { CrossTeamAssignments } from "@deck/core/session/assignments";
-import type { EventLog } from "./event-log";
+import type { EventLog, EventDraft } from "./event-log";
 import { writePrivateFile } from "./paths";
 
-export const LEDGER_SNAPSHOT_VERSION = 12 as const;
+// Older snapshots lack full-source overlay checks; rebuild them from durable events.
+export const LEDGER_SNAPSHOT_VERSION = 17 as const;
 const RESULT_LIMIT = 8192;
+const isRestartPause = (reason?: string): boolean => reason === "daemon-stopped" || reason === "daemon-restart" || reason?.startsWith("web-restart-forced:") === true;
 
 export const TASK_STATES = ["created", "queued", "running", "completed", "failed", "cancelled", "interrupted", "ownership-unsettled"] as const;
 export type TaskState = (typeof TASK_STATES)[number];
@@ -37,15 +42,18 @@ const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
 
 export type SessionLifecycleState = "created" | "running" | "idle" | "stopping" | "ended" | "recovered";
 export type AttemptAccounting = { seq: number; leadTaskId: string; leadAttempt: number; promptId?: string };
-export type TaskIntegration = AttemptAccounting & { commandId: string; state: TaskIntegrationState; note: string; evidenceSeqs: number[] };
-export type ContinuityBlock = { promptId: string; taskId: string; attempt: number; startedSeq: number; answer?: string; answerTruncated?: boolean; answerSeq?: number };
-export type TaskAttempt = {
+export type TaskIntegration = AttemptAccounting & { commandId: string; state: TaskIntegrationState; note: string; evidenceSeqs: number[]; findingResolutions?: import("@deck/core/session/task-handoff").FindingResolution[] };
+export type ContinuityBlock = { promptId: string; taskId: string; attempt: number; startedSeq: number; answer?: string; answerTruncated?: boolean; answerSeq?: number; answerHistorySafe?: boolean };
+export type TaskAttempt = AttemptContinuityState & {
   attempt: number; runnerId: string; modelId: string; thinking?: string; nativeSessionId?: string;
   state: TaskState; reason?: string; continuity?: "native" | "reseeded"; startedSeq: number; endedSeq?: number; unsettledSeq?: number; result?: string; resultSeq?: number; resultTruncated?: boolean;
   delivery?: AttemptAccounting; retrieval?: AttemptAccounting; integration?: TaskIntegration; integrations?: TaskIntegration[];
+  /** Derived from the complete event summary before RESULT_LIMIT clips it. */
+  resultHistorySafe?: boolean;
 };
 /** Native session confirmed by the runner (a `turn.started` was seen): only then may a later turn resume it. */
-export type LedgerTask = DecisionDependencies & { taskId: string; memberId: string; attempts: TaskAttempt[]; nativeConfirmed?: boolean };
+export type LeadRecoveryMessage = {role:"user"|"assistant";text:string;seq:number;truncated:boolean};
+export type LedgerTask = DecisionDependencies & TaskContinuityState & { leadRecovery?:{original?:LeadRecoveryMessage;recent:LeadRecoveryMessage[]}; taskId: string; memberId: string; attempts: TaskAttempt[]; nativeConfirmed?: boolean };
 /** Durable idempotency receipt (XR-1.5): the command's type and its original outcome. */
 export type LedgerCommandReceipt = { type: string; outcome: { ok: boolean; [key: string]: unknown } };
 export type LedgerPendingQuestion = { questionId: string; taskId?: string; tool?: string; questions: Question[]; seq: number };
@@ -61,6 +69,9 @@ export type UserPrompt = {
   firstAdmissionSeq?: number;
   /** Latest execution dispatch, with taskId/attempt tracking a possible native reseed. */
   dispatchedSeq?: number;
+  handoff?: {state:"pending"|"sending"|"delivered"|"unknown";seq:number;evidence?:string};
+  requeuedSeq?: number;
+  gated?: boolean;
   delivery?: "current-turn";
   requestedSteering?: {taskId:string;attempt:number;nativeThreadId:string;nativeTurnId:string};
   steering?: SteeringFence & {seq:number;state:"pending"|"accepted"|"unknown"|"not-accepted";eligible:boolean;stale:boolean;reason?:string;queueFallback?:boolean};
@@ -108,6 +119,18 @@ export class Ledger {
     return new Ledger(copy);
   }
 
+  /** Return a durable repair event; replay itself never invents queue transitions. */
+  restartQueueRepair(reason: string): EventDraft | undefined {
+    if (!this.promptQueue.paused || !isRestartPause(this.promptQueue.reason)) return;
+    const resumed = this.promptQueue.lastResumeSeq ?? 0;
+    if (this.prompts().some(prompt => prompt.state === "queued" || ["failed", "interrupted", "ownership-unsettled", "dispatched", "steering", "unknown"].includes(prompt.state) || prompt.state === "cancelled" && isRestartPause(prompt.reason) && prompt.seq > resumed)) return;
+    if (this.tasks().some(task => {
+      const attempt = task.attempts.at(-1);
+      return attempt && (["created", "queued", "running", "ownership-unsettled"].includes(attempt.state) || task.memberId === "lead" && ["failed", "interrupted"].includes(attempt.state) && (attempt.endedSeq ?? attempt.startedSeq) > resumed);
+    })) return;
+    return { kind: "prompt.queue", data: { paused: false, reason } };
+  }
+
   get seq(): number { return this.state.seq; }
   get sessionId(): string { return this.state.sessionId; }
   get session(): Readonly<LedgerSession> { return this.state.session; }
@@ -122,7 +145,7 @@ export class Ledger {
   get lastLeadReplySeq(): number { return this.state.lastLeadReplySeq ?? 0; }
   get lastEventTs(): string | undefined { return this.state.lastEventTs; }
   get promptQueue(): Readonly<{ paused: boolean; reason?: string; lastResumeSeq?: number }> { return this.state.promptQueue ?? { paused: false }; }
-  prompts(): UserPrompt[] { return Object.values(this.state.prompts ?? {}).sort((a, b) => a.seq - b.seq); }
+  prompts(): UserPrompt[] { return Object.values(this.state.prompts ?? {}).sort((a, b) => (a.state === "queued" && a.requeuedSeq ? -a.requeuedSeq : a.seq) - (b.state === "queued" && b.requeuedSeq ? -b.requeuedSeq : b.seq)); }
   prompt(promptId: string): UserPrompt | undefined { return this.state.prompts?.[promptId]; }
   get anomalies(): readonly LedgerAnomaly[] { return this.state.anomalies; }
   tasks(): LedgerTask[] { return Object.values(this.state.tasks); }
@@ -146,8 +169,9 @@ export class Ledger {
   private onDecisionReply(data: Record<string, unknown>): void {
     const reply = data as unknown as DecisionReply;
     const decision = this.decision(reply.decisionId), prompt = this.prompt(reply.promptId);
+    if (prompt?.handoff && prompt.handoff.state !== "delivered") return;
     if (!decision || !prompt?.dispatchedSeq || prompt.taskId !== reply.taskId || prompt.attempt !== reply.attempt || prompt.decisionTarget?.decisionId !== decision.decisionId) return;
-    if (!decision.replies.some(r => r.promptId === reply.promptId)) decision.replies.push({ ...structuredClone(reply), admittedSeq: prompt.dispatchedSeq });
+    if (!decision.replies.some(r => r.promptId === reply.promptId)) decision.replies.push({ ...structuredClone(reply), admittedSeq: prompt.handoff?.state === "delivered" ? prompt.handoff.seq : prompt.dispatchedSeq });
   }
 
   private onLifecycle(event: SessionEvent, type: string, fingerprint: string): void {
@@ -167,6 +191,8 @@ export class Ledger {
     this.state.lastEventTs = event.ts;
     const d = event.data;
     if(event.kind==="diagnostic" && d.code==="session.preparation" && d.commandId && d.outcome) this.onLifecycle(event,"session.prepare","");
+    const evidenceTask = this.task(String(d.taskId ?? event.source.taskId ?? ''));
+    if(evidenceTask && event.kind !== 'task.continued') projectTaskEvidence(evidenceTask,event);
     switch (event.kind) {
       case "decision.command": this.recordDecisionCommand(d.command); break;
       case "decision.opened": case "decision.revised": case "decision.state": {
@@ -192,7 +218,13 @@ export class Ledger {
         else if (event.kind === "task.retrieval") attempt.retrieval ??= accounting;
         else {
           const integration: TaskIntegration = { ...accounting, commandId: String(d.commandId), state: d.state as TaskIntegration["state"], note: String(d.note), evidenceSeqs: [...d.evidenceSeqs as number[]] };
-          (this.state.mutationIdentities ??= {})[integration.commandId] ??= {type:"deck_task_integrate",fingerprint:decisionFingerprint("deck_task_integrate",Object.fromEntries(["commandId","taskId","attempt","state","note","evidenceSeqs"].map(k=>[k,d[k]])))};
+          if(d.structuredUpdates && typeof d.structuredUpdates==='object') for(const [id,update] of Object.entries(d.structuredUpdates)) {
+            const target=this.task(id);if(!target)continue;
+            Object.assign(target,structuredClone(update));target.structuredSeq=event.seq;target.structuredActor={taskId:accounting.leadTaskId,attempt:accounting.leadAttempt};
+            for(const value of Object.values(target.findingStates??{}))if(value.seq===0)value.seq=event.seq;
+          }
+          if(d.findingResolutions) Object.assign(integration,{findingResolutions:structuredClone(d.findingResolutions)});
+          (this.state.mutationIdentities ??= {})[integration.commandId] ??= {type:"deck_task_integrate",fingerprint:decisionFingerprint("deck_task_integrate",Object.fromEntries(["commandId","taskId","attempt","state","note","evidenceSeqs", ...(d.findingResolutions === undefined ? [] : ["findingResolutions"])].map(k=>[k,d[k]])))};
           const records = attempt.integrations ??= [];
           if (!records.some(r => r.commandId === integration.commandId)) { records.push(integration); attempt.integration = integration; }
         }
@@ -210,7 +242,7 @@ export class Ledger {
         const promptId = str(d.promptId);
         if (!promptId || typeof d.text !== "string" || typeof d.textHash !== "string") return this.anomaly("prompt-queued-invalid", event.seq);
         const prompts = this.state.prompts ??= {};
-        prompts[promptId] ??= { promptId, state: "queued", text: d.text, textHash: d.textHash, ...(d.requestedSteering ? {requestedSteering:structuredClone(d.requestedSteering) as UserPrompt["requestedSteering"]} : {}), ...(d.delivery === "current-turn" ? {delivery:"current-turn" as const} : {}), by: str(d.by) ?? "unknown", generation: Number(d.generation) || 0, ...(d.decisionTarget ? { decisionTarget: structuredClone(d.decisionTarget) as DecisionTarget, ...(Number.isSafeInteger(d.targetQuestionRevision) ? { targetQuestionRevision: Number(d.targetQuestionRevision) } : {}) } : {}), position: Number(d.position) || 1, createdAt: event.ts, seq: event.seq, ...(Array.isArray(d.attachments) ? { attachments: structuredClone(d.attachments) as ImageAttachment[] } : {}) };
+        prompts[promptId] ??= { promptId, state: "queued", ...(d.gated===true ? {gated:true} : {}), text: d.text, textHash: d.textHash, ...(d.requestedSteering ? {requestedSteering:structuredClone(d.requestedSteering) as UserPrompt["requestedSteering"]} : {}), ...(d.delivery === "current-turn" ? {delivery:"current-turn" as const} : {}), by: str(d.by) ?? "unknown", generation: Number(d.generation) || 0, ...(d.decisionTarget ? { decisionTarget: structuredClone(d.decisionTarget) as DecisionTarget, ...(Number.isSafeInteger(d.targetQuestionRevision) ? { targetQuestionRevision: Number(d.targetQuestionRevision) } : {}) } : {}), position: Number(d.position) || 1, createdAt: event.ts, seq: event.seq, ...(Array.isArray(d.attachments) ? { attachments: structuredClone(d.attachments) as ImageAttachment[] } : {}) };
         break;
       }
       case "prompt.steering": {
@@ -245,9 +277,37 @@ export class Ledger {
       case "prompt.dispatched": {
         const prompt = this.state.prompts?.[String(d.promptId)];
         if (prompt && (prompt.state === "queued" || d.reseeded === true)) { prompt.state = "dispatched"; prompt.taskId = str(d.taskId); prompt.attempt = Number(d.attempt); prompt.dispatchedSeq = event.seq;
-          if (prompt.by !== "daemon" && d.reseeded !== true) prompt.firstAdmissionSeq ??= prompt.steering?.seq ?? event.seq;
-          if (prompt.by !== "daemon" && d.reseeded !== true) this.state.continuityBlock = { promptId: prompt.promptId, taskId: prompt.taskId!, attempt: prompt.attempt!, startedSeq: event.seq };
-          if (d.decisionReply) this.onDecisionReply(d.decisionReply as Record<string, unknown>); }
+          if (d.handoff !== "gated" && prompt.by !== "daemon" && d.reseeded !== true) prompt.firstAdmissionSeq ??= prompt.steering?.seq ?? event.seq;
+          if (d.handoff !== "gated" && prompt.by !== "daemon" && d.reseeded !== true) this.state.continuityBlock = { promptId: prompt.promptId, taskId: prompt.taskId!, attempt: prompt.attempt!, startedSeq: event.seq };
+          if (d.handoff === "gated") prompt.handoff = {state:"pending",seq:event.seq};
+          if (d.handoff !== "gated" && d.decisionReply) this.onDecisionReply(d.decisionReply as Record<string, unknown>); }
+        break;
+      }
+      case "prompt.handoff": {
+        const prompt = this.prompt(String(d.promptId));
+        if (!prompt?.handoff || prompt.taskId !== d.taskId || prompt.attempt !== d.attempt) break;
+        const before = prompt.handoff.state, next = String(d.state);
+        if (!(before === "pending" && next === "sending" || before === "sending" && ["delivered","unknown"].includes(next))) break;
+        prompt.handoff = {state:next as NonNullable<UserPrompt["handoff"]>["state"],seq:event.seq,...(str(d.evidence)?{evidence:str(d.evidence)}:{})};
+        if (next === "delivered" && prompt.by !== "daemon") {
+          const task = this.task(prompt.taskId!);
+          if (task?.memberId === 'lead' && prompt.text?.trim()) {
+            const recovery = task.leadRecovery ??= {recent:[]}, text = byteExcerpt(prompt.text,1024);
+            const message: LeadRecoveryMessage = {role:'user',text,seq:event.seq,truncated:text!==prompt.text};
+            recovery.original ??= message; recovery.recent.push(message); if(recovery.recent.length>8)recovery.recent.shift();
+          }
+          prompt.firstAdmissionSeq ??= event.seq;
+          this.state.continuityBlock = {promptId:prompt.promptId,taskId:prompt.taskId!,attempt:prompt.attempt!,startedSeq:event.seq};
+        }
+        break;
+      }
+      case "prompt.requeued": {
+        const prompt = this.prompt(String(d.promptId));
+        if (!prompt || !(prompt.state === "queued" || prompt.handoff?.state === "pending")) break;
+        if (d.taskId !== undefined && (prompt.taskId !== d.taskId || prompt.attempt !== d.attempt)) break;
+        prompt.state = "queued"; prompt.requeuedSeq = event.seq; prompt.reason = str(d.reason);
+        delete prompt.taskId; delete prompt.attempt; delete prompt.dispatchedSeq; delete prompt.handoff;
+        this.state.promptQueue = {paused:true,reason:prompt.reason,lastResumeSeq:this.state.promptQueue?.lastResumeSeq};
         break;
       }
       case "prompt.state": {
@@ -304,7 +364,7 @@ export class Ledger {
         if(Number(d.epoch)!==(this.state.session.releaseEpoch??0)) break;
         this.state.session.state="idle"; this.state.session.stopRequested=false;
         this.state.session.released=d.prepared!==true; this.state.session.releasePending=false;
-        if(d.prepared===true && !Object.values(this.state.prompts??{}).some(prompt=>prompt.state==="queued")) this.state.promptQueue={paused:false}; delete this.state.session.releaseFailure; delete this.state.session.releaseFailureSeq;
+        if(d.prepared===true && !isRestartPause(this.promptQueue.reason) && !Object.values(this.state.prompts??{}).some(prompt=>prompt.state==="queued")) this.state.promptQueue={paused:false}; delete this.state.session.releaseFailure; delete this.state.session.releaseFailureSeq;
         break;
       }
       case "session.renamed": {
@@ -353,10 +413,26 @@ export class Ledger {
       case "task.result": return this.onTaskResult(event);
       case "message.completed": {
         const task = event.source.taskId ? this.state.tasks[event.source.taskId] : undefined;
+        // Bounded append/replay projection for Lead's protected missing-native recovery.
+        // Keep the original request even after the rolling eight messages expire.
+        const active=task?.attempts.at(-1);
+        if(task?.memberId==="lead" && /^lead(?:-g[1-9]\d*)?$/.test(task.taskId)
+          && (event.source.memberId===undefined||event.source.memberId==="lead")
+          && (d.attempt===undefined||d.attempt===active?.attempt)
+          && (!event.source.nativeSessionId||event.source.nativeSessionId===active?.nativeSessionId)
+          && (d.role==="user" && !d.handoff||d.role==="assistant"&&active?.state==="running") && !d.internal && d.by!=="daemon"
+          && typeof d.text==="string" && d.text.trim()) {
+          const recovery=task.leadRecovery??={recent:[]};
+          const text=byteExcerpt(d.text,1024);
+          const message:LeadRecoveryMessage={role:d.role,text,seq:event.seq,truncated:text!==d.text};
+          if(d.role==="user")recovery.original??=message;
+          recovery.recent.push(message);if(recovery.recent.length>8)recovery.recent.shift();
+        }
         if (task?.memberId === "lead" && /^lead(?:-g[1-9]\d*)?$/.test(task.taskId) && (event.source.memberId === undefined || event.source.memberId === "lead") && d.role === "assistant" && !d.internal && typeof d.text === "string" && d.text.trim()) {
           this.state.lastLeadReplySeq = event.seq;
           const block = this.state.continuityBlock;
           if (block && block.taskId === task.taskId && block.attempt === task.attempts.at(-1)?.attempt) {
+            block.answerHistorySafe = sessionHistoryExcerpt(d.text) !== undefined;
             block.answer = d.text.slice(0, 1024); block.answerTruncated = d.text.length > 1024; block.answerSeq = event.seq;
           }
         }
@@ -419,6 +495,7 @@ export class Ledger {
         state: initial, startedSeq: event.seq,
       }],
     };
+    projectTaskEvidence(this.state.tasks[taskId]!,event);
     const queuedPrompt = str(d.promptId) ? this.state.prompts?.[d.promptId as string] : undefined;
     if (queuedPrompt?.state === "queued") { queuedPrompt.taskId = taskId; queuedPrompt.attempt = 1; }
   }
@@ -440,9 +517,10 @@ export class Ledger {
       attempt.state = wanted;
       if (wanted === "ownership-unsettled") attempt.unsettledSeq = event.seq; else delete attempt.unsettledSeq;
       if (str(d.reason)) attempt.reason = str(d.reason); else delete attempt.reason;
-      if (TERMINAL_TASK_STATES.includes(wanted)) attempt.endedSeq = event.seq;
+      if (TERMINAL_TASK_STATES.includes(wanted)) { attempt.endedSeq = event.seq; attempt.endedAt = Date.parse(event.ts); }
     }
     for (const prompt of Object.values(this.state.prompts ?? {})) {
+      if (prompt.handoff && prompt.handoff.state !== "delivered") continue;
       if ((prompt.state !== "dispatched" && prompt.state !== "accepted") || prompt.taskId !== taskId || prompt.attempt !== attempt.attempt) continue;
       if (wanted === "failed" && d.reason === "native-session-not-found") continue;
       if (TERMINAL_TASK_STATES.includes(wanted) || wanted === "ownership-unsettled") {
@@ -463,12 +541,12 @@ export class Ledger {
     if (!TERMINAL_TASK_STATES.includes(previous.state)) return this.anomaly("task-continue-not-terminal", event.seq, taskId);
     const attemptNo = Number.isInteger(d.attempt) ? (d.attempt as number) : previous.attempt + 1;
     if (attemptNo !== previous.attempt + 1) return this.anomaly("task-attempt-out-of-order", event.seq, String(attemptNo));
-    const continuity = d.continuity === "reseeded" ? "reseeded" : "native";
+    const continuity = d.continuityPending === true ? undefined : d.continuity === "reseeded" ? "reseeded" : "native";
     if (continuity === "reseeded") {
       task.nativeConfirmed = false;
       const block = this.state.continuityBlock;
       if (block && block.taskId === taskId && block.attempt === previous.attempt) {
-        block.attempt = attemptNo; delete block.answer; delete block.answerSeq; delete block.answerTruncated;
+        block.attempt = attemptNo; delete block.answer; delete block.answerSeq; delete block.answerTruncated; delete block.answerHistorySafe;
       }
     }
     // D-12: runner/model/thinking come from the recorded attempt, never from current config.
@@ -478,6 +556,7 @@ export class Ledger {
       ...(str(d.nativeSessionId) ? { nativeSessionId: str(d.nativeSessionId) } : {}),
       state: "created", continuity, startedSeq: event.seq,
     });
+    projectTaskEvidence(task,event);
     const queuedPrompt = str(d.promptId) ? this.state.prompts?.[d.promptId as string] : undefined;
     if (queuedPrompt?.state === "queued") { queuedPrompt.taskId = taskId; queuedPrompt.attempt = attemptNo; }
     if (continuity === "reseeded") for (const prompt of Object.values(this.state.prompts ?? {})) if (prompt.state === "dispatched" && prompt.taskId === taskId && prompt.attempt === previous.attempt) prompt.attempt = attemptNo;
@@ -489,7 +568,10 @@ export class Ledger {
     const attempt = taskId ? this.state.tasks[taskId]?.attempts.at(-1) : undefined;
     if (!attempt) return this.anomaly("task-unknown", event.seq, taskId);
     const summary = typeof d.summary === "string" ? d.summary : undefined;
+    if(typeof d.reportArtifactUnavailable==='string')attempt.reportArtifactUnavailable=d.reportArtifactUnavailable;
+    if(d.reportArtifact)attempt.reportArtifact=structuredClone(d.reportArtifact) as TaskAttempt["reportArtifact"];
     if (summary !== undefined) {
+      attempt.resultHistorySafe = sessionHistoryExcerpt(summary) !== undefined;
       attempt.result = summary.slice(0, RESULT_LIMIT); attempt.resultSeq = event.seq; attempt.resultTruncated = summary.length > RESULT_LIMIT;
     }
   }
@@ -550,11 +632,22 @@ export function saveLedgerSnapshot(ledger: Ledger, log: EventLog, snapshotFile: 
   const seq = ledger.seq;
   let hash = sha256("");
   if (seq > 0) {
-    const at = log.readAfter(seq - 1).next().value;
+    const at = log.readEvent(seq);
     if (!at || at.seq !== seq) throw new Error(`Cannot snapshot ledger at seq ${seq}: event missing from log`);
     hash = eventDigest(at);
   }
   const state = ledger.toState();
   const file: SnapshotFile = { v: LEDGER_SNAPSHOT_VERSION, seq, eventDigest: hash, digest: stateDigest(seq, hash, state), state };
   writePrivateFile(snapshotFile, JSON.stringify(file));
+}
+
+
+export function promptEndDrafts(prompt: UserPrompt, state: string, reason?: string): EventDraft[] {
+  if (prompt.state === 'cancelled') return [];
+  const identity = {promptId:prompt.promptId,...(prompt.taskId?{taskId:prompt.taskId,attempt:prompt.attempt}:{})};
+  if (prompt.handoff?.state === 'pending' || prompt.state === 'queued') return [{kind:'prompt.requeued',data:{...identity,text:prompt.text??'',attachments:prompt.attachments??[],createdAt:prompt.createdAt,reason:reason??state}}];
+  return [
+    ...(prompt.handoff?.state === 'sending' ? [{kind:'prompt.handoff' as const,data:{...identity,state:'unknown',reason:reason??state}}] : []),
+    {kind:'prompt.state',data:{...identity,state,...(reason?{reason}:{})}},
+  ];
 }

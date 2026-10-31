@@ -156,12 +156,12 @@ Scan for these patterns — each one is a concrete signal, not a vague smell:
 
 ### Step 3: Apply Changes Incrementally
 
-Make one simplification at a time. Run tests after each change. **Submit refactoring changes separately from feature or bug fix changes.** A PR that refactors and adds a feature is two PRs — split them.
+Make one simplification at a time. Run focused tests after each step and affected checks once at the end. **Submit refactoring changes separately from feature or bug fix changes.** A PR that refactors and adds a feature is two PRs — split them.
 
 ```
 FOR EACH SIMPLIFICATION:
 1. Make the change
-2. Run the test suite
+2. Run the focused checks for this step
 3. If tests pass → commit (or continue to next simplification)
 4. If tests fail → revert and reconsider
 ```

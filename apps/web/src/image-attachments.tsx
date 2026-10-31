@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { NavigationIcon } from './project-navigation';
 export type ImageAttachment = { attachmentId: string; mimeType: string; name: string; sizeBytes: number; width?: number; height?: number };
-export type ImageDraft = { draftId: string; file: File; src: string; status: 'uploading'|'ready'|'error'; attachment?: ImageAttachment; error?: string; version: number };
+export type ImageDraft = { draftId: string; file?: File; src: string; status: 'uploading'|'ready'|'error'; attachment?: ImageAttachment; error?: string; version: number };
 export type PreviewImage = { name: string; file?: File; src?: string; sessionId: string };
 export const attachmentURL = (sessionId:string,attachmentId:string) => `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}`;
 export function publicImages(value:unknown): ImageAttachment[] { return Array.isArray(value)?value.filter((item):item is ImageAttachment=>!!item&&typeof item.attachmentId==='string'&&typeof item.name==='string'&&['image/png','image/jpeg','image/webp'].includes(item.mimeType)&&Number.isFinite(item.sizeBytes)).slice(0,8):[]; }
@@ -33,20 +33,25 @@ export function useImageDrafts(upload: (sessionId:string,file:File,signal:AbortS
     function dispose(item:ImageDraft){controllers.current.get(item.draftId)?.abort();controllers.current.delete(item.draftId);if(urls.current.delete(item.src))URL.revokeObjectURL(item.src);}
     async function start(sessionId:string,item:ImageDraft){
         controllers.current.get(item.draftId)?.abort();const controller=new AbortController();controllers.current.set(item.draftId,controller);
-        try{const attachment=await transport.current(sessionId,item.file,controller.signal);if(!alive.current||controller.signal.aborted)return;
+        try{const attachment=await transport.current(sessionId,item.file!,controller.signal);if(!alive.current||controller.signal.aborted)return;
             update(old=>({...old,[sessionId]:(old[sessionId]??[]).map(entry=>entry.draftId===item.draftId&&entry.version===item.version?{...entry,status:'ready',attachment,error:undefined}:entry)}));
         }catch(cause){if(!alive.current||controller.signal.aborted)return;update(old=>({...old,[sessionId]:(old[sessionId]??[]).map(entry=>entry.draftId===item.draftId&&entry.version===item.version?{...entry,status:'error',error:(cause as Error).message||'Could not upload this image.'}:entry)}));}
         finally{if(controllers.current.get(item.draftId)===controller)controllers.current.delete(item.draftId);}
     }
     function add(sessionId:string,files:File[]){
-        if(!sessionId||!alive.current)return;const result=validateImageBatch((current.current[sessionId]??[]).map(item=>item.file),files);setErrors(old=>({...old,[sessionId]:result.error}));
+        if(!sessionId||!alive.current)return;const result=validateImageBatch((current.current[sessionId]??[]).map(item=>({size:item.file?.size??item.attachment?.sizeBytes??0})),files);setErrors(old=>({...old,[sessionId]:result.error}));
         const items=result.accepted.map(file=>{const src=URL.createObjectURL(file);urls.current.add(src);return {draftId:crypto.randomUUID(),file,src,status:'uploading' as const,version:1};});
         update(old=>({...old,[sessionId]:[...(old[sessionId]??[]),...items]}));items.forEach(item=>void start(sessionId,item));
     }
     function remove(sessionId:string,ids:string[],clearError=true){const removed=(current.current[sessionId]??[]).filter(item=>ids.includes(item.draftId));removed.forEach(dispose);update(old=>({...old,[sessionId]:(old[sessionId]??[]).filter(item=>!ids.includes(item.draftId))}));if(clearError)setErrors(old=>({...old,[sessionId]:''}));}
-    function retry(sessionId:string,id:string){const old=current.current[sessionId]?.find(item=>item.draftId===id);if(!old)return;const item={...old,status:'uploading' as const,error:undefined,version:old.version+1};update(drafts=>({...drafts,[sessionId]:drafts[sessionId]!.map(entry=>entry.draftId===id?item:entry)}));void start(sessionId,item);}
+    function retry(sessionId:string,id:string){const old=current.current[sessionId]?.find(item=>item.draftId===id);if(!old?.file)return;const item={...old,status:'uploading' as const,error:undefined,version:old.version+1};update(drafts=>({...drafts,[sessionId]:drafts[sessionId]!.map(entry=>entry.draftId===id?item:entry)}));void start(sessionId,item);}
     useEffect(()=>{alive.current=true;return()=>{alive.current=false;controllers.current.forEach(controller=>controller.abort());controllers.current.clear();urls.current.forEach(url=>URL.revokeObjectURL(url));urls.current.clear();};},[]);
-    return {drafts,errors,add,remove,retry,consume:(sessionId:string,ids:string[])=>remove(sessionId,ids,false)};
+    function restore(sessionId:string,attachments:ImageAttachment[]){
+        update(old=>{const existing=old[sessionId]??[],ids=new Set(existing.map(item=>item.attachment?.attachmentId));
+            const recalled=attachments.filter(item=>!ids.has(item.attachmentId)).map(attachment=>({draftId:crypto.randomUUID(),src:attachmentURL(sessionId,attachment.attachmentId),status:'ready' as const,attachment,version:1}));
+            return {...old,[sessionId]:[...recalled,...existing]};});
+    }
+    return {drafts,errors,add,remove,restore,retry,consume:(sessionId:string,ids:string[])=>remove(sessionId,ids,false)};
 }
 export function ImageGlyph(){return <svg className="navigation-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="2" width="12" height="12" rx="1.5"/><circle cx="5.5" cy="5.5" r="1"/><path d="m2 11 4-4 3 3 2-2 3 3"/></svg>;}
 export function ImagePicker({disabled,onFiles,sessionId}:{disabled:boolean;sessionId:string;onFiles:(files:File[],owner:string)=>void}){
@@ -55,7 +60,7 @@ export function ImagePicker({disabled,onFiles,sessionId}:{disabled:boolean;sessi
 }
 export function ImageDraftStrip({items,error,submitted,onRemove,onRetry,onPreview}:{items:ImageDraft[];error?:string;submitted:Set<string>;onRemove:(id:string)=>void;onRetry:(id:string)=>void;onPreview:(item:ImageDraft)=>void}){
     if(!items.length&&!error)return null;
-    return <section className="image-drafts" aria-label="Attached images"><ul>{items.map((item,index)=><li key={item.draftId} data-image-draft={item.draftId}><button type="button" className="image-thumbnail quiet" aria-label={`Preview attached image ${index+1}: ${imageDisplayName(item.file.name)}`} onClick={()=>onPreview(item)}><img src={item.src} alt="" width="56" height="56" decoding="async"/><span>{imageDisplayName(item.file.name)}</span></button><button type="button" className="quiet image-remove" disabled={submitted.has(item.draftId)} aria-label={`Remove attached image ${index+1}`} onClick={()=>onRemove(item.draftId)}><NavigationIcon kind="close"/></button><small role="status">{submitted.has(item.draftId)?'Sending…':item.status==='uploading'?'Uploading…':item.status==='ready'?'Ready':'Upload failed'}</small>{item.status==='error'&&<><p className="image-error" role="alert">{item.error}</p><button type="button" className="quiet image-retry" onClick={()=>onRetry(item.draftId)}>Retry upload</button></>}</li>)}</ul>{error&&<p className="image-error" role="alert">{error}</p>}</section>;
+    return <section className="image-drafts" aria-label="Attached images"><ul>{items.map((item,index)=><li key={item.draftId} data-image-draft={item.draftId}><button type="button" className="image-thumbnail quiet" aria-label={`Preview attached image ${index+1}: ${imageDisplayName((item.file?.name??item.attachment?.name??'Image'))}`} onClick={()=>onPreview(item)}><img src={item.src} alt="" width="56" height="56" decoding="async"/><span>{imageDisplayName((item.file?.name??item.attachment?.name??'Image'))}</span></button><button type="button" className="quiet image-remove" disabled={submitted.has(item.draftId)} aria-label={`Remove attached image ${index+1}`} onClick={()=>onRemove(item.draftId)}><NavigationIcon kind="close"/></button><small role="status">{submitted.has(item.draftId)?'Sending…':item.status==='uploading'?'Uploading…':item.status==='ready'?'Ready':'Upload failed'}</small>{item.status==='error'&&<><p className="image-error" role="alert">{item.error}</p><button type="button" className="quiet image-retry" onClick={()=>onRetry(item.draftId)}>Retry upload</button></>}</li>)}</ul>{error&&<p className="image-error" role="alert">{error}</p>}</section>;
 }
 export function ImageReferences({attachments,onPreview,compact=false}:{attachments:ImageAttachment[];onPreview:(attachment:ImageAttachment)=>void;compact?:boolean}){
     if(!attachments.length)return null;

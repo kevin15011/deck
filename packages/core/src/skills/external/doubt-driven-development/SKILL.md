@@ -224,7 +224,7 @@ If 3 cycles is "obviously insufficient" because the artifact is large: the artif
 
 - **`code-review-and-quality` / `/review`**: complementary. `/review` is post-hoc PR verdict; doubt-driven is in-flight per-decision. Use both.
 - **`source-driven-development`**: SDD verifies *facts about frameworks* against official docs. Doubt-driven verifies *your reasoning about the artifact*. SDD checks the API exists; doubt-driven checks you used it correctly under the contract.
-- **`test-driven-development`**: TDD's RED step is doubt made concrete — a failing test is a disproof attempt. When TDD applies, that failing test *is* the doubt step for behavioral claims.
+- **`deck-verification`**: Where the doctrine requires red-first evidence, a failing boundary check is a disproof attempt and satisfies the doubt step for behavioral claims.
 - **`debugging-and-error-recovery`**: when the reviewer surfaces a real failure mode, drop into the debugging skill to localize and fix.
 - **Repo orchestration rules** (`references/orchestration-patterns.md`): this skill orchestrates from the main session. A persona calling another persona is anti-pattern B — see Loading Constraints above.
 
@@ -233,7 +233,7 @@ If 3 cycles is "obviously insufficient" because the artifact is large: the artif
 After applying doubt-driven development:
 
 - [ ] Every non-trivial decision (per the definition above) was named explicitly as a CLAIM before standing
-- [ ] At least one fresh-context review per non-trivial artifact (a failing test produced by TDD's RED step satisfies this for behavioral claims, per Interaction with Other Skills)
+- [ ] At least one fresh-context review per non-trivial artifact (a failing boundary check required by the verification doctrine satisfies this for behavioral claims, per Interaction with Other Skills)
 - [ ] The reviewer received ARTIFACT + CONTRACT — NOT the CLAIM, NOT your reasoning
 - [ ] The reviewer's prompt was adversarial ("find issues"), not validating ("is it good")
 - [ ] Findings were classified against the artifact text (not rubber-stamped) using the precedence: contract misread / actionable / trade-off / noise

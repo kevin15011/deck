@@ -1,3 +1,4 @@
+import { guardRunnerAdapter } from "./runner-mutation-admission";
 /**
  * CLI adapter registry composition root.
  *
@@ -66,31 +67,38 @@ export function deckCodebaseGuardInvocation() {
 
 export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOptions = {}): AdapterRegistry {
   const registry = createAdapterRegistry();
-  registry.register("pi", createPiRunnerAdapter({
+  const guard = (adapter: import("@deck/core").RunnerAdapter) => guardRunnerAdapter(adapter, undefined, async projectRoot => {
+    const { refreshSharedSkillCatalogView } = await import("../../../packages/core/src/skill-discovery/shared");
+    // Install authority is not Setup authority: refresh the advisory view without publishing.
+    await refreshSharedSkillCatalogView({ projectRoot, providers: registry.list().flatMap(a => a.skillDiscovery ? [a.skillDiscovery] : []) });
+  });
+  registry.register("pi", guard(createPiRunnerAdapter({
     codebaseGuardInvocation: deckCodebaseGuardInvocation,
-    legacyBackupRoot: () => join(getDeckStateDir(), "backups", "pi-legacy"),
+
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     ...options.pi,
-  }));
-  registry.register("opencode", createOpenCodeRunnerAdapter({
+  })));
+  registry.register("opencode", guard(createOpenCodeRunnerAdapter({
     webSearchProviderResolver: getWebSearchProviderDescriptor,
+    webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     ...options.opencode,
-  }));
-  registry.register("codex", createCodexRunnerAdapter({
+  })));
+  registry.register("codex", guard(createCodexRunnerAdapter({
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     serenaProxyCommand: deckInternalCommand("serena-mcp"),
     deckMemoryMcpCommand: deckInternalCommand("memory-mcp"),
     ...options.codex,
-  }));
-  registry.register("claude", createClaudeRunnerAdapter({
+  })));
+  registry.register("claude", guard(createClaudeRunnerAdapter({
+    nativeSessionStartCommand: deckInternalCommand("project-readiness"),
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     resolveMemoryCredential: resolveClaudeSupermemoryLaunchCredential,
     serenaProxyCommand: deckInternalCommand("serena-mcp"),
     ...options.claude,
-  }));
+  })));
   return registry;
 }
 

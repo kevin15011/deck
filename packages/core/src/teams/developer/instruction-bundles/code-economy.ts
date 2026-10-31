@@ -84,7 +84,7 @@ Before writing any new code, consider in order:
 ### Anti-Overengineering Rules
 
 - **Avoid**: unrequested abstractions, avoidable new dependencies, "just-in-case" boilerplate, futuristic wrappers, fragmentation to appear smaller.
-- **Prefer**: deleting over adding, reusing existing patterns, localized changes, clear names, sufficient tests.
+- **Prefer**: deleting over adding, reusing existing patterns, localized changes, clear names, proof of required behavior at stable boundaries (see deck-verification).
 - **No-negotiables**: Requirements, security, input validation, trust boundary validation, data security, error handling, accessibility, completeness, tests, maintainability, and explicit user-requested behavior **always override** LOC reduction.
 
 ### Budget Advisory
@@ -116,7 +116,7 @@ Before writing any new code, consider in order:
 ### Anti-Overengineering Rules
 
 - **Avoid**: unrequested abstractions, avoidable new dependencies, "just-in-case" boilerplate, futuristic wrappers, fragmentation to appear smaller.
-- **Prefer**: deleting over adding, reusing existing patterns, localized changes, clear names, sufficient tests.
+- **Prefer**: deleting over adding, reusing existing patterns, localized changes, clear names, proof of required behavior at stable boundaries (see deck-verification).
 
 ### No-Negotiables (Override LOC Reduction)
 

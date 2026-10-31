@@ -48,6 +48,7 @@ export type StandaloneSkillDefinition = {
 };
 
 export const STANDALONE_SKILLS: readonly StandaloneSkillDefinition[] = [
+  { skillId: "deck-verification", sourcePath: "deck-verification/SKILL.md" },
   { skillId: "api-and-interface-design", sourcePath: "api-and-interface-design/SKILL.md" },
   { skillId: "ci-cd-and-automation", sourcePath: "ci-cd-and-automation/SKILL.md" },
   { skillId: "code-review-and-quality", sourcePath: "code-review-and-quality/SKILL.md" },
@@ -66,7 +67,6 @@ export const STANDALONE_SKILLS: readonly StandaloneSkillDefinition[] = [
   { skillId: "performance-optimization", sourcePath: "performance-optimization/SKILL.md" },
   { skillId: "security-and-hardening", sourcePath: "security-and-hardening/SKILL.md" },
   { skillId: "shipping-and-launch", sourcePath: "shipping-and-launch/SKILL.md" },
-  { skillId: "test-driven-development", sourcePath: "test-driven-development/SKILL.md" },
   { skillId: "using-agent-skills", sourcePath: "using-agent-skills/SKILL.md" },
   { skillId: "ui-skills-root", sourcePath: "ui-skills-root/SKILL.md" },
   { skillId: "frontend-design", sourcePath: "frontend-design/SKILL.md" },

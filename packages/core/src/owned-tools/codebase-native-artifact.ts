@@ -47,6 +47,12 @@ export function createCodebaseCompatibilityInspector(options: {
 } = {}) {
   const cache = new Map<string, boolean>();
   const capacity = Math.max(1, Math.min(256, options.maxEntries ?? 64));
+  // Some filesystems coalesce multiple writes into the same timestamp tick.
+  // Only settled identities can safely reuse a digest; young files are re-read.
+  const settled = (stat: import("node:fs").BigIntStats) => {
+    const now = BigInt(Date.now()) * 1_000_000n;
+    return now - stat.mtimeNs > 2_000_000_000n && now - stat.ctimeNs > 2_000_000_000n;
+  };
   const identity = (path: string) => {
     const stat = statSync(path, { bigint: true });
     return { stat, key: [path, stat.dev, stat.ino, stat.size, stat.mode, stat.uid, stat.gid, stat.mtimeNs, stat.ctimeNs].map(String).join("\0") };
@@ -57,11 +63,16 @@ export function createCodebaseCompatibilityInspector(options: {
       const real = realpathSync(path), before = identity(real);
       if (!before.stat.isFile() || before.stat.size !== BigInt(release.binaryBytes) || (before.stat.mode & 0o111n) === 0n) return false;
       const key = `${before.key}\0${release.binaryBytes}\0${release.binarySha256}`;
-      if (cache.has(key)) {
+      if (settled(before.stat) && cache.has(key)) {
         const result = cache.get(key)!; cache.delete(key); cache.set(key, result); return result;
       }
       const result = (options.hashFile ?? hashFileBounded)(real, release.binaryBytes) === release.binarySha256;
       if (realpathSync(path) !== real || identity(real).key !== before.key) return false;
+      if (!settled(before.stat)) {
+        // Recheck successful young-file hashes even if a write reused the stat tick.
+        return result && hashFileBounded(real, release.binaryBytes) === release.binarySha256
+          && realpathSync(path) === real && identity(real).key === before.key;
+      }
       cache.set(key, result);
       while (cache.size > capacity) cache.delete(cache.keys().next().value!);
       return result;

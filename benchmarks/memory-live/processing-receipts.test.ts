@@ -7,7 +7,7 @@ import { newRunId } from './manifest';
 import { simulatedWire } from './namespace-transport';
 import { FAKE_SECRETS, sha256 } from './security';
 import { testScratch } from './test-support';
-const scratch = testScratch();
+const scratch = testScratch({ smallCorpus: true });
 for (const status of [200, 503]) test(`first malformed scoped HTTP ${status} response is private, scrubbed and durable before gate validation`, async () => {
     const run = newRunId(), m = await prepareGuarded({ run, evalRoot: scratch.root(run), mode: 'pilot', budget: 5994, accountSharedWithProduction: true, processing: { schedule: 'adaptive-v1', requestTimeoutMs: 2000 } }, { ceilingUsd: .94, stopUsd: .89, cleanupReserveUsd: .05 });
     const fake = simulatedWire(), dir = join(m.evalRoot, 'processing-responses'); let beforeValidation = false, deletes = 0, statuses = 0;

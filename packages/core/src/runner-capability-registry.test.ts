@@ -22,19 +22,19 @@ describe("Runner Capability Registry", () => {
   it("accepts immutable synthetic adapter mappings without core registry edits", () => {
     const contribution = defineRunnerCapabilityContribution({
       runnerId: "synthetic",
-      mappings: [{ capabilityId: "context-mode", runnerId: "synthetic", status: "shared", provisionMode: "reuse", detectors: { commands: ["synthetic-context"] }, parityChecks: ["binary-usable"] }],
+      mappings: [{ capabilityId: "context7", runnerId: "synthetic", status: "shared", provisionMode: "reuse", detectors: { commands: ["synthetic-context7"] }, parityChecks: ["binary-usable"] }],
     });
 
     expect(Object.isFrozen(contribution)).toBe(true);
     expect(Object.isFrozen(contribution.mappings)).toBe(true);
-    expect(getRunnerCapabilityMapping("context-mode", "synthetic", [contribution])).toMatchObject({ status: "shared", provisionMode: "reuse" });
-    expect(validateRunnerCapabilitySemantics("synthetic", [{ capabilityId: "context-mode", status: "shared", provisionMode: "reuse", executable: "synthetic-context" }], [contribution])).toEqual([]);
+    expect(getRunnerCapabilityMapping("context7", "synthetic", [contribution])).toMatchObject({ status: "shared", provisionMode: "reuse" });
+    expect(validateRunnerCapabilitySemantics("synthetic", [{ capabilityId: "context7", status: "shared", provisionMode: "reuse", executable: "synthetic-context7" }], [contribution])).toEqual([]);
   });
 
   it("composes contributions deterministically and rejects mapping collisions", () => {
     const first = defineRunnerCapabilityContribution({
       runnerId: "synthetic",
-      mappings: [{ capabilityId: "context-mode", runnerId: "synthetic", status: "shared" }],
+      mappings: [{ capabilityId: "context7", runnerId: "synthetic", status: "shared" }],
     });
     const second = defineRunnerCapabilityContribution({
       runnerId: "synthetic",
@@ -44,7 +44,7 @@ describe("Runner Capability Registry", () => {
 
     const collision = defineRunnerCapabilityContribution({
       runnerId: "synthetic",
-      mappings: [{ capabilityId: "context-mode", runnerId: "synthetic", status: "supported" }],
+      mappings: [{ capabilityId: "context7", runnerId: "synthetic", status: "supported" }],
     });
     expect(() => getRunnerMappings("synthetic", [first, collision])).toThrow(RunnerCapabilityCompositionError);
     try {
@@ -100,10 +100,10 @@ describe("Runner Capability Registry", () => {
       expect(capability?.sharedBinary?.command).toBe("rtk");
     });
 
-    it("should include serena as capability", () => {
+    it("excludes retired capabilities from the canonical registry", () => {
       const capability = getCanonicalCapability("serena");
-      expect(capability).toBeDefined();
-      expect(capability?.id).toBe("serena");
+      expect(capability).toBeUndefined();
+      expect(getCanonicalCapability("context-mode")).toBeUndefined();
     });
 
     it("should include context7 as capability", () => {
@@ -159,8 +159,8 @@ describe("Runner Capability Registry", () => {
 
   describe("Helper Functions", () => {
     it("getCanonicalCapability should return exact entry", () => {
-      const capability = getCanonicalCapability("context-mode");
-      expect(capability?.id).toBe("context-mode");
+      const capability = getCanonicalCapability("context7");
+      expect(capability?.id).toBe("context7");
     });
 
     it("getCanonicalCapability should return undefined for non-existent", () => {

@@ -1,9 +1,6 @@
-import { prependOrchestratorInvariants, renderCompactOrchestratorInvariantsV1, type OrchestratorInvariantSurface, type InvariantVerificationResult } from "./orchestrator-invariants";
 
 import { renderDeveloperTeamContextAuthorityGuidance } from "../../memory/adaptive-context-renderer";
 
-import { deckInitSkillContent } from "../../skills/bootstrap/deck-init-content";
-import { deckOnboardSkillContent } from "../../skills/bootstrap/deck-onboard-content";
 
 /**
  * Runner-agnostic content registry for the Developer Team.
@@ -31,36 +28,7 @@ import { deckOnboardSkillContent } from "../../skills/bootstrap/deck-onboard-con
  */
 
 import { DEVELOPER_TEAM_AGENTS } from "./catalog";
-import {
-  ORCHESTRATOR_AGENT_BODY,
-  ORCHESTRATOR_COMPACT_AGENT_BODY,
-  ORCHESTRATOR_COMPACT_SKILL_BODY,
-  ORCHESTRATOR_SKILL_BODY,
-  getOrchestratorSystemPrompt,
-} from "./orchestrator-content";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "../../config/deck-config";
-import { EXPLORER_AGENT_BODY, EXPLORER_COMPACT_AGENT_BODY, EXPLORER_COMPACT_SKILL_BODY, EXPLORER_SKILL_BODY } from "./explorer-content";
-import { PROPOSAL_AGENT_BODY, PROPOSAL_COMPACT_AGENT_BODY, PROPOSAL_COMPACT_SKILL_BODY, PROPOSAL_SKILL_BODY } from "./proposal-content";
-import { SPEC_AGENT_BODY, SPEC_COMPACT_AGENT_BODY, SPEC_COMPACT_SKILL_BODY, SPEC_SKILL_BODY } from "./spec-content";
-import { DESIGN_AGENT_BODY, DESIGN_COMPACT_AGENT_BODY, DESIGN_COMPACT_SKILL_BODY, DESIGN_SKILL_BODY } from "./design-content";
-import { TASK_AGENT_BODY, TASK_COMPACT_AGENT_BODY, TASK_COMPACT_SKILL_BODY, TASK_SKILL_BODY } from "./task-content";
-import { APPLY_GENERAL_AGENT_BODY, APPLY_GENERAL_COMPACT_AGENT_BODY, APPLY_GENERAL_COMPACT_SKILL_BODY, APPLY_GENERAL_SKILL_BODY } from "./apply-general-content";
-import { APPLY_BACKEND_AGENT_BODY, APPLY_BACKEND_COMPACT_AGENT_BODY, APPLY_BACKEND_COMPACT_SKILL_BODY, APPLY_BACKEND_SKILL_BODY } from "./apply-backend-content";
-import { APPLY_FRONTEND_AGENT_BODY, APPLY_FRONTEND_COMPACT_AGENT_BODY, APPLY_FRONTEND_COMPACT_SKILL_BODY, APPLY_FRONTEND_SKILL_BODY } from "./apply-frontend-content";
-import { VERIFY_AGENT_BODY, VERIFY_COMPACT_AGENT_BODY, VERIFY_COMPACT_SKILL_BODY, VERIFY_SKILL_BODY } from "./verify-content";
-import { REVIEW_AGENT_BODY, REVIEW_COMPACT_AGENT_BODY, REVIEW_COMPACT_SKILL_BODY, REVIEW_SKILL_BODY } from "./review-content";
-import { ARCHIVE_AGENT_BODY, ARCHIVE_COMPACT_AGENT_BODY, ARCHIVE_COMPACT_SKILL_BODY, ARCHIVE_SKILL_BODY } from "./archive-content";
-import {
-  DECK_INIT_COMPACT_AGENT_BODY,
-  DECK_INIT_COMPACT_SKILL_BODY,
-  DECK_ONBOARD_COMPACT_AGENT_BODY,
-  DECK_ONBOARD_COMPACT_SKILL_BODY,
-} from "./bootstrap-compact-content";
-import {
-  VISUAL_EXPLANATIONS_SKILL_FRAGMENT,
-  VISUAL_EXPLANATIONS_AGENT_BODY,
-  VISUAL_EXPLANATIONS_SKILL_BODY,
-} from "./visual-explanations-content";
 import type { CapabilityInstructionBundle } from "./instruction-bundles/index";
 import {
   composeCapabilityInstructions,
@@ -101,7 +69,7 @@ export type AgentContent = {
   skillBody: string;
 };
 
-export type DeveloperTeamPromptProfileV1 = "legacy" | "compact";
+export type DeveloperTeamPromptProfileV1 = "compact";
 
 export type ContentRegistryOptions = {
   /** Optional capability instruction bundle to compose into agent/skill/session content */
@@ -130,89 +98,7 @@ export type ContentRegistryResultOptions = {
 // Internal: content map for agents with real (non-placeholder) content
 // ---------------------------------------------------------------------------
 
-const REAL_CONTENT: Record<string, { agentBody: string; skillBody: string }> = {
-  ...ADAPTIVE_AGENT_CONTENT,
-  "deck-developer-orchestrator": {
-    agentBody: ORCHESTRATOR_AGENT_BODY,
-    // Visual explanations are composed into the Orchestrator skill only.
-    // Proposal, Spec, Design, and Task agents do not receive this content
-    // by default (REQ-VISUAL-002, REQ-TEAMINSTALL-002).
-    skillBody: `${ORCHESTRATOR_SKILL_BODY.trimEnd()}\n\n${VISUAL_EXPLANATIONS_SKILL_FRAGMENT}\n`,
-  },
-  "deck-developer-explorer": {
-    agentBody: EXPLORER_AGENT_BODY,
-    skillBody: EXPLORER_SKILL_BODY,
-  },
-  "deck-developer-proposal": {
-    agentBody: PROPOSAL_AGENT_BODY,
-    skillBody: PROPOSAL_SKILL_BODY,
-  },
-  "deck-developer-spec": {
-    agentBody: SPEC_AGENT_BODY,
-    skillBody: SPEC_SKILL_BODY,
-  },
-  "deck-developer-design": {
-    agentBody: DESIGN_AGENT_BODY,
-    skillBody: DESIGN_SKILL_BODY,
-  },
-  "deck-developer-task": {
-    agentBody: TASK_AGENT_BODY,
-    skillBody: TASK_SKILL_BODY,
-  },
-  "deck-developer-apply-general": {
-    agentBody: APPLY_GENERAL_AGENT_BODY,
-    skillBody: APPLY_GENERAL_SKILL_BODY,
-  },
-  "deck-developer-apply-backend": {
-    agentBody: APPLY_BACKEND_AGENT_BODY,
-    skillBody: APPLY_BACKEND_SKILL_BODY,
-  },
-  "deck-developer-apply-frontend": {
-    agentBody: APPLY_FRONTEND_AGENT_BODY,
-    skillBody: APPLY_FRONTEND_SKILL_BODY,
-  },
-  "deck-developer-verify": {
-    agentBody: VERIFY_AGENT_BODY,
-    skillBody: VERIFY_SKILL_BODY,
-  },
-  "deck-developer-review": {
-    agentBody: REVIEW_AGENT_BODY,
-    skillBody: REVIEW_SKILL_BODY,
-  },
-  "deck-developer-archive": {
-    agentBody: ARCHIVE_AGENT_BODY,
-    skillBody: ARCHIVE_SKILL_BODY,
-  },
-  "deck-init": {
-    agentBody: extractBody(deckInitSkillContent),
-    skillBody: deckInitSkillContent,
-  },
-  "deck-onboard": {
-    agentBody: extractBody(deckOnboardSkillContent),
-    skillBody: deckOnboardSkillContent,
-  },
-};
-
-const COMPACT_CONTENT: Readonly<Record<string, AgentContent>> = Object.freeze({
-  ...ADAPTIVE_AGENT_CONTENT,
-  "deck-developer-orchestrator": Object.freeze({
-    agentBody: ORCHESTRATOR_COMPACT_AGENT_BODY,
-    skillBody: `${ORCHESTRATOR_COMPACT_SKILL_BODY.trimEnd()}\n\n${VISUAL_EXPLANATIONS_SKILL_FRAGMENT}\n`,
-  }),
-  "deck-developer-explorer": Object.freeze({ agentBody: EXPLORER_COMPACT_AGENT_BODY, skillBody: EXPLORER_COMPACT_SKILL_BODY }),
-  "deck-developer-proposal": Object.freeze({ agentBody: PROPOSAL_COMPACT_AGENT_BODY, skillBody: PROPOSAL_COMPACT_SKILL_BODY }),
-  "deck-developer-spec": Object.freeze({ agentBody: SPEC_COMPACT_AGENT_BODY, skillBody: SPEC_COMPACT_SKILL_BODY }),
-  "deck-developer-design": Object.freeze({ agentBody: DESIGN_COMPACT_AGENT_BODY, skillBody: DESIGN_COMPACT_SKILL_BODY }),
-  "deck-developer-task": Object.freeze({ agentBody: TASK_COMPACT_AGENT_BODY, skillBody: TASK_COMPACT_SKILL_BODY }),
-  "deck-developer-apply-general": Object.freeze({ agentBody: APPLY_GENERAL_COMPACT_AGENT_BODY, skillBody: APPLY_GENERAL_COMPACT_SKILL_BODY }),
-  "deck-developer-apply-backend": Object.freeze({ agentBody: APPLY_BACKEND_COMPACT_AGENT_BODY, skillBody: APPLY_BACKEND_COMPACT_SKILL_BODY }),
-  "deck-developer-apply-frontend": Object.freeze({ agentBody: APPLY_FRONTEND_COMPACT_AGENT_BODY, skillBody: APPLY_FRONTEND_COMPACT_SKILL_BODY }),
-  "deck-developer-verify": Object.freeze({ agentBody: VERIFY_COMPACT_AGENT_BODY, skillBody: VERIFY_COMPACT_SKILL_BODY }),
-  "deck-developer-review": Object.freeze({ agentBody: REVIEW_COMPACT_AGENT_BODY, skillBody: REVIEW_COMPACT_SKILL_BODY }),
-  "deck-developer-archive": Object.freeze({ agentBody: ARCHIVE_COMPACT_AGENT_BODY, skillBody: ARCHIVE_COMPACT_SKILL_BODY }),
-  "deck-init": Object.freeze({ agentBody: DECK_INIT_COMPACT_AGENT_BODY, skillBody: DECK_INIT_COMPACT_SKILL_BODY }),
-  "deck-onboard": Object.freeze({ agentBody: DECK_ONBOARD_COMPACT_AGENT_BODY, skillBody: DECK_ONBOARD_COMPACT_SKILL_BODY }),
-});
+const REAL_CONTENT: Record<string, AgentContent> = ADAPTIVE_AGENT_CONTENT;
 
 const CONTEXT_AUTHORITY_GUIDANCE = renderDeveloperTeamContextAuthorityGuidance();
 
@@ -379,35 +265,10 @@ function withSpecialistSkillDiscoveryContract(
   };
 }
 
-function withOrchestratorInvariants(
-  content: AgentContent,
-  agentId: string,
-): AgentContent {
-  // Only inject invariants into orchestrator agent
-  if (agentId !== "deck-developer-orchestrator") {
-    return content;
-  }
-
+function withCompactRuntimeContract(content: AgentContent, _agentId: string): AgentContent {
   return {
-    agentBody: prependOrchestratorInvariants(content.agentBody, "agent"),
-    skillBody: prependOrchestratorInvariants(content.skillBody, "skill"),
-  };
-}
-
-function withCompactRuntimeContract(content: AgentContent, agentId: string): AgentContent {
-  if (DEVELOPER_TEAM_AGENTS.some((agent) => agent.id === agentId)) {
-    return {
-      agentBody: `${ADAPTIVE_TEAM_RUNTIME_CONTRACT}\n\n${content.agentBody.trimStart()}`,
-      skillBody: `## Team Contract Reference\n\nThe agent-level Adaptive Developer Team Contract remains binding for this skill.\n\n${content.skillBody.trimStart()}`,
-    };
-  }
-  const orchestratorInvariants = agentId === "deck-developer-orchestrator"
-    ? `${renderCompactOrchestratorInvariantsV1()}\n\n`
-    : "";
-  const prefix = `${orchestratorInvariants}${DEVELOPER_TEAM_COMPACT_RUNTIME_CONTRACT}`;
-  return {
-    agentBody: `${prefix}\n\n${content.agentBody.trimStart()}`,
-    skillBody: `## Runtime Contract Reference\n\nThe agent-level Runtime-Enforced Team Contract remains binding for this skill.\n\n${content.skillBody.trimStart()}`,
+    agentBody: `${ADAPTIVE_TEAM_RUNTIME_CONTRACT}\n\n${content.agentBody.trimStart()}`,
+    skillBody: `## Team Contract Reference\n\nThe agent-level Adaptive Developer Team Contract remains binding for this skill.\n\n${content.skillBody.trimStart()}`,
   };
 }
 
@@ -512,14 +373,9 @@ export function getAgentContentResult(
   agentId: string,
   options?: ContentRegistryResultOptions,
 ): Result<AgentContent, AgentContentError> {
-  const promptProfile = options?.promptProfile ?? "compact";
-  const compact = promptProfile === "compact" ? COMPACT_CONTENT[agentId] : undefined;
-  const real = compact ?? REAL_CONTENT[agentId];
+  const real = REAL_CONTENT[agentId];
   if (real) {
-    // Apply composition order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) shared specialist discovery contract, (5) language policy, (6) capability instructions
-    const withInvariants = compact
-      ? withCompactRuntimeContract(real, agentId)
-      : withOrchestratorInvariants(real, agentId);
+    const withInvariants = withCompactRuntimeContract(real, agentId);
     const withAuthority = withContextAuthorityGuidance(withInvariants);
     const withDiscovery = withSpecialistSkillDiscoveryContract(withAuthority, agentId);
     const withLanguagePolicy = withDeveloperTeamLanguagePolicy(withDiscovery);
@@ -542,7 +398,7 @@ export function getAgentContentResult(
       // Agent exists in catalog but has no real content — fallback is appropriate
       const fallbackContent = getUnknownAgentContent(agentId, []);
       // Apply same composition order as real content
-      const withInvariants = withOrchestratorInvariants(fallbackContent, agentId);
+      const withInvariants = withCompactRuntimeContract(fallbackContent, agentId);
       const withAuthority = withContextAuthorityGuidance(withInvariants);
       const withDiscovery = withSpecialistSkillDiscoveryContract(withAuthority, agentId);
       const withLanguagePolicy = withDeveloperTeamLanguagePolicy(withDiscovery);
@@ -715,15 +571,8 @@ export function getTeamSessionInstructions(
 ): string | undefined {
   if (teamId === "developer-team") {
     const personality = options?.personality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
-    const promptProfile = options?.promptProfile ?? "compact";
-    const orchestratorPrompt = promptProfile === "compact"
-      ? getAdaptiveLeadSystemPrompt(personality)
-      : getOrchestratorSystemPrompt(personality, promptProfile);
-
-    // Compose order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) language policy, (5) optional active-runner discovery context, (6) capability instructions
-    const withInvariants = promptProfile === "compact"
-      ? `${ADAPTIVE_TEAM_RUNTIME_CONTRACT}\n\n${orchestratorPrompt}`
-      : prependOrchestratorInvariants(orchestratorPrompt, "session");
+    const orchestratorPrompt = getAdaptiveLeadSystemPrompt(personality);
+    const withInvariants = `${ADAPTIVE_TEAM_RUNTIME_CONTRACT}\n\n${orchestratorPrompt}`;
     const base = appendContextAuthorityGuidance(withInvariants);
     const baseWithLanguagePolicy = appendDeveloperTeamLanguagePolicy(base);
     const withSkillDiscoveryRuntimeContext = options?.skillDiscoveryRuntimeContext

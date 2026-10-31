@@ -56,7 +56,7 @@ describe("cross-runner materialized text guard", () => {
   test("Claude agent and skill bodies", () => {
     const translated = translateClaudeCapabilityInstructions(bundle());
     const files = getDeveloperTeamCatalog().flatMap((agent) => {
-      const content = getAgentContent(agent.id, { promptProfile: "legacy", capabilityInstructions: translated })!;
+      const content = getAgentContent(agent.id, { promptProfile: "compact", capabilityInstructions: translated })!;
       return [{ name: `${agent.id} agent`, content: content.agentBody }, { name: `${agent.id} skill`, content: content.skillBody }];
     });
     expect(leaks("claude", files)).toEqual([]);

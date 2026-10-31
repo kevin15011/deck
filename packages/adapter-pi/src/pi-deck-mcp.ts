@@ -78,7 +78,7 @@ export function selectDeckPiMcpServerIds(input: SelectDeckPiMcpInput): DeckPiMcp
       if (server) selected.add(server);
     }
   }
-  return DECK_PI_MCP_SERVER_IDS.filter((id) => selected.has(id));
+  return DECK_PI_MCP_SERVER_IDS.filter((id) => selected.has(id) && (id !== "codebase-memory" || input.instructionPackageIds.includes("codebase-memory")));
 }
 
 export type DeckPiMcpToolResolver = {
@@ -113,14 +113,11 @@ export function resolveDeckPiMcpServers(input: ResolveDeckPiMcpInput): ResolvedD
   };
 
   for (const id of input.selected) {
+    if (id === "context-mode" || id === "serena") continue;
     if (id === "context7") {
       const npx = input.tools.resolveExecutable("npx");
       if (!npx) unavailable(id, "Context7 needs `npx`, which was not found.");
       else servers[id] = buildDeckPiMcpEntry({ command: npx, args: ["-y", "@upstash/context7-mcp"] });
-    } else if (id === "context-mode") {
-      const command = input.tools.resolveExecutable("context-mode");
-      if (!command) unavailable(id, "The context-mode binary was not found.");
-      else servers[id] = buildDeckPiMcpEntry({ command, args: [] });
     } else if (id === "codebase-memory") {
       const command = input.tools.codebase.command();
       if (!command) diagnostics.push({ code: "codebase-memory-unavailable", severity: "warning", message: "Codebase Memory is unavailable for this execution. Use file listing, rg searches, and focused file reads. Review & Install can restore the reviewed executable; preparation never downloads it." });
@@ -134,17 +131,6 @@ export function resolveDeckPiMcpServers(input: ResolveDeckPiMcpInput): ResolvedD
       const command = input.tools.resolveExecutable(provider.command[0]!);
       if (!command) unavailable(id, `Web Search needs \`${provider.command[0]}\`, which was not found.`);
       else servers[provider.semanticServerId] = buildDeckPiMcpEntry({ command, args: provider.command.slice(1) });
-    } else if (id === "serena") {
-      const existing = input.existingServers.serena;
-      const record = existing && typeof existing === "object" && !Array.isArray(existing) ? (existing as Record<string, unknown>) : undefined;
-      if (!record || typeof record.command !== "string") {
-        diagnostics.push({ code: "PI_MCP_SERVER_UNAVAILABLE", severity: "warning", message: "Serena is selected but its evidence-gated MCP entry is not configured yet; the serena MCP server was not configured." });
-      } else if (!isAbsolute(record.command)) {
-        diagnostics.push({ code: "PI_MCP_SERVER_UNAVAILABLE", severity: "warning", message: "The existing Serena MCP entry uses a non-absolute command; the serena MCP server was not configured." });
-      } else {
-        const args = Array.isArray(record.args) ? record.args.filter((arg): arg is string => typeof arg === "string") : [];
-        servers.serena = buildDeckPiMcpEntry({ command: record.command, args });
-      }
     }
   }
   return { servers, diagnostics };

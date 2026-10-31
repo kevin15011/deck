@@ -102,10 +102,11 @@ test('full R offline pipeline and budget abort both persist reports; no credenti
 test('all native bytes match adapter pins and Claude/Codex/OpenCode replay actual capture scripts without sockets', async () => {
     for (const route of ['claude', 'codex', 'opencode'] as const)
         expect(Object.keys(verifyNative(route).hashes).length).toBeGreaterThan(0);
-    for (const route of ['claude', 'codex', 'opencode'] as const) {
-        const project = makeProject(root, `n_${route}_1`, 'A');
+    await Promise.all((['claude', 'codex', 'opencode'] as const).map(async route => {
+        const routeRoot = secureDir(join(root, route));
+        const project = makeProject(routeRoot, `n_${route}_1`, 'A');
         const t = new NamespaceTransport({ run, bindings: { [project.scope]: `deck_eval_${run}_n_${route}_a` }, budget: 100, wire: simulatedWire() });
-        const replay = new NativeReplay(route, root, t, true);
+        const replay = new NativeReplay(route, routeRoot, t, true);
         try {
             const r = await replay.capture({ id: `${route}-seed`, project: 'A', session_id: `native-${route}`, role: 'user', source: 'trusted-user-prompt', content: 'Confirmed decision: use Bun for testing the synthetic evaluation application and preserve this durable convention for future sessions.' }, project.cwd, project.scope);
             expect(r.status).toBe('replayed');
@@ -118,7 +119,7 @@ test('all native bytes match adapter pins and Claude/Codex/OpenCode replay actua
         finally {
             replay.close();
         }
-    }
+    }));
 }, 30000);
 test('cleanup requires separate authority and only deletes manifest-owned namespaces, without a DELETE body', async () => {
     const { cleanup } = await import('./cleanup');

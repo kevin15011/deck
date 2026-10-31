@@ -2,9 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { RolloutObservationV1 } from "./telemetry";
 import {
-  evaluateCompactPromptActivationV1,
   evaluateRolloutGateV1,
-  resolvePromptProfileActivationV1,
   transitionRolloutStateV1,
   type RolloutControlsV1,
   type RolloutGateDecisionV1,
@@ -242,88 +240,6 @@ describe("developer-team rollout gate", () => {
       }),
     ]);
     expect(decision.evidenceDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
-  });
-});
-
-describe("compact prompt activation", () => {
-  const eligibleRollout = evaluateRolloutGateV1(gateInput());
-  const passingInput = {
-    requestedProfile: "compact" as const,
-    rolloutDecision: eligibleRollout,
-    runtimeParity: true,
-    adapterParity: true,
-    goldenInvariants: true,
-    providerFiltering: true,
-    deterministicGeneration: true,
-    generatedSourceClean: true,
-    byteReductionPercent: 30,
-    tokenReductionPercent: 30,
-  };
-
-  test("refuses compact for each missing parity gate and for less than thirty-percent reduction", () => {
-    const cases = [
-      ["runtimeParity", "runtime-parity-unproven"],
-      ["adapterParity", "adapter-parity-unproven"],
-      ["goldenInvariants", "golden-invariants-unproven"],
-      ["providerFiltering", "provider-filtering-unproven"],
-      ["deterministicGeneration", "deterministic-generation-unproven"],
-      ["generatedSourceClean", "generated-source-dirty"],
-    ] as const;
-
-    for (const [field, reason] of cases) {
-      const result = evaluateCompactPromptActivationV1({ ...passingInput, [field]: false });
-      expect(result.status).toBe("rollout-paused");
-      expect(result.effectiveProfile).toBe("legacy");
-      expect(result.reasonCodes).toContain(reason);
-    }
-
-    const undersized = evaluateCompactPromptActivationV1({
-      ...passingInput,
-      byteReductionPercent: 29.99,
-    });
-    expect(undersized.reasonCodes).toContain("prompt-reduction-below-threshold");
-  });
-
-  test("returns an adapter-safe activation receipt only when compact is eligible", () => {
-    const result = evaluateCompactPromptActivationV1(passingInput);
-
-    expect(result).toEqual(expect.objectContaining({
-      schema: "prompt-profile-activation-v1",
-      status: "eligible",
-      requestedProfile: "compact",
-      effectiveProfile: "compact",
-      reasonCodes: [],
-    }));
-    expect(result.evidenceDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
-  });
-
-  test("keeps compact active when activation receipts are absent or malformed", () => {
-    expect(resolvePromptProfileActivationV1(undefined)).toBe("compact");
-    expect(() => resolvePromptProfileActivationV1({
-      schema: "prompt-profile-activation-v1",
-      status: "eligible",
-      requestedProfile: "compact",
-      effectiveProfile: "compact",
-      evidenceDigest: `sha256:${"a".repeat(64)}`,
-    } as never)).not.toThrow();
-    expect(resolvePromptProfileActivationV1({
-      schema: "prompt-profile-activation-v1",
-      status: "eligible",
-      requestedProfile: "compact",
-      effectiveProfile: "compact",
-      evidenceDigest: `sha256:${"a".repeat(64)}`,
-    } as never)).toBe("compact");
-  });
-
-  test("fails compact closed when reduction evidence is non-finite", () => {
-    const result = evaluateCompactPromptActivationV1({
-      ...passingInput,
-      byteReductionPercent: Number.NaN,
-    });
-
-    expect(result.status).toBe("rollout-paused");
-    expect(result.effectiveProfile).toBe("legacy");
-    expect(result.reasonCodes).toContain("invalid-prompt-reduction-evidence");
   });
 });
 

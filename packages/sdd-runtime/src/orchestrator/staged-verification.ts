@@ -242,6 +242,9 @@ export function validateBroadVerificationAcceptanceV1(
 
 export interface VerificationDisciplineEvidenceV1 {
   readonly behaviorChanged: boolean;
+  /** Omitted classification retains the existing conservative red-first requirement. */
+  readonly changeKind?: "reproducible_bug_fix" | "specified_logic" | "other";
+  readonly baselineEvidence?: SafeEvidenceRefV1;
   readonly priorFailingTest?: SafeEvidenceRefV1;
   readonly generatedOutputsChanged: readonly string[];
   readonly canonicalSourcesChanged: readonly string[];
@@ -259,7 +262,8 @@ export function validateVerificationDisciplineV1(
   try { state = parseStagedVerificationStateV1(stateValue); }
   catch { return deepFreeze({ code: "verification-evidence-required", rationaleCodes: ["VERIFY_STATE_INVALID"] }); }
   const rationaleCodes: string[] = [];
-  if (evidence.behaviorChanged && evidence.priorFailingTest?.resultCode !== "failed-before-implementation") rationaleCodes.push("TDD_PRIOR_FAILURE_REQUIRED");
+  if (evidence.behaviorChanged && evidence.changeKind !== "other" && evidence.priorFailingTest?.resultCode !== "failed-before-implementation") rationaleCodes.push("TDD_PRIOR_FAILURE_REQUIRED");
+  if (evidence.behaviorChanged && evidence.changeKind === "other" && evidence.baselineEvidence?.resultCode !== "passed") rationaleCodes.push("VERIFY_BASELINE_REQUIRED");
   if (evidence.behaviorChanged && (!scheduleIsCanonical(state) || state.nextStage !== undefined ||
     state.stages.some((stage) => stage.status !== "passed" && stage.status !== "skipped" && stage.status !== "deferred"))) {
     rationaleCodes.push("TDD_PASSING_STAGES_REQUIRED");

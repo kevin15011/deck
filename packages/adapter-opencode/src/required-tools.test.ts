@@ -62,17 +62,10 @@ describe("reviewOpenCodeTools", () => {
     expect(result.installedPackages).toEqual(["context-mode", "codebase-memory-mcp"]);
     expect(result.tools).toEqual([
       { name: "RTK", installed: false },
-      { name: "context-mode", installed: false },
       { name: "codebase-memory", installed: false },
       { name: "Context7", installed: false },
-      { name: "Serena", installed: false },
     ]);
-    expect(result.toolStatuses.find((tool) => tool.name === "context-mode")).toEqual({
-      name: "context-mode",
-      available: "missing",
-      configured: "missing",
-      ready: "missing",
-    });
+    expect(result.toolStatuses.some(tool => tool.name === "context-mode" || tool.name === "Serena")).toBe(false);
   });
 
   test("detects tools configured in opencode.json MCP and plugin sections", () => {
@@ -96,10 +89,8 @@ describe("reviewOpenCodeTools", () => {
 
     expect(result.tools).toEqual([
       { name: "RTK", installed: true },
-      { name: "context-mode", installed: false },
       { name: "codebase-memory", installed: false },
       { name: "Context7", installed: false },
-      { name: "Serena", installed: false },
     ]);
   });
 

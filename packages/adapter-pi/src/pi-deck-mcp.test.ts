@@ -50,15 +50,15 @@ describe("validateDeckPiMcpEntry", () => {
 
 describe("selectDeckPiMcpServerIds", () => {
   test("explicit capability selection maps to servers and ignores non-MCP capabilities", () => {
-    expect(selectDeckPiMcpServerIds({ capabilityIds: ["context-mode", "rtk", "codebase-memory-mcp", "adaptive-memory"], instructionPackageIds: [], webSearchEnabled: false, ownedServers: ["serena"] })).toEqual(["context-mode", "codebase-memory"]);
+    expect(selectDeckPiMcpServerIds({ capabilityIds: ["context-mode", "rtk", "codebase-memory-mcp", "adaptive-memory"], instructionPackageIds: ["codebase-memory"], webSearchEnabled: false, ownedServers: ["serena"] })).toEqual(["codebase-memory"]);
   });
 
   test("a launch without an explicit selection keeps servers Deck already owns", () => {
-    expect(selectDeckPiMcpServerIds({ capabilityIds: undefined, instructionPackageIds: [], webSearchEnabled: false, ownedServers: ["context7", "serena"] })).toEqual(["context7", "serena"]);
+    expect(selectDeckPiMcpServerIds({ capabilityIds: undefined, instructionPackageIds: [], webSearchEnabled: false, ownedServers: ["context7", "serena"] })).toEqual(["context7"]);
   });
 
   test("instruction packages and web search add servers", () => {
-    expect(selectDeckPiMcpServerIds({ capabilityIds: undefined, instructionPackageIds: ["context-mode", "codebase-memory", "serena"], webSearchEnabled: true, ownedServers: [] })).toEqual(["context-mode", "codebase-memory", "serena", "web-search"]);
+    expect(selectDeckPiMcpServerIds({ capabilityIds: undefined, instructionPackageIds: ["context-mode", "codebase-memory", "serena"], webSearchEnabled: true, ownedServers: [] })).toEqual(["codebase-memory", "web-search"]);
   });
 
   test("an explicit selection ignores instruction packages and the web search flag", () => {
@@ -79,14 +79,14 @@ describe("resolveDeckPiMcpServers", () => {
       selected: ["context7", "context-mode", "codebase-memory", "web-search"],
       tools: tools(),
     });
-    expect(Object.keys(servers).sort()).toEqual(["codebase-memory", "context-mode", "context7", "web-search"]);
+    expect(Object.keys(servers).sort()).toEqual(["codebase-memory", "context7", "web-search"]);
     for (const entry of Object.values(servers)) {
       expect(isAbsolute(entry.command as string)).toBe(true);
       expect(entry.exposure).toBe("direct");
       expect(entry.env).toEqual(DECK_PI_MEMORY_ENV_BLANKS);
     }
     expect(servers.context7).toMatchObject({ command: "/usr/bin/npx", args: ["-y", "@upstash/context7-mcp"] });
-    expect(servers["context-mode"]).toMatchObject({ command: "/usr/local/bin/context-mode", args: [] });
+    expect(servers["context-mode"]).toBeUndefined();
     expect(servers["codebase-memory"]!.command).toBe("/data/deck/pi/tools/codebase-native-v0.11.0/linux-x64/codebase-memory-mcp");
     expect(servers["web-search"]).toMatchObject({ command: "/usr/bin/npx", args: ["-y", "tavily-mcp@0.2.22"] });
     expect(diagnostics.filter((d) => d.severity === "error")).toEqual([]);
@@ -100,14 +100,14 @@ describe("resolveDeckPiMcpServers", () => {
   test("a server whose executable cannot be resolved is omitted with a warning", () => {
     const { servers, diagnostics } = resolveDeckPiMcpServers({ ...base, selected: ["context-mode", "codebase-memory"], tools: { resolveExecutable: () => undefined, codebase: { command: () => undefined } } });
     expect(servers).toEqual({});
-    expect(diagnostics.map((d) => d.code).sort()).toEqual(["PI_MCP_SERVER_UNAVAILABLE", "codebase-memory-unavailable"]);
+    expect(diagnostics.map((d) => d.code).sort()).toEqual(["codebase-memory-unavailable"]);
     expect(diagnostics.every((d) => d.severity === "warning")).toBe(true);
   });
 
   test("an unresolved server that Deck already owns keeps its existing entry", () => {
-    const existing = buildDeckPiMcpEntry({ command: "/old/context-mode", args: [] });
-    const { servers } = resolveDeckPiMcpServers({ ...base, selected: ["context-mode"], tools: { resolveExecutable: () => undefined, codebase: { command: () => undefined } }, existingServers: { "context-mode": existing }, ownedServerNames: ["context-mode"] });
-    expect(servers["context-mode"]).toEqual(existing);
+    const existing = buildDeckPiMcpEntry({ command: "/old/context7", args: [] });
+    const { servers } = resolveDeckPiMcpServers({ ...base, selected: ["context7"], tools: { resolveExecutable: () => undefined, codebase: { command: () => undefined } }, existingServers: { "context7": existing }, ownedServerNames: ["context7"] });
+    expect(servers["context7"]).toEqual(existing);
   });
 
   test("web search requires the Tavily provider descriptor", () => {
@@ -116,23 +116,11 @@ describe("resolveDeckPiMcpServers", () => {
     expect(diagnostics[0]!.message).toMatch(/Web Search/i);
   });
 
-  test("serena is adopted from its evidence-gated entry and normalized", () => {
-    const legacy = { command: "/data/deck/tools/serena/bin/serena", args: ["start-mcp-server"] };
-    const { servers } = resolveDeckPiMcpServers({ ...base, selected: ["serena"], tools: tools(), existingServers: { serena: legacy } });
-    expect(servers.serena).toEqual({ command: legacy.command, args: legacy.args, env: DECK_PI_MEMORY_ENV_BLANKS, exposure: "direct" });
-  });
+  test("retired Serena is neither adopted nor normalized", () => { const legacy = { command: '/owned/serena', args: ['start-mcp-server'] }; const before = JSON.stringify(legacy); const result = resolveDeckPiMcpServers({ ...base, selected: ['serena'], tools: tools(), existingServers: { serena: legacy } }); expect(result.servers).toEqual({}); expect(JSON.stringify(legacy)).toBe(before); });
 
-  test("serena without a configured entry is skipped with a warning", () => {
-    const { servers, diagnostics } = resolveDeckPiMcpServers({ ...base, selected: ["serena"], tools: tools() });
-    expect(servers).toEqual({});
-    expect(diagnostics[0]!.message).toMatch(/Serena/);
-  });
+  test("retired Serena needs no readiness diagnostic", ()=>{expect(resolveDeckPiMcpServers({...base,selected:['serena'],tools:tools()})).toEqual({servers:{},diagnostics:[]});});
 
-  test("a serena entry with a relative command is rejected", () => {
-    const { servers, diagnostics } = resolveDeckPiMcpServers({ ...base, selected: ["serena"], tools: tools(), existingServers: { serena: { command: "serena", args: [] } } });
-    expect(servers).toEqual({});
-    expect(diagnostics[0]!.severity).toBe("warning");
-  });
+  test("retired relative Serena stays untouched", () => { const source = { serena: { command: 'serena', args: [] } }; const result = resolveDeckPiMcpServers({ ...base, selected: ['serena'], tools: tools(), existingServers: source }); expect(result.servers).toEqual({}); expect(source.serena.command).toBe('serena'); });
 });
 
  test("unavailable owned Codebase is omitted and restored without touching source entries", () => {
@@ -147,3 +135,9 @@ describe("resolveDeckPiMcpServers", () => {
    expect(resolveDeckPiMcpServers(input).servers["codebase-memory"]?.command).toBe(command);
    expect(entries.personal.command).toBe("/custom");
  });
+
+test('the direct resolver ignores retired IDs without probing or adopting entries', () => {
+  let probes = 0;
+  expect(resolveDeckPiMcpServers({ selected: ['context-mode', 'serena'], tools: { resolveExecutable: () => { probes++; throw new Error('retired probe'); }, codebase: { command: () => undefined } }, existingServers: { serena: { command: '/retired' } }, ownedServerNames: ['serena'], webSearchProvider: undefined }).servers).toEqual({});
+  expect(probes).toBe(0);
+});

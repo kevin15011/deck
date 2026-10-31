@@ -40,7 +40,7 @@ describe("Pi Runner dashboard input mapping", () => {
   });
 
   test("OpenCode omits Deck adaptive-memory instructions while Pi and Codex retain them", () => {
-    const expected = ["codebase-memory", "context-mode", "rtk", "adaptive-memory", "serena"] as const;
+    const expected = ["codebase-memory", "rtk", "adaptive-memory"] as const;
     for (const runnerId of ["pi", "opencode", "codex"] as const) {
       const adapter = getAdapter(runnerId);
       const resolver: CapabilityResolver = {
@@ -49,7 +49,7 @@ describe("Pi Runner dashboard input mapping", () => {
       const state = createDefaultPiRunnerDashboardState({ runnerScope: runnerId, screen: "packages-detail" });
       const runnerExpected = runnerId === "opencode" ? expected.filter((id) => id !== "adaptive-memory") : [...expected];
       expect(getToggleablePackageInstructionIds(state, resolver)).toEqual(runnerExpected);
-      expect(getDashboardSectionSummaries(state, resolver)[0]).toMatchObject({ totalCount: runnerExpected.length, selectedCount: runnerExpected.length });
+      expect(getDashboardSectionSummaries(state, resolver)[0]).toMatchObject({ totalCount: runnerExpected.length, selectedCount: runnerExpected.length - 1 });
     }
   });
 
@@ -72,89 +72,15 @@ describe("Pi Runner dashboard input mapping", () => {
     expect(state.selectedCapabilities["codebase-memory"]).toBe(selectedBefore);
   });
 
-  test("a current-operation Serena package toggle explicitly selects it for installation", () => {
-    const adapter = getAdapter("opencode");
-    const resolver: CapabilityResolver = {
-      getSupportedPackageInstructionIds: () => adapter.packageInstructionIds ?? [],
-    };
-    const operation = {
-      runner: "opencode" as const,
-      operationId: "opencode-serena-package-selection",
-      explicitlySelected: false,
-    };
-    let state = createDefaultPiRunnerDashboardState({
-      runnerScope: "opencode",
-      screen: "packages-detail",
-      cursor: 3,
-      operationId: operation.operationId,
-      currentOperation: operation,
-      selectedCapabilities: { serena: false },
-      packageInstructions: { serena: false },
-    });
-
-    const selectAction = getPiRunnerDashboardToggleAction(state, resolver);
-    expect(selectAction).toBeDefined();
-    state = reduce(state, selectAction!);
-
-    expect(state.packageInstructions.serena).toBe(true);
-    expect(state.selectedCapabilities.serena).toBe(true);
-    expect(state.explicitlySelectedCapabilities.serena).toBe(true);
-    expect(state.currentOperation).toEqual({ ...operation, explicitlySelected: true });
-
-    const plan = buildOpenCodeRunnerReviewPlan({
-      runnerScope: state.runnerScope,
-      operationId: state.operationId,
-      currentOperation: { ...operation, explicitlySelected: true },
-      selectedCapabilities: { serena: state.selectedCapabilities.serena === true },
-      explicitlySelectedCapabilities: { serena: state.explicitlySelectedCapabilities.serena === true },
-    }, {
-      serena: {
-        capabilityId: "serena",
-        status: "missing",
-        runnerScope: "opencode",
-        installed: false,
-        toolId: "serena",
-        source: "serena-agent",
-        diagnostics: [],
-      },
-    });
-    expect(plan.groups.automaticInstalls).toContainEqual(expect.objectContaining({
-      id: "capability.serena.install",
-      source: "serena-agent",
-    }));
-
-    const clearAction = getPiRunnerDashboardToggleAction(state, resolver);
-    expect(clearAction).toBeDefined();
-    state = reduce(state, clearAction!);
-
-    expect(state.packageInstructions.serena).toBe(false);
-    expect(state.selectedCapabilities.serena).toBe(false);
+  test.each([true,false])("retired Serena has no toggle even with a current operation: %s", current => {
+    const adapter=getAdapter("opencode");
+    const resolver:CapabilityResolver={getSupportedPackageInstructionIds:()=>adapter.packageInstructionIds??[]};
+    const state=createDefaultPiRunnerDashboardState({runnerScope:"opencode",screen:"packages-detail",cursor:3,
+      ...(current?{currentOperation:{runner:"opencode",operationId:"current",explicitlySelected:false},operationId:"current"}:{currentOperation:undefined,operationId:undefined}),
+      selectedCapabilities:{serena:false},packageInstructions:{serena:false}});
+    expect(getToggleablePackageInstructionIds(state,resolver)).not.toContain("serena");
+    expect(getPiRunnerDashboardToggleAction(state,resolver)).toBeUndefined();
     expect(state.explicitlySelectedCapabilities.serena).toBeUndefined();
-    expect(state.currentOperation).toEqual(operation);
-  });
-
-  test("a Serena package toggle without a current operation cannot authorize installation", () => {
-    const adapter = getAdapter("opencode");
-    const resolver: CapabilityResolver = {
-      getSupportedPackageInstructionIds: () => adapter.packageInstructionIds ?? [],
-    };
-    let state = createDefaultPiRunnerDashboardState({
-      runnerScope: "opencode",
-      screen: "packages-detail",
-      cursor: 3,
-      operationId: undefined,
-      currentOperation: undefined,
-      selectedCapabilities: { serena: false },
-      packageInstructions: { serena: false },
-    });
-
-    const action = getPiRunnerDashboardToggleAction(state, resolver);
-    expect(action).toBeDefined();
-    state = reduce(state, action!);
-
-    expect(state.packageInstructions.serena).toBe(true);
-    expect(state.explicitlySelectedCapabilities.serena).toBeUndefined();
-    expect(state.currentOperation).toBeUndefined();
   });
 
   test("Web Search opens masked credential setup only when enablement lacks a credential", () => {
@@ -190,7 +116,7 @@ describe("Pi Runner dashboard input mapping", () => {
       getSupportedPackageInstructionIds: () => ["serena", "code-economy", "rtk", "codebase-memory"],
     };
     const state = createDefaultPiRunnerDashboardState({ runnerScope: "synthetic", screen: "packages-detail" });
-    expect(getToggleablePackageInstructionIds(state, resolver)).toEqual(["codebase-memory", "rtk", "serena"]);
+    expect(getToggleablePackageInstructionIds(state, resolver)).toEqual(["codebase-memory", "rtk"]);
   });
 
   test("seleccionar Supermemory abre setup y bloquea ejecución hasta configurar", () => {

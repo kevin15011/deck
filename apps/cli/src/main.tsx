@@ -1,3 +1,4 @@
+import { prepareClaudeInteractiveLaunch } from "./claude-interactive-launch";
 import { formatLaunchDiagnostic, formatPlainDiagnostic, isQuietDiagnostic, shouldColorStderr } from "./launch-diagnostic-format";
 import React from "react";
 import { render, renderToString } from "ink";
@@ -15,6 +16,12 @@ import { HomeScreen } from "./tui/screens/home-screen";
 import { inspectStandaloneWebSearchReadiness, isStandaloneWebSearchSmokeSuccessful } from "./standalone-web-search-smoke";
 import { createDeckConfigStoreFromEnvironment } from "./deck-config-store";
 
+// Dispatch before configuration or adapter construction. The child validates its private pipe.
+if (process.argv[2] === 'internal-git-reader-v1') {
+  const { runGitReaderProcess } = await import('../../../packages/session-host/src/git-diff-process');
+  try { await runGitReaderProcess(); process.exit(0); } catch { process.exit(1); }
+}
+
 // One authoritative operational registry is shared by direct commands and the TUI.
 // Version and other standalone commands must not instantiate runner adapters:
 // release smoke checks deliberately run without HOME or runner configuration.
@@ -25,6 +32,11 @@ const getAdapterRegistry = () => adapterRegistry ??= createDefaultAdapterRegistr
 const userArgs = process.argv.slice(2);
 const parsed = parseArgs(userArgs);
 const configStore = createDeckConfigStoreFromEnvironment({ projectRoot: resolveProjectRoot() ?? process.cwd() });
+
+if (parsed.command === "runner-cleanup") {
+  const { runRunnerCleanupCommand } = await import("./runner-cleanup-command");
+  process.exit(await runRunnerCleanupCommand(parsed));
+}
 
 if (parsed.command === "error") {
   console.error(parsed.message);
@@ -103,6 +115,13 @@ if (parsed.command === "internal-session-mcp") {
   process.exit(0);
 }
 
+if (parsed.command === "internal-project-readiness") {
+  const { claudeSessionStartContext } = await import("./internal-project-readiness");
+  const text = await claudeSessionStartContext();
+  process.stdout.write(parsed.hook ? JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text } }) : text);
+  process.exit(0);
+}
+
 if (parsed.command === "internal-daemon-restart-helper") {
   const {runWebRestartHelper}=await import("./web-daemon-restart");
   process.exit(await runWebRestartHelper(parsed.intentPath));
@@ -124,6 +143,9 @@ if (parsed.command === "internal-session-daemon") {
     restartChannel:getBuildInfo().channel==="dev"?"canary":"stable",
     anchorCommand: deckInternalCommand("child-anchor"),
     web: { autoStart: Boolean(crossRunner?.enabled), config: {...webConfig,...(restart?.webPort?{port:restart.webPort}:{})}, assets: WEB_ASSETS },
+    quotaRefresh: async (runner, signal) => runner === 'claude'
+      ? (await import('../../../packages/adapter-claude/src/quota')).refreshClaudeQuota(signal)
+      : (await import('@deck/adapter-codex')).refreshCodexQuota(signal),
     createService: (services) => createCrossSessionService(services, { configStore }),
   }));
 }
@@ -209,7 +231,7 @@ if (parsed.command === "rollback") {
     const currentVersion = getBuildInfo().version;
     if (flags.backupId) {
       const manifest = readBackupManifest(flags.backupId);
-      const result = rollbackBackup(manifest, currentVersion, {
+      const result = await rollbackBackup(manifest, currentVersion, {
         force: flags.force === true,
       });
       console.log(
@@ -223,7 +245,7 @@ if (parsed.command === "rollback") {
       console.error("No backup available to roll back to.");
       process.exit(1);
     }
-    const result = rollbackLatest(currentVersion, {
+    const result = await rollbackLatest(currentVersion, {
       force: flags.force === true,
     });
     console.log(
@@ -302,7 +324,7 @@ if (parsed.command === "claude-native-launch") {
 if (parsed.command === "claude-team-launch") {
   try {
     const adapter = getAdapterRegistry().get("claude");
-    const launch = await adapter.buildLaunchPlan!({ mode: "interactive", projectRoot: resolveProjectRoot() ?? process.cwd(), teamId: "developer-team", deckConfig: configStore.readRequired() });
+    const launch = await prepareClaudeInteractiveLaunch(adapter, { mode: "interactive", projectRoot: resolveProjectRoot() ?? process.cwd(), teamId: "developer-team", deckConfig: configStore.readRequired() }, undefined, () => configStore.readRequired());
     if (launch.status !== "ready") {
       console.error(launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "));
       process.exit(launch.status === "blocked" ? 1 : 2);
@@ -332,7 +354,6 @@ if (parsed.command === "runner-launch") {
     dryRun: parsed.dryRun,
     yes: parsed.yes,
     localOnly: parsed.localOnly,
-    cleanupLegacy: parsed.cleanupLegacy,
     cliMemoryProvider: parsed.memoryProvider,
     interactive,
     confirm: interactive ? async (question) => {
@@ -385,7 +406,6 @@ if (parsed.command === "runner-launch") {
     adapter,
     launch: { projectRoot, teamId: parsed.teamId, mode: "interactive", runnerNative: parsed.flags, deckConfig },
     cliMemoryProvider: parsed.memoryProvider,
-    cleanupLegacy: parsed.cleanupLegacy,
     interactive,
     yes: !interactive,
     confirm: interactive ? async (question) => {

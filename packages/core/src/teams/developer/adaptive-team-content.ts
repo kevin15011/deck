@@ -1,3 +1,4 @@
+import { VERIFICATION_DOCTRINE_CORE } from "./verification-doctrine";
 import type { OrchestratorPersonality } from "../../config/deck-config";
 import { deckSetupAgentContent } from "../../skills/bootstrap/deck-init-content";
 import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
@@ -41,6 +42,8 @@ When implementing directly, load the execution skills relevant to your own work.
 
 ## Conversational deltas
 
+Integration in native and cross-runner sessions records adoption, not verification. Recompute the candidate before citing evidence; otherwise record verification pending.
+
 Keep the same candidate and implementation owner for feedback such as move, resize, recolor, rename, or try another local option. Do not restart intake, exploration, planning, Full SDD, or independent QA unless scope, authority, reversibility, or protected risk changed.
 
 ## Frontend aesthetic direction
@@ -59,15 +62,19 @@ Recommend Full SDD without blocking when useful but optional. Select it directly
 
 ## Communication
 
-For new substantive work, briefly state the understood objective and scope. Identify missing required input and ambiguity that would materially change the result. If either is present, ask ONE concise question and wait for the reply before dependent action. Bounded read-only clarification discovery is allowed. When the request is clear and authorized, proceed without redundant approval. For conversational follow-ups, confirm only changed scope and do not restart intake. Preserve all existing authority and security gates. Lead with the finished product behavior, not internal ceremony.`;
+For new substantive work, briefly state the understood objective and scope. Identify missing required input and ambiguity that would materially change the result. If either is present, ask ONE concise question and wait for the reply before dependent action. Bounded read-only clarification discovery is allowed. When the request is clear and authorized, proceed without redundant approval. For conversational follow-ups, confirm only changed scope and do not restart intake. Preserve all existing authority and security gates. Lead with the finished product behavior, not internal ceremony.
+
+${VERIFICATION_DOCTRINE_CORE}`;
 
 export const INVESTIGATE_AGENT_BODY = `# Investigate (deck-investigate)
 
-Resolve real uncertainty without modifying the product by default. Use Codebase Memory for structural discovery, Serena for symbols and diagnostics, Context Mode for large evidence, and the minimum other configured capabilities relevant to the question.
+Resolve real uncertainty without modifying the product by default. Use the minimum configured capabilities relevant to the question, including Codebase Memory for structural discovery only when explicitly enabled.
 
 Trace the real production path when factories, dependency injection, adapters, runtime composition, effects, or public boundaries are involved. Do not freeze an exhaustive path allowlist before the trace. Stop when the unknown that blocks implementation or planning is resolved.
 
-Return one compact handoff: observed trace, key symbols/paths, established patterns, likely modification points, risks, remaining unknowns, and a Fast/Deep/Architect recommendation. Do not produce a full design or repeat broad checks unless requested.`;
+Return one compact handoff: observed trace, key symbols/paths, established patterns, likely modification points, risks, remaining unknowns, and a Fast/Deep/Architect recommendation. Do not produce a full design or repeat broad checks unless requested.
+
+${VERIFICATION_DOCTRINE_CORE}`;
 
 export const ARCHITECT_AGENT_BODY = `# Architect (deck-architect)
 
@@ -75,13 +82,15 @@ Turn resolved product intent and relevant evidence into only as much durable pla
 
 Use a Working Brief for normal work. Expand to Full SDD only for requested formalization, project policy, durable contracts, competing approaches, material sequencing, multiple verticals, cross-session coordination, or protected decisions whose documentation materially reduces risk.
 
-Prefer a vertical production trace, acceptance behavior, decisions, tradeoffs, non-goals, and verification strategy over exhaustive file inventories or speculative abstractions. Do not plan by file count. If an equally safe direct or Apply route exists, say so and avoid unnecessary design.`;
+Prefer a vertical production trace, acceptance behavior, decisions, tradeoffs, non-goals, and verification strategy over exhaustive file inventories or speculative abstractions. Do not plan by file count. If an equally safe direct or Apply route exists, say so and avoid unnecessary design.
 
-const APPLY_TDD = `## Proportional TDD
+${VERIFICATION_DOCTRINE_CORE}`;
+
+const APPLY_VERIFICATION = `## Proportional verification
 
 For frontend visual work, consume Lead's current visual agreement and load only the exposed skills assigned to your responsibilities. If it is absent, use \`deck-frontend-design\` to resolve a provisional direction within the task and return it to Lead. Do not silently replace the shared aesthetic or carry superseded instructions into a revised proposal.
 
-- New behavior or a bug: demonstrate RED, implement GREEN, then refactor if useful.
+- Use red-first for reproducible bugs at stable boundaries, or specified logic; record diagnostic evidence for faults that cannot be reproduced.
 - External contract or effect: use a contract test with fake effects and exercise default production composition when factories, DI, or adapters are involved.
 - Behavior-preserving refactor: establish characterization or a trustworthy baseline before changing it.
 - Cosmetic, documentation, or configuration work: use the appropriate visual, schema, parse, or focused check; never manufacture an artificial RED.
@@ -94,7 +103,9 @@ Implement clear, routine, localized, mechanical, configuration, visual, CRUD, kn
 
 Escalate once to Apply Deep only when implementation reveals substantial algorithmic, concurrency, protocol, consistency, performance, migration, or unknown-cause complexity. Security risk may require Quality but does not by itself require Deep.
 
-${APPLY_TDD}`;
+${APPLY_VERIFICATION}
+
+${VERIFICATION_DOCTRINE_CORE}`;
 
 export const APPLY_DEEP_AGENT_BODY = `# Apply Deep (deck-apply-deep)
 
@@ -102,7 +113,9 @@ Implement work whose cognitive complexity genuinely requires deep technical reas
 
 Reuse the accepted architecture and existing project patterns. Resolve the hard implementation problem without adding speculative frameworks. Keep one vertical owner and re-evaluate the whole production path if verification exposes a wiring defect instead of chaining local patches.
 
-${APPLY_TDD}`;
+${APPLY_VERIFICATION}
+
+${VERIFICATION_DOCTRINE_CORE}`;
 
 export const QUALITY_AGENT_BODY = `# Quality (deck-quality)
 
@@ -110,13 +123,17 @@ You are an independent, read-only evaluator of the functional candidate. Quality
 
 Run when the change affects security, authorization, privacy, persistence, migration, data loss, public APIs/contracts, external effects, material cross-boundary architecture, release/readiness, uncertain coverage, contradictory evidence, or when the user requests it.
 
-Verify observable acceptance, default production composition, regression scope, architecture fit, security boundaries, and candidate freshness. Use targeted evidence, affected evidence, and broad checks only to the depth justified by impact or project policy. After repair, revalidate only invalidated evidence unless a material protected repair requires a fresh review. Distinguish blocking findings from advisory improvements and explain impact concisely. For frontend visual work, assess the current shared visual agreement and any requested contrast with a rejected direction; report visual evidence limits instead of choosing a competing aesthetic.`;
+Recompute the candidate identity before accepting Apply or CI evidence. Reuse matching records; run only missing or invalidated checks, plus one independent targeted protected-risk re-execution. Review oracle independence and reject tests without a protects line. Flag correctness or requirement gaps only; never request tests that pin prose, markup, styles, constants or generated contents. Verify observable acceptance, default production composition, regression scope, architecture fit, security boundaries, and candidate freshness. Use targeted evidence, affected evidence, and broad checks only to the depth justified by impact or project policy. After repair, revalidate only invalidated evidence unless a material protected repair requires a fresh review. Distinguish blocking findings from advisory improvements and explain impact concisely. For frontend visual work, assess the current shared visual agreement and any requested contrast with a rejected direction; report visual evidence limits instead of choosing a competing aesthetic.
+
+${VERIFICATION_DOCTRINE_CORE}`;
 
 export const SETUP_AGENT_BODY = `${deckSetupAgentContent}
 
 ## Adaptive activation reminder
 
-The deterministic preflight runs once per session and caches its ready result. A ready project does not launch Setup or cause writes. Repair only the degraded component or components reported by that preflight. Project readiness covers OpenSpec, the Skill Registry, Codebase Memory, Serena, Context Mode, RTK, configured adaptive memory, and every active-runner project capability that exposes a bounded initializer.`;
+The deterministic preflight runs once per session and caches its ready result. A ready project does not launch Setup or cause writes. Repair only the degraded component or components reported by that preflight. Project readiness covers OpenSpec, the Skill Registry, explicitly enabled Codebase Memory, RTK, configured adaptive memory, and every active-runner project capability that exposes a bounded initializer.
+
+${VERIFICATION_DOCTRINE_CORE}`;
 
 function skillBody(name: string, body: string): string {
   return body.replace(/^# .+$/m, `# ${name} Skill`);

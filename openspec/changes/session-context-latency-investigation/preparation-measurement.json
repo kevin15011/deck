@@ -1,0 +1,59 @@
+{
+  "scope": "Retained repository sessions, potentially historical builds; not the community machine.",
+  "sessions": 7,
+  "eventCountsByRunner": {
+    "claude": 40241,
+    "codex": 176354
+  },
+  "malformedLines": 0,
+  "preparationPhaseObservations": [
+    {
+      "runner": "claude",
+      "phase": "checking-runner",
+      "n": 143,
+      "medianMs": 26,
+      "maxMs": 1954
+    },
+    {
+      "runner": "claude",
+      "phase": "preparing-tools",
+      "n": 143,
+      "medianMs": 2164,
+      "maxMs": 11565
+    },
+    {
+      "runner": "claude",
+      "phase": "starting-runner",
+      "n": 142,
+      "medianMs": 10416.0,
+      "maxMs": 29454
+    },
+    {
+      "runner": "codex",
+      "phase": "checking-runner",
+      "n": 257,
+      "medianMs": 37,
+      "maxMs": 247
+    },
+    {
+      "runner": "codex",
+      "phase": "preparing-tools",
+      "n": 252,
+      "medianMs": 3283.0,
+      "maxMs": 13247
+    },
+    {
+      "runner": "codex",
+      "phase": "starting-runner",
+      "n": 244,
+      "medianMs": 12489.0,
+      "maxMs": 25117
+    }
+  ],
+  "limitations": [
+    "Phase populations differ; missing terminal phase records are not imputed.",
+    "Do not sum phase medians or compare runners as equivalent workloads.",
+    "turn.started is adapter-specific, not uniform model readiness or time to first answer.",
+    "Concurrent local appends can change subsequent rerun counts."
+  ]
+}

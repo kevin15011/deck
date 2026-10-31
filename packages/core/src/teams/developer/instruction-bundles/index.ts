@@ -13,11 +13,12 @@
 import { buildAdaptiveMemoryInstructionBundle } from "./adaptive-memory";
 import { buildCodebaseMemoryInstructionBundle } from "./codebase-memory";
 import { buildCodeEconomyInstructionBundle } from "./code-economy";
-import { buildContextModeInstructionBundle } from "./context-mode";
+
 import { buildRtkInstructionBundle } from "./rtk";
-import { buildSerenaInstructionBundle, getSerenaToolPolicy } from "./serena";
+
 import { buildWebSearchInstructionBundle } from "./web-search";
 export { buildWebSearchInstructionBundle } from "./web-search";
+import { isCodebaseMemoryEnabled } from "../../../config/deck-config";
 import type { NormalizedDeckConfig } from "../../../config/deck-config";
 import type { PackageInstructionRunnerId, PackageInstructionPackageId } from "../../../config/deck-config";
 import type { ProjectBoundAdaptiveMemoryInstructionOptions } from "./adaptive-memory";
@@ -124,13 +125,11 @@ export type CapabilityToolPolicyBundle = {
 // Constants
 // ---------------------------------------------------------------------------
 
-const PACKAGE_BUILDERS: Record<CapabilityInstructionPackageId, () => CapabilityInstructionBundle> = {
+const PACKAGE_BUILDERS: Partial<Record<CapabilityInstructionPackageId, () => CapabilityInstructionBundle>> = {
   "codebase-memory": buildCodebaseMemoryInstructionBundle,
   "code-economy": buildCodeEconomyInstructionBundle,
-  "context-mode": buildContextModeInstructionBundle,
   rtk: buildRtkInstructionBundle,
   "adaptive-memory": buildAdaptiveMemoryInstructionBundle,
-  serena: buildSerenaInstructionBundle,
   "web-search": buildWebSearchInstructionBundle,
 };
 
@@ -138,10 +137,8 @@ const PACKAGE_BUILDERS: Record<CapabilityInstructionPackageId, () => CapabilityI
 const PACKAGE_ORDER: CapabilityInstructionPackageId[] = [
   "codebase-memory",
   "code-economy",
-  "context-mode",
   "rtk",
   "adaptive-memory",
-  "serena",
   "web-search",
 ];
 
@@ -157,13 +154,13 @@ export function getEnabledPackageInstructionIds(
   config: NormalizedDeckConfig,
   runner: PackageInstructionRunnerId,
 ): CapabilityInstructionPackageId[] {
-  const runnerConfig = config.packageInstructions[runner];
-  if (!runnerConfig) return [];
+  const runnerConfig = config.packageInstructions?.[runner];
+
 
   const enabled: CapabilityInstructionPackageId[] = [];
   for (const pkg of PACKAGE_ORDER) {
     if (pkg === "web-search") continue;
-    if (runnerConfig[pkg] === true) {
+    if (pkg === "codebase-memory" ? isCodebaseMemoryEnabled(config, runner) : runnerConfig?.[pkg as PackageInstructionPackageId] === true) {
       enabled.push(pkg);
     }
   }
@@ -322,9 +319,7 @@ export function composeCapabilityInstructions(
 export function getCapabilityToolPolicy(
   packageId: CapabilityInstructionPackageId,
 ): CapabilityToolPolicy | undefined {
-  if (packageId === "serena") {
-    return getSerenaToolPolicy();
-  }
+
   // Future packages can add their policies here
   return undefined;
 }

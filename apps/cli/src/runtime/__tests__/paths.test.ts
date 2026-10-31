@@ -121,22 +121,6 @@ describe("runtime/paths.ts", () => {
     });
   });
 
-  // --- Migration-only legacy candidates ---------------------------------
-
-  describe("getDeckConfigMigrationCandidateDir", () => {
-    it("returns ~/.config/.deck when XDG_CONFIG_HOME is unset", () => {
-      setEnv("XDG_CONFIG_HOME", undefined);
-      const dir = mod.getDeckConfigMigrationCandidateDir();
-      expect(dir.endsWith(".config/.deck")).toBe(true);
-    });
-
-    it("respects XDG_CONFIG_HOME when set to an absolute path", () => {
-      setEnv("XDG_CONFIG_HOME", "/tmp/custom-xdg-config");
-      const dir = mod.getDeckConfigMigrationCandidateDir();
-      expect(dir).toBe("/tmp/custom-xdg-config/.deck");
-    });
-  });
-
   describe("getGlobalDeckConfigDir", () => {
     it("now resolves to the new XDG config dir (post-migration target)", () => {
       setEnv("XDG_CONFIG_HOME", undefined);
@@ -165,28 +149,6 @@ describe("runtime/paths.ts", () => {
     });
   });
 
-  describe("getDeckConfigMigrationCandidatePaths", () => {
-    it("returns only migration candidates, not the canonical path", () => {
-      const paths = mod.getDeckConfigMigrationCandidatePaths();
-      expect(Array.isArray(paths)).toBe(true);
-      expect(paths.length).toBeGreaterThanOrEqual(2);
-      expect(paths.map((path) => path.configPath)).not.toContain(mod.getGlobalDeckConfigPath());
-    });
-
-    it("labels candidate kind as migration metadata", () => {
-      const paths = mod.getDeckConfigMigrationCandidatePaths();
-      expect(paths.map((path) => path.kind)).toEqual(expect.arrayContaining(["home-config-dot-deck", "home-dot-deck"]));
-    });
-
-    it("each path has configDir and configPath", () => {
-      const paths = mod.getDeckConfigMigrationCandidatePaths();
-      for (const p of paths) {
-        expect(typeof p.configDir).toBe("string");
-        expect(typeof p.configPath).toBe("string");
-      }
-    });
-  });
-
   describe("canonicalGlobalDeckConfigExists", () => {
     it("checks only the canonical global config path", () => {
       setEnv("XDG_CONFIG_HOME", join(tmpDir, "xdg-empty"));
@@ -197,20 +159,6 @@ describe("runtime/paths.ts", () => {
       const exists = mod.canonicalGlobalDeckConfigExists();
       expect(typeof exists).toBe("boolean");
       expect(exists).toBe(false);
-    });
-  });
-
-  describe("resolveExistingDeckConfigMigrationCandidatePath", () => {
-    it("returns only existing legacy migration candidates", () => {
-      setEnv("XDG_CONFIG_HOME", join(tmpDir, "xdg-empty"));
-      mod._resetDeckPathCache();
-      mkdirSync(join(tmpDir, ".config", "deck"), { recursive: true });
-      mkdirSync(join(tmpDir, ".deck"), { recursive: true });
-      writeFileSync(join(tmpDir, ".config", "deck", "config.json"), "{}\n");
-      writeFileSync(join(tmpDir, ".deck", "config.json"), "{}\n");
-
-      const path = mod.resolveExistingDeckConfigMigrationCandidatePath();
-      expect(path).toBe(join(tmpDir, ".deck", "config.json"));
     });
   });
 });

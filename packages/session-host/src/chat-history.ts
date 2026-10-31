@@ -33,7 +33,7 @@ export class ChatHistory {
         this.seq = event.seq;
         this.current.apply(event);
         const promptId = String(event.data.promptId ?? '');
-        if (event.kind === 'prompt.queued') this.queued.set(promptId, event.seq);
+        if (event.kind === 'prompt.queued' || event.kind === 'prompt.requeued') this.queued.set(promptId, event.seq);
         if (event.kind === 'prompt.dispatched' || event.kind === 'prompt.state') this.queued.delete(promptId);
         if (event.kind === 'prompt.steered' && event.data.state === 'accepted' && !event.source.runnerId && !this.steered.has(promptId)) {
             const fence = this.log.readEvent(Number(event.data.steeringSeq));

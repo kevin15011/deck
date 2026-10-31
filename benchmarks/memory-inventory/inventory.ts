@@ -55,7 +55,7 @@ export function assertAllowedRequest(method: string, path: string): { template: 
 function decodeSafe(value: string): string { try { return decodeURIComponent(value); } catch { throw new Error("Request rejected by inventory endpoint allowlist."); } }
 function isSafeDocumentId(value: unknown): value is string { return typeof value === "string" && value !== "." && /^[A-Za-z0-9_:.-]+$/.test(value) && !value.includes(".."); }
 
-export type InventoryOptions = { fetchImpl?: typeof fetch; maxRequests?: number; delayMs?: number; retries?: number; outputRoot?: string; now?: Date; sessions?: string[]; windowStart?: string; windowEnd?: string; dryRun?: boolean; live?: boolean };
+export type InventoryOptions = { fetchImpl?: typeof fetch; sleep?: (ms: number) => Promise<void>; maxRequests?: number; delayMs?: number; retries?: number; outputRoot?: string; now?: Date; sessions?: string[]; windowStart?: string; windowEnd?: string; dryRun?: boolean; live?: boolean };
 type RequestEntry = { method: string; path: string; status: number; latencyMs: number; responseBytes: number; attempt: number };
 type Redaction = { value: unknown; count: number };
 
@@ -280,6 +280,7 @@ export async function runInventory(options: InventoryOptions = {}) {
   }
   if (!options.live) throw new Error("Use --dry-run for offline preflight or --live to permit read-only API calls.");
   const fetchImpl = options.fetchImpl ?? fetch;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
   const delayMs = Math.max(100, options.delayMs ?? 350);
   const retries = Math.max(0, Math.min(3, options.retries ?? 2));
   const stamp = (options.now ?? new Date()).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
@@ -309,7 +310,7 @@ export async function runInventory(options: InventoryOptions = {}) {
     for (let attempt = 1; attempt <= retries + 1; attempt++) {
       if (operations >= cap) { const error = new Error("Inventory request cap reached."); await reportFailure(error); throw error; }
       operations++;
-      if (attempt > 1 || log.length > 0) await new Promise((r) => setTimeout(r, delayMs));
+      if (attempt > 1 || log.length > 0) await sleep(delayMs);
       const started = Date.now();
       let responseLogged = false;
       try {
@@ -319,7 +320,7 @@ export async function runInventory(options: InventoryOptions = {}) {
         responseLogged = true;
         if ((response.status === 429 || response.status >= 500) && attempt <= retries) {
           const retry = Number(response.headers.get("retry-after"));
-          await new Promise((r) => setTimeout(r, Number.isFinite(retry) && retry > 0 ? Math.min(retry * 1000, 5000) : delayMs)); continue;
+          await sleep(Number.isFinite(retry) && retry > 0 ? Math.min(retry * 1000, 5000) : delayMs); continue;
         }
         if (!response.ok) throw new Error(`Inventory request failed with status ${response.status}.`);
         try { return text ? JSON.parse(text) : {}; } catch { throw new Error(`non-JSON response (${new TextEncoder().encode(text).length} bytes)`); }

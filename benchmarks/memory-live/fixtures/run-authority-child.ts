@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { cleanup } from '../cleanup';
 import { execute } from '../run';
 import { simulatedWire } from '../namespace-transport';
+import { smallCorpus } from './small-corpus';
+if (process.argv[4] === 'small-corpus') smallCorpus();
 const m = JSON.parse(readFileSync(process.argv[2]!, 'utf8'));
 const evaluation = process.argv[3] === 'evaluation', fake = simulatedWire();
 let held = false;

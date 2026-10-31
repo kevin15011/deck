@@ -52,7 +52,7 @@ ${scopePolicy}
 - Preserve requested names, conventions, rationale, decisions, and discoveries as separate query facets; do not insert facts or proper nouns the user did not provide.
 - Repository inspection may verify current implementation but must not be used to conclude that no historical convention exists before managed recall.
 - Do not force recall for ordinary current-state implementation questions with no historical/project-convention aspect.
-- Context Mode remains for local/indexed documentation, command output, and current session knowledge; it is not the Deck-owned cross-session project-memory channel.
+- Local/indexed documentation, command output, and current session knowledge remain separate from the Deck-owned cross-session project-memory channel.
 - Search only when prior context is materially relevant or the user requests recall.
 - Keep recall advisory, scoped by Deck Runtime, limited to five results and about 1,500 tokens by default.
 - Keep query rewriting and reranking disabled unless benchmark evidence enables them.

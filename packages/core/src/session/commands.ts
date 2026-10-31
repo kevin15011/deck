@@ -28,10 +28,11 @@ export type SessionCommandBody =
   | { type: "prompt.cancel"; promptId: string }
   | { type: "prompt.resume" }
   | { type: "turn.interrupt"; taskId: string }
-  | ({ type: "approval.respond"; approvalId: string } & ApprovalResponse)
+  | ({ type: "approval.respond"; approvalId: string; origin?: "notification" } & ApprovalResponse)
   | { type: "session.revokeGrant"; grantId: string }
   | { type: "question.answer"; questionId: string; answers: Record<string, string[]> }
   | { type: "question.dismiss"; questionId: string }
+  | { type: "task.dismiss-failure"; taskId: string; attempt: number }
   | { type: "task.cancel"; taskId: string }
   | { type: "session.release" }
   | { type: "session.rename"; title: string }
@@ -66,10 +67,11 @@ const FIELD_RULES: Record<string, (c: Record<string, unknown>) => string | null>
   "prompt.cancel": (c) => str(c.promptId) ? null : "promptId required",
   "prompt.resume": () => null,
   "turn.interrupt": (c) => str(c.taskId) ? null : "taskId required",
-  "approval.respond": (c) => !str(c.approvalId) ? "approvalId required" : c.decision !== "allow" && c.decision !== "allow-once" && c.decision !== "deny" ? "decision must be allow|allow-once|deny" : c.scope !== undefined && !isApprovalScope(c.scope) ? "scope invalid" : c.grant !== undefined && !isSessionGrantKind(c.grant) ? "grant invalid" : c.confirmed !== undefined && typeof c.confirmed !== "boolean" ? "confirmed invalid" : null,
+  "approval.respond": (c) => !str(c.approvalId) ? "approvalId required" : c.origin !== undefined && c.origin !== "notification" ? "origin invalid" : c.decision !== "allow" && c.decision !== "allow-once" && c.decision !== "deny" ? "decision must be allow|allow-once|deny" : c.scope !== undefined && !isApprovalScope(c.scope) ? "scope invalid" : c.grant !== undefined && !isSessionGrantKind(c.grant) ? "grant invalid" : c.confirmed !== undefined && typeof c.confirmed !== "boolean" ? "confirmed invalid" : null,
   "session.revokeGrant": (c) => str(c.grantId) ? null : "grantId required",
   "question.answer": (c) => !str(c.questionId) ? "questionId required" : !isQuestionAnswers(c.answers) ? "answers invalid" : null,
   "question.dismiss": (c) => str(c.questionId) ? null : "questionId required",
+  "task.dismiss-failure": (c) => str(c.taskId) && Number.isSafeInteger(c.attempt) && (c.attempt as number) > 0 ? null : "taskId and positive attempt required",
   "task.cancel": (c) => str(c.taskId) ? null : "taskId required",
   "session.release": () => null,
   "session.rename": (c) => boundedString(c.title,160) ? null : "title invalid",

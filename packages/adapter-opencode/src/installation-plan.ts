@@ -45,7 +45,6 @@ export const OPENCODE_INSTALLABLE_TOOLS: InstallableOpenCodeTool[] = [
     shellInstallUrl: "https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh",
     postInstallCommand: ["rtk", "init", "-g", "--opencode"],
   },
-  { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp", capabilityId: "context-mode" },
   {
     id: "codebase-memory",
     name: "codebase-memory",
@@ -55,14 +54,6 @@ export const OPENCODE_INSTALLABLE_TOOLS: InstallableOpenCodeTool[] = [
     capabilityId: "codebase-memory",
   },
   { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "mcp-server", capabilityId: "context7" },
-  {
-    id: "serena",
-    name: "Serena",
-    module: "serena-agent",
-    required: false,
-    installKind: "serena-agent",
-    capabilityId: "serena",
-  },
 ];
 
 export function buildOpenCodeInstallationPlan(options: BuildOpenCodeInstallationPlanOptions): InstallableOpenCodeTool[] {

@@ -18,7 +18,7 @@ function productionFakes() {
   const env: Record<string, string | undefined> = { OPENAI_API_KEY: "one", PATH: "/fixture/bin" };
   let config = '{"providers":{"openai":{"env":"OPENAI_API_KEY","model":"gpt-4.1"}},"plugins":["./plugin.ts"]}';
   const writes: string[] = [];
-  let verboseCalls = 0;
+  let responseModel = "exact";
   const fs = {
     realpath: async (path: string) => path,
     stat: async (path: string) => ({ size: 1, mtimeMs: path.endsWith("auth.json") ? authMtime : path.endsWith("plugin.ts") ? pluginMtime : path.endsWith("opencode.json") ? configMtime : 1, ctimeMs: 1, mode: path.includes("opencode-model-inventory") ? 0o700 : 0o600, isFile: () => !path.endsWith("inventory"), isDirectory: () => path.endsWith("inventory") }),
@@ -27,46 +27,51 @@ function productionFakes() {
   };
   const commandRunner = { run: async (request: { args: readonly string[] }) => {
     if (request.args[0] === "--version") return { exitCode: 0, signal: null, stdout: "1.17.18", stderr: "" };
-    verboseCalls++;
-    return { exitCode: 0, signal: null, stdout: 'openai/exact\n{"providerID":"openai","variants":{"Exact":{}}}', stderr: "" };
+    return { exitCode: 0, signal: null, stdout: `openai/${responseModel}\n{"providerID":"openai","variants":{"Exact":{}}}`, stderr: "" };
   } };
-  return { fakes: { commandRunner, fs, now: () => 1_000, env, homeDir: "/fixture/home", xdgConfigHome: "/fixture/config", xdgDataHome: "/fixture/data", xdgCacheHome: "/fixture/cache", resolveExecutable: async () => runner, resolveWorkspaceRoot: async () => workspace, resolvePluginEntry: async (reference: string, from: string) => reference.startsWith(".") ? `${from}/${reference.slice(2)}` : null }, writes, calls: () => verboseCalls, mutate: { runner: (value: string) => { runner = value; }, workspace: (value: string) => { workspace = value; }, config: () => { configMtime++; }, configContent: (value: string) => { config = value; }, auth: () => { authMtime++; }, plugin: () => { pluginMtime++; }, env: (value: Record<string, string | undefined>) => { for (const key of Object.keys(env)) delete env[key]; Object.assign(env, value); } } };
+  return { fakes: { reserveInstallation: () => ({ file: 'fake', release() {}, trackProcess: () => () => {} }), commandRunner, fs, now: () => 1_000, env, homeDir: "/fixture/home", xdgConfigHome: "/fixture/config", xdgDataHome: "/fixture/data", xdgCacheHome: "/fixture/cache", resolveExecutable: async () => runner, resolveWorkspaceRoot: async () => workspace, resolvePluginEntry: async (reference: string, from: string) => reference.startsWith(".") ? `${from}/${reference.slice(2)}` : null }, writes, respondWith: (model: string) => { responseModel = model; }, mutate: { runner: (value: string) => { runner = value; }, workspace: (value: string) => { workspace = value; }, config: () => { configMtime++; }, configContent: (value: string) => { config = value; }, auth: () => { authMtime++; }, plugin: () => { pluginMtime++; }, env: (value: Record<string, string | undefined>) => { for (const key of Object.keys(env)) delete env[key]; Object.assign(env, value); } } };
 }
 
 describe("OpenCode adapter dynamic inventory", () => {
   test("uses the default production composition for safe invalidation and runner/project LKG scope", async () => {
     const proof = productionFakes();
     const adapter = createOpenCodeRunnerAdapter({ productionDiscoveryDependencies: proof.fakes });
-    const get = (projectRoot = "/fixture/project") => adapter.getModelInventory?.({ projectRoot });
-    await get(); expect(proof.calls()).toBe(1);
-    proof.mutate.config(); await get(); expect(proof.calls()).toBe(2);
-    proof.mutate.auth(); await get(); expect(proof.calls()).toBe(3);
-    proof.mutate.plugin(); await get(); expect(proof.calls()).toBe(4);
-    proof.mutate.workspace("/fixture/workspace-b"); await get(); expect(proof.calls()).toBe(5);
-    proof.mutate.runner("/fixture/bin/opencode-b"); await get(); expect(proof.calls()).toBe(6);
-    await get("/fixture/project-b"); expect(proof.calls()).toBe(7);
-    proof.mutate.env({ OPENAI_API_KEY: "two", PATH: "/fixture/bin", UNRELATED: "changed" }); await get("/fixture/project-b");
-    expect(proof.calls()).toBe(7);
+    let previousModel = "";
+    let nextModel = 0;
+    const check = async (refresh = true, projectRoot = "/fixture/project") => {
+      const offered = `fixture-${++nextModel}`;
+      proof.respondWith(offered);
+      if (refresh) previousModel = offered;
+      expect(await adapter.getModelInventory?.({ projectRoot })).toMatchObject({
+        state: "ready", inventory: { modelsByProvider: { openai: [{ id: `openai/${previousModel}`, variants: ["Exact"] }] } },
+      });
+    };
+    await check(true);
+    proof.mutate.config(); await check(true);
+    proof.mutate.auth(); await check(true);
+    proof.mutate.plugin(); await check(true);
+    proof.mutate.workspace("/fixture/workspace-b"); await check(true);
+    proof.mutate.runner("/fixture/bin/opencode-b"); await check(true);
+    await check(true, "/fixture/project-b");
+    proof.mutate.env({ OPENAI_API_KEY: "two", PATH: "/fixture/bin", UNRELATED: "changed" }); await check(false, "/fixture/project-b");
     proof.mutate.configContent('{"providers":{"custom-provider":{"env":"OPENAI_API_KEY","model":"gpt-4.2","options":{"token":"secret"}}},"plugins":["./plugin-b.ts"],"controlPath":"/fixture/alternate"}');
-    await get("/fixture/project-b"); expect(proof.calls()).toBe(8);
-    proof.mutate.env({ PATH: "/fixture/bin", UNRELATED: "changed" }); await get("/fixture/project-b");
-    expect(proof.calls()).toBe(9);
-    proof.mutate.env({ PATH: "/fixture/bin", UNRELATED: "another-change" }); await get("/fixture/project-b");
-    expect(proof.calls()).toBe(9);
+    await check(true, "/fixture/project-b");
+    proof.mutate.env({ PATH: "/fixture/bin", UNRELATED: "changed" }); await check(true, "/fixture/project-b");
+    proof.mutate.env({ PATH: "/fixture/bin", UNRELATED: "another-change" }); await check(false, "/fixture/project-b");
 
     proof.mutate.configContent('{"providers":{"custom-provider":{"options":{"baseURL":"https://one.example","bearer":"secret-one"}}}}');
-    await get("/fixture/project-b"); expect(proof.calls()).toBe(10);
+    await check(true, "/fixture/project-b");
     proof.mutate.configContent('{"providers":{"custom-provider":{"options":{"baseURL":"https://two.example","bearer":"secret-one"}}}}');
-    await get("/fixture/project-b"); expect(proof.calls()).toBe(11);
+    await check(true, "/fixture/project-b");
     proof.mutate.configContent('{"providers":{"custom-provider":{"options":{"baseURL":"https://two.example","bearer":"secret-two"}}}}');
-    await get("/fixture/project-b"); expect(proof.calls()).toBe(11);
+    await check(false, "/fixture/project-b");
 
     proof.mutate.env({ PATH: "/fixture/bin", OPENCODE_CONFIG_CONTENT: '{"providers":{"virtual":{"env":"CUSTOM_PROVIDER_TOKEN"}},"plugins":["./virtual-plugin.ts"]}' });
-    await get("/fixture/project-b"); expect(proof.calls()).toBe(12);
+    await check(true, "/fixture/project-b");
     proof.mutate.env({ PATH: "/fixture/bin", CUSTOM_PROVIDER_TOKEN: "present", OPENCODE_CONFIG_CONTENT: '{"providers":{"virtual":{"env":"CUSTOM_PROVIDER_TOKEN"}},"plugins":["./virtual-plugin.ts"]}' });
-    await get("/fixture/project-b"); expect(proof.calls()).toBe(13);
+    await check(true, "/fixture/project-b");
     proof.mutate.env({ PATH: "/fixture/bin", CUSTOM_PROVIDER_TOKEN: "present", UNRELATED: "another-change", OPENCODE_CONFIG_CONTENT: '{"providers":{"virtual":{"env":"CUSTOM_PROVIDER_TOKEN"}},"plugins":["./virtual-plugin.ts"]}' });
-    await get("/fixture/project-b"); expect(proof.calls()).toBe(13);
+    await check(false, "/fixture/project-b");
     expect(new Set(proof.writes.map((path) => path.replace(/\.[a-f0-9]{32}\.tmp$/, ""))).size).toBeGreaterThan(2);
   });
 
@@ -102,7 +107,6 @@ describe("OpenCode adapter dynamic inventory", () => {
     const result = await adapter.getModelInventory?.({ projectRoot: "/fixture/project" });
 
     expect(result).toMatchObject({ state: "ready", source: "live", inventory: { modelsByProvider: { openai: [{ id: "openai/exact", variants: ["Exact"] }] } } });
-    expect(proof.calls()).toBe(1);
   });
 
   test("invalidates default discovery when embedded credentials become present but not when values change", async () => {
@@ -110,15 +114,13 @@ describe("OpenCode adapter dynamic inventory", () => {
     proof.mutate.configContent('{"providers":{"custom":{"options":{"token":"Bearer {env:EMBEDDED_DEFAULT_TOKEN}"}}}}');
     const adapter = createOpenCodeRunnerAdapter({ productionDiscoveryDependencies: proof.fakes });
     const get = () => adapter.getModelInventory?.({ projectRoot: "/fixture/project" });
-
-    await get();
-    expect(proof.calls()).toBe(1);
+    expect(await get()).toMatchObject({ state: "ready", inventory: { modelsByProvider: { openai: [{ id: "openai/exact" }] } } });
+    proof.respondWith("credential-present");
     proof.mutate.env({ PATH: "/fixture/bin", EMBEDDED_DEFAULT_TOKEN: "first-secret" });
-    await get();
-    expect(proof.calls()).toBe(2);
+    expect(await get()).toMatchObject({ state: "ready", inventory: { modelsByProvider: { openai: [{ id: "openai/credential-present" }] } } });
+    proof.respondWith("should-remain-cached");
     proof.mutate.env({ PATH: "/fixture/bin", EMBEDDED_DEFAULT_TOKEN: "second-secret" });
-    await get();
-    expect(proof.calls()).toBe(2);
+    expect(await get()).toMatchObject({ state: "ready", inventory: { modelsByProvider: { openai: [{ id: "openai/credential-present" }] } } });
   });
 
   test("makes full default discovery settle at the absolute 15,000 ms deadline", async () => {

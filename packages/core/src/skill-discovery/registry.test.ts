@@ -724,3 +724,13 @@ function resetSourceCounters(counters: { indexedReads: number; iteratorCalls: nu
 
 void SKILL_REGISTRY_FINGERPRINT_ALGORITHM;
 void SKILL_REGISTRY_PRIVACY_POLICY_VERSION;
+
+// Exact-byte reuse must neither share mutable output nor accept changed invalid bytes.
+test("repeated parsing isolates caller mutations and revalidates changed bytes", () => {
+  const document = canonicalizeSkillRegistry({ activeRunnerId: "codex", sourceDeclarations: [], observations: [], diagnostics: [], generatedAt: "2026-01-01T00:00:00Z" }).document;
+  const first = parseSkillRegistryDocument(document);
+  const expected = structuredClone(first);
+  (first as any).frontmatter.candidate_count = 999;
+  expect(parseSkillRegistryDocument(document)).toEqual(expected);
+  expect(parseSkillRegistryDocument(document.replace("schema_version: 1", "schema_version: 99")).ok).toBe(false);
+});

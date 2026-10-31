@@ -13,7 +13,7 @@ const entries = [
     output: "packages/adapter-pi/assets/pi/extensions/developer-team-execution.generated.js",
   },
   {
-    input: "packages/adapter-codex/assets/codex/hooks/developer-team-execution.ts",
+    input: "packages/adapter-codex/assets/codex/hooks/developer-team-execution-entry.ts",
     output: "packages/adapter-codex/assets/codex/hooks/developer-team-execution.generated.js",
   },
 ] as const;
@@ -71,12 +71,12 @@ export function assertCanonicalBunRuntime(
   return { bunPath, bunVersion: actual };
 }
 
-export function generateRunnerExecutionAssets(options: { root?: string; spawnSync?: SpawnSync } = {}): RunnerExecutionAssetResult[] {
+export function generateRunnerExecutionAssets(options: { root?: string; spawnSync?: SpawnSync; runner?: "opencode" | "pi" | "codex" } = {}): RunnerExecutionAssetResult[] {
   const projectRoot = options.root ?? root;
   const spawnSync = options.spawnSync ?? Bun.spawnSync;
   const { bunPath, bunVersion } = assertCanonicalBunRuntime(projectRoot, spawnSync);
   const generated: RunnerExecutionAssetResult[] = [];
-  for (const entry of entries.map((candidate) => ({
+  for (const entry of entries.filter(candidate => !options.runner || candidate.input.includes(`/adapter-${options.runner}/`)).map((candidate) => ({
     input: resolve(projectRoot, candidate.input),
     output: resolve(projectRoot, candidate.output),
   }))) {

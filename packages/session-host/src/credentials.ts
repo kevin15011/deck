@@ -7,6 +7,7 @@ import { unlinkSync } from "node:fs";
 import { writePrivateFile } from "./paths";
 
 export type CredentialGrant = {
+  attempt?: number; epoch?: string;
   sessionId: string; taskId: string; memberId: string; runnerId?: string; allowedTools: readonly string[];
 };
 type Entry = { grant: CredentialGrant; file: string };
@@ -29,6 +30,10 @@ export class CredentialRegistry {
   lookup(token: string): CredentialGrant | undefined {
     if (typeof token !== "string" || token.length === 0) return undefined;
     return this.grants.get(hash(token))?.grant;
+  }
+
+  isActive(grant: CredentialGrant): boolean {
+    return [...this.grants.values()].some(entry => entry.grant === grant);
   }
 
   revoke(token: string): boolean {

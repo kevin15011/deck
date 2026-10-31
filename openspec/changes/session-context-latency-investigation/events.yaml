@@ -1,0 +1,46 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: working-brief.md
+    timestamp: "2026-10-22T11:07:27Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Confirmed the existing resume-history fix and reproduced remaining oversized history/tool-output failures with synthetic children."
+      - "Measured compaction in a separate local session and demonstrated a startup timeout collapsing to a generic error."
+      - "Community case correlation remains open; proposed runtime fixes are not implemented."
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: transaction-analysis.md
+    timestamp: "2026-10-22T11:37:35Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Confirmed the historical UI rationale for 40/120 pagination; distinguished native RPC, UI backpressure and token limits."
+      - "Measured 96,090 copied local events: 977.755 ms cold history construction, 0.793 ms median warm page, 810,744-byte initial page. No live-log writes or inference."
+      - "Prioritized compatible read coalescing, browser payload/refresh reduction and measured cold-index work; preserve native context ownership and durable uncertain-delivery semantics."
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: cross-runner-analysis.md
+    timestamp: "2026-10-22T11:45:59Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User clarified general latency reports include Claude; shared preparation/startup investigation supersedes Codex-first ordering."
+      - "Read-only aggregate of seven local repository sessions includes Claude and Codex preparation timings; observations are not matched workloads or community incident attribution."
+      - "Verified Claude per-turn process/native resume and exact-version bounded synchronous transcript checks through source fallback. No runtime changes or inference."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: preparation-progress.md
+    timestamp: "2026-10-22T12:10:58Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Implemented one bounded metadata-only tool-preparation diagnostic per observed resolver call; shared Claude/Codex path, success/failure/cancellation, no extra native request or forced flush."
+      - "271 affected-area tests and TypeScript passed; correlation fixture passed. Active daemon unchanged and end-to-end live benchmark outstanding."
+      - "Isolated production preparation measured roughly 6 seconds cold versus 11 milliseconds warm in both runners, all six Codebase-ready; no inference and owned processes cleaned up."

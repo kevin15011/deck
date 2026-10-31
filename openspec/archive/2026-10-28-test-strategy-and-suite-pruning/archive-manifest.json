@@ -1,0 +1,22 @@
+{
+  "source": "openspec/changes/test-strategy-and-suite-pruning",
+  "destination": "openspec/archive/2026-10-28-test-strategy-and-suite-pruning",
+  "original_sha256": {
+    "research.md": "fb2c29d46fe2ab1aa9744217e4914995200c46ad8b309eb1aff6f3f605482de8",
+    "b1-mapping.txt": "c4203950b2ece1dc716dc932ada78530aed9d7e43d66bf95f4b8d4d3e1c9bbf9",
+    "b1-report.md": "f87155e5092fa2cca8b346f3eef8a10663711d133b39433a60777c2e9e69bf2d",
+    "tasks.md": "ac5dfd6772ef7ed55cb757e494000e0675cb4eb763fa668d23f7e180a1e00056",
+    "policy-and-peers.md": "975714d1b5ad08b722593ca51711e4dddbe0c5a38ab1b13cc6cdf99840e16e55",
+    "audit-files.csv": "206686d71a75c4ddef38d8ef839037e628295af8ea4f94265fb1441642391cc8",
+    "design.md": "813a302b6a0a13cfe13e717cbbc0a2826d68e703beb67513f5bc053a1227b9b3",
+    "proposal.md": "fc097086baff9c259e1d4fd4ac308b2f0db2caa241789375cf7f4d513c17a533",
+    "apply-progress.md": "bdef62a0938ef9ad829f28bded915422004d0be4372603ed0be7043f7d9ea3ec",
+    "spec.md": "821e5bad010350770f496ae122f65bb993ea256dbdf6df038e2ec93c10d1848f",
+    "working-brief.md": "c036c941b4da652f8bbf836d8f895f704bb610cf9e43cde4f1746e4f5309c301",
+    "audit.md": "aa103d750bc2b69790e2d2b5a9b5753f557296feabaacd761da3b05591fd498d"
+  },
+  "modified_original_files": [
+    "tasks.md"
+  ],
+  "note": "Original historical files other than tasks.md preserved byte-for-byte; new archive artifacts recorded separately."
+}

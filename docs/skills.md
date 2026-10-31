@@ -25,6 +25,7 @@ These 59 skills are shipped as standalone reusable content. They are copied with
 | `api-and-interface-design` | Design stable APIs and module boundaries. |
 | `ci-cd-and-automation` | Set up or modify CI/CD and automation. |
 | `code-review-and-quality` | Review changes across correctness, architecture, security, and maintainability. |
+| `deck-verification` | Choose proportional checks, report candidate-bound evidence, and retire tests safely. |
 | `code-simplification` | Refactor working code for clarity without changing behavior. |
 | `cognitive-doc-design` | Write documentation that reduces cognitive load. |
 | `comment-writer` | Draft warm, direct collaboration and review comments. |
@@ -40,7 +41,6 @@ These 59 skills are shipped as standalone reusable content. They are copied with
 | `performance-optimization` | Optimize application performance from requirements and profiling evidence. |
 | `security-and-hardening` | Harden input, authentication, storage, and integrations. |
 | `shipping-and-launch` | Prepare production launches, monitoring, rollout, and rollback. |
-| `test-driven-development` | Drive behavior changes with proportional tests. |
 | `using-agent-skills` | Discover and invoke the relevant agent skill. |
 | `ui-skills-root` | Select the smallest useful UI skills context before UI work. |
 | `frontend-design` | Establish an intentional visual direction for distinctive interfaces. |
@@ -88,7 +88,7 @@ For aesthetic selection and compatible combinations, see [Frontend aesthetic sel
 
 This repository's [deck-runner-evolution skill](../.agents/skills/deck-runner-evolution/SKILL.md) reviews new stable Codex, OpenCode, and Claude Code releases against Deck and maintains a [version review record](maintainers/runner-evolution/README.md). It is project-local and is not shipped in the bundled external catalog.
 
-Project-local skills are discovery candidates supplied by the project and the active runner. They are not bundled Deck content, and their discovery metadata is not authority. Discovery is bounded to generic project roots plus the selected runner's declared sources; another runner's exclusive roots are not merged in.
+The shared skill catalog is advisory metadata, not authority. Cross-session preparation and `skill-registry` commands merge the four configured providers under their own source identities. The v2 catalog retains source ownership, exposure, load mode and completeness while keeping absolute roots private. Filesystem resources are deduplicated by validated identity; distinct same-name skills remain separate. All consumers can search shared records. Loading still revalidates a live source and the consuming runner's permitted loading mechanism; native-only exposure cannot be borrowed from another runner.
 
 Read-only checks:
 
@@ -103,7 +103,11 @@ An explicitly authorized refresh is separate from validation and discovery:
 deck skill-registry refresh --runner pi
 ```
 
-Refresh can be refused when the source set is incomplete, the registry is not protected by `.gitignore`, or the caller has not supplied the exact write authority. See [Developer Team](developer-team.md#project-workflows) for the boundary and [Runners](runners.md) for active-runner scope.
+Shared catalog evaluation at cross-session preparation/resume and explicit registry commands uses stat fingerprints: declared roots, descriptor relative paths, sizes and modification times, effective HOME/XDG/CODEX_HOME, and declared plugin generations. Persisted fingerprints let unchanged descriptors reuse bounded metadata; changed/added descriptors are reread and removed descriptors disappear. Containment is still checked before reuse, and diagnostic-bearing descriptors are reevaluated. An unchanged catalog retains its exact bytes. Discovery itself never writes it; persistence still requires authorized preparation. Legacy native preparation retains its existing discovery path.
+
+There is no watcher. Mid-session additions appear at the next preparation/resume or on-demand discovery. Edits preserving both size and modification time can remain undetected. Older v2 catalogs without descriptor fingerprints receive them on the next authorized refresh.
+
+Partial inventory produces a usable catalog with truthful partial status; it does not prevent authorized generation. Refresh preserves edited or unknown-ownership registry bytes and can be refused when the registry is not protected by `.gitignore` or the caller has not supplied exact write authority. Shared writes bind the executor and candidate digest. Legacy native preparation cannot replace a v2 shared catalog with an executor-only projection. See [Developer Team](developer-team.md#project-workflows) for the boundary and [Runners](runners.md) for active-runner scope.
 
 ## Frontend aesthetic selection
 

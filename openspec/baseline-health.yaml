@@ -25,7 +25,7 @@ focused_commands:
       passed: 6
       failed: 0
   - id: focused-e2e-ish-tests
-    command: "bun test apps/cli/src/tui/__tests__/runner-install-e2e.test.tsx"
+    command: "bun test apps/cli/src/tui/__tests__/runner-install.e2e.test.tsx"
     expected:
       status: pass
       passed: 15

@@ -1,3 +1,5 @@
+import { loadPreparedSessionStartContext } from "@deck/core/session/start-context";
+
 type CodexHookInput = {
   session_id?: unknown;
   turn_id?: unknown;
@@ -18,7 +20,9 @@ export async function forwardCodexTrustedHook(
   value: unknown,
   options: {
     endpoint?: string;
+    readiness?: boolean;
     token?: string;
+    environment?: Readonly<Record<string, string | undefined>>;
     post?: (endpoint: string, token: string, body: string) => Promise<BridgeResponse>;
   } = {},
 ): Promise<Record<string, unknown>> {
@@ -27,9 +31,18 @@ export async function forwardCodexTrustedHook(
   if (typeof input.session_id !== "string" || !input.session_id || typeof input.cwd !== "string" || !input.cwd || typeof input.hook_event_name !== "string" || !ALLOWED_EVENTS.has(input.hook_event_name)) {
     return { decision: "block", reason: "invalid-evidence" };
   }
+  let readiness: string | undefined;
+  if (input.hook_event_name === "SessionStart" && options.readiness !== false) {
+    try {
+      readiness = await loadPreparedSessionStartContext(input.cwd as string, options.environment);
+      if (readiness === undefined) process.stderr.write("deck-preparation: native-snapshot-unavailable\n");
+    }
+    catch { process.stderr.write("deck-preparation: session-start-context-unverified\n"); }
+  }
+  const prepared = (output: Record<string, unknown>) => readiness ? withAdditionalContext(output, input.hook_event_name, readiness) : output;
   const endpoint = options.endpoint ?? process.env.DECK_CODEX_BRIDGE_ENDPOINT;
   const token = options.token ?? process.env.DECK_CODEX_BRIDGE_TOKEN;
-  if (!endpoint || !token) return {};
+  if (!endpoint || !token) return prepared({});
   const post = options.post ?? (async (url, bearer, body) => {
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" || (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost")) throw new Error("invalid bridge endpoint");
@@ -40,10 +53,10 @@ export async function forwardCodexTrustedHook(
   try {
     const result = await post(endpoint, token, JSON.stringify(toLoopbackEvent(input)));
     if ((result.accepted === false || result.ok === false) && isExplicitMemoryEvent(input)) return { decision: "block", reason: result.reason ?? "modification-not-authorized" };
-    if (result.advisoryText) return withAdditionalContext(result.output ?? {}, input.hook_event_name, result.advisoryText);
-    return result.output ?? {};
+    if (result.advisoryText) return prepared(withAdditionalContext(result.output ?? {}, input.hook_event_name, result.advisoryText));
+    return prepared(result.output ?? {});
   } catch {
-    return isExplicitMemoryEvent(input) ? { decision: "block", reason: "invalid-evidence" } : {};
+    return isExplicitMemoryEvent(input) ? { decision: "block", reason: "invalid-evidence" } : prepared({});
   }
 }
 
@@ -51,7 +64,7 @@ function withAdditionalContext(output: Record<string, unknown>, hookEventName: u
   const prior = output.hookSpecificOutput && typeof output.hookSpecificOutput === "object" && !Array.isArray(output.hookSpecificOutput)
     ? output.hookSpecificOutput as Record<string, unknown>
     : {};
-  return { ...output, hookSpecificOutput: { ...prior, hookEventName, additionalContext } };
+  return { ...output, hookSpecificOutput: { ...prior, hookEventName, additionalContext: [prior.additionalContext, additionalContext].filter(text => typeof text === "string" && text).join("\n\n") } };
 }
 
 function toLoopbackEvent(input: CodexHookInput): Record<string, unknown> {

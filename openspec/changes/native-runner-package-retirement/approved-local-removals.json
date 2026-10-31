@@ -1,0 +1,1160 @@
+{
+  "status": "authorized-deferred-active-work",
+  "authority": "User explicitly approved only these 33 proven-owned removals, with revalidation; no ambiguous removal approval.",
+  "sourcePlan": "/tmp/native-retirement-q002-opaque/real-installation-plan.json",
+  "sourcePlanSha256": "6634da60e884c42e388f5bc0f2f4e22d54a491b8f39eb0ce5f2ebb3756a8192c",
+  "requiredConditions": [
+    "No active daemon sessions or turns; coordinated idle mutation boundary",
+    "Exact preimage, ownership and generation-reference revalidation",
+    "No widening of approved entry set",
+    "Existing backup and recovery"
+  ],
+  "entries": [
+    {
+      "id": "ad3a77cdbe0b95ff6a7087c85a335eea2f9a0fd83a6c4ab6a9ff67eeec19b700",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-19c8778a02bde570/.mcp.json",
+      "selector": "mcpServers.context-mode",
+      "capability": "context-mode",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "aada56b35920c2a123bc705e05250159b62720770615fac38dffffcde2852929",
+      "entryHash": "d8fae7cc3c51a8bdd36ed8d171965472d8db7075bbe86820c0980e267869302b",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-19c8778a02bde570/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "context-mode"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 24,
+          "end": 156
+        },
+        {
+          "start": 156,
+          "end": 157
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-19c8778a02bde570",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "4cf0e95a9150e6244e22cba673e6bc67d82447c0e707f2007a7848cd3ab17081",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-19c8778a02bde570/.mcp.json",
+      "selector": "mcpServers.serena",
+      "capability": "serena",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "aada56b35920c2a123bc705e05250159b62720770615fac38dffffcde2852929",
+      "entryHash": "31a9e298d62d5b684428d7bd869f1736da89cab4ac95613c040f0b2c9c39dd15",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-19c8778a02bde570/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "serena"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 402,
+          "end": 618
+        },
+        {
+          "start": 618,
+          "end": 619
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-19c8778a02bde570",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "62f05ec393cbbd1181c71c06b2bb4904e38213c9186bd6dd126a98411a639eb9",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-19c8778a02bde570/.mcp.json",
+      "selector": "mcpServers.codebase-memory",
+      "capability": "codebase-memory",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "aada56b35920c2a123bc705e05250159b62720770615fac38dffffcde2852929",
+      "entryHash": "e959602551d24ec1c9cacaa83cc29e9755cac3519861e7f65e3fff60fc9ed48a",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-19c8778a02bde570/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "codebase-memory"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 162,
+          "end": 255
+        },
+        {
+          "start": 255,
+          "end": 256
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-19c8778a02bde570",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "9232474da45a9ced299b4f5f2aba8b11dd2e4de229557da101a0b3ea276848e2",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-2ce52197d5d69e22/.mcp.json",
+      "selector": "mcpServers.context-mode",
+      "capability": "context-mode",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "6ff56ac2810867743ab0121430cc898d3eeb1127b44b95c33cd3462f965e12bb",
+      "entryHash": "d8fae7cc3c51a8bdd36ed8d171965472d8db7075bbe86820c0980e267869302b",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-2ce52197d5d69e22/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "context-mode"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 24,
+          "end": 156
+        },
+        {
+          "start": 156,
+          "end": 157
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-2ce52197d5d69e22",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "6cd6a067e32abae0a6ef1db1b2470d9261db06917b5645964f03052856acd844",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-2ce52197d5d69e22/.mcp.json",
+      "selector": "mcpServers.serena",
+      "capability": "serena",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "6ff56ac2810867743ab0121430cc898d3eeb1127b44b95c33cd3462f965e12bb",
+      "entryHash": "ed6591ca70f56cc5e0ecb8ae896e43539bf72dc512516c738c393fc5f1132763",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-2ce52197d5d69e22/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "serena"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 456,
+          "end": 672
+        },
+        {
+          "start": 672,
+          "end": 673
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-2ce52197d5d69e22",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "92000cbf72e66a278fe6aea1bed9dd6faa4383d590c1c06c02f6ba54a1fdd51b",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-2ce52197d5d69e22/.mcp.json",
+      "selector": "mcpServers.codebase-memory",
+      "capability": "codebase-memory",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "6ff56ac2810867743ab0121430cc898d3eeb1127b44b95c33cd3462f965e12bb",
+      "entryHash": "56139b7897560817309668b554b08dcadc2af4985c4e145218f7edea7bc3bbd5",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-2ce52197d5d69e22/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "codebase-memory"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 162,
+          "end": 309
+        },
+        {
+          "start": 309,
+          "end": 310
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-2ce52197d5d69e22",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "15d42145d1c4dabfb7f54d31d6071685e98808ed72be365abf38f349f7eb2032",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-466db1daaafef35c/.mcp.json",
+      "selector": "mcpServers.context-mode",
+      "capability": "context-mode",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "073d6c7643607a899c2548a39ce9c6f16fb70616c29b0b6f24075a94bd0bc851",
+      "entryHash": "d8fae7cc3c51a8bdd36ed8d171965472d8db7075bbe86820c0980e267869302b",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-466db1daaafef35c/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "context-mode"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 24,
+          "end": 156
+        },
+        {
+          "start": 156,
+          "end": 157
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-466db1daaafef35c",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "774796a04e23bf71fabde3f6f214b897247cc7dbdfb96e5100131d7136aa0d50",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-466db1daaafef35c/.mcp.json",
+      "selector": "mcpServers.serena",
+      "capability": "serena",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "073d6c7643607a899c2548a39ce9c6f16fb70616c29b0b6f24075a94bd0bc851",
+      "entryHash": "ac88b6673d2200381550ac2808b93325bb5012336b8b119ee14f4d514b37e360",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-466db1daaafef35c/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "serena"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 402,
+          "end": 537
+        },
+        {
+          "start": 537,
+          "end": 538
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-466db1daaafef35c",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "84e9c674419b644f09bb852acd5630aa374b2a8cb2b3a8d014238a77e8c0fe1a",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-466db1daaafef35c/.mcp.json",
+      "selector": "mcpServers.codebase-memory",
+      "capability": "codebase-memory",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "073d6c7643607a899c2548a39ce9c6f16fb70616c29b0b6f24075a94bd0bc851",
+      "entryHash": "e959602551d24ec1c9cacaa83cc29e9755cac3519861e7f65e3fff60fc9ed48a",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-466db1daaafef35c/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "codebase-memory"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 162,
+          "end": 255
+        },
+        {
+          "start": 255,
+          "end": 256
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-466db1daaafef35c",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "3bf8a236edca652a81d04f74492c7f40d74800c385b1ad1388a39d53cf7bea88",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-4e68432e0e23a2d9/.mcp.json",
+      "selector": "mcpServers.context-mode",
+      "capability": "context-mode",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "1f73112ed14135aa53cea842eb7622f43ee513f06c8526107ed89f816f00fb49",
+      "entryHash": "d8fae7cc3c51a8bdd36ed8d171965472d8db7075bbe86820c0980e267869302b",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-4e68432e0e23a2d9/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "context-mode"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 24,
+          "end": 156
+        },
+        {
+          "start": 156,
+          "end": 157
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-4e68432e0e23a2d9",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "7cf2f223cc8df30bb0fdf4972446b8c082d7764b1b0e289c9302e6cca4a16da8",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-4e68432e0e23a2d9/.mcp.json",
+      "selector": "mcpServers.serena",
+      "capability": "serena",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "1f73112ed14135aa53cea842eb7622f43ee513f06c8526107ed89f816f00fb49",
+      "entryHash": "584409f61e5710f118330b0825a327ee935db608f5334b197811dd00327a6816",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-4e68432e0e23a2d9/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "serena"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 402,
+          "end": 618
+        },
+        {
+          "start": 618,
+          "end": 619
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-4e68432e0e23a2d9",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "deab35881a5a293563ef7efdba5bff2c7f49cf93c904d07c0551057778cb222c",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-4e68432e0e23a2d9/.mcp.json",
+      "selector": "mcpServers.codebase-memory",
+      "capability": "codebase-memory",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "1f73112ed14135aa53cea842eb7622f43ee513f06c8526107ed89f816f00fb49",
+      "entryHash": "e959602551d24ec1c9cacaa83cc29e9755cac3519861e7f65e3fff60fc9ed48a",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-4e68432e0e23a2d9/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "codebase-memory"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 162,
+          "end": 255
+        },
+        {
+          "start": 255,
+          "end": 256
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-4e68432e0e23a2d9",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "c13ff17bbfa71d7368c472c52a2b6da82dd158a637ee245206c5a5e84b35748c",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-63aa4396c4ed9e89/.mcp.json",
+      "selector": "mcpServers.context-mode",
+      "capability": "context-mode",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "ed685c88733aceebc8f6fe82facc6f46101ecf679bce73fb8d2fe1f781d9289d",
+      "entryHash": "d8fae7cc3c51a8bdd36ed8d171965472d8db7075bbe86820c0980e267869302b",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-63aa4396c4ed9e89/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "context-mode"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 24,
+          "end": 156
+        },
+        {
+          "start": 156,
+          "end": 157
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-63aa4396c4ed9e89",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "74af431d92e05c51d9be4ec023da60335dfcea37b6b71f0f539d351864762700",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-63aa4396c4ed9e89/.mcp.json",
+      "selector": "mcpServers.serena",
+      "capability": "serena",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "ed685c88733aceebc8f6fe82facc6f46101ecf679bce73fb8d2fe1f781d9289d",
+      "entryHash": "1c48d941cdc5f5571000dbf2fa62b36c9f23fc8af40640857903457a608062f2",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-63aa4396c4ed9e89/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "serena"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 456,
+          "end": 672
+        },
+        {
+          "start": 672,
+          "end": 673
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-63aa4396c4ed9e89",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "bd51e3659904d3922a7ce505a50af29f161c6f3901cb28020865e06643706f3c",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-63aa4396c4ed9e89/.mcp.json",
+      "selector": "mcpServers.codebase-memory",
+      "capability": "codebase-memory",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "ed685c88733aceebc8f6fe82facc6f46101ecf679bce73fb8d2fe1f781d9289d",
+      "entryHash": "56139b7897560817309668b554b08dcadc2af4985c4e145218f7edea7bc3bbd5",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-63aa4396c4ed9e89/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "codebase-memory"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 162,
+          "end": 309
+        },
+        {
+          "start": 309,
+          "end": 310
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-63aa4396c4ed9e89",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "58aa61132b4999a502c4665501f80db86a8ec72787a95e71d25e0af6fef32896",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-70fc4ad56a67bed9/.mcp.json",
+      "selector": "mcpServers.context-mode",
+      "capability": "context-mode",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "beddb6ac8bbb8b34ac40b6a972396c0bef3600986693a6444abfac4c17be455a",
+      "entryHash": "d8fae7cc3c51a8bdd36ed8d171965472d8db7075bbe86820c0980e267869302b",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-70fc4ad56a67bed9/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "context-mode"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 24,
+          "end": 156
+        },
+        {
+          "start": 156,
+          "end": 157
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-70fc4ad56a67bed9",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "0052329c9332a96bd225f3a4dd71b55362f954abcf5e7cd8c3e9216e93a31c87",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-70fc4ad56a67bed9/.mcp.json",
+      "selector": "mcpServers.serena",
+      "capability": "serena",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "beddb6ac8bbb8b34ac40b6a972396c0bef3600986693a6444abfac4c17be455a",
+      "entryHash": "4e77232890ff262db9eac3e8b9690aff5021664dd2a8506a5ac4bb04242c6a91",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-70fc4ad56a67bed9/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "serena"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 402,
+          "end": 618
+        },
+        {
+          "start": 618,
+          "end": 619
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-70fc4ad56a67bed9",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "096eb24d5274b40c58517163c03359907ebb58fb9560d41ce9b240020f0f0eea",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-70fc4ad56a67bed9/.mcp.json",
+      "selector": "mcpServers.codebase-memory",
+      "capability": "codebase-memory",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "beddb6ac8bbb8b34ac40b6a972396c0bef3600986693a6444abfac4c17be455a",
+      "entryHash": "e959602551d24ec1c9cacaa83cc29e9755cac3519861e7f65e3fff60fc9ed48a",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-70fc4ad56a67bed9/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "codebase-memory"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 162,
+          "end": 255
+        },
+        {
+          "start": 255,
+          "end": 256
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-70fc4ad56a67bed9",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "c60be2bd4c478ab7348ef2ad8dd513db367caa8ff2a5245904c895cafadbf388",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-b980181debeea56c/.mcp.json",
+      "selector": "mcpServers.context-mode",
+      "capability": "context-mode",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "073d6c7643607a899c2548a39ce9c6f16fb70616c29b0b6f24075a94bd0bc851",
+      "entryHash": "d8fae7cc3c51a8bdd36ed8d171965472d8db7075bbe86820c0980e267869302b",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-b980181debeea56c/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "context-mode"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 24,
+          "end": 156
+        },
+        {
+          "start": 156,
+          "end": 157
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-b980181debeea56c",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "70beb68eb16019cb18f241e577142f1e492d2bb2cce28b7ed3d3ca4d4c61db20",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-b980181debeea56c/.mcp.json",
+      "selector": "mcpServers.serena",
+      "capability": "serena",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "073d6c7643607a899c2548a39ce9c6f16fb70616c29b0b6f24075a94bd0bc851",
+      "entryHash": "ac88b6673d2200381550ac2808b93325bb5012336b8b119ee14f4d514b37e360",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-b980181debeea56c/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "serena"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 402,
+          "end": 537
+        },
+        {
+          "start": 537,
+          "end": 538
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-b980181debeea56c",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "c5365ca2d6f991f9ef74b38b88580064d2aa14588d05ecff00c27575c135c135",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-b980181debeea56c/.mcp.json",
+      "selector": "mcpServers.codebase-memory",
+      "capability": "codebase-memory",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "073d6c7643607a899c2548a39ce9c6f16fb70616c29b0b6f24075a94bd0bc851",
+      "entryHash": "e959602551d24ec1c9cacaa83cc29e9755cac3519861e7f65e3fff60fc9ed48a",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-b980181debeea56c/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "codebase-memory"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 162,
+          "end": 255
+        },
+        {
+          "start": 255,
+          "end": 256
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-b980181debeea56c",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "2a6c941e85039410421f8aafe668090f8922bff9232541fc8a46e925f85df567",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-bb8e5c39508c6205/.mcp.json",
+      "selector": "mcpServers.context-mode",
+      "capability": "context-mode",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "6ff56ac2810867743ab0121430cc898d3eeb1127b44b95c33cd3462f965e12bb",
+      "entryHash": "d8fae7cc3c51a8bdd36ed8d171965472d8db7075bbe86820c0980e267869302b",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-bb8e5c39508c6205/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "context-mode"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 24,
+          "end": 156
+        },
+        {
+          "start": 156,
+          "end": 157
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-bb8e5c39508c6205",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "48e8719ecedfff3f5086e7e552b29c8b775f6bd40e92f169ee70a87ba529075b",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-bb8e5c39508c6205/.mcp.json",
+      "selector": "mcpServers.serena",
+      "capability": "serena",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "6ff56ac2810867743ab0121430cc898d3eeb1127b44b95c33cd3462f965e12bb",
+      "entryHash": "ed6591ca70f56cc5e0ecb8ae896e43539bf72dc512516c738c393fc5f1132763",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-bb8e5c39508c6205/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "serena"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 456,
+          "end": 672
+        },
+        {
+          "start": 672,
+          "end": 673
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-bb8e5c39508c6205",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "832900176d79bd001daf72b8cdc4e0e6ad3fdef1f0f1d9c92f61ef47e4adf9cb",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-bb8e5c39508c6205/.mcp.json",
+      "selector": "mcpServers.codebase-memory",
+      "capability": "codebase-memory",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "6ff56ac2810867743ab0121430cc898d3eeb1127b44b95c33cd3462f965e12bb",
+      "entryHash": "56139b7897560817309668b554b08dcadc2af4985c4e145218f7edea7bc3bbd5",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-bb8e5c39508c6205/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "codebase-memory"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 162,
+          "end": 309
+        },
+        {
+          "start": 309,
+          "end": 310
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-bb8e5c39508c6205",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "bdf5fc3fad23a3d6eaac6296587470962c3133076dc5dffddaed28b745517790",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-dc584b7d24c73d67/.mcp.json",
+      "selector": "mcpServers.context-mode",
+      "capability": "context-mode",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "74020a108801813d990755e7aa17881ab39ef6fa6916345c383da52e8bf9a65d",
+      "entryHash": "d8fae7cc3c51a8bdd36ed8d171965472d8db7075bbe86820c0980e267869302b",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-dc584b7d24c73d67/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "context-mode"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 24,
+          "end": 156
+        },
+        {
+          "start": 156,
+          "end": 157
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-dc584b7d24c73d67",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "9bb27e665542083d26baa563113bb6133adfee869c3924ed118f354662afe937",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-dc584b7d24c73d67/.mcp.json",
+      "selector": "mcpServers.serena",
+      "capability": "serena",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "74020a108801813d990755e7aa17881ab39ef6fa6916345c383da52e8bf9a65d",
+      "entryHash": "23bf399ead5322993db83fad6c4e4c4f721a7afbb2f2f66857a76fe95387ba0b",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-dc584b7d24c73d67/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "serena"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 402,
+          "end": 618
+        },
+        {
+          "start": 618,
+          "end": 619
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-dc584b7d24c73d67",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "96a9e67e6a19a3cc37dce08c3b1aed5f4e0992b68ae5cf2237030b9b2aee7ad5",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-dc584b7d24c73d67/.mcp.json",
+      "selector": "mcpServers.codebase-memory",
+      "capability": "codebase-memory",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "74020a108801813d990755e7aa17881ab39ef6fa6916345c383da52e8bf9a65d",
+      "entryHash": "e959602551d24ec1c9cacaa83cc29e9755cac3519861e7f65e3fff60fc9ed48a",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-dc584b7d24c73d67/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "codebase-memory"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 162,
+          "end": 255
+        },
+        {
+          "start": 255,
+          "end": 256
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-dc584b7d24c73d67",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "e040a5df454e593fbde0b237a2ef09dc493abf8f00e220750e92da8e9e0f50e6",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-e98cc8ac32e0884a/.mcp.json",
+      "selector": "mcpServers.context-mode",
+      "capability": "context-mode",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "073d6c7643607a899c2548a39ce9c6f16fb70616c29b0b6f24075a94bd0bc851",
+      "entryHash": "d8fae7cc3c51a8bdd36ed8d171965472d8db7075bbe86820c0980e267869302b",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-e98cc8ac32e0884a/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "context-mode"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 24,
+          "end": 156
+        },
+        {
+          "start": 156,
+          "end": 157
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-e98cc8ac32e0884a",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "2419fec07da820cbfccb76fe73e958d095e363a768d979a60989db49fafa13ee",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-e98cc8ac32e0884a/.mcp.json",
+      "selector": "mcpServers.serena",
+      "capability": "serena",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "073d6c7643607a899c2548a39ce9c6f16fb70616c29b0b6f24075a94bd0bc851",
+      "entryHash": "ac88b6673d2200381550ac2808b93325bb5012336b8b119ee14f4d514b37e360",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-e98cc8ac32e0884a/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "serena"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 402,
+          "end": 537
+        },
+        {
+          "start": 537,
+          "end": 538
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-e98cc8ac32e0884a",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "ba6f1f150a5be991a99d8bf07ac76617a7554fac3e3e46bb15792ef09164934c",
+      "runnerId": "claude",
+      "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-e98cc8ac32e0884a/.mcp.json",
+      "selector": "mcpServers.codebase-memory",
+      "capability": "codebase-memory",
+      "ownership": "dedicated-location",
+      "action": "remove",
+      "fileHash": "073d6c7643607a899c2548a39ce9c6f16fb70616c29b0b6f24075a94bd0bc851",
+      "entryHash": "e959602551d24ec1c9cacaa83cc29e9755cac3519861e7f65e3fff60fc9ed48a",
+      "contribution": {
+        "path": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-e98cc8ac32e0884a/.mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "codebase-memory"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 162,
+          "end": 255
+        },
+        {
+          "start": 255,
+          "end": 256
+        }
+      ],
+      "generation": {
+        "root": "/home/kevin15011/.local/share/deck/claude/developer-team-v2-e98cc8ac32e0884a",
+        "selectionPath": "/home/kevin15011/.local/share/deck/claude/model-assignments.json"
+      }
+    },
+    {
+      "id": "1fa71e814f440fdc27f64c6171df76526380d59d42e913251d802a0d4cb73e84",
+      "runnerId": "pi",
+      "path": "/home/kevin15011/.pi/agent/mcp.json",
+      "selector": "mcpServers.context-mode",
+      "capability": "context-mode",
+      "ownership": "manifest-proven",
+      "action": "remove",
+      "fileHash": "01191a94f7686d26b4cf56230710a957d934615f441367b5928937247a8b8d59",
+      "entryHash": "fd68ed4f696afd31a5c3656305cebddbb980ffae963001a495388575d1f26511",
+      "contribution": {
+        "path": "/home/kevin15011/.pi/agent/mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "context-mode"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 24,
+          "end": 325
+        },
+        {
+          "start": 325,
+          "end": 326
+        }
+      ],
+      "generation": null
+    },
+    {
+      "id": "ff2ce7b4e9bb92111d480d28e2448f1e4781e6b2c113c788b0b59236924db8e5",
+      "runnerId": "pi",
+      "path": "/home/kevin15011/.pi/agent/mcp.json",
+      "selector": "mcpServers.serena",
+      "capability": "serena",
+      "ownership": "manifest-proven",
+      "action": "remove",
+      "fileHash": "01191a94f7686d26b4cf56230710a957d934615f441367b5928937247a8b8d59",
+      "entryHash": "69fd4e664ac1a06c136f432ade07c7672327f5e45906dd7f8a38e680c988f413",
+      "contribution": {
+        "path": "/home/kevin15011/.pi/agent/mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "serena"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 793,
+          "end": 1234
+        },
+        {
+          "start": 787,
+          "end": 788
+        }
+      ],
+      "generation": null
+    },
+    {
+      "id": "1a2065ad39785b6cc74930a4bef13c0c5720ef6d57618c44383f147085643305",
+      "runnerId": "pi",
+      "path": "/home/kevin15011/.pi/agent/mcp.json",
+      "selector": "mcpServers.codebase-memory",
+      "capability": "codebase-memory",
+      "ownership": "manifest-proven",
+      "action": "remove",
+      "fileHash": "01191a94f7686d26b4cf56230710a957d934615f441367b5928937247a8b8d59",
+      "entryHash": "45027fd614f5f2d2cd414cce5e7379071348a203e88c8a24f78f683ecbeee1e5",
+      "contribution": {
+        "path": "/home/kevin15011/.pi/agent/mcp.json",
+        "selector": {
+          "kind": "json",
+          "keys": [
+            "mcpServers",
+            "codebase-memory"
+          ]
+        }
+      },
+      "ranges": [
+        {
+          "start": 497,
+          "end": 787
+        },
+        {
+          "start": 787,
+          "end": 788
+        }
+      ],
+      "generation": null
+    }
+  ]
+}

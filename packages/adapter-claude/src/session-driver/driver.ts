@@ -1,4 +1,5 @@
 import { PersonalMcpPreparationError } from "@deck/core/session/personal-mcp";
+import { runnerTransportFailure } from '@deck/core/session/failure';
 /**
  * Claude session driver (D-22, XR-4.x, XR-5.4): one `claude -p` process per turn behind the
  * host's process-group anchor, stream-json in and out. The driver never spawns directly
@@ -14,7 +15,7 @@ import type {
 } from "@deck/core/session/driver";
 import { prepareImages, redactImagePayload } from "./images";
 import { buildClaudeTurnLaunch, ClaudeLaunchError, encodeUserMessage, type ClaudeTurnLaunch } from "./launch";
-import { CLAUDE_PROTOCOL, ClaudeLineSplitter, ClaudeStreamMapper, parseClaudeLine, type ClaudeInit, type ClaudeResult } from "./mapper";
+import { CLAUDE_PROTOCOL, ClaudeLineError, ClaudeLineSplitter, ClaudeStreamMapper, parseClaudeLine, type ClaudeInit, type ClaudeResult } from "./mapper";
 import {claudeTranscriptPath,readClaudeTranscript,reconcileClaudeHistory} from './steering';
 
 export const CLAUDE_TESTED_VERSIONS = { min: "2.1.296", maxTested: "2.1.296" } as const;
@@ -79,6 +80,8 @@ type TurnState = {
   finished: boolean;
   escalation?: unknown;
   fatal?: string;
+  transportCleanup?: Promise<void>;
+  cleanupFailed?: () => void;
   init?: ClaudeInit;
   result?: ClaudeResult;
   stderr: string;
@@ -87,6 +90,7 @@ type TurnState = {
 class ClaudeTask {
   private current: TurnState | undefined;
   private closed = false;
+  private transportCleanup?: Promise<void>;
   private historyPath?: string;
 
   constructor(
@@ -103,6 +107,8 @@ class ClaudeTask {
 
   async runTurn(prompt: string, images?: readonly DriverImageInput[]): Promise<TurnOutcome> {
     if (this.closed) throw new Error("Claude task is closed");
+    // Never start another process while previous cleanup ownership is unresolved.
+    if (this.transportCleanup) await this.transportCleanup;
     if (this.current) throw new Error("A Claude turn is already running");
     let userMessage: string;
     const executionId=randomUUID(),guarded=this.input.steeringVersion==='2.1.296'&&!images?.length;
@@ -110,7 +116,7 @@ class ClaudeTask {
     catch { return { status: "failed", error: "image-input-invalid" }; }
     const resume = this.input.resume !== undefined || !this.firstTurnPending;
     this.firstTurnPending = false;
-    const emit = (event: DriverEvent) => { try { this.io.emit(event); } catch { /* a sink failure must not break the turn */ } };
+    const emit = (event: DriverEvent) => { try { this.io.emit(event.kind === 'turn.started' ? { ...event, data: { ...event.data, nativeThreadId: this.nativeId, nativeTurnId: executionId } } : event); } catch { /* a sink failure must not break the turn */ } };
 
     let launch: ClaudeTurnLaunch;
     try {
@@ -142,35 +148,54 @@ class ClaudeTask {
     const splitter = new ClaudeLineSplitter();
     // Native personal hooks can share events. Event names alone no longer prove provider provenance.
     const memory = this.input.nativeMemory;
-    const mapper = new ClaudeStreamMapper(memory?.plugin ? { ...memory, plugin: { ...memory.plugin, exclusiveHookEvents: [] } } : memory);
+    const mapper = new ClaudeStreamMapper(memory?.plugin ? { ...memory, plugin: { ...memory.plugin, exclusiveHookEvents: [] } } : memory, this.nativeId, executionId);
     const onLine = (line: string) => this.onLine(line, mapper, state, launch, emit, Boolean(images?.length));
-    child.onStdout((chunk) => { for (const line of splitter.push(chunk)) onLine(line); });
+    const cleanupFailed = new Promise<SupervisedChildExit>(resolve => {
+      state.cleanupFailed = () => resolve({ok:false,code:null,signal:null,drained:false,anchorLost:true});
+    });
+    child.onStdout((chunk) => {
+      if (state.fatal || state.finished) return;
+      try { splitter.push(chunk, onLine); }
+      catch (error) {
+        if (!(error instanceof ClaudeLineError)) throw error;
+        emit({ kind: 'diagnostic', data: { code: error.code, ...error.size } });
+        this.fail(state, error.code);
+      }
+    });
     child.onStderr((chunk) => { state.stderr = (state.stderr + chunk).slice(-STDERR_TAIL); });
-    if (state.interruptRequested) this.deliverInterrupt(state);
-    child.writeStdin(userMessage);
+    if (state.interruptRequested || this.io.claimInput?.() === false) {
+      state.interruptRequested = true;
+      this.deliverInterrupt(state);
+      this.endStdin(state);
+    } else child.writeStdin(userMessage);
     if(!guarded)this.endStdin(state);
 
     let exit: SupervisedChildExit;
-    try { exit = await child.exited; } catch (error) {
+    try { exit = await Promise.race([child.exited, cleanupFailed]); } catch (error) {
       exit = { ok: false, code: null, signal: null, drained: false, anchorLost: true, error: (error as Error).message };
     }
     for (const line of splitter.flush()) onLine(line);
-    if (splitter.overflowed) emit({ kind: "diagnostic", data: { code: "claude-line-too-long" } });
+    await state.transportCleanup?.then(() => {
+      if (this.transportCleanup === state.transportCleanup) this.transportCleanup = undefined;
+    }, () => {});
     state.finished = true;
     if(state.historyTimer!==undefined)this.options.clock.clearTimeout(state.historyTimer);
-    this.refreshSteering(state,true);
+    if (state.fatal !== 'claude-line-too-long') this.refreshSteering(state,true);
     if (state.escalation !== undefined) this.options.clock.clearTimeout(state.escalation);
     this.current = undefined;
     return this.outcome(state, exit);
   }
 
   private onLine(line: string, mapper: ClaudeStreamMapper, state: TurnState, launch: ClaudeTurnLaunch, emit: (e: DriverEvent) => void, imageTurn = false): void {
-    if (state.fatal) return;
+    if (state.fatal || state.finished || this.current !== state) return;
     const parsed = parseClaudeLine(line);
     const events = parsed.ok ? undefined : mapper.unparsable(imageTurn ? "Image turn native diagnostic omitted" : redactImagePayload(line));
     if (events) { for (const e of events) emit(e); return; }
     if (!parsed.ok) return;
     const message=parsed.message;
+    // Each process belongs to one turn. A foreign session must not seed its failure/reset fallback.
+    if ((message.type === "assistant" || message.type === "result" || message.type === "rate_limit_event")
+      && typeof message.session_id === "string" && message.session_id !== this.nativeId && !(state.guarded && message.type === "result")) return;
     if(state.guarded&&message.type==='result'){
       if(message.session_id!==this.nativeId){this.fail(state,'claude-result-session-mismatch');return;}
       const ids=message.user_message_uuids;
@@ -209,7 +234,7 @@ class ClaudeTask {
     const missing = expected.filter((n) => !actual.includes(n));
     const extra = actual.filter((n) => !expected.includes(n));
     const personal = actual.filter(id => !expected.includes(id));
-    if (missing.length > 0 || extra.some(id => (this.input.suppressedMcpServers ?? []).includes(id))) {
+    if (missing.length > 0 || actual.some(id => launch.expectedAbsentMcpServers.includes(id)) || init.tools.some(tool => launch.expectedAbsentToolPrefixes.some(prefix => tool.startsWith(prefix))) || extra.some(id => (this.input.suppressedMcpServers ?? []).includes(id))) {
       emit({ kind: "diagnostic", data: { code: "claude-isolation-violation", expected, actual, missing, extra } });
       this.fail(state, "claude-isolation-violation: the native CLI did not load exactly the Deck-computed MCP set");
       return;
@@ -225,6 +250,12 @@ class ClaudeTask {
     if (init.sessionId !== this.nativeId) {
       emit({ kind: "diagnostic", data: { code: "claude-session-id-mismatch", expected: this.nativeId, actual: init.sessionId } });
       this.fail(state, "claude-session-id-mismatch: the native CLI reported a different session id than the one assigned");
+      return;
+    }
+    if (this.input.nativeRole && !state.interruptRequested && !state.closing && !state.fatal && !state.finished) {
+      const role = this.input.nativeRole;
+      if (this.io.validatedLaunch?.({ roleId: role.roleId, generation: role.generation, nativeSessionId: this.nativeId, launchId: state.executionId }) === false)
+        this.fail(state, "claude-launch-binding-revoked");
     }
   }
 
@@ -278,11 +309,23 @@ class ClaudeTask {
   private fail(state: TurnState, reason: string): void {
     if (state.fatal) return;
     state.fatal = reason;
-    if (state.child) void state.child.terminateGroup(this.options.killGraceMs).catch(() => {});
+    if (reason === 'claude-line-too-long') {
+      if(state.historyTimer!==undefined){this.options.clock.clearTimeout(state.historyTimer);state.historyTimer=undefined;}
+      for (const pending of state.steering.values()) this.resolveSteering(pending, {state:'unknown',reason:'native-transport-unconfirmed'});
+      if (state.child) {
+        try { state.transportCleanup = state.child.terminateGroup(this.options.killGraceMs); }
+        catch (error) { state.transportCleanup = Promise.reject(error); }
+        this.transportCleanup = state.transportCleanup;
+        void state.transportCleanup.catch(() => {
+          try { this.io.emit({kind:'diagnostic',data:{code:'claude-transport-cleanup-failed'}}); } catch { /* Best effort. */ }
+          state.cleanupFailed?.();
+        });
+      }
+    } else if (state.child) void state.child.terminateGroup(this.options.killGraceMs).catch(() => {});
   }
 
   private outcome(state: TurnState, exit: SupervisedChildExit): TurnOutcome {
-    if (state.fatal) return { status: "failed", error: state.fatal };
+    if (state.fatal) return { status: "failed", error: state.fatal, failure: runnerTransportFailure(state.fatal) };
     if (state.forced || state.closing) return { status: "interrupted-forced" };
     // Do not retry authentication, transport or execution failures. This pre-init native
     // diagnostic identifies exactly the requested missing conversation.
@@ -296,14 +339,16 @@ class ClaudeTask {
       }
       if (result.subtype === "error_during_execution" && state.interruptRequested) return { status: "interrupted" };
       const detail = result.errors[0] ?? result.terminalReason ?? "no error detail";
-      return { status: "failed", error: `Claude turn failed (${result.subtype}): ${detail}` };
+      return { status: "failed", error: `Claude turn failed (${result.subtype}): ${detail}`, failure: result.failure ?? { category: "unknown", origin: "unknown", certainty: "inferred" } };
     }
     if (state.interruptRequested && exit.ok) return { status: "interrupted" };
     const how = exit.anchorLost ? (exit.error ?? "Anchor ended before reporting the child's exit")
       : exit.ok ? "claude ended without a result" : `claude exited with ${exit.signal ? `signal ${exit.signal}` : `code ${exit.code}`}`;
     // Native configuration/parser errors may contain literal personal credentials.
     const tail = state.init ? redactText(state.stderr, 400).trim() : "";
-    return { status: "failed", error: tail ? `${how}: ${tail}` : how };
+    return { status: "failed", error: tail ? `${how}: ${tail}` : how,
+      failure: exit.anchorLost ? { category: "unknown", origin: "unknown", certainty: "inferred" }
+        : { category: "runner-process", origin: "runner", certainty: "reported" } };
   }
 
   async interrupt(): Promise<void> {
@@ -331,6 +376,7 @@ class ClaudeTask {
 
   async close(): Promise<void> {
     this.closed = true;
+    if (this.transportCleanup) { await this.transportCleanup; return; }
     const state = this.current;
     if (!state) return;
     state.closing = true;
@@ -352,7 +398,7 @@ export function createClaudeSessionDriver(options: ClaudeSessionDriverOptions = 
   };
 
   return {
-    runnerId: "claude",
+    runnerId: "claude", supportsInputClaim: true,
     protocol: CLAUDE_PROTOCOL,
     testedVersions: { ...CLAUDE_TESTED_VERSIONS },
     newNativeSessionId: () => randomUUID(),

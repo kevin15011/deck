@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { mapCodexNotification } from "./mapper";
 
+test('context observation preserves Codex last counter without treating total or cached input as occupancy', () => {
+  const tokenUsage = { last: { totalTokens: 34794, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }, total: { totalTokens: 9000000 }, modelContextWindow: 258400 };
+  const result = mapCodexNotification({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread', turnId: 'turn', tokenUsage } })[0];
+  expect(result.data).toMatchObject({ ...tokenUsage, context: { basis: 'codex-last-total', tokens: 34794, capacity: 258400, nativeThreadId: 'thread', nativeTurnId: 'turn' } });
+  expect(result.data.context).not.toHaveProperty('percentage');
+  expect(mapCodexNotification({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread', turnId: 'turn', tokenUsage: { ...tokenUsage, modelContextWindow: null } } })[0].data.context).toMatchObject({ capacity: null });
+});
+
 describe("Codex app-server notification mapping", () => {
   test("future hook methods retain only bounded sanitized metadata without inventing lifecycle semantics", () => {
     const method = "hook/future token=synthetic-method-secret " + "x".repeat(1000);
@@ -89,4 +97,21 @@ describe("Codex app-server notification mapping", () => {
     expect(thought.data.text).not.toContain("synthetic-reasoning");
     expect(thought.data.text).not.toContain("\u001b");
   });
+});
+
+test('maps verified compaction lifecycle with bounded exact correlation identity', () => {
+  for (const [method, state] of [['item/started', 'started'], ['item/completed', 'completed']]) {
+    const mapped = mapCodexNotification({ method, params: { threadId: 'thread', turnId: 'turn', item: { type: 'contextCompaction', id: 'compact', private: 'not canonical' } } })[0]!;
+    expect(mapped).toMatchObject({ kind: 'diagnostic', data: { code: 'context.compaction', state, itemId: 'compact', nativeThreadId: 'thread', nativeTurnId: 'turn' } });
+    expect(JSON.stringify(mapped.data)).not.toContain('private');
+  }
+  for (const id of ['', undefined, 'x'.repeat(257), '\u001b[31m']) {
+    expect(mapCodexNotification({ method: 'item/started', params: { threadId: 'thread', turnId: 'turn', item: { type: 'contextCompaction', id } } })[0]?.data.code).not.toBe('context.compaction');
+  }
+});
+
+test('only successful native fileChange completions record attributable edit paths',()=>{
+ const params={threadId:'n',turnId:'t',item:{type:'fileChange',id:'edit',status:'completed',changes:[{path:'src/a.ts',kind:{type:'update'},diff:'+new'}]}};
+ expect(mapCodexNotification({method:'item/completed',params})[0]?.data.edits).toEqual([{path:'src/a.ts',op:'update',diff:'+new'}]);
+ for(const method of ['item/started','item/completed'])expect(mapCodexNotification({method,params:{...params,item:{...params.item,status:'failed'}}})[0]?.data.edits).toBeUndefined();
 });

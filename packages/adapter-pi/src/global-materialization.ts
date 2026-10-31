@@ -1,3 +1,4 @@
+import { ROLE_TOOL_POLICY } from "@deck/core/session/role-tool-policy";
 import { CODEBASE_DISCOVERY_FALLBACK } from "@deck/core/session/mcp";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { piAgentPaths } from "./agent-dir";
@@ -21,7 +22,7 @@ export const PI_SUBAGENTS_EXTENSION_NAME = "deck-subagents";
 export const PI_MEMORY_EXTENSION_NAME = "deck-memory";
 export const PI_TOOL_POLICY_EXTENSION_NAME = "deck-tool-policy";
 /** Roles that never mutate the workspace (enforced by `--tools` and by the tool-policy extension). */
-export const PI_READ_ONLY_ROLE_AGENT_IDS: readonly string[] = ["deck-investigate", "deck-quality"];
+export const PI_READ_ONLY_ROLE_AGENT_IDS: readonly string[] = ROLE_TOOL_POLICY.readOnlyRoles;
 
 function configuredServerIds(mcpServers: Readonly<Record<string, unknown>>): string[] {
   return DECK_PI_MCP_SERVER_IDS.filter((id) => id in mcpServers);
@@ -137,6 +138,8 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
     }],
     profile: { teamId, content: toolNamesSection ? `${profile.content.trimEnd()}\n\n${toolNamesSection}` : profile.content },
   });
+
+  files.push({relPath:"deck/package/role-policy.json",content:JSON.stringify(ROLE_TOOL_POLICY)});
 
   return {
     nativePlan: { ...nativePlan, memoryDiagnostics: [...nativePlan.memoryDiagnostics, ...profile.memoryDiagnostics] },

@@ -1,6 +1,7 @@
+import { validateOpenCodeEffectiveRoles } from "../native-role-source";
 import { PersonalMcpPreparationError } from "@deck/core/session/personal-mcp";
 import { assertOpenCodeControlName, assertOpenCodeProjectConfigAdmission, openCodeProjectConfigDisabled } from "../personal-mcp";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import {existsSync} from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -51,6 +52,15 @@ export function buildOpenCodeLaunch(input: DriverTaskInput, io: Pick<DriverHostI
   io.writePrivateFile("opencode.json", JSON.stringify(config));
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(base)) if (typeof value === "string") env[key] = value;
+  for (const key of Object.keys(env)) if (key.startsWith("DECK_SESSION_START_")) delete env[key];
+  if (input.sessionStartContext) {
+    if (!input.nativeRoleDescriptor) throw new Error("opencode-session-context-unverified");
+    const value = JSON.stringify({ ...input.sessionStartContext, root: input.cwd, generation: input.nativeRoleDescriptor.generation });
+    env.DECK_SESSION_START_CONTEXT = io.writePrivateFile("session-start-context.json", value);
+    env.DECK_SESSION_START_DIGEST = createHash("sha256").update(value).digest("hex");
+    env.DECK_SESSION_START_EPOCH = input.sessionStartContext.epoch;
+    env.DECK_SESSION_START_GENERATION = input.nativeRoleDescriptor.generation;
+  }
   Object.assign(env, {
     OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
     // A project grant admits native loading; explicit user disabling still wins.
@@ -59,6 +69,7 @@ export function buildOpenCodeLaunch(input: DriverTaskInput, io: Pick<DriverHostI
     OPENCODE_SERVER_PASSWORD: randomBytes(32).toString("hex"), OPENCODE_SERVER_USERNAME: "opencode",
   });
   if (input.nativeMemory?.scopeMode === "global") for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
+  if (input.nativeRoleDescriptor) validateOpenCodeEffectiveRoles(input.nativeRoleDescriptor.source.root, input.cwd, env);
   const expectedMcpSpecs = Object.fromEntries(input.mcp.servers.map(id => {
     const value = mcp[id] as Record<string, any>;
     return [id, value.headers ? { ...value, headers: Object.fromEntries(Object.entries(value.headers).map(([name, reference]) => [name, env[String(reference).slice(5, -1)] ?? ""])) } : value];

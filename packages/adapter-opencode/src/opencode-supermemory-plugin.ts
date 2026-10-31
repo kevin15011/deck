@@ -19,7 +19,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { resolveDefaultDeckDataRoot } from "@deck/core";
+import { recordOwnedRunnerArtifactTree, resolveDefaultDeckDataRoot } from "@deck/core";
 
 import { enumerateOpenCodeConfigCandidates } from "./model-discovery-context";
 
@@ -404,7 +404,14 @@ export async function installOwnedOpenCodeSupermemory(input: {
   }
 
   const existing = inspectOwnedOpenCodeSupermemory({ environment, homeDirectory, expectedArtifactDigests: input.expectedArtifactDigests });
-  if (existing.ready) return { ok: true, outcome: "reused", diagnostic: existing.diagnostic, paths };
+  const recordArtifacts = () => {
+    const root = environment.OPENCODE_CONFIG_DIR ?? join(environment.XDG_CONFIG_HOME ?? join(homeDirectory, ".config"), "opencode");
+    recordOwnedRunnerArtifactTree({ runnerId: "opencode", root, manifestPath: join(root, "deck/manifest.json"), artifactRoot: paths.installRoot, sourceItemId: "package:supermemory" });
+  };
+  if (existing.ready) {
+    recordArtifacts();
+    return { ok: true, outcome: "reused", diagnostic: existing.diagnostic, paths };
+  }
   if (!ensureOwnedInstallRoot(paths, environment, homeDirectory)) {
     return { ok: false, outcome: "blocked", diagnostic: "The Deck-owned Supermemory installation root is unsafe.", paths };
   }
@@ -426,6 +433,7 @@ export async function installOwnedOpenCodeSupermemory(input: {
   if (!artifacts.ready) return { ok: false, outcome: "failed", diagnostic: artifacts.diagnostic, paths };
   writeLoader(paths);
   const verified = inspectOwnedOpenCodeSupermemory({ environment, homeDirectory, expectedArtifactDigests: input.expectedArtifactDigests });
+  if (verified.ready) recordArtifacts();
   return verified.ready
     ? { ok: true, outcome: "installed", diagnostic: verified.diagnostic, paths }
     : { ok: false, outcome: "failed", diagnostic: verified.diagnostic, paths };

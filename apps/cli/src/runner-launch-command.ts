@@ -1,3 +1,7 @@
+import { spawnInstallationGated } from "./installation-gated-spawn";
+import { ROLE_TOOL_POLICY } from '@deck/core/session/role-tool-policy';
+import { DeckConfigStore } from "./deck-config-store";
+import { withNativeProjectReadiness } from "./native-project-readiness";
 import { classifyNativeCodebase, nativeCodebaseFailureCode, resolvePiAgentDir } from "@deck/adapter-pi";
 import type {
   RunnerAdapter,
@@ -6,7 +10,7 @@ import type {
   RunnerLaunchPlan,
   RunnerLaunchResult,
 } from "@deck/core";
-import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, prepareAndBuildDeveloperTeamInstallPlan, RUNNER_ENV_ALLOWLIST, isSensitiveRunnerEnv, sanitizeRunnerEnv, resolveCanonicalSupermemoryProjectScope, createOwnerOnlyFileSecretStore, readLogicalGitOriginRemote } from "@deck/core";
+import { acquireRunnerGenerationReference, MAX_RUNNER_STDIN_PAYLOAD_BYTES, prepareAndBuildDeveloperTeamInstallPlan, RUNNER_ENV_ALLOWLIST, isSensitiveRunnerEnv, sanitizeRunnerEnv, resolveCanonicalSupermemoryProjectScope, createOwnerOnlyFileSecretStore, readLogicalGitOriginRemote } from "@deck/core";
 import { discoverLiteralSshHostAliasesFromHome, resolveOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
 import { spawn as nodeSpawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -23,6 +27,7 @@ import { authorizeOpenCodeSupermemoryLaunch, VERIFIED_OPENCODE_SUPERMEMORY_BINDI
 import { createPiMemoryTokenHandoff, withCodexMemoryToolsLoopback, withPiMemoryLoopback, type PiMemoryTokenHandoff } from "./pi-memory-token-handoff";
 import { getDeckStateDir } from "./runtime/paths";
 import { isQuietDiagnostic } from "./launch-diagnostic-format";
+import { buildReviewedInteractiveLaunch, recordInteractiveSearchLaunch } from "./interactive-search-review";
 import { isCodexMemoryToolsRegistered, authorizeCodexSupermemoryLaunch, resolveCodexSupermemoryLaunchCredential, VERIFIED_CODEX_SUPERMEMORY_BINDING, type CodexSupermemoryLaunchEffects } from "./codex-supermemory-launch";
 
 export type SpawnedRunnerResult = {
@@ -39,7 +44,7 @@ export type RunnerProcessEffects = {
   spawn(
     command: string,
     args: readonly string[],
-    options: { cwd: string; env: Record<string, string>; stdio: "inherit" | "pipe"; stdin: "inherit" | "closed"; stdinPayload?: RunnerLaunchPlan["stdinPayload"]; captureLimitBytes?: number; sensitiveValues?: readonly string[] },
+    options: { cwd: string; env: Record<string, string>; stdio: "inherit" | "pipe"; stdin: "inherit" | "closed"; stdinPayload?: RunnerLaunchPlan["stdinPayload"]; captureLimitBytes?: number; sensitiveValues?: readonly string[]; onSpawn?: (pid: number) => (() => void) | undefined },
   ): Promise<SpawnedRunnerResult>;
 };
 
@@ -96,10 +101,12 @@ export async function executeRunnerLaunchPlan(
   }
   const secrets: string[] = [];
   const authorizedSensitiveKeys = plan.sensitiveEnvAuthorization?.binding === VERIFIED_OPENCODE_SUPERMEMORY_BINDING
-    ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_API_KEY"))
+    ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_API_KEY" || key === "TAVILY_API_KEY"))
     : plan.sensitiveEnvAuthorization?.binding === VERIFIED_CODEX_SUPERMEMORY_BINDING
       ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_CODEX_API_KEY" || key === "TAVILY_API_KEY"))
     : plan.sensitiveEnvAuthorization?.binding === "deck-pi-web-search-v1"
+      ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "TAVILY_API_KEY"))
+    : plan.sensitiveEnvAuthorization?.binding === "deck-opencode-web-search-v1"
       ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "TAVILY_API_KEY"))
     : plan.sensitiveEnvAuthorization?.binding === "deck-claude-web-search-v1" || plan.sensitiveEnvAuthorization?.binding === "deck-claude-official-memory-v1"
       ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "TAVILY_API_KEY" || plan.sensitiveEnvAuthorization?.binding === "deck-claude-official-memory-v1" && key === "SUPERMEMORY_CC_API_KEY"))
@@ -124,7 +131,14 @@ export async function executeRunnerLaunchPlan(
     }
   }
   signal?.throwIfAborted();
-  const raw = await effects.spawn(plan.command, plan.args, {
+  const releaseGeneration = plan.generationReference ? acquireRunnerGenerationReference(plan.generationReference) : undefined;
+  let releaseSearchReview: (() => void) | undefined;
+  let raw: SpawnedRunnerResult;
+  try {
+    if (plan.interactiveSearchReview) releaseSearchReview = recordInteractiveSearchLaunch(plan.interactiveSearchReview);
+    await plan.launchLifecycle?.beforeSpawn(env, signal);
+    signal?.throwIfAborted();
+    raw = await effects.spawn(plan.command, plan.args, {
     cwd: plan.cwd,
     env,
     stdio: plan.stdio,
@@ -132,7 +146,7 @@ export async function executeRunnerLaunchPlan(
     stdinPayload: plan.stdinPayload,
     captureLimitBytes: plan.captureLimitBytes,
     sensitiveValues: secrets,
-  });
+  }); } finally { try { releaseSearchReview?.(); } finally { try { releaseGeneration?.(); } finally { plan.launchLifecycle?.afterExit(); } } }
   const limit = plan.captureLimitBytes ?? 1024 * 1024;
   const stdout = bounded(redact(raw.stdout, secrets), limit);
   const stderr = bounded(redact(raw.stderr, secrets), limit);
@@ -266,13 +280,23 @@ export function createNodeRunnerProcessEffects(nodeSpawner: typeof nodeSpawn = n
     removeFile: async (path) => { await rm(path, { force: true }); },
     spawn(command, args, options) {
       return new Promise((resolve) => {
-        const child = nodeSpawner(command, [...args], {
-          cwd: options.cwd,
-          env: options.env,
-          stdio: options.stdio === "inherit"
-            ? "inherit"
-            : [options.stdinPayload ? "pipe" : options.stdin === "inherit" ? "inherit" : "ignore", "pipe", "pipe"],
-        });
+        // The shell cannot touch the installation until its lease exists. EOF on parent
+        // death refuses launch; after exec the PID and process birth identity stay the same.
+        const stdio = options.stdio === "inherit"
+          ? ["inherit", "inherit", "inherit"] as const
+          : [options.stdinPayload ? "pipe" : options.stdin === "inherit" ? "inherit" : "ignore", "pipe", "pipe"] as const;
+        const { child, register } = spawnInstallationGated(command, args, {
+          cwd: options.cwd, env: options.env, stdio: [...stdio], onSpawn: options.onSpawn,
+        }, nodeSpawner);
+        let releaseInstallationUse: (() => void) | undefined;
+        try {
+          releaseInstallationUse = register();
+        } catch (error) {
+          child.kill();
+          child.once('error', () => {});
+          child.once('close', () => { releaseInstallationUse?.(); resolve({ exitCode: 1, stdout: '', stderr: String(error) }); });
+          return;
+        }
         const requestedLimit = options.captureLimitBytes ?? 1024 * 1024;
         const limit = requestedLimit + Math.max(0, ...(options.sensitiveValues ?? []).map((value) => Buffer.byteLength(value)));
         let stdout: Buffer = Buffer.alloc(0);
@@ -294,6 +318,7 @@ export function createNodeRunnerProcessEffects(nodeSpawner: typeof nodeSpawn = n
         process.once("SIGINT", onSigint);
         process.once("SIGTERM", onSigterm);
         const cleanup = () => {
+          releaseInstallationUse?.(); releaseInstallationUse = undefined;
           process.off("SIGINT", onSigint);
           process.off("SIGTERM", onSigterm);
         };
@@ -318,8 +343,6 @@ export type RunRunnerLaunchInput = {
   dryRun?: boolean;
   yes?: boolean;
   localOnly?: boolean;
-  /** Explicit consent to remove a superseded per-project Deck install (unmodified Deck-owned files only). */
-  cleanupLegacy?: boolean;
   /** Print routine notes and full mutation details too (dry runs always do). */
   verbose?: boolean;
   cliMemoryProvider?: string;
@@ -491,6 +514,26 @@ function conciseLaunchSummary(context: {
 /** Generic CLI-owned install/verify/consent/spawn orchestration. */
 export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunRunnerLaunchResult> {
   input.signal?.throwIfAborted();
+  try {
+    if (!input.installOnly && !input.dryRun && input.adapter.withNativeInstallationUse) {
+      return await input.adapter.withNativeInstallationUse(() => runRunnerLaunchReserved({ ...input, processEffects: {
+        ...input.processEffects,
+        spawn: (command, args, options) => input.processEffects.spawn(command, args, { ...options,
+          onSpawn: pid => input.adapter.trackNativeInstallationProcess?.(pid),
+        }),
+      } }));
+    }
+    return await runRunnerLaunchReserved(input);
+  } catch (error) {
+    if (input.signal?.aborted) throw error;
+    const message = error instanceof Error ? error.message : "Runner preparation failed safely.";
+    return { status: "blocked", message: message.includes("symlink boundary:")
+      ? message + "; preserve the linked content elsewhere and remove the conflicting symlink before retrying."
+      : message };
+  }
+}
+async function runRunnerLaunchReserved(input: RunRunnerLaunchInput): Promise<RunRunnerLaunchResult> {
+  input.signal?.throwIfAborted();
   // The native Claude lane is separate. No Claude Developer Team adapter is verified yet;
   // never let a newly registered adapter inherit this legacy Deck memory-host pipeline.
   if (input.adapter.runnerId === "claude") {
@@ -502,22 +545,6 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     inspectionDiagnostics.push(...inspection.diagnostics.map((diagnostic) => diagnostic.message));
     if (inspection.state === "blocked") return { status: "blocked", message: inspection.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: inspection.diagnostics };
     if (inspection.state === "unsupported") return { status: "unsupported", code: "runner-version-unsupported", message: inspection.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: inspection.diagnostics };
-  }
-
-  if (input.cleanupLegacy && input.adapter.cleanupLegacyInstall) {
-    if (input.dryRun) {
-      await input.presentPreview("Legacy cleanup requested: a dry run removes nothing. Rerun without --dry-run to remove the unmodified Deck-owned per-project files.");
-    } else {
-      if (!input.yes && (!input.interactive || !input.confirm || !(await input.confirm("Remove the previous Deck install artifacts (unmodified Deck-owned files only; a backup is kept)? [y/N]")))) {
-        return { status: "blocked", message: "Legacy cleanup needs --yes or an interactive confirmation; nothing was removed." };
-      }
-      try {
-        const cleaned = await input.adapter.cleanupLegacyInstall(input.launch.projectRoot, { deckConfig: input.launch.deckConfig });
-        await input.presentPreview([`Legacy cleanup removed ${cleaned.removed.length} file(s).`, ...cleaned.diagnostics.map((message) => `! ${message}`)].join("\n"));
-      } catch (error) {
-        return { status: "blocked", message: `Legacy cleanup failed and was rolled back: ${error instanceof Error ? error.message : "unknown error"}` };
-      }
-    }
   }
 
   const codexAssignments = input.adapter.runnerId === "codex"
@@ -536,6 +563,9 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     ? { ...selectedDeckConfig, adaptiveMemory: { ...selectedDeckConfig.adaptiveMemory, enabled: false } }
     : selectedDeckConfig;
   if (codexMemoryUnavailable) inspectionDiagnostics.push("Supermemory is disabled for this launch because a verified repository identity is unavailable. Saved settings are unchanged; all Codex hooks (including user hooks and RTK) are disabled for this process to prevent unscoped memory effects.");
+  const readCurrentReadinessConfig = createNativeReadinessConfigReader(input.cliMemoryProvider, codexMemoryUnavailable,
+    new DeckConfigStore({ allowDefaultEnvironment: true, homeDir: input.processEffects?.inheritedEnv?.HOME,
+      xdgConfigHome: input.processEffects?.inheritedEnv?.XDG_CONFIG_HOME }));
   const baseLaunch = { ...input.launch, deckConfig } as RunnerLaunchInput;
   const installInput = {
     projectRoot: baseLaunch.projectRoot,
@@ -552,7 +582,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   let launch: RunnerLaunchResult | undefined;
   if (!input.installOnly) {
     if (!input.adapter.buildLaunchPlan) return { status: "blocked", message: `${input.adapter.displayName} does not expose launch planning.` };
-    launch = await input.adapter.buildLaunchPlan(baseLaunch);
+    launch = await buildReviewedInteractiveLaunch(input.adapter, baseLaunch);
   }
   const safeMutations = plan.mutationPreview ?? [];
   const previewIncomplete = plan.files.length > 0 && plan.mutationPreview === undefined;
@@ -600,7 +630,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   }
   if (input.dryRun) return { status: "dry-run", diagnostics: [preview] };
 
-  if (safeMutations.length > 0 && !input.yes) {
+  if (safeMutations.length > 0 && !input.yes && !(plan.automaticRefresh && !input.installOnly)) {
     if (!input.interactive || !input.confirm) return { status: "blocked", message: "Mutation requires --yes in non-interactive mode." };
     const confirmationQuestion = input.installOnly
       ? "Apply these changes? [y/N]"
@@ -610,18 +640,24 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   if (launch?.status === "unsupported") return { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
   if (launch?.status === "blocked") return { status: "blocked", message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
   const backup = input.adapter.backupDeveloperTeamFiles(plan);
-  let applyResult: Awaited<ReturnType<RunnerAdapter["applyDeveloperTeamInstall"]>>;
+  let refreshDeferred = false;
+  let applyResult: Awaited<ReturnType<RunnerAdapter["applyDeveloperTeamInstall"]>> = { results: [], changedCount: 0, unchangedCount: 0 };
   try {
     applyResult = await input.adapter.applyDeveloperTeamInstall({ projectRoot: baseLaunch.projectRoot, environmentId: input.adapter.environmentIds[0]!, plan });
   } catch (error) {
-    const rollback = error && typeof error === "object" && "rollback" in error
-      ? (error as { rollback?: { conflicts?: readonly string[] } }).rollback
-      : undefined;
-    const conflicts = rollback?.conflicts ?? [];
-    const message = error instanceof Error ? error.message : "Runner installation failed safely.";
-    return { status: "blocked", message: conflicts.length > 0 ? `${message}; rollback conflicts: ${conflicts.join(", ")}` : message };
+    if (!input.installOnly && ["codex", "opencode", "pi"].includes(input.adapter.runnerId) && error && typeof error === "object" && "code" in error && ["codex-installation-in-use", "runner-installation-in-use", "runner-mutation-deferred"].includes(String(error.code))) {
+      refreshDeferred = true;
+      await input.presentPreview(`${input.adapter.displayName} content refresh deferred while another invocation is active; launching with installed content.`);
+    } else {
+      const rollback = error && typeof error === "object" && "rollback" in error
+        ? (error as { rollback?: { conflicts?: readonly string[] } }).rollback
+        : undefined;
+      const conflicts = rollback?.conflicts ?? [];
+      const message = error instanceof Error ? error.message : "Runner installation failed safely.";
+      return { status: "blocked", message: conflicts.length > 0 ? `${message}; rollback conflicts: ${conflicts.join(", ")}` : message };
+    }
   }
-  const verified = await input.adapter.verifyDeveloperTeamInstall(plan);
+  const verified = refreshDeferred ? { valid: true, diagnostics: [] } : await input.adapter.verifyDeveloperTeamInstall(plan);
   if (!verified.valid) {
     const rollbackTarget = applyResult.operation ? { payload: applyResult.operation, diagnostics: [] } : backup;
     try {
@@ -639,10 +675,19 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     }
   }
   if (input.installOnly) return { status: "installed", diagnostics: verified.diagnostics };
+  if (input.adapter.runnerId === "opencode") {
+    try {
+      for (const roleId of ["deck-lead", ...ROLE_TOOL_POLICY.readOnlyRoles]) {
+        await input.adapter.prepareSessionNativeRole?.(roleId);
+      }
+    } catch (error) {
+      return { status: "blocked", message: error instanceof Error ? error.message : "OpenCode role validation failed; review the installed role permissions." };
+    }
+  }
 
   if (officialPluginMemory) {
     // The official Supermemory plugin owns memory alone: Deck's legacy runtime host and loopback are never started beside it.
-    launch = await input.adapter.buildLaunchPlan!(baseLaunch);
+    launch = await buildReviewedInteractiveLaunch(input.adapter, baseLaunch);
     if (launch.status === "unsupported") return { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
     if (launch.status === "blocked") return { status: "blocked", message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
     let executablePlan: RunnerLaunchPlan;
@@ -672,7 +717,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
       : { plan: executablePlan, close: async () => [] as readonly { code: string; severity: "warning"; message: string }[] };
     executablePlan = memoryTools.plan;
     try {
-      const outcome = await executeRunnerLaunchPlan(executablePlan, input.processEffects, input.signal);
+      const outcome = await executeRunnerLaunchPlan(withNativeProjectReadiness(executablePlan, input.adapter.runnerId, readCurrentReadinessConfig, undefined, config => input.adapter.readPreparationCapabilities?.(config) ?? {}, input.adapter.readPreparationGeneration?.bind(input.adapter)), input.processEffects, input.signal);
       const memoryToolsDiagnostics = await memoryTools.close();
       return {
         status: "launched",
@@ -696,7 +741,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   }
 
   if (input.adapter.runnerId === "opencode") {
-    launch = await input.adapter.buildLaunchPlan!(baseLaunch);
+    launch = await buildReviewedInteractiveLaunch(input.adapter, baseLaunch);
     if (launch.status === "unsupported") return { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
     if (launch.status === "blocked") return { status: "blocked", message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
 
@@ -733,7 +778,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     }
 
     try {
-      const outcome = await executeRunnerLaunchPlan(executablePlan, input.processEffects, input.signal);
+      const outcome = await executeRunnerLaunchPlan(withNativeProjectReadiness(executablePlan, input.adapter.runnerId, readCurrentReadinessConfig, undefined, config => input.adapter.readPreparationCapabilities?.(config) ?? {}, input.adapter.readPreparationGeneration?.bind(input.adapter)), input.processEffects, input.signal);
       return {
         status: "launched",
         outcome,
@@ -796,7 +841,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     }
     const launchInput = applyExplicitRecallAdvisory(baseLaunch, explicitRecallAdvisory);
     if (!result) {
-      launch = await input.adapter.buildLaunchPlan!(launchInput);
+      launch = await buildReviewedInteractiveLaunch(input.adapter, launchInput);
       if (launch.status === "unsupported") {
         closeReason = "blocked";
         result = { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: [readinessDiagnostic, ...launch.diagnostics] };
@@ -837,7 +882,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
       let finalAssistant: Awaited<ReturnType<typeof trustedFinalAssistantMessage>>;
       let memoryCapture: Awaited<ReturnType<typeof safeMemoryCapture>>;
       try {
-        outcome = await executeRunnerLaunchPlan(executableLaunch.plan, input.processEffects, input.signal);
+        outcome = await executeRunnerLaunchPlan(withNativeProjectReadiness(executableLaunch.plan, input.adapter.runnerId, readCurrentReadinessConfig, undefined, config => input.adapter.readPreparationCapabilities?.(config) ?? {}, input.adapter.readPreparationGeneration?.bind(input.adapter)), input.processEffects, input.signal);
         closeReason = outcome.signal ? "signal" : "normal";
         finalAssistant = await trustedFinalAssistantMessage(executableLaunch.plan, input.processEffects);
         memoryCapture = loopbackBridge
@@ -1041,4 +1086,12 @@ async function blockingExplicitRememberCapture(capture: () => Promise<{ ok: bool
       metrics: [],
     };
   }
+}
+
+/** Read trusted persisted intent on every lifecycle refresh; explicit launch overrides survive. */
+export function createNativeReadinessConfigReader(cliMemoryProvider?: string, memoryUnavailable = false, store: Pick<DeckConfigStore, "read"> = new DeckConfigStore({ allowDefaultEnvironment: true })) {
+  return () => {
+    const config = resolveLaunchDeckConfig(store.read(), cliMemoryProvider);
+    return memoryUnavailable ? { ...config, adaptiveMemory: { ...config.adaptiveMemory, enabled: false } } : config;
+  };
 }

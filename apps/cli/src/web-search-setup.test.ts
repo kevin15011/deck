@@ -54,7 +54,7 @@ describe("persistWebSearchCredentialAndEnable", () => {
     const environment: Record<string, string | undefined> = {};
     const configStore = testStore(root, projectRoot);
     mkdirSync(home);
-    configStore.write({ adaptiveMemory: { activeProvider: "none" }, packageInstructions: { codex: { serena: true } } });
+    configStore.write({ adaptiveMemory: { activeProvider: "none" }, packageInstructions: { codex: { rtk: true } } });
 
     const result = persistWebSearchCredentialAndEnable({
       credential: "interleaved-value",
@@ -72,7 +72,7 @@ describe("persistWebSearchCredentialAndEnable", () => {
     const config = configStore.read();
     expect(config.webSearch).toEqual({ enabled: true, provider: "tavily" });
     expect(config.orchestratorPersonality).toBe("guia");
-    expect(config.packageInstructions.codex.serena).toBe(true);
+    expect(config.packageInstructions.codex.rtk).toBe(true);
   });
 
   test("rolls back a newly created profile and restores the exact previous environment when Deck config persistence fails", () => {

@@ -1,0 +1,29 @@
+# Compaction progress working brief
+
+Intent: address P-001 by showing explicit compaction progress instead of a generic waiting label when the runner supplies reliable evidence. The user agreed to continue useful work in this session while observing the deployed readiness correction.
+
+Investigation owner: `investigate`, continuation of `task-1cf2011b-0318-4587-84f5-47cef713f609`. Scope: confirm native event shapes and adapter-to-UI path, identify the smallest implementation and regression coverage, and collect a bounded post-fix timing snapshot. Findings pending; no compaction implementation yet.
+
+Acceptance direction: distinguish compaction from approvals/questions; clear the state on completion and turn/session boundaries; preserve prompt receipt fences and correct task attribution; cover shared desktop/mobile rendering and reconnect/history limitations. Show only observed runner evidence, not inferred activity or invented context occupancy. Equivalent Claude support depends on actual available events, not assumptions from Codex.
+
+Known source: `apps/web/src/lead-progress.tsx` currently has no compaction phase and renders a common status component with a mobile option. The stale graph does not cover this path; direct source was read. Candidate test path `lead-progress.test.ts` was missing in coverage metadata; investigator must locate actual tests rather than assume absence of coverage.
+
+Readiness fix `1a371a3` is already active after restart at `2026-10-22T13:31:00.283Z`; first preparation after restart may legitimately be cold. Post-fix timing observations must separate that from repeated invalidation and must not claim a measured improvement from insufficient samples.
+
+## Reviewed investigation and implementation direction
+
+Investigator attempt 4 (result 17400 / ended 17401) identified native Codex `item/started` and `item/completed` events whose `params.item.type` is `contextCompaction`, with matching item IDs. The current mapper falls through to `runner.unmapped`. Emit a bounded `diagnostic` with code `context.compaction`, state `started`/`completed`, and item identity; use the existing event kind without changing generated schemas. The Lead projection consumes the canonical diagnostic, never raw native payloads. Add phase `compacting` and existing-language label `Compacting context…` to the shared desktop/mobile status.
+
+Lead reviewed mapper and driver source and corrected an overstatement in the report: the driver rejects foreign-thread notifications, but its current stale-turn guards apply to turn lifecycle notifications, not arbitrary item notifications. Implementation must fence compaction notifications by active thread/turn as appropriate and test late/foreign/inactive events; do not claim existing guards already cover this. Keep this check narrowly scoped to compaction to avoid unrelated event behavior changes.
+
+Pair completion to the active compaction identity and task/thread scope; an unrelated or delayed completion must not erase a newer state. Preserve approval/question precedence and clear on terminal/start/session/prompt boundaries. Verify actual reconnect and bounded-history behavior; replay alone does not prove that a missing start can be recovered. Do not widen history or invent current activity when evidence is absent. Preserve later real response/tool progress. No Claude mapping is proposed because this investigation did not establish a reliable native event; this is not an exhaustive claim that Claude lacks compaction support.
+
+Implementation scope: Codex mapper/driver and focused tests, Lead progress projection and its actual `lead-progress.test.tsx` suite. Apply Fast owns the complete slice. Keep existing layout and accessibility; no visual redesign or context-occupancy meter. Use RED→GREEN tests and verify shared mobile/desktop markup. Lead owns official artifact updates.
+
+Implementation task: `task-6dbe09ac-fc3a-4be3-9fe8-2b24d1f57ee6`, owner `apply-fast`; candidate pending.
+
+Attempt 1 is incomplete: production `CurrentEvents` filters the new diagnostic, and the regression demonstrates that the UI cannot receive current compaction evidence. Lead reviewed this source and extended the same owner's implementation scope to `packages/core/src/session/chat-history.ts` and focused projection tests. This is required transport/projection work within P-001, not a new product scope. Existing history bounds must remain unchanged. Attempt 2 is in progress. A separate cancellation test failure was routed to the original readiness implementation owner, without overlapping file ownership.
+
+Attempt 2 completed (result 20592 / ended 20593): canonical compaction now passes through bounded current-event retention into snapshot/live progress. Lead reviewed the retention diff and combined validation log `/tmp/p001-final-suites.log`: 354 passed, zero failures across Codex session driver, web and host chat-history suites. Typecheck and whitespace passed per implementer. Shared mobile/desktop behavior and missing-start limits remain as specified. Accepted as candidate; independent review is running with Quality task `task-42242c04-39b4-4a34-a996-c6f54bf9e0c9`, continuation attempt 3. No installation or activation yet.
+
+Independent review attempt 3 (result 23002 / ended 23003): **approve**, no blocking findings. The reviewer passed 154 focused tests and replayed the actual incident through mapper → current-event projection → snapshot → UI, observing compacting then waiting. A 5,000-turn check retained one terminal entry and one closed-task marker; an older Lead generation completion did not clear newer compaction. Existing 40/120 history and 200 activity limits remain unchanged. Shared accessible markup was tested; no live-browser, missing-start recovery or Claude compaction support is claimed. Lead accepted the review. Candidate ready to commit; activation remains pending.

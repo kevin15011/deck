@@ -1,3 +1,4 @@
+import { beginRunnerContributions, canonicalContributionJson, contributionHash, hasRunnerContributionProof } from "@deck/core";
 import { chmodSync, existsSync, readFileSync, statSync, writeFileSync, appendFileSync, renameSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -529,6 +530,7 @@ export function writeOpenCodeMcpConfig(
   const serverName = options.serverName.trim();
 
   const diagnostics: string[] = [];
+  if (serverName === "serena" || serverName === "context-mode") return { ok: false, path: configPath, serverName, diagnostics: ["Retired capability is disabled; no configuration written."] };
 
   if (!serverName) {
     diagnostics.push("MCP server name is required.");
@@ -609,9 +611,12 @@ export function writeOpenCodeMcpConfig(
   // This handles migration from opencode-plugin to MCP server
   if (options.pluginsToRemove && options.pluginsToRemove.length > 0) {
     const existingPlugins = Array.isArray(config.plugin) ? config.plugin : [];
-    const cleanedPlugins = existingPlugins.filter(
-      (p) => typeof p === "string" && !options.pluginsToRemove!.includes(p),
-    );
+    const cleanedPlugins = existingPlugins.filter((p) => {
+      if (typeof p !== "string" || !options.pluginsToRemove!.includes(p)) return true;
+      const proven = hasRunnerContributionProof(join(dirname(configPath), "deck/manifest.json"), { path: configPath, selector: { kind: "json-array", keys: ["plugin"], identity: canonicalContributionJson(p) } });
+      if (!proven) diagnostics.push(`Preserved ambiguous plugin entry in ${configPath}; review it individually before removal.`);
+      return !proven;
+    });
 
     if (cleanedPlugins.length > 0) {
       config.plugin = cleanedPlugins;
@@ -636,7 +641,15 @@ export function writeOpenCodeMcpConfig(
   }
 
   try {
-    writeFileSync(configPath, nextContent, "utf-8");
+    const root = dirname(configPath);
+    const accounting = beginRunnerContributions({ runnerId: "opencode", root, manifestPath: join(root, "deck/manifest.json"), deckVersion: "0.13.0",
+      targets: [{ path: configPath, selector: { kind: "json", keys: ["mcp", serverName] }, expectedHash: contributionHash(canonicalContributionJson(serverEntry)), sourceItemId: `mcp:${serverName}` }] });
+    const temporary = `${configPath}.deck-mcp-${process.pid}.tmp`;
+    try {
+      writeFileSync(temporary, nextContent, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      require("node:fs").renameSync(temporary, configPath);
+      accounting.commit();
+    } catch (error) { accounting.abandon(); throw error; } finally { if (existsSync(temporary)) require("node:fs").unlinkSync(temporary); }
     diagnostics.push(`MCP server '${serverName}' configured in OpenCode at ${configPath}.`);
 
     return { ok: true, path: configPath, serverName, diagnostics };

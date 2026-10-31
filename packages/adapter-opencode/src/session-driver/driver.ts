@@ -1,14 +1,24 @@
+import { acquireInstallationUse } from "../../../core/src/installation-use";
+import { verifyOpenCodeNativeRole } from "../native-role";
+import { ROLE_TOOL_POLICY, readOnlyMcpTools, isReadOnlyRole } from "@deck/core/session/role-tool-policy";
+import {correlatedOpenCodeEdits} from "./mapper";
+import { contextCapacity, contextIdentity, sanitizeContextObservation } from "@deck/core/session/events";
 import { openCodeProjectConfigDisabled, pendingOpenCodeProjectSources } from "../personal-mcp";
 import { prepareImages, redactImagePayload } from "./images";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import type { DriverDecision, DriverHostIo, DriverImageInput, DriverProbe, DriverTaskHandle, DriverTaskInput, RunnerSessionDriver, SupervisedChild, TurnOutcome } from "@deck/core/session/driver";
 import { validateQuestions, validateQuestionAnswers, type DriverQuestionAnswer, type Question } from "@deck/core/session/question";
 import { redactText } from "@deck/core/session/redaction";
 import { conflictingOpenCodeMcp, buildOpenCodeLaunch, type OpenCodeLaunchOptions } from "./launch";
 import { OpenCodeEventMapper, OpenCodeSseParser, OPENCODE_PROTOCOL, record } from "./mapper";
+import { classifyOpenCodeFailure } from "./failure";
+import { OpenCodeTransportError, readOpenCodeBody } from './transport';
+import { DriverStartupCleanupError } from '@deck/core/session/failure';
 
 export const OPENCODE_TESTED_VERSIONS = { min: "1.18.31", maxTested: "1.18.31" } as const;
 export type OpenCodeSessionDriverOptions = OpenCodeLaunchOptions & {
+  requireNativeRole?: boolean;
   readinessMs?: number; escalationMs?: number; killGraceMs?: number;
   exec?: (command: string, args: readonly string[], options: { cwd: string; timeoutMs: number }) => Promise<{ code: number | null; stdout: string }>;
 };
@@ -17,21 +27,34 @@ const nativeExec: NonNullable<OpenCodeSessionDriverOptions["exec"]> = (cmd, args
 });
 const compare = (a: string, b: string) => { const aa = a.split(".").map(Number), bb = b.split(".").map(Number); for (let i = 0; i < 3; i++) if (aa[i] !== bb[i]) return aa[i]! - bb[i]!; return 0; };
 
-type Turn = { settle: (outcome: TurnOutcome) => void; interrupted: boolean; forced?: boolean; timer?: ReturnType<typeof setTimeout>; controller: AbortController };
+function matchesPermission(pattern: string, value: string): boolean {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  return new RegExp(`^${escaped}$`).test(value);
+}
+
+type Turn = { confirmInvocation?: (info: Record<string, unknown>) => void; settle: (outcome: TurnOutcome) => void; interrupted: boolean; contextCompacted?: boolean; forced?: boolean; timer?: ReturnType<typeof setTimeout>; controller: AbortController };
 
 class OpenCodeTask {
   private base = "";
   private nativeId = "";
   private child!: SupervisedChild;
+  private installationUse?: ReturnType<typeof acquireInstallationUse>;
   private current?: Turn;
   private readonly lifetime = new AbortController();
   private closed = false;
+  private closing?: Promise<void>;
   private serverDead = false;
   private termination?: Promise<void>;
+  private transportFailure?: OpenCodeTransportError;
+  private transportCleanup?: Promise<void>;
   private readonly seenPermissions = new Set<string>();
   private readonly seenQuestions = new Set<string>();
   private stream?: Promise<void>;
   private authorization = "";
+  private nativePermissions: Array<{permission:string;pattern:string;action:string}> = [];
+  // This task owns one native server. Keep only validated limits, keyed by the
+  // exact provider/model tuple; no cross-server or growing global cache.
+  private readonly contextLimits = new Map<string, number>();
   private readonly mapper = new OpenCodeEventMapper();
   constructor(private readonly input: DriverTaskInput, private readonly io: DriverHostIo, private readonly options: OpenCodeSessionDriverOptions) {}
 
@@ -42,10 +65,54 @@ class OpenCodeTask {
     this.current = undefined; if (turn.timer) clearTimeout(turn.timer); turn.controller.abort(); turn.settle(outcome);
   }
 
+  private failTransport(error: OpenCodeTransportError, releaseReader?: () => Promise<void>): Promise<void> {
+    if (this.transportCleanup) return this.transportCleanup;
+    this.transportFailure = error; this.serverDead = true;
+    this.emit({ kind: 'diagnostic', data: { code: error.code, ...error.size } });
+    this.lifetime.abort(error); this.current?.controller.abort(error);
+    if (this.current?.timer) { clearTimeout(this.current.timer); this.current.timer = undefined; }
+    // Keep ownership until the server group has drained; its exit must not
+    // overwrite the local transport cause or allow another turn to start.
+    this.transportCleanup = (async () => {
+      // An SSE caller releases its own reader here; HTTP failures also wait
+      // for the lifetime abort to release the separately owned SSE reader.
+      try {
+        if (releaseReader) await releaseReader(); else await this.stream;
+        await this.terminate();
+      } catch (cleanupError) {
+        this.emit({kind:'diagnostic',data:{code:'opencode-transport-cleanup-failed'}});
+        throw cleanupError;
+      } finally {
+        this.finish({ status: 'failed', error: error.code, failure: error.failure });
+      }
+    })();
+    // Retain rejection for close()/host ownership; observe it immediately even
+    // when the stream or a background HTTP caller owns the failure path.
+    void this.transportCleanup.catch(() => {});
+    return this.transportCleanup;
+  }
+
   async initialize(): Promise<void> {
     const launch = buildOpenCodeLaunch(this.input, this.io, this.options);
     this.authorization = `Basic ${Buffer.from(`opencode:${launch.env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`;
-    this.child = await this.io.spawn(launch.command, launch.args, { cwd: this.input.cwd, env: launch.env });
+    const root = this.input.nativeRoleDescriptor?.source.root;
+    if (root) this.installationUse = acquireInstallationUse(root);
+    try {
+      if (root) verifyOpenCodeNativeRole(this.input.nativeRoleDescriptor!);
+      // The gated shell cannot load plugins before its birth-identity lease is published.
+      this.child = await this.io.spawn(root ? "/bin/sh" : launch.command, root
+        ? ["-c", 'IFS= read -r grant && [ "$grant" = launch ] || exit 125; exec "$@"', 'deck-opencode-gate', launch.command, ...launch.args]
+        : launch.args, { cwd: this.input.cwd, env: launch.env });
+      if (this.installationUse) {
+        const { workerPid } = await this.child.ready;
+        const release = this.installationUse.trackProcess(workerPid);
+        void this.child.exited.finally(() => { release(); this.installationUse?.release(); }).catch(() => {});
+        this.child.writeStdin("launch\n");
+      }
+    } catch (error) {
+      if (this.child) await this.child.terminateGroup(this.options.killGraceMs ?? 2000);
+      this.installationUse?.release(); throw error;
+    }
     let endpointResolve!: (url: string) => void, endpointReject!: (e: Error) => void;
     const endpoint = new Promise<string>((resolve, reject) => { endpointResolve = resolve; endpointReject = reject; });
     let output = "";
@@ -55,7 +122,7 @@ class OpenCodeTask {
       if (match && Number(match[1]) > 0 && Number(match[1]) <= 65535) endpointResolve(`http://127.0.0.1:${match[1]}`);
     };
     this.child.onStdout(onOutput); this.child.onStderr(onOutput); this.child.endStdin();
-    void this.child.exited.then(() => { this.serverDead = true; endpointReject(new Error("OpenCode server exited before readiness")); this.lifetime.abort(); if (!this.current?.forced) this.finish({ status: "failed", error: "OpenCode server exited" }); }, () => { this.serverDead = true; endpointReject(new Error("OpenCode anchor lost")); this.lifetime.abort(); if (!this.current?.forced) this.finish({ status: "failed", error: "OpenCode anchor lost" }); });
+    void this.child.exited.then(exit => { this.serverDead = true; endpointReject(new Error("OpenCode server exited before readiness")); this.lifetime.abort(); if (!this.transportFailure && !this.current?.forced) this.finish({ status: "failed", error: "OpenCode server exited", failure: exit.anchorLost ? { category: "unknown", origin: "unknown", certainty: "inferred" } : { category: "runner-process", origin: "runner", certainty: "reported" } }); }, () => { this.serverDead = true; endpointReject(new Error("OpenCode anchor lost")); this.lifetime.abort(); if (!this.transportFailure && !this.current?.forced) this.finish({ status: "failed", error: "OpenCode anchor lost", failure: { category: "unknown", origin: "unknown", certainty: "inferred" } }); });
     const startup = new AbortController();
     const startupSignal = AbortSignal.any([this.lifetime.signal, startup.signal]);
     const startupFailure = new Promise<never>((_resolve, reject) => {
@@ -66,6 +133,7 @@ class OpenCodeTask {
       const [url] = await Promise.all([endpoint, this.child.ready]);
       startupSignal.throwIfAborted();
       this.base = url;
+      void this.loadContextLimits();
       const config = await this.request("/config", undefined, startupSignal);
       if (!record(config) || !record(config.mcp)) throw new Error("opencode-native-config-unavailable");
       const conflicts = conflictingOpenCodeMcp(config, launch, this.input.suppressedMcpServers);
@@ -89,14 +157,31 @@ class OpenCodeTask {
         this.emit({ kind: "diagnostic", data: { code: "native-memory-capture-unverified", provider: "supermemory", runnerId: "opencode", message: "Native Supermemory recall and explicit tools are enabled. Automatic capture completion is not acknowledged by this managed server lifecycle." } });
       }
       const agents = await this.request("/agent", undefined, startupSignal);
-      const nativeAgent = Array.isArray(agents) ? agents.find(agent => record(agent) && agent.name === (config.default_agent ?? "build")) : undefined;
+      const nativeAgent = Array.isArray(agents) ? agents.find(agent => record(agent) && agent.name === (this.input.nativeRoleDescriptor?.roleRef ?? config.default_agent ?? "build")) : undefined;
       if (!record(nativeAgent) || !Array.isArray(nativeAgent.permission)) throw new Error("opencode-native-permission-policy-unavailable");
+      if (this.input.nativeRoleDescriptor) {
+        const role = this.input.nativeRoleDescriptor;
+        if (nativeAgent.prompt !== role.instructions || !role.hooks.every(hook => config.plugin?.includes(hook.command) || config.plugin?.includes(new URL(hook.command).pathname))) throw new Error("opencode-native-role-mismatch");
+      }
       const permission = [{permission:"*",pattern:"*",action:this.input.approvals === "relay" ? "ask" : "allow"}];
       // Native compilation owns defaults, precedence, agent overrides and ~/ expansion.
       // The relay may require approval for an allow; it never promotes a native deny.
       for (const rule of nativeAgent.permission) {
         if (!record(rule) || typeof rule.permission !== "string" || typeof rule.pattern !== "string" || !["ask","allow","deny"].includes(rule.action)) throw new Error("opencode-native-permission-policy-invalid");
         permission.push({permission:rule.permission,pattern:rule.pattern,action:rule.action === "allow" && this.input.approvals === "relay" ? "ask" : rule.action});
+      }
+      this.nativePermissions = [...permission];
+      if (isReadOnlyRole(this.input.nativeRoleDescriptor?.roleId ?? `deck-${this.input.memberId.replace(/^deck-/, "")}`)) {
+        const allowed = [...ROLE_TOOL_POLICY.builtins, ...readOnlyMcpTools(Object.keys(ROLE_TOOL_POLICY.mcp), (server, tool) => [`${server}_${server === "web-search" ? `tavily_${tool}` : tool}`])];
+        // Restrict the native compiled policy without overriding any existing deny.
+        // Exact known read tools retain their native rules; all other identities are denied.
+        const nativeRules = [...permission];
+        permission.length = 0;
+        permission.push({permission:"*",pattern:"*",action:"deny"});
+        for (const tool of allowed) {
+          const rules = nativeRules.filter(rule => matchesPermission(rule.permission, tool));
+          for (const rule of rules) permission.push({...rule,permission:tool});
+        }
       }
       if (this.input.disableNativeDelegation) permission.push({permission:"task",pattern:"*",action:"deny"});
       if (!this.input.disableNativeDelegation) this.emit({ kind: "diagnostic", data: { code: "native-delegation-not-disabled" } });
@@ -118,43 +203,110 @@ class OpenCodeTask {
       for (const question of Array.isArray(questions) ? questions : []) this.question(question);
     };
     try { await Promise.race([setup(), startupFailure]);
-    } catch (error) { await this.close(); throw error; } finally { clearTimeout(timeout); }
+    } catch (error) {
+      try { await this.close(); }
+      catch { throw new DriverStartupCleanupError(() => this.close(), this.transportFailure?.failure); }
+      throw error;
+    } finally { clearTimeout(timeout); }
+  }
+
+  /** One bounded local metadata request, independent of readiness/turn latency.
+   * The inventory CLI does not retain model limits, so it cannot supply them.
+   * If this has not completed by a prompt response, publish used tokens alone. */
+  private async loadContextLimits(): Promise<void> {
+    try {
+      const response = await fetch(this.base + '/provider', { redirect: 'error', headers: { authorization: this.authorization }, signal: AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(1500)]) });
+      if (!response.ok || !response.body) { await response.body?.cancel(); return; }
+      const reader = response.body.getReader(), chunks: Uint8Array[] = [];
+      let bytes = 0;
+      try {
+        for (;;) {
+          const chunk = await reader.read(); if (chunk.done) break;
+          bytes += chunk.value.byteLength;
+          if (bytes > 4 * 1024 * 1024) { await reader.cancel(); return; }
+          chunks.push(chunk.value);
+        }
+      } finally { reader.releaseLock(); }
+      const catalog: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (this.closed || this.lifetime.signal.aborted || !record(catalog) || !Array.isArray(catalog.all)) return;
+      for (const provider of catalog.all) {
+        if (!record(provider) || !contextIdentity(provider.id) || !record(provider.models)) continue;
+        for (const [modelId, model] of Object.entries(provider.models)) {
+          if (this.contextLimits.size >= 10000) return;
+          const capacity = record(model) && record(model.limit) ? contextCapacity(model.limit.context) : null;
+          if (contextIdentity(modelId) && capacity !== null) this.contextLimits.set(JSON.stringify([provider.id, modelId]), capacity);
+        }
+      }
+    } catch { /* Optional metadata never delays or fails a turn. */ }
   }
 
   private async request(path: string, body?: unknown, signal?: AbortSignal, method?: "PATCH"): Promise<unknown> {
+    const requestSignal = AbortSignal.any([this.lifetime.signal, signal ?? AbortSignal.timeout(5000)]);
+    try {
     const response = await fetch(this.base + path, {
       method: method ?? (body === undefined ? "GET" : "POST"), headers: { authorization: this.authorization, "content-type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: signal ?? AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(5000)]),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: requestSignal,
     });
-    if (!response.ok) throw new Error(`OpenCode HTTP ${response.status} for ${path}`);
-    const text = await response.text(); if (!text) return undefined;
-    try { return JSON.parse(text); } catch { throw new Error(`OpenCode invalid JSON for ${path}`); }
+    if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new Error(`OpenCode HTTP ${response.status} for ${path}`); }
+    const text = await readOpenCodeBody(response, requestSignal); if (!text) return undefined;
+    try { return JSON.parse(text); } catch { throw new OpenCodeTransportError('opencode-http-invalid-body'); }
+    } catch (error) { if (error instanceof OpenCodeTransportError) await this.failTransport(error).catch(() => {}); throw error; }
   }
 
   private async readStream(body: ReadableStream<Uint8Array>): Promise<void> {
-    const reader = body.getReader(), decoder = new TextDecoder(), parser = new OpenCodeSseParser();
+    const reader = body.getReader(), decoder = new TextDecoder('utf-8', { fatal: true }), parser = new OpenCodeSseParser();
+    const cancel = () => { void reader.cancel().catch(() => {}); };
+    this.lifetime.signal.addEventListener('abort', cancel, { once: true });
+    let cleanup: Promise<void> | undefined;
+    const releaseReader = () => cleanup ??= (async () => { this.lifetime.signal.removeEventListener('abort', cancel); await reader.cancel().catch(() => {}); reader.releaseLock(); })();
     try {
-      while (!this.closed) {
-        const chunk = await reader.read(); if (chunk.done) throw new Error("OpenCode SSE ended");
-        for (const event of parser.push(decoder.decode(chunk.value, { stream: true }))) this.event(event);
+      while (!this.closed && !this.serverDead) {
+        const chunk = await reader.read();
+        const decode = (bytes?: Uint8Array) => {
+          let text: string;
+          try { text = bytes ? decoder.decode(bytes, { stream: true }) : decoder.decode(); } catch { throw new OpenCodeTransportError('opencode-sse-invalid-frame'); }
+          parser.push(text, event => this.event(event));
+        };
+        if (chunk.done) { decode(); throw new Error("OpenCode SSE ended"); }
+        // Decode through one wire line at a time: fatal UTF-8 later in a
+        // coalesced read must not erase already complete, valid SSE frames.
+        for (let start = 0; start < chunk.value.length;) {
+          const newline = chunk.value.indexOf(10, start);
+          const end = newline < 0 ? chunk.value.length : newline + 1;
+          decode(chunk.value.subarray(start, end)); start = end;
+        }
       }
     } catch (error) {
-      if (!this.closed && !this.serverDead) { this.serverDead = true; this.finish({ status: "failed", error: redactText((error as Error).message, 400) }); void this.terminate().catch(() => {}); }
-    } finally { reader.releaseLock(); }
+      if (!this.closed && !this.serverDead) {
+        if (error instanceof OpenCodeTransportError) await this.failTransport(error, releaseReader).catch(() => {});
+        else { this.serverDead = true; this.finish({ status: "failed", error: redactText((error as Error).message, 400), failure: { category: "network", origin: "unknown", certainty: "inferred" } }); void this.terminate().catch(() => {}); }
+      }
+    } finally { await releaseReader(); }
   }
 
   private event(raw: unknown) {
+    if (this.closed || this.serverDead) return;
     raw = redactImagePayload(raw);
     const p = record(raw) && record(raw.properties) ? raw.properties : {};
     const sid = p.sessionID ?? (record(p.part) ? p.part.sessionID : undefined) ?? (record(p.info) ? p.info.sessionID : undefined);
     if (sid && sid !== this.nativeId) return;
-    for (const event of this.mapper.map(raw)) this.emit(event);
+    if (record(raw) && raw.type === "message.updated" && record(p.info) && sid === this.nativeId) this.current?.confirmInvocation?.(p.info);
+    // SSE assistant updates carry a parent id but this request does not yet
+    // know its native user-message id. Use the existing correlated HTTP result
+    // below instead of assigning a late same-session update to a new request.
+    for (const event of this.mapper.map(raw)) if (event.kind !== 'usage') this.emit(event);
     if (!record(raw)) return;
+    if (raw.type === 'session.compacted' && sid === this.nativeId) {
+      if (this.current) this.current.contextCompacted = true;
+      this.emit({ kind: 'diagnostic', data: { code: 'context.invalidated', reason: 'compaction', nativeThreadId: this.nativeId } });
+    }
     if (raw.type === "permission.asked") this.permission(p);
     if (raw.type === "question.asked") this.question(p);
     if (raw.type === "session.error") {
       const aborted = this.current?.interrupted && record(p.error) && p.error.name === "MessageAbortedError";
-      this.finish(aborted ? { status: "interrupted" } : { status: "failed", error: "OpenCode session error" });
+      // This event has only session identity, no request/turn identity. Preserve its terminal
+      // behavior without assigning an uncorrelated provider cause to a newer request.
+      this.finish(aborted ? { status: "interrupted" } : { status: "failed", error: "OpenCode session error", failure: { category: "unknown", origin: "unknown", certainty: "inferred" } });
     }
     if ((raw.type === "session.idle" || (raw.type === "session.status" && record(p.status) && p.status.type === "idle")) && this.current?.interrupted) this.finish({ status: "interrupted" });
   }
@@ -172,7 +324,10 @@ class OpenCodeTask {
       const identity = patterns.length ? JSON.stringify({ permission, patterns }) : undefined;
       const boundedIdentity = identity && Buffer.byteLength(identity, "utf8") <= 16 * 1024 ? identity : undefined;
       const supportsAlways = Array.isArray(raw.always) && raw.always.length > 0;
-      if (turn && !turn.interrupted && this.input.approvals === "relay") {
+      const readOnly = isReadOnlyRole(this.input.nativeRoleDescriptor?.roleId ?? `deck-${this.input.memberId.replace(/^deck-/, "")}`);
+      const allowed = [...ROLE_TOOL_POLICY.builtins, ...readOnlyMcpTools(Object.keys(ROLE_TOOL_POLICY.mcp), (server, tool) => [`${server}_${server === "web-search" ? `tavily_${tool}` : tool}`])];
+      const denied = (patterns.length ? patterns : ["*"]).some(pattern => this.nativePermissions.filter(rule => matchesPermission(rule.permission,permission) && matchesPermission(rule.pattern,String(pattern))).at(-1)?.action === "deny");
+      if (turn && !turn.interrupted && this.input.approvals === "relay" && !denied && (!readOnly || allowed.includes(permission))) {
         try {
           decision = await this.io.approval({
             approvalId: raw.id, tool: permission, toolKey: `opencode:${permission}`,
@@ -188,11 +343,11 @@ Patterns: ${raw.always.join("\n")}`,
           });
         } catch { /* Broker failure denies. */ }
       }
-      if (this.closed) return;
+      if (this.closed || this.serverDead) return;
       if (!turn || this.current !== turn || turn.interrupted || turn.controller.signal.aborted) decision = { decision: "deny" };
       const reply = decision.decision === "allow" ? (decision.scope === "always" && supportsAlways ? "always" : "once") : "reject";
       await this.request(`/permission/${encodeURIComponent(raw.id)}/reply`, { reply });
-    })().catch(error => { this.emit({ kind: "diagnostic", data: { code: "opencode-permission-reply-failed", message: redactText((error as Error).message, 300) } }); if (turn && this.current === turn) this.finish({ status: "failed", error: "OpenCode permission reply failed" }); });
+    })().catch(error => { if (this.transportFailure) return; this.emit({ kind: "diagnostic", data: { code: "opencode-permission-reply-failed", message: redactText((error as Error).message, 300) } }); if (turn && this.current === turn) this.finish({ status: "failed", error: "OpenCode permission reply failed" }); });
   }
 
   private question(raw: unknown) {
@@ -213,7 +368,7 @@ Patterns: ${raw.always.join("\n")}`,
           if (answer.outcome === "answered" && !validateQuestionAnswers(questions, answer.answers).ok) answer = { outcome: "dismissed" };
         }
       } catch { answer = { outcome: "dismissed" }; }
-      if (this.closed) return;
+      if (this.closed || this.serverDead) return;
       if (!turn || this.current !== turn || turn.interrupted || turn.controller.signal.aborted) answer = { outcome: "cancelled" };
       const path = `/question/${encodeURIComponent(raw.id)}`;
       if (answer.outcome === "answered") {
@@ -228,12 +383,16 @@ Patterns: ${raw.always.join("\n")}`,
         }
       }
       await this.request(path + "/reject", {});
-    })().catch(error => { this.emit({ kind: "diagnostic", data: { code: "opencode-question-reply-failed", message: redactText((error as Error).message, 300) } }); if (turn && this.current === turn) this.finish({ status: "failed", error: "OpenCode question reply failed" }); });
+    })().catch(error => { if (this.transportFailure) return; this.emit({ kind: "diagnostic", data: { code: "opencode-question-reply-failed", message: redactText((error as Error).message, 300) } }); if (turn && this.current === turn) this.finish({ status: "failed", error: "OpenCode question reply failed" }); });
   }
 
   send(prompt: string, images?: readonly DriverImageInput[]): Promise<TurnOutcome> {
     if (this.closed || this.serverDead) return Promise.resolve({ status: "failed", error: "OpenCode task is closed" });
     if (this.current) return Promise.reject(new Error("An OpenCode turn is already running"));
+    if (this.input.nativeRoleDescriptor) {
+      try { verifyOpenCodeNativeRole(this.input.nativeRoleDescriptor); }
+      catch { return Promise.resolve({status:"failed",error:"The installed OpenCode team changed. Reinstall its team from Review & Install, then retry the session."}); }
+    }
     let nativeImages: ReturnType<typeof prepareImages>;
     try { nativeImages = prepareImages(images); }
     catch { return Promise.resolve({ status: "failed", error: "image-input-invalid" }); }
@@ -242,43 +401,86 @@ Patterns: ${raw.always.join("\n")}`,
     if (split <= 0) return Promise.resolve({ status: "failed", error: "OpenCode model must be provider/model" });
     const done = new Promise<TurnOutcome>(settle => { this.current = { settle, interrupted: false, controller: new AbortController() }; });
     const turn = this.current!;
-    this.emit({ kind: "turn.started", data: { nativeSessionId: this.nativeId, model: this.input.assignment.modelId } });
+    if (this.io.claimInput?.() === false) { this.finish({ status: "interrupted" }); return done; }
+    const role = this.input.nativeRoleDescriptor;
+    // OpenCode 1.18.31 accepts caller message IDs and echoes the selected agent
+    // in message.updated. Keep native timestamp ordering and bind one exact POST.
+    const messageId = `msg_${BigInt.asUintN(48, BigInt(Date.now()) * 4096n).toString(16).padStart(12,"0")}${randomUUID().replaceAll("-", "").slice(0,14)}`;
+    if (role) {
+      let revoked = false, observed = false;
+      const current = () => {
+        if (this.current !== turn || turn.interrupted || turn.controller.signal.aborted || this.closed || this.serverDead || this.lifetime.signal.aborted) revoked = true;
+        try { verifyOpenCodeNativeRole(role); } catch { revoked = true; }
+        return observed && !revoked;
+      };
+      turn.confirmInvocation = info => {
+        if (info.id !== messageId || info.role !== "user") return;
+        if (info.agent !== role.roleRef) { revoked = true; return; }
+        if (observed || revoked) return;
+        observed = true;
+        if (!current() || this.io.validatedLaunch?.({ roleId: role.roleId, generation: role.generation, nativeSessionId: this.nativeId, launchId: messageId, current }) === false) {
+          revoked = true;
+          this.finish({ status: "failed", error: "opencode-launch-binding-revoked" });
+          void this.terminate().catch(() => {});
+        }
+      };
+    }
+    this.emit({ kind: "turn.started", data: { nativeSessionId: this.nativeId, nativeThreadId: this.nativeId, model: this.input.assignment.modelId } });
     void this.request(`/session/${encodeURIComponent(this.nativeId)}/message`, {
-      system: this.input.rolePrompt, model: { providerID: modelId.slice(0, split), modelID: modelId.slice(split + 1) },
+      ...(role ? { messageID: messageId } : {}), system: this.input.rolePrompt, ...(this.input.nativeRoleDescriptor ? { agent: this.input.nativeRoleDescriptor.roleRef } : {}), model: { providerID: modelId.slice(0, split), modelID: modelId.slice(split + 1) },
       ...(this.input.assignment.thinking && this.input.assignment.thinking !== "off" ? { variant: this.input.assignment.thinking } : {}), parts: [...(prompt || !nativeImages.length ? [{ type: "text", text: prompt }] : []), ...nativeImages.map(image => ({ type: "file", mime: image.mimeType, filename: image.name, url: `data:${image.mimeType};base64,${image.data}` }))],
     }, AbortSignal.any([turn.controller.signal, this.lifetime.signal])).then(result => {
-      if (this.current !== turn) return;
+      if (this.current !== turn || this.serverDead) return;
       if (turn.interrupted && record(result) && record(result.info) && record(result.info.error) && result.info.error.name === "MessageAbortedError") return this.finish({ status: "interrupted" });
-      if (!record(result) || !record(result.info) || result.info.error) return this.finish({ status: "failed", error: "OpenCode message failed" });
+      if (!record(result) || !record(result.info) || result.info.error) return this.finish({ status: "failed", error: "OpenCode message failed", failure: classifyOpenCodeFailure(record(result) && record(result.info) ? result.info.error : undefined) });
+      if (result.info.sessionID === this.nativeId && !turn.interrupted) {
+        for (const event of this.mapper.map({ type: 'message.updated', properties: { info: result.info } })) {
+          if (event.kind === 'usage') {
+            const { context: reported, ...native } = event.data;
+            const capacity = this.contextLimits.get(JSON.stringify([result.info.providerID, result.info.modelID])) ?? null;
+            const context = record(reported) ? sanitizeContextObservation({ ...reported, capacity }) : undefined;
+            this.emit({ ...event, data: { ...native, requestInput:null, requestInputUnknownReason:'provider-normalization-unverified', ...(!turn.contextCompacted && context ? { context } : {}) } });
+          }
+        }
+      }
+      if(!turn.interrupted && result.info.sessionID===this.nativeId)for(const event of correlatedOpenCodeEdits(result,this.nativeId))this.emit(event);
       for (const part of Array.isArray(result.parts) ? result.parts : []) if (record(part) && part.type === "text" && typeof part.text === "string") this.emit({ kind: "message.completed", data: { text: part.text, messageId: result.info.id }, raw: part });
       this.finish({ status: turn.interrupted ? "interrupted" : "completed" });
-    }, error => { if (this.current === turn && !turn.interrupted) this.finish({ status: "failed", error: redactText((error as Error).message, 400) }); });
+    }, error => { if (this.current === turn && !turn.interrupted && !this.serverDead) this.finish({ status: "failed", error: redactText((error as Error).message, 400) }); });
     return done;
   }
 
   async interrupt(): Promise<void> {
-    const turn = this.current; if (!turn || turn.interrupted) return;
+    const turn = this.current; if (!turn || turn.interrupted || this.serverDead) return;
     turn.interrupted = true;
     turn.timer = setTimeout(() => {
       if (this.current !== turn) return;
       turn.forced = true;
-      void this.terminate().then(() => this.finish({ status: "interrupted-forced" }), () => this.finish({ status: "failed", error: "OpenCode forced interruption cleanup failed" }));
+      void this.terminate().then(() => {
+        if (this.current === turn && !this.transportFailure) this.finish({ status: "interrupted-forced" });
+      }, () => {
+        if (this.current === turn && !this.transportFailure) this.finish({ status: "failed", error: "OpenCode forced interruption cleanup failed" });
+      });
     }, this.options.escalationMs ?? 10_000);
     try { await this.request(`/session/${encodeURIComponent(this.nativeId)}/abort`, {}); } catch { /* Wait for native terminal event or escalation. */ }
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return; this.closed = true;
-    this.finish({ status: "interrupted-forced" }); this.lifetime.abort();
-    if (this.child) await this.terminate().catch(() => {});
-    await this.stream;
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    this.closed = true;
+    return this.closing = (async () => {
+      if (this.transportCleanup) { await this.transportCleanup; await this.stream; return; }
+      this.finish({ status: "interrupted-forced" }); this.lifetime.abort();
+      if (this.child) await this.terminate();
+      await this.stream;
+    })();
   }
   get id() { return this.nativeId; }
 }
 
 export function createOpenCodeSessionDriver(options: OpenCodeSessionDriverOptions = {}): RunnerSessionDriver {
   return {
-    runnerId: "opencode", protocol: OPENCODE_PROTOCOL, testedVersions: { ...OPENCODE_TESTED_VERSIONS },
+    runnerId: "opencode", supportsInputClaim: true, protocol: OPENCODE_PROTOCOL, testedVersions: { ...OPENCODE_TESTED_VERSIONS },
     async probe(ctx): Promise<DriverProbe> {
       let text: string;
       try { const result = await (options.exec ?? nativeExec)(ctx.executablePath ?? options.executable ?? "opencode", ["--version"], { cwd: ctx.cwd, timeoutMs: 5000 }); if (result.code !== 0) throw Error("probe failed"); text = result.stdout; } catch { return { status: "blocked", reasonCode: "opencode-not-installed", capabilities: [] }; }
@@ -289,6 +491,11 @@ export function createOpenCodeSessionDriver(options: OpenCodeSessionDriverOption
       return { version, status: untested ? "degraded" : "ready", ...(untested ? { reasonCode: "opencode-version-untested" } : {}), capabilities: ["native-session-resume", "approval-relay", "interrupt-abort", "native-config-inheritance", "server-basic-auth"], mcpIsolationVerified: false };
     },
     async startTask(input, io): Promise<DriverTaskHandle> {
+      if (options.requireNativeRole && !input.nativeRoleDescriptor) throw new Error("opencode-session-generation-unverified");
+      if (input.nativeRoleDescriptor) {
+        if (input.nativeRoleDescriptor.roleId !== (input.nativeRole?.roleId ?? `deck-${input.memberId.replace(/^deck-/, "")}`)) throw new Error("native-role-binding-mismatch");
+        verifyOpenCodeNativeRole(input.nativeRoleDescriptor);
+      }
       const task = new OpenCodeTask(input, io, options); await task.initialize();
       return { nativeSessionId: Promise.resolve(task.id), done: task.send(input.prompt, input.images), send: (prompt, images) => task.send(prompt, images), interrupt: () => task.interrupt(), close: () => task.close() };
     },

@@ -1,3 +1,6 @@
+import { runPiModelDiscovery } from "../../../../packages/adapter-pi/src/model-discovery-command";
+import { withIdleRunnerMutation, RunnerMutationDeferredError } from "@deck/session-host";
+import { RunnerMutationDeferredScreen, stopDaemonForInstall } from "./screens/runner-mutation-deferred";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { readFileSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -324,6 +327,7 @@ export function modelConfigurationFailureMessage(error: unknown): string {
     "Claude plugin selection is indeterminate; inspect global Deck metadata manually.",
   ];
   if (publicMessages.includes(message)) return `Model configuration failed. ${message}`;
+  if (message.startsWith("Runner changes deferred: daemon work is active")) return "Deck is busy: open sessions block runner changes, even between turns. Close sessions or stop the Deck daemon, then retry.";
   const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
   return `Model configuration failed. Apply error: ${typeof code === "string" && ["EACCES", "EPERM", "EEXIST", "ENOENT", "ENOSPC", "EROFS"].includes(code) ? code : "unknown"}.`;
 }
@@ -674,6 +678,7 @@ function humanizeModelName(modelName: string): string {
 
 /** Narrow composition seam for deterministic discovery UI tests; defaults preserve production wiring. */
 export type DeckAppDependencies = {
+  stopDaemonForInstall?: typeof stopDaemonForInstall;
   getAdapter?: typeof getAdapter;
   adapterRegistry?: import("@deck/core").AdapterRegistry;
   resolveProjectRoot?: typeof resolveProjectRoot;
@@ -965,6 +970,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const [dashboardState, setDashboardState] = useState<RunnerDashboardState>(() => dependencies.initialDashboardState ?? createDefaultRunnerDashboardState());
   const [dashboardInventory, setDashboardInventory] = useState<CapabilityInventory | null>(dependencies.initialDashboardInventory ?? null);
   const [dashboardEnvironmentId, setDashboardEnvironmentId] = useState<EnvironmentId | null>(dependencies.initialDashboardEnvironmentId ?? null);
+  const [dashboardMutationDeferred, setDashboardMutationDeferred] = useState(false);
+  const [dashboardInstallAttempt, setDashboardInstallAttempt] = useState(0);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [dashboardActionResults, setDashboardActionResults] = useState<RunnerActionRunResult[]>([]);
   const [dashboardSerenaStages, setDashboardSerenaStages] = useState<RunnerSerenaStage[]>([]);
@@ -1191,6 +1198,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   }, []);
 
   useInput((input, key) => {
+    if (dashboardMutationDeferred) return;
     if (screen === "cross-configuration") return;
     if (modelConfigSavingRef.current) return;
     try { appendFileSync("/tmp/deck-debug.txt", `useInput TOP: key=${JSON.stringify(key)} screen=${screen}\n`); } catch {}
@@ -1429,7 +1437,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           dashboardState.runtime.runnerCommand,
         );
       };
-      const results = await runRunnerReviewPlan(dashboardState.plan!, {
+      const results = await withIdleRunnerMutation(() => runRunnerReviewPlan(dashboardState.plan!, {
         projectRoot: projectRoot,
         configStore: requiredConfigStore,
         runnerCommand: dashboardState.runtime.runnerCommand,
@@ -1636,6 +1644,10 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           const deckConfig = requiredConfigStore.readRequired();
           const effectiveDeckConfig = adapter.runnerId === "claude" ? {
             ...deckConfig,
+            capabilities: { "codebase-memory": {
+              enabled: deckConfig.capabilities?.["codebase-memory"].enabled ?? false,
+              runners: { ...deckConfig.capabilities?.["codebase-memory"].runners, claude: dashboardState.packageInstructions["codebase-memory"] === true },
+            } },
             adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: dashboardState.adaptiveMemory.provider === "supermemory", activeProvider: dashboardState.adaptiveMemory.provider },
             webSearch: { ...deckConfig.webSearch, enabled: dashboardState.selectedCapabilities["web-search"] === true, provider: dashboardState.webSearchProvider ?? deckConfig.webSearch.provider },
           } : adapter.runnerId === "codex" ? {
@@ -1691,10 +1703,14 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
               postInstallFollowUps: verifyResult.postInstallFollowUps ?? [],
             };
           } catch (error) {
+            log(`[runDashboardInstall] apply failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
             const primary = verificationFailure ?? modelConfigurationFailureMessage(error);
             let recovery = "Changes rolled back.";
             try { await rollbackOrThrow(adapter, backup); }
-            catch { recovery = "Rollback could not be completed. Review the runner files before retrying."; }
+            catch (rollbackError) {
+              log(`[runDashboardInstall] rollback failed: ${rollbackError instanceof Error ? rollbackError.stack ?? rollbackError.message : String(rollbackError)}`);
+              recovery = error instanceof Error && error.message.startsWith("Runner changes deferred") ? "Nothing was changed." : "Rollback could not be completed. Review the runner files before retrying.";
+            }
             throw new Error(`${primary} ${recovery}`);
           }
         },
@@ -1709,7 +1725,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
             identity: payload.identity,
           }, dashboardPlanBuilder));
         },
-      } as any);
+      } as any));
 
       log(`runDashboardInstall: runRunnerReviewPlan DONE. results=${results.length} cancelled=${cancelled} duration=${Date.now() - executionStart}ms`);
       
@@ -1764,6 +1780,10 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }
 
     const installPromise = runDashboardInstall().catch((err) => {
+      if (err instanceof RunnerMutationDeferredError && !cancelled) {
+        setDashboardMutationDeferred(true);
+        return;
+      }
       const msg = `[runDashboardInstall] FAILED: ${err instanceof Error ? err.stack : String(err)}`;
       log(msg);
       console.error(msg);
@@ -1793,7 +1813,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       controller.abort();
       clearDashboardSupermemoryEphemeralState();
     };
-  }, [dashboardState.screen, dashboardState.plan, dashboardState.runtime.runnerCommand, screen, supermemorySetup.token, selectedEnvironments, installedOpenCode?.command, openCodePreflight]);
+  }, [dashboardInstallAttempt, dashboardState.screen, dashboardState.plan, dashboardState.runtime.runnerCommand, screen, supermemorySetup.token, selectedEnvironments, installedOpenCode?.command, openCodePreflight]);
 
   // T3.5: orchestrator effect — fires when the user has confirmed the
   // upgrade. Calls `runUpgradeOrchestrator` with the captured
@@ -2807,20 +2827,16 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     // REQ-RBK-002: user-initiated rollback enter handling.
     if (screen === "rollback-confirm") {
       if (rollbackCursor === 0) {
-        // Apply — fire the rollback library. The library call is
-        // synchronous and mutates the filesystem, so we set the
-        // running state synchronously and resolve the result on the
-        // same tick. The "running" frame is brief by design; the
-        // terminal `completed` / `failed` frame is what the user
-        // will actually see.
+        // Show progress while coordinated idle admission and restoration run.
         if (!rollbackManifest) {
           setRollbackStatus({ mode: "failed", reason: "No backup available." });
           resetCursor("rollback-progress");
           return;
         }
         setRollbackStatus({ mode: "running" });
+        resetCursor("rollback-progress");
         try {
-          const result = rollbackLatest(rollbackManifest.deckVersionBefore);
+          const result = await rollbackLatest(rollbackManifest.deckVersionBefore);
           setRollbackStatus({ mode: "completed", restoredCount: result.restoredCount });
           addLog(
             `Rollback to v${result.rolledBackTo} complete (${result.restoredCount} files restored).`,
@@ -3699,7 +3715,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   }
 
   function runPiCommand(command: string, args: string[]) {
-    const result = spawnSync(command, args);
+    let result;
+    try { result = runPiModelDiscovery(command, args, spawnSync); }
+    catch(error) { return {stdout:"",stderr:error instanceof Error ? error.message : "Pi inventory blocked",exitCode:1}; }
     return {
       stdout: result.stdout,
       stderr: result.stderr,
@@ -3879,7 +3897,14 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       {screen === "personality-selection" ? (
         <PersonalitySelectionScreen cursor={cursor} selected={selectedPersonality} />
       ) : null}
-      {screen === "pi-runner-dashboard" ? (
+      {screen === "pi-runner-dashboard" && dashboardMutationDeferred ? (
+        <RunnerMutationDeferredScreen
+          stopDaemon={dependencies.stopDaemonForInstall}
+          onRetry={() => { setDashboardMutationDeferred(false); setDashboardInstallAttempt(value => value + 1); }}
+          onBack={() => { setDashboardMutationDeferred(false); setDashboardState(current => reduceRunnerDashboard(current, { type: "go-dashboard" }, dashboardPlanBuilder)); }}
+        />
+      ) : null}
+      {screen === "pi-runner-dashboard" && !dashboardMutationDeferred ? (
         <RunnerDashboardScreens
           state={dashboardState}
           installResults={dashboardActionResults}

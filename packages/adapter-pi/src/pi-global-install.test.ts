@@ -131,24 +131,24 @@ describe("ownership by hash", () => {
     writeFileSync(target, "# edited by the user\n");
 
     const plan = planPiGlobalInstall(desired({ files: desired().files.map((file) => (file.relPath.endsWith("deck-lead.md") ? { ...file, content: "# lead v2\n" } : file)) }), io());
-    expect(plan.blocked).toBe(true);
+    expect(plan.blocked).toBe(false);
     expect(plan.conflicts.map((conflict) => conflict.relPath)).toContain("deck/package/agents/deck-lead.md");
     expect(plan.conflicts[0]?.reason).toBe("modified");
-    expect(() => applyPiGlobalPlan(plan, io())).toThrow(/blocked/i);
+    applyPiGlobalPlan(plan, io());
     expect(readFileSync(target, "utf-8")).toBe("# edited by the user\n");
   });
 
-  test("a foreign file at a Deck-owned path blocks the plan before any mutation", () => {
+  test("a foreign file is preserved while other files install", () => {
     const foreign = join(agentDir, "deck/package/agents/deck-lead.md");
     mkdirSync(dirname(foreign), { recursive: true });
     writeFileSync(foreign, "foreign\n");
     const before = snapshotTree(agentDir);
 
     const plan = planPiGlobalInstall(desired(), io());
-    expect(plan.blocked).toBe(true);
+    expect(plan.blocked).toBe(false);
     expect(plan.conflicts[0]).toMatchObject({ relPath: "deck/package/agents/deck-lead.md", reason: "foreign" });
-    expect(() => applyPiGlobalPlan(plan, io())).toThrow();
-    expect(snapshotTree(agentDir)).toEqual(before);
+    applyPiGlobalPlan(plan, io());
+    expect(readFileSync(foreign,"utf8")).toBe("foreign\n");
   });
 
   test("files dropped from the desired state are removed only when unmodified", () => {
@@ -296,19 +296,20 @@ describe("mcp.json ownership", () => {
     expect(Object.keys(config.mcpServers)).toEqual(["my-tools"]);
   });
 
-  test("a foreign entry with a Deck-reserved name blocks the plan", () => {
+  test("a foreign MCP entry is preserved with a warning", () => {
     writeFileSync(paths().mcp, JSON.stringify({ mcpServers: { context7: { command: "/opt/custom-context7" } } }));
     const plan = planPiGlobalInstall(desired({ mcpServers: { context7: server("/usr/bin/npx") } }), io());
-    expect(plan.blocked).toBe(true);
+    expect(plan.blocked).toBe(false);
     expect(plan.conflicts.some((conflict) => conflict.relPath === "mcp.json#context7")).toBe(true);
     expect(readJson(paths().mcp).mcpServers.context7.command).toBe("/opt/custom-context7");
   });
 
-  test("a legacy Deck-written entry (bare command) is adopted and replaced", () => {
-    writeFileSync(paths().mcp, JSON.stringify({ mcpServers: { "context-mode": { command: "context-mode", args: [], env: {}, transport: "process" } } }));
-    const { plan } = install(desired({ mcpServers: { "context-mode": server("/usr/local/bin/context-mode") } }));
+  test("a legacy same-name entry is preserved without ownership proof", () => {
+    const original = JSON.stringify({ mcpServers: { "context-mode": { command: "context-mode", args: [], env: {}, transport: "process" } } });
+    writeFileSync(paths().mcp, original);
+    const plan = planPiGlobalInstall(desired({ mcpServers: { "context-mode": server("/usr/local/bin/context-mode") } }), io());
     expect(plan.blocked).toBe(false);
-    expect(readJson(paths().mcp).mcpServers["context-mode"]).toEqual(server("/usr/local/bin/context-mode"));
+    expect(readFileSync(paths().mcp, 'utf8')).toBe(original);
   });
 
   test("an owned server modified by the user is a conflict", () => {
@@ -317,7 +318,7 @@ describe("mcp.json ownership", () => {
     config.mcpServers.context7.env.EXTRA = "1";
     writeFileSync(paths().mcp, JSON.stringify(config));
     const plan = planPiGlobalInstall(desired({ mcpServers: { context7: server("/usr/bin/npx") } }), io());
-    expect(plan.blocked).toBe(true);
+    expect(plan.blocked).toBe(false);
     expect(plan.conflicts.some((conflict) => conflict.reason === "modified")).toBe(true);
   });
 });

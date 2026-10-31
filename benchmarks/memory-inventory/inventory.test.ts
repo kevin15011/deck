@@ -2,9 +2,15 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, readdir, rm, writeFile, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { assertAllowedRequest, classifyId, classifyNamespace, matchesSession, matchingSessionIds, readKey, redactDeep, runInventory, scrub, validateRequestCap } from "./inventory.ts";
+import { assertAllowedRequest, classifyId, classifyNamespace, matchesSession, matchingSessionIds, readKey, redactDeep, runInventory as inventory, scrub, validateRequestCap } from "./inventory.ts";
 import { parseArgs } from "./args.ts";
 
+// Only the external pacing delay is virtual; key/output validation and writes are real.
+const runInventory = (options: Parameters<typeof inventory>[0]) => inventory({ ...options, sleep: async () => {} });
+function summaryOf(result: Awaited<ReturnType<typeof inventory>>) {
+  expect('summary' in result && typeof result.summary === 'object' && result.summary !== null).toBe(true);
+  return result.summary as Record<string, any>;
+}
 let temp = "";
 const previous = process.env.SUPERMEMORY_INVENTORY_API_KEY_FILE;
 async function keyFixture(key = "SENTINEL_SECRET_KEY_123456") {
@@ -22,7 +28,7 @@ afterEach(async () => {
 describe("memory inventory safety", () => {
   test("rejects disallowed methods, paths, and namespaces before fetch", () => {
     let calls = 0;
-    const fetchImpl = (async () => { calls++; throw new Error("unexpected"); }) as typeof fetch;
+    const fetchImpl = (async () => { calls++; throw new Error("unexpected"); }) as unknown as typeof fetch;
     for (const [method, path] of [["PATCH", "/ns/sm_project_v1_kevin15011_deck"], ["POST", "/v4/search"], ["GET", "/ns/another/document/id"], ["DELETE", "/ns/sm_project_v1_kevin15011_deck/document/id"]]) {
       expect(() => assertAllowedRequest(method, path)).toThrow();
     }
@@ -40,7 +46,7 @@ describe("memory inventory safety", () => {
 
   test("dry-run is offline preflight and validates cap and flags", async () => {
     await keyFixture(); let calls = 0;
-    const fetchImpl = (async () => { calls++; throw new Error("must not fetch"); }) as typeof fetch;
+    const fetchImpl = (async () => { calls++; throw new Error("must not fetch"); }) as unknown as typeof fetch;
     const output = await runInventory({ fetchImpl, dryRun: true, outputRoot: join(temp, "out") });
     expect(output.preflight).toBe(true); expect(calls).toBe(0);
     for (const n of [0, -1, 1501, Number.NaN, 1.2]) expect(() => validateRequestCap(n)).toThrow();
@@ -71,39 +77,50 @@ describe("memory inventory safety", () => {
       if (url.pathname.endsWith("/profile/buckets")) return response({ buckets: {} });
       if (url.pathname.endsWith("/profile")) return response({ profile: { static: [], dynamic: [], buckets: {} } });
       throw new Error(`unhandled ${url.pathname}`);
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const logs: string[] = []; const oldLog = console.log; console.log = (v) => logs.push(String(v));
     const result = await runInventory({ fetchImpl, live: true, outputRoot: outside, maxRequests: 20, delayMs: 100, retries: 0, now: new Date("2026-10-21T02:00:00Z") });
     console.log = oldLog;
     const dir = join(outside, (await readdir(outside))[0]);
     for (const file of await readdir(dir)) expect(await readFile(join(dir, file), "utf8")).not.toContain(key);
-    expect(result.summary.exposedSessions).toHaveLength(1);
+    expect(summaryOf(result).exposedSessions).toHaveLength(1);
     expect(logs.join(" ")).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
-    expect(result.summary.classification.type["[REDACTED_TOKEN]"]).toBe(1);
-    expect(result.log.length).toBe(7);
-    expect(result.summary.counts.namespaces).toBe(2);
-    expect(result.summary.namespace).toBe("sm_project_v1_kevin15011_deck");
-    expect(result.log.filter((entry) => entry.path === "/namespaces")).toHaveLength(2);
+    expect(summaryOf(result).classification.type["[REDACTED_TOKEN]"]).toBe(1);
+    expect(result.log!.length).toBe(7);
+    expect(summaryOf(result).counts.namespaces).toBe(2);
+    expect(summaryOf(result).namespace).toBe("sm_project_v1_kevin15011_deck");
+    expect(result.log!.filter((entry) => entry.path === "/namespaces")).toHaveLength(2);
+  });
+
+  test("retry pacing preserves the minimum delay and caps Retry-After without wall-clock waits", async () => {
+    await keyFixture();
+    const waits: number[] = []; let calls = 0;
+    const fetchImpl = (async () => ++calls === 1
+      ? new Response('{}', { status: 429, headers: { 'retry-after': '60' } })
+      : new Response('{}', { status: 400 })) as unknown as typeof fetch;
+    await expect(inventory({ fetchImpl, sleep: async ms => { waits.push(ms); }, live: true,
+      outputRoot: join(temp, 'out'), retries: 1, delayMs: 0 })).rejects.toThrow('status 400');
+    expect(calls).toBe(2); expect(waits).toEqual([5000, 100]);
   });
 
   test("does not leak credentials from transport errors", async () => {
     const { key } = await keyFixture();
-    const fetchImpl = (async () => { throw new Error(`transport failed with ${key}`); }) as typeof fetch;
+    const fetchImpl = (async () => { throw new Error(`transport failed with ${key}`); }) as unknown as typeof fetch;
     const logs: string[] = []; const oldLog = console.log; console.log = (v) => logs.push(String(v));
     const error = await runInventory({ fetchImpl, live: true, retries: 0, maxRequests: 1, outputRoot: join(temp, "out") }).catch((e) => e as Error);
     console.log = oldLog;
-    expect(error.message).not.toContain(key);
+    expect((error as Error).message).not.toContain(key);
     expect(logs.join(" ")).toContain('"operations": 1');
     expect(logs.join(" ")).toContain('"0": 1');
   });
 
   test("reports non-JSON response generically and records failed operation", async () => {
     await keyFixture();
-    const fetchImpl = (async () => new Response("password_is_hunter2xyz <html> topsecretvalue", { status: 200 })) as typeof fetch;
+    const fetchImpl = (async () => new Response("password_is_hunter2xyz <html> topsecretvalue", { status: 200 })) as unknown as typeof fetch;
     const logs: string[] = []; const oldLog = console.log; console.log = (v) => logs.push(String(v));
     const error = await runInventory({ fetchImpl, live: true, outputRoot: join(temp, "out"), retries: 0 }).catch((e) => e as Error);
     console.log = oldLog;
-    expect(error.message).toBe("non-JSON response (44 bytes)");
+    expect((error as Error).message).toBe("non-JSON response (44 bytes)");
     expect(logs.join(" ")).toContain('"operations": 1');
     expect(logs.join(" ")).not.toContain("topsecretvalue");
     const outDir = join(temp, "out", (await readdir(join(temp, "out")))[0]);
@@ -124,13 +141,13 @@ describe("memory inventory safety", () => {
       if (url.pathname.endsWith("/profile/buckets")) return json({ buckets: {} });
       if (url.pathname.endsWith("/profile")) return json({ profile: { static: [], dynamic: [], buckets: {} } });
       throw new Error("unexpected request");
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const root = join(temp, "out"); const logs: string[] = []; const oldLog = console.log; console.log = (v) => logs.push(String(v));
     const result = await runInventory({ fetchImpl, live: true, outputRoot: root, retries: 0 }); console.log = oldLog;
     expect(paths.filter((p) => p.includes("/document/"))).toEqual(["/ns/sm_project_v1_kevin15011_deck/document/suspicious-doc", "/ns/sm_project_v1_kevin15011_deck/document/valid-doc"]);
-    expect(result.summary.invalidDocumentIds).toBe(1);
-    expect(result.summary.quarantinedRecords).toBe(2);
-    expect(result.summary.quarantinePatterns.private_key_material).toBe(1);
+    expect(summaryOf(result).invalidDocumentIds).toBe(1);
+    expect(summaryOf(result).quarantinedRecords).toBe(2);
+    expect(summaryOf(result).quarantinePatterns.private_key_material).toBe(1);
     expect(logs.join(" ")).toContain('"quarantinedRecords": 2');
     const dir = join(root, (await readdir(root))[0]);
     const files = await readdir(dir);
@@ -159,23 +176,23 @@ describe("memory inventory safety", () => {
       if (url.pathname.endsWith("/profile/buckets")) return json({ buckets: {} });
       if (url.pathname.endsWith("/profile")) return json({ profile: { static: [], dynamic: [], buckets: {} } });
       throw new Error("unexpected request");
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const oldLog = console.log; console.log = () => {};
     const result = await runInventory({ fetchImpl, live: true, outputRoot: join(temp, "out"), retries: 0, now: new Date("2026-10-21T05:00:00Z") }); console.log = oldLog;
-    const memory = result.summary.exposedSessions.find((entry: any) => entry.recordKind === "memory");
+    const memory = summaryOf(result).exposedSessions.find((entry: any) => entry.recordKind === "memory");
     expect(memory).toMatchObject({ matchedSession: sid, matchReason: "internal link", inWindow: true, id: "memory-1" });
   });
 
   test("rejects symlinked output path components", async () => {
     await keyFixture();
     const real = join(temp, "real"); const link = join(temp, "link"); await mkdir(real, { mode: 0o700 }); await symlink(real, link);
-    const fetchImpl = (async () => { throw new Error("must not fetch"); }) as typeof fetch;
+    const fetchImpl = (async () => { throw new Error("must not fetch"); }) as unknown as typeof fetch;
     await expect(runInventory({ fetchImpl, dryRun: true, outputRoot: join(link, "inventory") })).rejects.toThrow("symlinks");
   });
 
   test("enforces request cap and refuses repository output", async () => {
     await keyFixture(); let calls = 0;
-    const fetchImpl = (async () => { calls++; return new Response(JSON.stringify({ namespaces: [], pagination: { totalPages: 1 } })); }) as typeof fetch;
+    const fetchImpl = (async () => { calls++; return new Response(JSON.stringify({ namespaces: [], pagination: { totalPages: 1 } })); }) as unknown as typeof fetch;
     await expect(runInventory({ fetchImpl, live: true, maxRequests: 1, retries: 0, outputRoot: join(temp, "elsewhere") })).rejects.toThrow("request cap");
     expect(calls).toBe(1);
     await expect(runInventory({ fetchImpl, live: true, outputRoot: resolve("benchmarks/memory-inventory/output") })).rejects.toThrow("outside the repository");

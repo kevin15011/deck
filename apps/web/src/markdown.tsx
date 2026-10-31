@@ -1,6 +1,7 @@
 import React, { memo, useMemo, useState, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { copyText } from './clipboard';
 
 /** Links never navigate local files or application endpoints from untrusted prose. */
 export function safeMarkdownUrl(value: string): string {
@@ -13,7 +14,7 @@ function codeText(children: ReactNode): string {
 function CodeBlock({ children }: { children?: ReactNode }) {
     const [status, setStatus] = useState('Copy code');
     return <div className="code-block"><div className="code-toolbar"><span>Code</span><button type="button" className="quiet" onClick={async () => {
-        try { await navigator.clipboard.writeText(codeText(children).replace(/\n$/, '')); setStatus('Copied'); }
+        try { await copyText(codeText(children).replace(/\n$/, '')); setStatus('Copied'); }
         catch { setStatus('Copy failed'); }
     }}>{status}</button></div><pre>{children}</pre></div>;
 }

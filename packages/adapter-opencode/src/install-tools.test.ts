@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { installOpenCodeTools, type InstallCommandResult } from "./install-tools";
 import type { InstallableOpenCodeTool } from "./installation-plan";
@@ -16,11 +19,15 @@ import {
   type SerenaProcessSpec,
 } from "@deck/core";
 
+let installerHome: string;
+beforeEach(() => { installerHome = mkdtempSync(join(tmpdir(), "deck-installer-contract-")); });
+afterEach(() => rmSync(installerHome, { recursive: true, force: true }));
+
 function evidenceContext(): OpenCodeEvidenceContext {
   return {
     projectRoot: "/project",
     workspaceRoot: "/project",
-    homeDirectory: "/home/tester",
+    homeDirectory: installerHome,
     currentDirectory: "/cwd",
     platform: "linux",
     env: { PATH: "" },
@@ -86,7 +93,7 @@ describe("installOpenCodeTools", () => {
 
   test("executes npm install -g for npm-package-plus-mcp and does NOT write to plugin array", async () => {
     const plan: InstallableOpenCodeTool[] = [
-      { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp" },
+      { id: "context7", name: "context7", module: "context7", required: false, installKind: "npm-package-plus-mcp" },
     ];
     let installed = false;
     const results = await installOpenCodeTools("opencode", plan, () => {}, async () => {
@@ -94,12 +101,12 @@ describe("installOpenCodeTools", () => {
       return successfulCommand();
     }, {
       evidenceContext: evidenceContext(),
-      resolveEvidence: () => state("context-mode", installed ? "usable" : "absent"),
+      resolveEvidence: () => state("context7", installed ? "usable" : "absent"),
     });
 
     expect(results[0]?.success).toBe(true);
     expect(results[0]?.outcome).toBe("executed");
-    expect(results[0]?.message).toContain("context-mode");
+    expect(results[0]?.message).toContain("context7");
   });
 
   test("returns failure for external tools", async () => {
@@ -197,122 +204,33 @@ describe("installOpenCodeTools", () => {
       } as InstallableOpenCodeTool;
     }
 
-    test("delegates Serena to Core and carries typed readiness evidence", async () => {
-      const { effects, calls } = makeCoreEffects();
-      let commandExistsCalls = 0;
-      const stages: string[] = [];
-      const [result] = await installOpenCodeTools(
-        "opencode",
-        [serenaTool()],
-        () => {},
-        async () => { throw new Error("legacy installer must not run"); },
-        {
-          commandExists: () => { commandExistsCalls++; return true; },
-          serenaAuthorization: authorization,
-          serenaOperation: operation,
-          serenaBootstrap: bootstrapSerena,
-          serenaEffects: effects,
-          onStage: (stage) => stages.push(stage),
-          projectRoot: "/project",
-        },
-      );
+    test("retired Serena rejects authorized installation before any Core effect", async () => {
+ const { effects, calls } = makeCoreEffects(); let legacyEffects=0;
+ const [result] = await installOpenCodeTools('opencode',[serenaTool()],()=>{},async()=>{legacyEffects++;throw new Error('retired effect');}, {serenaEffects:effects,serenaAuthorization:authorization,serenaOperation:operation,serenaBootstrap:bootstrapSerena});
+ expect(result?.success).toBe(false);expect(result?.installerInvoked).toBe(false);expect(result?.serenaReadiness).toBeUndefined();
+ expect(calls.fetches).toEqual([]);expect(calls.processes).toEqual([]);expect(calls.probes).toEqual([]);expect(legacyEffects).toBe(0);
+});
 
-      expect(result).toMatchObject({
-        outcome: "executed",
-        success: true,
-        installerInvoked: true,
-        serenaBootstrapOutcome: "installed",
-        serenaReadiness: {
-          resolvedExecutablePath: SERENA_PATH,
-          fingerprint: "serena-fingerprint",
-        },
-      });
-      expect(calls.fetches).toHaveLength(1);
-      expect(calls.fetches[0]).toMatchObject({ url: SERENA_UV_INSTALLER_URL, method: "GET", redirect: "manual" });
-      expect(calls.processes.map((process) => [process.executable, [...process.args]])).toEqual([
-        ["/bin/sh", []],
-        [UV_PATH, [...SERENA_INSTALL_ARGS]],
-      ]);
-      expect(calls.processes[1]?.env).not.toHaveProperty("HOME");
-      expect(calls.processes[1]?.env).not.toHaveProperty("PATH_EXTRA");
-      expect(calls.probes[0]).toMatchObject({ args: ["--version"], shell: false });
-      expect(calls.probes[1]).toMatchObject({ args: [...SERENA_HELP_ARGS], shell: false });
-      expect(commandExistsCalls).toBe(0);
-      expect(stages).toEqual(["validating-serena", "preparing-uv", "installing-serena", "validating-serena"]);
-    });
-
-    test("reuses Core readiness without a bootstrap or legacy PATH gate", async () => {
-      const { effects, calls } = makeCoreEffects();
-      const serenaPath = `${SERENA_ROOT}/bin/serena`;
-      (effects.inspectPath as (path: string) => SerenaPathInspection) = (path) => path === serenaPath
-        ? readyInspection(serenaPath, "existing-fingerprint")
-        : { state: "missing" };
-      (effects.probeExecutable as (request: unknown) => SerenaProbeResult) = () => ({ state: "ready", fingerprint: "existing-fingerprint" });
-      let commandExistsCalls = 0;
-
-      const [result] = await installOpenCodeTools(
-        "opencode",
-        [serenaTool()],
-        () => {},
-        async () => { throw new Error("legacy installer must not run"); },
-        {
-          commandExists: () => { commandExistsCalls++; return true; },
-          serenaAuthorization: authorization,
-          serenaOperation: operation,
-          serenaBootstrap: bootstrapSerena,
-          serenaEffects: effects,
-        },
-      );
-
-      expect(result).toMatchObject({ outcome: "already-present", success: true, installerInvoked: false, serenaBootstrapOutcome: "reused" });
-      expect(calls.fetches).toHaveLength(0);
-      expect(calls.processes).toHaveLength(0);
-      expect(commandExistsCalls).toBe(0);
-    });
+    test("retired Serena never reuses legacy readiness or probes PATH", async () => {
+ const { effects, calls } = makeCoreEffects(); let legacyEffects=0;
+ const [result] = await installOpenCodeTools('opencode',[serenaTool()],()=>{},async()=>{legacyEffects++;throw new Error('retired effect');}, {serenaEffects:effects,commandExists:()=>true,serenaAuthorization:authorization,serenaOperation:operation,serenaBootstrap:async()=>{throw new Error('must not re-probe retired package');}});
+ expect(result?.success).toBe(false);expect(result?.installerInvoked).toBe(false);expect(result?.serenaReadiness).toBeUndefined();
+ expect(calls.fetches).toEqual([]);expect(calls.processes).toEqual([]);expect(calls.probes).toEqual([]);expect(legacyEffects).toBe(0);
+});
 
     test("fails closed before any Core effect without current-operation authorization", async () => {
-      const { effects, calls } = makeCoreEffects();
-      const [result] = await installOpenCodeTools(
-        "opencode",
-        [serenaTool()],
-        () => {},
-        async () => { throw new Error("legacy installer must not run"); },
-        { serenaBootstrap: bootstrapSerena, serenaEffects: effects },
-      );
+ const { effects, calls } = makeCoreEffects(); let legacyEffects=0;
+ const [result] = await installOpenCodeTools('opencode',[serenaTool()],()=>{},async()=>{legacyEffects++;throw new Error('retired effect');}, {serenaEffects:effects,serenaBootstrap:bootstrapSerena});
+ expect(result?.success).toBe(false);expect(result?.installerInvoked).toBe(false);expect(result?.serenaReadiness).toBeUndefined();
+ expect(calls.fetches).toEqual([]);expect(calls.processes).toEqual([]);expect(calls.probes).toEqual([]);expect(legacyEffects).toBe(0);
+});
 
-      expect(result?.outcome).toBe("failed");
-      expect(result?.success).toBe(false);
-      expect(result?.serenaReadiness).toBeUndefined();
-      expect(calls.fetches).toHaveLength(0);
-      expect(calls.processes).toHaveLength(0);
-    });
-
-    test("does not project failed, cancelled, or partial Core outcomes as readiness", async () => {
-      for (const outcome of [
-        { outcome: "failed", stage: "validating-serena", code: "serena-not-ready", diagnostic: { code: "serena-not-ready", message: "not ready" } },
-        { outcome: "cancelled", stage: "installing-serena", mutationStarted: true },
-        { outcome: "partial", stage: "installing-serena", code: "termination-unknown" },
-      ] as const) {
-        const [result] = await installOpenCodeTools(
-          "opencode",
-          [serenaTool()],
-          () => {},
-          async () => { throw new Error("legacy installer must not run"); },
-          {
-            serenaAuthorization: authorization,
-            serenaOperation: operation,
-            serenaBootstrap: async () => outcome as never,
-          },
-        );
-
-        expect(result?.success).toBe(false);
-        expect(result?.serenaReadiness).toBeUndefined();
-        expect(result?.serenaBootstrapOutcome).toBe(outcome.outcome);
-        if (outcome.outcome === "failed") {
-          expect(result?.cause).toContain("post-install/serena-not-ready");
-        }
-      }
-    });
+    test("retired Serena cannot request Core outcomes or publish readiness", async () => {
+ const { effects, calls } = makeCoreEffects(); let legacyEffects=0;
+ const [result] = await installOpenCodeTools('opencode',[serenaTool()],()=>{},async()=>{legacyEffects++;throw new Error('retired effect');}, {serenaEffects:effects,serenaAuthorization:authorization,serenaOperation:operation,serenaBootstrap:async()=>{throw new Error('must not invoke retired bootstrap');}});
+ expect(result?.success).toBe(false);expect(result?.installerInvoked).toBe(false);expect(result?.serenaReadiness).toBeUndefined();
+ expect(calls.fetches).toEqual([]);expect(calls.processes).toEqual([]);expect(calls.probes).toEqual([]);expect(legacyEffects).toBe(0);
+});
   });
 
   test("returns already-present with no external effect for usable evidence", async () => {
@@ -392,7 +310,7 @@ describe("installOpenCodeTools", () => {
     const waitForRelease = new Promise<void>((resolve) => { release = resolve; });
     const options = {
       evidenceContext: evidenceContext(),
-      resolveEvidence: () => state("context-mode", installed ? "usable" : "absent"),
+      resolveEvidence: () => state("context7", installed ? "usable" : "absent"),
     };
     const runner = async (): Promise<InstallCommandResult> => {
       effects++;
@@ -400,7 +318,7 @@ describe("installOpenCodeTools", () => {
       installed = true;
       return successfulCommand();
     };
-    const plan = [{ id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp" }] satisfies InstallableOpenCodeTool[];
+    const plan = [{ id: "context7", name: "context7", module: "context7", required: false, installKind: "npm-package-plus-mcp" }] satisfies InstallableOpenCodeTool[];
     const first = installOpenCodeTools("opencode", plan, () => {}, runner, options);
     const second = installOpenCodeTools("opencode", plan, () => {}, runner, options);
     await Promise.resolve();
@@ -419,13 +337,13 @@ describe("installOpenCodeTools", () => {
     const results = await installOpenCodeTools(
       "opencode",
       [
-        { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp" },
-        { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp" },
+        { id: "context7", name: "context7", module: "context7", required: false, installKind: "npm-package-plus-mcp" },
+        { id: "context7", name: "context7", module: "context7", required: false, installKind: "npm-package-plus-mcp" },
         { id: "rtk", name: "rtk", module: "rtk-ai/rtk", required: false, installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh" },
       ],
       () => {},
       async () => { effects++; return { exitCode: 1, stdout: "", stderr: "failed" }; },
-      { evidenceContext: evidenceContext(), resolveEvidence: () => state("context-mode", "absent"), signal: controller.signal },
+      { evidenceContext: evidenceContext(), resolveEvidence: () => state("context7", "absent"), signal: controller.signal },
     );
 
     expect(results).toHaveLength(3);
@@ -440,8 +358,8 @@ describe("installOpenCodeTools", () => {
     const results = await installOpenCodeTools(
       "opencode",
       [
-        { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp" },
-        { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp" },
+        { id: "context7", name: "context7", module: "context7", required: false, installKind: "npm-package-plus-mcp" },
+        { id: "context7", name: "context7", module: "context7", required: false, installKind: "npm-package-plus-mcp" },
       ],
       () => {},
       async () => { effects++; return { exitCode: 1, stdout: "", stderr: "first failure" }; },
@@ -460,7 +378,7 @@ describe("installOpenCodeTools", () => {
     const results = await installOpenCodeTools(
       "opencode",
       [
-        { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp" },
+        { id: "rtk", name: "RTK", module: "fixture:rtk", required: false, installKind: "npm-package-plus-mcp" },
         { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "npm-package" },
       ],
       () => {},

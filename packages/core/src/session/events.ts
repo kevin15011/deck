@@ -9,6 +9,7 @@ import { isQuestionAnswers } from "./question";
 import { isApprovalMode } from "./commands";
 import { validTaskAccounting, validTaskIntegration } from "./mcp";
 import { redactText } from "./redaction";
+export { sanitizeContextObservation, contextTokenSum, contextTokens, contextCapacity, contextIdentity, type ContextObservation } from './context-window';
 
 export const SESSION_EVENT_VERSION = 1 as const;
 export const RAW_PAYLOAD_LIMIT_BYTES = 64 * 1024;
@@ -25,7 +26,7 @@ export const SESSION_EVENT_KINDS = [
   /** Durable idempotency receipt: a command was accepted and its outcome is recorded (XR-1.5, survives daemon restart). */
   "command.accepted",
   "decision.command", "decision.opened", "decision.revised", "decision.state", "decision.reply",
-  "prompt.steering", "prompt.steered", "prompt.queued", "prompt.dispatched", "prompt.state", "prompt.queue",
+  "prompt.steering", "prompt.steered", "prompt.queued", "prompt.dispatched", "prompt.handoff", "prompt.requeued", "prompt.state", "prompt.queue",
 ] as const;
 export type SessionEventKind = (typeof SESSION_EVENT_KINDS)[number];
 

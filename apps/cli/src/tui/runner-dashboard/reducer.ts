@@ -397,13 +397,11 @@ function togglePackageInstruction(state: RunnerDashboardState, packageId: Canoni
     },
   };
 
-  // This toggle is emitted only by the interactive Packages screen. Serena's
-  // bootstrap gate therefore records the same current-operation user action
-  // as the dedicated capability toggle, while programmatic set actions remain
-  // instruction-only and cannot authorize installation.
-  const next = packageId === "serena"
-    ? updateCapabilitySelection(withInstruction, "serena", enabled, true)
+  // The interactive activation is the same intent used by installation and preparation.
+  const next = packageId === "codebase-memory"
+    ? updateCapabilitySelection(withInstruction, state.runnerScope === "pi" ? "codebase-memory-mcp" : "codebase-memory", enabled, true)
     : withInstruction;
+
   return invalidatePlan(next);
 }
 

@@ -128,3 +128,16 @@ describe("mergeCodexOwnedHooks", () => {
     expect(codexHooksFeatureDisabled("")).toBe(false);
   });
 });
+
+// Native Codex can insert its preferences before the final marker; a later hook
+// upgrade/removal owns only hooks, not those preference tables.
+test("hook changes preserve native tables inside marker comments", () => {
+  const native = '[tui]\nscreen_reader_detection_done = true';
+  const source = renderCodexOwnedHookBlock(CODEX_MEMORY_BRIDGE_HOOK_BLOCK).replace('# deck-codex-hook:memory-bridge:end', `${native}\n# deck-codex-hook:memory-bridge:end`);
+  for (const desired of [[], [{ ...CODEX_MEMORY_BRIDGE_HOOK_BLOCK, hooks: [{ event: 'Stop' as const, command: 'updated-command' }] }]]) {
+    const result = mergeCodexOwnedHooks(source, desired);
+    expect(result.status).toBe('updated');
+    expect((Bun.TOML.parse(result.content) as any).tui.screen_reader_detection_done).toBe(true);
+    expect((Bun.TOML.parse(result.content) as any).hooks?.Stop?.[0].hooks[0].command).toBe(desired.length ? 'updated-command' : undefined);
+  }
+});

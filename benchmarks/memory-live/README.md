@@ -1,6 +1,14 @@
 # Memory live evaluation harness
 
-Phase 0 measures the current production paths before product changes. This directory contains only evaluator code and synthetic inputs. A prior R pilot ran, but its quality scores are INVALID as a baseline because it recorded no processing readiness. This candidate has only offline evidence; the cause of the prior result remains a hypothesis. Quality reviews the candidate before the Lead approves a live manifest. `benchmarks/deckmemorybench.ts` remains the plumbing benchmark.
+Phase 0 measures selected production memory paths before product changes. This directory contains only evaluator code and synthetic inputs. A prior R pilot ran, but its quality scores are INVALID as a baseline because it recorded no processing readiness. This candidate has only offline evidence; the cause of the prior result remains a hypothesis. Quality reviews the candidate before the Lead approves a live manifest. `benchmarks/deckmemorybench.ts` remains the plumbing benchmark.
+
+## Coverage after local main synchronization (2026-10-31)
+
+The evaluator is synchronized with local main `9888759381b789fec935bb25cbe6fb933b0b9bd5`. Track R imports the current `createSupermemoryRuntime`, HTTP serializer and `createSupermemoryRuntimeHost` with fake external effects. It exercises the Pi runtime-host memory path, not a complete managed runner session. Managed Claude, Codex and OpenCode use `prepareSessionNativeMemory` and native hooks/plugins instead; their preparation, native skill/tool loading, authenticated Setup delegation, current capability availability, trusted generation refresh and launch leases are outside this replay's coverage.
+
+Track N remains **historical pinned-plugin replay** of the Phase 0 fixtures. Fixture bytes still verify against the adapter pins, but that does not prove faithful behavior of current runner launch, plugin registration, model consumption, compaction or task shutdown. Historical fidelity labels in `QUALITY-FIXES.md` describe those earlier simulations only. Full N execution remains disabled. Old manifests and live receipts stay immutable and cannot authorize execution against the synchronized source; simulation is not a valid cloud baseline and v2 coverage remains zero.
+
+Main's fast gate requires every test file to finish within two seconds and the entire gate within 90 seconds. The existing evaluator tests include longer real-time processing and durable-state scenarios. Running the offline command below establishes behavior only; it does not waive the fast gate or authorize test retirement/quarantine. Lead must resolve that gate incompatibility before committing. An active evaluator process must remain under attached supervision until its durable terminal result is recorded: ending the owning Deck turn closes the native runner process group.
 
 ## Offline verification and R simulation
 

@@ -1,3 +1,4 @@
+import { attachComposerFocus } from './composer-focus';
 import React, { useLayoutEffect, useRef, type TextareaHTMLAttributes } from 'react';
 
 function resize(input: HTMLTextAreaElement) {
@@ -17,6 +18,7 @@ function resize(input: HTMLTextAreaElement) {
 /** One visible line, growing with wrapped text up to four lines. */
 export function MessageInput({ value, ...props }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'value' | 'rows' | 'style'> & { value: string }) {
     const input = useRef<HTMLTextAreaElement>(null);
+    useLayoutEffect(() => input.current ? attachComposerFocus(input.current) : undefined, []);
     useLayoutEffect(() => { if (input.current) resize(input.current); }, [value]);
     useLayoutEffect(() => {
         const element = input.current;

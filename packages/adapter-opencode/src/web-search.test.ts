@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION, getOpenCodeRunnerCapability } from "./capability-catalog";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
+import { hasRunnerContributionProof, nativeSearchEvidence } from "@deck/core";
 import { createOpenCodeRunnerAdapter } from "./runner-adapter";
 import {
   resolveOpenCodeWebSearchReadiness,
@@ -12,6 +13,23 @@ import {
 } from "./web-search";
 
 describe("OpenCode web-search adapter", () => {
+  test("native readiness does not require a fallback provider", () => {
+    expect(resolveOpenCodeWebSearchReadiness({ enabled: true, executableAvailable: false, mcpConfigured: false,
+      nativeSearch: nativeSearchEvidence("available", "tool-inventory", {}) }).readiness.state).toBe("ready");
+  });
+
+  test("records new fallback entries without adopting or enabling user entries", () => {
+    const root = mkdtempSync(join(tmpdir(), "deck-opencode-search-receipt-"));
+    const path = join(root, "opencode.json");
+    try {
+      expect(writeOpenCodeWebSearchMcpConfig({ configPath: path, provider: TAVILY_PROVIDER_DESCRIPTOR }).ok).toBe(true);
+      expect(hasRunnerContributionProof(join(root, "deck/manifest.json"), { path, selector: { kind: "json", keys: ["mcp", "web-search"] } })).toBe(true);
+      const disabled = JSON.stringify({ mcp: { "web-search": { type: "local", command: [...TAVILY_PROVIDER_DESCRIPTOR.command], enabled: false } } });
+      writeFileSync(path, disabled);
+      expect(writeOpenCodeWebSearchMcpConfig({ configPath: path, provider: TAVILY_PROVIDER_DESCRIPTOR }).ok).toBe(false);
+      expect(readFileSync(path, "utf8")).toBe(disabled);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
   test("declares the canonical capability and provider-derived implementation", () => {
     expect(getOpenCodeRunnerCapability("web-search")).toMatchObject({
       capabilityId: "web-search",

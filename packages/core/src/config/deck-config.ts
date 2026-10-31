@@ -1,3 +1,4 @@
+import { normalizeContinuityPolicy, type ContinuityPolicy } from "../session/task-continuity";
 import { createHash } from "node:crypto";
 import { chmodSync, closeSync, existsSync, fsyncSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, parse, relative, resolve } from "node:path";
@@ -56,8 +57,10 @@ export const DEFAULT_ORCHESTRATOR_PERSONALITY: OrchestratorPersonality = "pragma
 /** Dynamic runner ID for package instructions — validated at runtime against AdapterRegistry. */
 export type PackageInstructionRunnerId = string & {};
 
-export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"] as const;
-export type PackageInstructionPackageId = (typeof PACKAGE_INSTRUCTION_PACKAGE_IDS)[number];
+export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "code-economy", "rtk", "adaptive-memory"] as const;
+/** Legacy input names remain type-readable, never selectable or effective. */
+export type PackageInstructionPackageId = (typeof PACKAGE_INSTRUCTION_PACKAGE_IDS)[number] | "context-mode" | "serena";
+export type PackageInstructionSelection = Record<(typeof PACKAGE_INSTRUCTION_PACKAGE_IDS)[number], boolean> & { "context-mode"?: boolean; serena?: boolean };
 
 export type PackageInstructionConfigurationMetadata = {
   id: PackageInstructionPackageId;
@@ -69,22 +72,20 @@ export type PackageInstructionConfigurationMetadata = {
 
 /** Canonical package-instruction configuration order and toggle policy. */
 export const PACKAGE_INSTRUCTION_CONFIGURATION_METADATA = Object.freeze([
-  { id: "codebase-memory", label: "Codebase Memory", description: "Inject Codebase Memory usage guidance.", configurable: true, defaultEnabled: true },
+  { id: "codebase-memory", label: "Codebase Memory", description: "Explicitly enable Codebase Memory installation, preparation and guidance for this runner.", configurable: true, defaultEnabled: false },
   { id: "code-economy", label: "Code Economy", description: "Always-on concise implementation guidance.", configurable: false, defaultEnabled: true },
-  { id: "context-mode", label: "Context Mode", description: "Inject Context Mode usage guidance.", configurable: true, defaultEnabled: true },
   { id: "rtk", label: "RTK", description: "Inject RTK command guidance.", configurable: true, defaultEnabled: true },
   { id: "adaptive-memory", label: "Adaptive Memory", description: "Inject adaptive-memory provider guidance.", configurable: true, defaultEnabled: true },
-  { id: "serena", label: "Serena", description: "Inject Serena symbolic-editing guidance.", configurable: true, defaultEnabled: true },
 ] as const satisfies readonly PackageInstructionConfigurationMetadata[]);
 
 function defaultPackageInstructionSelection(
   supportedIds: readonly string[] = PACKAGE_INSTRUCTION_PACKAGE_IDS,
-): Record<PackageInstructionPackageId, boolean> {
+): PackageInstructionSelection {
   const supported = new Set(supportedIds);
   return Object.fromEntries(PACKAGE_INSTRUCTION_CONFIGURATION_METADATA.map((entry) => [
     entry.id,
     entry.configurable ? supported.has(entry.id) && entry.defaultEnabled : entry.defaultEnabled,
-  ])) as Record<PackageInstructionPackageId, boolean>;
+  ])) as PackageInstructionSelection;
 }
 
 export function getConfigurablePackageInstructionMetadata(
@@ -97,12 +98,12 @@ export function getConfigurablePackageInstructionMetadata(
 export function normalizeSupportedPackageInstructionSelection(
   selection: Readonly<Record<string, boolean>> | undefined,
   supportedIds: readonly string[],
-): Record<PackageInstructionPackageId, boolean> {
+): PackageInstructionSelection {
   const supported = new Set(supportedIds);
   return Object.fromEntries(PACKAGE_INSTRUCTION_CONFIGURATION_METADATA.map((entry) => [
     entry.id,
     entry.configurable ? supported.has(entry.id) && (selection === undefined ? entry.defaultEnabled : selection[entry.id] === true) : entry.defaultEnabled,
-  ])) as Record<PackageInstructionPackageId, boolean>;
+  ])) as PackageInstructionSelection;
 }
 
 /**
@@ -165,7 +166,7 @@ export interface DeveloperTeamExecutionConfigV1 {
   };
   readonly registryWriter: "distributed-compatible" | "centralized";
   readonly routePolicy: "legacy-triage" | "shadow-risk-lanes" | "risk-lanes";
-  readonly promptProfile: "legacy" | "compact";
+  readonly promptProfile: "compact";
   readonly telemetry: "off" | "local-safe";
   readonly cohortPercent: number;
 }
@@ -175,12 +176,15 @@ export interface DeveloperTeamExecutionConfigV1 {
 // ---------------------------------------------------------------------------
 
 export type DeckPackageInstructionRunnerConfig = Partial<
-  Record<PackageInstructionPackageId, boolean>
+  Record<PackageInstructionPackageId | "context-mode" | "serena", boolean>
 >;
 
 export type DeckPackageInstructionConfig = Partial<Record<PackageInstructionRunnerId, DeckPackageInstructionRunnerConfig>>;
 
+export type DeckOptionalCapabilities = { "codebase-memory": { enabled: boolean; runners: Record<string, boolean> } };
+
 export type DeckConfig = {
+  capabilities?: { "codebase-memory"?: { enabled?: boolean; runners?: Record<string, boolean> } };
   version?: typeof DECK_CONFIG_VERSION;
   adaptiveMemory?: DeckAdaptiveMemoryConfig;
   webSearch?: DeckWebSearchConfig;
@@ -196,6 +200,7 @@ export type DeckConfig = {
 };
 
 export type NormalizedDeckConfig = {
+  capabilities?: DeckOptionalCapabilities;
   version: typeof DECK_CONFIG_VERSION;
   adaptiveMemory: {
     enabled?: boolean;
@@ -206,7 +211,7 @@ export type NormalizedDeckConfig = {
     enabled: boolean;
     provider?: string;
   };
-  packageInstructions: Record<PackageInstructionRunnerId, Record<PackageInstructionPackageId, boolean>>;
+  packageInstructions: Record<PackageInstructionRunnerId, PackageInstructionSelection>;
   orchestratorPersonality: OrchestratorPersonality;
   developerTeamExecution: DeveloperTeamExecutionConfigV1;
   profiles: Profile[];
@@ -225,12 +230,13 @@ export type CrossRunnerConfig = {
   approvals: Record<string, CrossRunnerApprovalMode>;
   maxConcurrentTasks: number;
   executionBudget?: { lead: number; delegated: number };
+  continuity?: ContinuityPolicy;
   web: { port: number; trustedProxy: string | null; allowedOrigins: string[]; allowFunnel: boolean; tailscaleServeAccess?: boolean };
   claudeTosAcknowledgedAt: string | null;
 };
 
 export type DeckConfigDiagnostic = Readonly<{
-  code: "SUPERMEMORY_CONFIG_DEPRECATED" | "CROSS_ASSIGNMENT_LEGACY_SHAPE";
+  code: "SUPERMEMORY_CONFIG_DEPRECATED";
   severity: "warning";
   message: string;
   fieldPath: string;
@@ -280,7 +286,7 @@ export type ActiveMemoryProviderResolution = {
 const SECRET_FIELD_PATTERN =
   /(?:token|secret|credential|credentials|api[-_]?key|password|private[-_]?key|access[-_]?key|auth(?:orization)?)/i;
 
-const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "webSearch", "packageInstructions", "orchestratorPersonality", "developerTeamExecution", "profiles", "activeProfile", "crossRunner"]);
+const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "webSearch", "capabilities", "packageInstructions", "orchestratorPersonality", "developerTeamExecution", "profiles", "activeProfile", "crossRunner"]);
 const ADAPTIVE_MEMORY_FIELDS = new Set(["enabled", "activeProvider", "supermemory"]);
 const WEB_SEARCH_FIELDS = new Set(["enabled", "provider"]);
 const SUPERMEMORY_FIELDS = new Set([
@@ -288,7 +294,7 @@ const SUPERMEMORY_FIELDS = new Set([
   "searchMode",
   "maxMemoriesPerSession",
 ]);
-const PACKAGE_INSTRUCTION_PACKAGE_FIELDS = new Set(PACKAGE_INSTRUCTION_PACKAGE_IDS);
+const PACKAGE_INSTRUCTION_PACKAGE_FIELDS = new Set<string>(PACKAGE_INSTRUCTION_PACKAGE_IDS);
 const DEVELOPER_TEAM_EXECUTION_FIELDS = new Set([
   "schema", "executionContracts", "decisionKernel", "invocationAuthorization", "registryWriter",
   "routePolicy", "promptProfile", "telemetry", "cohortPercent",
@@ -303,6 +309,7 @@ export function getDeckConfigPath(projectRoot: string): string {
 export function getDefaultDeckConfig(): NormalizedDeckConfig {
   return {
     version: DECK_CONFIG_VERSION,
+    capabilities: { "codebase-memory": { enabled: false, runners: {} } },
     adaptiveMemory: {
       enabled: false,
       activeProvider: "none",
@@ -314,6 +321,7 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
       pi: defaultPackageInstructionSelection(),
       opencode: defaultPackageInstructionSelection(),
       codex: defaultPackageInstructionSelection(),
+      claude: defaultPackageInstructionSelection(),
     },
     orchestratorPersonality: DEFAULT_ORCHESTRATOR_PERSONALITY,
     developerTeamExecution: {
@@ -886,6 +894,12 @@ export function validateDeckConfig(
     options,
   );
 
+  const capabilities = normalizeOptionalCapabilities(config.capabilities, options?.configPath, options?.registry);
+  for (const runner of new Set([...Object.keys(packageInstructions), ...Object.keys(capabilities["codebase-memory"].runners)])) {
+    packageInstructions[runner] ??= defaultPackageInstructionSelection();
+    packageInstructions[runner]!["codebase-memory"] = capabilities["codebase-memory"].runners[runner] ?? capabilities["codebase-memory"].enabled;
+  }
+
   const orchestratorPersonality = normalizeOrchestratorPersonalityConfig(
     config.orchestratorPersonality,
     options?.configPath,
@@ -909,6 +923,7 @@ export function validateDeckConfig(
     version: DECK_CONFIG_VERSION,
     adaptiveMemory,
     webSearch,
+    capabilities,
     packageInstructions,
     orchestratorPersonality,
     developerTeamExecution,
@@ -921,29 +936,8 @@ export function validateDeckConfig(
 export function diagnoseDeckConfigDeprecations(config: unknown): readonly DeckConfigDiagnostic[] {
   if (!config || typeof config !== "object" || Array.isArray(config)) return [];
   const diagnostics: DeckConfigDiagnostic[] = [];
-  const legacyMembers = ((config as Record<string, unknown>).crossRunner as Record<string, unknown> | undefined)?.members;
-  if (legacyMembers && typeof legacyMembers === "object" && !Array.isArray(legacyMembers)) {
-    for (const [memberId, value] of Object.entries(legacyMembers)) {
-      if (typeof value === "string") {
-        diagnostics.push({
-          code: "CROSS_ASSIGNMENT_LEGACY_SHAPE",
-          severity: "warning",
-          fieldPath: `crossRunner.members.${memberId}`,
-          message: "Bare-string cross-runner member assignment is deprecated; it is normalized to {runnerId, modelId} and persisted in the qualified shape on next write.",
-        });
-      }
-    }
-  }
   const adaptiveMemory = (config as Record<string, unknown>).adaptiveMemory;
   if (!adaptiveMemory || typeof adaptiveMemory !== "object" || Array.isArray(adaptiveMemory)) return diagnostics;
-  if ((adaptiveMemory as Record<string, unknown>).activeProvider === "engram") {
-    diagnostics.push({
-      code: "SUPERMEMORY_CONFIG_DEPRECATED",
-      severity: "warning",
-      fieldPath: "adaptiveMemory.activeProvider",
-      message: "Engram has been removed. Legacy Engram configuration is migrated to Adaptive Memory disabled; enable Adaptive Memory to use Supermemory.",
-    });
-  }
   const supermemory = (adaptiveMemory as Record<string, unknown>).supermemory;
   if (supermemory && typeof supermemory === "object" && !Array.isArray(supermemory) && Object.prototype.hasOwnProperty.call(supermemory, "maxMemoriesPerSession")) {
     diagnostics.push({
@@ -956,7 +950,7 @@ export function diagnoseDeckConfigDeprecations(config: unknown): readonly DeckCo
   return diagnostics;
 }
 
-const CROSS_RUNNER_FIELDS = new Set(["enabled", "defaultRunner", "members", "approvals", "maxConcurrentTasks", "executionBudget", "web", "claudeTosAcknowledgedAt"]);
+const CROSS_RUNNER_FIELDS = new Set(["enabled", "defaultRunner", "members", "approvals", "maxConcurrentTasks", "executionBudget", "continuity", "web", "claudeTosAcknowledgedAt"]);
 const CROSS_MEMBER_FIELDS = new Set(["runnerId", "modelId", "thinking"]);
 const CROSS_WEB_FIELDS = new Set(["port", "trustedProxy", "allowedOrigins", "allowFunnel", "tailscaleServeAccess"]);
 // Compatibility defaults only; session execution ignores crossRunner.approvals.
@@ -981,11 +975,6 @@ function normalizeCrossRunnerConfig(value: unknown, configPath?: string): CrossR
     assertPlainObject(value.members, "crossRunner.members", configPath);
     for (const [memberId, raw] of Object.entries(value.members)) {
       const path = `crossRunner.members.${memberId}`;
-      if (typeof raw === "string") {
-        if (!nonEmpty(raw)) throw crossInvalid(`${path} must be a non-empty model id.`, path, configPath);
-        members[memberId] = { runnerId: defaultRunner ?? "claude", modelId: raw.trim() };
-        continue;
-      }
       assertPlainObject(raw, path, configPath);
       assertKnownFields(raw, CROSS_MEMBER_FIELDS, path, configPath);
       if (!nonEmpty(raw.runnerId)) throw crossInvalid(`${path}.runnerId must be a non-empty string.`, `${path}.runnerId`, configPath);
@@ -1021,6 +1010,9 @@ function normalizeCrossRunnerConfig(value: unknown, configPath?: string): CrossR
       executionBudget[key] = n as number;
     }
   }
+
+  let continuity: ContinuityPolicy;
+  try { continuity = normalizeContinuityPolicy(value.continuity); } catch(error) { throw crossInvalid((error as Error).message, "crossRunner.continuity", configPath); }
 
   const web = { port: 7421, trustedProxy: null as string | null, allowedOrigins: [] as string[], allowFunnel: false, tailscaleServeAccess: false };
   if (value.web !== undefined) {
@@ -1067,6 +1059,7 @@ function normalizeCrossRunnerConfig(value: unknown, configPath?: string): CrossR
     approvals,
     maxConcurrentTasks: max,
     executionBudget,
+    continuity,
     web,
     claudeTosAcknowledgedAt: ack,
   };
@@ -1210,7 +1203,7 @@ function normalizeDeveloperTeamExecutionConfig(
     },
     registryWriter: executionConfigEnum(value.registryWriter, ["distributed-compatible", "centralized"] as const, "distributed-compatible", "developerTeamExecution.registryWriter", configPath),
     routePolicy: executionConfigEnum(value.routePolicy, ["legacy-triage", "shadow-risk-lanes", "risk-lanes"] as const, "legacy-triage", "developerTeamExecution.routePolicy", configPath),
-    promptProfile: executionConfigEnum(value.promptProfile, ["legacy", "compact"] as const, "compact", "developerTeamExecution.promptProfile", configPath),
+    promptProfile: executionConfigEnum(value.promptProfile, ["compact"] as const, "compact", "developerTeamExecution.promptProfile", configPath),
     telemetry: executionConfigEnum(value.telemetry, ["off", "local-safe"] as const, "off", "developerTeamExecution.telemetry", configPath),
     cohortPercent,
   };
@@ -1303,6 +1296,7 @@ function normalizePackageInstructionConfig(
     pi: defaultPackageInstructionSelection(),
     opencode: defaultPackageInstructionSelection(),
     codex: defaultPackageInstructionSelection(),
+    claude: defaultPackageInstructionSelection(),
   };
   for (const adapter of options?.registry?.list() ?? []) {
     defaultResult[adapter.runnerId] = defaultPackageInstructionSelection(adapter.packageInstructionIds);
@@ -1340,6 +1334,7 @@ function normalizePackageInstructionConfig(
 
     // Validate each package key in this runner
     for (const pkgKey of Object.keys(runnerValue)) {
+      if (pkgKey === "context-mode" || pkgKey === "serena") continue;
       if (!PACKAGE_INSTRUCTION_PACKAGE_FIELDS.has(pkgKey as PackageInstructionPackageId)) {
         throw new DeckConfigError(
           "DECK_CONFIG_UNKNOWN_FIELD",
@@ -1525,7 +1520,6 @@ function parseActiveProvider(
   }
   const normalized = value.trim().toLowerCase();
   if (normalized === "none" || normalized === "supermemory") return normalized;
-  if (normalized === "engram") return "none";
   throw new DeckConfigError(
     "ADAPTIVE_MEMORY_UNSUPPORTED_PROVIDER",
     "Unsupported adaptive-memory provider value. Adaptive Memory supports only disabled or Supermemory.",
@@ -1613,7 +1607,7 @@ function rejectSecretFields(value: unknown, fieldPath: string, configPath?: stri
 
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     const childPath = `${fieldPath}.${key}`;
-    if (SECRET_FIELD_PATTERN.test(key) && !SAFE_CONTROL_FIELD_KEYS.has(key)) {
+    if (SECRET_FIELD_PATTERN.test(key) && !SAFE_CONTROL_FIELD_KEYS.has(key) && !(fieldPath === 'config.crossRunner.continuity' && ['autoNativeMaxInputTokens','nativeHardCapInputTokens'].includes(key))) {
       throw new DeckConfigError(
         "DECK_CONFIG_SECRET_FIELD",
         "Deck config may not store credentials or secret-shaped fields.",
@@ -1622,4 +1616,30 @@ function rejectSecretFields(value: unknown, fieldPath: string, configPath?: stri
     }
     rejectSecretFields(child, childPath, configPath);
   }
+}
+
+function normalizeOptionalCapabilities(value: unknown, configPath?: string, registry?: AdapterRegistry): DeckOptionalCapabilities {
+  if (value === undefined) return { "codebase-memory": { enabled: false, runners: {} } };
+  assertPlainObject(value, "capabilities", configPath);
+  assertKnownFields(value, new Set(["codebase-memory"]), "capabilities", configPath);
+  const capability = value["codebase-memory"];
+  if (capability === undefined) return { "codebase-memory": { enabled: false, runners: {} } };
+  assertPlainObject(capability, "capabilities.codebase-memory", configPath);
+  assertKnownFields(capability, new Set(["enabled", "runners"]), "capabilities.codebase-memory", configPath);
+  if (capability.enabled !== undefined && typeof capability.enabled !== "boolean") throw new DeckConfigError("DECK_CONFIG_INVALID_SHAPE", "capabilities.codebase-memory.enabled must be boolean");
+  const runners: Record<string, boolean> = {};
+  if (capability.runners !== undefined) {
+    assertPlainObject(capability.runners, "capabilities.codebase-memory.runners", configPath);
+    if (registry) validateRunnerKeys(Object.keys(capability.runners), registry);
+    for (const [id, enabled] of Object.entries(capability.runners)) {
+      if (typeof enabled !== "boolean") throw new DeckConfigError("DECK_CONFIG_INVALID_SHAPE", `capabilities.codebase-memory.runners.${id} must be boolean`);
+      runners[id] = enabled;
+    }
+  }
+  return { "codebase-memory": { enabled: capability.enabled === true, runners } };
+}
+
+export function isCodebaseMemoryEnabled(config: Pick<NormalizedDeckConfig, "capabilities">, runnerId: string): boolean {
+  const intent = config.capabilities?.["codebase-memory"];
+  return intent?.runners[runnerId] ?? intent?.enabled ?? false;
 }

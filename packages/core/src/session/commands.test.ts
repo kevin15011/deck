@@ -4,6 +4,11 @@ import { validateSessionCommand } from "./commands";
 const id = "3f2b8c1e-5d4a-4b7e-9a1c-0e2d3f4a5b6c";
 
 describe("validateSessionCommand", () => {
+  test('approval origin is optional but only notification is recognized',()=>{
+    const c={v:1,commandId:id,type:'approval.respond',approvalId:'a',decision:'allow',scope:'once'};
+    expect(validateSessionCommand({...c,origin:'notification'})).toMatchObject({ok:true,value:{origin:'notification'}});
+    for(const origin of ['app','',null,true,{}])expect(validateSessionCommand({...c,origin}).ok).toBe(false);
+  });
   test("accepts each command kind", () => {
     const cmds = [
       { type: "session.create", projectRoot: "/p" },
@@ -104,4 +109,11 @@ test("project trust requires a reviewed nonnegative safe revision, including leg
  expect(validateSessionCommand(command).ok).toBe(false);
  for (const expectedRevision of [-1, 0.5, "0", null, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity]) expect(validateSessionCommand({...command,expectedRevision}).ok).toBe(false);
  for (const expectedRevision of [0,1,Number.MAX_SAFE_INTEGER]) expect(validateSessionCommand({...command,expectedRevision}).ok).toBe(true);
+});
+
+test('failure dismissal requires an exact positive attempt',()=>{
+ const base={v:1,commandId:'11111111-2222-4333-8444-555555555555',type:'task.dismiss-failure',taskId:'worker'};
+ expect(validateSessionCommand({...base,attempt:1}).ok).toBe(true);
+ for(const attempt of [undefined,0,-1,1.5,'1',Infinity]) expect(validateSessionCommand({...base,attempt}).ok).toBe(false);
+ expect(validateSessionCommand({...base,taskId:'',attempt:1}).ok).toBe(false);
 });

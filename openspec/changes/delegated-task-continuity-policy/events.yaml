@@ -1,0 +1,85 @@
+schema: spec-registry-events-v1
+events:
+  - phase: proposal
+    status: in_progress
+    event: proposal.in_progress
+    artifact: proposal.md
+    timestamp: "2026-10-22T18:45:18Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Recorded the user's continuity policy decision and acceptance criteria before design."
+      - "Added verified historical tool counts and source evidence; no production changes or live inference."
+      - "Member steering is a separate deferred change."
+  - phase: spec
+    status: approved
+    event: spec.approved
+    artifact: acceptance.md
+    timestamp: "2026-10-22T18:55:51Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Recorded user approval with seven amendments: input semantics, dequeue/end-time evaluation, structured criteria/findings, attributed edits, hard cap/override rates, assigned-role reviews, and acquisition-cost metrics."
+      - "Rationale is compaction, rework and review independence, not inferred latency growth per call."
+  - phase: design
+    status: in_progress
+    event: design.in_progress
+    artifact: acceptance.md
+    timestamp: "2026-10-22T18:55:51Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Started source-backed design analysis against amended criteria; design artifact will be registered after Lead review."
+      - "No implementation authorized; member steering remains a separate deferred change."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-10-22T19:11:40Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Source-backed design reviewed and written by Lead; ready for the user checkpoint, not approved for implementation."
+      - "Proposes 160000-token hard cap, no unsafe legacy bypass, and fresh OpenCode policy until provider normalization is verified."
+      - "Defines structured acceptance/findings, attributed/mixed diff evidence and first-edit/first-reported-finding acquisition metrics."
+  - phase: design
+    status: approved
+    event: design.approved
+    artifact: design.md
+    timestamp: "2026-10-22T20:18:13Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User approved design and initial160000 ceiling, with four amendments incorporated before implementation."
+      - "Explicit operator-interrupted attempts may resume within thresholds; failed attempts fresh. Lead explicitly closes findings, handoff includes open only."
+      - "Removed new reviewer tool and first-finding metric; reviews measured through completion. Effective cap constrained below verified native compaction trigger."
+  - phase: apply
+    status: in_progress
+    event: apply.in_progress
+    artifact: apply-progress.md
+    timestamp: "2026-10-22T20:18:13Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Implementation delegated to apply-deep task-9fd1215b-b617-48f7-bf0c-2396f251751a; no other production writer."
+      - "Architect task-0830556f-c081-4a66-87f0-5a86986980fa attempt2 verifies native compaction bounds read-only; unverified native paths stay fresh-only."
+  - phase: verify
+    status: passed_with_warnings
+    event: verify.passed_with_warnings
+    artifact: verify-report.md
+    timestamp: "2026-10-22T22:13:59Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User accepted fresh-all first delivery; internal Codex DB/history excluded. Native enablement deferred, no live speed claim."
+      - "Focused implementation checks and final typecheck pass; interrupted cohort evidence and mandatory handoff verified."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-22T22:13:59Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "All findings closed after independent review; final delivery delta31 tests pass."
+      - "Proceed local canary delivery; installation, daemon activation and live comparison remain distinct."

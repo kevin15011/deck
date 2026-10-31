@@ -44,5 +44,5 @@ export function evaluatePiVersion(output: string | undefined): PiVersionEvaluati
   if (!atLeast(parsed, minimum)) {
     return { supported: false, version: parsed.raw, reason: "below-minimum", diagnostic: `Pi ${parsed.raw} is not supported; Deck requires Pi >= ${PI_MIN_VERSION}. ${PI_UPGRADE_HINT}` };
   }
-  return { supported: true, version: parsed.raw };
+  return { supported: true, version: parsed.raw, ...(parsed.raw !== PI_MIN_VERSION ? { diagnostic: `Pi ${parsed.raw} is newer than tested ${PI_MIN_VERSION}; continuing with minimum-version compatibility.` } : {}) };
 }

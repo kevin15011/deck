@@ -25,15 +25,15 @@ describe("Pi direct-exposure tool names", () => {
 
 describe("catalog", () => {
   test("lists exactly the Deck-managed MCP servers", () => {
-    expect([...DECK_PI_MCP_SERVER_IDS].sort()).toEqual(["codebase-memory", "context-mode", "context7", "serena", "web-search"]);
+    expect([...DECK_PI_MCP_SERVER_IDS].sort()).toEqual(["codebase-memory", "context7", "web-search"]);
   });
 
   test("maps dashboard capability ids to servers", () => {
     expect(mcpServerForCapability("codebase-memory-mcp")).toBe("codebase-memory");
     expect(mcpServerForCapability("codebase-memory")).toBe("codebase-memory");
-    expect(mcpServerForCapability("context-mode")).toBe("context-mode");
+    expect(mcpServerForCapability("context-mode")).toBeUndefined();
     expect(mcpServerForCapability("context7")).toBe("context7");
-    expect(mcpServerForCapability("serena")).toBe("serena");
+    expect(mcpServerForCapability("serena")).toBeUndefined();
     expect(mcpServerForCapability("web-search")).toBe("web-search");
     expect(mcpServerForCapability("rtk")).toBeUndefined();
     expect(mcpServerForCapability("adaptive-memory")).toBeUndefined();
@@ -88,7 +88,7 @@ describe("renderPiMcpToolNamesSection", () => {
     const section = renderPiMcpToolNamesSection(["codebase-memory", "context-mode"]);
     expect(section).toContain("## Pi MCP Tool Names");
     expect(section).toContain("`search_graph` -> `mcp__codebase_memory__search_graph`");
-    expect(section).toContain("`ctx_search` -> `mcp__context_mode__ctx_search`");
+    expect(section).not.toContain("mcp__context_mode__ctx_search");
     expect(section).not.toContain("serena");
   });
 });

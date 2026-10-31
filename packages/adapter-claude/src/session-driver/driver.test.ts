@@ -24,11 +24,101 @@ function input(over: Partial<DriverTaskInput> = {}): DriverTaskInput {
 /** Fixture lines whose session id equals the task's native id. */
 const withSession = (name: string, sid = SID) => fixtureLines(name).map((l) => l.replace(/"session_id":"[0-9a-f-]{36}"/g, `"session_id":"${sid}"`));
 
+test.each([true, false])('Claude overflow fails immediately, drains before settling and cannot accept a later result (newline=%s)', async newline => {
+  const { h, driver } = make(); const task = await driver.startTask(input(), h.io); const child = await h.nextChild();
+  child.endOnTerminate = false;
+  child.stdout(JSON.stringify({ type: 'result', session_id: SID, subtype: 'success' }) + '\n');
+  child.stdout('TRANSPORT_SECRET' + '€'.repeat(Math.ceil(16 * 1024 * 1024 / 3)) + (newline ? '\n' : ''));
+  expect(child.terminations).toHaveLength(1);
+  const diagnostic = h.events.find(e => e.data.code === 'claude-line-too-long');
+  expect(diagnostic?.data).toMatchObject({ code: 'claude-line-too-long', maxFrameBytes: 16 * 1024 * 1024, frameBytesKind: newline ? 'exact' : 'lower-bound' });
+  expect(JSON.stringify(h.events)).not.toContain('TRANSPORT_SECRET');
+  child.lines(withSession('turn-success.jsonl'));
+  let settled = false; void task.done.then(() => { settled = true; }); await Promise.resolve(); expect(settled).toBe(false);
+  child.exit(); expect(await task.done).toMatchObject({ status: 'failed', error: 'claude-line-too-long', failure: { category: 'deck', origin: 'deck' } });
+  expect(h.events.filter(e => e.kind === 'message.completed')).toHaveLength(0);
+  const next = task.send('next'); const follow = await h.nextChild(2); follow.lines(withSession('turn-success.jsonl')); follow.exit();
+  expect(await next).toEqual({ status: 'completed' }); await task.close();
+});
+
+test('Claude admits escaped multibyte tool output above 1 MiB with completion identity and permission denials intact', async () => {
+  const { h, driver } = make(); const task = await driver.startTask(input(), h.io); const child = await h.nextChild();
+  const output = '€😀"\\\n'.repeat(150000);
+  const frame = JSON.stringify({ type: 'user', session_id: SID, message: { content: [{ type: 'tool_result', tool_use_id: 'large-tool', content: output, is_error: true }] } }) + '\n';
+  expect(Buffer.byteLength(frame)).toBeGreaterThan(1024 * 1024);
+  for (let i = 0; i < frame.length; i += 16381) child.stdout(frame.slice(i, i + 16381));
+  child.stdout(JSON.stringify({ type: 'result', session_id: SID, subtype: 'success', permission_denials: [{ tool_name: 'Bash', tool_use_id: 'denied-tool' }] }) + '\n');
+  child.exit(); expect(await task.done).toEqual({ status: 'completed' });
+  expect(h.events.find(e => e.kind === 'tool.completed')?.data).toMatchObject({ toolUseId: 'large-tool', isError: true, status: 'failed' });
+  expect(h.events.find(e => e.data.code === 'claude-permission-denied')?.data.tools).toEqual(['Bash']);
+  expect(child.terminations).toHaveLength(0); await task.close();
+});
+
+test('Claude admits exactly 16 MiB of serialized tool completion and flushes its final result', async () => {
+  const { h, driver } = make(); const task = await driver.startTask(input(), h.io); const child = await h.nextChild();
+  const frame = (content: string) => JSON.stringify({ type: 'user', session_id: SID, message: { content: [{ type: 'tool_result', tool_use_id: 'max-tool', content }] } });
+  const wire = frame('x'.repeat(16 * 1024 * 1024 - Buffer.byteLength(frame(''))));
+  expect(Buffer.byteLength(wire)).toBe(16 * 1024 * 1024);
+  for (let at = 0; at < wire.length; at += 65521) child.stdout(wire.slice(at, at + 65521));
+  child.stdout('\n' + JSON.stringify({ type: 'result', session_id: SID, subtype: 'success' }));
+  child.exit(); expect(await task.done).toEqual({ status: 'completed' });
+  expect(h.events.find(e => e.kind === 'tool.completed')?.data).toMatchObject({ toolUseId: 'max-tool', status: 'completed' });
+  await task.close();
+});
+
+test('Claude oversized terminal record cannot become a generic missing-result failure', async () => {
+  const { h, driver } = make(); const task = await driver.startTask(input(), h.io); const child = await h.nextChild();
+  child.stdout(JSON.stringify({ type:'result',session_id:SID,subtype:'success',result:'x'.repeat(16 * 1024 * 1024) }) + '\n');
+  expect(await task.done).toMatchObject({status:'failed',error:'claude-line-too-long'}); expect(child.terminations).toHaveLength(1); await task.close();
+});
+
+test('Claude transport cleanup rejection settles done but remains visible through repeated close', async () => {
+  const {h,driver}=make(); const spawn=h.io.spawn;
+  h.io.spawn=async(...args)=>{const child=await spawn(...args);child.terminateGroup=async()=>{throw new Error('fixture cleanup rejected');};return child;};
+  const task=await driver.startTask(input(),h.io),child=await h.nextChild();
+  await Promise.resolve();
+  child.stdout('x'.repeat(16*1024*1024+1));
+  const result=await Promise.race([task.done,Bun.sleep(100).then(()=>({status:'timeout'}))]);
+  try {
+    expect(result).toMatchObject({status:'failed',error:'claude-line-too-long'});
+    let exited=false;void child.exited.then(()=>{exited=true;});await Promise.resolve();expect(exited).toBe(false);
+    await expect(task.send('next')).rejects.toThrow('fixture cleanup rejected');
+    await expect(task.close()).rejects.toThrow('fixture cleanup rejected');
+    await expect(task.close()).rejects.toThrow('fixture cleanup rejected');
+  } finally {child.exit();await task.done;}
+});
+
+test.each([false,true])('Claude delivers complete records before a rejected successor independent of chunking: %s', async split => {
+  const {h,driver}=make(),task=await driver.startTask(input(),h.io),child=await h.nextChild();
+  const valid=JSON.stringify({type:'user',session_id:SID,message:{content:[{type:'tool_result',tool_use_id:'before-error',content:'OK'}]}})+'\n';
+  const bad='x'.repeat(16*1024*1024+1)+'\n';
+  if(split){child.stdout(valid);child.stdout(bad+valid);}else child.stdout(valid+bad+valid);
+  expect(await task.done).toMatchObject({status:'failed',error:'claude-line-too-long'});
+  expect(h.events.filter(e=>e.kind==='tool.completed')).toHaveLength(1);await task.close();
+});
+
 function make(timers = new FakeTimers()) {
   const h = harness();
   const driver = createClaudeSessionDriver({ baseEnv: { PATH: "/bin" }, clock: timers, escalationMs: 10_000, killGraceMs: 2_000 });
   return { h, driver, timers };
 }
+
+test('Claude usage follows one exact process execution, preserving raw usage without foreign/late attribution', async () => {
+  const { h, driver } = make(); const task = await driver.startTask(input(), h.io); const child = await h.nextChild();
+  child.lines(withSession('turn-success.jsonl')); child.exit(); await task.done;
+  const usage = h.events.find(e => e.kind === 'usage')!;
+  expect(usage.data.context).toMatchObject({ nativeThreadId: SID, basis: 'claude-last-request-input', tokens: 3868 });
+  const first = usage.data.context as { nativeTurnId: string };
+  const nextTurn = task.send('next'); const next = await h.nextChild(2);
+  const previousCount = h.events.filter(e => e.kind === 'usage').length;
+  child.lines(withSession('turn-success.jsonl'));
+  next.lines([JSON.stringify({ type: 'result', session_id: 'foreign', subtype: 'success', usage: { input_tokens: 999 } })]);
+  expect(h.events.filter(e => e.kind === 'usage')).toHaveLength(previousCount);
+  next.lines(withSession('turn-success.jsonl')); next.exit(); await nextTurn;
+  expect(h.events.filter(e => e.kind === 'usage')).toHaveLength(previousCount + 2);
+  expect((h.events.filter(e => e.kind === 'usage').at(-1)?.data.context as { nativeTurnId: string }).nativeTurnId).not.toBe(first.nativeTurnId);
+  await task.close();
+});
 
 const imageDirs: string[] = [];
 afterEach(() => { for (const dir of imageDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -71,6 +161,29 @@ describe("Claude native image inputs", () => {
 });
 
 describe("createClaudeSessionDriver.startTask", () => {
+  test("process exit and lost supervision have distinct evidence, and cancellation acquires no failure", async () => {
+    for (const anchorLost of [false, true]) {
+      const { h, driver } = make(); const handle = await driver.startTask(input(), h.io); const child = await h.nextChild();
+      child.exit({ ok: false, code: anchorLost ? null : 1, anchorLost });
+      expect(await handle.done).toMatchObject({ status: "failed", failure: { category: anchorLost ? "unknown" : "runner-process", origin: anchorLost ? "unknown" : "runner" } });
+    }
+    const { h, driver } = make(); const handle = await driver.startTask(input(), h.io); const child = await h.nextChild();
+    child.lines([JSON.stringify({ type: "assistant", session_id: SID, error: "rate_limit", api_error_status: 429, api_error_origin: "first_party" })]);
+    await handle.interrupt(); child.lines(withSession("turn-interrupted.jsonl")); child.exit();
+    expect(await handle.done).toEqual({ status: "interrupted" });
+  });
+  test("reports structured provider failure without stale/reset attribution on a later turn", async () => {
+    const { h, driver } = make(); const handle = await driver.startTask(input(), h.io); const child = await h.nextChild();
+    child.lines([JSON.stringify({ type: "assistant", session_id: "foreign", error: "rate_limit", api_error_status: 429, api_error_origin: "first_party", api_error: "usage_limit_reached", api_error_params: { rate_limit_info: { status: "rejected", resetsAt: 1792607400 } } }),
+      JSON.stringify({ type: "result", session_id: "foreign", subtype: "success", is_error: false }),
+      JSON.stringify({ type: "result", session_id: SID, subtype: "success", is_error: true, terminal_reason: "api_error", api_error_status: 429, api_error_origin: "first_party", api_error: "usage_limit_reached" })]);
+    child.exit(); const failed = await handle.done;
+    expect(failed).toMatchObject({ status: "failed", failure: { category: "quota", origin: "provider", provider: "anthropic" } });
+    expect(failed.failure?.resetAt).toBeUndefined();
+    const retry = handle.send("manual retry"); const next = await h.nextChild(2);
+    next.lines(withSession("turn-success.jsonl")); next.exit(); expect(await retry).toEqual({ status: "completed" });
+    await handle.close();
+  });
   test("only a confirmed missing resume context receives the reseed reason", async () => {
     for (const [message, missing] of [[`No conversation found with session ID: ${SID}`, true], ["API authentication failed", false]] as const) {
       const { h, driver } = make();
@@ -102,7 +215,9 @@ describe("createClaudeSessionDriver.startTask", () => {
     child.lines(withSession("turn-success.jsonl"));
     child.exit();
     expect(await handle.done).toEqual({ status: "completed" });
-    expect(h.events.map((e) => e.kind)).toEqual(["turn.started", "message.completed", "rate-limit", "usage"]);
+    expect(h.events.map((e) => e.kind)).toEqual(["turn.started", "message.completed", "diagnostic", "usage", "rate-limit", "usage", "diagnostic"]);
+    expect(h.events[2]!.data).toMatchObject({code:"request.observed",nativeThreadId:SID,nativeRequestId:h.events[1]!.data.messageId});
+    expect(h.events[3]!.data.requestUsage).toMatchObject({requestId:h.events[2]!.data.nativeRequestId});
     expect(h.events[1]!.data.text).toBe("pong");
   });
 
@@ -115,7 +230,7 @@ describe("createClaudeSessionDriver.startTask", () => {
     child.stdout(text.slice(137)); // no trailing newline: flushed at exit
     child.exit();
     expect(await handle.done).toEqual({ status: "completed" });
-    expect(h.events.at(-1)!.kind).toBe("usage");
+    expect(h.events.filter(e=>e.kind==="usage").at(-1)!.kind).toBe("usage");
   });
 
   test("a non-JSON stdout line is a diagnostic, not a crash", async () => {
@@ -422,4 +537,17 @@ test('pre-init native stderr cannot publish literal configuration credentials',a
  const {h,driver}=make(),task=await driver.startTask(input(),h.io),child=await h.nextChild();
  child.stderr('invalid config FAKE_PRIVATE_NATIVE_SENTINEL');child.exit({ok:false,code:1});
  const result=await task.done;expect(result.error).toContain('code 1');expect(result.error).not.toContain('FAKE_PRIVATE_NATIVE_SENTINEL');await task.close();
+});
+
+test.each([true,false])('Claude claim immediately precedes stdin; allowed=%s',async allowed=>{
+  const {h,driver}=make();let claims=0;
+  const task=await driver.startTask(input(),{...h.io,claimInput:()=>{claims++;expect(h.children[0]!.stdin).toEqual([]);return allowed;}});
+  const child=await h.nextChild();await Promise.resolve();expect(claims).toBe(1);expect(child.stdin.length).toBe(allowed?1:0);
+  child.exit({ok:false,code:null,signal:'SIGINT'});await task.done;await task.close();
+});
+test('Claude interrupt during spawn never writes the initial prompt',async()=>{
+  const {h,driver}=make();const held=Promise.withResolvers<void>();
+  const task=await driver.startTask(input(),{...h.io,spawn:async(...args)=>{const child=await h.io.spawn(...args);await held.promise;return child;}});
+  const child=await h.nextChild();await task.interrupt();held.resolve();await Promise.resolve();await Promise.resolve();expect(child.stdin).toEqual([]);
+  child.exit({ok:false,code:null,signal:'SIGINT'});await task.done;await task.close();
 });

@@ -1,7 +1,18 @@
 import { expect, test } from 'bun:test';
-import { summarize, finalSegment } from '../push-attention';
+import { summarize, finalSegment, approvalPushFields } from '../push-attention';
 import type { SessionEvent } from '@deck/core/session/events';
 const e = (seq: number, kind: string, text?: string, role = 'assistant') => ({ v: 1, sessionId: 's', ts: new Date().toISOString(), seq, kind, source: { taskId: 'lead' }, data: { text, role } } as SessionEvent);
+test('approval push metadata is bounded, identifier-only and fail-closed',()=>{
+ expect(approvalPushFields({approvalId:'a',tool:'mcp__deck__read',risk:'normal',input:{command:'SECRET'},summary:'SECRET'})).toEqual({approvalId:'a',tool:'mcp__deck__read',risk:'normal'});
+ for(const tool of ['Bash /private/path','/private/path','token=SECRET','x'.repeat(81),'Bash\u202esecret']){
+  const fields=approvalPushFields({approvalId:'a',tool,risk:'unknown'});
+  expect(fields).toEqual({approvalId:'a',tool:'Tool',risk:'high'});
+ }
+ expect(approvalPushFields({approvalId:'a',tool:'Bash'}).risk).toBe('high');
+ const f=projection();f.state.approvals={a:{approvalId:'a',seq:11}};
+ f.events[1]={...e(11,'approval.requested'),data:{approvalId:'a',tool:'Bash',risk:'normal',input:{command:'SECRET'}}};
+ expect(f.run().find(a=>a.kind==='approval')).toMatchObject({approvalId:'a',tool:'Bash',risk:'normal'});
+});
 test('final-segment heuristic excludes tools, prior commentary and steering', () => {
     expect(finalSegment([e(1, 'message.completed', 'Checking'), e(2, 'tool.completed', 'SECRET'), e(3, 'message.completed', 'Done.'), e(4, 'reasoning.delta', 'SECRET'), e(5, 'message.completed', 'Tested.')], 'lead', 0, 6)).toBe('Done.\n\nTested.');
     expect(finalSegment([e(1, 'message.completed', 'old'), e(2, 'message.completed', 'steer', 'user')], 'lead', 0, 3)).toBe('');

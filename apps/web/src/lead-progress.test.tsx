@@ -89,3 +89,142 @@ test('session auto-approval does not leave the Lead waiting for permission',()=>
  const events=[event(1,'turn.started'),event(2,'approval.requested',{approvalId:'a'}),event(3,'approval.resolved',{approvalId:'a',auto:true,by:'session-grant:g'})];
  expect(leadProgress(events,{sessionId:'s'})?.phase).not.toBe('approval');
 });
+
+const compaction = (seq: number, state = 'started', itemId = 'c', taskId = 'lead', nativeTurnId = 'turn') => event(seq, 'diagnostic', { code: 'context.compaction', state, itemId, nativeThreadId: 'thread', nativeTurnId }, taskId);
+test('canonical compaction replays into shared accessible mobile and desktop status; missing start is unknown', () => {
+ const history = [event(1, 'turn.started'), compaction(2)];
+ const progress = leadProgress(history, { sessionId: 's' });
+ expect(progress).toEqual({ phase: 'compacting', label: 'Compacting context…' });
+ for (const mobile of [false, true]) {
+   const html = renderToStaticMarkup(<LeadProgress progress={progress} mobile={mobile}/>);
+   expect(html).toContain('data-phase="compacting"'); expect(html).toContain('Compacting context…'); expect(html).toContain('role="status"');
+ }
+ expect(leadProgress(history, { sessionId: 's', connection: 'Reconnecting' })?.phase).toBe('connection');
+ expect(leadProgress([...history], { sessionId: 's', connection: 'Connected' })).toEqual(progress);
+ expect(leadProgress([compaction(3, 'completed')], { sessionId: 's' })).toBeUndefined();
+ expect(leadProgress([...history, compaction(3, 'completed')], { sessionId: 's' })?.phase).toBe('waiting');
+});
+test('completion matches newest compaction identity and source and cannot erase later real progress', () => {
+ const active = [compaction(1, 'started', 'old'), compaction(2, 'started', 'new')];
+ for (const completion of [compaction(3, 'completed', 'old'), compaction(3, 'completed', 'new', 'child'), compaction(3, 'completed', 'new', 'lead', 'old-turn'), { ...compaction(3, 'completed', 'new'), source: { taskId: 'lead', runnerId: 'other' } }, { ...compaction(3, 'completed', 'new'), source: { taskId: 'other-lead-generation', memberId: 'lead', runnerId: 'codex' } }]) {
+  expect(leadProgress([...active, completion], { sessionId: 's' })?.phase).toBe('compacting');
+ }
+ for (const evidence of [event(3, 'message.delta', { text: 'answer' }), event(3, 'tool.started', { toolCallId: 'tool', name: 'Read' }), event(3, 'reasoning.delta', { text: 'reason' })]) {
+  const progress = leadProgress([...active, evidence], { sessionId: 's' });
+  expect(leadProgress([...active, evidence, compaction(4, 'completed', 'new')], { sessionId: 's' })).toEqual(progress);
+ }
+});
+test('compaction respects questions, approvals, receipt, session and lifecycle fences', () => {
+ for (const [kind, data, phase] of [['question.requested', { questionId: 'q' }, 'question'], ['approval.requested', { approvalId: 'a' }, 'approval']] as const) {
+  expect(leadProgress([compaction(1), event(2, kind, data)], { sessionId: 's' })?.phase).toBe(phase);
+ }
+ for (const boundary of [event(2, 'turn.completed'), event(2, 'session.ended'), event(2, 'task.state', { state: 'failed' })]) {
+  expect(leadProgress([compaction(1), boundary, compaction(3)], { sessionId: 's' })).toBeUndefined();
+ }
+ for (const boundary of [event(2, 'turn.started'), event(2, 'task.continued')]) {
+  expect(leadProgress([compaction(1), boundary, compaction(3, 'completed')], { sessionId: 's' })?.phase).toBe('waiting');
+ }
+ expect(leadProgress([compaction(1)], { sessionId: 'other' })).toBeUndefined();
+ expect(leadProgress([compaction(7)], { sessionId: 's', pending })?.phase).toBe('sending');
+ expect(leadProgress([compaction(4), receipt()], { sessionId: 's', pending })?.phase).toBe('waiting');
+ expect(leadProgress([receipt(), compaction(7)], { sessionId: 's', pending })?.phase).toBe('compacting');
+ expect(leadProgress([receipt(), compaction(7), event(8, 'prompt.state', { promptId: 'prompt', state: 'completed' })], { sessionId: 's', pending })).toBeUndefined();
+ expect(leadProgress([event(1, 'runner.unmapped', { nativeType: 'item/started', raw: { type: 'contextCompaction' } })], { sessionId: 's' })).toBeUndefined();
+});
+
+test('resolving an approval reveals current compaction evidence', () => {
+ const events = [compaction(1), event(2, 'approval.requested', { approvalId: 'a' }), event(3, 'approval.resolved', { approvalId: 'a' })];
+ expect(leadProgress(events, { sessionId: 's' })?.phase).toBe('compacting');
+});
+
+test('production bounded current evidence retains compaction through snapshot and live reduction', async () => {
+ const { CurrentEvents } = await import('../../../packages/core/src/session/chat-history');
+ const { snapshotView } = await import('./chat-history');
+ const current = new CurrentEvents();
+ current.apply(event(1, 'turn.started')); current.apply(compaction(2));
+ expect(leadProgress(snapshotView(current.values(), 2).events, { sessionId: 's' })?.phase).toBe('compacting');
+ current.apply(compaction(3, 'started', 'new')); current.apply(compaction(4, 'completed', 'c'));
+ expect(leadProgress(current.values(), { sessionId: 's' })?.phase).toBe('compacting');
+ current.apply(event(5, 'message.delta', { text: 'answer' })); current.apply(compaction(6, 'completed', 'new'));
+ expect(leadProgress(current.values(), { sessionId: 's' })?.phase).toBe('responding');
+ current.apply(event(7, 'turn.completed'));
+ expect(leadProgress(current.values(), { sessionId: 's' })).toBeUndefined();
+});
+
+test('bounded compaction projection rejects unmatched and malformed records without displacing newer evidence', async () => {
+ const { CurrentEvents } = await import('../../../packages/core/src/session/chat-history');
+ const current = new CurrentEvents();
+ current.apply(compaction(1));
+ const newer = compaction(2, 'started', 'new'); current.apply(newer);
+ const mismatches = [compaction(3, 'completed'), { ...compaction(4, 'completed', 'new'), data: { ...newer.data, state: 'completed', nativeThreadId: 'other' } }, compaction(5, 'completed', 'new', 'lead', 'other'), { ...compaction(6, 'completed', 'new'), source: { taskId: 'lead', runnerId: 'other' } }, { ...compaction(7, 'completed', 'new'), source: { taskId: 'lead', runnerId: 'codex', nativeSessionId: 'other' } }];
+ for (const mismatch of mismatches) current.apply(mismatch);
+ for (const [index, itemId] of ['', undefined, 42, 'x'.repeat(257), '\u001b[31m', 'token=private'].entries()) current.apply({ ...compaction(8 + index), data: { ...newer.data, itemId } });
+ expect(current.values().filter(e => e.data.code === 'context.compaction')).toEqual([newer]);
+ expect(leadProgress(current.values(), { sessionId: 's' })?.phase).toBe('compacting');
+ current.apply(compaction(20, 'completed', 'new'));
+ expect(leadProgress(current.values(), { sessionId: 's' })?.phase).toBe('waiting');
+ for (let seq = 21; seq < 521; seq++) current.apply(compaction(seq, 'started', `c-${seq}`));
+ expect(current.values().filter(e => e.data.code === 'context.compaction')).toHaveLength(1);
+ expect(current.values().length).toBeLessThanOrEqual(2);
+});
+
+test('bounded compaction replay clears terminals, new turns and active prompt fences', async () => {
+ const { CurrentEvents } = await import('../../../packages/core/src/session/chat-history');
+ for (const boundary of [event(3, 'turn.completed'), event(3, 'session.ended'), event(3, 'task.state', { state: 'failed' }), event(3, 'turn.started'), event(3, 'task.continued')]) {
+  const current = new CurrentEvents(); current.apply(event(1, 'turn.started')); current.apply(compaction(2)); current.apply(boundary);
+  current.apply(compaction(4, 'completed'));
+  expect(current.values().some(e => e.data.code === 'context.compaction')).toBe(false);
+  if (['turn.completed', 'session.ended', 'task.state'].includes(boundary.kind)) {
+   current.apply(compaction(5));
+   expect(leadProgress(current.values(), { sessionId: 's' })).toBeUndefined();
+  }
+ }
+ const current = new CurrentEvents();
+ current.apply(event(1, 'turn.started')); current.apply(event(2, 'prompt.dispatched', { promptId: 'p', taskId: 'lead' })); current.apply(compaction(3));
+ current.apply(event(4, 'prompt.state', { promptId: 'other', state: 'failed' }));
+ expect(leadProgress(current.values(), { sessionId: 's' })?.phase).toBe('compacting');
+ current.apply(event(5, 'prompt.state', { promptId: 'p', state: 'failed' }));
+ current.apply(compaction(6));
+ expect(current.values().some(e => e.data.code === 'context.compaction')).toBe(false);
+ current.apply(event(7, 'turn.started')); current.apply(compaction(8));
+ expect(leadProgress(current.values(), { sessionId: 's' })?.phase).toBe('compacting');
+});
+
+test('snapshot-to-live reduction keeps canonical compaction bounded without raw or malformed recovery', async () => {
+ const { CurrentEvents } = await import('../../../packages/core/src/session/chat-history');
+ const { snapshotView } = await import('./chat-history');
+ const { reduceCurrentEvent } = await import('./state');
+ const server = new CurrentEvents();
+ const started = { ...compaction(2), raw: { runnerId: 'codex', protocol: 'codex-app-server', payload: { transcript: 'PRIVATE_COMPACTION_TRANSCRIPT' }, truncated: false } };
+ server.apply(event(1, 'turn.started')); server.apply(started);
+ for (let seq = 3; seq < 303; seq++) server.apply(event(seq, 'tool.completed', { toolCallId: 'other' }));
+ const page = server.values();
+ expect(page.filter(e => e.kind === 'tool.completed')).toHaveLength(200);
+ expect(JSON.stringify(page)).not.toContain('PRIVATE_COMPACTION_TRANSCRIPT');
+ expect(page.find(e => e.data.code === 'context.compaction')?.raw).toBeUndefined();
+ const live = new CurrentEvents(); for (const e of page) live.apply(e);
+ let view = snapshotView(page, 302);
+ const next = compaction(303, 'started', 'next');
+ live.apply(next); view = reduceCurrentEvent(view, next, live.values());
+ expect(leadProgress(view.events, { sessionId: 's' })?.phase).toBe('compacting');
+ const done = compaction(304, 'completed', 'c');
+ live.apply(done); view = reduceCurrentEvent(view, done, live.values());
+ expect(leadProgress(view.events, { sessionId: 's' })?.phase).toBe('compacting');
+ const terminal = event(305, 'turn.completed');
+ live.apply(terminal); view = reduceCurrentEvent(view, terminal, live.values());
+ expect(leadProgress(view.events, { sessionId: 's' })).toBeUndefined();
+ const missing = new CurrentEvents(); missing.apply(compaction(1, 'completed'));
+ expect(missing.values()).toEqual([]);
+ for (const data of [{ itemId: undefined }, { nativeThreadId: [] }, { nativeTurnId: 'x'.repeat(257) }, { state: 'unknown' }]) missing.apply({ ...compaction(2), data: { ...compaction(2).data, ...data } });
+ expect(missing.values()).toEqual([]);
+});
+
+test('explicit task admission reopens compaction evidence after a settled turn without inventing a start', async () => {
+ const { CurrentEvents } = await import('../../../packages/core/src/session/chat-history');
+ const current = new CurrentEvents();
+ current.apply(event(1, 'turn.completed'));
+ current.apply(event(2, 'task.state', { state: 'running' }));
+ expect(leadProgress(current.values(), { sessionId: 's' })?.phase).toBe('waiting');
+ current.apply(compaction(3));
+ expect(leadProgress(current.values(), { sessionId: 's' })?.phase).toBe('compacting');
+});

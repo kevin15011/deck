@@ -7,8 +7,7 @@
  *
  * XDG split layout (introduced by `add-self-update-system`):
  *   - `$XDG_CONFIG_HOME/deck/` (default `~/.config/deck/`) for `config.yaml` and the
- *     compatibility-read `config.json` (legacy `~/.config/.deck/config.json` is
- *     one-shot migrated here).
+ *     `config.json`.
  *   - `$XDG_STATE_HOME/deck/` (default `~/.local/state/deck/`) for `state.yaml`,
  *     `manifest.json`, history and `logs/`.
  *   - `$XDG_CACHE_HOME/deck/` (default `~/.cache/deck/`) for `releases/vX.Y.Z/`
@@ -47,15 +46,6 @@ export function _resetDeckPathCache(): void {
 export type ConfigPaths = {
   configDir: string;
   configPath: string;
-};
-
-export type DeckConfigMigrationCandidateKind =
-  | "xdg-dot-deck"
-  | "home-config-dot-deck"
-  | "home-dot-deck";
-
-export type DeckConfigMigrationCandidatePath = ConfigPaths & {
-  kind: DeckConfigMigrationCandidateKind;
 };
 
 export type DeckXdgPaths = {
@@ -200,20 +190,6 @@ export function getDeckXdgPaths(): DeckXdgPaths {
 }
 
 /**
-  * Get the legacy Deck config directory that the XDG migration may import.
- *
-  * This is migration-only metadata, not an active preference fallback.
-  */
-export function getDeckConfigMigrationCandidateDir(): string {
-  const home = getHomeDir();
-  const xdg = getXdgConfigHome();
-  if (xdg) {
-    return join(xdg, ".deck");
-  }
-  return join(home, ".config", ".deck");
-}
-
-/**
   * Get the canonical global Deck config directory.
  *
  * @returns Resolved config directory path
@@ -246,42 +222,6 @@ export function getRunnerConfigDir(): string {
 }
 
 /**
- * Get migration-candidate config paths only.
- *
- * These paths describe legacy locations that migration tooling may inspect.
- * They are not an active read order and must not be used as runtime preference
- * fallbacks.
- */
-export function getDeckConfigMigrationCandidatePaths(): DeckConfigMigrationCandidatePath[] {
-  const home = getHomeDir();
-  const xdg = getXdgConfigHome();
-
-  const paths: DeckConfigMigrationCandidatePath[] = [];
-
-  if (xdg) {
-    paths.push({
-      kind: "xdg-dot-deck",
-      configDir: join(xdg, ".deck"),
-      configPath: join(xdg, ".deck", "config.json"),
-    });
-  }
-
-  paths.push({
-    kind: "home-config-dot-deck",
-    configDir: join(home, ".config", ".deck"),
-    configPath: join(home, ".config", ".deck", "config.json"),
-  });
-
-  paths.push({
-    kind: "home-dot-deck",
-    configDir: join(home, ".deck"),
-    configPath: join(home, ".deck", "config.json"),
-  });
-
-  return paths;
-}
-
-/**
  * Check if the canonical global Deck config exists.
  *
  * Legacy migration candidates are intentionally excluded.
@@ -289,23 +229,4 @@ export function getDeckConfigMigrationCandidatePaths(): DeckConfigMigrationCandi
 export function canonicalGlobalDeckConfigExists(): boolean {
   const { existsSync } = require("node:fs");
   return existsSync(getGlobalDeckConfigPath());
-}
-
-/**
- * Resolve the first existing migration-candidate config path.
- *
- * Migration tooling may use this to decide whether a legacy import is needed.
- * Runtime preference reads must use the canonical global config path instead.
- */
-export function resolveExistingDeckConfigMigrationCandidatePath(): string | undefined {
-  const { existsSync } = require("node:fs");
-  const paths = getDeckConfigMigrationCandidatePaths();
-
-  for (const { configPath } of paths) {
-    if (existsSync(configPath)) {
-      return configPath;
-    }
-  }
-
-  return undefined;
 }

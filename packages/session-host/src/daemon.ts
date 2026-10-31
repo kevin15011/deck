@@ -1,3 +1,5 @@
+import { QuotaStore, type QuotaRefresh } from "./quota";
+import { runnerMutationActive, acquireRunnerMutationMarker, releaseRunnerMutationMarker } from "./runner-mutation";
 import {WebRestart,type RestartIdentity,type RestartLauncher} from "./web-restart";
 import {createHash} from "node:crypto";
 import { QuestionBroker } from "./question-broker";
@@ -47,6 +49,8 @@ export type DaemonOptions = {
   createService?: (services: DaemonServices) => SessionService;
   clock?: Clock;
   idleMs?: number;
+  /** Idle self-shutdown (XR-3.1). Production disables it: the daemon must stay reachable for remote web clients. */
+  idleShutdown?: boolean;
   idlePollMs?: number;
   recoverOnStart?: boolean;
   probe?: ProcessProbe;
@@ -55,6 +59,7 @@ export type DaemonOptions = {
   uid?: number;
   pid?: number;
   nonce?: string;
+  quotaRefresh?: QuotaRefresh;
   web?: { config: WebConfig; assets?: WebAssets; autoStart?: boolean; push?: WebServiceOptions["push"] };
 };
 
@@ -92,9 +97,13 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     return lock.reason === "already-running" ? { ok: false, reason: "already-running", holder: lock.holder } : { ok: false, reason: "contended" };
   }
 
+  if (runnerMutationActive(paths, probe)) {lock.release();return {ok:false,reason:"contended"};}
+
   let server: ControlServer | undefined;
   let service: SessionService | undefined;
   let web: WebService | undefined;
+  let quota: QuotaStore | undefined;
+  let unsubscribeQuota: (() => void) | undefined;
   try {
     const recovery = options.recoverOnStart === false ? { sessions: [], errors: [] } : recoverAllSessions({ paths, probe });
     for (const e of recovery.errors) logger.warn("recovery.session-failed", { sessionId: e.sessionId, error: e.error });
@@ -110,6 +119,12 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     const services: DaemonServices = { broker, questionBroker: defaultQuestionBroker, credentials, supervisor, paths, clock, logger, probe };
     service = (options.createService ?? (() => new UnavailableSessionService()))(services);
     const svc = service;
+    quota = new QuotaStore({ refresh: options.quotaRefresh ? (runner, signal) => {
+      if (runnerMutationActive(paths, probe)) return Promise.reject(Error('runner-mutation-active'));
+      return options.quotaRefresh!(runner, signal);
+    } : undefined, now: () => clock.now() });
+    unsubscribeQuota = svc.subscribeEvents?.(event => quota?.observe(event));
+    await quota.seed(paths.sessionsDir);
     // Older CLI compositions construct the manager with only the approval broker.
     const questionBroker = svc.questionBroker ?? defaultQuestionBroker;
     services.questionBroker = questionBroker;
@@ -117,16 +132,19 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     let admitted = 0;
     // Fence admission synchronously with restart acceptance. All transports share the same gate,
     // including commands already admitted before the service reports a running native turn.
-    const admit = async (effect: () => CommandOutcome | Promise<CommandOutcome>): Promise<CommandOutcome> => {
+    const safeQueries = new Set(["session.summary", "decisions.list", "task.result", "projects.list", "directories.list", "sessions.list", "projects.status", "sessions.status", "prompts.list", "project.trust", "session.readiness", "project.files", "project.content", "git.list", "git.read", "git.content", "web.status", "web.devices"]);
+    const admit = async (effect: () => CommandOutcome | Promise<CommandOutcome>, duringMutation = false): Promise<CommandOutcome> => {
       if (draining) return { ok: false, code: "daemon-stopping", message: "The daemon is shutting down" };
+      if (!duringMutation && runnerMutationActive(paths, probe)) return {ok:false,code:"runner-mutation-active",message:"Runner maintenance is in progress; retry when it finishes."};
       admitted++;
       try { return await effect(); } finally { admitted--; }
     };
     const guardedService: SessionService = {
-      execute: (input) => admit(() => svc.execute(input)), openLog: (id) => svc.openLog(id), hasRunningWork: () => svc.hasRunningWork(),
-      query: (name, args) => admit(() => svc.query?.(name, args) ?? { ok: false, code: "query-unknown" }),
+      execute: (input) => admit(() => svc.execute(input), input.command.type === "session.prepare.cancel" || input.command.type === "session.attach"), openLog: (id) => svc.openLog(id), hasRunningWork: () => svc.hasRunningWork(),
+      query: (name, args) => admit(() => svc.query?.(name, args) ?? { ok: false, code: "query-unknown" }, safeQueries.has(name)),
       uploadAttachment: (input) => {
         if (draining) return { ok: false, code: "daemon-stopping" };
+        if (runnerMutationActive(paths, probe)) return {ok:false,code:"runner-mutation-active"};
         admitted++;
         try { return svc.uploadAttachment?.(input) ?? { ok: false, code: "attachment-unavailable" }; }
         finally { admitted--; }
@@ -134,18 +152,22 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       subscribeEvents: svc.subscribeEvents ? listener => svc.subscribeEvents!(listener) : undefined,
       pushAttentionItems: svc.pushAttentionItems ? id => draining ? [] : svc.pushAttentionItems!(id) : undefined,
       pushAttentionSessions: svc.pushAttentionSessions ? () => draining ? [] : svc.pushAttentionSessions!() : undefined,
+      pushSessionName: id => svc.pushSessionName?.(id),
       isPushAttentionCurrent: attention => !draining && (svc.isPushAttentionCurrent?.(attention) ?? false),
       readAttachment: (sessionId, attachmentId) => svc.readAttachment?.(sessionId, attachmentId),
     };
     const transportService: SessionService = {
       execute: (input) => guardedService.execute(input), openLog: (id) => svc.openLog(id), hasRunningWork: () => svc.hasRunningWork(),
-      query: (name, args) => name.startsWith("web.") ? admit(() => web?.query(name, args) ?? { ok: false, code: "web-unavailable" }) : guardedService.query!(name, args),
+      query: (name, args) => name === "runner-mutation.acquire"
+        ? Promise.resolve(!draining && !isBusy() && svc.hasActiveSessions?.() === false && acquireRunnerMutationMarker(paths,args) ? {ok:true} : {ok:false,code:"runner-mutation-deferred"})
+        : name === "runner-mutation.release" ? Promise.resolve({ok:releaseRunnerMutationMarker(paths,args)} as CommandOutcome)
+        : name.startsWith("web.") ? admit(() => web?.query(name, args) ?? { ok: false, code: "web-unavailable" }, safeQueries.has(name)) : guardedService.query!(name, args),
     };
 
     const startedAt = clock.now();
     const nonce = lock.nonce;
     let stopRequested: ((reason: StopReason) => Promise<void>) | undefined;
-    const isBusy = () => admitted > 0 || svc.hasRunningWork() || broker.pending().length > 0 || questionBroker.pending().length > 0;
+    const isBusy = () => runnerMutationActive(paths, probe) || admitted > 0 || quota?.refreshing === true || svc.hasRunningWork() || broker.pending().length > 0 || questionBroker.pending().length > 0;
     const bridge = new BridgeService({
       credentials, broker, questionBroker,
       status: (grant) => svc.taskStatus?.(grant) ?? { sessionId: grant.sessionId, taskId: grant.taskId, memberId: grant.memberId },
@@ -157,7 +179,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       webPort:()=>web?.status().port,
       drain:value=>{if(value&&draining)throw Error('restart-in-progress');draining=value;},stop:reason=>{void stopRequested?.(reason);},
     });
-    if(options.web){web=new WebService({paths,service:guardedService,...options.web,restart});if(options.web.autoStart!==false)try{web.start();}catch{logger.warn('web.listen-failed');}}
+    if(options.web){web=new WebService({paths,service:guardedService,...options.web,restart,quota});if(options.web.autoStart!==false)try{web.start();}catch{logger.warn('web.listen-failed');}}
 
     server = new ControlServer({
       socketPath: paths.socket.path,
@@ -169,7 +191,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
         version: options.version, pid, nonce,
         status: () => ({
           pid, nonce, version: options.version, startedAt: new Date(startedAt).toISOString(), uptimeMs: clock.now() - startedAt,
-          clients: server!.clientCount + (web?.clientCount ?? 0), web: web?.status(), runningWork: svc.hasRunningWork(), pendingApprovals: broker.pending().length, pendingQuestions: questionBroker.pending().length, socketPath: paths.socket.path, stopping: draining, ...(options.restart?{executable:options.restart.identity}:{}),
+          clients: server!.clientCount + (web?.clientCount ?? 0), web: web?.status(), runningWork: svc.hasRunningWork(), activeSessions: svc.hasActiveSessions?.() ?? false, pendingApprovals: broker.pending().length, pendingQuestions: questionBroker.pending().length, socketPath: paths.socket.path, stopping: draining, ...(options.restart?{executable:options.restart.identity}:{}),
         }),
         requestRestart: () => {
           if (draining) return { ok: true as const };
@@ -190,15 +212,16 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     let resolveStopped!: (reason: StopReason) => void;
     const stopped = new Promise<StopReason>((resolve) => { resolveStopped = resolve; });
     const idle = new IdleMonitor({
-      clock, idleMs: options.idleMs, pollMs: options.idlePollMs, isBusy, clientCount: () => activeServer.clientCount + (web?.clientCount ?? 0),
+      clock, idleMs: options.idleMs, pollMs: options.idlePollMs, isBusy: () => isBusy() || web?.listening === true, clientCount: () => activeServer.clientCount + (web?.clientCount ?? 0),
       onIdle: () => { void stop("idle"); },
     });
 
     const stop = (reason: StopReason): Promise<void> => {
       draining = true;
       stopPromise ??= (async () => {
-        logger.info("daemon.stopping", { reason });
+        logger.info("daemon.stopping", { reason, clients: activeServer.clientCount + (web?.clientCount ?? 0), webListening: web?.listening === true });
         idle.stop();
+        unsubscribeQuota?.(); quota?.close();
         broker.dispose(reason.startsWith("web-restart-forced:")?reason:"shutdown");
         questionBroker.dispose(reason.startsWith("web-restart-forced:")?reason:"shutdown");
         // Let the manager abort readiness, drain native handles and release shared backend
@@ -220,7 +243,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       return stopPromise.then(() => undefined);
     };
     stopRequested = stop;
-    idle.start();
+    if (options.idleShutdown !== false) idle.start();
     logger.info("daemon.started", { pid, version: options.version, socket: paths.socket.path, socketLocation: paths.socket.location });
 
     return {
@@ -228,6 +251,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       daemon: { info, services, server, get clientCount() { return activeServer.clientCount + (web?.clientCount ?? 0); }, stop, stopped },
     };
   } catch (error) {
+    unsubscribeQuota?.(); quota?.close();
     try { await web?.close(); } catch { /* best effort */ }
     try { await server?.close(); } catch { /* best effort */ }
     try { await service?.close?.(); } catch { /* best effort */ }

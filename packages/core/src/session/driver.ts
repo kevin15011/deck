@@ -6,6 +6,7 @@ import type { SteeringInput, SteeringOutcome, SteeringTarget } from "./steering"
 import type { DriverProtocol } from "./events";
 import type { RunnerQualifiedAssignment } from "./assignments";
 import type { ChildMcpSet } from "./mcp";
+import type { TurnFailure } from "./failure";
 
 export type DriverProbeContext = { executablePath?: string; cwd: string };
 export type DriverProbe = {
@@ -48,10 +49,31 @@ export type NativeMemoryDescriptor = {
   };
 };
 
+/** Preparation findings are data; they never grant repair or execution authority. */
+export type RunnerPreparationFinding = { kind: "H" | "W" | "B"; code: string; item: string; message: string };
+
+/** Host-verified native plugin providing skills, bound to an installed team selection. */
+export type NativeSkillsDescriptor = {
+  root: string;
+  pluginName: string;
+  preparation?: readonly RunnerPreparationFinding[];
+  sourceSelection?: { path: string; hash: string };
+  selectionPath: string;
+  selectionHash: string;
+  contentHash: string;
+  files: Readonly<Record<string, string>>;
+};
+
 /** Host-validated managed files, supplied as native structured image input. */
 export type DriverImageInput = { path: string; mimeType: "image/png" | "image/jpeg" | "image/webp"; name: string };
 
 export type DriverTaskInput = {
+  /** Installed role bytes and native defaults. This is not native Setup caller attestation. */
+  nativeRoleDescriptor?: NativeRoleDescriptor;
+  /** Verified native selection; adapter checks the installed generation before each spawn. */
+  nativeRole?: { roleId: string; roleRef: string; generation: string };
+  /** Immutable host-owned SessionStart data; never a grant of repair authority. */
+  sessionStartContext?: { text: string; epoch: string; snapshotId: string };
   steeringVersion?: "0.162.1" | "2.1.296";
   /** Provenance of the original host-composed input, distinct from later genuine steering. */
   inputOrigin?: "user" | "host";
@@ -63,12 +85,28 @@ export type DriverTaskInput = {
   /** Launch spec for every id in `mcp.servers` (the Deck session server included). */
   mcpServerSpecs: Readonly<Record<string, ChildMcpServerSpec>>;
   nativeMemory?: NativeMemoryDescriptor;
+  nativeSkills?: NativeSkillsDescriptor;
   /** Host-owned canonical project grant. Absence never authorizes OpenCode project execution. */
   projectConfigTrusted?: boolean;
   /** Native names suppressed only for an unavailable managed binding or protected conflict. */
   suppressedMcpServers?: readonly string[];
+  codebaseAvailability?: import("./codebase-availability").CodebaseAvailabilityDisposition;
   approvals: "relay" | "runner-default"; credentialFile: string;
   disableNativeDelegation: boolean;
+};
+
+export type NativeRoleDescriptor = {
+  preparation?: readonly RunnerPreparationFinding[];
+  runnerId: string;
+  roleId: string;
+  roleRef: string;
+  generation: string;
+  source: { root: string; files: Readonly<Record<string, string>> };
+  instructions: string;
+  model?: string;
+  effort?: string;
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  hooks: readonly { event: string; command: string }[];
 };
 
 export type DriverApprovalRequest = { approvalId: string; tool: string; summary?: string; input?: unknown; toolKey: string; /** Full canonical unredacted action identity; memory only, at most 16 KiB UTF-8. */ identity?: string; /** Full redacted display string, at most 4096 characters; host bounds to 512. */ exactKey?: string; risk: ApprovalRisk; nativeScopes?: ("always")[]; alwaysNote?: string };
@@ -99,6 +137,10 @@ export type SupervisedChild = {
 export type SupervisedSpawn = (command: string, args: readonly string[], options?: { cwd?: string; env?: Record<string, string> }) => Promise<SupervisedChild>;
 
 export type DriverHostIo = {
+  /** Only after actual startup/session validation; generic turn.started cannot arm authority. */
+  validatedLaunch?(binding: { roleId: string; generation: string; nativeSessionId: string; launchId: string; current?(): boolean }): boolean;
+  /** Synchronous durable handoff fence. A false result forbids writing input. */
+  claimInput?(): boolean;
   spawn: SupervisedSpawn;
   emit(e: DriverEvent): void;
   /** Absent on older hosts: drivers treat this as dismissed. */
@@ -108,7 +150,7 @@ export type DriverHostIo = {
   writePrivateFile(name: string, content: string): string;
 };
 
-export type TurnOutcome = { status: "completed" | "interrupted" | "interrupted-forced" | "failed"; error?: string; reasonCode?: "native-session-not-found" };
+export type TurnOutcome = { status: "completed" | "interrupted" | "interrupted-forced" | "failed"; error?: string; failure?: TurnFailure; reasonCode?: "native-session-not-found" };
 
 export type DriverTaskHandle = {
   nativeSessionId: Promise<string>;
@@ -126,6 +168,8 @@ export type DriverTaskHandle = {
 
 export interface RunnerSessionDriver {
   readonly runnerId: string;
+  /** The driver calls claimInput immediately before the native input write. */
+  readonly supportsInputClaim?: true;
   readonly protocol: DriverProtocol;
   readonly testedVersions: { min: string; maxTested: string };
   /** Present when the runner lets the caller assign the native session id (Claude `--session-id`): the host persists it before spawn (XR-4.5). */

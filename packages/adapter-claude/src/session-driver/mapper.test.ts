@@ -2,6 +2,34 @@ import { describe, expect, test } from "bun:test";
 import { fixtureLines } from "./fixtures";
 import { ClaudeLineSplitter, ClaudeStreamMapper, parseClaudeLine } from "./mapper";
 
+test('Claude context uses the latest main assistant API input and exact-model result capacity', () => {
+  const mapper = new ClaudeStreamMapper(undefined, 'session', 'execution');
+  const assistant = { type: 'assistant', session_id: 'session', parent_tool_use_id: null, message: { id: 'msg1', model: 'claude-model', content: [], usage: { input_tokens: 2, cache_creation_input_tokens: 381, cache_read_input_tokens: 3485, output_tokens: 900 } } };
+  const result = { type: 'result', session_id: 'session', subtype: 'success', usage: { input_tokens: 99999, output_tokens: 999, cache_read_input_tokens: 99999 }, modelUsage: { 'claude-model': { contextWindow: 200000 }, other: { contextWindow: 1000000 } } };
+  expect(mapper.map(result).events[0].data.context).toBeUndefined();
+  expect(mapper.map(assistant).events.at(-1)?.data.context).toMatchObject({ basis: 'claude-last-request-input', tokens: 3868, capacity: null, modelId: 'claude-model', nativeThreadId: 'session', nativeTurnId: 'execution' });
+  expect(mapper.map(result).events[0].data).toMatchObject({ inputTokens: 99999, context: { tokens: 3868, capacity: 200000 } });
+  expect(mapper.map({ ...result, modelUsage: { alias: { contextWindow: 999999 } } }).events[0].data.context).toMatchObject({ tokens: 3868, capacity: null });
+  for (const patch of [{ session_id: 'foreign' }, { parent_tool_use_id: 'subagent' }]) expect(mapper.map({ ...assistant, ...patch }).events.some(e => e.kind === 'usage')).toBe(false);
+  expect(mapper.map({ ...result, session_id: 'foreign' }).events[0].data.context).toBeUndefined();
+  mapper.map({ ...assistant, message: { ...assistant.message, id: 'msg2', model: 'new-model', usage: { input_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 10 } } });
+  expect(mapper.map(result).events[0].data.context).toMatchObject({ tokens: 15, capacity: null, modelId: 'new-model' });
+  mapper.map({ type: 'system', subtype: 'compact_boundary', session_id: 'foreign' });
+  expect(mapper.map(result).events[0].data.context).toBeDefined();
+  mapper.map({ type: 'system', subtype: 'compact_boundary', session_id: 'session' });
+  expect(mapper.map(assistant).events.some(e => e.data.context)).toBe(false);
+  expect(mapper.map(result).events[0].data.context).toBeUndefined();
+});
+
+test('Claude sanitized fixture has per-call usage distinct from result accounting', () => {
+  const messages = fixtureLines('turn-success.jsonl').map(line => JSON.parse(line));
+  const mapper = new ClaudeStreamMapper(undefined, messages.find(m => m.type === 'assistant').session_id, 'execution');
+  const observations = messages.flatMap(m => mapper.map(m).events).filter(e => e.data.context);
+  expect(observations).toHaveLength(2);
+  expect(observations[0].data.context).toMatchObject({ tokens: 3868, capacity: null, basis: 'claude-last-request-input', modelId: 'claude-haiku-5-5' });
+  expect(observations[1].data.context).toMatchObject({ tokens: 3868, capacity: 1000000 });
+});
+
 function run(name: string) {
   const mapper = new ClaudeStreamMapper();
   const events: Array<{ kind: string; data: Record<string, unknown>; raw?: unknown }> = [];
@@ -162,9 +190,16 @@ describe("parseClaudeLine / ClaudeLineSplitter", () => {
   });
   test("splitter bounds a runaway line", () => {
     const s = new ClaudeLineSplitter(100);
-    const lines = s.push("x".repeat(500));
-    expect(lines).toEqual([]);
-    expect(s.overflowed).toBe(true);
+    expect(() => s.push("x".repeat(500))).toThrow("claude-line-too-long");
+    expect(s.push('{"type":"result"}\n')).toEqual([]);
+    expect(s.flush()).toEqual([]);
+  });
+  test("splitter counts UTF-8 across split surrogate pairs and fails closed at the byte boundary", () => {
+    const s = new ClaudeLineSplitter(7);
+    expect(s.push('€\ud83d')).toEqual([]);
+    expect(s.push('\ude00\n{}\n')).toEqual(['€😀', '{}']);
+    expect(() => s.push('€😀x\n')).toThrow('claude-line-too-long');
+    expect(s.push('{}\n')).toEqual([]);
   });
   test("a non-JSON line maps to a bounded diagnostic", () => {
     const events = new ClaudeStreamMapper().unparsable("Error: something\u001b[31m went wrong " + "y".repeat(2000));
@@ -198,4 +233,64 @@ describe("Claude partial message stream", () => {
     const mapper = new ClaudeStreamMapper();
     expect(mapper.map({ type: "stream_event", event: { type: "future_stream" } }).events).toMatchObject([{ kind: "runner.unmapped", data: { type: "stream_event/future_stream" } }]);
   });
+});
+
+
+test('Claude incomplete, invalid or overflowing per-call usage does not carry the previous call', () => {
+  for (const usage of [undefined, { input_tokens: 1 }, ...[NaN, Infinity, -1, 0.5, Number.MAX_SAFE_INTEGER].map(input_tokens => ({ input_tokens, cache_creation_input_tokens: 1, cache_read_input_tokens: 0 }))]) {
+    const mapper = new ClaudeStreamMapper(undefined, 's', 'execution');
+    const message = { type: 'assistant', session_id: 's', message: { model: 'model', usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } };
+    mapper.map(message);
+    expect(mapper.map({ ...message, message: { model: 'model', usage } }).events.at(-1)?.data.context).toMatchObject({ tokens: null, capacity: null });
+    expect(mapper.map({ type: 'result', session_id: 's', usage: { input_tokens: 99999 }, modelUsage: { model: { contextWindow: 200000 } } }).events[0].data.context).toMatchObject({ tokens: null, capacity: 200000 });
+  }
+});
+
+test('recorded synthetic API error shape preserves the last valid context and visible error; genuine zero is valid', () => {
+  // Reviewed retained seq27013 fields; identifiers/text are sanitized, no history read.
+  const error = JSON.parse(fixtureLines('context-synthetic-api-error.jsonl')[0]!);
+  for (const patch of [{}, { is_api_error_message: true, message: { ...error.message, model: 'model' } }, { is_api_error_message: false }, { is_api_error_message: false, message: { ...error.message, model: 'model' }, error: 'rate_limit', api_error_status: 429, api_error_origin: 'first_party' }]) {
+    const mapper = new ClaudeStreamMapper(undefined, 'session', 'execution');
+    mapper.map({ type: 'assistant', session_id: 'session', message: { model: 'model', usage: { input_tokens: 148000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } });
+    const out = mapper.map({ ...error, ...patch });
+    expect(out.events.some(e => e.kind === 'usage')).toBe(false);
+    expect(out.events.find(e => e.kind === 'message.completed')?.data.text).toBe('Sanitized API failure');
+    const result = mapper.map({ type: 'result', session_id: 'session', subtype: 'error_during_execution', is_error: true, terminal_reason: 'api_error', usage: { input_tokens: 0 }, modelUsage: { model: { contextWindow: 200000 } } });
+    expect(result.events[0].data.context).toMatchObject({ tokens: 148000, capacity: 200000, modelId: 'model' });
+    if ('error' in patch) expect(result.result?.failure).toMatchObject({ category: 'rate-limit', httpStatus: 429 });
+    expect(mapper.map({ ...error, is_api_error_message: false, message: { ...error.message, model: 'model' } }).events.find(e => e.kind === 'usage')?.data.context).toMatchObject({ tokens: 0, modelId: 'model' });
+  }
+});
+
+test('continuity input is last main request with cache and real identity; later failure invalidates it without changing UI',()=>{
+ const mapper=new ClaudeStreamMapper(undefined,'s','turn');
+ const message={type:'assistant',session_id:'s',message:{id:'r',model:'m',content:[],usage:{input_tokens:1,cache_creation_input_tokens:2,cache_read_input_tokens:3}}};
+ expect(mapper.map(message).events.find(e=>e.kind==='usage')?.data.requestInput).toMatchObject({tokens:6,nativeRequestId:'r',final:false});
+ expect(mapper.map({...message,parent_tool_use_id:'nested'}).events.some(e=>e.data.requestInput)).toBe(false);
+ expect(mapper.map({type:'result',session_id:'s',subtype:'success'}).events).toContainEqual({kind:'diagnostic',data:{code:'request.input-finalized',nativeThreadId:'s',nativeTurnId:'turn',nativeRequestId:'r'}});
+ const error=mapper.map({...message,is_api_error_message:true});expect(error.events.some(e=>e.data.code==='request.input-invalidated')).toBe(true);expect(error.events.some(e=>e.kind==='usage')).toBe(false);
+});
+test.each(['Edit','Write','NotebookEdit'])('successful correlated %s records edits; nested/failed results do not',name=>{
+ const mapper=new ClaudeStreamMapper(undefined,'s','turn');
+ const assistant={type:'assistant',session_id:'s',message:{id:'r',model:'m',content:[{type:'tool_use',id:'edit',name,input:{file_path:'/project/a.ts',notebook_path:'/project/a.ipynb'}}]}};
+ mapper.map(assistant);
+ const result={type:'user',session_id:'s',message:{content:[{type:'tool_result',tool_use_id:'edit',is_error:false,content:'success'}]}};
+ expect(mapper.map(result).events.find(e=>e.kind==='tool.completed')?.data).toMatchObject({requestId:'r',edits:[{path:name==='NotebookEdit'?'/project/a.ipynb':'/project/a.ts'}]});
+ mapper.map(assistant);expect(mapper.map({...result,message:{content:[{...result.message.content[0],is_error:true}]}}).events.find(e=>e.kind==='tool.completed')?.data.edits).toBeUndefined();
+ mapper.map({...assistant,parent_tool_use_id:'nested'});expect(mapper.map({...result,parent_tool_use_id:'nested'}).events.find(e=>e.kind==='tool.completed')?.data.edits).toBeUndefined();
+});
+
+test('a delayed older request snapshot cannot establish continuity input after a newer request',()=>{
+ const mapper=new ClaudeStreamMapper(undefined,'s','turn');
+ const assistant=(id:string,tokens:number)=>({type:'assistant',session_id:'s',message:{id,model:'m',content:[],usage:{input_tokens:tokens,cache_creation_input_tokens:0,cache_read_input_tokens:0}}});
+ mapper.map(assistant('r1',10));mapper.map(assistant('r2',20));
+ expect(mapper.map(assistant('r1',10)).events.find(e=>e.kind==='usage')?.data.requestInput).toBeNull();
+ expect(mapper.map({type:'result',session_id:'s',subtype:'success'}).events.some(e=>e.data.code==='request.input-finalized')).toBe(false);
+});
+
+
+test('quota mapping preserves only valid unified windows and overage status',()=>{
+ const mapped=new ClaudeStreamMapper().map({type:'rate_limit_event',rate_limit_info:{status:'allowed',unifiedWindows:{five_hour:{utilization:.2,resetsAt:1900000000,secret:'hidden'},seven_day:{utilization:.7,resetsAt:1900010000}},overageStatus:'allowed',overageUtilization:.4}}).events[0];
+ expect(mapped.data.unifiedWindows).toEqual({five_hour:{utilization:.2,resetsAt:1900000000},seven_day:{utilization:.7,resetsAt:1900010000}});
+ expect(mapped.data.overageStatus).toBe('allowed');
 });

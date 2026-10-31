@@ -153,15 +153,7 @@ export function mergeConfig(
     }
   }
 
-  // Fix Issue 2: Remove stale plugin entry when mcp.context-mode exists.
-  // OpenCode registers ZERO tools when BOTH plugin: ["context-mode"] AND mcp.context-mode exist.
-  // MCP is the authoritative source now — remove legacy plugin entry instead.
-  // If only plugin exists (no MCP), leave it for now (migration handled elsewhere).
-  if (merged.mcp && typeof merged.mcp === "object" && "context-mode" in merged.mcp) {
-    if (Array.isArray(merged.plugin)) {
-      merged.plugin = merged.plugin.filter((p) => p !== "context-mode");
-    }
-  }
+  // Legacy same-name plugins require granular ownership proof or individual review.
 
   return merged;
 }

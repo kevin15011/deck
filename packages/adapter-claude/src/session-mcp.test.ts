@@ -25,7 +25,7 @@ function setup(ids?: ClaudeCapabilityId[]) {
 test("no owned Claude selection needs no install and yields no ordinary child servers", async () => {
   const e = setup();
   const adapter = createClaudeRunnerAdapter({ ...e, resolveMemoryCredential: () => { throw new Error("must not read credentials"); } });
-  expect(await adapter.readSessionMcpServers()).toEqual({});
+  expect(await adapter.readSessionCapabilityOverrides()).toEqual({});
 });
 
 test("session additions read only guarded Codebase; ordinary native packages are not reconstructed", async () => {
@@ -35,20 +35,20 @@ test("session additions read only guarded Codebase; ordinary native packages are
     webSearchCredential: () => { throw new Error("must not read web credentials"); },
     installSharedTool: async () => { throw new Error("must not install"); },
   });
-  const servers = await adapter.readSessionMcpServers();
+  const servers = await adapter.readSessionCapabilityOverrides({ capabilities: { "codebase-memory": { enabled: true, runners: {} } }, webSearch: { enabled: false } } as never);
   expect(Object.keys(servers).sort()).toEqual(["codebase-memory"]);
   expect(servers["context-mode"]).toBeUndefined();
 });
 
 test("ordinary native executable readiness is left to the native loader", async () => {
   const e = setup(["context-mode"]);
-  expect(await createClaudeRunnerAdapter({ ...e, resolveCommand: () => undefined }).readSessionMcpServers()).toEqual({});
+  expect(await createClaudeRunnerAdapter({ ...e, resolveCommand: () => undefined }).readSessionCapabilityOverrides()).toEqual({});
 });
 
 test("untrusted owned selection is refused rather than treated as no selection", async () => {
   const e = setup(["context-mode"]);
   chmodSync(join(e.parent, "model-assignments.json"), 0o644);
-  await expect(createClaudeRunnerAdapter(e).readSessionMcpServers()).rejects.toThrow("untrusted");
+  await expect(createClaudeRunnerAdapter(e).readSessionCapabilityOverrides()).rejects.toThrow("untrusted");
 });
 
 test("ordinary native Serena is neither reconstructed nor bootstrapped by the resolver", async () => {
@@ -57,5 +57,5 @@ test("ordinary native Serena is neither reconstructed nor bootstrapped by the re
     serenaReadiness: async () => ({ state: "missing" }) as never,
     serenaBootstrap: async () => { throw new Error("must not bootstrap"); },
   });
-  expect(await adapter.readSessionMcpServers()).toEqual({});
+  expect(await adapter.readSessionCapabilityOverrides()).toEqual({});
 });

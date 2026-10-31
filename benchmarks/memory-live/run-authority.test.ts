@@ -13,7 +13,7 @@ import { execute } from './run';
 import { simulatedWire } from './namespace-transport';
 import * as security from './security';
 import { testScratch, confirmSyntheticCleanup, syntheticConfirmation } from './test-support';
-const scratch = testScratch();
+const scratch = testScratch({ smallCorpus: true });
 const limits = { ceilingUsd: .25, stopUsd: .20, cleanupReserveUsd: .05 };
 const plan = () => { const run = newRunId(); return prepareGuarded({ run, evalRoot: scratch.root(run), mode: 'pilot', repeats: 1, budget: 822, processing: { pollIntervalMs: 300000 }, accountSharedWithProduction: true }, limits); };
 const ownership = (m: any, all = true) => security.privateWrite(join(m.evalRoot, 'ownership.json'), { run: m.run, bindingsHash: security.sha256(JSON.stringify(m.bindings)), owned: Object.fromEntries((Object.values(m.bindings) as string[]).slice(0, all ? 4 : 1).map(tag => [tag, ['synthetic-owned']])) });
@@ -149,7 +149,7 @@ test('retention then authorized manual cleanup shares the same 28 reservations a
 }, 30000);
 test('separate active evaluation process excludes deletion; killed write remains reserved and cannot restart', async () => {
     const m = await plan();
-    const child = Bun.spawn([process.execPath, join(import.meta.dir, 'fixtures/run-authority-child.ts'), join(m.evalRoot, 'plan.json'), 'evaluation'], { env: { PATH: process.env.PATH!, HOME: homedir() }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, 'fixtures/run-authority-child.ts'), join(m.evalRoot, 'plan.json'), 'evaluation', 'small-corpus'], { env: { PATH: process.env.PATH!, HOME: homedir() }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
     const reader = child.stdout.getReader();
     try {
         expect(new TextDecoder().decode((await reader.read()).value)).toContain('effect_reserved');

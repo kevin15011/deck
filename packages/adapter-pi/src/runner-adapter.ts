@@ -1,5 +1,14 @@
+import { verifyPiInstallation } from "./installation-trust";
+import { withInstallationUse, withInstallationMutation, trackInstallationProcess, InstallationBusyError } from "../../core/src/installation-use";
+import { createPiSkillDiscoveryProvider } from "./skill-discovery-provider";
+export { createPiSkillDiscoveryProvider } from "./skill-discovery-provider";
+import { PrerequisiteEvidence, pinnedHookExecutable } from "../../core/src/session/prerequisite-evidence";
+import { createPiSessionDriver } from "./session-driver/driver";
+import { preparePiSessionRole } from "./session-driver/native-role";
+import { inspectPiNativeSearch } from "./native-search";
 import { buildCodebaseGuardEntry, parseCodebaseGuardEntry, type CodebaseGuardInvocation } from "./pi-codebase-guard-command";
-import { hashJsonValue } from "./pi-manifest";
+import { hashJsonValue, matchesOwnedHash, parsePiManifest } from "./pi-manifest";
+import { assertNoContributionSymlink } from "@deck/core";
 /**
  * Pi RunnerAdapter — implements the RunnerAdapter interface for the Pi runner.
  *
@@ -55,8 +64,6 @@ import {
   readDeveloperTeamThinkingAssignments,
   type DeveloperTeamInstallOptions,
 } from "./developer-team-install";
-import { cleanupPiLegacy, describePiLegacy, detectPiLegacy, type PiLegacyReport } from "./pi-legacy";
-import { buildPiLegacyTemplates } from "./pi-legacy-templates";
 import { PI_THINKING_LEVELS, supportsThinkingForModel, getDefaultThinkingForModel, resolveThinkingForModel } from "./model-config";
 import { getPiRunnerCapability, getUserFacingCapability, PI_RUNNER_CAPABILITY_CONTRIBUTION, PI_RUNNER_CAPABILITY_IDS, type CapabilityId } from "./capability-catalog";
 import { getOptionalPiTools } from "./installation-plan";
@@ -99,12 +106,8 @@ import type {
   RunnerPlanDiagnostic,
   DeveloperTeamApplyInput,
   DeveloperTeamApplyResult,
-  SkillDiscoveryDiagnosticV1,
-  SkillDiscoverySourceBindingV1,
-  SkillDiscoverySourceDeclarationV1,
   SkillDiscoverySourceProviderV1,
   OpaqueSkillInventoryResultV1,
-  SkillLocatorResolutionV1,
   SerenaBootstrapAuthorization,
   SerenaOperationIdentity,
   SerenaReadinessEvidence,
@@ -129,8 +132,6 @@ import {
   validateSerenaOperationAuthorization,
   hasWebSearchProviderCredential,
   isWebSearchProviderDescriptor,
-  SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
-  SKILL_DISCOVERY_SOURCE_SCHEMA,
 } from "@deck/core";
 
 function requireDeckConfig(config: NormalizedDeckConfig | undefined, context: string): NormalizedDeckConfig {
@@ -160,7 +161,7 @@ export type PiRunnerAdapterOptions = {
   /** File effects for the global install engine (hermetic tests inject failures here). */
   readonly piFileIO?: PiFileIO;
   /** Directory (under the Deck state home) that receives the backup of an opt-in legacy cleanup. */
-  readonly legacyBackupRoot?: () => string;
+
   /** Deck-owned tool resolution (RTK, Codebase Memory, shared commands). Defaults to the production resolver. */
   readonly piTools?: PiToolResolution;
   /** Shared Web Search credential resolver (composition root); the value only ever reaches the launched process env. */
@@ -199,197 +200,6 @@ type PiSerenaActionContextExtensions = {
   readonly piMcpFileSystem?: PiMcpConfigFileSystem;
 };
 
-type PiFilesystemSourceDefinition = {
-  readonly sourceId: string;
-  readonly sourceCategory: "project_runner" | "user_runner";
-  readonly scope: "project" | "user";
-  readonly locatorStrategy: "project_relative" | "runner_relative";
-  readonly safeLocatorBase: string;
-  readonly getRoot: (projectRoot: string, homeDirectory: string, agentDir: string) => string;
-};
-
-const PI_FILESYSTEM_SOURCE_DEFINITIONS: readonly PiFilesystemSourceDefinition[] = [
-  {
-    sourceId: "pi-project-skills",
-    sourceCategory: "project_runner",
-    scope: "project",
-    locatorStrategy: "project_relative",
-    safeLocatorBase: ".pi/skills",
-    getRoot: (projectRoot) => join(projectRoot, ".pi", "skills"),
-  },
-  {
-    sourceId: "pi-user-agent-skills",
-    sourceCategory: "user_runner",
-    scope: "user",
-    locatorStrategy: "runner_relative",
-    safeLocatorBase: "pi-user-agent-skills",
-    getRoot: (_projectRoot, _homeDirectory, agentDir) => join(agentDir, "skills"),
-  },
-  {
-    // Skills shipped inside the Deck-managed global Pi package (agent dir `deck/package/skills`).
-    sourceId: "pi-deck-package-skills",
-    sourceCategory: "user_runner",
-    scope: "user",
-    locatorStrategy: "runner_relative",
-    safeLocatorBase: "pi-deck-package-skills",
-    getRoot: (_projectRoot, _homeDirectory, agentDir) => join(piAgentPaths(agentDir).packageRoot, "skills"),
-  },
-  {
-    sourceId: "pi-user-skills",
-    sourceCategory: "user_runner",
-    scope: "user",
-    locatorStrategy: "runner_relative",
-    safeLocatorBase: "pi-user-skills",
-    getRoot: (_projectRoot, homeDirectory) => join(homeDirectory, ".pi", "skills"),
-  },
-];
-
-const PI_OPAQUE_SOURCE_ID = "pi-runner-exposed";
-
-/**
- * Construct the Pi-only source provider. It only declares Pi roots and never
- * consults the bundled standalone-skill catalog or another adapter.
- */
-export function createPiSkillDiscoveryProvider(
-  options: PiRunnerAdapterOptions = {},
-): SkillDiscoverySourceProviderV1 {
-  const homeDirectory = normalizeRuntimeDirectory(options.homeDirectory ?? process.env.HOME ?? homedir());
-  const agentDirResolution = resolvePiAgentDir(options.env ?? process.env, homeDirectory);
-  const agentDir = agentDirResolution.ok ? agentDirResolution.dir : join(homeDirectory, ".pi", "agent");
-
-  return {
-    schema: SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
-    runnerId: PI_RUNNER_ID,
-
-    async listSources(input): Promise<
-      | { readonly outcome: "complete"; readonly sources: readonly SkillDiscoverySourceBindingV1[]; readonly diagnostics: readonly SkillDiscoveryDiagnosticV1[] }
-      | { readonly outcome: "indeterminate"; readonly sources: readonly SkillDiscoverySourceBindingV1[]; readonly reasonCode: "partial_source_evaluation"; readonly diagnostics: readonly SkillDiscoveryDiagnosticV1[] }
-    > {
-      const projectRoot = normalizeProjectRoot(input.projectRoot);
-      if (!projectRoot) {
-        return {
-          outcome: "indeterminate",
-          sources: [],
-          reasonCode: "partial_source_evaluation",
-          diagnostics: [piDiagnostic("invalid_project_root")],
-        };
-      }
-
-      const sources = buildPiFilesystemSources(projectRoot, homeDirectory, agentDir);
-      const diagnostics = sources
-        .filter((source): source is Extract<SkillDiscoverySourceBindingV1, { readonly kind: "filesystem" }> => source.kind === "filesystem")
-        .filter((source) => !isDeclaredRootReadable(source.absoluteRoot))
-        .map((source) => piDiagnostic("source_unreadable", source.declaration.sourceId));
-
-      if (options.opaqueInventory) {
-        sources.push(buildPiOpaqueSource(options.opaqueInventory));
-      }
-
-      if (diagnostics.length > 0) {
-        return {
-          outcome: "indeterminate",
-          sources,
-          reasonCode: "partial_source_evaluation",
-          diagnostics,
-        };
-      }
-
-      return { outcome: "complete", sources, diagnostics: [] };
-    },
-
-    async resolveLocator(input): Promise<SkillLocatorResolutionV1> {
-      const projectRoot = normalizeProjectRoot(input.projectRoot);
-      if (!projectRoot || typeof input.locator !== "string") {
-        return { status: "rejected", diagnostic: piDiagnostic("invalid_locator") };
-      }
-
-      const sources = buildPiFilesystemSources(projectRoot, homeDirectory, agentDir);
-      if (options.opaqueInventory) sources.push(buildPiOpaqueSource(options.opaqueInventory));
-
-      if (input.locator.startsWith("project:")) {
-        const projectRelativePath = decodeLocatorPath(input.locator.slice("project:".length));
-        if (!projectRelativePath || !projectRelativePath.startsWith(".pi/skills/")) {
-          return { status: "rejected", diagnostic: piDiagnostic("invalid_locator", "pi-project-skills") };
-        }
-        const source = sources.find((candidate) => candidate.declaration.sourceId === "pi-project-skills");
-        if (!source || source.kind !== "filesystem") return { status: "missing" };
-        return resolveFilesystemLocator(source.absoluteRoot, projectRelativePath.slice(".pi/skills/".length), source.declaration.sourceId);
-      }
-
-      const runnerLocator = parseRunnerLocator(input.locator);
-      if (!runnerLocator) return { status: "rejected", diagnostic: piDiagnostic("invalid_locator") };
-      if (runnerLocator.runnerId !== PI_RUNNER_ID) {
-        return { status: "rejected", diagnostic: piDiagnostic("runner_mismatch") };
-      }
-
-      const source = sources.find((candidate) => candidate.declaration.sourceId === runnerLocator.sourceId);
-      if (!source) return { status: "missing" };
-
-      if (source.kind === "opaque_inventory") {
-        return resolveOpaqueLocator(source, runnerLocator.resourcePath);
-      }
-
-      const relativePath = decodeLocatorPath(runnerLocator.resourcePath);
-      if (!relativePath) return { status: "rejected", diagnostic: piDiagnostic("invalid_locator", source.declaration.sourceId) };
-      return resolveFilesystemLocator(source.absoluteRoot, relativePath, source.declaration.sourceId);
-    },
-  };
-}
-
-function buildPiFilesystemSources(projectRoot: string, homeDirectory: string, agentDir: string): SkillDiscoverySourceBindingV1[] {
-  return PI_FILESYSTEM_SOURCE_DEFINITIONS.map((definition) => {
-    const declaration: SkillDiscoverySourceDeclarationV1 = {
-      schema: SKILL_DISCOVERY_SOURCE_SCHEMA,
-      sourceId: definition.sourceId,
-      sourceCategory: definition.sourceCategory,
-      scope: definition.scope,
-      runnerId: PI_RUNNER_ID,
-      locatorStrategy: definition.locatorStrategy,
-      expectedContent: "skill_md",
-      safeLocatorBase: definition.safeLocatorBase,
-    };
-    return {
-      kind: "filesystem",
-      declaration,
-      absoluteRoot: definition.getRoot(projectRoot, homeDirectory, agentDir),
-      descriptorBasename: "SKILL.md",
-    };
-  });
-}
-
-function buildPiOpaqueSource(readInventory: () => Promise<OpaqueSkillInventoryResultV1>): SkillDiscoverySourceBindingV1 {
-  const declaration: SkillDiscoverySourceDeclarationV1 = {
-    schema: SKILL_DISCOVERY_SOURCE_SCHEMA,
-    sourceId: PI_OPAQUE_SOURCE_ID,
-    sourceCategory: "runner_exposed",
-    scope: "runner",
-    runnerId: PI_RUNNER_ID,
-    locatorStrategy: "runner_opaque",
-    expectedContent: "opaque_inventory_v1",
-    safeLocatorBase: PI_OPAQUE_SOURCE_ID,
-  };
-  return {
-    kind: "opaque_inventory",
-    declaration,
-    readInventory: async () => {
-      try {
-        const result = await readInventory();
-        if (result && (result.outcome === "complete" || result.outcome === "indeterminate") && Array.isArray(result.observations) && Array.isArray(result.diagnostics)) {
-          return result;
-        }
-      } catch {
-        // Convert runner inventory failures into a bounded partial result.
-      }
-      return {
-        outcome: "indeterminate",
-        observations: [],
-        reasonCode: "partial_source_evaluation",
-        diagnostics: [piDiagnostic("opaque_inventory_unavailable", PI_OPAQUE_SOURCE_ID)],
-      };
-    },
-  };
-}
-
 function normalizeRuntimeDirectory(directory: string): string {
   return isAbsolute(directory) ? resolve(directory) : resolve(homedir());
 }
@@ -405,136 +215,6 @@ function commandAvailable(command: string, environment: Readonly<Record<string, 
       return false;
     }
   });
-}
-
-function normalizeProjectRoot(projectRoot: string): string | undefined {
-  return typeof projectRoot === "string" && projectRoot.length > 0 && isAbsolute(projectRoot) ? resolve(projectRoot) : undefined;
-}
-
-function isDeclaredRootReadable(root: string): boolean {
-  if (!existsSync(root)) return true;
-  try {
-    const stats = statSync(root);
-    if (!stats.isDirectory() || (stats.mode & 0o444) === 0 || (stats.mode & 0o111) === 0) return false;
-    accessSync(root, fsConstants.R_OK | fsConstants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function parseRunnerLocator(locator: string): { runnerId: string; sourceId: string; resourcePath: string } | undefined {
-  if (!locator.startsWith("runner:")) return undefined;
-  const remainder = locator.slice("runner:".length);
-  const runnerSeparator = remainder.indexOf(":");
-  if (runnerSeparator <= 0) return undefined;
-  const runnerId = remainder.slice(0, runnerSeparator);
-  const token = remainder.slice(runnerSeparator + 1);
-  const sourceSeparator = token.indexOf("/");
-  if (sourceSeparator <= 0 || sourceSeparator === token.length - 1) return undefined;
-  const sourceId = decodeLocatorComponent(token.slice(0, sourceSeparator));
-  const resourcePath = token.slice(sourceSeparator + 1);
-  return sourceId ? { runnerId, sourceId, resourcePath } : undefined;
-}
-
-function decodeLocatorPath(value: string): string | undefined {
-  const decoded = decodeLocatorComponent(value);
-  if (!decoded || !isSafeRelativeSkillPath(decoded)) return undefined;
-  return decoded;
-}
-
-function decodeLocatorComponent(value: string): string | undefined {
-  try {
-    const decoded = decodeURIComponent(value);
-    return decoded && !/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/u.test(decoded) ? decoded : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function isSafeRelativeSkillPath(value: string): boolean {
-  if (!value || value.includes("\\") || value.startsWith("/") || value.startsWith("~") || /^[A-Za-z]:/u.test(value)) return false;
-  if (!value.endsWith("/SKILL.md")) return false;
-  return value.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
-}
-
-function resolveFilesystemLocator(root: string, relativePath: string, sourceId: string): SkillLocatorResolutionV1 {
-  if (!isSafeRelativeSkillPath(relativePath)) {
-    return { status: "rejected", diagnostic: piDiagnostic("invalid_locator", sourceId) };
-  }
-  if (!isDeclaredRootReadable(root)) {
-    return { status: "rejected", diagnostic: piDiagnostic("source_unreadable", sourceId) };
-  }
-
-  const candidate = resolve(root, relativePath);
-  if (!isContained(root, candidate)) {
-    return { status: "rejected", diagnostic: piDiagnostic("locator_outside_root", sourceId) };
-  }
-  if (!existsSync(candidate)) return { status: "missing" };
-
-  try {
-    const canonicalRoot = realpathSync(root);
-    const canonicalCandidate = realpathSync(candidate);
-    if (!isContained(canonicalRoot, canonicalCandidate)) {
-      return { status: "rejected", diagnostic: piDiagnostic("locator_outside_root", sourceId) };
-    }
-    if (!statSync(candidate).isFile()) {
-      return { status: "rejected", diagnostic: piDiagnostic("locator_not_file", sourceId) };
-    }
-    accessSync(candidate, fsConstants.R_OK);
-    if (realpathSync(candidate) !== canonicalCandidate || !statSync(candidate).isFile()) {
-      return { status: "rejected", diagnostic: piDiagnostic("locator_changed", sourceId) };
-    }
-    return { status: "available", loadReference: candidate };
-  } catch {
-    return { status: "rejected", diagnostic: piDiagnostic("locator_unavailable", sourceId) };
-  }
-}
-
-async function resolveOpaqueLocator(
-  source: Extract<SkillDiscoverySourceBindingV1, { readonly kind: "opaque_inventory" }>,
-  resourcePath: string,
-): Promise<SkillLocatorResolutionV1> {
-  const opaqueId = decodeLocatorComponent(resourcePath);
-  if (!opaqueId || !isSafeOpaqueId(opaqueId)) {
-    return { status: "rejected", diagnostic: piDiagnostic("invalid_opaque_id", source.declaration.sourceId) };
-  }
-  const inventory = await source.readInventory();
-  if (inventory.outcome !== "complete") {
-    return { status: "rejected", diagnostic: piDiagnostic("opaque_inventory_incomplete", source.declaration.sourceId) };
-  }
-  if (!inventory.observations.some((observation) => observation.opaqueId === opaqueId)) return { status: "missing" };
-  return { status: "available", loadReference: `pi:opaque:${encodeURIComponent(opaqueId)}` };
-}
-
-function isSafeOpaqueId(value: string): boolean {
-  return !value.includes("/") && !value.includes("\\") && !value.startsWith("~") && !isAbsolute(value) && !/^[A-Za-z]:/u.test(value);
-}
-
-function isContained(root: string, candidate: string): boolean {
-  const result = relative(resolve(root), resolve(candidate));
-  return result !== "" && result !== ".." && !result.startsWith(`..${sep}`) && !isAbsolute(result);
-}
-
-function piDiagnostic(code: string, sourceId?: string): SkillDiscoveryDiagnosticV1 {
-  const messages: Record<string, string> = {
-    invalid_project_root: "Pi skill discovery received an invalid project root.",
-    invalid_locator: "The Pi skill locator is invalid.",
-    runner_mismatch: "The skill locator belongs to a different runner.",
-    source_unreadable: "A declared Pi skill source could not be read.",
-    locator_outside_root: "The skill locator is outside its declared source.",
-    locator_not_file: "The selected Pi skill locator is not a regular file.",
-    locator_changed: "The selected Pi skill locator changed during verification.",
-    locator_unavailable: "The selected Pi skill locator is unavailable.",
-    invalid_opaque_id: "The opaque Pi skill identifier is invalid.",
-    opaque_inventory_unavailable: "The Pi skill inventory could not be evaluated completely.",
-    opaque_inventory_incomplete: "The Pi skill inventory is incomplete.",
-  };
-  return {
-    code,
-    ...(sourceId ? { source_id: sourceId } : {}),
-    message: messages[code] ?? "Pi skill discovery could not complete.",
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -572,9 +252,43 @@ export function isPiSerenaActionAuthorized(
 // ---------------------------------------------------------------------------
 
 class PiRunnerAdapterImpl implements RunnerAdapter {
+  readonly #preparationEvidence = new PrerequisiteEvidence();
+  readPreparationGeneration() {
+    const root = this.#readAgentDir(), evidence = this.#preparationEvidence;
+    const source = evidence.read(join(root, "deck/manifest.json")), parsed = parsePiManifest(source);
+    if (!parsed.ok) throw new Error("pi-generation-unverified");
+    const files = Object.entries(parsed.manifest.files).filter(([path]) => path.startsWith("deck/package/") && (!path.includes("/skills/") || path.includes("/skills/deck-")));
+    if (files.length > 256 || !files.some(([path]) => path === "deck/package/role-policy.json")) throw new Error("pi-generation-unverified");
+    const hash = createHash("sha256").update(source);
+    for (const [path] of files.sort()) {
+      const target = resolve(root, path);
+      if (!target.startsWith(resolve(root) + sep)) throw new Error("pi-generation-unverified");
+      assertNoContributionSymlink(target);
+      // The launch verifier owns content admission. Lifecycle invalidation needs
+      // metadata only, including for Pi's large bundled execution assets.
+      const stat = statSync(target, { bigint: true });
+      if (!stat.isFile()) throw new Error("pi-generation-unverified");
+      hash.update(path).update([stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs, stat.mode].join(":"));
+    }
+    return hash.digest("hex");
+  }
+  readPreparationCapabilities(config: import("@deck/core").NormalizedDeckConfig) {
+    const evidence = this.#preparationEvidence, root = this.#readAgentDir();
+    let entry: any;
+    try { entry = JSON.parse(evidence.read(join(root, "mcp.json"))).mcpServers?.context7; } catch { /* Missing selection is not enablement. */ }
+    return {
+      rtk: evidence.observe(config.packageInstructions.pi?.rtk === true, () => {
+        const source = evidence.read(join(root, "deck/package/extensions/deck-tool-policy/config.json"));
+        return [source, evidence.read(join(root, "deck/package/extensions/deck-tool-policy/impl.js")), evidence.executable(JSON.parse(source).rtkBinary)];
+      }),
+      context7: evidence.observe(!!entry && entry.disabled !== true && entry.enabled !== false, () => [entry.args ?? [], evidence.executable(entry.command, this.#env.PATH)]),
+    };
+  }
+
   readonly runnerId: string = PI_RUNNER_ID;
   readonly displayName: string = PI_DISPLAY_NAME;
   readonly environmentIds: readonly string[] = PI_ENVIRONMENT_IDS;
+  async inspectNativeSearch(input: import("@deck/core").NativeSearchInspectionInput) { return inspectPiNativeSearch(input, this.#readAgentDir()); }
   readonly packageInstructionIds = PACKAGE_INSTRUCTION_PACKAGE_IDS;
   readonly ui = {
     environmentLabels: { "pi-development": "Pi" },
@@ -621,10 +335,8 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   #lastMaterialization: { materialization: PiGlobalMaterialization; enginePlan: PiGlobalPlan } | null = null;
   #piTools?: PiToolResolution;
   #webSearchCredential?: () => string | undefined;
-  #legacyBackupRoot?: () => string;
   #codebaseGuardInvocation?: () => CodebaseGuardInvocation;
   constructor(options: PiRunnerAdapterOptions = {}) {
-    this.#legacyBackupRoot = options.legacyBackupRoot;
     this.#codebaseGuardInvocation = options.codebaseGuardInvocation;
     this.#homeDirectory = options.homeDirectory ?? process.env.HOME ?? homedir();
     this.#env = options.env ?? process.env;
@@ -645,6 +357,26 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     this.#webSearchProvider = options.webSearchProvider;
     this.#webSearchProviderResolver = options.webSearchProviderResolver;
   }
+
+  getSessionDriver() { return createPiSessionDriver({ command: this.#piCommand, baseEnv: this.#env }); }
+  async prepareSessionNativeRole(roleId: string, config?: NormalizedDeckConfig) {
+    const findings: import("@deck/core/session/driver").RunnerPreparationFinding[] = [];
+    if (config) {
+      const root = this.#readAgentDir();
+      const plan = this.buildDeveloperTeamInstallPlan({projectRoot: root, environmentId: "pi-development", deckConfig: config});
+      findings.push(...(plan.diagnosticEntries ?? []).filter(d => d.severity === "warning").map(d => ({kind: "W" as const, code:d.code, item:root, message:d.message})));
+      try {
+        const result = await this.applyDeveloperTeamInstall({projectRoot:root,environmentId:"pi-development",plan});
+        if(result.changedCount) findings.push({kind:"H",code:"pi-content-refreshed",item:root,message:"Refreshed owned Pi content."});
+      } catch(error) {
+        if(!(error instanceof InstallationBusyError))throw error;
+        findings.push({kind:"W",code:"pi-refresh-deferred",item:root,message:error.message});
+      }
+    }
+    return {...preparePiSessionRole(this.#readAgentDir(), roleId), preparation:findings};
+  }
+  withNativeInstallationUse<T>(effect: () => Promise<T>): Promise<T> { return withInstallationUse(this.#readAgentDir(), effect); }
+  trackNativeInstallationProcess(pid: number) { return trackInstallationProcess(this.#readAgentDir(), pid); }
 
   async #ensureSerenaRuntime(explicitRoot: string | undefined, signal?: AbortSignal): Promise<void> {
     let root = explicitRoot ?? this.#serenaOwnedRoot;
@@ -899,6 +631,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // -------------------------------------------------------------------------
 
   async runAction(action: RunnerAction, context: RunnerActionContext): Promise<RunnerActionRunResult> {
+    if ([action.capabilityId, action.toolId].some(id => id === "serena" || id === "context-mode")) return { actionId: action.id, status: "skipped", message: "Retired capability is disabled; no action performed.", diagnostics: [] };
     // Handle internal runner package installs
     if (action.internalPackageId) {
       const installResult = await installInternalRunnerPackages(
@@ -1189,9 +922,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       // With memory off the Deck memory extension stays silent instead of reporting "unavailable" on every launch.
       ...(input.deckConfig.adaptiveMemory.enabled === true && input.deckConfig.adaptiveMemory.activeProvider === "supermemory" ? {} : { DECK_PI_MEMORY: { value: "disabled" } }),
       // A non-default agent directory must reach Pi itself, not only the Deck process.
-      ...(this.#agentDirResolution.source === "env" ? { PI_CODING_AGENT_DIR: { value: this.#agentDirResolution.dir } } : {}),
+      PI_CODING_AGENT_DIR: { value: this.#agentDirResolution.dir },
     };
-    const diagnostics: { code: string; severity: "info" | "warning" | "error"; message: string }[] = version.reason === "unavailable" && version.diagnostic
+    const diagnostics: { code: string; severity: "info" | "warning" | "error"; message: string }[] = version.diagnostic
       ? [{ code: "pi-version-unavailable", severity: "warning", message: version.diagnostic }]
       : [];
     if (!this.#tools().codebase.command()) diagnostics.push({ code: "codebase-memory-unavailable", severity: "warning", message: "Codebase Memory is unavailable for this execution. Use file listing, rg searches, and focused file reads. Review & Install can restore the reviewed executable; preparation never downloads it." });
@@ -1212,6 +945,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         stdio: "inherit",
         stdin: "inherit",
         executionClass: "static-compatible",
+        launchLifecycle: { beforeSpawn: () => verifyPiInstallation(this.#readAgentDir()), afterExit: () => {} },
         envOverlay: overlay,
         ...(sensitiveKeys.length > 0 ? { sensitiveEnvAuthorization: { binding: PI_WEB_SEARCH_BINDING, keys: sensitiveKeys } } : {}),
       },
@@ -1299,40 +1033,6 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     }
   }
 
-  /** Read-only legacy detection; the Deck-template check runs only when a Deck-named path actually exists. */
-  #detectLegacy(projectRoot: string, agentDir: string, installOptions: DeveloperTeamInstallOptions): PiLegacyReport {
-    const quick = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot });
-    if (quick.files.length === 0) return quick;
-    try {
-      const templates = buildPiLegacyTemplates({ projectRoot, packageRoot: piAgentPaths(agentDir).packageRoot, installOptions });
-      return detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot, templates });
-    } catch {
-      return quick;
-    }
-  }
-
-  /**
-   * Opt-in cleanup of legacy Deck artifacts (project `.pi/agents|skills`, `.deck/pi/profiles`, loose files in the Pi
-   * agent directory, Deck-added project package entries). Backed up first, rolled back on failure; modified files stay.
-   */
-  async cleanupLegacyInstall(projectRoot: string, context?: { readonly deckConfig: NormalizedDeckConfig }): Promise<{ removed: readonly string[]; preserved: readonly string[]; diagnostics: readonly string[] }> {
-    if (!this.#agentDirResolution.ok) return { removed: [], preserved: [], diagnostics: [this.#agentDirResolution.message] };
-    const agentDir = this.#agentDirResolution.dir;
-    const quick = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot });
-    if (quick.files.length === 0 && quick.packages.length === 0) return { removed: [], preserved: [], diagnostics: ["No legacy Pi artifacts were found."] };
-    const backupRoot = this.#legacyBackupRoot?.();
-    if (!backupRoot) return { removed: [], preserved: [], diagnostics: ["Legacy cleanup needs a Deck state directory for its backup; nothing was changed."] };
-    let report = quick;
-    if (context?.deckConfig) {
-      const { installOptions } = this.#resolveInstallOptions({ projectRoot, environmentId: PI_ENVIRONMENT_IDS[0]!, deckConfig: context.deckConfig } as DeveloperTeamAdapterInstallInput, agentDir);
-      report = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot, templates: buildPiLegacyTemplates({ projectRoot, packageRoot: piAgentPaths(agentDir).packageRoot, installOptions }) });
-    } else {
-      // Without a Deck config the templates cannot be reproduced: nothing is provably unmodified, so nothing is removed.
-      report = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot, templates: new Map() });
-    }
-    return cleanupPiLegacy({ io: this.#fileIO, agentDir, projectRoot, report, backupRoot });
-  }
-
   /**
    * Role model/thinking assignments exist only as frontmatter in the installed agent files, so a re-render of the
    * package must carry them over. Precedence (lowest first): project `.pi/agents`, pre-package `<agent dir>/agents`,
@@ -1402,6 +1102,22 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     };
   }
 
+  async detectDeckInstall() {
+    const root = this.#readAgentDir();
+    try {
+      assertNoContributionSymlink(piAgentPaths(root).manifest);
+      const manifest = readPiManifest(this.#fileIO, root);
+      if (!manifest) return {installed:false,managedPaths:[]};
+      const managedPaths = Object.entries(manifest.files).flatMap(([path,hash])=>{
+        if (isAbsolute(path) || path.split(/[\\/]/).includes('..')) return [];
+        const absolute = join(root,path); assertNoContributionSymlink(absolute);
+        const text = this.#fileIO.readText(absolute);
+        return text !== undefined && matchesOwnedHash(path,hash,text) ? [absolute] : [];
+      });
+      return {installed:managedPaths.length > 0,managedPaths,diagnostics:managedPaths.length ? [] : ['Pi manifest has no unchanged owned artifacts; review installation conflicts.']};
+    } catch {return {installed:false,managedPaths:[],diagnostics:['Pi installation ownership could not be established; nothing was adopted.']};}
+  }
+
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
     // Blocking prerequisites: a valid agent dir and a supported Pi. Nothing is planned (or written) otherwise.
     const diagnosticEntries: { code: string; severity: "info" | "warning" | "error"; message: string }[] = [];
@@ -1415,6 +1131,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     if (!version.supported && version.diagnostic) {
       diagnosticEntries.push({ code: `PI_VERSION_${(version.reason ?? "unsupported").toUpperCase().replace(/-/g, "_")}`, severity: version.reason === "unavailable" ? "warning" : "error", message: version.diagnostic });
     }
+    if(version.supported && version.diagnostic) diagnosticEntries.push({code:"PI_VERSION_UNTESTED",severity:"warning",message:version.diagnostic});
     const versionBlocked = !version.supported && version.reason !== "unavailable";
 
     const { capabilityInstructions, installOptions } = this.#resolveInstallOptions(input, agentDir);
@@ -1426,7 +1143,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     {
       const resolved = resolveDeckPiMcpServers({
         selected: selectDeckPiMcpServerIds({
-          capabilityIds: input.capabilityIds,
+          capabilityIds: input.capabilityIds?.filter(id => id !== "web-search" || inspectPiNativeSearch({ projectRoot: input.projectRoot }, agentDir).availability !== "available"),
           instructionPackageIds: capabilityInstructions?.instructions.map((fragment) => fragment.packageId) ?? [],
           webSearchEnabled: deckConfig.webSearch.enabled === true,
           ownedServers: ownedMcp,
@@ -1438,14 +1155,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       });
       availableMcpServers = resolved.servers;
       mcpServers = { ...resolved.servers };
-      // Preserve the owned selection on disk so restoration needs no manual reconfiguration.
-      // The reviewed native connector filters this selection before connection; persistence is not an execution grant.
-      const existing = readPiMcpServers(this.#fileIO, agentDir)["codebase-memory"];
-      if (!resolved.servers["codebase-memory"] && ownedMcp.includes("codebase-memory") && existing &&
-          hashJsonValue(existing) === readPiManifest(this.#fileIO, agentDir)?.mcp.servers["codebase-memory"] &&
-          (input.capabilityIds === undefined || input.capabilityIds.some(id => id === "codebase-memory" || id === "codebase-memory-mcp"))) {
-        mcpServers["codebase-memory"] = existing as Record<string, unknown>;
-      }
+      const existingCodebase = readPiMcpServers(this.#fileIO, agentDir)["codebase-memory"];
+      if (!mcpServers["codebase-memory"] && existingCodebase && getEnabledCapabilityInstructionIds(deckConfig, "pi").includes("codebase-memory") &&
+          hashJsonValue(existingCodebase) === readPiManifest(this.#fileIO, agentDir)?.mcp.servers["codebase-memory"]) mcpServers["codebase-memory"] = existingCodebase as Record<string, unknown>;
       if (this.#codebaseGuardInvocation && mcpServers["codebase-memory"]) {
         const current = mcpServers["codebase-memory"]!;
         const binary = parseCodebaseGuardEntry(current, agentDir)?.binary ?? current.command;
@@ -1477,15 +1189,6 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     this.#lastMaterialization = { materialization, enginePlan };
 
     for (const diagnostic of enginePlan.diagnostics) diagnosticEntries.push({ code: diagnostic.code, severity: diagnostic.severity, message: diagnostic.message });
-    const legacy = this.#detectLegacy(input.projectRoot, agentDir, installOptions);
-    if (legacy.files.length > 0 || legacy.packages.length > 0) {
-      const lines = describePiLegacy(legacy);
-      diagnosticEntries.push({
-        code: "PI_LEGACY_ARTIFACTS",
-        severity: "warning",
-        message: `Earlier Deck versions left ${lines.length} legacy Pi item(s) that can duplicate the global Deck package: ${lines.slice(0, 8).join("; ")}${lines.length > 8 ? `; and ${lines.length - 8} more` : ""}. ${lines.some((line) => line.includes("/skills/")) ? " Legacy skills in the Pi skills directory shadow the package skills outside Deck sessions and cause a '[Skill conflicts]' startup block (Deck sessions already prefer the package); copies in ~/.agents/skills belong to other runners and are never touched." : ""} Run 'deck pi developer --cleanup-legacy' to remove unmodified Deck files and global deck-* files that are demonstrably Deck-authored but older than the current templates (a backup is kept; user-modified files are never touched).`,
-      });
-    }
     for (const kept of enginePlan.kept) diagnosticEntries.push({ code: "PI_FILE_KEPT", severity: "info", message: `${kept.relPath} ${kept.reason}.` });
     const standalone = new Set(materialization.nativePlan.standaloneSkills.map((file) => file.skillId));
     const files = materialization.desired.files.map((file) => {
@@ -1498,6 +1201,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     });
     return {
       files,
+      automaticRefresh: true,
       mutationPreview: versionBlocked ? [] : enginePlan.mutationPreview.map((mutation) => ({ ...mutation })),
       blocked: enginePlan.blocked || versionBlocked,
       diagnostics: diagnosticEntries.map((entry) => entry.message),
@@ -1511,7 +1215,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     if (input.plan?.blocked) throw new Error(`Pi global install is blocked: ${(input.plan.diagnostics ?? []).join("; ") || "unresolved prerequisites"}`);
     const { materialization, enginePlan } = this.#lastMaterialization;
     assertPiProjectSkillExclusionTargets(enginePlan);
-    const applied = applyPiGlobalPlan(enginePlan, this.#fileIO);
+    const applied = enginePlan.writes.length === 0 && enginePlan.deletes.length === 0
+      ? applyPiGlobalPlan(enginePlan, this.#fileIO)
+      : await withInstallationMutation(this.#readAgentDir(), async () => applyPiGlobalPlan(enginePlan, this.#fileIO));
     const changed = new Set(applied.changes.map((change) => change.relPath));
     const results = materialization.desired.files.map((file) => ({
       agentId: file.relPath,
@@ -1520,6 +1226,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     }));
     return {
       results,
+      contributionManifestPath: join(this.#readAgentDir(), "deck", "manifest.json"),
       changedCount: applied.changedCount,
       unchangedCount: results.filter((result) => result.status === "unchanged").length,
     };
@@ -1641,8 +1348,11 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     if (!this.#lastMaterialization) {
       throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
     }
-    const result = verifyPiGlobalInstall(this.#lastMaterialization.materialization.desired, this.#fileIO);
-    return { valid: result.valid, diagnostics: result.diagnostics };
+    const diagnostics: string[] = [];
+    for (const write of this.#lastMaterialization.enginePlan.writes) {
+      if (this.#fileIO.readText(write.path) !== write.content) diagnostics.push(`Pi content changed after refresh: ${write.path}`);
+    }
+    return {valid:diagnostics.length === 0, diagnostics};
   }
 
   // -------------------------------------------------------------------------

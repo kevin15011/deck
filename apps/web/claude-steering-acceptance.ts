@@ -1,3 +1,4 @@
+import { selectTheme } from './acceptance-theme';
 /** Isolated HTTP/WebSocket/browser acceptance with production Claude driver and scripted native effects. */
 import {chromium} from '@playwright/test';
 import assert from 'node:assert/strict';
@@ -71,7 +72,7 @@ try{
  await input.fill('Draft after uncertain delivery');await select('OpenCode conversation');assert.equal(await delivery.count(),0);await page.locator('.composer-gate').getByRole('button',{name:'Prepare session',exact:true}).click();await input.fill('Other draft kept');assert.equal(await action.count(),0);
  await select('Claude conversation');assert.equal(await input.inputValue(),'Draft after uncertain delivery');await delivery.getByText(/may remain in later context/).waitFor();checks.push('transcript-only-warning-no-current-acceptance-no-resend-session-isolation');
  const bounds=async()=>{await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1||document.documentElement.scrollHeight>innerHeight+1),false,'no outer overflow');assert.equal(await page.locator('.composer').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight+1),true);};
- for(const theme of ['dark','light','cyberpunk']){await page.getByRole('combobox',{name:'Theme',exact:true}).selectOption(theme);await bounds();await page.screenshot({path:join(evidence,`desktop-${theme}.png`),fullPage:true});}
+ for(const theme of ['dark','light','cyberpunk']){await selectTheme(page,theme);await bounds();await page.screenshot({path:join(evidence,`desktop-${theme}.png`),fullPage:true});}
  await page.setViewportSize({width:390,height:844});await bounds();await page.screenshot({path:join(evidence,'mobile-390-cyberpunk.png'),fullPage:true});await page.setViewportSize({width:320,height:740});await bounds();await page.screenshot({path:join(evidence,'mobile-320-cyberpunk.png'),fullPage:true});checks.push('desktop-mobile-320-390-light-dark-cyberpunk-reduced-motion');
  await input.fill('');await page.reload();await select('Claude conversation');await delivery.getByText(/may remain in later context/).waitFor();assert.equal(h.children[0]!.stdin.length,3);checks.push('reload-restores-retention-warning-without-resend');
  await page.setViewportSize({width:1440,height:1000});await select('OpenCode conversation');await input.fill('Other draft after reload');await select('Claude conversation');await input.fill('New genuine instruction');await input.press('Enter');h.children[0]!.exit();await wait(()=>h.children.length===2,'new genuine turn');await action.waitFor();assert.equal(JSON.parse(h.children[1]!.stdin[0]!).message.content,'New genuine instruction');

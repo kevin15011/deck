@@ -55,7 +55,7 @@ describe("canonical frontend aesthetic catalog", () => {
   });
 
   test("Lead references router on compact and legacy surfaces without injecting all profiles", () => {
-    for (const promptProfile of ["compact", "legacy"] as const) {
+    for (const promptProfile of ["compact"] as const) {
       const lead = getAgentContent("deck-lead", { promptProfile })!;
       for (const body of [lead.agentBody, lead.skillBody, getTeamSessionInstructions("developer-team", { promptProfile })!]) {
         expect(body).toContain("deck-frontend-design");

@@ -94,6 +94,7 @@ describe("release binary build contract", () => {
     });
 
     expect(command).toContain("--env=DECK_COMPILED_BUILD_*");
+    expect(command).toContain(join(ROOT,"apps/cli/src/main.tsx"));
     expect(environment.DECK_COMPILED_BUILD_VERSION).toBe("0.4.0");
     expect(environment.DECK_COMPILED_BUILD_CHANNEL).toBe("dev");
   });
@@ -110,7 +111,7 @@ describe("release binary build contract", () => {
   });
 
   test("pins one Bun version for local development and every release job", () => {
-    const expected = "1.3.12";
+    const expected = "1.4.0";
     const packageJson = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8")) as { packageManager?: string };
     const localVersion = readFileSync(join(ROOT, ".bun-version"), "utf-8").trim();
     const workflow = readFileSync(join(ROOT, ".github/workflows/release.yml"), "utf-8");

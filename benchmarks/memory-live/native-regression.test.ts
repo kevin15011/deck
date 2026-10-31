@@ -14,7 +14,7 @@ import { scoreArtifact } from './case-artifacts';
 import { dataset } from './dataset';
 const scratch = testScratch();
 test('pinned native routes retrieve seeded positive controls over IPC inside separate OS network namespaces', async () => {
-    for (const route of ['claude', 'codex', 'opencode'] as const) {
+    await Promise.all((['claude', 'codex', 'opencode'] as const).map(async route => {
         const run = newRunId(), root = scratch.root(run), project = makeProject(root, `n_${route}_1`, 'CONTROL');
         const t = new NamespaceTransport({ run, bindings: { [project.scope]: `deck_eval_${run}_n_${route}_1_control` }, budget: 100, wire: simulatedWire() });
         const replay = new NativeReplay(route, root, t, true);
@@ -27,7 +27,7 @@ test('pinned native routes retrieve seeded positive controls over IPC inside sep
         const mapping = JSON.parse(readFileSync(join(root, 'opaque-identities.json'), 'utf8')).bindings;
         expect(Object.values(mapping).every(x => /^[a-f0-9-]{36}$/.test(String(x)))).toBe(true);
         replay.close();
-    }
+    }));
 }, 30000);
 test('full baseline requires three repeats and cannot fall back to the old unguarded live path', async () => {
     const run = newRunId();

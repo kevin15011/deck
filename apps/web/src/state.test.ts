@@ -167,3 +167,22 @@ test('native metadata cannot impersonate a host steering fence or crash chronolo
 test('pairing token capture survives unavailable history API without copying it into route state',()=>{
  expect(pairingToken({hash:'#pair=private-token',pathname:'/',search:'?session=s'},{replaceState:()=>{throw Error('history unavailable');}})).toBe('private-token');
 });
+
+test('gated prompt bubbles distinguish pending, delivered, unknown and hidden recalled/requeued input', () => {
+    const prefix = [event(1,'prompt.dispatched',{promptId:'p',handoff:'gated',taskId:'lead',attempt:1}),event(2,'message.completed',{role:'user',text:'hello',promptId:'p',handoff:'pending'})];
+    expect(conversationEvents(prefix)[0]?.data.handoff).toBe('pending');
+    expect(conversationEvents([...prefix,event(3,'prompt.handoff',{promptId:'p',state:'sending'})])[0]?.data.handoff).toBe('sending');
+    expect(conversationEvents([...prefix,event(3,'prompt.handoff',{promptId:'p',state:'delivered'})])[0]?.data.handoff).toBe('delivered');
+    expect(conversationEvents([...prefix,event(3,'prompt.handoff',{promptId:'p',state:'unknown'})])[0]?.data.handoff).toBe('unknown');
+    expect(conversationEvents([...prefix,event(3,'prompt.requeued',{promptId:'p',text:'hello',reason:'interrupted'})])).toEqual([]);
+    expect(conversationEvents([...prefix,event(3,'prompt.state',{promptId:'p',state:'cancelled'})])).toEqual([]);
+    expect(conversationEvents([event(1,'message.completed',{role:'user',text:'legacy',promptId:'old'}),event(2,'prompt.state',{promptId:'old',state:'interrupted'})])[0]?.data.handoff).toBeUndefined();
+});
+
+test('native reseed keeps its user bubble, while an actual requeue/resend hides the old bubble',()=>{
+  const initial=[event(1,'prompt.dispatched',{promptId:'p',handoff:'gated'}),event(2,'message.completed',{role:'user',promptId:'p',text:'hello',handoff:'pending'})];
+  const reseeded=[...initial,event(3,'prompt.dispatched',{promptId:'p',handoff:'gated',reseeded:true}),event(4,'prompt.handoff',{promptId:'p',state:'delivered'})];
+  expect(conversationEvents(reseeded).map(e=>e.data.text)).toEqual(['hello']);
+  const retried=[...reseeded,event(5,'prompt.requeued',{promptId:'p',text:'hello'}),event(6,'prompt.dispatched',{promptId:'p',handoff:'gated'}),event(7,'message.completed',{role:'user',promptId:'p',text:'hello',handoff:'pending'}),event(8,'prompt.dispatched',{promptId:'p',handoff:'gated',reseeded:true})];
+  expect(conversationEvents(retried).map(e=>e.seq)).toEqual([7]);
+});

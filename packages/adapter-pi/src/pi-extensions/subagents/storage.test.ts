@@ -1,36 +1,23 @@
 import { expect, test } from "bun:test";
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { randomUUID } from "node:crypto";
-import { childSessionPath, prepareChildSession } from "./storage";
-import { clean, type Job } from "./jobs";
+import { join } from "node:path";
+import { readChildInvocationId } from "./storage";
 
-test("private exact history: no glob/latest lookup, parent/task/header binding and no symlink adoption", () => {
-  const dir = mkdtempSync(join(tmpdir(), "deck-child-storage-"));
+test("child identity ignores history UTF-8 split at the bounded read edge", () => {
+  // protects: valid host identity is independent of model history and read chunk boundaries.
+  // oracle: only the newline-delimited host header supplies invocation identity.
+  const root = mkdtempSync(join(tmpdir(), "deck-child-header-"));
+  const file = join(root, "child.jsonl");
   try {
-    const parentFile = join(dir, "parent.jsonl"); const job = { id: randomUUID(), childId: randomUUID(), parent: "parent", cwd: dir } as Job;
-    const file = prepareChildSession(parentFile, job);
-    expect(lstatSync(file).mode & 0o777).toBe(0o600); expect(lstatSync(dirname(file)).mode & 0o777).toBe(0o700);
-    expect(JSON.parse(readFileSync(file, "utf8")).deckTaskId).toBe(job.id);
-    expect(prepareChildSession(parentFile, job, true)).toBe(file);
-    expect(childSessionPath(parentFile, "other", job.childId)).not.toBe(file);
-    expect(() => prepareChildSession(parentFile, { ...job, id: randomUUID() }, true)).toThrow("binding mismatch");
-    expect(() => prepareChildSession(parentFile, { ...job, childId: randomUUID() }, true)).toThrow("unavailable");
-    chmodSync(file, 0o644); expect(() => prepareChildSession(parentFile, job, true)).toThrow("Unsafe"); chmodSync(file, 0o600);
-    rmSync(file); const target = join(dir, "unrelated"); writeFileSync(target, "secret", { mode: 0o600 }); symlinkSync(target, file);
-    expect(() => prepareChildSession(parentFile, job, true)).toThrow("Unsafe"); expect(readFileSync(target, "utf8")).toBe("secret");
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-test("symlinked storage directory refused before any child header is written", () => {
-  const dir = mkdtempSync(join(tmpdir(), "deck-child-symlink-"));
-  try {
-    const target = join(dir, "elsewhere"); mkdirSync(target, { mode: 0o700 }); symlinkSync(target, join(dir, ".deck-subagents"));
-    expect(() => prepareChildSession(join(dir, "parent"), { id: randomUUID(), childId: randomUUID(), parent: "p", cwd: dir } as Job)).toThrow("Unsafe");
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-test("untrusted terminal controls, credentials and output floods are bounded/redacted", () => {
-  expect(clean("\x1b]0;title\x07\x1b[31mhello\u202e")).toBe("hello");
-  expect(clean("Authorization: Bearer private-value token=secret-value")).not.toContain("private-value");
-  expect(clean("a".repeat(100000))).toHaveLength(12000);
+    const header = JSON.stringify({ type: "session", id: "child", deckParent: "parent", deckTaskId: "task", cwd: root }) + "\n";
+    const history = "x".repeat(8191 - Buffer.byteLength(header)) + "€\n";
+    writeFileSync(file, header + history, { mode: 0o600 });
+    expect(readChildInvocationId(file, "parent", "task", root)).toBe("child");
+    expect(() => readChildInvocationId(file, "other", "task", root)).toThrow("binding mismatch");
+    writeFileSync(file, Buffer.concat([Buffer.from('{"id":"'), Buffer.from([0xff]), Buffer.from('"}\n')]));
+    expect(() => readChildInvocationId(file, "parent", "task", root)).toThrow();
+    writeFileSync(file, "x".repeat(8192) + "\n");
+    expect(() => readChildInvocationId(file, "parent", "task", root)).toThrow("header unavailable");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

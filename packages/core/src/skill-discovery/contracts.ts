@@ -103,6 +103,8 @@ export type SkillDiscoverySourceBindingV1 =
       /** Runtime-only; never serialized or logged. */
       readonly absoluteRoot: string;
       readonly descriptorBasename: "SKILL.md";
+      /** Host-provided plugin/selection generation; never model authority. */
+      readonly generation?: string;
     }
   | {
       readonly kind: "opaque_inventory";
@@ -163,11 +165,32 @@ export interface SkillRegistryRecordV1 {
   readonly diagnostic?: string;
 }
 
-export type SkillRegistryCompletenessV1 = "complete" | "truncated";
+export type SkillRegistryCompletenessV1 = "complete" | "partial" | "truncated";
 
+export interface SharedSkillSourceV2 {
+  readonly source_id: string;
+  readonly owner: string;
+  readonly category: SkillDiscoverySourceCategoryV1;
+  readonly scope: SkillDiscoveryScopeV1;
+  readonly locator_base: string;
+  readonly load_mode: "filesystem" | "native";
+  readonly completeness: "complete" | "partial";
+  readonly fingerprint: SkillDiscoveryDigestV1;
+}
+export interface SharedSkillExposureV2 {
+  /** Optional advisory stat key; absent in older v2 catalogs. */
+  readonly descriptor_fingerprint?: SkillDiscoveryDigestV1;
+  readonly observation_id: string;
+  readonly source_id: string;
+  readonly owner: string;
+  readonly locator: string;
+  readonly load_mode: "filesystem" | "native";
+}
 export interface SkillRegistryFrontmatterV1 {
-  readonly schema: typeof SKILL_REGISTRY_SCHEMA;
-  readonly schema_version: typeof SKILL_REGISTRY_SCHEMA_VERSION;
+  readonly sources?: readonly SharedSkillSourceV2[];
+  readonly exposures?: readonly SharedSkillExposureV2[];
+  readonly schema: typeof SKILL_REGISTRY_SCHEMA | "skill-registry-v2";
+  readonly schema_version: typeof SKILL_REGISTRY_SCHEMA_VERSION | 2;
   /** Informational only; it does not determine freshness. */
   readonly generated_at: string;
   readonly fingerprint: SkillDiscoveryDigestV1;
@@ -287,6 +310,9 @@ export interface SkillCandidateQueryV1 {
 
 /** Privacy-safe candidate projection; locators and load references stay runtime-private. */
 export interface SkillCandidateV1 {
+  readonly match_reasons?: readonly string[];
+  readonly availability?: "filesystem-revalidation-required" | "native-revalidation-required" | "not-exposed";
+  readonly source_owners?: readonly string[];
   readonly observation_id: string;
   readonly name: string;
   readonly source_category: SkillDiscoverySourceCategoryV1;

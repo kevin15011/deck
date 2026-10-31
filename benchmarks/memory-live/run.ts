@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataset, isFuture, orderedSeeds, shuffle } from './dataset';
-import { NamespaceTransport, simulatedWire, type Wire, type Event } from './namespace-transport';
+import { NamespaceTransport, simulatedWire, type Wire, type Event, type TransportTiming } from './namespace-transport';
 import { privateWrite, sha256, readEvalKey, fail } from './security';
 import { prepare, validateManifest, assertLiveRoot, assertAccountDeclaration, parseAccountDeclaration, cleanupBudget, type Manifest } from './manifest';
 export { prepare, validateManifest, validateManifestIdentity } from './manifest';
@@ -16,12 +16,12 @@ import { reportSummary, aggregateCases, planningBudget } from './report';
 import { RunAuthority, publicAuthorityError } from './run-authority';
 import { prepareGuarded, validateLiveCostGuard, CostLedger } from './cost-guard';
 import { ProcessingGate, realClock, simulationClock, parseProcessingArgs, type Clock } from './processing';
-export type ExecuteOptions = { live?: boolean; wire?: Wire; includeNative?: boolean; clock?: Clock };
+export type ExecuteOptions = { live?: boolean; wire?: Wire; includeNative?: boolean; clock?: Clock; transportTiming?: TransportTiming };
 export async function execute(m: Manifest, options: ExecuteOptions = {}) {
     validateManifest(m);
     // Native payload/timing/status correspondence needs its own forecast and contract.
     if (m.mode !== 'pilot' || m.repeats !== 1) fail('full_baseline_processing_plan_not_supported');
-    if (options.live && (m.liveApproved !== true || options.wire || options.clock)) fail('live_requires_explicit_approved_manifest');
+    if (options.live && (m.liveApproved !== true || options.wire || options.clock || options.transportTiming)) fail('live_requires_explicit_approved_manifest');
     if (options.live) { assertAccountDeclaration(m); validateLiveCostGuard(m); assertLiveRoot(m); }
     if (m.costGuard) validateLiveCostGuard(m, options.live === true);
     const authority = RunAuthority.acquire(m, 'evaluation');
@@ -58,7 +58,7 @@ async function executeOwned(m: Manifest, options: ExecuteOptions, authority: Run
         }
     };
     const saveOwnership = () => { if (t) saveProcessingResponses(); if (t) privateWrite(join(m.evalRoot, 'ownership.json'), { schema: 'deck-memory-live-ownership-v1', run: m.run, bindingsHash: sha256(JSON.stringify(m.bindings)), owned: t.owned, attemptedNamespaces: [...t.writeIntents], unresolvedNamespaces: [...new Set(t.events.filter(e => e.endpoint === '/v3/documents' && (!e.documentId || e.error)).map(e => e.tag))], unownedNamespaces: preflight.filter(p => p.status === 'failed').map(p => p.tag), preflight, namespaceVisibility: t.namespaceVisibility }); gate?.notify(); };
-    t = new NamespaceTransport({ run: m.run, bindings: m.bindings, budget: m.requestBudget, wire: options.wire ?? simulatedWire(), ...(key ? { key: () => key! } : {}), ...(options.live ? { wire: (u, i) => fetch(u, i) } : {}), costLedger: ledger, authority, changed: saveOwnership, now: () => clock.now(), deadlineAtMs: runDeadlineAtMs, requestTimeoutMs: plan.ordinaryIoTimeoutMs, verifyWriteVisibility: true, ...(offline ? { visibilityWait: async () => {} } : {}) });
+    t = new NamespaceTransport({ run: m.run, bindings: m.bindings, budget: m.requestBudget, wire: options.wire ?? simulatedWire(), ...(key ? { key: () => key! } : {}), ...(options.live ? { wire: (u, i) => fetch(u, i) } : {}), costLedger: ledger, authority, changed: saveOwnership, now: () => clock.now(), deadlineAtMs: runDeadlineAtMs, requestTimeoutMs: plan.ordinaryIoTimeoutMs, timing: options.transportTiming, verifyWriteVisibility: true, ...(offline ? { visibilityWait: async () => {} } : {}) });
     const processingGate = gate = new ProcessingGate(t, plan, clock);
     const automaticCleanup = { performed: false, disabledByPolicy: true, status: retained.status, requests: 0, retainedNamespaces: Object.values(m.bindings).map(namespace => ({ namespace, reason: retained.status })) };
     const save = () => {
@@ -87,10 +87,9 @@ async function executeOwned(m: Manifest, options: ExecuteOptions, authority: Run
             return [q.id, refs.length ? Math.max(...refs) : Math.max(0, ordered.findIndex(s => s.project === q.project_under_query))];
         }));
         const assertProcessing = () => {
-            const observed = processingGate.snapshot();
-            if (observed.invalidWrites.length || observed.documents.some(d => !['pending', 'done'].includes(d.status))) fail('processing_invalid');
+            if (processingGate.hasInvalidProcessing()) fail('processing_invalid');
         };
-        const checkpoint = async () => { checkDeadline(); await processingGate.sample(-1, Infinity, runDeadlineAtMs); assertProcessing(); };
+        const checkpoint = async () => { checkDeadline(); await processingGate.sample(-1, Infinity, runDeadlineAtMs, false); assertProcessing(); };
         processingGate.startMonitoring(runDeadlineAtMs);
         const captured: string[] = [];
         for (const [index, seed] of ordered.entries()) {
@@ -103,7 +102,7 @@ async function executeOwned(m: Manifest, options: ExecuteOptions, authority: Run
             for (const q of questions.filter(q => anchors.get(q.id) === index)) {
                 const targetAtMs = startedAtMs + plan.nextTurnDelayMs;
                 t.phase = 'processing_monitor';
-                await processingGate.monitorUntil(targetAtMs, runDeadlineAtMs); checkDeadline();
+                await processingGate.monitorUntil(targetAtMs, runDeadlineAtMs, false, false); checkDeadline();
                 assertProcessing();
                 t.phase = 'availability_' + q.id; t.frozen = true;
                 const actualAtMs = clock.now(), before = t.observations.length, beforeEffects = t.events.length, begin = performance.now();

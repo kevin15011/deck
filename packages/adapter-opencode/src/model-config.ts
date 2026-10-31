@@ -16,7 +16,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
-import { migrateLegacyDeveloperTeamAssignments } from "@deck/core/teams/developer/model-migration";
 import { getModelCatalog, type DeveloperTeamDefaultModelAssignment } from "@deck/core";
 import {
   resolveReasoningEffortSupport,
@@ -297,7 +296,8 @@ export function readOpenCodeDeveloperTeamModelConfigAssignments(
     const agentConfig = config.agent ?? {};
     const rawModelAssignments: Record<string, string> = {};
     const rawThinkingAssignments: Record<string, string> = {};
-    for (const [agentId, entry] of Object.entries(agentConfig)) {
+    for (const { id: agentId } of DEVELOPER_TEAM_AGENTS) {
+      const entry = agentConfig[agentId];
       if (entry?.model) {
         rawModelAssignments[agentId] = entry.model;
 
@@ -308,8 +308,8 @@ export function readOpenCodeDeveloperTeamModelConfigAssignments(
       }
     }
 
-    modelAssignments = { ...migrateLegacyDeveloperTeamAssignments(rawModelAssignments).assignments };
-    thinkingAssignments = { ...migrateLegacyDeveloperTeamAssignments(rawThinkingAssignments).assignments };
+    modelAssignments = rawModelAssignments;
+    thinkingAssignments = rawThinkingAssignments;
 
     const catalog = getModelCatalog();
     for (const agent of DEVELOPER_TEAM_AGENTS) {

@@ -7,7 +7,9 @@ import { prepare, newRunId } from './manifest';
 import { execute } from './run';
 import { simulatedWire } from './namespace-transport';
 import { testScratch } from './test-support';
-const scratch = testScratch();
+// Eight queries span multiple 120s polling windows; the separate 40-revision
+// checks retain distribution/load coverage, and pipeline/adaptive tests keep the full corpus.
+const scratch = testScratch({ smallCorpus: 4 });
 // Ported from Quality R9's blind-gap.ts; no reviewer script import or persistent side effects.
 for (const pollIntervalMs of [30000, 60000, 120000, 1000]) test(`execute observes older pending revisions during later turns (${pollIntervalMs}ms)`, async () => {
     let now = 1700000000000, chosen: string | undefined, accepted = 0, deletes = 0;
@@ -27,7 +29,7 @@ for (const pollIntervalMs of [30000, 60000, 120000, 1000]) test(`execute observe
     expect(d.memoryObservedAtMs - accepted).toBeLessThanOrEqual(60000 + pollIntervalMs);
     expect(d.memoryObservedAtMs).toBeLessThan(saved.processing.gateStartedAtMs);
     expect(saved.processing.latency.quantitativeValidity).toBe('valid');
-    expect(saved.availability.timeline).toHaveLength(42);
+    expect(saved.availability.timeline).toHaveLength(8);
     for (const row of saved.availability.timeline) { expect(row.driftMs).toBe(0); expect(row.capturedSeedIds.at(-1)).toBe(row.anchorSeed); }
 }, 60000);
 function fixture(pollIntervalMs = 30000, pollDuration = 0) {
@@ -100,7 +102,7 @@ test('actual execute with slow polls preserves availability targets and captured
         return r;
     } });
     const saved = JSON.parse(readFileSync(join(m.evalRoot, 'results.json'), 'utf8'));
-    expect(result.quality.validity).toBe('valid'); expect(saved.availability.timeline).toHaveLength(42);
+    expect(result.quality.validity).toBe('valid'); expect(saved.availability.timeline).toHaveLength(8);
     for (const row of saved.availability.timeline) {
         expect(row.driftMs).toBe(0);
         const future = [...saved.results[0].captures, ...saved.results[0].poolControls].find((c: any) => !row.capturedSeedIds.includes(c.id));

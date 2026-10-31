@@ -9,7 +9,7 @@ Deck coordinates a Developer Team across coding runners. Read the [architecture]
 
 ## Prerequisites and setup
 
-Use Git and **Bun 1.3.12**, pinned in [.bun-version](.bun-version), [package.json](package.json), and the [release workflow](.github/workflows/release.yml). From the repository root:
+Use Git and **Bun 1.4.0**, pinned in [.bun-version](.bun-version), [package.json](package.json), and the [release workflow](.github/workflows/release.yml). From the repository root:
 
 ```sh
 bun install --frozen-lockfile
@@ -17,7 +17,7 @@ bun install --frozen-lockfile
 
 Tracked runner execution assets, skill bundles, and build metadata enforce the release workflow's Bun version before writing output; the release binary build invokes that guard too. A mismatch fails closed. The standalone web asset generator and canary installer do **not** enforce this guard themselves; still use the pinned version for reproducible work.
 
-To exercise a real runner, install and authenticate its native CLI separately. Cross sessions support Claude, Codex, and OpenCode; Pi uses its native Deck workflow.
+To exercise a real runner, install and authenticate its native CLI separately. Cross sessions support Claude, Codex, and OpenCode. Pi 1.0.0 also supports delegated Setup in cross sessions; its other roles use the native Deck workflow.
 
 ## Run from source
 
@@ -86,22 +86,24 @@ bun sandbox:update
 
 The sandbox mounts no host HOME, repository, or credentials. Exit its main shell to remove the container. See the [sandbox guide](sandbox/linux-install/README.md) for prerequisites, supplying an existing Linux binary, authentication, and inspection.
 
-## Verify your change
+## Verify your change (Deck repository conventions)
 
-Run the smallest affected test first. For example, for documentation:
+Run focused test files while editing, for example `bun test tests/documentation-governance.test.ts`.
+Before committing, run `bun run test` and `bunx tsc --noEmit`. Reuse evidence for an unchanged
+candidate; rerun only checks whose inputs changed. Runner or installation changes additionally
+require a short live canary check by the Lead.
 
-```sh
-bun test tests/documentation-governance.test.ts
-```
+`bun run test` runs the fast suite with four isolated file workers. Each file must finish within
+2 seconds, including process startup; the whole run must finish within 90 seconds. Exceeding
+either wall-time budget fails the run and identifies the offending file or whole-run deadline.
+The wrapper preserves vendor exclusions from `bunfig.toml`. Quarantine entries in
+`tests/quarantine.yaml` require ownership, an issue link and expiry within 14 days;
+protected tests require explicit user approval.
 
-Then run the relevant broader checks:
-
-```sh
-bunx tsc --noEmit
-bun run test
-```
-
-The test script sets a 30-second per-test timeout. Release CI also runs the full suite and typecheck, plus release-specific checks. Compare broad-suite failures with [openspec/baseline-health.yaml](openspec/baseline-health.yaml); do not label a new fingerprint as known without evidence through the approved workflow.
+PR and release CI run `bun run test` and typecheck. Compare failures with
+[openspec/baseline-health.yaml](openspec/baseline-health.yaml); do not label a new fingerprint
+as known without evidence through the approved workflow. These commands and budgets apply
+to Deck itself; user projects retain their own conventions.
 
 ## Work on the web UI
 

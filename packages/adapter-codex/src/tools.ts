@@ -1,3 +1,4 @@
+import { recordOwnedRunnerArtifactTree } from "@deck/core";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -26,12 +27,14 @@ import {
 
 /** Pinned shared npm release, identical to the Claude adapter's reviewed Context Mode version. */
 export const CODEX_CONTEXT_MODE_PACKAGE = "context-mode@1.0.169";
+export const CODEX_CONTEXT7_PACKAGE = "@upstash/context7-mcp@4.1.1";
 export const CODEX_MIN_NODE_MAJOR = 18;
 
 export type CodexOwnedState = "absent" | "ready" | "conflict" | "unusable" | "unsupported";
 
 export type CodexToolOptions = {
   homeDir?: string;
+  codexHome?: string;
   dataRoot?: string;
   /** Privileged test seam replacing PATH lookups of shared executables. */
   resolveCommand?: (name: string) => string | undefined;
@@ -46,6 +49,7 @@ export type CodexToolOptions = {
   /** Verifies a shared Context Mode executable (defaults to the reviewed size and hash). */
   verifyContextMode?: (executable: string) => boolean;
   installContextMode?: () => Promise<boolean>;
+  installContext7?: () => Promise<boolean>;
   /** Absolute Node.js used by Deck-owned hook scripts; production resolves `node` and checks the version. */
   nodeCommand?: string;
   verifyNodeRuntime?: (executable: string) => boolean;
@@ -153,13 +157,23 @@ export function createCodexTools(options: CodexToolOptions = {}) {
     }
     return undefined;
   };
-  const installContextMode = async (): Promise<boolean> => {
-    if (options.installContextMode) return options.installContextMode();
+  // Match Claude's executable verification and reuse its per-user npm installation when present.
+  const context7Command = (): string | undefined => {
+    const candidates = [pathCandidate("context7-mcp"), join(dataRoot, "claude", "tools", "node_modules", ".bin", "context7-mcp"), join(toolRoot, "node_modules", ".bin", "context7-mcp")];
+    for (const candidate of candidates) {
+      const executable = executableFile(candidate);
+      if (executable) return executable;
+    }
+    return undefined;
+  };
+  const installSharedTool = async (id: "context-mode" | "context7"): Promise<boolean> => {
+    const override = id === "context7" ? options.installContext7 : options.installContextMode;
+    if (override) return override();
     const npm = Bun.which("npm");
     if (!npm) return false;
     await ensurePrivatePath(toolRoot, home);
     const code = await new Promise<number>((done) => {
-      const child = spawn(npm, ["install", "--prefix", toolRoot, "--no-audit", "--no-fund", "--ignore-scripts", CODEX_CONTEXT_MODE_PACKAGE], {
+      const child = spawn(npm, ["install", "--prefix", toolRoot, "--no-audit", "--no-fund", "--ignore-scripts", id === "context7" ? CODEX_CONTEXT7_PACKAGE : CODEX_CONTEXT_MODE_PACKAGE], {
         cwd: home,
         env: { HOME: home, PATH: process.env.PATH ?? "", USER: process.env.USER ?? "" },
         stdio: "ignore",
@@ -168,7 +182,7 @@ export function createCodexTools(options: CodexToolOptions = {}) {
       child.once("error", () => { clearTimeout(timer); done(1); });
       child.once("close", (status) => { clearTimeout(timer); done(status ?? 1); });
     });
-    return code === 0 && contextModeCommand() !== undefined;
+    return code === 0 && (id === "context7" ? context7Command() : contextModeCommand()) !== undefined;
   };
 
   // ---- Official Supermemory plugin hooks ----
@@ -201,6 +215,7 @@ export function createCodexTools(options: CodexToolOptions = {}) {
         await ensurePrivatePath(resolve(ownedRtkRoot, ".."), home);
         const result = await installOwnedRtk(ownedRtkRoot, rtkRelease, options.rtkArtifactEffects);
         if (rtkState() !== "ready") throw new Error("RTK verification failed.");
+        recordOwnedRunnerArtifactTree({ runnerId: "codex", root: options.codexHome ?? join(home, ".codex"), manifestPath: join(options.codexHome ?? join(home, ".codex"), "deck", "manifest.json"), artifactRoot: ownedRtkRoot, sourceItemId: "package:rtk" });
         return result;
       },
     }),
@@ -214,10 +229,12 @@ export function createCodexTools(options: CodexToolOptions = {}) {
         await ensurePrivatePath(resolve(ownedCodebaseRoot, ".."), home);
         const result = await installOwnedCodebase(ownedCodebaseRoot, codebaseRelease, options.codebaseArtifactEffects);
         if (codebaseState() !== "ready") throw new Error("Codebase Memory native verification failed.");
+        recordOwnedRunnerArtifactTree({ runnerId: "codex", root: options.codexHome ?? join(home, ".codex"), manifestPath: join(options.codexHome ?? join(home, ".codex"), "deck", "manifest.json"), artifactRoot: ownedCodebaseRoot, sourceItemId: "package:codebase-memory" });
         return result;
       },
     }),
-    contextMode: Object.freeze({ command: contextModeCommand, install: installContextMode }),
+    contextMode: Object.freeze({ command: contextModeCommand, install: () => installSharedTool("context-mode") }),
+    context7: Object.freeze({ command: context7Command, install: () => installSharedTool("context7") }),
     supermemory: Object.freeze({
       root: supermemoryRoot,
       state: supermemoryState,
@@ -227,6 +244,7 @@ export function createCodexTools(options: CodexToolOptions = {}) {
         await ensurePrivatePath(toolRoot, home);
         const result = await installCodexSupermemoryArtifact(supermemoryRoot, options.supermemoryArtifactEffects, options.supermemoryManifest);
         if (supermemoryState() !== "ready") throw new Error("Official artifact verification failed.");
+        recordOwnedRunnerArtifactTree({ runnerId: "codex", root: options.codexHome ?? join(home, ".codex"), manifestPath: join(options.codexHome ?? join(home, ".codex"), "deck", "manifest.json"), artifactRoot: supermemoryRoot, sourceItemId: "package:supermemory" });
         return result;
       },
     }),

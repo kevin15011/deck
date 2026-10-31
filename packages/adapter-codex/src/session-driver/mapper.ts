@@ -1,5 +1,5 @@
 import type { DriverEvent, NativeMemoryDescriptor } from "@deck/core/session/driver";
-import { boundRaw, HOOK_STATUSES } from "@deck/core/session/events";
+import { boundRaw, HOOK_STATUSES, sanitizeContextObservation } from "@deck/core/session/events";
 import { redactText } from "@deck/core/session/redaction";
 import { object, type RpcMessage } from "./rpc";
 
@@ -36,7 +36,7 @@ export function mapCodexNotification(message: RpcMessage, nativeMemory?: NativeM
         ...(attributed ? { provider: "supermemory", integration: "runner-plugin" } : {}),
       } }];
     }
-    case "turn/started": return event("turn.started", { nativeTurnId: turn.id });
+    case "turn/started": return event("turn.started", { nativeTurnId: turn.id, nativeThreadId: p.threadId });
     case "turn/completed": return event("turn.completed", { nativeTurnId: turn.id, status: codexTurnStatus(turn.status) });
     case "item/agentMessage/delta": return event("message.delta", { text: text(p.delta), messageId: p.itemId });
     case "item/reasoning/textDelta":
@@ -46,11 +46,21 @@ export function mapCodexNotification(message: RpcMessage, nativeMemory?: NativeM
       const reasoningKind = summary ? "summary" : "text";
       return event("reasoning.delta", { text: text(p.delta), messageId: p.itemId, reasoningKind, format: "delta", ...(Number.isInteger(index) ? { partId: `${reasoningKind}:${index}` } : {}) });
     }
-    case "thread/tokenUsage/updated": return event("usage", { ...object(p.tokenUsage) });
+    case "thread/tokenUsage/updated": {
+      const usage = object(p.tokenUsage);
+      const context = sanitizeContextObservation({ basis: 'codex-last-total', tokens: object(usage.last).totalTokens, capacity: usage.modelContextWindow, nativeThreadId: p.threadId, nativeTurnId: p.turnId });
+      return event("usage", { ...usage, ...(context ? { context } : {}) });
+    }
     case "account/rateLimits/updated": return event("rate-limit", { ...object(p.rateLimits) });
     case "item/started":
     case "item/completed": {
       const complete = message.method === "item/completed";
+      if (item.type === "contextCompaction") {
+        // Reject oversized/redacted identities rather than truncate them into collisions.
+        const identity = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 256 && redactText(value, 256) === value;
+        if (![item.id, p.threadId, p.turnId].every(identity)) return event("runner.unmapped", { nativeType: message.method });
+        return event("diagnostic", { code: "context.compaction", state: complete ? "completed" : "started", itemId: item.id, nativeThreadId: p.threadId, nativeTurnId: p.turnId });
+      }
       if (item.type === "agentMessage" && complete) return event("message.completed", { text: text(item.text), messageId: item.id });
       if (item.type === "reasoning" && complete) {
         const snapshots: DriverEvent[] = [];
@@ -63,6 +73,12 @@ export function mapCodexNotification(message: RpcMessage, nativeMemory?: NativeM
       if (["commandExecution", "fileChange", "mcpToolCall", "webSearch", "dynamicToolCall"].includes(String(item.type))) {
         const isError = item.status === "failed" || item.status === "declined" || item.success === false || item.error != null || (typeof item.exitCode === "number" && item.exitCode !== 0);
         return event(complete ? "tool.completed" : "tool.started", {
+          ...(complete && !isError && item.type==='fileChange' && item.status==='completed' && Array.isArray(item.changes) ? {edits:item.changes.slice(0,257).flatMap((change:unknown)=>{
+            const c=object(change),k=object(c.kind);const op=typeof c.kind==='string'?c.kind:k.type;
+            if(typeof c.path!=='string'||!['add','update','delete'].includes(String(op)))return [];
+            return [{path:c.path,op:typeof k.move_path==='string'?'rename-from':op,...(typeof c.diff==='string'?{diff:text(c.diff)}:{})},...(typeof k.move_path==='string'?[{path:k.move_path,op:'rename-to'}]:[])];
+          })} : {}),
+          nativeThreadId:p.threadId,nativeTurnId:p.turnId,
           toolCallId: item.id, tool: item.type, ...(typeof item.tool === "string" ? { toolName: text(item.tool) } : {}), ...(typeof item.server === "string" ? { server: text(item.server) } : {}),
           status: complete ? (isError ? "failed" : "completed") : "running", nativeStatus: item.status, isError,
           input: bounded(item.arguments ?? item.changes ?? (item.type === "webSearch" ? { query: item.query, action: item.action } : { command: item.command, cwd: item.cwd })),

@@ -27,7 +27,7 @@ export type AgentEntry = {
   /** Prompt reference in OpenCode's {file:/absolute/path} format */
   prompt: string;
   tools?: Record<string, boolean>;
-  permission?: { task?: Record<string, string> };
+  permission?: { task?: Record<string, string>; [key: string]: string | Record<string, string> | undefined };
   hidden?: boolean;
   variant?: string;
 };
