@@ -40,12 +40,12 @@ test("ephemeral lifecycle refresh reflects additions and removals without changi
  writeFileSync(join(root, ".skills/new/SKILL.md"), "---\nname: new\ndescription: verification\n---\n");
  await refreshSharedSkillCatalogView({ projectRoot: root, providers: [] });
  const snapshot = new ProjectPreparationService().status({ projectRoot: root, sessionId: "s", epoch: "e", policyDigest: "p", members: [] });
- expect(composeSkillSessionStartContext(snapshot, "codex", { roleId: "quality" })).toContain('"name":"new"');
+ expect(composeSkillSessionStartContext(snapshot, "codex", { roleId: "quality", taskText: "verification" })).toContain('"name":"new"');
  const view = readEphemeralSkillCatalog(root)!;
  (view.records as unknown[]).length = 0;
  expect(readEphemeralSkillCatalog(root)!.records.some(r => r.name === "new")).toBe(true);
  rmSync(join(root, ".skills/new"), { recursive: true });
  await refreshSharedSkillCatalogView({ projectRoot: root, providers: [] });
- expect(composeSkillSessionStartContext(snapshot, "codex", { roleId: "quality" })).not.toContain('"name":"new"');
+ expect(composeSkillSessionStartContext(snapshot, "codex", { roleId: "quality", taskText: "verification" })).not.toContain('"name":"new"');
  expect(readFileSync(registry, "utf8")).toBe("User-owned notes");
 });

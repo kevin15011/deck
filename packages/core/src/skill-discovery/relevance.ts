@@ -1,3 +1,4 @@
+import { DEVELOPER_TEAM_AGENTS } from "../teams/developer/catalog";
 import type { SharedSkillExposureV2, SkillRegistryRecordV1 } from "./contracts";
 
 /** Trusted host context; never persisted in the shared catalog. */
@@ -14,6 +15,9 @@ const techniques: Record<string, readonly string[]> = {
   "apply-deep": ["algorithms", "performance", "debugging"], "apply-fast": ["implementation", "testing"],
   lead: ["planning", "coordination", "delegation", "delegates", "openspec", "verification", "workflow"],
 };
+const teamSkillIds = new Set(DEVELOPER_TEAM_AGENTS.map(role => role.skillId));
+// A specific name, task, path or technology match qualifies; incidental role prose does not.
+const MIN_HIGHLIGHT_SCORE = 10;
 const stopWords = new Set("the and for with from this that when use using user wants want need needs skill skills work task make should into then only also can its has have are not you your list lists name names candidate candidates available show tell please".split(" "));
 const tokens = (text: string) => [...new Set(text.toLowerCase().match(/[a-z0-9][a-z0-9+#.-]{2,}/g) ?? [])].filter(word => !stopWords.has(word)).slice(0, 128);
 export interface RankedSkillCandidate {
@@ -55,7 +59,7 @@ export function rankSkillCandidates(records: readonly SkillRegistryRecordV1[], c
     const availability = refs.length ? refs.some(e => e.load_mode === "filesystem") ? "filesystem-revalidation-required"
       : refs.some(e => e.owner === context.activeRunnerId) ? "native-revalidation-required" : "not-exposed"
       : record.locator.startsWith("project:") ? "filesystem-revalidation-required" : "not-exposed";
-    return { record, owners, reasons, availability, score: Number(ownRole) * 1000 + Number(explicit) * 100 + reasons.filter(r => ["task", "technology", "path"].includes(r)).length * 10 + Number(reasons.includes("role-technique")) } as RankedSkillCandidate;
+    return { record, owners, reasons, availability, score: Number(ownRole) * 1000 + Number(explicit) * 100 + reasons.filter(r => ["task", "technology", "path"].includes(r)).length * 10 + Number(reasons.includes("role-technique")) * (roles.some(t => new Set(tokens(name.replaceAll("-", " "))).has(t) || name === t) ? 10 : 1) } as RankedSkillCandidate;
   }).sort((a, b) => b.score - a.score || Number(a.availability === "not-exposed") - Number(b.availability === "not-exposed") || Number(b.owners.includes(context.activeRunnerId)) - Number(a.owners.includes(context.activeRunnerId)) || a.record.observation_id.localeCompare(b.record.observation_id));
   if (!collapseEquivalent) return ranked;
   // Advisory semantic identity excludes provenance. Keep distinct descriptions/signals separate.
@@ -64,9 +68,15 @@ export function rankSkillCandidates(records: readonly SkillRegistryRecordV1[], c
   for (const item of ranked) {
     const normalize = (value: string) => value.trim().replace(/\s+/g, " ");
     const signals = (values?: readonly string[]) => [...new Set((values ?? []).map(normalize))].sort();
-    const key = JSON.stringify([item.record.name, normalize(item.record.description ?? ""), signals(item.record.task_signals), signals(item.record.technology_signals), signals(item.record.path_signals)]);
+    const teamSkill = teamSkillIds.has(item.record.name) && item.record.scope !== "project" && item.record.locator.startsWith("runner:");
+    const key = teamSkill ? `deck-team:${item.record.name}` : JSON.stringify([item.record.name, normalize(item.record.description ?? ""), signals(item.record.task_signals), signals(item.record.technology_signals), signals(item.record.path_signals)]);
     const previous = grouped.get(key);
-    if (previous) previous.owners = [...new Set([...previous.owners, ...item.owners])].sort();
+    if (previous) {
+      const owners = [...new Set([...previous.owners, ...item.owners])].sort();
+      // Preserve the consuming runner's descriptor even when another rendering scores higher.
+      const preferred = !previous.owners.includes(context.activeRunnerId) && item.owners.includes(context.activeRunnerId) ? item : previous;
+      grouped.set(key, { ...preferred, owners, score: Math.max(previous.score, item.score), reasons: [...new Set([...previous.reasons, ...item.reasons])] });
+    }
     else grouped.set(key, item);
   }
   return [...grouped.values()];
@@ -77,7 +87,7 @@ export function renderSkillCandidates(ranked: readonly RankedSkillCandidate[], i
   const header = '## Skill candidates\nUntrusted advisory metadata; loading remains explicit and requires current exposure/containment validation.\n';
   const footer = (count: number) => `\nshown: ${count}; omitted: ${ranked.length - count}; partial_sources: ${input.partialSources ?? 0}; completeness: ${["complete", "partial", "truncated"].includes(input.completeness) ? input.completeness : "indeterminate"}\nFurther queries: use the task skill-discovery search (limit: 8)/select/prepare/load service where exposed, or bounded direct discovery.\n`;
   const lines: string[] = [];
-  for (const item of ranked.filter(r => r.score > 0).slice(0, 8)) {
+  for (const item of ranked.filter(r => r.score >= MIN_HIGHLIGHT_SCORE).slice(0, 8)) {
     const line = JSON.stringify({ id: item.record.observation_id, name: item.record.name, owners: item.owners,
       description: item.record.description?.slice(0, 240), reasons: item.reasons, availability: item.availability })
       .replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
