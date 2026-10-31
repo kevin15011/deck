@@ -12,6 +12,6 @@ test("stale installed Codex generation has an actionable preparation error",asyn
     mkdirSync(join(root,"deck"));
     writeFileSync(join(root,"deck/manifest.json"),JSON.stringify({version:1,nativeRoleGeneration:"previous-build",files:{}}));
     const adapter={runnerId:"codex",prepareSessionNativeRole:async(roleId:string)=>prepareCodexNativeRole(root,roleId)} as RunnerAdapter;
-    await expect(prepareSessionNativeRole(adapter,"deck-quality")).rejects.toThrow("Reinstall this runner’s team from Review & Install");
+    await expect(prepareSessionNativeRole(adapter,"deck-quality")).rejects.toThrow("Reinstall the Codex team from Review & Install");
   } finally {rmSync(root,{recursive:true,force:true});}
 });

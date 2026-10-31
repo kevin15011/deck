@@ -9,7 +9,11 @@ export const SESSION_SKILLS_PLUGIN_NAME = "deck-developer-team";
 export const skillHash = (text: string) => createHash("sha256").update(text).digest("hex");
 export class ClaudeSkillsError extends Error {
   readonly code = "claude-session-skills-unverified";
-  constructor(readonly check = "unspecified") { super("claude-session-skills-unverified: Sync the Claude Deck team generation before starting a session; its selection or team plugin could not be verified."); }
+  readonly finding: import("@deck/core/session/driver").RunnerPreparationFinding;
+  constructor(readonly check = "unspecified") {
+    super(`claude-session-skills-unverified: ${check}. Check private path permissions and selection binding, then prepare again; originals are preserved.`);
+    this.finding = { kind: "B", code: this.code, item: check, message: this.message };
+  }
 }
 
 /** Recheck the selection and exact canonical plugin file set immediately before every child launch. */
@@ -18,7 +22,7 @@ export function verifyClaudeSessionSkills(value: NativeSkillsDescriptor): void {
   try {
     if (value.pluginName !== SESSION_SKILLS_PLUGIN_NAME || !/^[a-f0-9]{64}$/.test(value.contentHash)) throw new Error();
     check = "ancestor-permissions";
-    for (const target of [value.root, dirname(value.selectionPath)]) {
+    for (const target of [value.root, dirname(value.selectionPath), ...(value.sourceSelection ? [dirname(value.sourceSelection.path)] : [])]) {
       let path = target;
       for (;;) {
         const stat = lstatSync(path);
@@ -34,6 +38,10 @@ export function verifyClaudeSessionSkills(value: NativeSkillsDescriptor): void {
       if (!stat.isFile() || (stat.mode & 0o077) !== 0 || typeof process.getuid === "function" && stat.uid !== process.getuid()) throw new Error();
       return readFileSync(path, "utf8");
     };
+    if (value.sourceSelection) {
+      check = "source-selection-changed";
+      if (skillHash(readPrivate(value.sourceSelection.path)) !== value.sourceSelection.hash) throw new Error();
+    }
     const selection = readPrivate(value.selectionPath);
     check = "selection-digests";
     if (skillHash(selection) !== value.selectionHash || JSON.parse(selection).contentHash !== value.contentHash) throw new Error();
@@ -74,9 +82,11 @@ export function claudeSessionOverrideDenials(value: NativeSkillsDescriptor, over
 export function validateClaudeSessionIntent(value: NativeSkillsDescriptor, config: NormalizedDeckConfig): void {
   verifyClaudeSessionSkills(value);
   const selected = JSON.parse(readFileSync(value.selectionPath, "utf8"));
+  if (selected.capabilities?.includes("rtk") && config.packageInstructions.claude?.rtk !== true)
+    throw new ClaudeSkillsError("rtk-intent-changed");
   if (selected.capabilities?.includes("codebase-memory") && !isCodebaseMemoryEnabled(config, "claude"))
     throw new Error("claude-codebase-memory-selection-stale: Review and publish a replacement Claude generation before launching.");
-  if ((selected.capabilities?.includes("web-search") === true) !== config.webSearch.enabled)
+  if (selected.capabilities?.includes("web-search") === true && !config.webSearch.enabled)
     throw new Error("claude-web-search-selection-stale: Review and publish a replacement Claude generation before launching.");
 }
 

@@ -49,10 +49,15 @@ export type NativeMemoryDescriptor = {
   };
 };
 
+/** Preparation findings are data; they never grant repair or execution authority. */
+export type RunnerPreparationFinding = { kind: "H" | "W" | "B"; code: string; item: string; message: string };
+
 /** Host-verified native plugin providing skills, bound to an installed team selection. */
 export type NativeSkillsDescriptor = {
   root: string;
   pluginName: string;
+  preparation?: readonly RunnerPreparationFinding[];
+  sourceSelection?: { path: string; hash: string };
   selectionPath: string;
   selectionHash: string;
   contentHash: string;

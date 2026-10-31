@@ -161,7 +161,7 @@ export type SessionManagerOptions = {
 };
 
 export type SessionModelCatalog = { runners: Array<{ runnerId: string; label: string; available: boolean; reasonCode?: string; models: Array<{ modelId: string; label: string; thinkingLevels: readonly string[] }> }> };
-export type SessionPreparation = { projectTrust?: import("./project-store").ProjectTrust; personalMcpRunnerId?: string; memberMcpAvailability?: PersonalMcpByMember; personalMcpAvailability?: readonly PersonalMcpAvailability[]; capabilityAvailability?: readonly CapabilityAvailability[]; preparationId?: string; status: "unprepared" | "releasing" | "preparing" | "ready" | "failed" | "cancelled"; generation: number; phase?: "checking-runner" | "preparing-tools"; reasonCode?: string; checkedAt?: string };
+export type SessionPreparation = { preparationFindings?: readonly import("@deck/core/session/driver").RunnerPreparationFinding[]; projectTrust?: import("./project-store").ProjectTrust; personalMcpRunnerId?: string; memberMcpAvailability?: PersonalMcpByMember; personalMcpAvailability?: readonly PersonalMcpAvailability[]; capabilityAvailability?: readonly CapabilityAvailability[]; preparationId?: string; status: "unprepared" | "releasing" | "preparing" | "ready" | "failed" | "cancelled"; generation: number; phase?: "checking-runner" | "preparing-tools"; reasonCode?: string; checkedAt?: string };
 type PreparationJob = { epoch: number; reopening: boolean; state: SessionPreparation; controller: AbortController; done: Promise<void> };
 
 type SessionMeta = {
@@ -1496,7 +1496,7 @@ export class SessionManager implements SessionService {
         throw new Error(failureCode);
       }
       const capabilityAvailability = reviewedCapabilityAvailability(resolver, assignment.runnerId);
-      completion = { status: "ready", personalMcpRunnerId: assignment.runnerId, personalMcpAvailability: validatePersonalMcpAvailability(resolver?.personalMcpAvailability), capabilityAvailability, reasonCode: capabilityAvailability.find(item => item.status === "unavailable")?.reasonCode, checkedAt: new Date(this.clock.now()).toISOString() };
+      completion = { status: "ready", preparationFindings: resolver?.nativeSkills?.preparation?.slice(0, 16), personalMcpRunnerId: assignment.runnerId, personalMcpAvailability: validatePersonalMcpAvailability(resolver?.personalMcpAvailability), capabilityAvailability, reasonCode: capabilityAvailability.find(item => item.status === "unavailable")?.reasonCode, checkedAt: new Date(this.clock.now()).toISOString() };
     } catch (error) {
       if (error instanceof PersonalMcpPreparationError) failureCode = error.reasonCode;
       if (failureCode === "preparation-tools-failed" && error instanceof Error) {
@@ -1988,6 +1988,9 @@ export class SessionManager implements SessionService {
       const roleId = live.ledger.task(turn.taskId)?.assignedRoleId ?? this.options.assignedRoleId?.(turn.memberId);
       const nativeRoleDescriptor = roleId ? await resolver?.prepareNativeRole?.(roleId) : undefined;
       if (nativeRoleDescriptor && (nativeRoleDescriptor.runnerId !== assignment.runnerId || nativeRoleDescriptor.roleId !== roleId)) throw new Error("native-role-binding-mismatch");
+      if (resolver?.nativeSkills?.preparation?.length) this.driverEvent(live, turn, assignment.runnerId, {
+        kind: "diagnostic", data: { code: "runner.preparation", findings: resolver.nativeSkills.preparation.slice(0, 16) },
+      });
       const nativeRole = assignment.runnerId === "claude" && resolver?.nativeSkills && roleId ? { roleId, roleRef: `deck-developer-team:${roleId}`, generation: resolver.nativeSkills.contentHash } : undefined;
       if (turn.preparationDelegation) {
         const selected = nativeRole ?? nativeRoleDescriptor;

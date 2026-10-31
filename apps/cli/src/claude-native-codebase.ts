@@ -24,7 +24,9 @@ export function attachClaudeCodebaseObservation(adapter: RunnerAdapter, input: R
       if (!skills || skills.root !== result.plan.generationReference?.root || skills.selectionHash !== result.plan.generationReference.selectionHash) throw new Error("claude-generation-changed");
       validateClaudeSessionIntent(skills, readConfig());
       if (!isCodebaseMemoryEnabled(currentConfig, 'claude')) return;
+      if (!Object.hasOwn(skills.files, '.mcp.json')) return;
       const declaration = JSON.parse(readFileSync(join(skills.root, '.mcp.json'), 'utf8')).mcpServers?.['codebase-memory'];
+      if (!declaration) return; // Optional capability was omitted during preparation.
       if (!declaration || typeof declaration.command !== 'string' || (declaration.args !== undefined && !Array.isArray(declaration.args))) throw new Error('claude-codebase-declaration-unverified');
       const service = observer ?? new SessionCodebaseReadiness({ supervisor: new Supervisor({ anchorCommand: deckInternalCommand('child-anchor') }), environment });
       const invocationId = randomUUID();

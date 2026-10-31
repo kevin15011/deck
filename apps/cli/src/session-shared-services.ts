@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { preparationCapabilities } from "./preparation-capabilities";
 import { issueCodebaseAvailability } from "@deck/core/session/codebase-availability";
 import { validateClaudeSessionIntent } from "../../../packages/adapter-claude/src/session-skills";
@@ -53,7 +54,10 @@ export async function resolveSessionChildMcp(
   step("native-memory");
   const memory = managed ? prepareSessionNativeMemory(adapter?.runnerId ?? "", managed.context.projectRoot, config, environment, nativeMemoryEffects) : undefined;
   step("native-mcp-config");
-  const configured = { ...await adapter?.readSessionCapabilityOverrides?.(config) };
+  const nativeSelection = adapter?.runnerId === "claude" && managed?.nativeSkills
+    ? JSON.parse(readFileSync(managed.nativeSkills.selectionPath, "utf8")) : undefined;
+  const configured = nativeSelection && !nativeSelection.capabilities?.includes("codebase-memory")
+    ? {} : { ...await adapter?.readSessionCapabilityOverrides?.(config) };
   // Deck participation follows new explicit intent. Independent native integrations stay in the native loader.
   if (!isCodebaseMemoryEnabled(config, adapter?.runnerId ?? "")) delete configured["codebase-memory"];
   assertSessionCapabilityOverrides(Object.keys(configured));
@@ -76,7 +80,15 @@ export async function resolveSessionChildMcp(
     : nativeSearchEvidence("unknown", "effective-config", { runner: adapter?.runnerId }, "web-search-disabled");
   const provider = enabled ? getWebSearchProviderDescriptor(config.webSearch.provider) : undefined;
   const credential = provider ? environment[provider.credentialEnvVar]?.trim() : undefined;
-  const selection = resolveWebSearchLaunch(enabled, nativeSearch, !!provider && !!credential);
+  let selection: ReturnType<typeof resolveWebSearchLaunch>;
+  try { selection = resolveWebSearchLaunch(enabled, nativeSearch, !!provider && !!credential); }
+  catch (error) {
+    if (adapter?.runnerId !== "claude") throw error;
+    selection = { route: "disabled", diagnostics: ["web-search-fallback-unavailable"] };
+    if (managed?.nativeSkills) managed.nativeSkills.preparation = [...managed.nativeSkills.preparation ?? [], {
+      kind: "W", code: "claude-optional-unavailable", item: "web-search", message: "Search fallback is unavailable. Ordinary work can continue; configure its provider and credential to use it.",
+    }];
+  }
   const searchDiagnostics = [...selection.diagnostics];
   suppressedMcpServers.push(...(enabled ? nativeSearch.ownedFallbackServerIds ?? [] :
     await adapter?.readOwnedSearchFallbackIds?.({ projectRoot: managed?.context.projectRoot ?? process.cwd(),
@@ -111,7 +123,9 @@ export async function resolveSessionChildMcp(
     }
     const codebase = servers["codebase-memory"];
     if (managed) {
-      if (!codebase) capabilityAvailability.push({ capabilityId: "codebase-memory", status: "unselected" });
+      if (!codebase) capabilityAvailability.push(managed.nativeSkills?.preparation?.some(finding => finding.code === "claude-optional-unavailable" && finding.item === "codebase-memory")
+        ? { capabilityId: "codebase-memory", status: "unavailable", reasonCode: "codebase-memory-unavailable" }
+        : { capabilityId: "codebase-memory", status: "unselected" });
       else {
         try {
           step("codebase-readiness");

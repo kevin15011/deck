@@ -3,14 +3,14 @@ import { PrerequisiteEvidence, pinnedHookExecutable } from "../../core/src/sessi
 import { resolveWebSearchLaunch } from "@deck/core";
 import { ROLE_TOOL_POLICY, isReadOnlyRole, readOnlyMcpTools } from "@deck/core/session/role-tool-policy";
 import { SESSION_SKILLS_PLUGIN_NAME, ClaudeSkillsError, verifyClaudeSessionSkills, claudeCodebaseDenials } from "./session-skills";
-import type { NativeSkillsDescriptor } from "@deck/core/session/driver";
+import type { NativeSkillsDescriptor, RunnerPreparationFinding } from "@deck/core/session/driver";
 import { claudeProjectConfigTrusted } from './personal-mcp';
 import { inspectClaudeNativeSearch } from "./native-search";
 import { beginRunnerContributions, contributionId, readRunnerContributions, recordOwnedRunnerArtifactTree } from "@deck/core";
 import { isCompatibleCodebaseExecutable } from "@deck/core";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { CLAUDE_ATTRIBUTION_SETTINGS_ARGS } from "./launch-settings";
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, writeFileSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, realpath, rename, rm, writeFile, link } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { CLAUDE_CAPABILITY_IDS, claudeContentPluginName, claudeModelMetadata, claudePluginName, normalizeClaudeAssignments, normalizeClaudeCapabilities, normalizeClaudeEfforts, type ClaudeEfforts, type ClaudeAssignments, type ClaudeCapabilityId } from "./models";
@@ -29,7 +29,7 @@ import type { ChildMcpServerSpec } from "@deck/core/session/driver";
 
 /** Read-only session composition seam; shared runner contracts remain unchanged until S2. */
 export type ClaudeSessionMcpAdapter = RunnerAdapter & {
-  prepareSessionNativeSkills(): Promise<NativeSkillsDescriptor>;
+  prepareSessionNativeSkills(config?: import("@deck/core").NormalizedDeckConfig): Promise<NativeSkillsDescriptor>;
   readSessionCapabilityOverrides(config?: import("@deck/core").NormalizedDeckConfig): Promise<Record<string, ChildMcpServerSpec>>;
 };
 
@@ -370,7 +370,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
     if (providerId !== undefined && providerId !== "tavily" || capabilities.includes("web-search") !== (providerId === "tavily")) throw new Error("Claude Web Search provider selection is untrusted.");
     const contentHash = ["deck-claude-models-v2", "deck-claude-models-v3"].includes(data.schema as string) && typeof data.contentHash === "string" ? data.contentHash : undefined;
     const efforts = normalizeClaudeEfforts(data.efforts ?? {});
-    if (raw !== claudeModelMetadata(assignments, originalCapabilities, providerId as string | undefined, contentHash, efforts)) throw new Error("Claude plugin selection metadata does not match the owned plugin.");
+    if (data.plugin !== JSON.parse(claudeModelMetadata(assignments, originalCapabilities, providerId as string | undefined, contentHash, efforts)).plugin) throw new Error("Claude plugin selection metadata does not match the owned plugin.");
     return { assignments, capabilities, ...(providerId ? { providerId: providerId as string } : {}), plugin: contentHash ? claudeContentPluginName(assignments, originalCapabilities, providerId as string | undefined, contentHash) : claudePluginName(assignments, originalCapabilities), ...(contentHash ? { contentHash } : {}), ...(Object.keys(efforts).length ? { efforts } : {}) };
   };
   const readAssignments = (): ClaudeAssignments => readSelection().assignments;
@@ -480,41 +480,87 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       },
     }),
     inspectNativeSearch: async (input) => inspectClaudeNativeSearch({ ...input, environment: input.environment ?? options.sessionDriver?.baseEnv, flags: input.flags ?? options.sessionDriver?.extraArgs }, home),
-    async prepareSessionNativeSkills() {
-      let check = "selection-metadata";
+    async prepareSessionNativeSkills(config) {
+      const findings: RunnerPreparationFinding[] = [];
       try {
         const selection = readSelection();
+        const sourceText = readFileSync(metadataPath, "utf8");
+        if (Object.keys(JSON.parse(sourceText)).some(key => !["schema", "assignments", "capabilities", "efforts", "providerId", "plugin", "contentHash"].includes(key)))
+          findings.push({ kind: "W", code: "claude-selection-preserved", item: "model-assignments.json", message: "Custom selection metadata is preserved. This launch uses only validated model and capability selections." });
         const location = join(parent, selection.plugin);
-        check = "installed-hook-binding";
-        // This installation-specific command is data, never executed here. Rebuild every
-        // canonical byte with it and bind the result to the private selection digest below.
-        const hookPath = join(location, "hooks/session-start.cjs");
-        assertTrustedAncestors(dirname(hookPath), home);
-        const hookStat = lstatSync(hookPath);
-        if (!hookStat.isFile() || hookStat.size > 64 * 1024 || (hookStat.mode & 0o077) !== 0
-          || typeof process.getuid === "function" && hookStat.uid !== process.getuid()) throw new Error();
-        const binding = readFileSync(hookPath, "utf8").split("\n", 1)[0]!.match(/^const nativeContextCommand = (.*);$/);
-        if (!binding) throw new Error();
-        const command: unknown = JSON.parse(binding[1]!);
-        if (command !== null && (!Array.isArray(command) || command.length === 0
-          || command.some(part => typeof part !== "string" || /[\0\r\n]/.test(part)) || !isAbsolute(command[0]))) throw new Error();
-        const effects = { ...toolEffects, nativeSessionStartCommand: command === null ? undefined : command as string[] };
-        check = "canonical-files";
-        const expected = expectedFiles(location, selection.assignments, selection.capabilities, effects, selection.providerId, selection.efforts);
-        const selected = { ...selection, location, expected };
-        const selectionHash = hash(readFileSync(metadataPath, "utf8"));
-        // Use the same hash root as publication, including any root-dependent contents.
-        const hashFiles = expectedFiles(parent, selection.assignments, selection.capabilities, effects, selection.providerId, selection.efforts);
+        const capabilities = selection.capabilities.filter(id => !config ||
+          (id !== "codebase-memory" || getEnabledCapabilityInstructionIds(config, "claude").includes(id)) &&
+          (id !== "web-search" || config.webSearch.enabled) &&
+          (id !== "rtk" || config.packageInstructions.claude?.rtk === true));
+        const available = capabilities.filter(id => {
+          try { claudeCapabilityFiles(parent, [id], toolEffects, selection.providerId); return true; }
+          catch {
+            findings.push({ kind: "W", code: "claude-optional-unavailable", item: id,
+              message: `${id} is unavailable for this launch. Saved selections are preserved; ordinary work can continue.` });
+            return false;
+          }
+        });
+        // Commands come from the trusted composition, never from an edited installed hook.
+        const providerId = available.includes("web-search") ? selection.providerId : undefined;
+        const hashFiles = expectedFiles(parent, selection.assignments, available, toolEffects, providerId, selection.efforts);
         const contentHash = hash(JSON.stringify(hashFiles.map(file => [relative(parent, file.path), file.kind, hash(file.content)])));
-        check = "generation-content-hash";
-        if (selected.contentHash !== contentHash) throw new Error();
-        check = "installed-canonical-files";
-        if (inspect(selected.location, selected.expected, home) !== "ready") throw new Error();
-        const root = selected.location;
-        const descriptor = { root, pluginName: SESSION_SKILLS_PLUGIN_NAME, selectionPath: metadataPath, selectionHash, contentHash, files: Object.fromEntries(selected.expected.map(file => [relative(root, file.path), hash(file.content)])) };
+        const root = join(parent, `prepared-${contentHash}`);
+        const files = hashFiles.map(file => ({ ...file, path: join(root, relative(parent, file.path)) }));
+        let receipts: ReturnType<typeof readRunnerContributions>;
+        try { receipts = readRunnerContributions(join(parent, "manifest.json")); }
+        catch { findings.push({ kind: "W", code: "claude-ownership-unknown", item: "manifest.json", message: "Ownership metadata is unavailable. Installed originals are preserved; this launch uses a fresh verified copy." }); }
+        const prior = new Map(receipts?.contributions.map(entry => [entry.path, entry.hash]));
+        // Only inspect bounded known paths. Unknown extras are preserved and never loaded.
+        for (const file of hashFiles) {
+          const key = relative(parent, file.path), installed = join(location, key);
+          try {
+            assertTrustedAncestors(dirname(installed), home);
+            const stat = lstatSync(installed);
+            if (!stat.isFile() || stat.size > 1024 * 1024 || (stat.mode & 0o077) !== 0) throw new Error();
+            const bytes = readFileSync(installed, "utf8");
+            if (hash(bytes) !== prior.get(installed) && bytes !== file.content)
+              findings.push({ kind: "W", code: "claude-content-preserved", item: key, message: `Preserved customized ${key}. This launch uses the bundled copy; no customized hook is executed.` });
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") findings.push({ kind: "W", code: "claude-content-preserved", item: key, message: `Preserved unverified ${key}; it is excluded from this launch.` });
+          }
+        }
+        await ensurePrivatePath(parent, home);
+        const state = inspect(root, files, home);
+        if (state === "conflict") throw new ClaudeSkillsError("prepared-generation-conflict");
+        if (state === "absent") {
+          const staging = await mkdtemp(join(parent, ".deck-claude-stage-"));
+          try {
+            for (const file of files) {
+              const local = join(staging, relative(root, file.path));
+              mkdirSync(dirname(local), { recursive: true, mode: 0o700 });
+              writeFileSync(local, file.content, { flag: "wx", mode: 0o600 });
+            }
+            if (inspect(staging, files.map(file => ({ ...file, path: join(staging, relative(root, file.path)) })), home) !== "ready") throw new ClaudeSkillsError("staged-generation-invalid");
+            assertTrustedAncestors(root, home);
+            try { await rename(staging, root); }
+            catch (error) { if (inspect(root, files, home) !== "ready") throw error; }
+            findings.push({ kind: "H", code: "claude-content-refreshed", item: "team-plugin", message: "Prepared current Deck skills and hooks. Existing generations remain intact." });
+          } finally { await rm(staging, { recursive: true, force: true }); }
+        }
+        // A separate immutable selection keeps refresh from invalidating active invocations.
+        const selectionText = claudeModelMetadata(selection.assignments, available, providerId, contentHash, selection.efforts);
+        const selectionPath = join(parent, `prepared-selection-${hash(selectionText)}.json`);
+        if (!existsSync(selectionPath)) {
+          const temporary = join(parent, `.prepared-selection-${randomUUID()}.tmp`);
+          try {
+            await writeFile(temporary, selectionText, { flag: "wx", mode: 0o600 });
+            try { await link(temporary, selectionPath); }
+            catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+          } finally { await rm(temporary, { force: true }); }
+        }
+        if (readFileSync(metadataPath, "utf8") !== sourceText) throw new ClaudeSkillsError("selection-changed-during-refresh");
+        const descriptor: NativeSkillsDescriptor = { root, pluginName: SESSION_SKILLS_PLUGIN_NAME,
+          selectionPath, selectionHash: hash(selectionText), contentHash,
+          sourceSelection: { path: metadataPath, hash: hash(sourceText) }, preparation: findings,
+          files: Object.fromEntries(files.map(file => [relative(root, file.path), hash(file.content)])) };
         verifyClaudeSessionSkills(descriptor);
         return descriptor;
-      } catch (error) { throw error instanceof ClaudeSkillsError ? error : new ClaudeSkillsError(check); }
+      } catch (error) { throw error instanceof ClaudeSkillsError ? error : new ClaudeSkillsError("preparation-boundary"); }
     },
     getSessionDriver: () => createClaudeSessionDriver(options.sessionDriver),
     runnerId: "claude", displayName: "Claude Code", environmentIds: [ENVIRONMENT], packageInstructionIds: ["codebase-memory", "rtk"],
@@ -547,19 +593,25 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       const memoryEnabled = memorySelected && scope?.kind === "canonical";
       if (memoryEnabled && officialState() !== "ready") return { status: "blocked", code: "claude-official-memory-plugin-unverified", diagnostics: diagnostic("claude-official-memory-plugin-unverified", "The pinned official Claude Supermemory plugin or Node.js 18+ runtime is not installed and verified.") };
       if (input.mode !== "interactive" || input.modelId || input.reasoningLevel || input.runnerNative) return { status: "unsupported", code: "claude-team-route-unverified", diagnostics: diagnostic("claude-team-route-unverified", "Only interactive Claude plugin-file sessions are supported; native overrides and exec/resume are unverified.") };
-      let selected: ReturnType<typeof active> | undefined;
-      try { selected = active(); } catch { /* untrusted owned metadata */ }
+      let prepared: NativeSkillsDescriptor;
+      try { prepared = await adapter.prepareSessionNativeSkills(input.deckConfig); }
+      catch (error) { return { status: "blocked", code: "claude-session-skills-unverified", diagnostics: diagnostic("claude-session-skills-unverified", error instanceof Error ? error.message : "Check private Claude paths, then prepare again.") }; }
+      const snapshot = JSON.parse(readFileSync(prepared.selectionPath, "utf8"));
+      const selected = { ...snapshot, capabilities: snapshot.capabilities ?? [], assignments: snapshot.assignments ?? {}, location: prepared.root };
       if (selected?.capabilities.includes("serena") && !await revalidateSerena()) return { status: "blocked", code: "claude-serena-readiness-stale", diagnostics: diagnostic("claude-serena-readiness-stale", "Deck-owned Serena bootstrap evidence is stale; Claude was not launched.") };
-      if (!selected || inspect(selected.location, selected.expected, home) !== "ready") return { status: "blocked", code: "claude-plugin-unverified", diagnostics: diagnostic("claude-plugin-unverified", "Deck-owned global Claude plugin or model selection is missing or conflicts with its verified manifest.") };
+      verifyClaudeSessionSkills(prepared);
       if (selected.capabilities.includes("codebase-memory") && !getEnabledCapabilityInstructionIds(input.deckConfig, "claude").includes("codebase-memory")) return { status: "blocked", code: "claude-codebase-memory-selection-stale", diagnostics: diagnostic("claude-codebase-memory-selection-stale", "Codebase Memory activation changed. Review and publish a verified replacement Claude plugin before reopening; existing generations and independent executables are preserved.") };
       const nativeSearch = inspectClaudeNativeSearch({ projectRoot: input.projectRoot, modelId: selected.assignments["deck-lead"], environment: options.sessionDriver?.baseEnv, flags: options.sessionDriver?.extraArgs }, home);
-      if (selected.capabilities.includes("web-search") !== input.deckConfig.webSearch.enabled) return { status: "blocked", code: "claude-web-search-selection-stale", diagnostics: diagnostic("claude-web-search-selection-stale", "Review and publish a replacement Claude generation for the current Web Search selection.") };
+      if (selected.capabilities.includes("web-search") && !input.deckConfig.webSearch.enabled) return { status: "blocked", code: "claude-web-search-selection-stale", diagnostics: diagnostic("claude-web-search-selection-stale", "Review and publish a replacement Claude generation for the current Web Search selection.") };
       const needsFallback = input.deckConfig.webSearch.enabled && nativeSearch.availability !== "available" && nativeSearch.webAllowed !== false;
       const provider = needsFallback ? options.webSearchProviderResolver?.(input.deckConfig.webSearch.provider) : undefined;
       const token = provider ? (options.webSearchCredential?.() ?? process.env.TAVILY_API_KEY)?.trim() : undefined;
       let search: ReturnType<typeof resolveWebSearchLaunch>;
       try { search = resolveWebSearchLaunch(input.deckConfig.webSearch.enabled, nativeSearch, !!provider && !!token && !/[\0\r\n]/.test(token)); }
-      catch { return { status: "blocked", code: "claude-web-search-credential-missing", diagnostics: diagnostic("claude-web-search-credential-missing", "The shared search fallback is unavailable.") }; }
+      catch {
+        search = { route: "disabled", diagnostics: ["web-search-fallback-unavailable"] };
+        prepared.preparation = [...prepared.preparation ?? [], { kind: "W", code: "claude-optional-unavailable", item: "web-search", message: "Search fallback is unavailable. Ordinary work can continue; configure its provider and credential to use it." }];
+      }
       const webSearchEnabled = search.route === "fallback";
       if (webSearchEnabled && (!selected.capabilities.includes("web-search") || selected.providerId !== input.deckConfig.webSearch.provider)) return { status: "blocked", code: "claude-web-search-selection-stale", diagnostics: diagnostic("claude-web-search-selection-stale", "Review and reinstall the selected search capability.") };
       const searchArgs = webSearchEnabled && provider ? ["--mcp-config", JSON.stringify({ mcpServers: { [provider.semanticServerId]: { command: provider.command[0], args: provider.command.slice(1) } } })] : [];
@@ -568,12 +620,12 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
         try { credential = options.resolveMemoryCredential?.(input.projectRoot); } catch { /* Never expose a secret-store or project-config error. */ }
         if (!credential || !credential.token || credential.token.length > 16 * 1024 || /[\0\r\n]/.test(credential.token) || !/^sm_project_v1_[a-z0-9_]{3,180}$/.test(credential.canonicalRepoTag) || credential.canonicalRepoTag !== (scope?.kind === "canonical" ? scope.projectScope : undefined)) return { status: "blocked", code: "claude-memory-profile-unavailable", diagnostics: diagnostic("claude-memory-profile-unavailable", "Shared Supermemory profile, verified repository tag or plugin-override inspection is not ready.") };
       }
-      const codebaseDenials = input.codebaseAvailability ? claudeCodebaseDenials({ skills: await adapter.prepareSessionNativeSkills(),
+      const codebaseDenials = input.codebaseAvailability ? claudeCodebaseDenials({ skills: prepared,
         projectRoot: input.projectRoot, invocationId: input.codebaseInvocationId ?? "", route: "native", overrides: [], availability: input.codebaseAvailability }) : [];
       const attributionArgs = codebaseDenials.length ? ["--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, deniedMcpServers: codebaseDenials.map(serverName => ({ serverName })) })] : CLAUDE_ATTRIBUTION_SETTINGS_ARGS;
       const envOverlay = { ...(webSearchEnabled && token ? { TAVILY_API_KEY: { value: token, sensitive: true } } : {}), ...(credential ? { SUPERMEMORY_CC_API_KEY: { value: credential.token, sensitive: true }, SUPERMEMORY_REPO_TAG: { value: credential.canonicalRepoTag } } : {}) };
       const sensitiveKeys = [...(webSearchEnabled && token ? ["TAVILY_API_KEY"] : []), ...(credential ? ["SUPERMEMORY_CC_API_KEY"] : [])];
-      return { status: "ready", plan: { generationReference: { root: selected.location, selectionPath: metadataPath, selectionHash: hash(readFileSync(metadataPath, "utf8")) }, command: "claude", args: [...attributionArgs, ...searchArgs, "--setting-sources", claudeProjectConfigTrusted(home, input.projectRoot, options.sessionDriver?.baseEnv ?? process.env) ? "user,project,local" : "user", "--plugin-dir", selected.location, ...(credential ? ["--plugin-dir", officialRoot] : []), "--agent", "deck-developer-team:deck-lead"], cwd: input.projectRoot, stdio: "inherit", stdin: "inherit", executionClass: "static-compatible", ...(sensitiveKeys.length ? { envOverlay, sensitiveEnvAuthorization: { binding: credential ? "deck-claude-official-memory-v1" : "deck-claude-web-search-v1", keys: sensitiveKeys } } : {}) }, diagnostics: [...(input.deckConfig.webSearch.enabled && nativeSearch.availability === "unknown" ? [{ code: "native-search-detection-defect", severity: "warning" as const, message: "Native search availability is unknown; the configured fallback is selected and may duplicate an existing search tool." }, { code: "native-search-possible-duplicate", severity: "warning" as const, message: "Review the effective Claude provider/model/tool configuration; existing user search tools are preserved." }] : []), ...(scope?.kind === "global" ? [{ code: "claude-memory-session-disabled", severity: "warning" as const, message: "Git repository identity is absent; Deck Supermemory is disabled for this launch. Saved settings are unchanged. External plugins and hooks may still load." }] : []), { code: "claude-static-compatible", severity: "warning", message: credential ? "Pinned official Supermemory plugin owns recall/capture; Deck only supplies the selected process-local profile and verified scope. Co-loaded user plugins may see the process credential; protected execution remains unsupported." : "Deck supplies the verified team plugin with --plugin-dir. Other user/managed plugins and hooks may still load; remote memory is not asserted off for external plugins." }] };
+      return { status: "ready", plan: { generationReference: { root: selected.location, selectionPath: prepared.selectionPath, selectionHash: prepared.selectionHash }, command: "claude", args: [...attributionArgs, ...searchArgs, "--setting-sources", claudeProjectConfigTrusted(home, input.projectRoot, options.sessionDriver?.baseEnv ?? process.env) ? "user,project,local" : "user", "--plugin-dir", selected.location, ...(credential ? ["--plugin-dir", officialRoot] : []), "--agent", "deck-developer-team:deck-lead"], cwd: input.projectRoot, stdio: "inherit", stdin: "inherit", executionClass: "static-compatible", ...(sensitiveKeys.length ? { envOverlay, sensitiveEnvAuthorization: { binding: credential ? "deck-claude-official-memory-v1" : "deck-claude-web-search-v1", keys: sensitiveKeys } } : {}) }, diagnostics: [...(prepared.preparation ?? []).map(finding => ({ code: finding.code, severity: "warning" as const, message: finding.message })), ...(input.deckConfig.webSearch.enabled && nativeSearch.availability === "unknown" ? [{ code: "native-search-detection-defect", severity: "warning" as const, message: "Native search availability is unknown; the configured fallback is selected and may duplicate an existing search tool." }, { code: "native-search-possible-duplicate", severity: "warning" as const, message: "Review the effective Claude provider/model/tool configuration; existing user search tools are preserved." }] : []), ...(scope?.kind === "global" ? [{ code: "claude-memory-session-disabled", severity: "warning" as const, message: "Git repository identity is absent; Deck Supermemory is disabled for this launch. Saved settings are unchanged. External plugins and hooks may still load." }] : []), { code: "claude-static-compatible", severity: "warning", message: credential ? "Pinned official Supermemory plugin owns recall/capture; Deck only supplies the selected process-local profile and verified scope. Co-loaded user plugins may see the process credential; protected execution remains unsupported." : "Deck supplies the verified team plugin with --plugin-dir. Other user/managed plugins and hooks may still load; remote memory is not asserted off for external plugins." }] };
     },
     async detectRuntimes() {
       let detected = options.detectClaudeVersion?.();
@@ -794,7 +846,6 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       const selection = readSelection(); // Reject corrupt metadata, even when no ordinary package is selected.
       if (!existsSync(metadataPath)) return {};
       if (adapter.readSelectedCapabilityIds?.() === undefined) throw new Error("Claude session MCP selection is untrusted.");
-      if (config && selection.capabilities.includes("codebase-memory") && !getEnabledCapabilityInstructionIds(config, "claude").includes("codebase-memory")) throw new Error("claude-codebase-memory-selection-stale");
       const ids = selection.capabilities.filter((id) => id === "codebase-memory" && config && getEnabledCapabilityInstructionIds(config, "claude").includes("codebase-memory"));
       // Cross sessions verify the reviewed native pin during managed readiness.
       // Static plugin installs retain their shared-daemon command preference.
