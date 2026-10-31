@@ -87,12 +87,12 @@ test('draft subscriptions isolate sessions and asynchronous clearing reaches the
 test('compaction retains failed queued receipts and drops dispatched or cancelled queue content', async () => {
     const { failedQueuedPrompts } = await import('./prompt-queue');
     const current = new CurrentEvents();
-    current.apply(event(1, 'prompt.queued', { promptId: 'failed', text: 'Synthetic failed queue' }));
-    current.apply(event(2, 'prompt.state', { promptId: 'failed', state: 'failed', reason: 'runner-driver-unavailable' }));
+    current.apply(event(1, 'prompt.queued', { promptId: 'active', text: 'Synthetic active' }));
+    current.apply(event(2, 'prompt.dispatched', { promptId: 'active', taskId: 'lead' }));
     current.apply(event(3, 'prompt.queued', { promptId: 'cancelled', text: 'Synthetic cancelled' }));
     current.apply(event(4, 'prompt.state', { promptId: 'cancelled', state: 'cancelled' }));
-    current.apply(event(5, 'prompt.queued', { promptId: 'active', text: 'Synthetic active' }));
-    current.apply(event(6, 'prompt.dispatched', { promptId: 'active', taskId: 'lead' }));
+    current.apply(event(5, 'prompt.queued', { promptId: 'failed', text: 'Synthetic failed queue' }));
+    current.apply(event(6, 'prompt.state', { promptId: 'failed', state: 'failed', reason: 'runner-driver-unavailable' }));
     current.apply(event(7, 'prompt.queue', { paused: true }));
     expect(failedQueuedPrompts(current.values()).map(item => item.promptId)).toEqual(['failed']);
     expect(JSON.stringify(current.values())).not.toContain('Synthetic cancelled');
