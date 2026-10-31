@@ -68,3 +68,11 @@ test('empty restart pause is hidden while queued and failed input keep resume vi
   expect(render([],[{promptId:'f',text:'Failed',reason:'failed'}])).toContain('Resume queue');
  }
 });
+test('a later started message supersedes an earlier start failure',()=>{
+ const failedFirst=[event(1,'prompt.queued',{promptId:'old',text:'Stale',position:1}),event(2,'prompt.state',{promptId:'old',state:'failed',reason:'Codex session Serena readiness is stale.'})];
+ expect(failedQueuedPrompts(failedFirst)).toHaveLength(1);
+ const later=[...failedFirst,event(3,'prompt.queued',{promptId:'new',text:'Next',position:2}),event(4,'prompt.dispatched',{promptId:'new',taskId:'lead',attempt:2})];
+ expect(failedQueuedPrompts(later)).toEqual([]);
+ const failsAfter=[...later,event(5,'prompt.queued',{promptId:'third',text:'Again',position:3}),event(6,'prompt.state',{promptId:'third',state:'failed',reason:'Runner unavailable'})];
+ expect(failedQueuedPrompts(failsAfter).map(item=>item.promptId)).toEqual(['third']);
+});

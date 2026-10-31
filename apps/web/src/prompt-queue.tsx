@@ -38,11 +38,12 @@ export function reduceInbox(inbox: PromptInbox, event: SessionEvent): PromptInbo
     if(event.kind==='prompt.queue'){next.paused=event.data.paused===true;next.pauseReason=typeof event.data.reason==='string'?event.data.reason:undefined;}
     return next;
 }
+/** A failure stays visible only until a later message starts; a newer dispatch supersedes it. */
 export function failedQueuedPrompts(events: SessionEvent[]) {
     const queued=new Map<string,QueuedPrompt>(),dispatched=new Set<string>(),failed=new Map<string,QueuedPrompt & {reason:string}>();
     for(const event of events){const id=String(event.data.promptId??'');if(!id)continue;
         if(event.kind==='prompt.queued'&&typeof event.data.text==='string')queued.set(id,{promptId:id,text:event.data.text,...(publicImages(event.data.attachments).length?{attachments:publicImages(event.data.attachments)}:{})});
-        if(event.kind==='prompt.dispatched'){dispatched.add(id);failed.delete(id);}
+        if(event.kind==='prompt.dispatched'){dispatched.add(id);failed.clear();}
         if(event.kind==='prompt.state'&&!dispatched.has(id)&&['failed','ownership-unsettled'].includes(String(event.data.state))){const item=queued.get(id);if(item)failed.set(id,{...item,reason:typeof event.data.reason==='string'?event.data.reason:'The message could not start.'});}
     }
     return [...failed.values()];
