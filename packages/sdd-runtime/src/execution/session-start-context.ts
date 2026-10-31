@@ -1,3 +1,4 @@
+import { readEphemeralSkillCatalog } from "../../../core/src/skill-discovery/shared";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -75,7 +76,7 @@ export function projectSkillCandidates(projectRoot: string, context: SkillReleva
     technologies = Object.keys({ ...manifest.dependencies, ...manifest.devDependencies }).slice(0, 40);
   } catch { /* Optional project hints never prevent startup. */ }
   const parsed = parseSkillRegistryDocument(advisoryFile(join(projectRoot, ".atl/skill-registry.md"), 512 * 1024) ?? "");
-  const catalog = parsed.ok ? parsed.frontmatter : undefined;
+  const catalog = readEphemeralSkillCatalog(projectRoot) ?? (parsed.ok ? parsed.frontmatter : undefined);
   const ranked = rankSkillCandidates(catalog?.records ?? [], { ...context, technologies: context.technologies ?? technologies }, catalog?.exposures);
   return renderSkillCandidates(ranked, { partialSources: catalog?.sources?.filter(s => s.completeness === "partial").length, completeness: catalog?.completeness === "complete" ? "indeterminate" : catalog?.completeness ?? "indeterminate" });
 }

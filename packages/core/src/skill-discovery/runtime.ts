@@ -147,7 +147,7 @@ export function createTaskScopedSkillDiscoveryRuntime(
     for (const record of activeRecords) {
       activeNameCounts.set(record.name, (activeNameCounts.get(record.name) ?? 0) + 1);
     }
-    const ranked = rankSkillCandidates(activeRecords, { ...input.relevance, activeRunnerId: input.activeRunnerId }, sharedCatalog?.exposures);
+    const ranked = rankSkillCandidates(activeRecords, { ...input.relevance, activeRunnerId: input.activeRunnerId }, sharedCatalog?.exposures, false);
     const matched = ranked.filter(item => matches(item.record, normalized))
       .map(item => ({ record: item.record, public: { ...publicCandidate(item.record), match_reasons: item.reasons, availability: item.availability, source_owners: item.owners }, searchGeneration: generation }));
     const visible = matched.slice(0, normalized.limit);

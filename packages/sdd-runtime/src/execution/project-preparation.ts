@@ -1,4 +1,4 @@
-import { discoverSharedSkillCatalog } from "../../../core/src/skill-discovery/shared";
+import { discoverSharedSkillCatalog, refreshSharedSkillCatalogView } from "../../../core/src/skill-discovery/shared";
 import { preparationAuthorityScope, observedPreparationCapabilities } from "@deck/core/session/preparation";
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync, mkdirSync, linkSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -180,8 +180,8 @@ export class ProjectPreparationService implements PreparationPort {
       try {
         const source = read(scope.projectRoot, REGISTRY, SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes);
         const parsed = parseSkillRegistryDocument(source);
+        const candidate = await refreshSharedSkillCatalogView({ projectRoot: scope.projectRoot, providers: this.options.registryProviders() });
         if (!parsed.ok || parsed.frontmatter?.schema_version !== 2) return;
-        const candidate = await discoverSharedSkillCatalog({ projectRoot: scope.projectRoot, providers: this.options.registryProviders() });
         if (read(scope.projectRoot, REGISTRY, SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes) !== source) return;
         this.registryEvidence.set(key, { digest: hash(source), partial: candidate.frontmatter.completeness !== "complete", stale: candidate.frontmatter.fingerprint !== parsed.frontmatter.fingerprint });
         if (this.registryEvidence.size > 128) this.registryEvidence.delete(this.registryEvidence.keys().next().value!);

@@ -9,6 +9,23 @@ const within = (root: string, target: string) => { const child = relative(root, 
 export const sourceLocatorBase = (binding: SkillDiscoverySourceBindingV1, owner: string) => binding.declaration.locatorStrategy === "project_relative"
   ? `project:${binding.declaration.safeLocatorBase}` : `runner:${owner}:${binding.declaration.safeLocatorBase}`;
 
+// Advisory views only: never consulted for readiness, write authority or loading.
+const ephemeralCatalogs = new Map<string, SkillRegistryFrontmatterV1>();
+export function readEphemeralSkillCatalog(projectRoot: string): SkillRegistryFrontmatterV1 | undefined {
+  const catalog = ephemeralCatalogs.get(resolve(projectRoot));
+  return catalog ? structuredClone(catalog) : undefined;
+}
+
+/** Safe lifecycle refresh; persistence remains exclusively in the authorized writer. */
+export async function refreshSharedSkillCatalogView(input: Parameters<typeof discoverSharedSkillCatalog>[0]) {
+  const snapshot = await discoverSharedSkillCatalog(input);
+  const key = resolve(input.projectRoot);
+  ephemeralCatalogs.delete(key);
+  ephemeralCatalogs.set(key, structuredClone(snapshot.frontmatter));
+  if (ephemeralCatalogs.size > 8) ephemeralCatalogs.delete(ephemeralCatalogs.keys().next().value!);
+  return snapshot;
+}
+
 /** Each provider is evaluated under its own identity; executor/roster never chooses catalog scope. */
 export async function discoverSharedSkillCatalog(input: {
   projectRoot: string; providers: readonly SkillDiscoverySourceProviderV1[]; generatedAt?: string;

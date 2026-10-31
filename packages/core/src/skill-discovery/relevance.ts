@@ -9,12 +9,13 @@ export interface SkillRelevanceContext {
   technologies?: readonly string[];
 }
 const techniques: Record<string, readonly string[]> = {
-  architect: ["architecture", "interfaces", "design"], quality: ["verification", "testing", "security", "review"],
-  investigate: ["debugging", "tracing", "architecture"], setup: ["installation", "configuration"],
+  architect: ["architecture", "interfaces", "design", "api", "contracts", "openspec"], quality: ["verification", "testing", "security", "review"],
+  investigate: ["debugging", "tracing", "architecture", "investigation"], setup: ["installation", "configuration", "readiness", "setup"],
   "apply-deep": ["algorithms", "performance", "debugging"], "apply-fast": ["implementation", "testing"],
-  lead: ["planning", "coordination"],
+  lead: ["planning", "coordination", "delegation", "delegates", "openspec", "verification", "workflow"],
 };
-const tokens = (text: string) => [...new Set(text.toLowerCase().match(/[a-z0-9][a-z0-9+#.-]{2,}/g) ?? [])].slice(0, 128);
+const stopWords = new Set("the and for with from this that when use using user wants want need needs skill skills work task make should into then only also can its has have are not you your".split(" "));
+const tokens = (text: string) => [...new Set(text.toLowerCase().match(/[a-z0-9][a-z0-9+#.-]{2,}/g) ?? [])].filter(word => !stopWords.has(word)).slice(0, 128);
 export interface RankedSkillCandidate {
   record: SkillRegistryRecordV1;
   owners: string[];
@@ -22,13 +23,13 @@ export interface RankedSkillCandidate {
   availability: "filesystem-revalidation-required" | "native-revalidation-required" | "not-exposed";
   score: number;
 }
-export function rankSkillCandidates(records: readonly SkillRegistryRecordV1[], context: SkillRelevanceContext, exposures: readonly SharedSkillExposureV2[] = []): RankedSkillCandidate[] {
+export function rankSkillCandidates(records: readonly SkillRegistryRecordV1[], context: SkillRelevanceContext, exposures: readonly SharedSkillExposureV2[] = [], collapseEquivalent = true): RankedSkillCandidate[] {
   const task = (context.taskText ?? "").slice(0, 32768).toLowerCase();
   const taskTokens = tokens(task);
   const roles = techniques[(context.roleId ?? "").replace(/^deck-/, "")] ?? [];
-  return records.slice(0, 500).map(record => {
+  const ranked = records.slice(0, 500).map(record => {
     const haystack = [record.name, record.description, ...(record.task_signals ?? []), ...(record.technology_signals ?? []), ...(record.path_signals ?? [])].join(" ").toLowerCase();
-    const words = new Set(tokens(haystack));
+    const words = new Set([...tokens(haystack), ...tokens(haystack.replaceAll("-", " "))]);
     const reasons: string[] = [];
     const name = record.name.toLowerCase();
     // Exact token/name boundaries avoid selecting "ui" from "build".
@@ -39,14 +40,27 @@ export function rankSkillCandidates(records: readonly SkillRegistryRecordV1[], c
     if ((context.technologies ?? []).slice(0, 40).some(t => words.has(t.toLowerCase()))) reasons.push("technology");
     if ((context.targetPaths ?? []).slice(0, 40).some(p => tokens(p.replaceAll("/", " ")).some(t => words.has(t))
       || (record.path_signals ?? []).some(s => s.startsWith("*.") && p.endsWith(s.slice(1))))) reasons.push("path");
-    if (roles.some(t => words.has(t))) reasons.push("role-technique");
+    if (roles.some(t => words.has(t)) || record.name.toLowerCase() === `deck-${(context.roleId ?? "").replace(/^deck-/, "")}`) reasons.push("role-technique");
     const refs = exposures.filter(e => e.observation_id === record.observation_id);
     const owners = [...new Set(refs.length ? refs.map(e => e.owner) : [record.runner_id ?? "core"])].sort();
     const availability = refs.length ? refs.some(e => e.load_mode === "filesystem") ? "filesystem-revalidation-required"
       : refs.some(e => e.owner === context.activeRunnerId) ? "native-revalidation-required" : "not-exposed"
       : record.locator.startsWith("project:") ? "filesystem-revalidation-required" : "not-exposed";
     return { record, owners, reasons, availability, score: Number(explicit) * 100 + reasons.filter(r => ["task", "technology", "path"].includes(r)).length * 10 + Number(reasons.includes("role-technique")) } as RankedSkillCandidate;
-  }).sort((a, b) => b.score - a.score || Number(a.availability === "not-exposed") - Number(b.availability === "not-exposed") || a.record.observation_id.localeCompare(b.record.observation_id));
+  }).sort((a, b) => b.score - a.score || Number(a.availability === "not-exposed") - Number(b.availability === "not-exposed") || Number(b.owners.includes(context.activeRunnerId)) - Number(a.owners.includes(context.activeRunnerId)) || a.record.observation_id.localeCompare(b.record.observation_id));
+  if (!collapseEquivalent) return ranked;
+  // Advisory semantic identity excludes provenance. Keep distinct descriptions/signals separate.
+  // Never use this grouping as load authority: the selected observation is revalidated normally.
+  const grouped = new Map<string, RankedSkillCandidate>();
+  for (const item of ranked) {
+    const normalize = (value: string) => value.trim().replace(/\s+/g, " ");
+    const signals = (values?: readonly string[]) => [...new Set((values ?? []).map(normalize))].sort();
+    const key = JSON.stringify([item.record.name, normalize(item.record.description ?? ""), signals(item.record.task_signals), signals(item.record.technology_signals), signals(item.record.path_signals)]);
+    const previous = grouped.get(key);
+    if (previous) previous.owners = [...new Set([...previous.owners, ...item.owners])].sort();
+    else grouped.set(key, item);
+  }
+  return [...grouped.values()];
 }
 
 /** JSON lines keep untrusted descriptor strings out of the surrounding instructions. */
