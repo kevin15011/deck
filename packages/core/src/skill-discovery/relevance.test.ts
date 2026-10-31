@@ -44,3 +44,26 @@ test("hyphenated technologies keep exact matches alongside role name tokens", ()
  const ranked = rankSkillCandidates([row("mobile", "react-native")], { activeRunnerId: "codex", technologies: ["react-native"] });
  expect(ranked[0]!.reasons).toContain("technology");
 });
+test("generic discovery requests do not become task or explicit-name matches", () => {
+ const ranked = rankSkillCandidates([row("skill", "skill list names"), row("skill-installer", "List available skill names and candidates")], { activeRunnerId: "codex", taskText: "List skill candidates and names" });
+ expect(ranked.every(r => r.score === 0)).toBe(true);
+});
+test("Quality prioritizes its own role and review techniques over incidental UI prose", () => {
+ const required = ["deck-quality", "deck-verification", "judgment-day", "code-review-and-quality", "security-and-hardening"];
+ const records = [...required.map(name => row(name)), row("testing", "testing"), row("diagram-design", "Review design and testing"), row("landing-page-design", "Review landing page security"), row("skill-installer", "List skill candidates and names")];
+ const ranked = rankSkillCandidates(records, { activeRunnerId: "codex", roleId: "deck-quality", taskText: "List skill candidates and names" });
+ expect(ranked[0]!.record.name).toBe("deck-quality");
+ const relevant = ranked.filter(r => r.score > 0).map(r => r.record.name);
+ expect(relevant.sort()).toEqual([...required, "testing"].sort());
+ const ui = rankSkillCandidates(records, { activeRunnerId: "codex", roleId: "deck-quality", taskText: "Review landing page design" });
+ expect(ui[0]!.record.name).toBe("deck-quality");
+ expect(ui.find(r => r.record.name === "landing-page-design")!.score).toBeGreaterThan(0);
+ const path = rankSkillCandidates(records, { activeRunnerId: "codex", roleId: "deck-quality", targetPaths: ["apps/web/src/panel.tsx"] });
+ expect(path.find(r => r.record.name === "diagram-design")!.score).toBeGreaterThan(0);
+});
+test("every role's own skill ranks first even against explicit task matches", () => {
+ for (const role of ["lead", "architect", "quality", "investigate", "setup", "apply-deep", "apply-fast"]) {
+  const ranked = rankSkillCandidates([row("chosen"), row(`deck-${role}`)], { activeRunnerId: "codex", roleId: `deck-${role}`, taskText: "Use $chosen" });
+  expect(ranked[0]!.record.name).toBe(`deck-${role}`);
+ }
+});
