@@ -1,3 +1,4 @@
+import { parseJsonc } from "./model-discovery-context";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -21,7 +22,7 @@ export function backupOpenCodeInstall(root: string, files: readonly { path: stri
   for (const file of files) {
     const path = join(root, file.path), before = read(path);
     if (file.path === 'opencode.json') {
-      const targets = [...sharedJsonContributionTargets(path, JSON.parse(before ?? '{}')), ...sharedJsonContributionTargets(path, JSON.parse(file.content))];
+      const targets = [...sharedJsonContributionTargets(path, parseJsonc(before ?? '{}') as Record<string, unknown>), ...sharedJsonContributionTargets(path, parseJsonc(file.content) as Record<string, unknown>)];
       for (const target of new Map(targets.map(target => [contributionId(target), target])).values()) add(target, selectContributionContent(before ?? '{}', target.selector), selectContributionContent(file.content, target.selector));
     } else add({ path, selector: { kind: 'file' } }, before, file.content);
   }

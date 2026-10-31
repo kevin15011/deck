@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import type { RunnerModelDiscoveryError, RunnerModelInventory, RunnerModelEntry, RunnerModelProvider } from "@deck/core";
 
@@ -11,7 +12,7 @@ const MAX_BLOCK_BYTES = 256 * 1024;
 const MAX_VARIANT_BYTES = 128;
 const MAX_VARIANTS = 64;
 
-export type OpenCodeCommandRequest = { file: string; args: readonly string[]; cwd: string; timeoutMs: number; maxStdoutBytes: number; maxStderrBytes: number; signal?: AbortSignal; env?: Readonly<Record<string,string|undefined>> };
+export type OpenCodeCommandRequest = { onSpawn?: (pid: number) => () => void; file: string; args: readonly string[]; cwd: string; timeoutMs: number; maxStdoutBytes: number; maxStderrBytes: number; signal?: AbortSignal; env?: Readonly<Record<string,string|undefined>> };
 export type OpenCodeCommandResult = { exitCode: number | null; signal: string | null; stdout: string; stderr: string; terminationReason?: "timeout" | "output-limit" };
 export interface OpenCodeCommandRunner { run(request: OpenCodeCommandRequest): Promise<OpenCodeCommandResult>; }
 export interface ModelDiscoveryFileSystem {
@@ -123,8 +124,10 @@ export type NodeOpenCodeCommandRunnerDependencies = {
   spawn: (
     file: string,
     args: string[],
-    options: { cwd: string; shell: false; stdio: ["ignore", "pipe", "pipe"]; env?: Record<string,string|undefined> },
+    options: { cwd: string; shell: false; stdio: ["ignore" | "pipe", "pipe", "pipe"]; env?: Record<string,string|undefined> },
   ) => {
+    pid?: number;
+    stdin?: { end(value: string): unknown; on?(event: "error", listener: () => void): unknown } | null;
     stdout: { on(event: "data", listener: (chunk: Buffer | string) => void): unknown };
     stderr: { on(event: "data", listener: (chunk: Buffer | string) => void): unknown };
     on(event: "error", listener: () => void): unknown;
@@ -141,7 +144,7 @@ export type NodeOpenCodeCommandRunnerDependencies = {
  */
 export function createNodeOpenCodeCommandRunner(
   dependencies: NodeOpenCodeCommandRunnerDependencies = {
-    spawn: (file, args, options) => spawn(file, args, options),
+    spawn: (file, args, options) => spawn(file, args, options) as ChildProcessByStdio<Writable | null, Readable, Readable>,
     setTimeout: (callback, delay) => setTimeout(callback, delay),
     clearTimeout: (timer) => clearTimeout(timer),
   },
@@ -150,12 +153,15 @@ export function createNodeOpenCodeCommandRunner(
     run(request) {
       if (request.signal?.aborted) return Promise.resolve({exitCode:null,signal:null,stdout:"",stderr:"",terminationReason:"timeout"});
       return new Promise((resolve) => {
-        const child = dependencies.spawn(request.file, [...request.args], {
+        const child = dependencies.spawn(request.onSpawn ? "/bin/sh" : request.file, request.onSpawn
+          ? ["-c", 'IFS= read -r grant && [ "$grant" = launch ] || exit 125; exec "$@"', "deck-inventory-gate", request.file, ...request.args]
+          : [...request.args], {
           cwd: request.cwd,
           ...(request.env ? {env: {...request.env}} : {}),
           shell: false,
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: [request.onSpawn ? "pipe" : "ignore", "pipe", "pipe"],
         });
+        let releaseChild: (() => void) | undefined;
         const stdoutDecoder = new StringDecoder("utf8");
         const stderrDecoder = new StringDecoder("utf8");
         let stdout = "", stderr = "", stdoutBytes = 0, stderrBytes = 0;
@@ -206,8 +212,19 @@ export function createNodeOpenCodeCommandRunner(
         };
         child.stdout.on("data", (chunk) => append(chunk, "stdout"));
         child.stderr.on("data", (chunk) => append(chunk, "stderr"));
-        child.on("error", () => { reaped = true; if (killTimer) dependencies.clearTimeout(killTimer); settle(null, null); });
-        child.on("close", (exitCode, signal) => { reaped = true; if (killTimer) dependencies.clearTimeout(killTimer); settle(exitCode, signal); });
+        child.on("error", () => { reaped = true; releaseChild?.(); if (killTimer) dependencies.clearTimeout(killTimer); settle(null, null); });
+        child.on("close", (exitCode, signal) => { reaped = true; releaseChild?.(); if (killTimer) dependencies.clearTimeout(killTimer); settle(exitCode, signal); });
+        if (request.onSpawn) {
+          child.stdin?.on?.("error", () => { child.kill("SIGKILL"); settle(1, null); });
+          try {
+            if (!child.pid || !child.stdin) throw new Error("inventory-process-unavailable");
+            releaseChild = request.onSpawn(child.pid);
+            child.stdin.end("launch\n");
+          } catch {
+            child.kill("SIGKILL");
+            settle(1, null);
+          }
+        }
       });
     },
   };

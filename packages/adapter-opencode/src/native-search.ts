@@ -9,7 +9,7 @@ const truthy = (v: string | undefined) => !!v && !['false', '0', ''].includes(v.
 /** Interactive OpenCode admits native project sources unless explicitly disabled.
  * Managed callers pass their separate prior-consent decision explicitly. Reading
  * these settings grants no execution or project trust. */
-function configPaths(input: NativeSearchInspectionInput, root: string): string[] {
+export function configPaths(input: NativeSearchInspectionInput, root: string): string[] {
   const env = input.environment ?? process.env;
   let workspaceRoot = input.projectRoot;
   while (!existsSync(join(workspaceRoot, '.git')) && dirname(workspaceRoot) !== workspaceRoot) workspaceRoot = dirname(workspaceRoot);

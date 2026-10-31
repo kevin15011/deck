@@ -1,3 +1,4 @@
+import { acquireInstallationUse } from "../../../core/src/installation-use";
 import { verifyOpenCodeNativeRole } from "../native-role";
 import { ROLE_TOOL_POLICY, readOnlyMcpTools, isReadOnlyRole } from "@deck/core/session/role-tool-policy";
 import {correlatedOpenCodeEdits} from "./mapper";
@@ -37,6 +38,7 @@ class OpenCodeTask {
   private base = "";
   private nativeId = "";
   private child!: SupervisedChild;
+  private installationUse?: ReturnType<typeof acquireInstallationUse>;
   private current?: Turn;
   private readonly lifetime = new AbortController();
   private closed = false;
@@ -93,7 +95,24 @@ class OpenCodeTask {
   async initialize(): Promise<void> {
     const launch = buildOpenCodeLaunch(this.input, this.io, this.options);
     this.authorization = `Basic ${Buffer.from(`opencode:${launch.env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`;
-    this.child = await this.io.spawn(launch.command, launch.args, { cwd: this.input.cwd, env: launch.env });
+    const root = this.input.nativeRoleDescriptor?.source.root;
+    if (root) this.installationUse = acquireInstallationUse(root);
+    try {
+      if (root) verifyOpenCodeNativeRole(this.input.nativeRoleDescriptor!);
+      // The gated shell cannot load plugins before its birth-identity lease is published.
+      this.child = await this.io.spawn(root ? "/bin/sh" : launch.command, root
+        ? ["-c", 'IFS= read -r grant && [ "$grant" = launch ] || exit 125; exec "$@"', 'deck-opencode-gate', launch.command, ...launch.args]
+        : launch.args, { cwd: this.input.cwd, env: launch.env });
+      if (this.installationUse) {
+        const { workerPid } = await this.child.ready;
+        const release = this.installationUse.trackProcess(workerPid);
+        void this.child.exited.finally(() => { release(); this.installationUse?.release(); }).catch(() => {});
+        this.child.writeStdin("launch\n");
+      }
+    } catch (error) {
+      if (this.child) await this.child.terminateGroup(this.options.killGraceMs ?? 2000);
+      this.installationUse?.release(); throw error;
+    }
     let endpointResolve!: (url: string) => void, endpointReject!: (e: Error) => void;
     const endpoint = new Promise<string>((resolve, reject) => { endpointResolve = resolve; endpointReject = reject; });
     let output = "";

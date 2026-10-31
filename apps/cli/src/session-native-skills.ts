@@ -26,7 +26,7 @@ export async function prepareSessionNativeRole(adapter: RunnerAdapter, roleId: s
     for (const finding of role.preparation ?? []) if (finding.kind === "W") onWarning?.(`${finding.code}: ${finding.message}`);
     return role;
   } catch (cause) {
-    if (adapter.runnerId === "codex") throw new Error("codex-session-preparation-blocked: The role or hook trust boundary could not be validated after preparation. Review the preserved conflicting item or unsafe path, then retry.", { cause });
+    if (["codex", "opencode"].includes(adapter.runnerId)) throw new Error(`${adapter.runnerId}-session-preparation-blocked: The role or hook trust boundary could not be validated after preparation. Review the preserved conflicting item or unsafe path, then retry.`, { cause });
     throw new Error(`${adapter.runnerId}-session-skills-unverified: The installed team could not be verified against this Deck build. Reinstall the ${adapter.runnerId === "codex" ? "Codex" : adapter.runnerId} team from Review & Install, then retry the session.`, { cause });
   }
 }

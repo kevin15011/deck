@@ -1,3 +1,4 @@
+import { ROLE_TOOL_POLICY } from '@deck/core/session/role-tool-policy';
 import { DeckConfigStore } from "./deck-config-store";
 import { withNativeProjectReadiness } from "./native-project-readiness";
 import { classifyNativeCodebase, nativeCodebaseFailureCode, resolvePiAgentDir } from "@deck/adapter-pi";
@@ -520,15 +521,23 @@ function conciseLaunchSummary(context: {
 /** Generic CLI-owned install/verify/consent/spawn orchestration. */
 export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunRunnerLaunchResult> {
   input.signal?.throwIfAborted();
-  if (!input.installOnly && !input.dryRun && input.adapter.withNativeInstallationUse) {
-    return input.adapter.withNativeInstallationUse(() => runRunnerLaunchReserved({ ...input, processEffects: {
-      ...input.processEffects,
-      spawn: (command, args, options) => input.processEffects.spawn(command, args, { ...options,
-        onSpawn: pid => input.adapter.trackNativeInstallationProcess?.(pid),
-      }),
-    } }));
+  try {
+    if (!input.installOnly && !input.dryRun && input.adapter.withNativeInstallationUse) {
+      return await input.adapter.withNativeInstallationUse(() => runRunnerLaunchReserved({ ...input, processEffects: {
+        ...input.processEffects,
+        spawn: (command, args, options) => input.processEffects.spawn(command, args, { ...options,
+          onSpawn: pid => input.adapter.trackNativeInstallationProcess?.(pid),
+        }),
+      } }));
+    }
+    return await runRunnerLaunchReserved(input);
+  } catch (error) {
+    if (input.signal?.aborted) throw error;
+    const message = error instanceof Error ? error.message : "Runner preparation failed safely.";
+    return { status: "blocked", message: message.includes("symlink boundary:")
+      ? message + "; preserve the linked content elsewhere and remove the conflicting symlink before retrying."
+      : message };
   }
-  return runRunnerLaunchReserved(input);
 }
 async function runRunnerLaunchReserved(input: RunRunnerLaunchInput): Promise<RunRunnerLaunchResult> {
   input.signal?.throwIfAborted();
@@ -628,7 +637,7 @@ async function runRunnerLaunchReserved(input: RunRunnerLaunchInput): Promise<Run
   }
   if (input.dryRun) return { status: "dry-run", diagnostics: [preview] };
 
-  if (safeMutations.length > 0 && !input.yes && !(input.adapter.runnerId === "codex" && plan.automaticRefresh && !input.installOnly)) {
+  if (safeMutations.length > 0 && !input.yes && !(plan.automaticRefresh && !input.installOnly)) {
     if (!input.interactive || !input.confirm) return { status: "blocked", message: "Mutation requires --yes in non-interactive mode." };
     const confirmationQuestion = input.installOnly
       ? "Apply these changes? [y/N]"
@@ -643,9 +652,9 @@ async function runRunnerLaunchReserved(input: RunRunnerLaunchInput): Promise<Run
   try {
     applyResult = await input.adapter.applyDeveloperTeamInstall({ projectRoot: baseLaunch.projectRoot, environmentId: input.adapter.environmentIds[0]!, plan });
   } catch (error) {
-    if (!input.installOnly && input.adapter.runnerId === "codex" && error && typeof error === "object" && "code" in error && ["codex-installation-in-use", "runner-mutation-deferred"].includes(String(error.code))) {
+    if (!input.installOnly && ["codex", "opencode"].includes(input.adapter.runnerId) && error && typeof error === "object" && "code" in error && ["codex-installation-in-use", "runner-installation-in-use", "runner-mutation-deferred"].includes(String(error.code))) {
       refreshDeferred = true;
-      await input.presentPreview("Codex content refresh deferred while another invocation is active; launching with installed content.");
+      await input.presentPreview(`${input.adapter.displayName} content refresh deferred while another invocation is active; launching with installed content.`);
     } else {
       const rollback = error && typeof error === "object" && "rollback" in error
         ? (error as { rollback?: { conflicts?: readonly string[] } }).rollback
@@ -673,6 +682,15 @@ async function runRunnerLaunchReserved(input: RunRunnerLaunchInput): Promise<Run
     }
   }
   if (input.installOnly) return { status: "installed", diagnostics: verified.diagnostics };
+  if (input.adapter.runnerId === "opencode") {
+    try {
+      for (const roleId of ["deck-lead", ...ROLE_TOOL_POLICY.readOnlyRoles]) {
+        await input.adapter.prepareSessionNativeRole?.(roleId);
+      }
+    } catch (error) {
+      return { status: "blocked", message: error instanceof Error ? error.message : "OpenCode role validation failed; review the installed role permissions." };
+    }
+  }
 
   if (officialPluginMemory) {
     // The official Supermemory plugin owns memory alone: Deck's legacy runtime host and loopback are never started beside it.

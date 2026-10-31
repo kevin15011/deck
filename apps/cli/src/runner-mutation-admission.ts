@@ -7,12 +7,12 @@ export function guardRunnerAdapter(adapter: RunnerAdapter, admission: RunnerMuta
   return new Proxy(adapter, {get(target,key) {
     const value = Reflect.get(target,key,target);
     if (typeof value !== 'function') return value;
-    if (key === 'prepareSessionNativeRole' && target.runnerId === 'codex') return async (...args: unknown[]) => {
+    if (key === 'prepareSessionNativeRole' && ['codex', 'opencode'].includes(target.runnerId)) return async (...args: unknown[]) => {
       try { return await admission(() => value.apply(target, args)); }
       catch (error) {
         if (!(error instanceof RunnerMutationDeferredError)) throw error;
         const role = await value.call(target, args[0]);
-        return { ...role, preparation: [...role.preparation ?? [], { kind: 'W', code: 'codex-refresh-deferred', item: 'codex-installation', message: 'Using the installed role while another invocation is active. Owned content will refresh at the next idle preparation.' }] };
+        return { ...role, preparation: [...role.preparation ?? [], { kind: 'W', code: `${target.runnerId}-refresh-deferred`, item: `${target.runnerId}-installation`, message: 'Using the installed role while another invocation is active. Owned content will refresh at the next idle preparation.' }] };
       }
     };
     return writes.has(key) ? (...args: unknown[]) => admission(async () => {

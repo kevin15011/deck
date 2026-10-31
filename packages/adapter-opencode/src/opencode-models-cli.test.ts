@@ -270,3 +270,23 @@ test('revoked discovery cannot spawn a native process after its signal is aborte
  let spawns=0;const runner=createNodeOpenCodeCommandRunner({spawn:()=>{spawns++;throw Error('must not spawn');},setTimeout,clearTimeout});const controller=new AbortController();controller.abort();
  const result=await runner.run({file:'opencode',args:['models','--verbose'],cwd:'/fixture',timeoutMs:1000,maxStdoutBytes:1000,maxStderrBytes:1000,signal:controller.signal});expect(spawns).toBe(0);expect(result.terminationReason).toBe('timeout');
 });
+
+// Q1: publication precedes execution; child protection lasts until reaping, not timeout.
+test('inventory gate registers the child before granting execution and retains protection until close', async () => {
+  const child = createFakeChild(), timers = createControlledTimers();
+  let registered = false, released = false, granted = false;
+  const runner = createNodeOpenCodeCommandRunner({ ...timers, spawn: (file, args) => {
+    expect(file).toBe('/bin/sh');
+    expect(args).toContain('deck-inventory-gate');
+    return Object.assign(child, { pid: 123, stdin: { end: () => { expect(registered).toBe(true); granted = true; } } });
+  } });
+  const result = runner.run({ file: '/fake/opencode', args: ['models', '--verbose'], cwd: '/fixture', timeoutMs: 100,
+    maxStdoutBytes: 100, maxStderrBytes: 100, onSpawn: pid => { expect(pid).toBe(123); registered = true; return () => { released = true; }; },
+  });
+  expect(granted).toBe(true);
+  timers.advance(100);
+  await result;
+  expect(released).toBe(false);
+  child.emit('close', 1, null);
+  expect(released).toBe(true);
+});
