@@ -22,6 +22,11 @@ const finish = (code, signal, error) => {
   // Parent must relinquish signal ownership before allowing anchor cleanup.
   // A dead parent closes IPC and triggers endGroup; never exit/reap this anchor early.
 };
+if (process.env.DECK_PI_INSTALLATION_GATE === "1") {
+  await new Promise(resolve => process.on("message", message => {
+    if(message?.type === "deck_installation_ready" && message.nonce === nonce) resolve();
+  }));
+}
 try {
   const env = { ...process.env, DECK_PI_GROUP_PID: String(process.pid) };
   delete env.DECK_PI_SUPERVISOR_NONCE;

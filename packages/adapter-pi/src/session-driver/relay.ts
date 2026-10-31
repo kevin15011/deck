@@ -9,11 +9,15 @@ delete process.env.DECK_PI_RELAY_COMMAND;
 const group = execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], {encoding:'utf8'}).trim();
 if (!/^[1-9][0-9]*$/.test(group)) throw new Error('pi-host-group-unavailable');
 const send = (channel, value) => process.stdout.write(JSON.stringify({channel,value})+'\n');
+const input = createInterface({input:process.stdin});
+if(process.env.DECK_PI_INSTALLATION_GATE === '1') {
+  await new Promise((resolve,reject)=>{ input.once('line',line=>line==='installation-ready'?resolve():reject(new Error('pi-installation-not-ready'))); input.once('close',()=>reject(new Error('pi-host-closed'))); });
+}
 const child = spawn(command, args, {detached:false, shell:false, stdio:['ignore','pipe','pipe','ipc'],
   env:{...process.env, DECK_PI_GROUP_PID:group}});
 child.on('spawn', () => send('spawned', {pid:child.pid}));
 child.on('message', value => send('ipc', value));
-createInterface({input:process.stdin}).on('line', line => {
+input.on('line', line => {
   try { const value=JSON.parse(line); if(child.connected)child.send(value,()=>{}); } catch { child.kill('SIGTERM'); }
 });
 child.on('disconnect', () => send('revoked', null));

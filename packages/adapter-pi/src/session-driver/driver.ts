@@ -1,3 +1,5 @@
+import { evaluatePiVersion } from "../pi-version";
+import { acquireInstallationUse } from "../../../core/src/installation-use";
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -24,8 +26,9 @@ export function createPiSessionDriver(options: Options = {}): RunnerSessionDrive
       try {
         const version=(await (options.exec??exec)(options.command??'pi',['--version'])).trim();
         await (options.exec??exec)(options.runtime??'node',['--version']);
-        return version==='1.0.0' ? {status:'ready',version,capabilities:['setup-project-repair']} :
-          {status:'blocked',version,reasonCode:'pi-session-version-unsupported',capabilities:[]};
+        const evaluated = evaluatePiVersion(version);
+        return evaluated.supported ? {status:evaluated.diagnostic ? 'degraded' : 'ready',version:evaluated.version,capabilities:['setup-project-repair'], ...(evaluated.diagnostic ? { reasonCode: 'pi-version-untested' } : {})} :
+          {status:'blocked',version,reasonCode:'pi-session-version-unsupported',message:evaluated.diagnostic,capabilities:[]};
       } catch { return {status:'blocked',reasonCode:'pi-session-runtime-unavailable',capabilities:[]}; }
     },
     async startTask(input:DriverTaskInput, io:DriverHostIo) {
@@ -52,10 +55,13 @@ export function createPiSessionDriver(options: Options = {}): RunnerSessionDrive
       const run=async(prompt:string):Promise<TurnOutcome> => {
         if(closed||running) return {status:'failed',error:'pi-session-not-idle'};
         running=true;
+        let installation: ReturnType<typeof acquireInstallationUse> | undefined;
+        let releaseRelay: (() => void) | undefined;
         let revoked=false, bound=false, contained=false, ready=false, modelFailed=false, rejected=false;
         revoke=()=>{revoked=true;};
         const current=()=>{try {check();}catch {revoked=true;}return !closed&&!revoked&&running;};
         try {
+          installation=acquireInstallationUse(role.source.root);
           check();
           const nonce=randomUUID(), containment=randomUUID();
           const config=io.writePrivateFile('pi-session-mcp.json',JSON.stringify({
@@ -66,7 +72,7 @@ export function createPiSessionDriver(options: Options = {}): RunnerSessionDrive
           const env:Record<string,string>={};
           for(const [key,value] of Object.entries(options.baseEnv??process.env)) if(value!==undefined&&!key.startsWith('DECK_PI_')&&!key.startsWith('DECK_RUNNER_MEMORY_'))env[key]=value;
           Object.assign(env,{PI_CODING_AGENT_DIR:role.source.root,DECK_PI_SESSION:'1',DECK_PI_CHILD:'1',DECK_PI_ROLE:'setup',
-            DECK_PI_CROSS_CONFIG:config,DECK_PI_CONTAINMENT:containment,DECK_PI_CLARIFICATION_NONCE:nonce,
+            DECK_PI_INSTALLATION_GATE:'1',DECK_PI_CROSS_CONFIG:config,DECK_PI_CONTAINMENT:containment,DECK_PI_CLARIFICATION_NONCE:nonce,
             DECK_PI_PARENT_SESSION:'deck-session-host',DECK_PI_TASK_ID:input.taskId,DECK_PI_CHILD_SESSION:sessionFile,DECK_PI_ATTEMPT:'1'});
           const args=['--mode','json','-p','--session',sessionFile,'--extension',join(role.source.root,'deck/package'),
             '--append-system-prompt',system,'--model',input.assignment.modelId];
@@ -140,12 +146,14 @@ export function createPiSessionDriver(options: Options = {}): RunnerSessionDrive
           // Stderr is deliberately not forwarded: runner errors may contain credentials.
           active.onStderr(()=>{});
           try {
-            await active.ready;
+            const {workerPid} = await active.ready;
+            releaseRelay=installation.trackProcess(workerPid);
+            active.writeStdin("installation-ready\n");
             const result=await active.exited;
             return closed ? {status:'interrupted'} : result.ok&&bound&&contained&&!modelFailed&&!rejected ? {status:'completed'} : {status:'failed',error:'pi-session-execution-failed'};
           } finally {clearTimeout(timer);revoked=true;}
         } catch(error) {return {status:'failed',error:(error as Error).message};}
-        finally {revoked=true;running=false;}
+        finally {releaseRelay?.();installation?.release();revoked=true;running=false;}
       };
       const done=run(input.prompt);
       const close=async()=>{closed=true;revoke();await child?.terminateGroup();await done;};

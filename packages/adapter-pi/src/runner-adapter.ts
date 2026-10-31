@@ -1,3 +1,5 @@
+import { verifyPiInstallation } from "./installation-trust";
+import { withInstallationUse, withInstallationMutation, trackInstallationProcess, InstallationBusyError } from "../../core/src/installation-use";
 import { createPiSkillDiscoveryProvider } from "./skill-discovery-provider";
 export { createPiSkillDiscoveryProvider } from "./skill-discovery-provider";
 import { PrerequisiteEvidence, pinnedHookExecutable } from "../../core/src/session/prerequisite-evidence";
@@ -357,7 +359,24 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   }
 
   getSessionDriver() { return createPiSessionDriver({ command: this.#piCommand, baseEnv: this.#env }); }
-  async prepareSessionNativeRole(roleId: string) { return preparePiSessionRole(this.#readAgentDir(), roleId); }
+  async prepareSessionNativeRole(roleId: string, config?: NormalizedDeckConfig) {
+    const findings: import("@deck/core/session/driver").RunnerPreparationFinding[] = [];
+    if (config) {
+      const root = this.#readAgentDir();
+      const plan = this.buildDeveloperTeamInstallPlan({projectRoot: root, environmentId: "pi-development", deckConfig: config});
+      findings.push(...(plan.diagnosticEntries ?? []).filter(d => d.severity === "warning").map(d => ({kind: "W" as const, code:d.code, item:root, message:d.message})));
+      try {
+        const result = await this.applyDeveloperTeamInstall({projectRoot:root,environmentId:"pi-development",plan});
+        if(result.changedCount) findings.push({kind:"H",code:"pi-content-refreshed",item:root,message:"Refreshed owned Pi content."});
+      } catch(error) {
+        if(!(error instanceof InstallationBusyError))throw error;
+        findings.push({kind:"W",code:"pi-refresh-deferred",item:root,message:error.message});
+      }
+    }
+    return {...preparePiSessionRole(this.#readAgentDir(), roleId), preparation:findings};
+  }
+  withNativeInstallationUse<T>(effect: () => Promise<T>): Promise<T> { return withInstallationUse(this.#readAgentDir(), effect); }
+  trackNativeInstallationProcess(pid: number) { return trackInstallationProcess(this.#readAgentDir(), pid); }
 
   async #ensureSerenaRuntime(explicitRoot: string | undefined, signal?: AbortSignal): Promise<void> {
     let root = explicitRoot ?? this.#serenaOwnedRoot;
@@ -903,9 +922,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       // With memory off the Deck memory extension stays silent instead of reporting "unavailable" on every launch.
       ...(input.deckConfig.adaptiveMemory.enabled === true && input.deckConfig.adaptiveMemory.activeProvider === "supermemory" ? {} : { DECK_PI_MEMORY: { value: "disabled" } }),
       // A non-default agent directory must reach Pi itself, not only the Deck process.
-      ...(this.#agentDirResolution.source === "env" ? { PI_CODING_AGENT_DIR: { value: this.#agentDirResolution.dir } } : {}),
+      PI_CODING_AGENT_DIR: { value: this.#agentDirResolution.dir },
     };
-    const diagnostics: { code: string; severity: "info" | "warning" | "error"; message: string }[] = version.reason === "unavailable" && version.diagnostic
+    const diagnostics: { code: string; severity: "info" | "warning" | "error"; message: string }[] = version.diagnostic
       ? [{ code: "pi-version-unavailable", severity: "warning", message: version.diagnostic }]
       : [];
     if (!this.#tools().codebase.command()) diagnostics.push({ code: "codebase-memory-unavailable", severity: "warning", message: "Codebase Memory is unavailable for this execution. Use file listing, rg searches, and focused file reads. Review & Install can restore the reviewed executable; preparation never downloads it." });
@@ -926,6 +945,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         stdio: "inherit",
         stdin: "inherit",
         executionClass: "static-compatible",
+        launchLifecycle: { beforeSpawn: () => verifyPiInstallation(this.#readAgentDir()), afterExit: () => {} },
         envOverlay: overlay,
         ...(sensitiveKeys.length > 0 ? { sensitiveEnvAuthorization: { binding: PI_WEB_SEARCH_BINDING, keys: sensitiveKeys } } : {}),
       },
@@ -1111,6 +1131,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     if (!version.supported && version.diagnostic) {
       diagnosticEntries.push({ code: `PI_VERSION_${(version.reason ?? "unsupported").toUpperCase().replace(/-/g, "_")}`, severity: version.reason === "unavailable" ? "warning" : "error", message: version.diagnostic });
     }
+    if(version.supported && version.diagnostic) diagnosticEntries.push({code:"PI_VERSION_UNTESTED",severity:"warning",message:version.diagnostic});
     const versionBlocked = !version.supported && version.reason !== "unavailable";
 
     const { capabilityInstructions, installOptions } = this.#resolveInstallOptions(input, agentDir);
@@ -1180,6 +1201,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     });
     return {
       files,
+      automaticRefresh: true,
       mutationPreview: versionBlocked ? [] : enginePlan.mutationPreview.map((mutation) => ({ ...mutation })),
       blocked: enginePlan.blocked || versionBlocked,
       diagnostics: diagnosticEntries.map((entry) => entry.message),
@@ -1193,7 +1215,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     if (input.plan?.blocked) throw new Error(`Pi global install is blocked: ${(input.plan.diagnostics ?? []).join("; ") || "unresolved prerequisites"}`);
     const { materialization, enginePlan } = this.#lastMaterialization;
     assertPiProjectSkillExclusionTargets(enginePlan);
-    const applied = applyPiGlobalPlan(enginePlan, this.#fileIO);
+    const applied = enginePlan.writes.length === 0 && enginePlan.deletes.length === 0
+      ? applyPiGlobalPlan(enginePlan, this.#fileIO)
+      : await withInstallationMutation(this.#readAgentDir(), async () => applyPiGlobalPlan(enginePlan, this.#fileIO));
     const changed = new Set(applied.changes.map((change) => change.relPath));
     const results = materialization.desired.files.map((file) => ({
       agentId: file.relPath,
@@ -1324,8 +1348,11 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     if (!this.#lastMaterialization) {
       throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
     }
-    const result = verifyPiGlobalInstall(this.#lastMaterialization.materialization.desired, this.#fileIO);
-    return { valid: result.valid, diagnostics: result.diagnostics };
+    const diagnostics: string[] = [];
+    for (const write of this.#lastMaterialization.enginePlan.writes) {
+      if (this.#fileIO.readText(write.path) !== write.content) diagnostics.push(`Pi content changed after refresh: ${write.path}`);
+    }
+    return {valid:diagnostics.length === 0, diagnostics};
   }
 
   // -------------------------------------------------------------------------

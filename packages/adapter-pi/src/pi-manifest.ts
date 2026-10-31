@@ -50,6 +50,9 @@ export function stripUserOwnedAgentLines(content: string): string {
  * hashes its full content.
  */
 export function fileOwnershipHash(relPath: string, content: string): string {
+  if(relPath.endsWith(".json")) {
+    try { return hashJsonValue(JSON.parse(content)); } catch { /* Invalid JSON never becomes a semantic match. */ }
+  }
   return hashContent(PACKAGE_AGENT_FILE.test(relPath) ? stripUserOwnedAgentLines(content) : content);
 }
 

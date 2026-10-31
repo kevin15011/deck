@@ -1,3 +1,4 @@
+import { verifyPiInstallation } from "../../installation-trust";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
@@ -27,14 +28,15 @@ export function verifyInstalledPiRole(packageRoot: string, agent: DeckAgent): De
       if (!matchesOwnedHash(path,parsed.manifest.files[path],bytes)) throw new Error("changed-owned-source");
       return bytes;
     };
-    const fresh = parseAgentMarkdown(agent.id,owned(`deck/package/agents/${agent.id}.md`));
+    verifyPiInstallation(agentDir);
+    const fresh = parseAgentMarkdown(agent.id,read(join(root,`agents/${agent.id}.md`)));
     if (JSON.stringify(fresh) !== JSON.stringify(agent)) throw new Error("role-changed-after-discovery");
-    if (owned("deck/package/role-policy.json") !== JSON.stringify(ROLE_TOOL_POLICY)) throw new Error("stale-policy");
+
     owned("deck/package/package.json");
     for (const extension of ["deck-tool-policy", "deck-subagents"]) {
       for (const name of ["index.js", "impl.js"]) owned(`deck/package/extensions/${extension}/${name}`);
     }
     owned("deck/package/extensions/deck-tool-policy/config.json");
     return fresh;
-  } catch (cause) { throw new Error("The installed Pi team could not be verified. Reinstall its team from Review & Install, then retry the task.",{cause}); }
+  } catch (cause) { throw new Error("The installed Pi executable or role policy could not be authenticated. Restore the owned extension or remove unsafe role permissions before retrying.",{cause}); }
 }

@@ -1,9 +1,10 @@
+import { acquireInstallationUse } from "../../../../core/src/installation-use";
 import { verifyInstalledPiRole, verifiedPiGeneration } from "./verified-role";
 import { randomUUID } from "node:crypto";
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { PI_READ_ONLY_BUILTIN_TOOLS, PI_READ_ONLY_MEMORY_TOOLS } from "../../pi-mcp-catalog";
 import { isThinkingLevel, PI_THINKING_LEVEL_NAMES } from "../shared/thinking";
@@ -161,16 +162,22 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
     if (agent.thinking !== undefined && !isThinkingLevel(agent.thinking)) {
       return failure(agent, task, `Invalid thinking level "${agent.thinking}" for ${agent.id}. Expected one of: ${PI_THINKING_LEVEL_NAMES.join(", ")}.`);
     }
-    const tools = agent.readOnly ? [...new Set([...(agent.tools.length > 0 ? agent.tools : READ_ONLY_FALLBACK_TOOLS), ...options.personalToolNames?.() ?? []])] : undefined;
+    const tools = agent.readOnly ? [...new Set([...(options.packageRoot ? agent.tools : agent.tools.length > 0 ? agent.tools : READ_ONLY_FALLBACK_TOOLS), ...options.personalToolNames?.() ?? []])] : undefined;
     const args: string[] = ["--mode", "json", "-p", ...(request.sessionFile ? ["--session", request.sessionFile] : ["--no-session"])];
     if (agent.model) args.push("--model", agent.model);
     if (agent.thinking) args.push("--thinking", agent.thinking);
-    if (tools) args.push("--tools", tools.join(","));
+    if (tools) args.push(...(tools.length ? ["--tools", tools.join(",")] : ["--no-tools"]));
     if (options.packageRoot) args.push("--extension", options.packageRoot);
 
+    let installation: ReturnType<typeof acquireInstallationUse> | undefined;
+    let releaseChildInstallation: (() => void) | undefined;
     let promptDir: string | undefined;
     let lease: ReturnType<typeof claimExecution> | undefined;
     try {
+      if(options.packageRoot) {
+        installation=acquireInstallationUse(dirname(dirname(options.packageRoot)));
+        verifyInstalledPiRole(options.packageRoot,agent);
+      }
       promptDir = mkdtempSync(join(tmpdir(), "deck-pi-subagent-"));
       if (agent.body.trim()) {
         const promptFile = join(promptDir, `prompt-${agent.id.replace(/[^\w.-]+/g, "_")}.md`);
@@ -213,7 +220,7 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
             // across Node and Bun; retain the nonce/PID-bound startup proof.
             stdio: ["ignore", "pipe", "pipe", "ipc"],
             serialization: "json",
-            env: { ...childEnv(options.env ?? process.env, agent.role, options.memory?.()), DECK_PI_SUPERVISOR_NONCE: supervisorNonce, DECK_PI_CONTAINMENT: containmentNonce ?? "", DECK_PI_CLARIFICATION_NONCE: clarificationNonce ?? "", DECK_PI_CHILD_SESSION: request.sessionFile ?? "", DECK_PI_ATTEMPT: String(request.attempt ?? 1), ...(request.parentId ? { DECK_PI_PARENT_SESSION: request.parentId } : {}), ...(request.taskId ? { DECK_PI_TASK_ID: request.taskId } : {}) },
+            env: { ...childEnv(options.env ?? process.env, agent.role, options.memory?.()), DECK_PI_SUPERVISOR_NONCE: supervisorNonce, DECK_PI_INSTALLATION_GATE: installation ? "1" : "0", DECK_PI_CONTAINMENT: containmentNonce ?? "", DECK_PI_CLARIFICATION_NONCE: clarificationNonce ?? "", DECK_PI_CHILD_SESSION: request.sessionFile ?? "", DECK_PI_ATTEMPT: String(request.attempt ?? 1), ...(request.parentId ? { DECK_PI_PARENT_SESSION: request.parentId } : {}), ...(request.taskId ? { DECK_PI_TASK_ID: request.taskId } : {}) },
           });
         } catch (error) {
           state.spawnError = true;
@@ -222,7 +229,14 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
           return;
         }
 
-        try { if (proc.pid) lease?.spawned(proc.pid); }
+        try {
+          if (proc.pid) lease?.spawned(proc.pid);
+          if (installation) {
+            if(!supervised || !proc.pid)throw new Error("Pi installation protection unavailable");
+            releaseChildInstallation=installation.trackProcess(proc.pid);
+            proc.send({type:"deck_installation_ready",nonce:supervisorNonce});
+          }
+        }
         catch (e) {
           // Claim metadata could not be committed. Stop only the just-spawned owned group.
           try { if (proc.pid && process.platform !== "win32") process.kill(-proc.pid, "SIGKILL"); else proc.kill("SIGKILL"); } catch {}
@@ -438,6 +452,8 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
     } catch (error) {
       return failure(agent, task, error instanceof Error ? error.message : String(error));
     } finally {
+      releaseChildInstallation?.();
+      installation?.release();
       try { lease?.release(); } catch { /* Keep uncertain ownership locked; never blindly reclaim. */ }
       if (promptDir) {
         try { rmSync(promptDir, { recursive: true, force: true }); } catch { /* best effort */ }

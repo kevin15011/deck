@@ -1,3 +1,4 @@
+import { runPiModelDiscovery } from "../../../../packages/adapter-pi/src/model-discovery-command";
 import { withIdleRunnerMutation, RunnerMutationDeferredError } from "@deck/session-host";
 import { RunnerMutationDeferredScreen, stopDaemonForInstall } from "./screens/runner-mutation-deferred";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -3714,7 +3715,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   }
 
   function runPiCommand(command: string, args: string[]) {
-    const result = spawnSync(command, args);
+    let result;
+    try { result = runPiModelDiscovery(command, args, spawnSync); }
+    catch(error) { return {stdout:"",stderr:error instanceof Error ? error.message : "Pi inventory blocked",exitCode:1}; }
     return {
       stdout: result.stdout,
       stderr: result.stderr,

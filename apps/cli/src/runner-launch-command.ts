@@ -1,3 +1,4 @@
+import { spawnInstallationGated } from "./installation-gated-spawn";
 import { ROLE_TOOL_POLICY } from '@deck/core/session/role-tool-policy';
 import { DeckConfigStore } from "./deck-config-store";
 import { withNativeProjectReadiness } from "./native-project-readiness";
@@ -281,25 +282,17 @@ export function createNodeRunnerProcessEffects(nodeSpawner: typeof nodeSpawn = n
       return new Promise((resolve) => {
         // The shell cannot touch the installation until its lease exists. EOF on parent
         // death refuses launch; after exec the PID and process birth identity stay the same.
-        const gated = !!options.onSpawn;
         const stdio = options.stdio === "inherit"
           ? ["inherit", "inherit", "inherit"] as const
           : [options.stdinPayload ? "pipe" : options.stdin === "inherit" ? "inherit" : "ignore", "pipe", "pipe"] as const;
-        const child = nodeSpawner(gated ? "/bin/sh" : command, gated
-          ? ["-c", 'IFS= read -r grant <&3 && [ "$grant" = launch ] || exit 125; exec 3<&-; exec "$@"', "deck-launch-gate", command, ...args]
-          : [...args], { cwd: options.cwd, env: options.env, stdio: [...stdio, ...(gated ? ["pipe" as const] : [])] });
-        const gate = child.stdio[3] as import("node:stream").Writable | null;
-        gate?.on("error", () => {});
+        const { child, register } = spawnInstallationGated(command, args, {
+          cwd: options.cwd, env: options.env, stdio: [...stdio], onSpawn: options.onSpawn,
+        }, nodeSpawner);
         let releaseInstallationUse: (() => void) | undefined;
         try {
-          if (gated) {
-            if (child.pid === undefined) throw new Error('native-child-pid-unavailable');
-            releaseInstallationUse = options.onSpawn!(child.pid);
-            if (!releaseInstallationUse) throw new Error('native-child-lease-unavailable');
-            gate!.end("launch\n");
-          }
+          releaseInstallationUse = register();
         } catch (error) {
-          gate?.end(); child.kill();
+          child.kill();
           child.once('error', () => {});
           child.once('close', () => { releaseInstallationUse?.(); resolve({ exitCode: 1, stdout: '', stderr: String(error) }); });
           return;
@@ -652,7 +645,7 @@ async function runRunnerLaunchReserved(input: RunRunnerLaunchInput): Promise<Run
   try {
     applyResult = await input.adapter.applyDeveloperTeamInstall({ projectRoot: baseLaunch.projectRoot, environmentId: input.adapter.environmentIds[0]!, plan });
   } catch (error) {
-    if (!input.installOnly && ["codex", "opencode"].includes(input.adapter.runnerId) && error && typeof error === "object" && "code" in error && ["codex-installation-in-use", "runner-installation-in-use", "runner-mutation-deferred"].includes(String(error.code))) {
+    if (!input.installOnly && ["codex", "opencode", "pi"].includes(input.adapter.runnerId) && error && typeof error === "object" && "code" in error && ["codex-installation-in-use", "runner-installation-in-use", "runner-mutation-deferred"].includes(String(error.code))) {
       refreshDeferred = true;
       await input.presentPreview(`${input.adapter.displayName} content refresh deferred while another invocation is active; launching with installed content.`);
     } else {

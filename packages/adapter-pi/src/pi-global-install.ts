@@ -1,4 +1,4 @@
-import { contributionId, type RunnerContribution, type ContributionTarget } from "@deck/core";
+import { assertNoContributionSymlink, contributionId, type RunnerContribution, type ContributionTarget } from "@deck/core";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, posix, sep } from "node:path";
 
@@ -40,6 +40,7 @@ export function createNodePiFileIO(): PiFileIO {
     exists: (path) => existsSync(path),
     readText: (path) => {
       try {
+        assertNoContributionSymlink(path);
         return readFileSync(path, "utf-8");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
@@ -197,8 +198,8 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
   };
   const conflict = (entry: PiPlanConflict, code: string) => {
     plan.conflicts.push(entry);
-    plan.diagnostics.push({ code, severity: "error", message: entry.message });
-    plan.blocked = true;
+    plan.diagnostics.push({ code, severity: entry.reason === "invalid" ? "error" : "warning", message: entry.message });
+    if (entry.reason === "invalid") plan.blocked = true;
   };
   const addChange = (change: PiPlannedChange, write?: PlannedWrite, del?: PlannedDelete) => {
     plan.changes.push(change);
@@ -250,16 +251,21 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
       continue;
     }
     const diskHash = hashContent(disk);
-    if (diskHash === postimage) {
-      if (!manifest.files[file.relPath] && !file.relPath.startsWith("deck/")) delete nextFiles[file.relPath];
+    if (diskHash === postimage || file.relPath.endsWith(".json") && fileOwnershipHash(file.relPath,disk) === fileOwnershipHash(file.relPath,file.content)) {
+      if (!matchesOwnedHash(file.relPath, manifest.files[file.relPath], disk) && !matchesOwnedHash(file.relPath, manifest.files[file.relPath], file.content)) {
+        delete nextFiles[file.relPath];
+        plan.diagnostics.push({code:"PI_FILE_UNRECEIPTED",severity:"warning",message:`Preserved unreceipted Pi file ${absolute}; it remains user-owned.`});
+      }
       continue;
     }
     const owned = manifest.files[file.relPath];
     if (owned === undefined) {
+      delete nextFiles[file.relPath];
       conflict({ relPath: file.relPath, reason: "foreign", message: `A file Deck does not own already exists at ${absolute}; Deck will not overwrite it.` }, "PI_FILE_FOREIGN");
       continue;
     }
     if (!matchesOwnedHash(file.relPath, owned, disk)) {
+      delete nextFiles[file.relPath];
       conflict({ relPath: file.relPath, reason: "modified", message: `${absolute} was modified after Deck wrote it; Deck will not overwrite it. Restore or remove the file to continue.` }, "PI_FILE_MODIFIED");
       continue;
     }
@@ -408,6 +414,7 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
           mutated = true;
 
         } else {
+          delete nextMcpOwned[name];
           conflict({ relPath: `mcp.json#${name}`, reason: owned === undefined ? "foreign" : "modified", message: owned === undefined
             ? `${paths.mcp} already defines an MCP server named "${name}" that Deck does not own; Deck will not replace it.`
             : `The Deck-owned MCP server "${name}" in ${paths.mcp} was modified after Deck wrote it; Deck will not overwrite it.` }, "PI_MCP_ENTRY_CONFLICT");

@@ -1,6 +1,6 @@
 /** Opt-in source-level proof. Not a stable API or a second scheduler. */
 import {validatePiResumeTarget,matchesPiResumeReceipt,supportsExactPiResume,PI_EXACT_RESUME_BLOCKED_REASON,type PiResumeTarget} from "../../../packages/adapter-pi/src/pi-resume-target";
-import { spawn } from "node:child_process";
+import { spawnInstallationGated } from "./installation-gated-spawn";
 import { isAbsolute } from "node:path";
 import { statSync } from "node:fs";
 import { Readable, Writable } from "node:stream";
@@ -94,7 +94,10 @@ export async function runPiClientProof(input: Omit<RunRunnerLaunchInput, "proces
         const target=input.launch.mode==="resume-by-id"?validatePiResumeTarget(input.launch.projectRoot,JSON.parse(String(input.launch.runnerNative?.resumeTarget))):undefined;
         if(target&&!supportsExactPiResume(command,options.env))throw new Error(PI_EXACT_RESUME_BLOCKED_REASON);
         let receiptVerified=!target;
-        const child = spawn(command, [...args], { cwd: options.cwd, env: options.env, shell: false, stdio: ["pipe", "pipe", "pipe"] });
+        const gated = spawnInstallationGated(command, args, { cwd: options.cwd, env: options.env, stdio: ["pipe", "pipe", "pipe"], onSpawn: options.onSpawn });
+        const release = gated.register();
+        const child = gated.child as import("node:child_process").ChildProcessWithoutNullStreams;
+        child.once("close", () => release?.());
         let failed = false;
         let closing = false;
         const pending = new Map<string, {request:Dialog;timer:ReturnType<typeof setTimeout>}>();
