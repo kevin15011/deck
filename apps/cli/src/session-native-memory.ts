@@ -7,6 +7,7 @@ import { inspectOwnedOpenCodeSupermemory } from "@deck/adapter-opencode";
 import { resolveSupermemorySessionScope, resolveVerifiedGitSharedProjectBase, resolveDefaultDeckDataRoot, type NormalizedDeckConfig } from "@deck/core";
 import type { ChildMcpServerSpec, NativeMemoryDescriptor } from "@deck/core/session/driver";
 import { CLAUDE_SUPERMEMORY_COMMIT, inspectClaudeSupermemoryArtifact } from "../../../packages/adapter-claude/src/supermemory-artifact";
+import { CLAUDE_SUPERMEMORY_MCP_ID, claudeSupermemoryProxyArgs } from "../../../packages/adapter-claude/src/supermemory-transport";
 import { resolveClaudeSupermemorySessionCredential } from "./claude-supermemory-launch";
 import { assertCodexSupermemoryReady, inspectDisabledCodexMemoryPlugin, buildCodexSupermemoryLaunchOverlay, resolveCodexSupermemorySessionCredential } from "./codex-supermemory-launch";
 import { buildOpenCodeSupermemoryLaunchOverlay, inspectProjectRepoTagOverride } from "./opencode-supermemory-launch";
@@ -60,7 +61,10 @@ export function readPreparedClaudeMemoryPlugin(root: string): Plugin {
   for (const [id, value] of Object.entries(mcp.mcpServers ?? mcp)) {
     const spec = value as { command: string; args?: string[]; env?: Record<string, string> };
     const expand = (s: string) => s.replaceAll("${CLAUDE_PLUGIN_ROOT}", root);
-    mcpServers[`plugin_supermemory_${id}`] = { command: expand(spec.command), args: (spec.args ?? []).map(expand), env: Object.fromEntries(Object.entries(spec.env ?? {}).map(([key, value]) => [key, expand(value)])) };
+    // Match Claude's native identity so the explicit transport replaces the
+    // plugin MCP without duplicating it. The plugin still supplies all hooks.
+    const nativeId = id === "supermemory" ? CLAUDE_SUPERMEMORY_MCP_ID : `plugin:supermemory:${id}`;
+    mcpServers[nativeId] = { command: expand(spec.command), args: id === "supermemory" ? claudeSupermemoryProxyArgs(root) : (spec.args ?? []).map(expand), env: Object.fromEntries(Object.entries(spec.env ?? {}).map(([key, value]) => [key, expand(value)])) };
   }
   return { root, hookConfigPath, hooks, exclusiveHookEvents: Object.keys(hooks), mcpServers };
 }

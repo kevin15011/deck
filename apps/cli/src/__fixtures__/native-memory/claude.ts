@@ -41,6 +41,10 @@ export async function exerciseClaudeLaunch(home:string,repo:string,root:string,t
   assert.equal(native.status,"ready",JSON.stringify(native));
   if(native.status!=="ready") throw new Error("native launch missing");
   assert(native.plan.args.includes(root));
+  const nativeMcp = Object.assign({}, ...native.plan.args.flatMap((arg, index) => arg === "--mcp-config" ? [JSON.parse(native.plan.args[index + 1]!).mcpServers] : []));
+  const memoryServer = memory.plugin!.mcpServers!["plugin:supermemory:supermemory"]!;
+  assert("command" in memoryServer, "prepared memory server must use stdio");
+  assert.deepEqual(nativeMcp["plugin:supermemory:supermemory"].args, memoryServer.args);
   const overlay=buildClaudeSupermemoryLaunchOverlay({token,canonicalRepoTag:scope});
   assert.deepEqual(native.plan.envOverlay,overlay);
   const skills=await adapter.prepareSessionNativeSkills(config);
@@ -48,7 +52,7 @@ export async function exerciseClaudeLaunch(home:string,repo:string,root:string,t
   const launch=buildClaudeTurnLaunch({taskId:"apply",memberId:"apply",cwd:repo,assignment:{runnerId:"claude",modelId:"opus"},rolePrompt:"Continue public work.",prompt:"hello",nativeSessionId:"3f2b8c1e-5d4a-4b7e-9a1c-0e2d3f4a5b6c",mcp:{servers:["ordinary"],sessionTools:[]},mcpServerSpecs:{ordinary:{command:"node",args:["ordinary.js"],env:{}}},approvals:"runner-default",disableNativeDelegation:true,credentialFile:"/fake",nativeMemory:memory,nativeSkills:skills,nativeRole:{roleId:"deck-apply-deep",roleRef:`${skills.pluginName}:deck-apply-deep`,generation:skills.contentHash}} as DriverTaskInput,
     {writePrivateFile:(name,content)=>{files.set(name,content);return join(home,name);}},{baseEnv:process.env});
   assert(launch.args.includes(root)); assert(launch.args.includes(skills.root));
-  assert(launch.expectedMcpServers.includes("ordinary")); assert(launch.expectedMcpServers.includes("plugin_supermemory_supermemory"));
+  assert(launch.expectedMcpServers.includes("ordinary")); assert(launch.expectedMcpServers.includes("plugin:supermemory:supermemory"));
   assert(launch.args.includes("user"));
   assert.deepEqual(JSON.parse(readFileSync(userSettings,"utf8")),personal);
   const disabled=await adapter.buildLaunchPlan!({projectRoot:repo,mode:"interactive",deckConfig:{...config,adaptiveMemory:{...config.adaptiveMemory,enabled:false,activeProvider:undefined}}} as any);
