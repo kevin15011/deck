@@ -45,7 +45,7 @@ export const DECK_PI_MCP_CATALOG: Readonly<Partial<Record<DeckPiMcpServerId, Dec
 export const PI_READ_ONLY_BUILTIN_TOOLS = ["read", "grep", "find", "ls"] as const;
 
 /** Deck explicit memory tools read-only roles may call (`memory_save` is write-capable and never allowed). */
-export const PI_READ_ONLY_MEMORY_TOOLS = ["memory_search"] as const;
+export const PI_READ_ONLY_MEMORY_TOOLS = ["memory_search", "memory_read"] as const;
 
 export function sanitizeMcpName(value: string): string {
   return value.replace(/[^a-zA-Z0-9_]/g, "_");

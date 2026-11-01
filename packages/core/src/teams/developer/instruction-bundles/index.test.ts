@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { buildAdaptiveMemoryInstructionBundle } from "./adaptive-memory";
 
 import {
   DEFAULT_ORCHESTRATOR_PERSONALITY,
@@ -155,7 +156,12 @@ describe("buildCapabilityInstructionBundle", () => {
     expect(text).toContain("preserve code economy");
     expect(text).toContain("preserve serena");
     expect(text).toContain("Runtime-managed recall and capture bind project scope server-side");
-    expect(text).toContain("schemas permit model-selected project scope");
+    expect(rebound!.instructions.filter(fragment => fragment.packageId === "adaptive-memory")).toEqual(
+      [...buildAdaptiveMemoryInstructionBundle({
+        supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+        configuredSupermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+      }).instructions],
+    );
     expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
     expect(text).not.toContain("supermemory_search_memory");
     expect(text).not.toContain("stale unscoped adaptive memory");

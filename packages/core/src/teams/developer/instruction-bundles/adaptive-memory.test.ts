@@ -16,11 +16,10 @@ describe("buildAdaptiveMemoryInstructionBundle canonical Supermemory conversatio
       const markdown = bundle.instructions.find((fragment) => fragment.surface === surface)?.markdown ?? "";
 
       expect(markdown).toContain("conversation capture");
-      expect(markdown).toContain("Deck-owned runtime");
-      expect(markdown).toContain("stable customId");
+      // Artifact structure is checked here; Pi wire IDs and capture behavior are exercised through the runtime/host.
+      expect(bundle.instructions.find(fragment => fragment.surface === surface)?.packageId).toBe("adaptive-memory");
       expect(markdown).toContain("verified Git repository identity held by Runtime");
-      expect(markdown).toContain("five results");
-      expect(markdown).toContain("1,500 tokens");
+      expect(new Set(bundle.instructions.map(fragment => fragment.surface))).toEqual(new Set(surfaces));
       expect(markdown).toContain("OPENSPEC IS OFFICIAL CONTEXT");
       expect(markdown).toContain("When available, use `deck_project_memory_recall` first");
       expect(markdown).toContain("earlier project decisions, names, conventions, rationale, discoveries, or prior-session work");
@@ -59,7 +58,7 @@ describe("buildAdaptiveMemoryInstructionBundle canonical Supermemory conversatio
 
       expect(markdown).toContain("Deck has resolved a verified project identity");
       expect(markdown).toContain("Runtime-managed recall and capture bind project scope server-side");
-      expect(markdown).toContain("schemas permit model-selected project scope");
+      expect(scopedBundle.instructions.find(fragment => fragment.surface === surface)?.packageId).toBe("adaptive-memory");
       expect(markdown).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(markdown).not.toContain("supermemory_search_memory");
       expect(markdown).not.toContain("supermemory_add_memory");

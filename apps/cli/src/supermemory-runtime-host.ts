@@ -1,3 +1,4 @@
+import { createPiMemoryPages } from "./pi-memory-pages";
 import { join } from "node:path";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 
@@ -369,6 +370,9 @@ type RunnerLoopbackEvent = Readonly<{
   correlationId?: unknown;
   limit?: unknown;
   kind?: unknown;
+  options?: unknown;
+  continuation?: unknown;
+  documentId?: unknown;
   eventId?: unknown;
   timestamp?: unknown;
 }>;
@@ -421,6 +425,7 @@ function startSupermemoryRunnerLoopbackBridge(input: {
   const successfulEvents = new Map<string, LoopbackReplayEntry>();
   const inFlightEvents = new Map<string, Promise<Record<string, unknown>>>();
   const expectedInjections = createExpectedInjectionStore();
+  const pages = input.runnerId === "pi" ? createPiMemoryPages() : undefined;
 
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -431,7 +436,7 @@ function startSupermemoryRunnerLoopbackBridge(input: {
       if (!sameBearer(request.headers.get("authorization") ?? "", expected)) return jsonResponse(401, { ok: false, diagnostics: ["unauthorized"] });
       const length = Number(request.headers.get("content-length") ?? "0");
       if (Number.isFinite(length) && length > 256 * 1024) return jsonResponse(413, { ok: false, diagnostics: ["payload-too-large"] });
-      const task = handleLoopbackRequest(await request.text(), { ...input, expectedInjections }, rolesBySession, successfulEvents, inFlightEvents);
+      const task = handleLoopbackRequest(await request.text(), { ...input, expectedInjections, pages }, rolesBySession, successfulEvents, inFlightEvents);
       inFlight.add(task);
       try {
         return jsonResponse(200, await task);
@@ -455,14 +460,17 @@ function startSupermemoryRunnerLoopbackBridge(input: {
       const diagnostics: SupermemoryRuntimeHostDiagnostic[] = [];
       const metrics: SupermemoryRuntimeMetric[] = [];
       let timedOut = false;
+      let drainTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
           Promise.allSettled([...inFlight, ...inFlightEvents.values()]),
-          new Promise((resolve) => setTimeout(() => { timedOut = true; resolve(undefined); }, 1_000)),
+          new Promise((resolve) => { drainTimer = setTimeout(() => { timedOut = true; resolve(undefined); }, 1_000); }),
         ]);
         if (timedOut) diagnostics.push({ code: "supermemory-runtime-cleanup-failed", severity: "warning", message: "Supermemory loopback cleanup timed out while draining in-flight runner events; cleanup continued." });
       } finally {
+        clearTimeout(drainTimer);
         expectedInjections.close();
+        pages?.clear();
         server.stop(true);
       }
       return { diagnostics, metrics };
@@ -472,11 +480,12 @@ function startSupermemoryRunnerLoopbackBridge(input: {
 
 async function handleLoopbackRequest(
   body: string,
-  host: { runnerId: string; projectRoot: string; teamId: string; sessionId: string; role: SupermemoryRuntimeRole; runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void; scopeFingerprint: string; stateHome?: string; expectedInjections: ExpectedInjectionStore },
+  host: { runnerId: string; projectRoot: string; teamId: string; sessionId: string; role: SupermemoryRuntimeRole; runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void; scopeFingerprint: string; stateHome?: string; expectedInjections: ExpectedInjectionStore; pages?: ReturnType<typeof createPiMemoryPages> },
   rolesBySession: Map<string, SupermemoryRuntimeRole>,
   successfulEvents: Map<string, LoopbackReplayEntry>,
   inFlightEvents: Map<string, Promise<Record<string, unknown>>> = new Map(),
 ): Promise<Record<string, unknown>> {
+  if (Buffer.byteLength(body) > 256 * 1024) return { ok: false, diagnostics: ["payload-too-large"] };
   let event: RunnerLoopbackEvent;
   try { event = JSON.parse(body) as RunnerLoopbackEvent; } catch { return { ok: false, diagnostics: ["invalid-json"] }; }
   if (event.schema !== "deck-runner-memory-loopback-v1" || event.runnerId !== host.runnerId) return { ok: false, diagnostics: ["invalid-evidence"] };
@@ -508,9 +517,8 @@ async function handleLoopbackRequest(
     // Fetch both sources afresh; do not apply explicit-recall's profile suppression on a miss.
     if (event.event === "compaction_recall") {
       if (host.runnerId !== "pi") return { ok: false, diagnostics: ["unsupported-event"] };
-      const parsed = parseManagedProjectMemoryRecallQuery(event.query);
-      if (!parsed.ok) return { ok: false, diagnostics: ["invalid-query"] };
-      const recalled = await recallForLoopback(host, role, parsed.query, "automatic", correlation);
+      if (typeof event.query !== "string" || !event.query.trim()) return { ok: false, diagnostics: ["invalid-query"] };
+      const recalled = await recallForLoopback(host, role, event.query, "automatic", correlation);
       if (recalled.ok !== false) successfulEvents.set(eventId, { timestamp: Date.now(), response: recalled });
       return recalled;
     }
@@ -544,21 +552,41 @@ async function handleLoopbackRequest(
       successfulEvents.set(eventId, { timestamp: Date.now(), response });
       return response;
     }
+    if (host.pages && event.event === "page") return host.pages.read(sessionId, String(event.continuation ?? ""));
+    if (host.pages && (event.event === "profile" || event.event === "document")) {
+      try {
+        let value: unknown;
+        if (event.event === "document") {
+          if (typeof event.documentId !== "string" || !event.documentId || event.documentId.length > 255) return { ok: false, diagnostics: ["invalid-document-id"] };
+          value = await host.runtime.document(event.documentId);
+        } else {
+          const result = await host.runtime.profile({ role, dependency: "explicit-recall", correlation });
+          host.observe(result.metrics);
+          if (!result.ok) return { ok: false, diagnostics: result.diagnostics };
+          value = result.context.providerResponse ?? result.context.items;
+        }
+        return host.pages.deliver(sessionId, JSON.stringify(value));
+      } catch { return { ok: false, diagnostics: ["provider-read-failed"] }; }
+    }
     if (event.event === "capture" || event.event === "explicit_remember") {
       if (typeof event.content !== "string" || event.content.length > 64 * 1024) return { ok: false, diagnostics: ["invalid-content"] };
+      if (event.event === "explicit_remember" && !isSupermemoryExplicitSaveAllowed(role)) return { ok: false, diagnostics: ["role-not-permitted"] };
+      if (event.event === "capture" && event.source !== "trusted-final-assistant" && event.source !== "trusted-user-prompt") return { ok: false, diagnostics: ["unsupported-source"] };
       const source = event.event === "explicit_remember" ? "explicit-remember" : event.source === "trusted-final-assistant" ? "trusted-final-assistant" : "trusted-user-prompt";
       const capture = await host.runtime.capture({
         role: source === "trusted-final-assistant" ? "assistant" : "user",
         source,
         dependency: event.event === "explicit_remember" ? "explicit-remember" : "automatic",
         content: event.content,
-        correlationId: typeof event.correlationId === "string" ? event.correlationId : undefined,
+        correlationId: host.runnerId === "pi" ? eventId.replace(/:part\d+$/, "") : eventId,
+        provenanceRole: role,
         correlation,
         capturedAt: new Date().toISOString(),
       });
       host.observe(capture.metrics);
       const response = { ok: capture.ok, diagnostics: capture.diagnostics };
-      if (capture.ok) successfulEvents.set(eventId, { timestamp: Date.now(), response });
+      // Cache failure too: a provider timeout may have accepted an append.
+      successfulEvents.set(eventId, { timestamp: Date.now(), response });
       return response;
     }
     if (event.event === "search" || event.event === "save") {
@@ -567,11 +595,12 @@ async function handleLoopbackRequest(
       const response = event.event === "search"
         ? await explicitSearchForLoopback(host, explicitRole, event, correlation)
         : await explicitSaveForLoopback(host, explicitRole, event, correlation);
-      if (response.ok !== false) successfulEvents.set(eventId, { timestamp: Date.now(), response });
+      successfulEvents.set(eventId, { timestamp: Date.now(), response });
       return response;
     }
     if (event.event === "shutdown_flush") {
       rolesBySession.delete(sessionId);
+      host.pages?.clear(sessionId);
       host.expectedInjections.retireSession(sessionId);
       const response = { ok: true, diagnostics: [] };
       successfulEvents.set(eventId, { timestamp: Date.now(), response });
@@ -592,7 +621,7 @@ const EXPLICIT_MEMORY_KINDS: ReadonlySet<string> = new Set(["decision", "discove
 
 /** On-demand search for runners without a native memory tool (Pi extension tool, Codex MCP server). */
 async function explicitSearchForLoopback(
-  host: { runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void },
+  host: { runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void; pages?: ReturnType<typeof createPiMemoryPages> },
   role: SupermemoryRuntimeRole,
   event: RunnerLoopbackEvent,
   correlation: LoopbackMetricCorrelation,
@@ -600,13 +629,16 @@ async function explicitSearchForLoopback(
   const parsed = parseManagedProjectMemoryRecallQuery(event.query);
   if (!parsed.ok) return { ok: false, diagnostics: ["invalid-query"] };
   const limit = event.limit === undefined ? undefined : typeof event.limit === "number" && Number.isSafeInteger(event.limit) && event.limit >= 1 ? event.limit : null;
-  if (limit === null) return { ok: false, diagnostics: ["invalid-limit"] };
-  const search = await host.runtime.search({ role, query: parsed.query, dependency: "explicit-recall", correlation });
+  if (limit === null || (limit !== undefined && limit > 100)) return { ok: false, diagnostics: ["invalid-limit"] };
+  const options = event.options;
+  if (options !== undefined && !validPiSearchOptions(options)) return { ok: false, diagnostics: ["invalid-search-options"] };
+  const search = await host.runtime.search({ role, query: parsed.query, ...(host.pages ? { options: { ...(options as object ?? {}), ...(limit !== undefined ? { limit } : {}) } } : {}), dependency: "explicit-recall", correlation });
   host.observe(search.metrics);
   if (!search.ok) {
     if (search.reason === "role_policy_skip") return { ok: false, diagnostics: ["role-not-permitted"] };
     return { ok: false, diagnostics: [redactSecretDiagnostic(search.diagnostics.join(" "))] };
   }
+  if (host.pages) return { ...host.pages.deliver(correlation.nativeSessionId, JSON.stringify(search.context.providerResponse ?? search.context.items)), resultCount: search.context.items.length };
   const items = limit === undefined ? search.context.items : search.context.items.slice(0, limit);
   const advisoryText = renderAdvisoryContext([{ ...search.context, items }]);
   return { ok: true, ...(advisoryText ? { advisoryText } : {}), resultCount: advisoryText ? items.length : 0, diagnostics: [] };
@@ -614,7 +646,7 @@ async function explicitSearchForLoopback(
 
 /** On-demand save: read-only roles are refused; content passes the same eligibility and redaction as every capture. */
 async function explicitSaveForLoopback(
-  host: { runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void },
+  host: { runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void; pages?: ReturnType<typeof createPiMemoryPages> },
   role: SupermemoryRuntimeRole,
   event: RunnerLoopbackEvent,
   correlation: LoopbackMetricCorrelation,
@@ -629,10 +661,26 @@ async function explicitSaveForLoopback(
     dependency: "explicit-remember",
     content,
     correlation,
+    correlationId: typeof event.eventId === "string" ? event.eventId : undefined,
+    provenanceRole: role,
     capturedAt: new Date().toISOString(),
   });
   host.observe(capture.metrics);
   return { ok: capture.ok, diagnostics: capture.ok ? [] : capture.diagnostics.map(redactSecretDiagnostic) };
+}
+
+function validPiSearchOptions(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const options = value as Record<string, unknown>;
+  for (const [key, val] of Object.entries(options)) {
+    if (key === "searchMode" && ["hybrid", "memories", "chunks"].includes(String(val))) continue;
+    if (key === "rerank" && ["none", "order", "aggregate"].includes(String(val))) continue;
+    if (key === "rewriteQuery" && typeof val === "boolean") continue;
+    if (key === "threshold" && typeof val === "number" && val >= 0 && val <= 1) continue;
+    if (key === "include" && val && typeof val === "object" && !Array.isArray(val) && Object.entries(val).every(([k,v]) => ["documents", "related", "forgotten"].includes(k) && typeof v === "boolean")) continue;
+    return false;
+  }
+  return true;
 }
 
 function runtimeRecallAttemptMetric(input: {
@@ -876,7 +924,7 @@ function createExpectedInjectionStore(now: () => number = () => Date.now()): Exp
 }
 
 async function recallForLoopback(
-  host: { runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void; scopeFingerprint: string; expectedInjections?: ExpectedInjectionStore },
+  host: { runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void; scopeFingerprint: string; expectedInjections?: ExpectedInjectionStore; pages?: ReturnType<typeof createPiMemoryPages> },
   role: SupermemoryRuntimeRole,
   query?: string,
   dependency: "automatic" | "explicit-recall" = "automatic",
@@ -897,7 +945,7 @@ async function recallForLoopback(
     operationMetrics.push(search.metrics);
     host.observe(search.metrics);
     if (search.ok) {
-      focusedSearchMatched = Boolean(renderAdvisoryContext([search.context]));
+      focusedSearchMatched = search.context.items.length > 0 && Boolean(renderAdvisoryContext([search.context]));
       if (!explicitRecall || focusedSearchMatched) contexts.push(search.context);
     } else diagnostics.push(...search.diagnostics);
   }
@@ -905,7 +953,8 @@ async function recallForLoopback(
     if (!explicitRecall || focusedSearchMatched) contexts.push(profile.context);
   } else diagnostics.push(...profile.diagnostics);
 
-  const advisoryText = renderAdvisoryContext(contexts);
+  const rawAdvisory = renderAdvisoryContext(contexts);
+  const advisoryText = rawAdvisory && host.pages && correlation ? host.pages.deliver(correlation.nativeSessionId, rawAdvisory).advisoryText : rawAdvisory;
   const basis = operationMetrics[0];
   if (basis) {
     host.observe(runtimeRecallTerminalMetric({ basis, operationMetrics, contexts, diagnostics, startedAt, dependency, correlation }));
@@ -977,6 +1026,7 @@ const MAX_ADVISORY_TOKENS = 1_500;
 const MAX_ADVISORY_ITEMS = 5;
 
 function renderAdvisoryContext(contexts: readonly SupermemoryRenderedContext[]): string | undefined {
+  if (contexts.some(context => context.providerResponse !== undefined)) return JSON.stringify({ source: "Supermemory", trust: "untrusted-advisory", responses: contexts.map(context => context.providerResponse ?? context.items), coverage: "Provider response; ranked search is not exhaustive. Use memory_read for source/profile and continuation." });
   const selected: { id: string; content: string }[] = [];
   const seen = new Set<string>();
   for (const item of contexts.flatMap((context) => context.items)) {

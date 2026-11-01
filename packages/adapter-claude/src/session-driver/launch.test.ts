@@ -196,3 +196,15 @@ test("global memory requires explicit admission and drops inherited provider sel
   expect(() => build({ nativeMemory: { ...memory, scopeMode: undefined } })).toThrow("canonical");
   expect(() => build({ nativeMemory: { ...memory, projectScope: "sm_project_v1_owner_repo" } })).toThrow("canonical");
 });
+
+// Protects current human input provenance and keeps historical observations out
+// of installed roles/readiness. The native append-system file carries context.
+test('local session evidence is attached separately from the current user turn', () => {
+  const original=input({localContext:'Historical observation: use violet.'});
+  const files=new Map<string,string>();
+  const launch=buildClaudeTurnLaunch(original,{writePrivateFile:(name,text)=>{files.set(name,text);return `/state/${name}`;}},{baseEnv:{HOME:'/home/u'}});
+  expect(files.get('role-prompt.md')).toContain('Historical observation: use violet.');
+  expect(original.prompt).toBe('hello');expect(original.rolePrompt).not.toContain('violet');
+  expect(encodeUserMessage(original.prompt)).not.toContain('violet');
+  expect(launch.args.join(' ')).not.toContain('violet');
+});

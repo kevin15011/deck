@@ -392,7 +392,7 @@ function addAdaptiveMemoryActions(
     id: installActionId,
     kind: "install-opencode-plugin",
     title: "Install official Supermemory plugin",
-    description: "Installs and verifies the pinned official package in Deck's owned data path, then materializes only the OpenCode loader compatibility adapter.",
+    description: "Installs and verifies the pinned official package and loader, and sets captureEveryNTurns to 1 in the provider's settings while preserving other options. Native capture completion remains unverified.",
     toolId: "opencode-supermemory",
     source: OPENCODE_SUPERMEMORY_PACKAGE_SPEC,
     status: actionStatus,

@@ -37,10 +37,10 @@ const fixture = () => {
 };
 
 describe("pinned official Codex Supermemory artifact", () => {
-  test("pins one immutable npm release and only the two documented hooks", () => {
-    expect(CODEX_SUPERMEMORY_TARBALL_URL).toBe("https://registry.npmjs.org/codex-supermemory/-/codex-supermemory-1.0.19.tgz");
+  test("pins one immutable npm release and the documented hooks and hosted proxy", () => {
+    expect(CODEX_SUPERMEMORY_TARBALL_URL).toBe("https://registry.npmjs.org/codex-supermemory/-/codex-supermemory-1.1.0.tgz");
     expect(CODEX_SUPERMEMORY_TARBALL.sha256).toMatch(/^[a-f0-9]{64}$/);
-    expect(CODEX_SUPERMEMORY_FILES.map((entry) => entry[0])).toEqual(["recall.js", "flush.js"]);
+    expect(CODEX_SUPERMEMORY_FILES.map((entry) => entry[0])).toEqual(["recall.js", "flush.js", "mcp-proxy.js", "package.json"]);
     for (const entry of CODEX_SUPERMEMORY_FILES) expect(entry[2]).toMatch(/^[a-f0-9]{64}$/);
   });
 

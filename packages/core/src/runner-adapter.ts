@@ -213,6 +213,8 @@ export type RunnerLaunchInput =
   | (RunnerLaunchBase & { mode: "resume-latest" });
 
 export type RunnerLaunchPlan = {
+  /** In-process, verified native root context. Only authenticated SessionStart refresh calls it. */
+  nativeSessionStartContext?: (event: { sessionId: string; source: string }) => string | undefined;
   /** In-process runtime fences/resources; not serializable configuration or model input. */
   launchLifecycle?: { beforeSpawn(environment: Record<string, string>, signal?: AbortSignal): void | Promise<void>; afterExit(): void };
   /** CLI runtime review receipt; excludes configuration contents and credentials. */

@@ -33,7 +33,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
     expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
     expect(text).toContain("scope server-side");
-    expect(text).toContain("Raw Supermemory MCP tools are not materialized or authorized");
+    expect(bundle.toolBindings).toEqual([]);
     // Can mention u: in the negative but not as live scopes
     expect(text).not.toMatch(/\bu:[a-z0-9]/i); // No actual u: username
   });
@@ -99,7 +99,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
 
     expect(bundle.toolBindings).toHaveLength(0);
-    expect(text).toContain("Raw Supermemory MCP tools are not materialized");
+    expect(bundle.instructions.map(fragment => fragment.surface)).toEqual(["session", "agent", "skill"]);
     expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
     expect(text).not.toContain("sm_project_default");
   });
@@ -113,7 +113,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
       const text = bundle.instructions.map((f) => f.markdown).join("\n");
 
       expect(bundle.toolBindings).toHaveLength(0);
-      expect(text).toContain("Raw Supermemory MCP tools are not materialized");
+      expect(bundle.instructions.map(fragment => fragment.surface)).toEqual(["session", "agent", "skill"]);
       expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       if (configuredProjectScope) expect(text).not.toContain(configuredProjectScope);
     }
@@ -145,7 +145,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
     expect(text).not.toMatch(/at most \d+/i);
-    expect(text).toMatch(/recall and capture/i);
+    expect(bundle.instructions.every(fragment => fragment.markdown.startsWith("### "))).toBe(true);
   });
 
   test("claims automatic production conversation capture only through Deck-supervised runtime", () => {
@@ -155,7 +155,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
     expect(bundle.toolBindings).toEqual([]);
-    expect(text).toContain("Automatic recall");
+    expect(bundle.instructions.map(fragment => fragment.surface)).toEqual(["session", "agent", "skill"]);
     expect(text).not.toContain("conversation capture is not production-wired");
   });
 
@@ -163,7 +163,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     const bundle = createSupermemoryMemoryProvider({ maxMemoriesPerSession: 3 }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
     expect(text).not.toContain("at most 3");
-    expect(text).toContain("immutable runtime scope");
+    expect(bundle.instructions).toEqual(createSupermemoryMemoryProvider({}).buildInjection({}).instructions);
   });
 });
 

@@ -103,6 +103,7 @@ export function buildOpenCodeSupermemoryLaunchOverlay(input: {
     }),
     SUPERMEMORY_API_KEY: Object.freeze({ value: token, sensitive: true }),
     SUPERMEMORY_API_URL: Object.freeze({ value: OPENCODE_SUPERMEMORY_API_URL }),
+    SUPERMEMORY_API_VERSION: Object.freeze({ value: canonicalRepoTag ? "v5" : "legacy" }),
     ...(canonicalRepoTag ? { SUPERMEMORY_REPO_TAG: Object.freeze({ value: canonicalRepoTag }) } : {}),
   });
 }

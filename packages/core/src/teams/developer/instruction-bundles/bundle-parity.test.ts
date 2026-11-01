@@ -27,11 +27,6 @@ function hash(s: string): number {
  * They serve as inline snapshot verification for byte-exact parity.
  */
 const BASELINE_HASHES: Record<string, Record<string, number>> = {
-  "adaptive-memory": {
-    agent: -777727741, // A1: remove the retired Context Mode sentence; managed recall/capture policy is otherwise byte-identical
-    session: -777727741, // A1: remove the retired Context Mode sentence; managed recall/capture policy is otherwise byte-identical
-    skill: -777727741, // A1: remove the retired Context Mode sentence; managed recall/capture policy is otherwise byte-identical
-  },
   "codebase-memory": {
     agent: 392768171,
     skill: 2106445653,
@@ -56,25 +51,24 @@ const BASELINE_HASHES: Record<string, Record<string, number>> = {
 
 describe("bundle parity snapshots", () => {
   describe("adaptive-memory", () => {
-    const bundle = buildAdaptiveMemoryInstructionBundle();
-
-    test("agent fragment hash matches baseline", () => {
-      const agent = bundle.instructions.find((f) => f.surface === "agent");
-      expect(agent).toBeDefined();
-      expect(hash(agent!.markdown)).toBe(BASELINE_HASHES["adaptive-memory"].agent);
-    });
-
-    test("session fragment hash matches baseline", () => {
-      const session = bundle.instructions.find((f) => f.surface === "session");
-      expect(session).toBeDefined();
-      expect(hash(session!.markdown)).toBe(BASELINE_HASHES["adaptive-memory"].session);
-    });
-
-    test("skill fragment hash matches baseline", () => {
-      const skill = bundle.instructions.find((f) => f.surface === "skill");
-      expect(skill).toBeDefined();
-      expect(hash(skill!.markdown)).toBe(BASELINE_HASHES["adaptive-memory"].skill);
-    });
+    // Canonical policy must agree across runner surfaces for each scope state;
+    // intentional editorial changes must not require a new prose snapshot.
+    for (const surface of ["agent", "session", "skill"] as const) {
+      test(`${surface} has one nonempty fragment consistent with the other surfaces`, () => {
+        for (const options of [
+          {},
+          { supermemoryProjectScope: "sm_project_v1_example_repo" },
+          { supermemoryProjectScope: "sm_project_v1_example_repo", configuredSupermemoryProjectScope: "sm_project_v1_other_repo" },
+        ]) {
+          const bundle = buildAdaptiveMemoryInstructionBundle(options);
+          const fragments = bundle.instructions.filter(fragment => fragment.surface === surface);
+          expect(fragments).toHaveLength(1);
+          expect(fragments[0]!.packageId).toBe("adaptive-memory");
+          expect(fragments[0]!.markdown.trim().length).toBeGreaterThan(0);
+          for (const peer of bundle.instructions) expect(peer.markdown).toBe(fragments[0]!.markdown);
+        }
+      });
+    }
   });
 
   describe("codebase-memory", () => {

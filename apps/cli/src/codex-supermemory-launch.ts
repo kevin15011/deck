@@ -1,8 +1,11 @@
+import { inspectCodexSupermemoryArtifact, CODEX_SUPERMEMORY_FILES, CODEX_SUPERMEMORY_VERSION } from "../../../packages/adapter-codex/src/supermemory-artifact";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, dirname } from "node:path";
 import {
   CODEX_LAUNCH_ENV_BINDING,
+  isCodexOfficialSupermemoryConfigured,
+  CODEX_SUPERMEMORY_MCP_URL,
   CODEX_SUPERMEMORY_ENV_KEY,
   createCodexTools,
   inspectCodexOwnedHookIds,
@@ -68,11 +71,12 @@ function withoutDeckMemoryMcpBlock(source: string): string {
   const lines = source.split("\n");
   const kept: string[] = [];
   for (let index = 0; index < lines.length; index++) {
-    if (lines[index]!.trimEnd() !== `# deck-codex-mcp:${CODEX_MEMORY_MCP_SERVER_ID}`) { kept.push(lines[index]!); continue; }
+    if (![CODEX_MEMORY_MCP_SERVER_ID, "supermemory"].some(id => lines[index]!.trimEnd() === `# deck-codex-mcp:${id}`)) { kept.push(lines[index]!); continue; }
+    const id = lines[index]!.trimEnd().slice("# deck-codex-mcp:".length);
     index += 1;
     while (index < lines.length) {
       const trimmed = lines[index]!.trim();
-      if (trimmed === "" || trimmed.startsWith("# deck-codex-") || (trimmed.startsWith("[") && !trimmed.startsWith(`[mcp_servers.${CODEX_MEMORY_MCP_SERVER_ID}`))) break;
+      if (trimmed === "" || trimmed.startsWith("# deck-codex-") || (trimmed.startsWith("[") && !new RegExp(`^\\[mcp_servers\\.${id}(?:\\.|\\])`).test(trimmed))) break;
       index += 1;
     }
     index -= 1;
@@ -118,6 +122,8 @@ export function assertCodexSupermemoryReady(projectRoot: string, effects: CodexS
   const codexHome = resolveCodexHome(effects);
   const globalConfig = readBounded(join(codexHome, "config.toml")) ?? "";
   if (!inspectCodexOwnedHookIds(globalConfig).includes("supermemory")) throw new Error("Codex Supermemory launch blocked: the global Codex config has no Deck-owned Supermemory plugin hooks (run Review & Install).");
+  if (!isCodexOfficialSupermemoryConfigured(globalConfig, { nodeCommand: tools.node.command()!, script: tools.supermemory.proxy()! })) throw new Error("Codex Supermemory launch blocked: the verified official hosted proxy is not configured (run Review & Install).");
+  if (isDeckManagedCodexMcpServer(globalConfig, CODEX_MEMORY_MCP_SERVER_ID)) throw new Error("Codex Supermemory launch blocked: the legacy Deck memory entry still exists; complete its owned migration in Review & Install.");
   // Deck's own blocks are excluded from the user-level scan; anything else, in user files or in the project, would double-integrate.
   if (/supermemory/i.test(withoutDeckHookBlocks(globalConfig))) throw new Error("Codex Supermemory launch blocked: your Codex configuration contains a non-Deck Supermemory registration that would double-integrate with Deck's official plugin; preserve it and remove the conflict explicitly before retrying.");
   const foreign = [
@@ -149,6 +155,8 @@ export function buildCodexSupermemoryLaunchOverlay(input: {
   return Object.freeze({
     [CODEX_SUPERMEMORY_ENV_KEY]: Object.freeze({ value: token, sensitive: true }),
     SUPERMEMORY_API_URL: Object.freeze({ value: CODEX_SUPERMEMORY_API_URL }),
+    SUPERMEMORY_MCP_URL: Object.freeze({ value: CODEX_SUPERMEMORY_MCP_URL }),
+    SUPERMEMORY_API_VERSION: Object.freeze({ value: canonicalRepoTag ? "v5" : "legacy" }),
     ...(canonicalRepoTag ? { SUPERMEMORY_REPO_TAG: Object.freeze({ value: canonicalRepoTag }) } : {}),
   });
 }
@@ -161,6 +169,8 @@ export function authorizeCodexSupermemoryLaunch(
 ): RunnerLaunchPlan {
   assertCodexSupermemoryReady(input.projectRoot, effects);
   const overlay = buildCodexSupermemoryLaunchOverlay(input);
+  // Keep native role instructions intact. Memory guidance uses the existing
+  // verified SessionStart context, refreshed on resume and after compaction.
   return {
     ...plan,
     envOverlay: { ...(plan.envOverlay ?? {}), ...overlay },
@@ -180,4 +190,29 @@ export function resolveCodexSupermemorySessionCredential(projectRoot: string, ef
   const resolved = resolveOpenCodeSupermemoryCredential({ store });
   if (!resolved.ok) throw new Error(resolved.reason === "invalid-store" ? "Protected shared profile store is invalid." : "No explicit shared default credential is configured.");
   return { token: resolved.token, profile: resolved.profile };
+}
+
+/** Read-only disable evidence; never resolves credentials or installs missing artifacts. */
+export function inspectDisabledCodexMemoryPlugin(effects: CodexSupermemoryLaunchEffects = {}): import("@deck/core/session/driver").NativeMemoryDescriptor["plugin"] {
+  try {
+    const tools = createCodexTools({ homeDir: effects.home, ...(effects.tools ?? {}) });
+    const nodeCommand = tools.node.command();
+    if (!nodeCommand) return undefined;
+    const config = readBounded(join(resolveCodexHome(effects), "config.toml")) ?? "";
+    const legacyRoot = join(dirname(tools.supermemory.root), `official-supermemory-${CODEX_SUPERMEMORY_VERSION}`);
+    let root = tools.supermemory.root, scripts = tools.supermemory.scripts();
+    if (!scripts || config.includes(legacyRoot + "/")) {
+      // A disabled launch can precede Review & Install. Retained hook-only generations
+      // must also be suppressed; recognizing them never authorizes their execution.
+      root = legacyRoot;
+      const hooks = CODEX_SUPERMEMORY_FILES.filter(([name]) => name === "recall.js" || name === "flush.js");
+      if (inspectCodexSupermemoryArtifact(root, hooks) !== "ready") return undefined;
+      scripts = { recall: join(root, "recall.js"), flush: join(root, "flush.js") };
+    }
+    const mcpServers = Object.fromEntries((["supermemory", CODEX_MEMORY_MCP_SERVER_ID] as const)
+      .filter(id => isDeckManagedCodexMcpServer(config, id))
+      // Disabled descriptors carry names for suppression only, never executable additions.
+      .map(id => [id, { command: nodeCommand, args: [], env: {} }]));
+    return { root, scripts, nodeCommand, mcpServers };
+  } catch { return undefined; }
 }

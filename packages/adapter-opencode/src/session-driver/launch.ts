@@ -1,3 +1,4 @@
+import { createCaptureTicket } from "./capture-drain";
 import { validateOpenCodeEffectiveRoles } from "../native-role-source";
 import { PersonalMcpPreparationError } from "@deck/core/session/personal-mcp";
 import { assertOpenCodeControlName, assertOpenCodeProjectConfigAdmission, openCodeProjectConfigDisabled } from "../personal-mcp";
@@ -69,12 +70,15 @@ export function buildOpenCodeLaunch(input: DriverTaskInput, io: Pick<DriverHostI
     OPENCODE_SERVER_PASSWORD: randomBytes(32).toString("hex"), OPENCODE_SERVER_USERNAME: "opencode",
   });
   if (input.nativeMemory?.scopeMode === "global") for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
+  delete env.DECK_NATIVE_CAPTURE_TICKET;
+  const captureTicket = loader ? createCaptureTicket(input.taskId, io) : undefined;
+  if (captureTicket) env.DECK_NATIVE_CAPTURE_TICKET = captureTicket.path;
   if (input.nativeRoleDescriptor) validateOpenCodeEffectiveRoles(input.nativeRoleDescriptor.source.root, input.cwd, env);
   const expectedMcpSpecs = Object.fromEntries(input.mcp.servers.map(id => {
     const value = mcp[id] as Record<string, any>;
     return [id, value.headers ? { ...value, headers: Object.fromEntries(Object.entries(value.headers).map(([name, reference]) => [name, env[String(reference).slice(5, -1)] ?? ""])) } : value];
   }));
-  return { command: options.executable ?? "opencode", args: ["serve", "--hostname", "127.0.0.1", "--port", "0"], env, expectedMcpServers: [...input.mcp.servers], expectedMcpSpecs, expectedPlugins: plugins, expectedGlobalSkillPaths:globalSkillPaths };
+  return { captureTicket, command: options.executable ?? "opencode", args: ["serve", "--hostname", "127.0.0.1", "--port", "0"], env, expectedMcpServers: [...input.mcp.servers], expectedMcpSpecs, expectedPlugins: plugins, expectedGlobalSkillPaths:globalSkillPaths };
 }
 
 /** Compare only protected Deck declarations; unrelated native additions remain native. */

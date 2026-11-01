@@ -4,7 +4,8 @@ import { createOpenCodeSessionDriver } from "../../../adapter-opencode/src/sessi
 import { ROLE_TOOL_POLICY, readOnlyMcpTools } from "./role-tool-policy";
 test("core grants only explicit semantic queries and no retired capability", () => {
   expect(ROLE_TOOL_POLICY.mcpDefault).toBe("deny");
-  expect(Object.keys(ROLE_TOOL_POLICY.mcp)).toEqual(["context7", "codebase-memory", "web-search"]);
+  expect(ROLE_TOOL_POLICY.mcp.deck).toEqual(["deck_session_history"]);
+  expect(ROLE_TOOL_POLICY.mcp.deck).not.toContain("deck_memory_propose");
   expect(readOnlyMcpTools([], (s, t) => [`${s}/${t}`])).toEqual([]);
   expect(readOnlyMcpTools(["codebase-memory"], (s, t) => [`${s}/${t}`])).not.toContain("codebase-memory/index_repository");
 });

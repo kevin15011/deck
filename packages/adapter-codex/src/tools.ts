@@ -17,6 +17,7 @@ import {
   type RtkReleaseArtifact,
 } from "@deck/core";
 import { assertTrustedAncestors, ensurePrivatePath } from "./private-path";
+import { configureCodexSupermemoryCapture } from "./supermemory-settings";
 import {
   CODEX_SUPERMEMORY_ROOT_NAME,
   inspectCodexSupermemoryArtifact,
@@ -239,11 +240,13 @@ export function createCodexTools(options: CodexToolOptions = {}) {
       root: supermemoryRoot,
       state: supermemoryState,
       /** Absolute hook script paths, only when the pinned artifact verifies. */
+      proxy: (): string | undefined => supermemoryState() === "ready" ? join(supermemoryRoot, "mcp-proxy.js") : undefined,
       scripts: (): { recall: string; flush: string } | undefined => supermemoryState() === "ready" ? { recall: join(supermemoryRoot, "recall.js"), flush: join(supermemoryRoot, "flush.js") } : undefined,
       async install(): Promise<"installed" | "unchanged"> {
         await ensurePrivatePath(toolRoot, home);
         const result = await installCodexSupermemoryArtifact(supermemoryRoot, options.supermemoryArtifactEffects, options.supermemoryManifest);
         if (supermemoryState() !== "ready") throw new Error("Official artifact verification failed.");
+        await configureCodexSupermemoryCapture(home);
         recordOwnedRunnerArtifactTree({ runnerId: "codex", root: options.codexHome ?? join(home, ".codex"), manifestPath: join(options.codexHome ?? join(home, ".codex"), "deck", "manifest.json"), artifactRoot: supermemoryRoot, sourceItemId: "package:supermemory" });
         return result;
       },

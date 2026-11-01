@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { admitPublicMemoryCapture, containsHighConfidenceManagedRecallSecret } from "@deck/core";
 import { evaluateAdaptiveMemoryCaptureEligibility, fingerprintSupermemoryProjectScope, isCanonicalSupermemoryProjectScope } from "@deck/core";
 import { createAdaptiveMemoryContentReceipt } from "@deck/core/memory/adaptive-memory-observability-receipts";
 
@@ -63,6 +65,7 @@ export type SupermemoryRuntimeTransport = Readonly<{
   add(payload: SupermemoryAddPayload): Promise<unknown>;
   search(payload: SupermemorySearchPayload): Promise<SupermemorySearchResponse>;
   profile(payload: SupermemoryProfilePayload): Promise<SupermemoryProfileResponse>;
+  document?(payload: { containerTag: string; id: string }): Promise<unknown>;
   health?(payload: { containerTag: string }): Promise<unknown>;
 }>;
 
@@ -79,10 +82,12 @@ export type SupermemoryAddPayload = Readonly<{
 export type SupermemorySearchPayload = Readonly<{
   q: string;
   containerTag: string;
-  searchMode: "hybrid";
-  rerank?: false;
-  rewriteQuery?: false;
-  limit: number;
+  searchMode?: "hybrid" | "memories" | "chunks";
+  rerank?: false | "none" | "order" | "aggregate";
+  rewriteQuery?: boolean;
+  limit?: number;
+  include?: { documents?: boolean; related?: boolean; forgotten?: boolean };
+  threshold?: number;
 }>;
 
 export type SupermemoryProfilePayload = Readonly<{
@@ -103,10 +108,11 @@ export type SupermemorySearchResponseItem = Readonly<{
 }>;
 
 export type SupermemoryProfileResponse = Readonly<{
-  profile?: Readonly<{ static?: readonly string[]; dynamic?: readonly string[] }>;
+  profile?: Readonly<{ static?: readonly (string | { id: string; memory: string })[]; dynamic?: readonly (string | { id: string; memory: string })[]; buckets?: Readonly<Record<string, readonly { id: string; memory: string }[]>> }>;
 }>;
 
 export type SupermemoryRenderedContext = Readonly<{
+  providerResponse?: unknown;
   header: "ADAPTIVE CONTEXT (Supermemory, untrusted advisory)";
   items: readonly { id: string; content: string }[];
   maxTokens: number;
@@ -195,6 +201,8 @@ export function createSupermemoryRuntime(input: {
   const scopeFingerprint = isCanonicalSupermemoryProjectScope(canonicalScope)
     ? fingerprintSupermemoryProjectScope(canonicalScope)
     : "smfp_invalid";
+  const publicPi = input.runnerId === "pi";
+  const admit = publicPi ? admitPublicMemoryCapture : evaluateAdaptiveMemoryCaptureEligibility;
   const now = input.now ?? (() => Date.now());
 
   function metric(args: Omit<SupermemoryRuntimeMetric, "provider" | "durationMs" | "scopeFingerprint"> & { startedAt: number }): SupermemoryRuntimeMetric {
@@ -223,20 +231,24 @@ export function createSupermemoryRuntime(input: {
   }
 
   return {
+    async document(id: string): Promise<unknown> {
+      if (!isCanonicalSupermemoryProjectScope(canonicalScope) || !input.transport.document) throw new Error("document unavailable");
+      return input.transport.document({ containerTag: canonicalScope, id });
+    },
     async profile(request: { role: SupermemoryRuntimeRole; q?: string; dependency?: SupermemoryRequestDependency; correlation?: SupermemoryRuntimeCorrelation }): Promise<SupermemoryRuntimeResult> {
       const startedAt = now();
       if (!isCanonicalSupermemoryProjectScope(canonicalScope)) return invalidScope("profile", startedAt);
-      const rolePolicy = resolveSupermemoryRolePolicy(request.role);
+      const rolePolicy = publicPi ? policy(request.role, Infinity, Infinity, "task-scoped", "material-only") : resolveSupermemoryRolePolicy(request.role);
       if (rolePolicy.profile === "skip") return skipped("profile", "role_policy_skip", rolePolicy, startedAt, metric, request.dependency ?? "automatic", request.correlation);
       try {
         emit({ operation: "profile", status: "attempted", role: request.role, dependency: request.dependency ?? "automatic", ...correlationFields(request.correlation), startedAt });
         const response = await input.transport.profile({ containerTag: canonicalScope, q: request.q });
         const items = profileItems(response);
-        const bounded = boundSupermemoryRetrievalItems({ items, maxItems: rolePolicy.maxResults, maxTokens: rolePolicy.maxTokens });
+        const bounded = publicPi ? { items, maxTokens: Infinity, rerank: false as const, rewriteQuery: false as const } : boundSupermemoryRetrievalItems({ items, maxItems: rolePolicy.maxResults, maxTokens: rolePolicy.maxTokens });
         const injectedText = bounded.items.map((item) => item.content).join(" ");
         return {
           ok: true,
-          context: renderContext(bounded),
+          context: { ...renderContext(bounded), ...(publicPi ? { providerResponse: response } : {}) },
           metrics: metric({
             operation: "profile",
             status: "succeeded",
@@ -254,12 +266,13 @@ export function createSupermemoryRuntime(input: {
       }
     },
 
-    async search(request: { role: SupermemoryRuntimeRole; query: string; dependency?: SupermemoryRequestDependency; correlation?: SupermemoryRuntimeCorrelation }): Promise<SupermemoryRuntimeResult> {
+    async search(request: { role: SupermemoryRuntimeRole; query: string; options?: Omit<SupermemorySearchPayload, "q" | "containerTag">; dependency?: SupermemoryRequestDependency; correlation?: SupermemoryRuntimeCorrelation }): Promise<SupermemoryRuntimeResult> {
       const startedAt = now();
       if (!isCanonicalSupermemoryProjectScope(canonicalScope)) return invalidScope("search", startedAt);
-      const rolePolicy = resolveSupermemoryRolePolicy(request.role);
+      const rolePolicy = publicPi ? policy(request.role, Infinity, Infinity, "task-scoped", "material-only") : resolveSupermemoryRolePolicy(request.role);
       const query = request.query.trim();
       if (rolePolicy.search === "skip" || rolePolicy.maxResults <= 0) return skipped("search", "role_policy_skip", rolePolicy, startedAt, metric, request.dependency ?? "automatic", request.correlation);
+      if (publicPi && containsHighConfidenceManagedRecallSecret(query)) return skipped("search", "secret_detected", rolePolicy, startedAt, metric, request.dependency ?? "automatic", request.correlation);
       if (!query) return skipped("search", "empty_query", rolePolicy, startedAt, metric, request.dependency ?? "automatic", request.correlation);
       const queryMetadata = queryObservability(query);
       try {
@@ -267,16 +280,13 @@ export function createSupermemoryRuntime(input: {
         const response = await input.transport.search({
           q: query,
           containerTag: canonicalScope,
-          searchMode: "hybrid",
-          rerank: false,
-          rewriteQuery: false,
-          limit: rolePolicy.maxResults,
+          ...(publicPi ? request.options : { searchMode: "hybrid" as const, rerank: false as const, rewriteQuery: false, limit: rolePolicy.maxResults }),
         });
-        const bounded = boundSupermemoryRetrievalItems({ items: searchItems(response), maxItems: rolePolicy.maxResults, maxTokens: rolePolicy.maxTokens });
+        const bounded = publicPi ? { items: searchItems(response), maxTokens: Infinity, rerank: false as const, rewriteQuery: false as const } : boundSupermemoryRetrievalItems({ items: searchItems(response), maxItems: rolePolicy.maxResults, maxTokens: rolePolicy.maxTokens });
         const injectedText = bounded.items.map((item) => item.content).join(" ");
         return {
           ok: true,
-          context: renderContext(bounded),
+          context: { ...renderContext(bounded), ...(publicPi ? { providerResponse: response } : {}) },
           metrics: metric({
             operation: "search",
             status: "succeeded",
@@ -296,7 +306,7 @@ export function createSupermemoryRuntime(input: {
       }
     },
 
-    async capture(turn: { role: SupermemoryConversationRole; content: string; source: SupermemoryCaptureSource; capturedAt?: string; dependency?: SupermemoryRequestDependency; correlationId?: string; correlation?: SupermemoryRuntimeCorrelation }): Promise<SupermemoryCaptureResult> {
+    async capture(turn: { provenanceRole?: SupermemoryRuntimeRole; role: SupermemoryConversationRole; content: string; source: SupermemoryCaptureSource; capturedAt?: string; dependency?: SupermemoryRequestDependency; correlationId?: string; correlation?: SupermemoryRuntimeCorrelation }): Promise<SupermemoryCaptureResult> {
       const startedAt = now();
       const dependency = turn.dependency ?? "automatic";
       const baseCaptureMetric = {
@@ -313,7 +323,7 @@ export function createSupermemoryRuntime(input: {
           metrics: metric({ operation: "capture", status: "skipped", reason: "invalid_project_scope", ...baseCaptureMetric, startedAt }),
         };
       }
-      const rawEligibility = evaluateAdaptiveMemoryCaptureEligibility({ source: turn.source, content: turn.content });
+      const rawEligibility = admit({ source: turn.source, content: turn.content });
       if (!rawEligibility.eligible) {
         return {
           ok: false,
@@ -331,7 +341,7 @@ export function createSupermemoryRuntime(input: {
           metrics: metric({ operation: "capture", status: "skipped", reason: "secret_or_empty_content", ...baseCaptureMetric, startedAt }),
         };
       }
-      const eligibility = evaluateAdaptiveMemoryCaptureEligibility({ source: turn.source, content: redacted.content });
+      const eligibility = admit({ source: turn.source, content: redacted.content });
       if (!eligibility.eligible) {
         return {
           ok: false,
@@ -348,7 +358,12 @@ export function createSupermemoryRuntime(input: {
       };
       const ingest = buildSupermemoryConversationIngest({
         canonicalScope,
-        sessionId: input.sessionId,
+        // Pi uses an immutable public-event document. Only transport segments
+        // of that event append to its ID, so later role/source metadata cannot
+        // relabel earlier conversation turns. No retry of uncertain appends.
+        sessionId: publicPi
+          ? `${turn.correlation?.sessionFingerprint ?? input.sessionId}:${turn.correlationId ?? randomUUID()}`
+          : input.sessionId,
         turn: { role: turn.role, content: eligibility.content, source: turn.source, capturedAt: turn.capturedAt, dependency },
       });
       if (!ingest.ok) {
@@ -361,7 +376,7 @@ export function createSupermemoryRuntime(input: {
       }
       try {
         emit({ operation: "capture", status: "attempted", approximateInputTokens: countApproxTokens(eligibility.content), ...finalCaptureMetric, startedAt });
-        await input.transport.add(ingest.request);
+        await input.transport.add({ ...ingest.request, metadata: { ...ingest.request.metadata, runner: input.runnerId ?? "unknown", ...(turn.provenanceRole ? { agentRole: turn.provenanceRole } : {}), ...(publicPi && turn.correlation?.logicalTurnFingerprint ? { turnFingerprint: turn.correlation.logicalTurnFingerprint } : {}) } });
         return {
           ok: true,
           diagnostics: ingest.diagnostics,
@@ -422,28 +437,43 @@ export function createSupermemoryHttpTransport(input: {
   const baseURL = input.baseURL ?? DEFAULT_SUPERMEMORY_API_BASE_URL;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const fetchImpl = input.fetchImpl ?? fetch;
+  const call = (path: string, body: unknown, method = "POST") => callSupermemoryHttp(fetchImpl, baseURL, input.apiKey, path, body, timeoutMs, method);
+  // Published v5 OpenAPI paths are /ns/{namespace}; there is no /v5 prefix.
+  const ns = (scope: string) => {
+    if (scope.length > 100 || !/^[a-zA-Z0-9_:-]+$/.test(scope)) throw new Error("invalid namespace");
+    return `/ns/${encodeURIComponent(scope)}`;
+  };
   return {
-    add: (payload) => callSupermemoryHttp(fetchImpl, baseURL, input.apiKey, "/v3/documents", httpAddPayload(payload), timeoutMs),
-    search: (payload) => callSupermemoryHttp(fetchImpl, baseURL, input.apiKey, "/v4/search", httpSearchPayload(payload), timeoutMs) as Promise<SupermemorySearchResponse>,
-    profile: (payload) => callSupermemoryHttp(fetchImpl, baseURL, input.apiKey, "/v4/profile", httpProfilePayload(payload), timeoutMs) as Promise<SupermemoryProfileResponse>,
-    health: async (payload) => {
-      await callSupermemoryHttp(fetchImpl, baseURL, input.apiKey, "/v4/profile", httpProfilePayload(payload), timeoutMs);
+    add: payload => isCanonicalSupermemoryProjectScope(payload.containerTag)
+      ? call(`${ns(payload.containerTag)}/document`, { content: payload.content, id: payload.customId, metadata: payload.metadata, dreaming: payload.dreaming })
+      : call("/v3/documents", httpAddPayload(payload)),
+    search: payload => {
+      if (!isCanonicalSupermemoryProjectScope(payload.containerTag)) return call("/v4/search", httpSearchPayload(payload)) as Promise<SupermemorySearchResponse>;
+      const { q, containerTag: _scope, rerank, ...options } = payload;
+      return call(`${ns(payload.containerTag)}/search`, { query: q, ...options, ...(rerank !== undefined ? { rerank: rerank === false ? "none" : rerank } : {}) }) as Promise<SupermemorySearchResponse>;
+    },
+    profile: payload => (isCanonicalSupermemoryProjectScope(payload.containerTag)
+      ? call(`${ns(payload.containerTag)}/profile`, {})
+      : call("/v4/profile", httpProfilePayload(payload))) as Promise<SupermemoryProfileResponse>,
+    document: payload => call(`${ns(payload.containerTag)}/document/${encodeURIComponent(payload.id)}?include=chunks,memories`, undefined, "GET"),
+    health: async payload => {
+      await (isCanonicalSupermemoryProjectScope(payload.containerTag) ? call(`${ns(payload.containerTag)}/profile`, {}) : call("/v4/profile", httpProfilePayload(payload)));
       return { ok: true };
     },
   };
 }
 
-async function callSupermemoryHttp(fetchImpl: SupermemoryRuntimeFetch, baseURL: string, apiKey: string, path: string, payload: unknown, timeoutMs: number): Promise<unknown> {
+async function callSupermemoryHttp(fetchImpl: SupermemoryRuntimeFetch, baseURL: string, apiKey: string, path: string, payload: unknown, timeoutMs: number, method = "POST"): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(new URL(path, baseURL), {
-      method: "POST",
+      method,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: payload === undefined ? undefined : JSON.stringify(payload),
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`supermemory_http_status_${response.status}`);
@@ -506,8 +536,9 @@ function renderContext(bounded: ReturnType<typeof boundSupermemoryRetrievalItems
 function profileItems(response: SupermemoryProfileResponse): readonly { id: string; content: string }[] {
   const profile = response.profile ?? {};
   return [
-    ...(profile.static ?? []).map((content, index) => ({ id: `profile-static-${index}`, content })),
-    ...(profile.dynamic ?? []).map((content, index) => ({ id: `profile-dynamic-${index}`, content })),
+    ...(profile.static ?? []).map((content, index) => (typeof content === "string" ? { id: `profile-static-${index}`, content } : { id: content.id, content: content.memory })),
+    ...Object.values(profile.buckets ?? {}).flat().map(item => ({ id: item.id, content: item.memory })),
+    ...(profile.dynamic ?? []).map((content, index) => (typeof content === "string" ? { id: `profile-dynamic-${index}`, content } : { id: content.id, content: content.memory })),
   ];
 }
 

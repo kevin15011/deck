@@ -233,9 +233,9 @@ describe("Supermemory first-class runtime", () => {
     await transport.search({ q: "hello", containerTag: "sm_project_v1_kevin15011_deck", searchMode: "hybrid", limit: 5 });
     await transport.profile({ containerTag: "sm_project_v1_kevin15011_deck" });
 
-    expect(calls.map((call) => new URL(call.url).pathname)).toEqual(["/v3/documents", "/v4/search", "/v4/profile"]);
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual(["/ns/sm_project_v1_kevin15011_deck/document", "/ns/sm_project_v1_kevin15011_deck/search", "/ns/sm_project_v1_kevin15011_deck/profile"]);
     expect(calls.every((call) => call.init?.headers && JSON.stringify(call.init.headers).includes("Bearer sm_test"))).toBe(true);
-    expect(calls[1]!.body).toEqual({ q: "hello", containerTag: "sm_project_v1_kevin15011_deck", searchMode: "hybrid", rerank: false, rewriteQuery: false, limit: 5 });
+    expect(calls[1]!.body).toEqual({ query: "hello", searchMode: "hybrid", limit: 5 });
   });
 
   test("aborts HTTP transport on timeout", async () => {

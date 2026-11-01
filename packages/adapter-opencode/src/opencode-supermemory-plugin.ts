@@ -23,14 +23,14 @@ import { recordOwnedRunnerArtifactTree, resolveDefaultDeckDataRoot } from "@deck
 
 import { enumerateOpenCodeConfigCandidates } from "./model-discovery-context";
 
-export const OPENCODE_SUPERMEMORY_PACKAGE_VERSION = "2.0.15";
+export const OPENCODE_SUPERMEMORY_PACKAGE_VERSION = "2.1.0";
 export const OPENCODE_SUPERMEMORY_PACKAGE_SPEC = `opencode-supermemory@${OPENCODE_SUPERMEMORY_PACKAGE_VERSION}`;
-export const OPENCODE_SUPERMEMORY_PACKAGE_INTEGRITY = "sha512-5rVGW0yxP+w4Iz71y7qkAjiiigSQArC/OqfEyfCoRNZPS1dCJQrdBcyYwrrSSwX/89qLKIIFRwmkl7l5xKYctQ==";
+export const OPENCODE_SUPERMEMORY_PACKAGE_INTEGRITY = "sha512-yzLuEoe0T2BU/YS8kct5CAgK4U+5UyM084Q0/bpo2avLJsC6Owqw0qUnnoTz3UQBdgiQiSxSfk9WxLMlZ+nlCw==";
 
 const PUBLISHED_ARTIFACT_DIGESTS = Object.freeze({
-  "package.json": "d8efdecc9b36b04104bac1f14bc7a24ea51efd142e356c925126a9519ed6e69a",
-  "dist/index.js": "7609aae38efb0f07a39759cab404e28b02d1e31e5d601a012f6efd83b202d1a7",
-  "dist/server.js": "37e56a4860f41c7a51a1dfecff3b750c7442f3748a410e32ac56de6eda9a3414",
+  "package.json": "6555942e98790d5a3e5743517f6051908abef964627edf35b93b750c7b7843fa",
+  "dist/index.js": "3aef33827ec259e246ab7b14a8a1197b57574a32f418b067da033b8d31900924",
+  "dist/server.js": "288d9287e5b3fad24302711445a41a20dce8313517cca2a7853e2282518ae0bb",
 });
 
 type ArtifactPath = keyof typeof PUBLISHED_ARTIFACT_DIGESTS;
@@ -163,7 +163,27 @@ export function buildOpenCodeSupermemoryLoaderContent(): string {
     "",
     "export default Object.freeze({",
     '  id: "opencode-supermemory",',
-    "  server: (ctx) => SupermemoryPlugin(ctx),",
+    "  server: async (ctx) => {",
+    "    const hooks = await SupermemoryPlugin(ctx);",
+    "    const ticket = process.env.DECK_NATIVE_CAPTURE_TICKET;",
+    "    if (!ticket) return hooks;",
+    '    const fs = await import("node:fs");',
+    "    const binding = JSON.parse(fs.readFileSync(ticket, 'utf8'));",
+    "    const sessions = new Set(); let drain;",
+    "    const finish = () => drain ??= (async () => {",
+    "      let lifecycle = 'completed';",
+    "      try { await hooks.event?.({event:{type:'server.instance.disposed',properties:{}}}); await hooks.dispose?.(); }",
+    "      catch { lifecycle = 'error'; }",
+    "      const fd = fs.openSync(ticket, fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW);",
+    "      try { fs.ftruncateSync(fd); fs.writeFileSync(fd, JSON.stringify({...binding, lifecycle, nativeSessionIds:[...sessions], acceptance:'unknown'})); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }",
+    "    })();",
+    "    return {...hooks, event: async (input) => {",
+    "      if (input.event.type === 'server.instance.disposed') return finish();",
+    "      const p = input.event.properties; const id = p?.sessionID ?? p?.info?.sessionID;",
+    "      if (typeof id === 'string') sessions.add(id);",
+    "      return hooks.event?.(input);",
+    "    }, dispose: finish};",
+    "  },",
     "  setup: ServerPlugin.setup,",
     "});",
     "",
@@ -265,7 +285,31 @@ function stripJsonComments(value: string): string {
     }
     output += current;
   }
-  return output.replace(/,\s*([}\]])/g, "$1");
+  return output.replace(/"(?:\\.|[^"\\])*"|,\s*([}\]])/g, (match, closing: string | undefined) => closing ?? match);
+}
+
+/** Use the provider's supported cadence setting; preparation remains read-only. */
+export function configureOpenCodeSupermemoryCapture(home: string): void {
+  const directory = join(home, ".config", "opencode");
+  for (const part of [home, join(home, ".config"), directory]) {
+    if (!existsSync(part)) mkdirSync(part, { mode: 0o700 });
+    if (!isSafeOwnedDirectory(part)) throw new Error("Unsafe OpenCode Supermemory settings directory");
+  }
+  const path = [join(directory, "supermemory.jsonc"), join(directory, "supermemory.json")].find(existsSync) ?? join(directory, "supermemory.json");
+  const original = existsSync(path) ? safeReadOwned(path, 64 * 1024) : undefined;
+  if (existsSync(path) && !original) throw new Error("Unsafe OpenCode Supermemory settings");
+  let config: Record<string, unknown>;
+  try { config = original ? JSON.parse(stripJsonComments(original.toString("utf8"))) : {}; }
+  catch { throw new Error("Invalid OpenCode Supermemory settings"); }
+  if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid OpenCode Supermemory settings");
+  if (config.captureEveryNTurns === 1) return;
+  const temporary = `${path}.${crypto.randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, JSON.stringify({ ...config, captureEveryNTurns: 1 }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+    const current = existsSync(path) ? safeReadOwned(path, 64 * 1024) : undefined;
+    if (original ? !current?.equals(original) : existsSync(path)) throw new Error("OpenCode Supermemory settings changed during installation");
+    renameSync(temporary, path);
+  } finally { rmSync(temporary, { force: true }); }
 }
 
 function pluginRegistrations(path: string): { status: "absent" | "readable" | "unsafe"; registrations: string[] } {
@@ -409,6 +453,7 @@ export async function installOwnedOpenCodeSupermemory(input: {
     recordOwnedRunnerArtifactTree({ runnerId: "opencode", root, manifestPath: join(root, "deck/manifest.json"), artifactRoot: paths.installRoot, sourceItemId: "package:supermemory" });
   };
   if (existing.ready) {
+    configureOpenCodeSupermemoryCapture(homeDirectory);
     recordArtifacts();
     return { ok: true, outcome: "reused", diagnostic: existing.diagnostic, paths };
   }
@@ -431,6 +476,7 @@ export async function installOwnedOpenCodeSupermemory(input: {
   }
   const artifacts = inspectInstalledArtifacts(paths, input.expectedArtifactDigests ?? PUBLISHED_ARTIFACT_DIGESTS);
   if (!artifacts.ready) return { ok: false, outcome: "failed", diagnostic: artifacts.diagnostic, paths };
+  configureOpenCodeSupermemoryCapture(homeDirectory);
   writeLoader(paths);
   const verified = inspectOwnedOpenCodeSupermemory({ environment, homeDirectory, expectedArtifactDigests: input.expectedArtifactDigests });
   if (verified.ready) recordArtifacts();

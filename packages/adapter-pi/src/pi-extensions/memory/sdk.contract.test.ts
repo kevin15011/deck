@@ -38,7 +38,7 @@ afterEach(() => {
 });
 
 describe("deck-memory through the Pi 1.0 SDK (DefaultResourceLoader extension factories + faux provider)", () => {
-  sdkTest("native split-empty history gets an extra summary call, fresh memory stays out of session messages, and completed summaries alone are saved", async () => {
+  sdkTest("native split-empty history gets an extra summary call, fresh memory stays out of session messages, and compaction never reingests injected context", async () => {
     const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = sdk!;
     const fixtureOptions = { dir: root, advisory: "START_ONLY" };
     host = startFakeLoopbackHost(fixtureOptions);
@@ -68,7 +68,7 @@ describe("deck-memory through the Pi 1.0 SDK (DefaultResourceLoader extension fa
       expect(requests.slice(before)).toHaveLength(2);
       expect(requests.slice(before).join("\n")).toContain("FRESH_COMPACTION_PROFILE_RELEVANT");
       expect(requests.slice(before).join("\n")).not.toContain("START_ONLY");
-      expect(host.named("save").map(e => e.content)).toEqual([result.summary]);
+      expect(host.named("save")).toHaveLength(0);
       const entries = session.sessionManager.getEntries();
       expect(JSON.stringify(entries.filter(e => e.type === "message"))).not.toContain("FRESH_COMPACTION_PROFILE_RELEVANT");
       expect(JSON.stringify(entries)).not.toContain(host.token);
@@ -77,9 +77,7 @@ describe("deck-memory through the Pi 1.0 SDK (DefaultResourceLoader extension fa
       await session.compact();
       expect(previous).toBe(result.summary);
       expect(requests.slice(beforeSecond).join("\n")).toContain(JSON.stringify(result.summary).slice(1, -1));
-      expect(host.acceptedSaves).toHaveLength(2);
-      expect(host.acceptedSaves.map(e => e.content)).toEqual([result.summary, result.summary]);
-      expect(new Set(host.acceptedSaves.map(e => e.eventId)).size).toBe(2);
+      expect(host.acceptedSaves).toHaveLength(0);
     } finally { session.dispose(); }
   }, 60_000);
 

@@ -4,7 +4,7 @@ import { clearPublishedMemoryHandoff, publishMemoryHandoff, resolveMemoryHandoff
 import type { ExtensionAPI } from "../shared/pi-api";
 import { LEAD_ROLE, normalizeRole } from "../shared/roles";
 import { registerMemoryTools } from "./tools";
-import { createLoopbackClient, isLoopbackEndpoint, sha256Hex, truncateForCapture, type LoopbackClient } from "./client";
+import { createLoopbackClient, isLoopbackEndpoint, sha256Hex, sendPublicCapture, type LoopbackClient } from "./client";
 
 export type DeckMemoryOptions = {
   /** Environment to read and scrub. Default: `process.env`. */
@@ -17,7 +17,6 @@ export type DeckMemoryOptions = {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 4_000;
 const DEFAULT_DRAIN_TIMEOUT_MS = 3_000;
-const MAX_QUERY_CHARS = 4_000;
 
 type Notifier = { hasUI?: boolean; ui?: { notify?: (message: string, type?: "info" | "warning" | "error") => void } };
 type SessionCtx = Notifier & { sessionManager?: { getSessionId?: () => string } };
@@ -109,7 +108,7 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
 
     let turn = 0;
     let sessionStarted = false;
-    let childAdvisory: string | undefined;
+    let publicRun = false;
     let pendingFinal: string | undefined;
     let warned = false;
     let lastSessionId = "pi-session";
@@ -140,18 +139,16 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
       });
     }
 
-    const capture = (sessionId: string, source: "trusted-user-prompt" | "trusted-final-assistant", content: string, turnNumber: number) => {
-      const bounded = truncateForCapture(content);
+    const capture = (sessionId: string, source: "trusted-user-prompt" | "trusted-final-assistant", content: string, turnNumber: number) => track((async () => {
       const kind = source === "trusted-user-prompt" ? "u" : "a";
-      return track(client.send({
-        eventId: `${idPart(sessionId)}:cap-${kind}:${turnNumber}:${sha256Hex(bounded).slice(0, 16)}`,
-        event: "capture",
-        sessionId,
-        role: LEAD_ROLE,
-        source,
-        content: bounded,
-      }, { retries: 1 }));
-    };
+      const result = await sendPublicCapture(client, {
+        eventId: `${idPart(sessionId)}:${nonce}:cap-${kind}:${turnNumber}:${sha256Hex(content).slice(0, 16)}`,
+        event: "capture", sessionId, role: roleEnv, source,
+        logicalTurnId: `t${turnNumber}`, snapshotGeneration: turnNumber,
+      }, content);
+      if (!result.ok) report(result.diagnostics.join(" "));
+      return result;
+    })());
 
     pi.on("before_agent_start", async (event, ctx) => {
       const prompt = typeof event.prompt === "string" ? event.prompt : "";
@@ -159,58 +156,35 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
       const sessionId = sessionIdOf(ctx);
       pendingFinal = undefined;
 
-      if (isChild) {
-        if (childAdvisory === undefined && !sessionStarted) {
-          sessionStarted = true;
-          turn += 1;
-          const logicalTurnId = `t${turn}`;
-          const result = await client.send({ eventId: `${idPart(sessionId)}:${nonce}:role_start`, event: "role_start", sessionId, role: roleEnv, query: prompt.slice(0, MAX_QUERY_CHARS), logicalTurnId, snapshotGeneration: turn });
-          if (!result.ok) { warnOnce(`recall failed (${result.diagnostics.join(", ") || "unavailable"}); continuing without it.`, ctx); return undefined; }
-          if (result.advisoryText) {
-            childAdvisory = result.advisoryText;
-            void track(client.send({ eventId: `${idPart(sessionId)}:${nonce}:ack:${turn}`, event: "injection_ack", sessionId, role: roleEnv, logicalTurnId, snapshotGeneration: turn, injectedByteCount: Buffer.byteLength(childAdvisory, "utf8"), injectedSha256: sha256Hex(childAdvisory) }));
-          }
-        }
-        return childAdvisory ? { systemPrompt: `${event.systemPrompt}\n\n${childAdvisory}` } : undefined;
-      }
-
+      publicRun = true;
       continuationAdvisory = undefined;
       turn += 1;
       const turnNumber = turn;
       const logicalTurnId = `t${turnNumber}`;
-      void capture(sessionId, "trusted-user-prompt", prompt, turnNumber);
-      const kind = sessionStarted ? "recall" : "session_start";
+      await capture(sessionId, "trusted-user-prompt", prompt, turnNumber);
+      const kind = sessionStarted ? "recall" : isChild ? "role_start" : "session_start";
       sessionStarted = true;
-      const result = await client.send({ eventId: `${idPart(sessionId)}:${nonce}:${kind}:${turnNumber}`, event: kind, sessionId, role: LEAD_ROLE, query: prompt.slice(0, MAX_QUERY_CHARS), logicalTurnId, snapshotGeneration: turnNumber });
+      const result = await client.send({ eventId: `${idPart(sessionId)}:${nonce}:${kind}:${turnNumber}`, event: kind, sessionId, role: roleEnv, query: prompt, logicalTurnId, snapshotGeneration: turnNumber });
       if (!result.ok) { warnOnce(`recall failed (${result.diagnostics.join(", ") || "unavailable"}); continuing without it.`, ctx); return undefined; }
       const advisory = result.advisoryText;
       if (!advisory) return undefined;
       continuationAdvisory = { sessionId, text: advisory };
-      void track(client.send({ eventId: `${idPart(sessionId)}:${nonce}:ack:${turnNumber}`, event: "injection_ack", sessionId, role: LEAD_ROLE, logicalTurnId, snapshotGeneration: turnNumber, injectedByteCount: Buffer.byteLength(advisory, "utf8"), injectedSha256: sha256Hex(advisory) }));
+      void track(client.send({ eventId: `${idPart(sessionId)}:${nonce}:ack:${turnNumber}`, event: "injection_ack", sessionId, role: roleEnv, logicalTurnId, snapshotGeneration: turnNumber, injectedByteCount: Buffer.byteLength(advisory, "utf8"), injectedSha256: sha256Hex(advisory) }));
       // Ephemeral: applied to this agent run only, so it never accumulates in the session or across --continue.
       return { systemPrompt: `${event.systemPrompt}\n\n${advisory}` };
     });
 
-    if (isChild) {
-      // Children never capture; they only flush their role session on exit.
-      pi.on("session_shutdown", async (event, ctx) => {
-        const sessionId = sessionIdOf(ctx);
-        await drain();
-        if (event.reason === "reload") return;
-        await client.send({ eventId: `${idPart(sessionId)}:${nonce}:shutdown_flush`, event: "shutdown_flush", sessionId, role: roleEnv }, { timeoutMs: drainTimeoutMs });
-      });
-      return;
-    }
-
     pi.on("turn_end", (event) => {
       const text = assistantText(event.message as { role?: string; content?: unknown });
-      if (text) pendingFinal = text;
+      if (publicRun && text) pendingFinal = text;
     });
 
-    pi.on("agent_end", (_event, ctx) => {
+    pi.on("agent_end", async (_event, ctx) => {
       const text = pendingFinal;
       pendingFinal = undefined;
-      if (text) void capture(sessionIdOf(ctx), "trusted-final-assistant", text, turn);
+      publicRun = false;
+      if (text) await capture(sessionIdOf(ctx), "trusted-final-assistant", text, turn);
+      await drain();
     });
 
     let compactionNumber = 0;
@@ -223,7 +197,7 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
       const user = messages.filter(message => message.role === "user").at(-1);
       const content = user?.content;
       const text = typeof content === "string" ? content : Array.isArray(content) ? content.filter(block => block.type === "text").map(block => block.text).join(" ") : "";
-      const query = Array.from(text.replace(/\s+/gu, " ").trim() || "current project decisions conventions and active work").slice(0, 256).join("");
+      const query = text.trim() || "current project decisions conventions and active work";
       const sessionId = sessionIdOf(ctx);
       const number = ++compactionNumber;
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -242,8 +216,10 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
             if (event.signal?.aborted) abort();
           }),
         ]);
-        if (event.signal?.aborted || !result?.ok || !result.advisoryText) return undefined;
-        const advisory = truncateForCapture(result.advisoryText, 6000);
+        if (event.signal?.aborted) return undefined;
+        if (!result?.ok) { warnOnce("compaction recall was not delivered; original public turns remain in the native session.", ctx); return undefined; }
+        if (!result.advisoryText) return undefined;
+        const advisory = result.advisoryText;
         // Native compact() consumes this shared preparation, but session entries and
         // turn-prefix inputs remain untouched. An empty split history now requires
         // Pi's additional history-summary call, alongside its turn-prefix call.
@@ -258,17 +234,8 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
       return undefined;
     });
 
-    let compactionSaveNumber = 0;
-    if (!isChild && roleEnv === LEAD_ROLE) pi.on("session_compact", async (event, ctx) => {
-      // Pi can emit the first matching entry again for identical summaries.
-      // Allocate once per occurrence; client retries retain this event ID.
-      const number = ++compactionSaveNumber;
-      const summary = event.compactionEntry.summary;
-      if (!summary.trim()) return;
-      const sessionId = sessionIdOf(ctx);
-      // Reuse explicit save's eligibility, redaction and immutable host scope.
-      await track(client.send({ eventId: `${idPart(sessionId)}:${nonce}:compact-save:${number}`, event: "save", sessionId, role: roleEnv, content: truncateForCapture(summary, 16 * 1024), kind: "note" }));
-    });
+    // Compaction includes injected/tool/private context. Its summary is not a new
+    // public observation; original public turns already have their own capture.
 
     pi.on("session_shutdown", async (event, ctx) => {
       const sessionId = sessionIdOf(ctx);
@@ -278,7 +245,7 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
       await drain();
       // A reload keeps the same session alive, so the host must not retire it.
       if (event.reason === "reload") return;
-      await client.send({ eventId: `${idPart(sessionId)}:${nonce}:shutdown_flush`, event: "shutdown_flush", sessionId, role: LEAD_ROLE }, { timeoutMs: drainTimeoutMs });
+      await client.send({ eventId: `${idPart(sessionId)}:${nonce}:shutdown_flush`, event: "shutdown_flush", sessionId, role: roleEnv }, { timeoutMs: drainTimeoutMs });
     });
   };
 }

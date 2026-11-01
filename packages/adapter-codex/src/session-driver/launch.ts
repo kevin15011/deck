@@ -1,3 +1,4 @@
+import { CODEX_SUPERMEMORY_MCP_ENV } from "../supermemory-hosted";
 import { isReadOnlyRole, ROLE_TOOL_POLICY } from "@deck/core/session/role-tool-policy";
 import type { DriverTaskInput } from "@deck/core/session/driver";
 import { isAbsolute } from "node:path";
@@ -21,6 +22,13 @@ export function codexMemoryHooks(input: DriverTaskInput): Record<string, unknown
   hooks.UserPromptSubmit = [{ hooks: [{ type: "command", command: command(plugin.scripts.recall), timeout: 60, statusMessage: "Searching memories..." }] }];
   hooks.Stop = [{ hooks: [{ type: "command", command: command(plugin.scripts.flush), timeout: 30 }] }];
   return hooks;
+}
+/** Exact owned executable match; also used to suppress installed hooks when memory is disabled. */
+export function matchesOwnedCodexMemoryCommand(hook: Pick<CodexHookMetadata, "eventName" | "handlerType" | "command">, input: DriverTaskInput): boolean {
+  const plugin = input.nativeMemory?.plugin;
+  const script = hook.eventName === "userPromptSubmit" ? plugin?.scripts?.recall : hook.eventName === "stop" ? plugin?.scripts?.flush : undefined;
+  const quote = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+  return !!script && !!plugin?.nodeCommand && hook.handlerType === "command" && hook.command === `${quote(plugin.nodeCommand)} ${quote(script)}`;
 }
 export function isAdmittedCodexMemoryHook(hook: CodexHookMetadata, input: DriverTaskInput): boolean {
   const nativeEvent = hook.eventName === "userPromptSubmit" ? "UserPromptSubmit" : hook.eventName === "stop" ? "Stop" : undefined;
@@ -55,12 +63,13 @@ export function codexThreadMcpConfig(input: DriverTaskInput, nativeIds: readonly
     const allowed = readOnly ? codexReadOnlyTools(input, id) : undefined;
     if (readOnly && !allowed) { if (nativeIds.includes(id)) servers[id] = { enabled: false }; continue; }
     const spec = input.mcpServerSpecs[id]; if (!spec) throw new Error("codex-mcp-spec-missing");
-    servers[id] = spec.transport === "http" ? { enabled: true, url: spec.url, ...(spec.envHttpHeaders ? { env_http_headers: spec.envHttpHeaders } : {}) } : { enabled: true, command: spec.command, args: spec.args, env: spec.env };
+    servers[id] = spec.transport === "http" ? { enabled: true, url: spec.url, ...(spec.envHttpHeaders ? { env_http_headers: spec.envHttpHeaders } : {}) } : { enabled: true, command: spec.command, args: spec.args, env: spec.env, ...(input.nativeMemory?.status === "ready" && id === nativeCodexMcpId(input.taskId, "supermemory") ? { env_vars: CODEX_SUPERMEMORY_MCP_ENV } : {}) };
   }
   if (readOnly) for (const id of input.mcp.servers) if (codexReadOnlyTools(input, id)) Object.assign(servers[id] as object, { enabled_tools: codexReadOnlyTools(input, id) });
   return { mcp_servers: servers, ...(readOnly ? { "features.apps": false, "features.plugins": false } : {}) };
 }
 export function isAdmittedCodexRoleHook(hook: CodexHookMetadata, input: DriverTaskInput): boolean {
+  if (matchesOwnedCodexMemoryCommand(hook, input) && !isAdmittedCodexMemoryHook(hook, input)) return false;
   return (hook.source === "user" || isAdmittedCodexMemoryHook(hook, input)) && hook.handlerType === "command" && hook.async !== true
     && !!input.nativeRoleDescriptor?.hooks.some(expected => expected.event === hook.eventName && expected.command === hook.command);
 }
@@ -71,10 +80,11 @@ export function buildCodexLaunch(input: DriverTaskInput, options: CodexLaunchOpt
   if (input.disableNativeDelegation) for (const feature of ISOLATION_FEATURES) args.push("-c", `features.${feature}=false`);
   if (input.nativeRoleDescriptor?.preparation?.some(finding => finding.code === "codex-hooks-preserved")) {
     args.push("-c", "features.hooks=false");
-  } else if (input.nativeMemory?.status === "ready" || input.nativeRoleDescriptor) {
+  } else if (input.nativeMemory?.plugin?.scripts || input.nativeRoleDescriptor) {
     args.push("-c", "features.hooks=true");
     const hooks = codexMemoryHooks(input);
     hooks.state = Object.fromEntries(inheritedHooks.flatMap(hook => {
+      if (input.nativeMemory?.status === "disabled" && matchesOwnedCodexMemoryCommand(hook, input)) return [[hook.key, { enabled: false }]];
       if (isAdmittedCodexMemoryHook(hook, input) || isAdmittedCodexRoleHook(hook, input)) return [[hook.key, { enabled: true, trusted_hash: hook.currentHash }]];
       const event = hook.eventName === "userPromptSubmit" ? "UserPromptSubmit" : hook.eventName === "stop" ? "Stop" : undefined;
       const expected = event ? (codexMemoryHooks(input)[event] as {hooks:{command:string}[]}[] | undefined)?.[0]?.hooks[0]?.command : undefined;
@@ -94,7 +104,7 @@ export function buildCodexLaunch(input: DriverTaskInput, options: CodexLaunchOpt
     env.DECK_SESSION_START_GENERATION = input.nativeRoleDescriptor.generation;
   }
   if (input.nativeRoleDescriptor) env.CODEX_HOME = input.nativeRoleDescriptor.source.root;
-  if (input.nativeMemory?.scopeMode === "global") for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
+  if (input.nativeMemory?.scopeMode === "global" || input.nativeMemory?.status === "disabled") for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
   return { command: options.executable ?? "codex", args, env };
 }
 

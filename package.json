@@ -29,7 +29,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "latest",
-    "opencode-supermemory": "2.0.15",
+    "opencode-supermemory": "2.1.0",
     "typescript": "latest"
   },
   "dependencies": {

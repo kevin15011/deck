@@ -7,23 +7,25 @@ import { gunzipSync } from "node:zlib";
 
 /**
  * Official `supermemoryai/codex-supermemory` plugin, pinned to one immutable npm release.
- * Only the two documented lifecycle hooks are materialised (UserPromptSubmit recall and Stop flush);
- * the plugin's own installer, its hosted-MCP proxy and its `~/.codex` mutations are never run.
+ * Materializes the two lifecycle hooks and the original hosted MCP proxy. All three
+ * are self-contained CommonJS bundles with Node built-ins only; no upstream installer runs.
  */
-export const CODEX_SUPERMEMORY_VERSION = "1.0.19";
+export const CODEX_SUPERMEMORY_VERSION = "1.1.0";
 export const CODEX_SUPERMEMORY_TARBALL_URL = `https://registry.npmjs.org/codex-supermemory/-/codex-supermemory-${CODEX_SUPERMEMORY_VERSION}.tgz`;
 export const CODEX_SUPERMEMORY_TARBALL = Object.freeze({
-  bytes: 149209,
-  sha256: "32c48d598199566b6dceedf0f84cff8db49bf7123fa88ab17c745879fbfb42a4",
+  bytes: 311632,
+  sha256: "3e0f16dc2d4d99770677ca95140c45df90c3cd5140b2b5458db7aed540979c99",
   /** npm registry `dist.integrity`; kept as provenance evidence for the registry-published artifact. */
-  integrity: "sha512-ZzEPI8Dxo+j50O91ZdQVsIfrR/KhVS7ur9oc/sdgUHy/NcQ1FYZzgGzM7Bpf0lhu3kmvr0B5yY9buIKU1Hohrw==",
+  integrity: "sha512-EOveOZ5QcMgRJWILK+poHF5CMpn72zUVHtwQrvso41mdaCepcyFhPU9tyaY3hI3cMGkLswqNyAdYE7wS0NMAcw==",
 });
 export type CodexSupermemoryFileEntry = readonly [name: string, tarPath: string, sha256: string, bytes: number];
 export const CODEX_SUPERMEMORY_FILES: readonly CodexSupermemoryFileEntry[] = Object.freeze([
-  ["recall.js", "package/dist/hooks/recall.js", "62d5c106fd4537accbc6241ed51d79c455821f31cc74ff6fcde44aab66877f1a", 34443],
-  ["flush.js", "package/dist/hooks/flush.js", "b146633584cd90d7616cd616d32abadce3c6d9ceb88ef28b19541effe851ef34", 111541],
+  ["recall.js", "package/dist/hooks/recall.js", "18396a8667b62ffc31f7670b5e84a067b60e0880572b2d750815ab0374b0dcb4", 213199],
+  ["flush.js", "package/dist/hooks/flush.js", "1842f9de3b5c9fc047089482e908d953a1adcb7068742cb214493ad265a70449", 292891],
+  ["mcp-proxy.js", "package/dist/hooks/mcp-proxy.js", "c96a1cfd36a522b831e70dd95083456fca77816385609355238d1f904cbbcca2", 19942],
+  ["package.json", "package/dist/package.json", "73513439b93b2391b8a67720b5e0959f46afc909c1f0fc7dd73b79c5ae36bda7", 24],
 ] as const);
-export const CODEX_SUPERMEMORY_ROOT_NAME = `official-supermemory-${CODEX_SUPERMEMORY_VERSION}`;
+export const CODEX_SUPERMEMORY_ROOT_NAME = `official-supermemory-${CODEX_SUPERMEMORY_VERSION}-hosted-v1`;
 /** Runtime credential name read by the official plugin (injected only into the launched child process). */
 export const CODEX_SUPERMEMORY_ENV_KEY = "SUPERMEMORY_CODEX_API_KEY";
 

@@ -110,6 +110,12 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 
 // Exact shared wire/schema identifiers; these do not import adapter implementations.
 const allowedContractLiterals: Record<string, readonly string[]> = {
+  // Credential recognition is shared privacy policy, not a provider dependency.
+  'memory/capture-redaction.ts': ['(?:authorization|x-api-key|x-supermemory-api-key)'],
+  // Canonical instructions describe each runner's accepted scope contract.
+  'teams/developer/instruction-bundles/adaptive-memory.ts': [
+    '- Pi memory tools bind the project server-side. Official-plugin runners follow their native tool access contract and current project guidance.',
+  ],
   'runner-contributions.ts': ['pi', 'deck-pi-manifest-v1'],
   'package-retirement.ts': ['opencode'],
   'session/task-continuity.ts': ['opencode-verified-input'],

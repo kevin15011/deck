@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto";
 import { expect, test } from "bun:test";
-import { buildCodexDeveloperTeamInstallPlan, CODEX_MANIFEST_PATH } from "./developer-team-install";
+import { buildCodexDeveloperTeamInstallPlan, codexManagedPaths, CODEX_MANIFEST_PATH } from "./developer-team-install";
 
 const input = { projectRoot: "/tmp/deck-refresh-fixture", codexHome: "/tmp/deck-refresh-fixture/.codex" };
 function installed() {
-  return new Map(buildCodexDeveloperTeamInstallPlan({ ...input, existingFiles: new Map() }).expectedFiles.map(file => [file.relativePath, file.content]));
+  const plan = buildCodexDeveloperTeamInstallPlan({ ...input, existingFiles: new Map() });
+  // Protects snapshot completeness as the canonical catalog grows; no generated
+  // bytes are pinned. Missing a planner target must fail this structural oracle.
+  const inventory = new Set(codexManagedPaths());
+  for (const file of plan.expectedFiles) expect(inventory.has(file.relativePath)).toBe(true);
+  return new Map(plan.expectedFiles.map(file => [file.relativePath, file.content]));
 }
 test("preserves custom roles while refreshing independent owned content without adopting edits", () => {
   const files = installed();

@@ -70,7 +70,7 @@ function assertNoHigherPriorityOverrides(projectRoot: string, home: string, effe
   }
   for (const file of [join(paths[1]!, "config.json"), join(paths[2]!, "settings.json")]) {
     const config = readOverride(file);
-    if (config && ["apiKey", "baseUrl", "repoContainerTag", "projectContainerTag", "personalContainerTag", "authToken", "apiUrl"].some((key) => Object.hasOwn(config, key))) throw new Error("Claude Supermemory settings override Deck's reviewed credential or repository scope.");
+    if (config && ["apiKey", "baseUrl", "namespace", "repoContainerTag", "projectContainerTag", "personalContainerTag", "authToken", "apiUrl"].some((key) => Object.hasOwn(config, key))) throw new Error("Claude Supermemory settings override Deck's reviewed credential or repository scope.");
   }
   for (const file of [...userConfigDirs.flatMap((dir) => [join(dir, "settings.json"), join(dir, "settings.local.json")]), join(top, ".claude", "settings.json"), join(top, ".claude", "settings.local.json"), ...managedFiles]) {
     const config = readOverride(file);

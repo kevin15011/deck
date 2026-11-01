@@ -6,9 +6,9 @@ export type ChildMcpSet = { servers: string[]; sessionTools: string[] };
 
 export const LEAD_SESSION_TOOLS = [
   "deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel", "deck_task_list", "deck_task_integrate", "deck_decision_open", "deck_decision_list", "deck_decision_revise", "deck_decision_resolve",
-  "deck_memory_recall", "deck_memory_propose", "deck_approve",
+  "deck_memory_recall", "deck_memory_propose", "deck_approve", "deck_session_history",
 ] as const;
-export const MEMBER_SESSION_TOOLS = ["deck_memory_recall", "deck_memory_propose", "deck_approve"] as const;
+export const MEMBER_SESSION_TOOLS = ["deck_session_history", "deck_memory_recall", "deck_memory_propose", "deck_approve"] as const;
 
 export type ChildMcpInput = {
   runnerPackages: readonly string[];

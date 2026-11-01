@@ -46,6 +46,7 @@ export type BuildCodexInstallPlanInput = {
   capabilityInstructions?: CapabilityInstructionBundle;
   memoryProvider?: "none" | "supermemory";
   supermemoryProjectScope?: string;
+  supermemoryProxy?: import("./supermemory-hosted").CodexSupermemoryProxy;
   mcpCapabilityIds?: readonly string[];
   /** Full materialization may change runner config; content-only refreshes Deck content only. */
   materializationScope?: "full" | "content-only";
@@ -103,6 +104,29 @@ export const CODEX_MANIFEST_PATH = ".codex/deck/manifest.json";
 export const CODEX_RTK_HOOK_SCRIPT_PATH = ".codex/deck/hooks/deck-rtk-hook.cjs";
 export const CODEX_EXECUTION_HOOK_PATH = ".codex/deck/hooks/developer-team-execution.js";
 const RTK_HOOK_SCRIPT_PATH = CODEX_RTK_HOOK_SCRIPT_PATH;
+
+/** Inventory only: no mutation preimages, hashes, configuration merges or rendered
+ * role instructions. Read the current bundle catalog, including development-mode
+ * resources; never cache live installation or source filesystem state.
+ */
+export function codexManagedPaths(): readonly string[] {
+  const paths = new Set([
+    CODEX_MANIFEST_PATH, CODEX_EXECUTION_HOOK_PATH, CODEX_RTK_HOOK_SCRIPT_PATH,
+    ".codex/deck/hooks/package.json", ".codex/deck/role-selection.txt",
+    ".codex/config.toml", ".codex/hooks.json",
+  ]);
+  for (const agent of DEVELOPER_TEAM_AGENTS) {
+    const roleId = agent.id.startsWith("deck-") ? agent.id : `deck-${agent.id}`;
+    paths.add(`.codex/agents/${roleId}.toml`);
+    paths.add(`.agents/skills/${safeRelativePath(agent.skillId)}/SKILL.md`);
+  }
+  for (const { skillId } of getStandaloneSkills()) {
+    paths.add(`.agents/skills/${safeRelativePath(skillId)}/SKILL.md`);
+    for (const path of Object.keys(getStandaloneSkill(skillId).files)) paths.add(`.agents/skills/${safeRelativePath(skillId)}/${safeRelativePath(path)}`);
+  }
+  for (const skill of getBootstrapSkillFiles()) paths.add(`.agents/skills/${safeRelativePath(skill.relativePath)}`);
+  return [...paths];
+}
 
 function isPreservedRuntimePath(path: string): boolean {
   return path === ".codex/config.toml" || path === CODEX_EXECUTION_HOOK_PATH || path === ".codex/deck/hooks/package.json" || path === RTK_HOOK_SCRIPT_PATH;
@@ -390,7 +414,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         serenaLauncherAvailable: input.serenaLauncherAvailable,
         serenaProxyAvailable: input.serenaProxyAvailable,
         serenaProxyCommand: input.serenaProxyCommand,
-        deckMemoryCommand: input.deckMemoryCommand,
+        supermemoryProxy: input.supermemoryProxy,
         contextModeCommand: input.contextModeCommand,
         context7Command: input.context7Command,
         codebaseMemoryCommand: input.codebaseMemoryCommand,
@@ -405,7 +429,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         const canon = (path: string) => { try { return realpathSync(path); } catch { return path; } };
         const foreign = [...input.foreignMcpCommands].map(([name, command]) => [name, canon(command)] as const);
         const kept = desiredMcp.servers.filter((server) => {
-          if (server.transport !== "stdio" || server.id === "serena") return true;
+          if (server.transport !== "stdio" || server.id === "serena" || server.id === "supermemory") return true;
           const owners = foreign.filter(([name, command]) => name !== server.id && command === canon(server.command)).map(([name]) => name);
           if (owners.length === 0) return true;
           diagnostics.push({ code: "mcp-foreign-duplicate", severity: "info", message: `Deck did not add MCP server '${server.id}' because your own registration '${owners.join("', '")}' already runs the same executable; Deck leaves it untouched.` });
@@ -445,8 +469,8 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
           diagnostics.push({ code: gap, severity: "warning", message: "Web Search is enabled but its process credential is unavailable; no credential was persisted." });
         } else if (gap === "web-search-executable-missing") {
           diagnostics.push({ code: gap, severity: "warning", message: "Web Search is enabled but its configured MCP executable prerequisite is unavailable." });
-        } else if (gap === "supermemory-raw-mcp-disabled") {
-          diagnostics.push({ code: gap, severity: "info", message: "Supermemory is provided by the pinned official plugin hooks; no Supermemory MCP entry is written beside it." });
+        } else if (gap === "supermemory-proxy-not-ready") {
+          diagnostics.push({ code: gap, severity: "info", message: "The pinned official Supermemory proxy is unavailable; install the current reviewed artifact to enable hosted tools." });
         } else if (gap === "context-mode-not-ready" || gap === "codebase-memory-not-ready" || gap === "context7-not-ready") {
           diagnostics.push({ code: gap, severity: "warning", message: `${gap === "context-mode-not-ready" ? "Context Mode" : gap === "context7-not-ready" ? "Context7" : "Codebase Memory"} is selected but no verified executable is available; no MCP entry was written. Install it through the Deck TUI (Review & Install) and rerun.` });
         } else if (gap === "supermemory-project-scope-missing") {

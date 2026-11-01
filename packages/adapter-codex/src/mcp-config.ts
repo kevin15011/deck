@@ -1,3 +1,4 @@
+import { CODEX_SUPERMEMORY_MCP_ENV, validCodexSupermemoryProxy, type CodexSupermemoryProxy } from "./supermemory-hosted";
 import { getStaticTOMLValue, parseTOML, type AST } from "toml-eslint-parser";
 import {
   isWebSearchProviderDescriptor,
@@ -147,6 +148,16 @@ export function isCodexSupermemoryMcpConfigured(source: string): boolean {
   return inspectCodexSupermemoryMcpState(source).ok;
 }
 
+/** Launch readiness requires the exact owned stdio contract, independently of legacy HTTP checks. */
+export function isCodexOfficialSupermemoryConfigured(source: string, proxy: CodexSupermemoryProxy): boolean {
+  if (!validCodexSupermemoryProxy(proxy)) return false;
+  try {
+    const server = existingServers(source).get("supermemory");
+    const expected = normalized({ id: "supermemory", transport: "stdio", command: proxy.nodeCommand, args: [proxy.script], envVars: CODEX_SUPERMEMORY_MCP_ENV });
+    return isDeckManagedCodexMcpServer(source, "supermemory") && JSON.stringify(canonical(server)) === JSON.stringify(canonical(expected));
+  } catch { return false; }
+}
+
 /** Confirms the exact portable Deck proxy contract. */
 export function isCodexSerenaMcpConfigured(source: string, command: readonly string[] = [CODEX_SERENA_PROXY_COMMAND, ...CODEX_SERENA_PROXY_ARGS]): boolean {
   try {
@@ -202,6 +213,10 @@ function validate(server: CodexMcpServer): void {
   if (!CODEX_MCP_SERVER_IDS.includes(server.id)) throw new Error(`Unsupported Codex MCP server: ${server.id}`);
   if (server.transport === "stdio") {
     if (!server.command || /[\0\r\n]/.test(server.command)) throw new Error(`Invalid command for ${server.id}.`);
+    if (server.id === "supermemory" && (!validCodexSupermemoryProxy({ nodeCommand: server.command, script: server.args?.[0] ?? "" })
+      || server.args?.length !== 1 || JSON.stringify(server.envVars) !== JSON.stringify(CODEX_SUPERMEMORY_MCP_ENV))) {
+      throw new Error("Supermemory stdio requires the verified official proxy and its exact credential-name contract.");
+    }
     for (const name of server.envVars ?? []) if (!ENV_NAME.test(name)) throw new Error(`Invalid external environment name for ${server.id}.`);
   } else {
     const url = new URL(server.url);
@@ -383,6 +398,7 @@ export function buildCodexMcpServers(input: {
   packageIds: readonly string[];
   memoryProvider: "none" | "supermemory";
   supermemoryProjectScope?: string;
+  supermemoryProxy?: CodexSupermemoryProxy;
   /** A fresh Core probe confirmed the Deck-owned Serena launcher. */
   serenaLauncherAvailable?: boolean;
   /** The effective `deck` command has confirmed the hidden Serena proxy route. */
@@ -444,11 +460,12 @@ export function buildCodexMcpServers(input: {
     if (isAbsolutePinnedCommand(input.context7Command)) servers.push({ id: "context7", transport: "stdio", command: input.context7Command });
     else gaps.push("context7-not-ready");
   }
-  // The official plugin owns memory and derives its repository tag per launch, so a global install needs no project scope.
-  if (input.memoryProvider === "supermemory") gaps.push("supermemory-raw-mcp-disabled");
-  // Explicit memory tools ride the Deck loopback host; the entry is inert without the loopback variables.
-  if (input.memoryProvider === "supermemory" && input.deckMemoryCommand && input.deckMemoryCommand.length > 0) {
-    servers.push({ id: CODEX_MEMORY_MCP_SERVER_ID, transport: "stdio", command: input.deckMemoryCommand[0]!, args: input.deckMemoryCommand.slice(1), envVars: [...CODEX_MEMORY_MCP_ENV_VARS] });
+  if (input.memoryProvider === "supermemory") {
+    if (input.supermemoryProxy && validCodexSupermemoryProxy(input.supermemoryProxy)) servers.push({
+      id: "supermemory", transport: "stdio", command: input.supermemoryProxy.nodeCommand,
+      args: [input.supermemoryProxy.script], envVars: CODEX_SUPERMEMORY_MCP_ENV,
+    });
+    else gaps.push("supermemory-proxy-not-ready");
   }
   if (selected.has(WEB_SEARCH_CAPABILITY_ID)) {
     if (input.webSearchProviderConfigured !== true) {

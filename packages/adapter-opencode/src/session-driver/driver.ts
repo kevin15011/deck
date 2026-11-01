@@ -1,3 +1,5 @@
+import { drainNativeCapture, type CaptureTicket } from "./capture-drain";
+import type { NativeCaptureOutcome } from "@deck/core/session/driver";
 import { acquireInstallationUse } from "../../../core/src/installation-use";
 import { verifyOpenCodeNativeRole } from "../native-role";
 import { ROLE_TOOL_POLICY, readOnlyMcpTools, isReadOnlyRole } from "@deck/core/session/role-tool-policy";
@@ -40,6 +42,10 @@ class OpenCodeTask {
   private child!: SupervisedChild;
   private installationUse?: ReturnType<typeof acquireInstallationUse>;
   private current?: Turn;
+  private captureTicket?: CaptureTicket;
+  private lastOutcome?: TurnOutcome;
+  private readonly captureAbort = new AbortController();
+  capture: NativeCaptureOutcome = { lifecycle: 'unknown', acceptance: 'unknown', reason: 'native-lifecycle-unobserved' };
   private readonly lifetime = new AbortController();
   private closed = false;
   private closing?: Promise<void>;
@@ -62,6 +68,7 @@ class OpenCodeTask {
   private terminate(): Promise<void> { return this.termination ??= this.child.terminateGroup(this.options.killGraceMs ?? 2000); }
   private finish(outcome: TurnOutcome) {
     const turn = this.current; if (!turn) return;
+    this.lastOutcome = outcome;
     this.current = undefined; if (turn.timer) clearTimeout(turn.timer); turn.controller.abort(); turn.settle(outcome);
   }
 
@@ -94,6 +101,7 @@ class OpenCodeTask {
 
   async initialize(): Promise<void> {
     const launch = buildOpenCodeLaunch(this.input, this.io, this.options);
+    this.captureTicket = launch.captureTicket;
     this.authorization = `Basic ${Buffer.from(`opencode:${launch.env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`;
     const root = this.input.nativeRoleDescriptor?.source.root;
     if (root) this.installationUse = acquireInstallationUse(root);
@@ -427,7 +435,7 @@ Patterns: ${raw.always.join("\n")}`,
     }
     this.emit({ kind: "turn.started", data: { nativeSessionId: this.nativeId, nativeThreadId: this.nativeId, model: this.input.assignment.modelId } });
     void this.request(`/session/${encodeURIComponent(this.nativeId)}/message`, {
-      ...(role ? { messageID: messageId } : {}), system: this.input.rolePrompt, ...(this.input.nativeRoleDescriptor ? { agent: this.input.nativeRoleDescriptor.roleRef } : {}), model: { providerID: modelId.slice(0, split), modelID: modelId.slice(split + 1) },
+      ...(role ? { messageID: messageId } : {}), system: [this.input.rolePrompt, this.input.localContext].filter(Boolean).join("\n\n"), ...(this.input.nativeRoleDescriptor ? { agent: this.input.nativeRoleDescriptor.roleRef } : {}), model: { providerID: modelId.slice(0, split), modelID: modelId.slice(split + 1) },
       ...(this.input.assignment.thinking && this.input.assignment.thinking !== "off" ? { variant: this.input.assignment.thinking } : {}), parts: [...(prompt || !nativeImages.length ? [{ type: "text", text: prompt }] : []), ...nativeImages.map(image => ({ type: "file", mime: image.mimeType, filename: image.name, url: `data:${image.mimeType};base64,${image.data}` }))],
     }, AbortSignal.any([turn.controller.signal, this.lifetime.signal])).then(result => {
       if (this.current !== turn || this.serverDead) return;
@@ -451,6 +459,7 @@ Patterns: ${raw.always.join("\n")}`,
   }
 
   async interrupt(): Promise<void> {
+    this.captureAbort.abort();
     const turn = this.current; if (!turn || turn.interrupted || this.serverDead) return;
     turn.interrupted = true;
     turn.timer = setTimeout(() => {
@@ -470,6 +479,11 @@ Patterns: ${raw.always.join("\n")}`,
     this.closed = true;
     return this.closing = (async () => {
       if (this.transportCleanup) { await this.transportCleanup; await this.stream; return; }
+      if (this.captureTicket && this.lastOutcome?.status === 'completed' && !this.serverDead && !this.current) {
+        this.capture = await drainNativeCapture(this.captureTicket, this.nativeId,
+          signal => this.request(`/instance/dispose?directory=${encodeURIComponent(this.input.cwd)}`, {}, signal),
+          AbortSignal.any([this.captureAbort.signal, this.lifetime.signal]));
+      }
       this.finish({ status: "interrupted-forced" }); this.lifetime.abort();
       if (this.child) await this.terminate();
       await this.stream;
@@ -497,7 +511,7 @@ export function createOpenCodeSessionDriver(options: OpenCodeSessionDriverOption
         verifyOpenCodeNativeRole(input.nativeRoleDescriptor);
       }
       const task = new OpenCodeTask(input, io, options); await task.initialize();
-      return { nativeSessionId: Promise.resolve(task.id), done: task.send(input.prompt, input.images), send: (prompt, images) => task.send(prompt, images), interrupt: () => task.interrupt(), close: () => task.close() };
+      return { nativeSessionId: Promise.resolve(task.id), done: task.send(input.prompt, input.images), send: (prompt, images) => task.send(prompt, images), interrupt: () => task.interrupt(), close: () => task.close(), captureOutcome: () => task.capture };
     },
   };
 }

@@ -1,3 +1,4 @@
+import { codexSupermemoryToolContext } from "../supermemory-hosted";
 import { verifyCodexNativeRole } from "../native-role";
 import { isCodexReadOnlyTask, codexReadOnlyTools } from "./launch";
 import {codexRequestInput} from "@deck/core/session/request-input";
@@ -14,7 +15,7 @@ import type { TurnFailure } from "@deck/core/session/failure";
 import { runnerTransportFailure } from '@deck/core/session/failure';
 import { classifyCodexFailure, codexNotificationFailure } from "./failure";
 import { CODEX_PROTOCOL, codexTurnStatus, mapCodexNotification } from "./mapper";
-import { buildCodexLaunch, isAdmittedCodexRoleHook, matchesCodexMemoryGroups, codexThreadMcpConfig, isAdmittedCodexMemoryHook, nativeCodexMcpId, verifyCodexConfig, type CodexHookMetadata, type CodexLaunchOptions } from "./launch";
+import { buildCodexLaunch, matchesOwnedCodexMemoryCommand, isAdmittedCodexRoleHook, matchesCodexMemoryGroups, codexThreadMcpConfig, isAdmittedCodexMemoryHook, nativeCodexMcpId, verifyCodexConfig, type CodexHookMetadata, type CodexLaunchOptions } from "./launch";
 import { CodexRpc, CodexRpcFrameError, object, type RpcMessage } from "./rpc";
 
 export const CODEX_TESTED_VERSIONS = { min: "0.162.1", maxTested: "0.162.1" } as const;
@@ -84,8 +85,10 @@ class CodexTask {
   private rejectId!: (error: Error) => void;
   readonly nativeSessionId = new Promise<string>((resolve, reject) => { this.resolveId = resolve; this.rejectId = reject; });
   constructor(private readonly input: DriverTaskInput, private readonly io: DriverHostIo, private readonly options: CodexSessionDriverOptions) {
+    const memoryServers = input.nativeMemory?.status === "ready" ? input.nativeMemory.plugin?.mcpServers ?? {} : {};
+    input = { ...input, mcp: { ...input.mcp, servers: [...new Set([...input.mcp.servers, ...Object.keys(memoryServers)])] }, mcpServerSpecs: { ...input.mcpServerSpecs, ...memoryServers } };
     const aliases = Object.fromEntries(input.mcp.servers.map((id) => [id, nativeCodexMcpId(input.taskId, id)]));
-    this.nativeInput = { ...input, suppressedMcpServers: [...new Set([...(input.suppressedMcpServers ?? []), ...input.mcp.servers])], mcp: { ...input.mcp, servers: input.mcp.servers.map((id) => aliases[id]!) }, mcpServerSpecs: Object.fromEntries(input.mcp.servers.map((id) => [aliases[id]!, input.mcpServerSpecs[id]!])) };
+    this.nativeInput = { ...input, suppressedMcpServers: [...new Set([...(input.suppressedMcpServers ?? []), ...Object.keys(input.nativeMemory?.plugin?.mcpServers ?? {}), ...input.mcp.servers])], mcp: { ...input.mcp, servers: input.mcp.servers.map((id) => aliases[id]!) }, mcpServerSpecs: Object.fromEntries(input.mcp.servers.map((id) => [aliases[id]!, input.mcpServerSpecs[id]!])) };
     this.emit({ kind: "diagnostic", data: { code: "codex-mcp-aliases", aliases } });
     // The host may await done before nativeSessionId; failed startup must not become an unhandled rejection.
     void this.nativeSessionId.catch(() => {});
@@ -184,7 +187,7 @@ class CodexTask {
       let rpc = inventory;
       let runtimeConfig = config;
       let admittedRoleHooks: CodexHookMetadata[] = [];
-      if (this.input.nativeMemory?.status === "ready" || this.input.nativeRoleDescriptor) {
+      if (this.input.nativeMemory?.plugin?.scripts || this.input.nativeRoleDescriptor) {
         // Installed role hooks and managed memory require exact native hash attestation.
         // Only managed hook-hash attestation needs a second process. Personal MCPs,
         // skills and plugins use this process's fresh native configuration directly.
@@ -208,13 +211,14 @@ class CodexTask {
         verifyCodexNativeRole(this.input.nativeRoleDescriptor);
         const activeHooks = await this.readHooks(rpc);
         for (const expected of this.input.nativeRoleDescriptor.hooks) {
+          if (this.input.nativeMemory?.status === "disabled" && matchesOwnedCodexMemoryCommand({ eventName: expected.event, command: expected.command, handlerType: "command" }, this.input)) continue;
           if (!activeHooks.some(hook => isAdmittedCodexRoleHook(hook, this.input) && hook.eventName === expected.event && hook.command === expected.command && hook.enabled !== false && hook.trustStatus === "trusted" && admittedRoleHooks.some(prior => prior.key === hook.key && prior.currentHash === hook.currentHash))) throw new Error("codex-hook-isolation-violation");
         }
       }
       const role = this.input.nativeRoleDescriptor;
       const thread = object(object(await rpc.call(this.input.resume ? "thread/resume" : "thread/start", {
         ...nativeModel(this.input.assignment.modelId || role?.model || ""), cwd: this.input.cwd,
-        developerInstructions: [role?.instructions, this.input.rolePrompt].filter(Boolean).join("\n\n"),
+        developerInstructions: [role?.instructions, this.input.rolePrompt, this.input.localContext, this.input.nativeMemory?.status === "ready" && this.input.nativeMemory.projectScope ? codexSupermemoryToolContext(this.input.nativeMemory.projectScope) : undefined].filter(Boolean).join("\n\n"),
         config: { ...codexThreadMcpConfig(this.nativeInput, Object.keys(object(runtimeConfig.mcp_servers))), ...((this.input.assignment.thinking || role?.effort) ? { model_reasoning_effort: this.input.assignment.thinking || role?.effort } : {}) },
         approvalPolicy: isCodexReadOnlyTask(this.input) ? "never" : this.input.approvals === "relay" ? "on-request" : "never",
         approvalsReviewer: "user", sandbox: isCodexReadOnlyTask(this.input) || role?.sandbox === "read-only" || this.input.approvals === "relay" ? "read-only" : role?.sandbox ?? "danger-full-access",

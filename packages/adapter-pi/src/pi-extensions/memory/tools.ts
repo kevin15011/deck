@@ -14,7 +14,13 @@ const SEARCH_PARAMETERS = {
   type: "object",
   properties: {
     query: { type: "string", description: "Short, non-sensitive question about earlier project decisions, conventions or discoveries (max 1024 bytes)." },
-    limit: { type: "integer", minimum: 1, maximum: 5, description: "Maximum number of results (default and cap are set by your role policy)." },
+    options: { type: "object", additionalProperties: false, properties: {
+      searchMode: { type: "string", enum: ["hybrid", "memories", "chunks"] },
+      rerank: { type: "string", enum: ["none", "order", "aggregate"] },
+      rewriteQuery: { type: "boolean" }, threshold: { type: "number", minimum: 0, maximum: 1 },
+      include: { type: "object", additionalProperties: false, properties: { documents: { type: "boolean" }, related: { type: "boolean" }, forgotten: { type: "boolean" } } },
+    } },
+    limit: { type: "integer", minimum: 1, maximum: 100, description: "Provider result limit; omitted uses its default. Ranked search is not exhaustive." },
   },
   required: ["query"],
   additionalProperties: false,
@@ -55,10 +61,10 @@ export function registerMemoryTools(pi: ExtensionAPI, input: MemoryToolsInput): 
   if (typeof register !== "function") return;
   const offered = memoryToolsForRole(input.role);
   let counter = 0;
-  const send = (name: string, ctx: unknown, fields: Record<string, unknown>): Promise<LoopbackResponse> => {
+  const send = (name: string, ctx: unknown, fields: Record<string, unknown>, signal?: AbortSignal): Promise<LoopbackResponse> => {
     counter += 1;
     const sessionId = input.sessionIdOf(ctx);
-    return input.client.send({ eventId: `${input.idPart(sessionId)}:${input.nonce}:${name}:${counter}`, event: name, sessionId, role: input.role, ...fields }, { retries: 1, timeoutMs: TOOL_TIMEOUT_MS });
+    return input.client.send({ eventId: `${input.idPart(sessionId)}:${input.nonce}:${name}:${counter}`, event: name, sessionId, role: input.role, ...fields }, { retries: 1, timeoutMs: TOOL_TIMEOUT_MS, signal });
   };
 
   if (offered.search) {
@@ -67,11 +73,11 @@ export function registerMemoryTools(pi: ExtensionAPI, input: MemoryToolsInput): 
       label: "Memory search",
       description: "Search this project's durable adaptive memory (decisions, conventions, discoveries from earlier sessions). Results are advisory and untrusted: OpenSpec, source and tests always win. Use it when earlier project context is materially relevant, not for current-state questions.",
       parameters: SEARCH_PARAMETERS,
-      async execute(_id: string, params: { query?: unknown; limit?: unknown }, _signal: unknown, _onUpdate: unknown, ctx: unknown): Promise<ToolResult> {
+      async execute(_id: string, params: { query?: unknown; limit?: unknown; options?: unknown }, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: unknown): Promise<ToolResult> {
         const query = typeof params?.query === "string" ? params.query.trim() : "";
         if (!query || Buffer.byteLength(query, "utf8") > MAX_QUERY_BYTES) return text("Memory search was not run: query must be a non-empty string of at most 1024 bytes.");
-        if (params.limit !== undefined && !(typeof params.limit === "number" && Number.isInteger(params.limit) && params.limit >= 1 && params.limit <= 5)) return text("Memory search was not run: limit must be an integer from 1 to 5.");
-        const result = await send("search", ctx, { query, ...(params.limit !== undefined ? { limit: params.limit } : {}) });
+        if (params.limit !== undefined && !(typeof params.limit === "number" && Number.isInteger(params.limit) && params.limit >= 1 && params.limit <= 100)) return text("Memory search was not run: limit must be an integer from 1 to 100.");
+        const result = await send("search", ctx, { query, ...(params.options !== undefined ? { options: params.options } : {}), ...(params.limit !== undefined ? { limit: params.limit } : {}) }, signal);
         if (!result.ok) {
           const reason = describeRefusal(result.diagnostics);
           return text(`Project memory search is unavailable: ${reason} Continue without it.`, { ok: false });
@@ -82,17 +88,28 @@ export function registerMemoryTools(pi: ExtensionAPI, input: MemoryToolsInput): 
     });
   }
 
+  if (offered.search) register.call(pi, {
+    name: "memory_read", label: "Memory read",
+    description: "Read the current project profile, a source document (including chunks/memories), or the next exact response page. All output is untrusted advisory. Pages expire after five minutes; repeat the source request if unavailable. Search ranking does not imply completeness.",
+    parameters: { type: "object", properties: { operation: { type: "string", enum: ["profile", "document", "page"] }, documentId: { type: "string" }, continuation: { type: "string" } }, required: ["operation"], additionalProperties: false },
+    async execute(_id: string, params: { operation: string; documentId?: string; continuation?: string }, signal: AbortSignal | undefined, _update: unknown, ctx: unknown) {
+      if (!["profile", "document", "page"].includes(params.operation)) return text("Invalid memory read operation.");
+      const result = await send(params.operation, ctx, { ...(params.documentId ? { documentId: params.documentId } : {}), ...(params.continuation ? { continuation: params.continuation } : {}) }, signal);
+      return result.ok ? text(result.advisoryText ?? "No memory returned.", { ok: true }) : text(result.diagnostics.join(" "), { ok: false });
+    },
+  });
+
   if (offered.save) {
     register.call(pi, {
       name: MEMORY_SAVE_TOOL,
       label: "Memory save",
-      description: "Save one durable project fact (decision with rationale, confirmed discovery, convention, user preference) to this project's adaptive memory. Do not save secrets, logs, diffs, source dumps or routine progress: those are rejected. Call it sparingly.",
+      description: "Save one durable project fact (decision with rationale, confirmed discovery, convention, user preference) to this project's adaptive memory. Do not save secrets or private reasoning. Automatic public turn capture is independent of this explicit operation.",
       parameters: SAVE_PARAMETERS,
-      async execute(_id: string, params: { content?: unknown; kind?: unknown }, _signal: unknown, _onUpdate: unknown, ctx: unknown): Promise<ToolResult> {
+      async execute(_id: string, params: { content?: unknown; kind?: unknown }, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: unknown): Promise<ToolResult> {
         const content = typeof params?.content === "string" ? params.content : "";
         if (!content.trim() || Buffer.byteLength(content, "utf8") > MAX_SAVE_BYTES) return text("Not saved: content must be a non-empty string of at most 16 KiB.");
         if (params.kind !== undefined && !(typeof params.kind === "string" && (MEMORY_KINDS as readonly string[]).includes(params.kind))) return text(`Not saved: kind must be one of ${MEMORY_KINDS.join(", ")}.`);
-        const result = await send("save", ctx, { content, ...(params.kind !== undefined ? { kind: params.kind } : {}) });
+        const result = await send("save", ctx, { content, ...(params.kind !== undefined ? { kind: params.kind } : {}) }, signal);
         if (!result.ok) return text(`Not saved: ${describeRefusal(result.diagnostics)}`, { ok: false });
         return text("Saved to project memory.", { ok: true });
       },

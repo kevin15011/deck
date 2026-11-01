@@ -11,7 +11,7 @@
       "devDependencies": {
         "@types/bun": "latest",
         "@types/react": "latest",
-        "opencode-supermemory": "2.0.15",
+        "opencode-supermemory": "2.1.0",
         "typescript": "latest",
       },
     },
@@ -623,7 +623,7 @@
 
     "openai": ["openai@7.19.0", "", { "peerDependencies": { "@aws-sdk/credential-provider-node": ">=3.972.0 <4", "@smithy/hash-node": ">=4.3.0 <5", "@smithy/signature-v4": ">=5.4.0 <6", "undici": ">=5 <9", "ws": "^8.21.0", "zod": "^3.25 || ^4.0" }, "optionalPeers": ["@aws-sdk/credential-provider-node", "@smithy/hash-node", "@smithy/signature-v4", "undici", "ws", "zod"] }, "sha512-MX2s3u2L5racTO0CC/SWpCOasJQBCJrqLKXK+l82cAhdeF8mPMBEe/gxMm0ZFa2xpKpOFLRjxv5afYEZbBXmbQ=="],
 
-    "opencode-supermemory": ["opencode-supermemory@2.0.15", "", { "peerDependencies": { "@opentui/core": ">=0.5.8", "@opentui/solid": ">=0.5.8", "solid-js": ">=1.9.0" }, "optionalPeers": ["@opentui/core", "@opentui/solid", "solid-js"], "bin": { "opencode-supermemory": "dist/cli.js" } }, "sha512-5rVGW0yxP+w4Iz71y7qkAjiiigSQArC/OqfEyfCoRNZPS1dCJQrdBcyYwrrSSwX/89qLKIIFRwmkl7l5xKYctQ=="],
+    "opencode-supermemory": ["opencode-supermemory@2.1.0", "", { "peerDependencies": { "@opentui/core": ">=0.5.8", "@opentui/solid": ">=0.5.8", "solid-js": ">=1.9.0" }, "optionalPeers": ["@opentui/core", "@opentui/solid", "solid-js"], "bin": { "opencode-supermemory": "dist/cli.js" } }, "sha512-yzLuEoe0T2BU/YS8kct5CAgK4U+5UyM084Q0/bpo2avLJsC6Owqw0qUnnoTz3UQBdgiQiSxSfk9WxLMlZ+nlCw=="],
 
     "p-retry": ["p-retry@4.6.2", "", { "dependencies": { "@types/retry": "0.12.0", "retry": "^0.13.1" } }, "sha512-312Id396EbJdvRONlngUx0NydfrIQ5lsYu0znKVUzVvArzEIt08V1qhtyESbGVd1FGX7UKtiFp5uwKZdM8wIuQ=="],
 

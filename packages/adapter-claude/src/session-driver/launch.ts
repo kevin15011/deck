@@ -149,7 +149,8 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   else if (input.approvals === "runner-default") args.push("--dangerously-skip-permissions");
   else throw new ClaudeLaunchError("claude-approval-mode-invalid", "Explicit session approval mode is required.");
   if (input.disableNativeDelegation) args.push("--disallowedTools", NATIVE_DELEGATION_TOOLS);
-  if (input.rolePrompt.length > 0) args.push("--append-system-prompt-file", files.writePrivateFile("role-prompt.md", input.rolePrompt));
+  const contextualPrompt = [input.rolePrompt, input.localContext].filter(Boolean).join("\n\n");
+  if (contextualPrompt.length > 0) args.push("--append-system-prompt-file", files.writePrivateFile("role-prompt.md", contextualPrompt));
 
   if (options.extraArgs) args.push(...options.extraArgs);
 

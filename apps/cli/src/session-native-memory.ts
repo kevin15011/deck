@@ -1,3 +1,4 @@
+import { buildClaudeSupermemoryLaunchOverlay } from "../../../packages/adapter-claude/src/supermemory-settings";
 /** Native Supermemory preparation for managed cross sessions. No installation or provider I/O. */
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -7,7 +8,7 @@ import { resolveSupermemorySessionScope, resolveVerifiedGitSharedProjectBase, re
 import type { ChildMcpServerSpec, NativeMemoryDescriptor } from "@deck/core/session/driver";
 import { CLAUDE_SUPERMEMORY_COMMIT, inspectClaudeSupermemoryArtifact } from "../../../packages/adapter-claude/src/supermemory-artifact";
 import { resolveClaudeSupermemorySessionCredential } from "./claude-supermemory-launch";
-import { assertCodexSupermemoryReady, buildCodexSupermemoryLaunchOverlay, resolveCodexSupermemorySessionCredential } from "./codex-supermemory-launch";
+import { assertCodexSupermemoryReady, inspectDisabledCodexMemoryPlugin, buildCodexSupermemoryLaunchOverlay, resolveCodexSupermemorySessionCredential } from "./codex-supermemory-launch";
 import { buildOpenCodeSupermemoryLaunchOverlay, inspectProjectRepoTagOverride } from "./opencode-supermemory-launch";
 
 type Credential = { token: string; canonicalRepoTag?: string };
@@ -71,7 +72,9 @@ export function prepareSessionNativeMemory(
 ): PreparedNativeMemory | undefined {
   if (!["claude", "codex", "opencode"].includes(runnerId)) return undefined;
   const base = { provider: "supermemory", integration: "runner-plugin" } as const;
-  if (!config.adaptiveMemory.enabled || config.adaptiveMemory.activeProvider !== "supermemory") return { nativeMemory: { ...base, status: "disabled", reasonCode: "memory-disabled" } };
+  const disabled = (reasonCode: string): PreparedNativeMemory => ({ nativeMemory: { ...base, status: "disabled", reasonCode,
+    ...(runnerId === "codex" ? { plugin: inspectDisabledCodexMemoryPlugin({ home: environment.HOME, codexHome: environment.CODEX_HOME ?? (environment.HOME ? join(environment.HOME, ".codex") : undefined) }) } : {}) } });
+  if (!config.adaptiveMemory.enabled || config.adaptiveMemory.activeProvider !== "supermemory") return disabled("memory-disabled");
   const unavailable = (reasonCode: string): PreparedNativeMemory => ({ nativeMemory: { ...base, status: "unavailable", reasonCode } });
   const scope = resolveSupermemorySessionScope({ projectRoot, remotes: [] });
   if (scope.kind === "invalid") return unavailable("native-memory-scope-unavailable");
@@ -87,14 +90,14 @@ export function prepareSessionNativeMemory(
     if (scope.kind === "global" && inspectProjectRepoTagOverride(resolveVerifiedGitSharedProjectBase(projectRoot) ?? projectRoot).status !== "absent") throw new Error("Global memory cannot admit project container overrides");
     let prepared: { plugin: Plugin; env: Record<string, string> };
     if (effects.plugin) prepared = effects.plugin(runnerId, projectRoot, credential);
-    else if (runnerId === "claude") prepared = { plugin: prepareClaudePlugin(environment), env: { SUPERMEMORY_CC_API_KEY: credential.token, SUPERMEMORY_API_URL: "https://api.supermemory.ai", SUPERMEMORY_MCP_URL: "https://mcp.supermemory.ai/mcp", ...(projectScope ? { SUPERMEMORY_REPO_TAG: projectScope } : {}) } };
+    else if (runnerId === "claude") prepared = { plugin: prepareClaudePlugin(environment), env: Object.fromEntries(Object.entries(buildClaudeSupermemoryLaunchOverlay(credential)).map(([key, value]) => [key, value.value])) };
     else if (runnerId === "codex") {
-      assertCodexSupermemoryReady(projectRoot, { home: environment.HOME, codexHome: environment.CODEX_HOME });
+      assertCodexSupermemoryReady(projectRoot, { home: environment.HOME, codexHome: environment.CODEX_HOME ?? (environment.HOME ? join(environment.HOME, ".codex") : undefined) });
       const tools = createCodexTools({ homeDir: environment.HOME });
       const scripts = tools.supermemory.scripts(), nodeCommand = tools.node.command();
       if (!scripts || !nodeCommand) throw new Error("Pinned Codex hooks unavailable");
       const overlay = buildCodexSupermemoryLaunchOverlay({ token: credential.token, projectRoot, canonicalRepoTag: projectScope });
-      prepared = { plugin: { root: tools.supermemory.root, scripts, nodeCommand }, env: Object.fromEntries(Object.entries(overlay).map(([key, value]) => [key, value.value])) };
+      prepared = { plugin: { root: tools.supermemory.root, scripts, nodeCommand, mcpServers: { supermemory: { command: nodeCommand, args: [tools.supermemory.proxy()!], env: {} } } }, env: Object.fromEntries(Object.entries(overlay).map(([key, value]) => [key, value.value])) };
     } else {
       const overlay = buildOpenCodeSupermemoryLaunchOverlay({ token: credential.token, projectRoot, canonicalRepoTag: projectScope, environment, homeDirectory: environment.HOME });
       const owned = inspectOwnedOpenCodeSupermemory({ environment, homeDirectory: environment.HOME });
@@ -104,7 +107,10 @@ export function prepareSessionNativeMemory(
     if (scope.kind === "global") {
       // Provider credentials stay in the host; the transport will supply a session bearer later.
       const env = Object.fromEntries(Object.entries(prepared.env).filter(([key]) => !/^SUPERMEMORY_/i.test(key) && !/^DECK_MEMORY_/i.test(key)));
-      return { nativeMemory: { ...base, status: "ready", scopeMode: "global", automaticRecall: "native-hook", automaticCapture: "unverified", plugin: prepared.plugin }, envOverlay: env, globalTransportToken: credential.token };
+      // The official hosted proxy shares the hook credential variable. Global hooks
+      // receive only a loopback bearer, so no hosted proxy may inherit that value.
+      const plugin = runnerId === "codex" ? { ...prepared.plugin, mcpServers: undefined } : prepared.plugin;
+      return { nativeMemory: { ...base, status: "ready", scopeMode: "global", automaticRecall: "native-hook", automaticCapture: "unverified", plugin }, envOverlay: env, globalTransportToken: credential.token };
     }
     return { nativeMemory: { ...base, status: "ready", projectScope, automaticRecall: "native-hook", automaticCapture: "unverified", plugin: prepared.plugin }, envOverlay: prepared.env };
   } catch { return unavailable("native-memory-plugin-unavailable"); }

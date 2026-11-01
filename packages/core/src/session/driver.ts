@@ -78,6 +78,8 @@ export type DriverTaskInput = {
   /** Provenance of the original host-composed input, distinct from later genuine steering. */
   inputOrigin?: "user" | "host";
   taskId: string; memberId: string; cwd: string; assignment: RunnerQualifiedAssignment;
+  /** Historical public session evidence, separate from role/readiness authority and user input. */
+  localContext?: string;
   rolePrompt: string; prompt: string; images?: readonly DriverImageInput[]; resume?: { nativeSessionId: string };
   /** Caller-assigned native session id for a fresh native session; set only for drivers that expose `newNativeSessionId`. */
   nativeSessionId?: string;
@@ -152,7 +154,11 @@ export type DriverHostIo = {
 
 export type TurnOutcome = { status: "completed" | "interrupted" | "interrupted-forced" | "failed"; error?: string; failure?: TurnFailure; reasonCode?: "native-session-not-found" };
 
+/** Native lifecycle evidence never implies remote acceptance or processing. */
+export type NativeCaptureOutcome = { lifecycle: "completed" | "pending" | "error" | "unknown"; acceptance: "unknown"; reason: string };
+
 export type DriverTaskHandle = {
+  captureOutcome?(): NativeCaptureOutcome;
   nativeSessionId: Promise<string>;
   /** Optional verified exact-turn text capability. Never use send for concurrent delivery. */
   steeringTarget?(): SteeringTarget | undefined;

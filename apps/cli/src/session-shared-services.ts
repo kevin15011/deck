@@ -114,11 +114,12 @@ export async function resolveSessionChildMcp(
   })().finally(() => { releasing = undefined; });
   try {
     if (memory?.globalTransportToken) {
+      if (adapter?.runnerId === "codex") suppressedMcpServers.push("supermemory");
       step("memory-transport");
       const transport = await startGlobalTransport({ token: memory.globalTransportToken, signal: managed?.context.signal });
       releases.push(() => transport.close());
-      const credentialKey = adapter?.runnerId === "claude" ? "SUPERMEMORY_CC_API_KEY" : "SUPERMEMORY_API_KEY";
-      envOverlay = { ...envOverlay, [credentialKey]: transport.token, SUPERMEMORY_API_URL: transport.apiUrl,
+      const credentialKey = adapter?.runnerId === "claude" ? "SUPERMEMORY_CC_API_KEY" : adapter?.runnerId === "codex" ? "SUPERMEMORY_CODEX_API_KEY" : "SUPERMEMORY_API_KEY";
+      envOverlay = { ...envOverlay, [credentialKey]: transport.token, SUPERMEMORY_API_URL: transport.apiUrl, SUPERMEMORY_API_VERSION: "legacy",
         ...(adapter?.runnerId === "claude" ? { SUPERMEMORY_MCP_URL: transport.mcpUrl } : {}) };
     }
     const codebase = servers["codebase-memory"];

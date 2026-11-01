@@ -22,6 +22,12 @@ const server = Bun.serve({
     const body = request.method === "GET" ? null : await request.json().catch(() => null);
     calls.push({ path: url.pathname, method: request.method, authorization: request.headers.get("authorization"), body });
     if (request.headers.get("authorization") === "Bearer sm_bad_compiled") return new Response("bad token sm_bad_compiled", { status: 401 });
+    const canonical = url.pathname.startsWith("/ns/");
+    if ((canonical && url.pathname.endsWith("/search") && body?.query === "timeout") || (url.pathname === "/v4/search" && body?.q === "timeout")) await new Promise((resolve) => setTimeout(resolve, 100));
+    if (canonical && url.pathname.endsWith("/document") && request.method === "POST") return Response.json({ id: body.id, status: "queued" });
+    if (canonical && url.pathname.includes("/document/") && request.method === "GET" && url.searchParams.get("include") === "chunks,memories") return Response.json({ id: decodeURIComponent(url.pathname.split("/").at(-1)!), content: "compiled source", chunks: [], memories: [] });
+    if (canonical && url.pathname.endsWith("/search")) return Response.json({ results: [{ id: "compiled-memory", memory: "compiled recall" }] });
+    if (canonical && url.pathname.endsWith("/profile")) return Response.json({ profile: { static: [{ id: "compiled-profile", memory: "compiled profile" }], dynamic: [], buckets: {} } });
     if (url.pathname === "/v3/documents") return Response.json({ id: "doc" });
     if (url.pathname === "/v4/search") return Response.json({ results: [{ id: "m", memory: "compiled deck recall" }] });
     if (url.pathname === "/v4/profile") return Response.json({ profile: { static: ["compiled deck profile"], dynamic: [] } });
@@ -45,7 +51,12 @@ try {
         const body = request.method === "GET" ? null : await request.json().catch(() => null);
         calls.push({ path: url.pathname, method: request.method, authorization: request.headers.get("authorization"), body });
         if (request.headers.get("authorization") === "Bearer sm_bad_compiled") return new Response("bad token sm_bad_compiled", { status: 401 });
-        if (url.pathname === "/v4/search" && body?.q === "timeout") await new Promise((resolve) => setTimeout(resolve, 100));
+        const canonical = url.pathname.startsWith("/ns/");
+        if ((canonical && url.pathname.endsWith("/search") && body?.query === "timeout") || (url.pathname === "/v4/search" && body?.q === "timeout")) await new Promise((resolve) => setTimeout(resolve, 100));
+        if (canonical && url.pathname.endsWith("/document") && request.method === "POST") return Response.json({ id: body.id, status: "queued" });
+        if (canonical && url.pathname.includes("/document/") && request.method === "GET" && url.searchParams.get("include") === "chunks,memories") return Response.json({ id: decodeURIComponent(url.pathname.split("/").at(-1)!), content: "compiled source", chunks: [], memories: [] });
+        if (canonical && url.pathname.endsWith("/search")) return Response.json({ results: [{ id: "compiled-memory", memory: "compiled recall" }] });
+        if (canonical && url.pathname.endsWith("/profile")) return Response.json({ profile: { static: [{ id: "compiled-profile", memory: "compiled profile" }], dynamic: [], buckets: {} } });
         if (url.pathname === "/v3/documents") return Response.json({ id: "doc" });
         if (url.pathname === "/v4/search") return Response.json({ results: [{ id: "m", memory: "compiled recall" }] });
         if (url.pathname === "/v4/profile") return Response.json({ profile: { static: ["compiled profile"], dynamic: [] } });
@@ -108,9 +119,35 @@ try {
       const profile = await runtime.profile({ role: "lead", dependency: "explicit-recall" });
       const capture = await runtime.capture({ role: "assistant", source: "trusted-final-assistant", dependency: "automatic", content: "Compiled runtime captured a bounded high-signal final assistant summary." });
       if (!health.ok || !search.ok || !profile.ok || !capture.ok) throw new Error("compiled runtime failed");
-      const timeoutRuntime = createSupermemoryRuntime({ canonicalScope: scope, sessionId: "compiled-timeout", runnerId: "compiled-smoke", transport: createSupermemoryHttpTransport({ apiKey: "sm_test_compiled", baseURL: "http://127.0.0.1:" + server.port, timeoutMs: 1 }) });
+      if (search.context.items[0]?.id !== "compiled-memory" || search.context.items[0]?.content !== "compiled recall") throw new Error("canonical search response was not decoded");
+      if (profile.context.items[0]?.id !== "compiled-profile" || profile.context.items[0]?.content !== "compiled profile") throw new Error("canonical profile response was not decoded");
+      const canonicalPrefix = "/ns/" + scope;
+      const documentCall = calls.find(call => call.path === canonicalPrefix + "/document");
+      if (documentCall?.method !== "POST" || !documentCall.body?.id?.startsWith("deck_conversation_") || "customId" in documentCall.body || "containerTag" in documentCall.body) throw new Error("canonical capture must send a v5 document id in its namespace");
+      const document = await transport.document!({ containerTag: scope, id: documentCall.body.id }) as { id: string; content: string };
+      if (document.id !== documentCall.body.id || document.content !== "compiled source") throw new Error("canonical document response id/content mismatch");
+      const appended = await transport.add({ containerTag: scope, customId: "compiled-append-id", content: "compiled append" }) as { id: string };
+      if (appended.id !== "compiled-append-id") throw new Error("canonical append response id mismatch");
+      const searchCall = calls.find(call => call.path === canonicalPrefix + "/search");
+      if (searchCall?.method !== "POST" || searchCall.body?.query !== "compiled" || "q" in searchCall.body || "containerTag" in searchCall.body) throw new Error("canonical search request must use query in its namespace");
+      if (calls.some(call => call.path === canonicalPrefix + "/profile" && (call.method !== "POST" || JSON.stringify(call.body) !== "{}"))) throw new Error("canonical profile request shape mismatch");
+      const timeoutRuntime = createSupermemoryRuntime({ canonicalScope: scope, sessionId: "compiled-timeout", runnerId: "compiled-smoke", transport: createSupermemoryHttpTransport({ apiKey: "sm_test_compiled", baseURL: "http://127.0.0.1:" + server.port, timeoutMs: 25 }) });
       const timeoutResult = await timeoutRuntime.search({ role: "lead", query: "timeout", dependency: "explicit-recall" });
       if (timeoutResult.ok || !timeoutResult.diagnostics.join(" ").includes("reason=timeout")) throw new Error("timeout path was not exercised");
+      if (!calls.some(call => call.path === canonicalPrefix + "/search" && call.body?.query === "timeout")) throw new Error("canonical timeout request did not reach the fixture");
+      // Legacy/global transport remains an explicit compatibility lane.
+      const legacyScope = "legacy-global";
+      const legacyDocument = await transport.add({ containerTag: legacyScope, customId: "legacy-id", content: "legacy capture" }) as { id: string };
+      const legacySearch = await transport.search({ containerTag: legacyScope, q: "legacy" });
+      const legacyProfile = await transport.profile({ containerTag: legacyScope });
+      if (legacyDocument.id !== "doc" || legacySearch.results?.[0]?.id !== "m" || legacyProfile.profile?.static?.[0] !== "compiled profile") throw new Error("legacy response contract mismatch");
+      const legacyTimeout = createSupermemoryHttpTransport({ apiKey: "sm_test_compiled", baseURL: "http://127.0.0.1:" + server.port, timeoutMs: 25 });
+      let legacyTimedOut = false;
+      try { await legacyTimeout.search({ containerTag: legacyScope, q: "timeout" }); } catch (error) { legacyTimedOut = String(error).includes("timed out"); }
+      if (!legacyTimedOut || !calls.some(call => call.path === "/v4/search" && call.body?.q === "timeout")) throw new Error("legacy timeout path was not exercised");
+      const legacyAdd = calls.find(call => call.path === "/v3/documents");
+      if (legacyAdd?.body?.containerTag !== legacyScope || legacyAdd.body?.customId !== "legacy-id" || "id" in legacyAdd.body) throw new Error("legacy capture request contract mismatch");
+      if (!calls.some(call => call.path === "/v4/profile" && call.body?.containerTag === legacyScope)) throw new Error("legacy profile scope missing");
       const invalidAuthRuntime = createSupermemoryRuntime({ canonicalScope: scope, sessionId: "compiled-invalid", runnerId: "compiled-smoke", transport: createSupermemoryHttpTransport({ apiKey: "sm_bad_compiled", baseURL: "http://127.0.0.1:" + server.port, timeoutMs: 2000 }) });
       const invalidAuth = await invalidAuthRuntime.health({ dependency: "explicit-recall" });
       if (invalidAuth.ok) throw new Error("invalid auth unexpectedly succeeded");
@@ -119,15 +156,13 @@ try {
       const disabled = await disabledRuntime.health({ dependency: "automatic" });
       if (disabled.ok || disabled.reason !== "invalid_project_scope") throw new Error("disabled/missing scope path was not exercised");
       const paths = calls.map((call) => call.path).sort();
-      for (const required of ["/v3/documents", "/v4/profile", "/v4/search"]) {
+      for (const required of [canonicalPrefix + "/document", canonicalPrefix + "/profile", canonicalPrefix + "/search", "/v3/documents", "/v4/profile", "/v4/search"]) {
         if (!paths.includes(required)) throw new Error("missing HTTP endpoint " + required + " saw " + paths.join(","));
       }
       for (const call of calls) {
         if (call.authorization !== "Bearer sm_test_compiled" && call.authorization !== "Bearer sm_bad_compiled") throw new Error("missing bearer header for " + call.path);
       }
       const serialized = JSON.stringify(calls);
-      if (!serialized.includes(scope)) throw new Error("containerTag missing from HTTP payloads");
-      if (!serialized.includes("deck_conversation_")) throw new Error("customId missing from capture payload");
       if (serialized.includes("node_modules") || serialized.includes("npm ")) throw new Error("compiled runtime leaked external module path or npm dependency wording");
       console.log("compiled-supermemory-runtime ok");
     } finally {
@@ -196,11 +231,15 @@ try {
       if (runtimeSmokeOutput.includes("sm_test_compiled") || runtimeSmokeOutput.includes("sm_bad_compiled")) throw new Error("extracted Deck runtime smoke leaked a credential");
       const realDeckCalls = calls.slice(realDeckCallsStart);
       const realDeckPaths = realDeckCalls.map((call) => call.path).sort();
-      for (const required of ["/v3/documents", "/v4/profile", "/v4/search"]) {
+      const canonicalPrefix = "/ns/sm_project_v1_kevin15011_deck";
+      for (const required of [canonicalPrefix + "/document", canonicalPrefix + "/profile", canonicalPrefix + "/search"]) {
         if (!realDeckPaths.includes(required)) throw new Error("extracted Deck runtime smoke missing endpoint " + required + " saw " + realDeckPaths.join(","));
       }
-      const realDeckCapture = realDeckCalls.find((call) => call.path === "/v3/documents" && call.body?.metadata?.source === "explicit-remember");
+      const realDeckCapture = realDeckCalls.find((call) => call.path === canonicalPrefix + "/document" && call.body?.metadata?.source === "explicit-remember");
       if (!realDeckCapture) throw new Error("extracted Deck runtime smoke did not exercise explicit remember capture contract");
+      if (realDeckCapture.method !== "POST" || !realDeckCapture.body?.id?.startsWith("deck_conversation_") || "customId" in realDeckCapture.body || "containerTag" in realDeckCapture.body) throw new Error("extracted Deck capture did not use the canonical v5 document id contract");
+      if (realDeckCalls.some(call => !call.path.startsWith(canonicalPrefix + "/"))) throw new Error("extracted Deck canonical operations escaped their namespace");
+      if (!realDeckCalls.some(call => call.path.endsWith("/search") && typeof call.body?.query === "string" && !("q" in call.body))) throw new Error("extracted Deck search did not use the canonical query field");
       if (JSON.stringify(realDeckCapture).includes("compiled-deck-explicit-remember") || realDeckCapture.body?.metadata?.correlationId !== undefined) throw new Error("extracted Deck runtime smoke persisted a transport correlation identifier");
       console.log("compiled-deck-runtime-operations ok (extracted release archive, mock endpoint, credential-free MCP materialization, authenticated loopback capture)");
 

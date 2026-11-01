@@ -21,7 +21,7 @@ test("fresh and repeated initialization restore tools from matching scrubbed coo
   const reads: string[] = [];
   for (let i = 0; i < 3; i++) {
     const result = initialize(env, path => { reads.push(path); return secret; });
-    expect(result.tools).toEqual(["memory_search", "memory_save"]);
+    expect(result.tools).toEqual(["memory_search", "memory_read", "memory_save"]);
     expect(result.notices).toEqual([]);
   }
   expect(reads).toEqual(Array(3).fill("/fake/private-token"));
@@ -32,7 +32,7 @@ test("fresh explicit coordinates override published coordinates for memory and c
   const next = { DECK_RUNNER_MEMORY_ENDPOINT: endpoint.replace("12345", "12346"), DECK_RUNNER_MEMORY_TOKEN_FILE: "/fake/new-token" };
   expect(resolveMemoryHandoff(next)).toEqual({ endpoint: next.DECK_RUNNER_MEMORY_ENDPOINT, tokenFile: next.DECK_RUNNER_MEMORY_TOKEN_FILE });
   const paths: string[] = [];
-  expect(initialize(next, path => { paths.push(path); return secret; }).tools).toHaveLength(2);
+  expect(initialize(next, path => { paths.push(path); return secret; }).tools).toHaveLength(3);
   expect(paths).toEqual(["/fake/new-token"]);
 });
 
@@ -40,7 +40,7 @@ test("an explicit changed token file at the same endpoint wins over the scrubbed
   const env = fresh(); initialize(env);
   env.DECK_RUNNER_MEMORY_TOKEN_FILE = "/fake/rotated-token";
   const paths: string[] = [];
-  expect(initialize(env, path => { paths.push(path); return secret; }).tools).toHaveLength(2);
+  expect(initialize(env, path => { paths.push(path); return secret; }).tools).toHaveLength(3);
   expect(paths).toEqual(["/fake/rotated-token"]);
   expect(readPublishedMemoryHandoff()?.tokenFile).toBe("/fake/rotated-token");
 });
@@ -80,5 +80,5 @@ test("reload still validates unreadable and empty private files and read-only ro
     expect(readPublishedMemoryHandoff()).toBeUndefined();
   }
   const env = { ...fresh(), DECK_PI_ROLE: "investigate", DECK_PI_CHILD: "1" };
-  for (let i = 0; i < 3; i++) expect(initialize(env).tools).toEqual(["memory_search"]);
+  for (let i = 0; i < 3; i++) expect(initialize(env).tools).toEqual(["memory_search", "memory_read"]);
 });

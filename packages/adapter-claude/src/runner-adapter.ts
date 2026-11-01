@@ -1,3 +1,4 @@
+import { buildClaudeSupermemoryLaunchOverlay, configureClaudeSupermemoryCapture } from "./supermemory-settings";
 import { createClaudeSkillDiscoveryProvider, type ClaudeSkillDiscoveryOptions } from "./skill-discovery-provider";
 import { PrerequisiteEvidence, pinnedHookExecutable } from "../../core/src/session/prerequisite-evidence";
 import { resolveWebSearchLaunch } from "@deck/core";
@@ -81,6 +82,7 @@ export function expectedFiles(root: string, assignments: ClaudeAssignments = {},
     const canonical = getAgentContent(agent.id, { promptProfile: "compact", ...(instructionIds.length ? { capabilityInstructions: translateClaudeCapabilityInstructions(buildCapabilityInstructionBundle(instructionIds)) } : {}) });
     if (!canonical?.agentBody || !canonical.skillBody || /<!-- Placeholder:/.test(canonical.agentBody + canonical.skillBody)) throw new Error("Incomplete canonical Claude role.");
     const readOnlyTools = [
+      ...ROLE_TOOL_POLICY.mcp.deck!.map(tool => `mcp__deck__${tool}`),
       ...(capabilities.includes("web-search") ? ["WebSearch", "WebFetch"] : []),
       ...ROLE_TOOL_POLICY.builtins.map(tool => tool[0]!.toUpperCase() + tool.slice(1)),
       ...readOnlyMcpTools(capabilities, (server, tool) => server === "codebase-memory"
@@ -623,7 +625,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       const codebaseDenials = input.codebaseAvailability ? claudeCodebaseDenials({ skills: prepared,
         projectRoot: input.projectRoot, invocationId: input.codebaseInvocationId ?? "", route: "native", overrides: [], availability: input.codebaseAvailability }) : [];
       const attributionArgs = codebaseDenials.length ? ["--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, deniedMcpServers: codebaseDenials.map(serverName => ({ serverName })) })] : CLAUDE_ATTRIBUTION_SETTINGS_ARGS;
-      const envOverlay = { ...(webSearchEnabled && token ? { TAVILY_API_KEY: { value: token, sensitive: true } } : {}), ...(credential ? { SUPERMEMORY_CC_API_KEY: { value: credential.token, sensitive: true }, SUPERMEMORY_REPO_TAG: { value: credential.canonicalRepoTag } } : {}) };
+      const envOverlay = { ...(webSearchEnabled && token ? { TAVILY_API_KEY: { value: token, sensitive: true } } : {}), ...(credential ? buildClaudeSupermemoryLaunchOverlay(credential) : {}) };
       const sensitiveKeys = [...(webSearchEnabled && token ? ["TAVILY_API_KEY"] : []), ...(credential ? ["SUPERMEMORY_CC_API_KEY"] : [])];
       return { status: "ready", plan: { generationReference: { root: selected.location, selectionPath: prepared.selectionPath, selectionHash: prepared.selectionHash }, command: "claude", args: [...attributionArgs, ...searchArgs, "--setting-sources", claudeProjectConfigTrusted(home, input.projectRoot, options.sessionDriver?.baseEnv ?? process.env) ? "user,project,local" : "user", "--plugin-dir", selected.location, ...(credential ? ["--plugin-dir", officialRoot] : []), "--agent", "deck-developer-team:deck-lead"], cwd: input.projectRoot, stdio: "inherit", stdin: "inherit", executionClass: "static-compatible", ...(sensitiveKeys.length ? { envOverlay, sensitiveEnvAuthorization: { binding: credential ? "deck-claude-official-memory-v1" : "deck-claude-web-search-v1", keys: sensitiveKeys } } : {}) }, diagnostics: [...(prepared.preparation ?? []).map(finding => ({ code: finding.code, severity: "warning" as const, message: finding.message })), ...(input.deckConfig.webSearch.enabled && nativeSearch.availability === "unknown" ? [{ code: "native-search-detection-defect", severity: "warning" as const, message: "Native search availability is unknown; the configured fallback is selected and may duplicate an existing search tool." }, { code: "native-search-possible-duplicate", severity: "warning" as const, message: "Review the effective Claude provider/model/tool configuration; existing user search tools are preserved." }] : []), ...(scope?.kind === "global" ? [{ code: "claude-memory-session-disabled", severity: "warning" as const, message: "Git repository identity is absent; Deck Supermemory is disabled for this launch. Saved settings are unchanged. External plugins and hooks may still load." }] : []), { code: "claude-static-compatible", severity: "warning", message: credential ? "Pinned official Supermemory plugin owns recall/capture; Deck only supplies the selected process-local profile and verified scope. Co-loaded user plugins may see the process credential; protected execution remains unsupported." : "Deck supplies the verified team plugin with --plugin-dir. Other user/managed plugins and hooks may still load; remote memory is not asserted off for external plugins." }] };
     },
@@ -748,6 +750,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
         try {
           await ensurePrivatePath(parent, home);
           const status = await installClaudeSupermemoryArtifact(officialRoot, options.supermemoryArtifactEffects, officialManifest);
+          configureClaudeSupermemoryCapture(home);
           recordOwnedRunnerArtifactTree({ runnerId: "claude", root: parent, manifestPath: join(parent, "manifest.json"), artifactRoot: officialRoot, sourceItemId: "package:supermemory", expectedFiles: officialManifest.map(([path]) => path) });
           if (officialState() !== "ready") throw new Error("Official artifact verification failed.");
           return { actionId: action.id, status: "executed", message: status === "installed" ? "Pinned official Supermemory plugin installed and verified." : "Pinned official Supermemory plugin verified without changes.", diagnostics: [] };

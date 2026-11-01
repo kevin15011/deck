@@ -1,3 +1,4 @@
+import { readLocalContext, renderLocalContext, localContextWatermark, type LocalContextPage } from "./local-session-context";
 import { reservePreparationMutation } from "./runner-mutation";
 import { summarizeActivity } from './activity-summary';
 import type { ActivitySummary, ProjectActivity } from '@deck/core/session/activity-summary';
@@ -191,6 +192,8 @@ type Turn = {
   stop?: import("./task-evidence").AttemptContinuityState["stop"];
   lastText?: string;
   nativeMemory?: NativeMemoryDescriptor;
+  localContextPage?: LocalContextPage;
+  localContextDelivered?: boolean;
   promptId?: string;
   images?: DriverImageInput[];
   noticeSnapshot?: Array<{ taskId: string; attempt: number; text: string }>;
@@ -630,6 +633,11 @@ export class SessionManager implements SessionService {
     const d = args as Record<string, unknown>;
     try {
       switch (name) {
+        case "deck_session_history": {
+          if (!this.options.credentials.isActive(grant) || grant.attempt !== caller.attempt || !grant.allowedTools.includes(name)) return fail("credential-revoked");
+          if (Object.keys(d).some(key => !['before','after','eventSeq','offset'].includes(key))) return fail("invalid-arguments");
+          return ok(readLocalContext(live.log, d, live.ledger));
+        }
         case "deck_prepare_project": {
           const port = this.options.projectPreparation, binding = caller.validatedPreparationLaunch, exact = caller.preparationDelegation;
           const current = () => {
@@ -1217,6 +1225,16 @@ export class SessionManager implements SessionService {
     } else if (turn.promptId && prompt?.state !== 'dispatched') return false;
     turn.inputClaimed = true;
     return true;
+  }
+
+  private localContextDelivered(live: Live, turn: Turn, evidence: string): void {
+    // An observed native response confirms attachment admission, not consumption.
+    // Record only the exact native context; failed pre-write starts cannot advance it.
+    if (turn.localContextPage && !turn.localContextDelivered && turn.nativeSessionId) {
+      this.append(live, { kind: 'diagnostic', source: { taskId: turn.taskId, memberId: turn.memberId, runnerId: turn.assignment.runnerId, nativeSessionId: turn.nativeSessionId },
+        data: { code: 'session.context-delivered', attempt: turn.attempt, through: turn.localContextPage.through, before: turn.localContextPage.before, evidence } });
+      this.flush(live); turn.localContextDelivered = true;
+    }
   }
 
   private inputDelivered(live: Live, turn: Turn, evidence: string): void {
@@ -2111,6 +2129,8 @@ export class SessionManager implements SessionService {
           if (event.kind === 'diagnostic' && event.data.code === 'input.delivered' || !event.data.internal && event.data.role !== 'user' && event.data.role !== 'system' && ['message.delta','message.completed','reasoning.delta','tool.started','usage'].includes(event.kind))
             this.inputDelivered(live, turn, event.kind === 'diagnostic' ? String(event.data.evidence ?? 'native-receipt') : event.kind);
           if (!this.driverEvent(live, turn, assignment.runnerId, event)) return;
+          if (event.kind === 'diagnostic' && event.data.code === 'input.delivered' || !event.data.internal && event.data.role !== 'user' && event.data.role !== 'system' && ['message.delta','message.completed','tool.started','usage'].includes(event.kind))
+            this.localContextDelivered(live, turn, event.kind);
           if (turn.nativeEnded) { this.publishSteering(live); return; }
           // This is the driver's observed turn boundary, not uniform model readiness:
           // Claude reports native init; OpenCode reports its prompt request boundary.
@@ -2154,6 +2174,11 @@ export class SessionManager implements SessionService {
         input.prompt=prompt;delete input.resume;delete input.nativeSessionId;
         if(resume)input.resume=resume;else if(nativeSessionId)input.nativeSessionId=nativeSessionId;
       }
+      // Use the final launch selection, including reseeding. Fresh contexts get a
+      // recent page; native resumes get only events beyond their confirmed receipt.
+      turn.localContextPage = readLocalContext(live.log, { after: localContextWatermark(live.log, turn.taskId, assignment.runnerId, input.resume?.nativeSessionId) }, live.ledger);
+      turn.localContextDelivered = false;
+      input.localContext = renderLocalContext(turn.localContextPage);
       turn.launched=true;
       if(turn.memberId===LEAD_MEMBER_ID){this.append(live,{kind:'task.state',source:{taskId:turn.taskId},data:{taskId:turn.taskId,state:'running',attempt:turn.attempt,launched:true}});this.flush(live);}
       resolver?.validateLaunch?.();
@@ -2190,6 +2215,18 @@ export class SessionManager implements SessionService {
       turn.ownershipUnsettled = true;
       outcome = { status: "failed", error: `Unable to close the turn: ${bounded((error as Error).message)}`, failure: sanitizeTurnFailure(outcome.failure) };
       this.options.logger?.warn("session.mcp-binding-retained", { sessionId: live.sessionId, taskId: turn.taskId, reason: "native-close-failed" });
+    }
+    if (turn.nativeMemory?.status === 'ready') {
+      let capture: import('@deck/core/session/driver').NativeCaptureOutcome | undefined;
+      try {
+        const observed = drained ? turn.handle?.captureOutcome?.() : undefined;
+        if (observed && ['completed','pending','error','unknown'].includes(observed.lifecycle) && observed.acceptance === 'unknown'
+          && ['owned-plugin-disposal','native-disposal-unconfirmed','capture-drain-timeout','close-interrupted','native-lifecycle-unobserved'].includes(observed.reason))
+          capture = { lifecycle: observed.lifecycle, acceptance: 'unknown', reason: observed.reason };
+      } catch { /* Optional evidence must not prevent release or terminal persistence. */ }
+      this.append(live, { kind: 'diagnostic', source: { taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId, nativeSessionId: turn.nativeSessionId },
+        data: { code: 'session.native-capture', attempt: turn.attempt, ...(capture ?? { lifecycle: 'unknown', acceptance: 'unknown', reason: drained ? 'native-receipt-unavailable' : 'process-drain-failed' }) } });
+      this.flush(live);
     }
     try { if (drained) await resolver?.release?.(); }
     catch { if(resolver?.release) (live.cleanupFailures??=[]).push(()=>resolver!.release!()); outcome = { status: "failed", error: "Unable to release the managed MCP binding", failure: { category: "deck", origin: "deck", certainty: "inferred" } }; }

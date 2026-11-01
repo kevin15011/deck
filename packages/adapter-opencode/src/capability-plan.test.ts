@@ -174,7 +174,7 @@ describe("buildOpenCodeRunnerReviewPlan official Supermemory plugin UX", () => {
       id: "adaptive-memory.supermemory.install-official-plugin",
       kind: "install-opencode-plugin",
       toolId: "opencode-supermemory",
-      source: "opencode-supermemory@2.0.15",
+      source: "opencode-supermemory@2.1.0",
       status: "ready",
       required: true,
     }));

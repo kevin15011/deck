@@ -60,7 +60,7 @@ describe("piReadOnlyToolAllowlist", () => {
   });
 
   test("without selected servers it is the built-ins plus the read-only memory search", () => {
-    expect(piReadOnlyToolAllowlist([])).toEqual(["read", "grep", "find", "ls", "memory_search"]);
+    expect(piReadOnlyToolAllowlist([])).toEqual(["read", "grep", "find", "ls", "memory_search", "memory_read"]);
   });
 
   test("never allows write-capable built-ins", () => {

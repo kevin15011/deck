@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./memory/capture-redaction": "./src/memory/capture-redaction.ts",
+    "./memory/capture-eligibility": "./src/memory/capture-eligibility.ts",
     "./runner-capability": "./src/runner-capability.ts",
     "./runner-capability-registry": "./src/runner-capability-registry.ts",
     "./runner-capability-parity": "./src/runner-capability-parity.ts",

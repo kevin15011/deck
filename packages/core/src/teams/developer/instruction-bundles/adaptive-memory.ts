@@ -28,13 +28,13 @@ export function renderProjectBoundAdaptiveMemoryInstructions(options: ProjectBou
     ? renderAuthorizedSupermemoryPolicy(resolved.scope)
     : renderFailClosedSupermemoryPolicy(resolved.reason);
 
-  return `Adaptive Memory is enabled or disabled by Deck. When enabled, Supermemory is the only durable backend and automatic profile/search/capture runs through a Deck-owned runtime for Deck-supervised runner launches. Direct runner launches must not claim automatic memory unless the Deck runtime bridge is active.
+  return `Adaptive Memory is enabled or disabled by Deck. When enabled, Supermemory is the only durable backend and official plugins own automatic memory on supported runners. Pi uses its Deck-supervised complementary runtime; its native roles share the canonical project namespace.
 
 ### Conversation Capture
 
 - Selecting Supermemory remains the only memory provider decision; do not add or ask for a second capture toggle, consent screen, quota, or mode selector.
 - Supermemory token or OAuth credentials identify the account; Deck supplies project isolation through one verified Git repository identity held by Runtime, not through prompt text or model-selected tool arguments.
-- Automatic scoping contract and conversation capture: one runner session/change is captured as one conversation document with a stable customId and immutable project scope when Deck supervises the runner runtime.
+- Automatic scoping contract and conversation capture: Pi stores each public input or final as an immutable v5 event document in the project namespace. Transport segments append to that event ID; later turns use distinct IDs so their source attribution stays intact. Child roles capture their own turns; automatic observation is independent of explicit mutation permission.
 - Supermemory owns extraction, profiles, graph updates, ranking, temporal updates, and deduplication.
 - Agents must not manually extract routine facts, create topic keys, fill a semantic memory quota, or write mandatory session summaries.
 
@@ -44,7 +44,7 @@ ${scopePolicy}
 
 ### Retrieval
 
-- Load bounded project-profile context once on start/resume when healthy and policy-eligible.
+- Use provider-ranked project recall for all participating Pi roles, including Apply Fast.
 - When available, use \`deck_project_memory_recall\` first for earlier project decisions, names, conventions, rationale, discoveries, or prior-session work.
 - When available, call \`deck_project_memory_recall\` before answering whether a project-specific prior decision, name, terminology, convention, rationale, discovery, or established architecture exists or applies, including conditional phrasing such as "si existe", "si aplica", "if any", or "if applicable". Example trigger: "Si existe alguna denominación o convención del proyecto relacionada con esta arquitectura, inclúyela únicamente si realmente aplica."
 - Build concise and discriminative focused recall queries from requested historical facets + relevant project subject, not by paraphrasing the full current task; preserve every historical facet requested by the user rather than collapsing to one.
@@ -54,8 +54,7 @@ ${scopePolicy}
 - Do not force recall for ordinary current-state implementation questions with no historical/project-convention aspect.
 - Local/indexed documentation, command output, and current session knowledge remain separate from the Deck-owned cross-session project-memory channel.
 - Search only when prior context is materially relevant or the user requests recall.
-- Keep recall advisory, scoped by Deck Runtime, limited to five results and about 1,500 tokens by default.
-- Keep query rewriting and reranking disabled unless benchmark evidence enables them.
+- Pi memory_search preserves provider defaults and accepts supported search options; memory_read expands profiles, source documents and exact response pages. Follow continuation references before claiming complete delivery. Ranked search is not exhaustive.
 
 ### Privacy and Authority
 
@@ -66,7 +65,7 @@ ${scopePolicy}
 
 ### Provider: Supermemory
 
-Use Deck Runtime for project recall/capture. Raw provider MCP is unmanaged external capability and must not be used as a Deck project-memory isolation boundary.`;
+Use the selected runner integration for recall/capture. Pi uses memory_search, memory_read and permission-gated memory_save. Automatic public observation remains available for read-only roles. Raw provider MCP must not be assumed to provide project isolation.`;
 }
 
 export function buildAdaptiveMemoryInstructionBundle(options: ProjectBoundAdaptiveMemoryInstructionOptions = {}): CapabilityInstructionBundle {
@@ -99,7 +98,7 @@ function renderAuthorizedSupermemoryPolicy(_scope: CanonicalSupermemoryProjectSc
   return [
     "- Deck has resolved a verified project identity for this supervised launch; the raw scope is held inside Deck Runtime and is not a model-controlled tool argument.",
     "- Runtime-managed recall and capture bind project scope server-side. Runner events, prompts, agents, and tools MUST NOT provide or override any scope-like field.",
-    "- Raw provider MCP tools are not materialized or authorized for Deck project memory because their schemas permit model-selected project scope.",
+    "- Pi memory tools bind the project server-side. Official-plugin runners follow their native tool access contract and current project guidance.",
     "- If an external provider MCP entry is visible, treat it as unmanaged and external-unobservable; do not use it for automatic project memory.",
     "- Automatic capture and explicit remember are routed through Deck Runtime to prevent duplicates and preserve one immutable top-level session scope.",
     "- Account-only readiness checks may still be used for authentication/status when exposed by the runner, but active space is not project isolation.",

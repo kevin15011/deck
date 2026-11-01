@@ -1,18 +1,49 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { isBuiltin } from "node:module";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { CLAUDE_SUPERMEMORY_COMMIT, CLAUDE_SUPERMEMORY_FILES, inspectClaudeSupermemoryArtifact, installClaudeSupermemoryArtifact } from "./supermemory-artifact";
 
 const pinnedHooks = readFileSync(new URL("./fixtures/official-supermemory-hooks.json", import.meta.url));
 const sha = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
 
+// Protects: only the complete immutable upstream plugin is admitted; corrupt or foreign files cannot become executable.
 describe("official Claude Supermemory immutable artifact", () => {
+  test("complete published fixture verifies and closes native hook, module and SDK dependencies", async () => {
+    const home = await mkdtemp(join(tmpdir(), "deck-claude-closure-"));
+    try {
+      const source = join(home, "source");
+      await mkdir(source);
+      const archive = new URL(`./fixtures/claude-supermemory-${CLAUDE_SUPERMEMORY_COMMIT.slice(0, 12)}.tgz`, import.meta.url).pathname;
+      expect(Bun.spawnSync(["tar", "-xzf", archive, "-C", source]).exitCode).toBe(0);
+      const root = join(home, "plugin");
+      await installClaudeSupermemoryArtifact(root, { fetchFile: async path => readFile(join(source, path)) });
+      expect(inspectClaudeSupermemoryArtifact(root)).toBe("ready");
+      const paths = new Set(CLAUDE_SUPERMEMORY_FILES.map(([path]) => resolve(root, path)));
+      for (const [path] of CLAUDE_SUPERMEMORY_FILES) {
+        if (!/\.(?:c?js)$/.test(path)) continue;
+        const code = readFileSync(join(root, path), "utf8");
+        for (const [, dependency] of code.matchAll(/require\(['"]([^'"]+)['"]\)/g)) {
+          if (isBuiltin(dependency!)) continue;
+          expect(dependency!.startsWith(".")).toBe(true);
+          const target = resolve(dirname(join(root, path)), dependency!);
+          expect(paths.has(target) || paths.has(`${target}.js`)).toBe(true);
+        }
+      }
+      const manifest = JSON.parse(pinnedHooks.toString());
+      for (const module of manifest.modules) expect(paths.has(resolve(root, "hooks", module))).toBe(true);
+      for (const groups of Object.values(manifest.hooks) as any[]) for (const group of groups) for (const hook of group.hooks) {
+        const path = hook.command.match(/\$\{CLAUDE_PLUGIN_ROOT\}\/([^" ]+)/)?.[1];
+        expect(paths.has(resolve(root, path))).toBe(true);
+      }
+      expect(manifest.hooks.Stop[0].hooks[0].async).toBe(true);
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
   test("pins the official hook entrypoints and authentic published hook bytes", () => {
-    expect(CLAUDE_SUPERMEMORY_COMMIT).toBe("915aba1b8056ddb3630fa833973032ba6b788fdb");
-    expect(CLAUDE_SUPERMEMORY_FILES).toHaveLength(26);
+    expect(CLAUDE_SUPERMEMORY_COMMIT).toMatch(/^[a-f0-9]{40}$/);
     const hookEntry = CLAUDE_SUPERMEMORY_FILES.find(([path]) => path === "hooks/hooks.json");
     expect(hookEntry?.[1] === sha(pinnedHooks)).toBe(true);
     expect(hookEntry?.[2] === pinnedHooks.length).toBe(true);

@@ -4,6 +4,7 @@ export const ROLE_TOOL_POLICY = Object.freeze({
   builtins: ["read", "grep", "glob", "skill"] as readonly string[],
   mcpDefault: "deny" as const,
   mcp: {
+    deck: ["deck_session_history"],
     context7: ["resolve-library-id", "query-docs"],
     "codebase-memory": ["search_graph", "trace_path", "get_code_snippet", "check_index_coverage", "query_graph", "get_architecture", "search_code", "index_status", "list_projects"],
     "web-search": ["search", "extract"],

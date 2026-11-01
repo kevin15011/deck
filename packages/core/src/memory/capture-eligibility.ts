@@ -1,3 +1,5 @@
+import { redactMemoryCaptureContent } from "./capture-redaction";
+
 export type AdaptiveMemoryCaptureSource = "trusted-user-prompt" | "trusted-final-assistant" | "explicit-remember";
 
 export type AdaptiveMemoryCaptureEligibilityReason =
@@ -23,7 +25,7 @@ const SUPPORTED_CAPTURE_SOURCES: ReadonlySet<string> = new Set(["trusted-user-pr
 
 const TRIVIAL_TEXT = /^(?:ok(?:ay)?|done|thanks?|thank you|continue|go on|yes|no|run tests?|retry|proceed|sounds good|ship it|looks good)[.!?\s]*$/i;
 const ENV_DUMP_LINE = /^\s*(?:[A-Z_][A-Z0-9_]*|[a-z_][a-z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)[a-z0-9_]*)=[^\n]+$/gm;
-const HIGH_CONFIDENCE_SECRET = /(?:\bsk-[A-Za-z0-9_-]{8,}\b|\b(?:password|passphrase|secret|api[_-]?key|token|access[_-]?token|auth[_-]?token|refresh[_-]?token|session[_-]?id|session|cookie|dsn|private[_-]?key|database[_-]?uri|[a-z0-9_]+[_-]uri)\b\s*[:=]\s*["'][^"']{4,}["']|\b(?:password|passphrase|secret|api[_-]?key|token|access[_-]?token|auth[_-]?token|refresh[_-]?token|session[_-]?id|session|cookie|dsn|private[_-]?key|database[_-]?uri|[a-z0-9_]+[_-]uri)\b\s*[:=]\s*[^\s,;"'{}\[\]]{4,}|["'](?:password|passphrase|secret|api[_-]?key|token|access[_-]?token|auth[_-]?token|refresh[_-]?token|session|cookie|dsn|private[_-]?key|database[_-]?uri|[a-z0-9_]+[_-]uri)["']\s*[:=]\s*["'][^"']{4,}["']|--(?:password|passphrase|secret|api-key|token|access-token|auth-token|cookie|session|dsn)\s+[^\s]+|[a-z][a-z0-9+.-]*:\/\/[^\s\/@:]+:[^\s\/@]+@|(?:sqlite|file|libsql):\/\/(?:\/)?[^\s,;"'{}\[\]]*(?:\.db|\.sqlite|\.sqlite3)\b|\/(?:Users|home|var|private|tmp)\/[^\s,;"'{}\[\]]*(?:\.db|\.sqlite|\.sqlite3)\b|^(?:export\s+)?[A-Z0-9_]*(?:PASSWORD|PASSPHRASE|SECRET|API[_-]?KEY|TOKEN|SESSION|COOKIE|DSN|DATABASE[_-]?(?:URL|URI)|REDIS[_-]?(?:URL|URI)|MONGO(?:DB)?[_-]?(?:URL|URI)|PRIVATE[_-]?KEY|URI)[A-Z0-9_]*\s*=\s*[^\s]+|(?:Cookie|Set-Cookie|Session|X-Api-Key|Authorization)\s*:\s*[^\n]+|\b(?:AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|GOOGLE_APPLICATION_CREDENTIALS|AZURE_CLIENT_SECRET)\s*=\s*[^\s]+)/gim;
+const HIGH_CONFIDENCE_SECRET = /(?:\bsk-[A-Za-z0-9_-]{8,}\b|\b(?:password|passphrase|secret|api[_-]?key|token|access[_-]?token|auth[_-]?token|refresh[_-]?token|session[_-]?id|session|cookie|dsn|private[_-]?key|database[_-]?uri|[a-z0-9_]+[_-]uri)\b\s*[:=]\s*["'][^"']{4,}["']|\b(?:password|passphrase|secret|api[_-]?key|token|access[_-]?token|auth[_-]?token|refresh[_-]?token|session[_-]?id|session|cookie|dsn|private[_-]?key|database[_-]?uri|[a-z0-9_]+[_-]uri)\b\s*[:=]\s*[^\s,;"'{}\[\]]{4,}|["'](?:password|passphrase|secret|api[_-]?key|token|access[_-]?token|auth[_-]?token|refresh[_-]?token|session|cookie|dsn|private[_-]?key|database[_-]?uri|[a-z0-9_]+[_-]uri)["']\s*[:=]\s*["'][^"']{4,}["']|--(?:password|passphrase|secret|api-key|token|access-token|auth-token|cookie|session|dsn)\s+[^\s]+|\b[a-z][a-z0-9+.-]*:\/\/[^\s\/@:]+:[^\s\/@]+@|(?:sqlite|file|libsql):\/\/(?:\/)?[^\s,;"'{}\[\]]*(?:\.db|\.sqlite|\.sqlite3)\b|\/(?:Users|home|var|private|tmp)\/[^\s,;"'{}\[\]]*(?:\.db|\.sqlite|\.sqlite3)\b|^(?:export\s+)?[A-Z0-9_]*(?:PASSWORD|PASSPHRASE|SECRET|API[_-]?KEY|TOKEN|SESSION|COOKIE|DSN|DATABASE[_-]?(?:URL|URI)|REDIS[_-]?(?:URL|URI)|MONGO(?:DB)?[_-]?(?:URL|URI)|PRIVATE[_-]?KEY|URI)[A-Z0-9_]*\s*=\s*[^\s]+|(?:Cookie|Set-Cookie|Session|X-Api-Key|Authorization)\s*:\s*[^\n]+|\b(?:AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|GOOGLE_APPLICATION_CREDENTIALS|AZURE_CLIENT_SECRET)\s*=\s*[^\s]+)/gim;
 const STACK_TRACE_LINE = /^\s*(?:at\s+\S+\s+\(|File "[^"]+", line \d+|\w+(?:Error|Exception):\s+.+)/gm;
 const TEST_OUTPUT = /(?:^|\n)\s*(?:FAIL|FAILED|PASS|✓|✗|×)\s+[^\n]+|Ran \d+ tests?|\b\d+\s+(?:pass|fail|failed|passed)\b|Expected:\s*[\s\S]*?Received:/i;
 const TOOL_CHATTER = /(?:<\/?(?:function|tool|functions\.|multi_tool_use)|MCP error|tool_use|recipient_name|stderr|stdout|exit code|\$\s*(?:bun|npm|pnpm|yarn|git|pytest|cargo|go test)\b)/i;
@@ -73,6 +75,15 @@ export function evaluateAdaptiveMemoryCaptureEligibility(input: {
   }
 
   return { eligible: true, content, reason: "eligible", diagnostics: [] };
+}
+
+/** Public Pi input/output admission: provenance and secrets, never semantic importance. */
+export function admitPublicMemoryCapture(input: { source: string; content: string }): AdaptiveMemoryCaptureEligibility {
+  if (!SUPPORTED_CAPTURE_SOURCES.has(input.source)) return rejected("unsupported_source", "Capture source is not trusted.");
+  if (!input.content.trim()) return rejected("empty_content", "Capture content is empty.");
+  // Share every provider redaction pattern and reject the complete source before any split.
+  if (!redactMemoryCaptureContent(input.content).safe || matchesHighConfidenceSecret(stripQuoteAndFenceMarkers(input.content))) return rejected("secret_detected", "Capture contains secret material.");
+  return { eligible: true, content: input.content, reason: "eligible", diagnostics: [] };
 }
 
 function rejected(reason: Exclude<AdaptiveMemoryCaptureEligibilityReason, "eligible">, diagnostic: string): AdaptiveMemoryCaptureEligibility {

@@ -31,3 +31,13 @@ test('rejected role hooks disable native hooks even with previously trusted meta
   expect(launch.args).toContain('features.hooks=false');
   expect(launch.args).not.toContain('features.hooks=true');
 });
+
+// Protects read-only access to local continuity without granting memory writes,
+// delegation or approval. Native tool filtering and host grants both apply.
+test('read-only tasks can page local history without mutation tools',()=>{
+  const id='deck-session-t-deck';
+  const review={...input,memberId:'quality',mcp:{servers:[id],sessionTools:['deck_session_history','deck_memory_propose']},mcpServerSpecs:{[id]:input.mcpServerSpecs['deck-task']!}};
+  const servers=codexThreadMcpConfig(review).mcp_servers as any;
+  expect(servers[id].enabled_tools).toEqual(['deck_session_history']);
+  expect(servers[id].enabled_tools).not.toContain('deck_memory_propose');
+});

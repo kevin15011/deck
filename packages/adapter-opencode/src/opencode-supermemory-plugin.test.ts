@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, test } from "bun:test";
 
 import {
@@ -11,6 +12,7 @@ import {
   inspectOpenCodeSupermemoryRegistrations,
   inspectOwnedOpenCodeSupermemory,
   resolveOwnedOpenCodeSupermemoryPaths,
+  configureOpenCodeSupermemoryCapture,
 } from "./opencode-supermemory-plugin";
 
 const roots: string[] = [];
@@ -67,6 +69,21 @@ function writeInstalledFixture(root: string): void {
 }
 
 describe("Deck-owned OpenCode Supermemory loader", () => {
+  // Protects: short-turn capture configuration preserves JSONC string values and rejects unsafe or malformed files without exposing content.
+  test("capture settings preserve provider options and reject unsafe configuration", () => {
+    const home = tempRoot(); const directory = join(home,".config/opencode");
+    mkdirSync(directory,{recursive:true}); const path = join(directory,"supermemory.jsonc");
+    writeFileSync(path,'{ "captureEveryNTurns": 0, /* native option */ "maxMemories": 8, "filterPrompt": "preserve literal,} and comma,]", }');
+    configureOpenCodeSupermemoryCapture(home);
+    expect(JSON.parse(readFileSync(path,"utf8"))).toEqual({captureEveryNTurns:1,maxMemories:8,filterPrompt:"preserve literal,} and comma,]"});
+    chmodSync(path,0o666);
+    expect(()=>configureOpenCodeSupermemoryCapture(home)).toThrow("Unsafe");
+    rmSync(path); const target=join(home,"foreign.json"); writeFileSync(target,"{}"); symlinkSync(target,path);
+    expect(()=>configureOpenCodeSupermemoryCapture(home)).toThrow("Unsafe");
+    expect(readFileSync(target,"utf8")).toBe("{}");
+    rmSync(path); writeFileSync(path,"FAKE_PRIVATE_SETTING invalid JSON");
+    expect(()=>configureOpenCodeSupermemoryCapture(home)).toThrow(/^Invalid OpenCode Supermemory settings$/);
+  });
   test("installs the exact official package into the owned path and writes only a loader adapter", async () => {
     const root = tempRoot();
     const commands: Array<{ command: string; args: string[] }> = [];
@@ -100,9 +117,12 @@ describe("Deck-owned OpenCode Supermemory loader", () => {
     const loader = readFileSync(result.paths.loaderPath, "utf8");
     expect(loader).toContain('from "./node_modules/opencode-supermemory/dist/index.js"');
     expect(loader).toContain('from "./node_modules/opencode-supermemory/dist/server.js"');
-    expect(loader).toContain("server: (ctx) => SupermemoryPlugin(ctx)");
-    expect(loader).toContain("setup: ServerPlugin.setup");
-    expect(loader).not.toMatch(/capture|compaction|recall/i);
+    // Parse and exercise the installed compatibility module. Lifecycle adaptation
+    // is allowed; the admitted upstream artifact must remain byte-identical.
+    const module = await import(pathToFileURL(result.paths.loaderPath).href);
+    expect(typeof module.default.setup).toBe("function");
+    expect(typeof (await module.default.server({})).event).toBe("function");
+    expect(readFileSync(join(result.paths.packageDirectory, "dist/index.js"), "utf8")).toBe(fixtureArtifacts["dist/index.js"]);
     expect(inspectOwnedOpenCodeSupermemory({
       environment: { XDG_DATA_HOME: root },
       homeDirectory: root,
