@@ -2,7 +2,6 @@ import { readFileSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { scoreUnits, type Question } from './score';
-import { roleCap } from './capture-replay/runtime';
 import { privateWrite, sha256, fail, FAKE_SECRETS, CANARIES } from './security';
 import { NamespaceTransport } from './namespace-transport';
 export type CaseArtifact = {
@@ -25,7 +24,7 @@ export type CaseArtifact = {
     nativeHookOutput?: string;
     [key: string]: any;
 };
-export function scoreArtifact(q: Question, a: CaseArtifact) { const k = roleCap(q.role); const final = scoreUnits(q, a.injectedUnits, k); return { id: q.id, category: q.category, role: q.role, project_under_query: a.project, status: a.availability ?? (k === 0 ? 'policy_skip' : 'scored'), durationMs: a.durationMs, cap: k, final, at1: scoreUnits(q, a.injectedUnits, 1), at5: scoreUnits(q, a.injectedUnits, 5), raw: scoreUnits(q, a.rawReturnedUnits, k), rawAt1: scoreUnits(q, a.rawReturnedUnits, 1), rawAt5: scoreUnits(q, a.rawReturnedUnits, 5), injectedBytes: Buffer.byteLength(a.injectedText), injectedTokens: Math.max(a.injectedText.split(/\s+/).filter(Boolean).length, Math.ceil(Buffer.byteLength(a.injectedText) / 4)), injectionHash: sha256(a.injectedText), settledEligible: a.settledEligible, settledReason: a.settledReason, policySkipExpected: k === 0, policySkipObserved: a.injectedText.length === 0, rolePolicyViolation: k === 0 && a.injectedText.length > 0, surfaceSafety: { secrets: FAKE_SECRETS.filter(x => a.injectedText.includes(x)).map(sha256), canaries: CANARIES.filter(x => a.injectedText.includes(x)).map(sha256) } }; }
+export function scoreArtifact(q: Question, a: CaseArtifact) { const k = a.injectedUnits.length; const final = scoreUnits(q, a.injectedUnits, k); return { id: q.id, category: q.category, role: q.role, project_under_query: a.project, status: a.availability ?? 'scored', durationMs: a.durationMs, cap: null, final, at1: scoreUnits(q, a.injectedUnits, 1), at5: scoreUnits(q, a.injectedUnits, 5), raw: scoreUnits(q, a.rawReturnedUnits, a.rawReturnedUnits.length), rawAt1: scoreUnits(q, a.rawReturnedUnits, 1), rawAt5: scoreUnits(q, a.rawReturnedUnits, 5), injectedBytes: Buffer.byteLength(a.injectedText), injectedTokens: Math.max(a.injectedText.split(/\s+/).filter(Boolean).length, Math.ceil(Buffer.byteLength(a.injectedText) / 4)), injectionHash: sha256(a.injectedText), settledEligible: a.settledEligible, settledReason: a.settledReason, policySkipExpected: false, policySkipObserved: a.injectedText.length === 0, rolePolicyViolation: false, surfaceSafety: { secrets: FAKE_SECRETS.filter(x => a.injectedText.includes(x)).map(sha256), canaries: CANARIES.filter(x => a.injectedText.includes(x)).map(sha256) } }; }
 export function persistCase(root: string, q: Question, a: CaseArtifact, t: NamespaceTransport) {
     const name = 'cases/' + randomBytes(16).toString('hex') + '.json';
     const encoded = t.sanitize(JSON.stringify(a, null, 2) + '\n');

@@ -1,6 +1,7 @@
 // Adapted from Quality r7-recovery/sidecars.ts; never imports its autorun script.
-import { test, expect } from 'bun:test';
-import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
+import { test, expect, beforeAll, afterEach, spyOn } from 'bun:test';
+import * as fs from 'node:fs';
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, symlinkSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -18,6 +19,19 @@ function plan(initialize = false) {
     privateWrite(join(m.evalRoot, 'plan.json'), m);
     return m;
 }
+// Rejection cases never change the committed authority. Reuse that real disk
+// baseline, removing only each test's hostile sidecar before the next case.
+let rejectionPlan: Manifest;
+let rejectionBytes: string[];
+const hostilePaths: string[] = [];
+beforeAll(() => {
+    rejectionPlan = plan();
+    rejectionBytes = databases.map(name => sha256(readFileSync(join(rejectionPlan.evalRoot, name))));
+});
+afterEach(() => {
+    for (const path of hostilePaths.splice(0)) rmSync(path, { recursive: true, force: true });
+    expect(databases.map(name => sha256(readFileSync(join(rejectionPlan.evalRoot, name))))).toEqual(rejectionBytes);
+});
 function child(m: Manifest, operation: string, database: string, suffix = '') {
     return spawnSync(process.execPath, [childPath, join(m.evalRoot, 'plan.json'), operation, database, suffix], { env: { PATH: process.env.PATH!, HOME: homedir() }, encoding: 'utf8', timeout: 2500, killSignal: 'SIGKILL' });
 }
@@ -28,7 +42,8 @@ function unchanged(path: string) {
 for (const database of databases) for (const suffix of suffixes) {
     for (const kind of ['fifo', 'symlink', 'dangling-symlink', 'hardlink', 'directory', 'public-mode', 'readonly-mode']) {
         test(`${database}${suffix} rejects ${kind} before open without hanging or changing an external sentinel`, () => {
-            const m = plan(), path = join(m.evalRoot, database + suffix);
+            const m = rejectionPlan, path = join(m.evalRoot, database + suffix);
+            hostilePaths.push(path);
             const sentinel = join(scratch.suite, m.run + '-external-synthetic-sentinel');
             privateWrite(sentinel, 'SYNTHETIC_ONLY_NEVER_REAL\n'.repeat(64));
             const before = unchanged(sentinel);
@@ -53,11 +68,20 @@ for (const database of databases) for (const suffix of suffixes) {
         }, 10000);
     }
     test(`${database}${suffix} rejects synthetic foreign-owner metadata`, () => {
-        const m = plan(), path = join(m.evalRoot, database + suffix);
+        const m = rejectionPlan, path = join(m.evalRoot, database + suffix);
+        hostilePaths.push(path);
         privateWrite(path, 'SYNTHETIC_SIDECAR');
-        const result = child(m, 'foreign-owner', database, suffix);
-        expect(result.error?.message ?? null).toBeNull(); expect(result.status).toBe(0);
-        expect(JSON.parse(result.stdout)).toEqual({ reason: 'run_authority_unsafe_file' });
+        const before = unchanged(path), stat = fs.lstatSync;
+        // Owner metadata is already synthetic in the child probe. This regular
+        // file cannot block, so exercise the same rejection in this process.
+        const foreignOwner = spyOn(fs, 'lstatSync').mockImplementation(((target: any, ...rest: any[]) => {
+            const value = (stat as any)(target, ...rest);
+            if (String(target) === path) value.uid = process.getuid!() + 1;
+            return value;
+        }) as any);
+        try { expect(() => { const a = RunAuthority.acquire(m, 'cleanup'); a.close(); }).toThrow('run_authority_unsafe_file'); }
+        finally { foreignOwner.mockRestore(); }
+        expect(unchanged(path)).toEqual(before);
     });
 }
 for (const database of databases) {

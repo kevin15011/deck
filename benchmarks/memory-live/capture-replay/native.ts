@@ -1,9 +1,7 @@
+import { HISTORICAL_NATIVE, HISTORICAL_SOURCE_COMMIT, historicalOpenCodeLoader } from './historical-native-pins';
 import { readFileSync, lstatSync, existsSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
-import { CODEX_SUPERMEMORY_FILES, CODEX_SUPERMEMORY_VERSION } from '../../../packages/adapter-codex/src/supermemory-artifact';
-import { CLAUDE_SUPERMEMORY_FILES, CLAUDE_SUPERMEMORY_COMMIT } from '../../../packages/adapter-claude/src/supermemory-artifact';
-import { OPENCODE_SUPERMEMORY_PACKAGE_VERSION, buildOpenCodeSupermemoryLoaderContent } from '../../../packages/adapter-opencode/src/opencode-supermemory-plugin';
 import { NamespaceTransport } from '../namespace-transport';
 import { gateway, LOCAL_BEARER, IPC_ORIGIN } from '../gateway';
 import { secureDir, privateWrite, sha256, scrub, fail } from '../security';
@@ -12,25 +10,8 @@ import type { Seed } from './runtime';
 export type NativeRoute = 'claude' | 'codex' | 'opencode';
 const fixtureRoot = resolve(import.meta.dir, '../fixtures/native');
 export function verifyNative(route: NativeRoute) {
-    let entries: readonly (readonly [
-        string,
-        string,
-        number?
-    ])[];
-    if (route === 'claude')
-        entries = CLAUDE_SUPERMEMORY_FILES;
-    else if (route === 'codex')
-        entries = CODEX_SUPERMEMORY_FILES.map(e => [e[0], e[2], e[3]] as const);
-    else {
-        // Private adapter digest table is the canonical manifest; read it instead of maintaining a second pin.
-        const source = readFileSync(resolve(import.meta.dir, '../../../packages/adapter-opencode/src/opencode-supermemory-plugin.ts'), 'utf8');
-        const block = source.match(/const PUBLISHED_ARTIFACT_DIGESTS = Object.freeze\(\{([\s\S]*?)\}\);/)?.[1];
-        if (!block)
-            fail('opencode_adapter_pin_unreadable');
-        entries = [...block.matchAll(/"([^"]+)": "([a-f0-9]{64})"/g)].map(m => [m[1]!, m[2]!] as const);
-        if (entries.length !== 3)
-            fail('opencode_adapter_pin_unreadable');
-    }
+    const pin = HISTORICAL_NATIVE[route];
+    const entries: readonly (readonly [string, string, number?])[] = pin.entries;
     const hashes: Record<string, string> = {};
     for (const [path, digest, size] of entries) {
         const target = join(fixtureRoot, route, path);
@@ -42,7 +23,7 @@ export function verifyNative(route: NativeRoute) {
             fail('native_pin_mismatch');
         hashes[path] = hash;
     }
-    return { route, version: route === 'claude' ? CLAUDE_SUPERMEMORY_COMMIT : route === 'codex' ? CODEX_SUPERMEMORY_VERSION : OPENCODE_SUPERMEMORY_PACKAGE_VERSION, hashes, root: join(fixtureRoot, route) };
+    return { route, version: pin.version, evidence: 'historical-fixture-replay' as const, sourceCommit: HISTORICAL_SOURCE_COMMIT, hashes, root: join(fixtureRoot, route) };
 }
 export class NativeReplay {
     readonly pin;
@@ -60,7 +41,7 @@ export class NativeReplay {
             privateWrite(join(materialized, name), readFileSync(join(verified.root, name), 'utf8'));
         }
         if (route === 'opencode')
-            privateWrite(join(install, 'loader.mjs'), buildOpenCodeSupermemoryLoaderContent());
+            privateWrite(join(install, 'loader.mjs'), historicalOpenCodeLoader());
         if (route !== 'opencode')
             privateWrite(join(materialized, 'package.json'), { type: 'commonjs' });
         this.pin = { ...verified, root: materialized };

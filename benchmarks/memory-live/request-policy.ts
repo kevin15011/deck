@@ -56,3 +56,8 @@ export function namespaceConfiguration(path: string, method: string, body: Recor
     }
     return match[1]!;
 }
+
+/** Classify only the legacy replay and exact v5 ordinary paths; status GETs are not writes. */
+export const isDocumentWrite = (path: string) => path === '/v3/documents' || /^\/ns\/[a-zA-Z0-9_:-]+\/document$/.test(path);
+export const isMemorySearch = (path: string) => path === '/v4/search' || /^\/ns\/[a-zA-Z0-9_:-]+\/search$/.test(path);
+export const isMemoryProfile = (path: string) => path === '/v4/profile' || /^\/ns\/[a-zA-Z0-9_:-]+\/profile$/.test(path);

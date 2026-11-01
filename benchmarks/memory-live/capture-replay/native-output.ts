@@ -1,3 +1,4 @@
+import { isMemoryProfile, isMemorySearch } from '../request-policy';
 /** Decode actual hook outputs; never score the JSON transport quoting as prose. */
 export function nativeContext(output: string) {
     const contexts: string[] = [];
@@ -46,5 +47,5 @@ export function nativeRawUnits(observations: {
     body: any;
 }[]): string[] {
     const text = (value: any): string => typeof value === 'string' ? value : value?.memory ?? value?.content ?? value?.chunk ?? value?.text ?? '';
-    return observations.flatMap(o => o.endpoint === '/v4/search' ? (o.body?.results ?? []) : o.endpoint === '/v4/profile' ? [...(o.body?.profile?.static ?? []), ...(o.body?.profile?.dynamic ?? []), ...(o.body?.searchResults?.results ?? [])] : []).map(text).filter(Boolean);
+    return observations.flatMap(o => isMemorySearch(o.endpoint) ? (o.body?.results ?? []) : isMemoryProfile(o.endpoint) ? [...(o.body?.profile?.static ?? []), ...(o.body?.profile?.dynamic ?? []), ...(o.body?.searchResults?.results ?? [])] : []).map(text).filter(Boolean);
 }

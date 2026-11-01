@@ -4,7 +4,7 @@ import type { Manifest } from './manifest';
 import type { CostLedger } from './cost-guard';
 import { isCanonicalSupermemoryProjectScope } from '../../packages/core/src/memory/canonical-supermemory-project';
 import { sha256, validRun, FAKE_SECRETS, CANARIES, scrub, fail, foreignCanary } from './security';
-import { validateFilters, nativeOrRuntimeId, rejectAccountEndpoint, namespaceConfiguration } from './request-policy';
+import { validateFilters, nativeOrRuntimeId, rejectAccountEndpoint, namespaceConfiguration, isDocumentWrite, isMemorySearch, isMemoryProfile } from './request-policy';
 export type TransportTiming = { now(): number; schedule(ms: number, callback: () => void): () => void };
 const realTransportTiming: TransportTiming = {
     now: () => performance.now(),
@@ -47,6 +47,11 @@ export type Event = {
     completed?: boolean;
     blocked?: boolean;
     category?: string;
+};
+const canonicalFields: Record<string, Set<string>> = {
+    document: new Set(['content', 'id', 'metadata', 'dreaming']),
+    search: new Set(['query', 'searchMode', 'rerank', 'rewriteQuery', 'limit', 'threshold', 'include']),
+    profile: new Set(),
 };
 const fields: Record<string, Set<string>> = {
     '/v3/documents': new Set(['content', 'containerTag', 'containerTags', 'customId', 'metadata', 'dreaming', 'entityContext', 'supportingContext']),
@@ -106,6 +111,9 @@ export class NamespaceTransport {
     #run: string;
     #now: () => number;
     #deadlineAtMs: number;
+    #elapsedDeadlineAtMs: number;
+    #remainingRunMs?: () => number;
+    #deadlineExpired = false;
     #requestTimeoutMs: number;
     #timing: TransportTiming;
     constructor(input: {
@@ -124,6 +132,7 @@ export class NamespaceTransport {
         authority?: RunAuthority;
         now?: () => number;
         deadlineAtMs?: number;
+        remainingRunMs?: () => number;
         requestTimeoutMs?: number;
         timing?: TransportTiming;
     }) {
@@ -139,6 +148,8 @@ export class NamespaceTransport {
         this.#now = input.now ?? Date.now;
         this.#timing = input.timing ?? realTransportTiming;
         this.#deadlineAtMs = input.deadlineAtMs ?? Infinity;
+        this.#elapsedDeadlineAtMs = this.#timing.now() + Math.max(0, this.#deadlineAtMs - this.#now());
+        this.#remainingRunMs = input.remainingRunMs;
         this.#requestTimeoutMs = input.requestTimeoutMs ?? 15000;
         this.#costLedger = input.costLedger;
         this.#authority = input.authority;
@@ -164,6 +175,14 @@ export class NamespaceTransport {
     async drain() { while (this.#pending.size) await Promise.all([...this.#pending]); }
     get used() { return this.#used; }
     get costProgress() { return this.#costLedger?.snapshot() ?? null; }
+    /** UTC remains receipt data. Elapsed time can only shorten its allowance;
+     * once either limit expires it stays closed, even after a civil clock jump. */
+    private remainingMs() {
+        const remaining = Math.min(this.#deadlineAtMs - this.#now(), this.#elapsedDeadlineAtMs - this.#timing.now(), this.#remainingRunMs?.() ?? Infinity);
+        if (!(remaining > 0)) this.#deadlineExpired = true;
+        return this.#deadlineExpired ? 0 : remaining;
+    }
+    assertDeadline() { if (this.remainingMs() <= 0) fail('evaluation_deadline'); }
     /** Preserve the only egress/key closures while giving cleanup its own bounded counter. */
     createCleanupTransport(budget: number) { return new NamespaceTransport({ run: this.#run, bindings: Object.fromEntries(this.#bindings), budget, wire: this.#wire, key: this.#key, cleanup: true, authorizeNamespaceDelete: true, owned: this.owned, costLedger: this.#costLedger, authority: this.#authority }); }
     recordNativeFenceBlock(kind: string, durationMs = 0) {
@@ -266,7 +285,8 @@ export class NamespaceTransport {
                 this.aborted = true;
                 break;
             }
-            await this.#visibilityWait(delay);
+            if (this.remainingMs() <= 0) break;
+            await this.#visibilityWait(Math.min(delay, this.remainingMs()));
             try {
                 receipt.v5Status = await this.inspectNamespace(tag);
                 receipt.attempts.push({ v5Status: receipt.v5Status });
@@ -281,7 +301,7 @@ export class NamespaceTransport {
         receipt.status = receipt.v5Status === 200 ? 'visible_v5_200' : 'retained_visibility_unknown';
         this.visibilityUnknown = receipt.status !== 'visible_v5_200';
         this.#changed?.();
-        if (this.#now() >= this.#deadlineAtMs) fail('evaluation_deadline');
+        this.assertDeadline();
         if (this.visibilityUnknown)
             fail('namespace_visibility_unknown');
     }
@@ -328,13 +348,13 @@ export class NamespaceTransport {
             if (this.events.length === before) {
                 const reason = e instanceof Error && /^[a-z_]+$/.test(e.message) ? e.message : 'request_rejected';
                 const category = reason === 'eval_credential_egress_blocked' ? 'credential' : reason === 'synthetic_secret_egress_blocked' ? 'secret' : endpoint === '/v3/settings' ? 'account_settings' : ['account_endpoint_forbidden', 'account_modification_forbidden'].includes(reason) ? 'account_scope' : reason === 'namespace_not_in_run_allowlist' ? 'legacy_or_inactive_scope' : ['request_budget_exhausted', 'estimated_cost_guard_stopped'].includes(reason) ? 'budget' : 'endpoint_or_schema';
-                this.blocked.push({ endpoint: this.sanitize(endpoint), method, phase: this.phase, tag: '', preHash: sha256(this.sanitize(String(body?.containerTag ?? body?.containerTags ?? ''))), postHash: '', requestHash: sha256(this.sanitize(JSON.stringify(body))), durationMs: this.#timing.now() - start, inputTokenEstimate: 0, blocked: true, error: reason, category, profileWithQuery: endpoint === '/v4/profile' && !!body?.q });
+                this.blocked.push({ endpoint: this.sanitize(endpoint), method, phase: this.phase, tag: '', preHash: sha256(this.sanitize(String(body?.containerTag ?? body?.containerTags ?? ''))), postHash: '', requestHash: sha256(this.sanitize(JSON.stringify(body))), durationMs: this.#timing.now() - start, inputTokenEstimate: 0, blocked: true, error: reason, category, profileWithQuery: isMemoryProfile(endpoint) && !!body?.q });
             }
             throw e;
         }
     };
     private async perform(url: URL, init: RequestInit, method: string, body: any) {
-        if (this.#now() >= this.#deadlineAtMs) fail('evaluation_deadline');
+        this.assertDeadline();
         if (this.visibilityUnknown)
             fail('namespace_visibility_unknown');
         if (url.origin !== 'https://api.supermemory.ai' || url.username || url.password || url.hash)
@@ -346,7 +366,8 @@ export class NamespaceTransport {
         let configurationWrite = false;
         const document = url.pathname.match(/^\/ns\/(deck_eval_[a-z0-9_]+)\/document\/([^/]+)$/);
         const configurationTag = namespaceConfiguration(url.pathname, method, body);
-        const original = JSON.stringify(body), logical = body.containerTag ?? body.containerTags?.[0];
+        const canonical = url.pathname.match(/^\/ns\/([a-zA-Z0-9_:-]+)\/(document|search|profile)$/);
+        const original = JSON.stringify(body), logical = canonical?.[1] ?? body.containerTag ?? body.containerTags?.[0];
         const ns = url.pathname.match(/^\/ns\/(deck_eval_[a-z0-9_]+)(?:\/list\/(documents|chunks|memories))?$/);
         if (document) {
             tag = this.map(document[1]);
@@ -384,23 +405,25 @@ export class NamespaceTransport {
                 fail('preflight_endpoint_only');
         }
         else {
-            if (this.#cleanup && (!this.#legacyProbe || !['/v4/profile', '/v4/search'].includes(url.pathname)) || url.search || method !== 'POST' || !fields[url.pathname])
+            if (canonical && (this.#cleanup || this.#preflight || this.#inspection || this.#legacyProbe)) fail('canonical_operation_phase_forbidden');
+            if (this.#cleanup && (!this.#legacyProbe || !['/v4/profile', '/v4/search'].includes(url.pathname)) || url.search || method !== 'POST' || !(canonical ? canonicalFields[canonical[2]!] : fields[url.pathname]))
                 fail('endpoint_not_allowlisted');
-            if (Object.keys(body).some(k => !fields[url.pathname]!.has(k)))
+            if (Object.keys(body).some(k => !(canonical ? canonicalFields[canonical[2]!]! : fields[url.pathname]!).has(k)))
                 fail('unknown_endpoint_body_field');
             const selectors = ['containerTag', 'containerTags'].filter(k => k in body);
-            if (selectors.length !== 1)
+            if (selectors.length !== (canonical ? 0 : 1))
                 fail('one_scope_required');
-            const field = selectors[0]!;
-            const value = body[field];
+            const field = selectors[0];
+            const value = field ? body[field] : canonical![1];
             if (field === 'containerTags' && (!Array.isArray(value) || value.length !== 1))
                 fail('multi_container_forbidden');
             tag = this.map(field === 'containerTags' ? value[0] : value);
-            for (const name of ['q', 'content', 'customId', 'entityContext', 'supportingContext'])
+            for (const name of ['q', 'query', 'content', 'customId', 'id', 'entityContext', 'supportingContext'])
                 if (name in body && typeof body[name] !== 'string')
                     fail('invalid_endpoint_body_type');
-            if (url.pathname === '/v3/documents') {
-                if (typeof body.customId !== 'string' || !(new RegExp(`^deck_eval_${this.#run}_[a-f0-9]{32,64}$`).test(body.customId) || this.#customIds.get(tag)?.has(body.customId)))
+            if (isDocumentWrite(url.pathname)) {
+                const id = canonical ? body.id : body.customId;
+                if (typeof id !== 'string' || !(new RegExp(`^deck_eval_${this.#run}_[a-f0-9]{32,64}$`).test(id) || this.#customIds.get(tag)?.has(id)))
                     fail('custom_id_not_run_owned');
             }
             if ('filters' in body)
@@ -423,8 +446,22 @@ export class NamespaceTransport {
             for (const [k, v] of Object.entries(body))
                 if (k !== field)
                     check({ [k]: v });
-            body[field] = field === 'containerTags' ? [tag] : tag;
-            if (this.frozen && url.pathname === '/v3/documents') {
+            if (field) body[field] = field === 'containerTags' ? [tag] : tag;
+            if (canonical) {
+                // Preserve v5's wire contract; map only the exact admitted namespace.
+                url.pathname = `/ns/${tag}/${canonical[2]}`;
+                if (canonical[2] === 'document' && typeof body.content !== 'string') fail('invalid_endpoint_body_type');
+                if (canonical[2] === 'search' && typeof body.query !== 'string') fail('invalid_endpoint_body_type');
+                if ('rerank' in body && !['none', 'order', 'aggregate'].includes(body.rerank)) fail('invalid_endpoint_body_type');
+                if ('dreaming' in body && !['dynamic', 'instant'].includes(body.dreaming)) fail('invalid_endpoint_body_type');
+                if ('searchMode' in body && !['hybrid', 'memories', 'chunks'].includes(body.searchMode)) fail('invalid_endpoint_body_type');
+                if ('limit' in body && (!Number.isInteger(body.limit) || body.limit < 1 || body.limit > 100)) fail('invalid_endpoint_body_type');
+                if ('threshold' in body && (typeof body.threshold !== 'number' || body.threshold < 0 || body.threshold > 1)) fail('invalid_endpoint_body_type');
+                if ('rewriteQuery' in body && typeof body.rewriteQuery !== 'boolean') fail('invalid_endpoint_body_type');
+                if ('include' in body && (!body.include || typeof body.include !== 'object' || Array.isArray(body.include) || Object.entries(body.include).some(([k, v]) => !['documents', 'related', 'forgotten'].includes(k) || typeof v !== 'boolean'))) fail('invalid_endpoint_body_type');
+                if ('metadata' in body && (!body.metadata || typeof body.metadata !== 'object' || Array.isArray(body.metadata) || Object.values(body.metadata).some(v => !['string', 'number', 'boolean'].includes(typeof v) && !(Array.isArray(v) && v.every(x => typeof x === 'string'))))) fail('invalid_endpoint_body_type');
+            }
+            if (this.frozen && isDocumentWrite(url.pathname)) {
                 this.violations.push({ kind: 'read_only_fence_write', hash: sha256(scrub(original)) });
                 fail('corpus_frozen');
             }
@@ -444,13 +481,13 @@ export class NamespaceTransport {
         this.#used++;
         const key = this.#key();
         const mapped = JSON.stringify(body);
-        const event: Event = { endpoint: url.pathname, method, phase: this.phase, tag, preHash: sha256(String(logical ?? tag)), postHash: sha256(tag), requestHash: sha256(scrub(mapped, key)), durationMs: 0, contentUtf8Bytes: url.pathname === '/v3/documents' ? Buffer.byteLength(String(body.content ?? ''), 'utf8') : 0, serializedBodyUtf8Bytes: method === 'GET' || method === 'DELETE' && !configurationWrite ? 0 : Buffer.byteLength(mapped, 'utf8'), conservativeTokenUpperProxy: url.pathname === '/v3/documents' ? Buffer.byteLength(String(body.content ?? ''), 'utf8') : 0, inputTokenEstimate: url.pathname === '/v3/documents' && body.taskType !== 'superrag' ? Math.ceil(Buffer.byteLength(String(body.content ?? '')) / 4) : 0, superRagTokenEstimate: body.taskType === 'superrag' ? Math.ceil(Buffer.byteLength(String(body.content ?? '')) / 4) : 0, operationEstimate: Number(body.dreaming === 'instant') + Number(body.rerank === true) + Number(body.rewriteQuery === true) + Number(body.aggregate === true), profileWithQuery: url.pathname === '/v4/profile' && !!body.q };
-        if (url.pathname === '/v3/documents') Object.assign(event, { writeStartedAtMs: this.#now(), contentHash: sha256(body.content), customIdHash: sha256(body.customId ?? '') });
+        const event: Event = { endpoint: url.pathname, method, phase: this.phase, tag, preHash: sha256(String(logical ?? tag)), postHash: sha256(tag), requestHash: sha256(scrub(mapped, key)), durationMs: 0, contentUtf8Bytes: isDocumentWrite(url.pathname) ? Buffer.byteLength(String(body.content ?? ''), 'utf8') : 0, serializedBodyUtf8Bytes: method === 'GET' || method === 'DELETE' && !configurationWrite ? 0 : Buffer.byteLength(mapped, 'utf8'), conservativeTokenUpperProxy: isDocumentWrite(url.pathname) ? Buffer.byteLength(String(body.content ?? ''), 'utf8') : 0, inputTokenEstimate: isDocumentWrite(url.pathname) && body.taskType !== 'superrag' ? Math.ceil(Buffer.byteLength(String(body.content ?? '')) / 4) : 0, superRagTokenEstimate: body.taskType === 'superrag' ? Math.ceil(Buffer.byteLength(String(body.content ?? '')) / 4) : 0, operationEstimate: Number(body.dreaming === 'instant') + Number(body.rerank === true || body.rerank === 'order' || body.rerank === 'aggregate') + Number(body.rewriteQuery === true) + Number(body.aggregate === true), profileWithQuery: isMemoryProfile(url.pathname) && !!body.q };
+        if (isDocumentWrite(url.pathname)) Object.assign(event, { writeStartedAtMs: this.#now(), contentHash: sha256(body.content), customIdHash: sha256(body.id ?? body.customId ?? '') });
         if (document) event.phase = 'processing_monitor';
         event.completed = false;
         const eventIndex = this.events.length;
         this.events.push(event);
-        if (url.pathname === '/v3/documents' || configurationWrite)
+        if (isDocumentWrite(url.pathname) || configurationWrite)
             this.writeIntents.add(tag);
         this.#changed?.();
         const start = this.#timing.now();
@@ -461,8 +498,8 @@ export class NamespaceTransport {
         try {
             // Identity/account override headers are never forwarded, including all x-sm-* headers.
             const headers = new Headers({ accept: 'application/json', 'content-type': 'application/json', authorization: `Bearer ${key}` });
-            if (this.#now() >= this.#deadlineAtMs) fail('evaluation_deadline');
-            const { response, text } = await boundedWire(this.#wire, url, { ...init, method, body: method === 'GET' || method === 'DELETE' && !configurationWrite ? undefined : mapped, redirect: 'error', headers }, Math.min(this.#requestTimeoutMs, this.#deadlineAtMs - this.#now()), this.#timing);
+            this.assertDeadline();
+            const { response, text } = await boundedWire(this.#wire, url, { ...init, method, body: method === 'GET' || method === 'DELETE' && !configurationWrite ? undefined : mapped, redirect: 'error', headers }, Math.min(this.#requestTimeoutMs, this.remainingMs()), this.#timing, () => this.assertDeadline());
             event.status = response.status;
             if (response.status >= 300 && response.status < 400)
                 fail('redirect_rejected');
@@ -485,7 +522,7 @@ export class NamespaceTransport {
                 data = {}; bodyJsonParsed = false;
             }
             this.observations.push({ eventIndex, bodyJsonParsed, endpoint: url.pathname, phase: event.phase, tag, body: data });
-            if (url.pathname === '/v3/documents' && response.ok) {
+            if (isDocumentWrite(url.pathname) && response.ok) {
                 event.acceptedAtMs = this.#now();
                 const id = data?.id ?? data?.documentId ?? data?.data?.id;
                 if (safeDocumentId(id)) {
@@ -499,7 +536,7 @@ export class NamespaceTransport {
                     this.violations.push({ kind: 'write_ack_without_owned_id', hash: sha256(tag) });
             }
             egressEnded = this.#timing.now();
-            if (url.pathname === '/v3/documents' && response.ok)
+            if (isDocumentWrite(url.pathname) && response.ok)
                 await this.verifyFirstWrite(tag);
             const responseHeaders = new Headers();
             for (const name of RESPONSE_HEADERS) {
@@ -518,7 +555,7 @@ export class NamespaceTransport {
         finally {
             // A timeout/failed acknowledgement can still have written data. Check its first
             // namespace visibility too, retaining the write intent regardless of outcome.
-            if (url.pathname === '/v3/documents' && this.#requireWriteVisibility && !this.namespaceVisibility.some(v => v.tag === tag)) {
+            if (isDocumentWrite(url.pathname) && this.#requireWriteVisibility && !this.namespaceVisibility.some(v => v.tag === tag)) {
                 try {
                     await this.verifyFirstWrite(tag);
                 }
@@ -543,9 +580,16 @@ export function simulatedWire(): Wire {
             docs.delete(tag);
             return Response.json({ deleted: true });
         }
-        if (url.pathname.startsWith('/ns/')) {
-            if (!pool)
-                return Response.json({ error: 'not_found' }, { status: 404 });
+        if (isDocumentWrite(url.pathname)) {
+            const p = pool ?? new Map<string, string>();
+            docs.set(tag, p);
+            const id = b.id ?? b.customId;
+            // v5 conversation IDs append public deltas; legacy fixtures use their own snapshots.
+            p.set(id, b.id && p.has(id) ? p.get(id) + '\n' + b.content : b.content);
+            return Response.json({ id, status: 'acknowledged' });
+        }
+        if (url.pathname.startsWith('/ns/') && !isMemoryProfile(url.pathname) && !isMemorySearch(url.pathname)) {
+            if (!pool) return Response.json({ error: 'not_found' }, { status: 404 });
             if (url.pathname.split('/')[3] === 'document') {
                 const id = decodeURIComponent(url.pathname.split('/')[4]!);
                 if (!pool.has(id)) return Response.json({ error: 'not_found' }, { status: 404 });
@@ -554,22 +598,17 @@ export function simulatedWire(): Wire {
             const type = url.pathname.split('/')[4];
             return type ? Response.json({ [type]: [...pool].slice(0, 1).map(([id]) => ({ id })), pagination: { currentPage: 1, totalItems: pool.size, totalPages: 1 } }) : Response.json({ namespace: tag });
         }
-        if (url.pathname === '/v3/documents') {
-            const p = pool ?? new Map<string, string>();
-            docs.set(tag, p);
-            p.set(b.customId, b.content);
-            return Response.json({ id: b.customId, status: 'acknowledged' });
-        }
         const hits = [...(pool ?? [])].slice(0, b.limit ?? 5).map(([id, memory]) => ({ id, memory, similarity: 0.9, updatedAt: '2026-10-21T00:00:00Z' }));
-        if (url.pathname === '/v4/search')
+        if (isMemorySearch(url.pathname))
             return Response.json({ results: hits, total: hits.length, timing: 1 });
+        if (url.pathname.startsWith('/ns/')) return Response.json({ profile: { static: [], dynamic: [] } });
         return Response.json({ profile: { static: [], dynamic: [] }, searchResults: { results: hits, total: hits.length, timing: 1 } });
     };
 }
 
 /** Bound both headers and body consumption, even for a test wire that ignores abort.
  * A timed-out attempt remains charged. Late resolution cannot mutate event/ownership state. */
-async function boundedWire(wire: Wire, url: URL, init: RequestInit, timeoutMs: number, timing: TransportTiming) {
+async function boundedWire(wire: Wire, url: URL, init: RequestInit, timeoutMs: number, timing: TransportTiming, assertDeadline: () => void) {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) fail('evaluation_deadline');
     const timeout = new AbortController(), cancelTimeout = timing.schedule(Math.max(1, timeoutMs), () => timeout.abort());
     const signal = AbortSignal.any([timeout.signal, ...(init.signal ? [init.signal] : [])]);
@@ -580,7 +619,7 @@ async function boundedWire(wire: Wire, url: URL, init: RequestInit, timeoutMs: n
         const aborted = new Promise<never>((_, reject) => { abort = () => reject(new TransportFailure(abortKind())); signal.addEventListener('abort', abort, { once: true }); });
         return await Promise.race([
             aborted,
-            (async () => { try { const response = await wire(url, { ...init, signal }); return { response, text: await response.text() }; } catch { throw new TransportFailure(signal.aborted ? abortKind() : 'network'); } })(),
+            (async () => { try { assertDeadline(); const response = await wire(url, { ...init, signal }); return { response, text: await response.text() }; } catch { throw new TransportFailure(signal.aborted ? abortKind() : 'network'); } })(),
         ]);
     } finally { cancelTimeout(); if (abort) signal.removeEventListener('abort', abort); }
 }

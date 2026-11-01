@@ -1,3 +1,4 @@
+import { isDocumentWrite, isMemoryProfile, isMemorySearch } from './request-policy';
 import { test, expect } from 'bun:test';
 import { ProcessingGate, processingPlan } from './processing';
 import { NamespaceTransport, simulatedWire } from './namespace-transport';
@@ -20,7 +21,7 @@ function fixture(deadlineMs = 10000) {
     let gate: ProcessingGate, failNext = false, httpNext = 0, writeDelay = 0, pollDelay = 100, content = 'old', status = 'indexing', dreamingStatus = 'dreaming';
     let active = 0, peak = 0; const starts: number[] = [];
     const t = new NamespaceTransport({ run, bindings: m.bindings, budget: 100, now: clock.now, changed: () => (gate as any)?.notify?.(), wire: async (u,i) => {
-        if (u.pathname === '/v3/documents') { if (writeDelay) await clock.sleep(writeDelay); content = JSON.parse(String(i.body)).content; return Response.json({ id: 'owned' }); }
+        if (isDocumentWrite(u.pathname)) { if (writeDelay) await clock.sleep(writeDelay); content = JSON.parse(String(i.body)).content; return Response.json({ id: 'owned' }); }
         starts.push(clock.now()); active++; peak = Math.max(peak, active);
         const saved = { content, status, dreamingStatus };
         try { if (httpNext) { const status = httpNext; httpNext = 0; return new Response('synthetic unavailable', { status }); } if (failNext) { failNext = false; throw new Error('synthetic-network-secret-MUST-NOT-LEAK'); } await clock.sleep(pollDelay); return Response.json({ id: 'owned', content: saved.content, system: { status: saved.status, dreamingStatus: saved.dreamingStatus, createdAt: '2026-10-21T00:00:00Z', updatedAt: '2026-10-21T00:00:00Z' } }); }
@@ -111,7 +112,7 @@ test('twelve pending documents retain honest 3s precision while ordinary retriev
             const b = await r.json(); await clock.sleep(200); active--;
             return Response.json({ ...b, system: { ...b.system, status: age >= 15000 ? 'done' : 'indexing', dreamingStatus: age >= 30000 ? 'done' : 'dreaming' } });
         }
-        if (u.pathname === '/v4/search') await clock.sleep(4000);
+        if (isMemorySearch(u.pathname)) await clock.sleep(4000);
         return r;
     } });
     gate = new ProcessingGate(t, processingPlan({ schedule: 'adaptive-v1', requestTimeoutMs: 5000 }), clock); gate.startMonitoring(600000);
@@ -135,7 +136,7 @@ test('execute observes through slow capture and query I/O with one authority, fi
     const pollStarts: number[] = [], accepted = new Map<string, number>();
     const execution = execute(m, { clock, wire: async (u,i) => {
         if (i.method === 'DELETE') deletes++;
-        if (u.pathname === '/v3/documents') {
+        if (isDocumentWrite(u.pathname)) {
             writes++;
             if (writes === 2) { captureWindow = [clock.now()]; await clock.sleep(4000); captureWindow.push(clock.now()); }
             const r = await fake(u,i); accepted.set((await r.clone().json()).id,clock.now()); return r;
@@ -151,7 +152,7 @@ test('execute observes through slow capture and query I/O with one authority, fi
                 return Response.json({ ...b, system: { ...b.system, status: age >= 15000 ? 'done' : 'indexing', dreamingStatus: age >= 30000 ? 'done' : 'dreaming' } });
             } finally { active--; }
         }
-        if (writes && !querying && ['/v4/search','/v4/profile'].includes(u.pathname) && JSON.parse(String(i.body ?? '{}')).q) {
+        if (writes && !querying && (isMemoryProfile(u.pathname) || isMemorySearch(u.pathname)) && (JSON.parse(String(i.body ?? '{}')).q ?? JSON.parse(String(i.body ?? '{}')).query)) {
             querying = true; queryPrefix = writes; queryWindow = [clock.now()]; await clock.sleep(4000); queryWindow.push(clock.now()); expect(writes).toBe(queryPrefix); queryDone = true;
         }
         return fake(u,i);

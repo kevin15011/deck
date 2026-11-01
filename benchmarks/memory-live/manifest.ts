@@ -47,7 +47,7 @@ function sourceHashes() {
 }
 // External checkout read boundary; default reads and hashes every file on every call.
 export const manifestSources = { readHashes: sourceHashes };
-export function harnessHashes() { const paths = [...readdirSync(import.meta.dir).filter(n => n.endsWith('.ts') && !n.endsWith('.test.ts') && n !== 'test-support.ts'), ...readdirSync(join(import.meta.dir, 'capture-replay')).filter(n => /\.(?:ts|mjs|cjs)$/.test(n)).map(n => 'capture-replay/' + n), 'fixtures/scorer-calibration.json'].sort(); return Object.fromEntries(paths.map(p => [p, sha256(readFileSync(join(import.meta.dir, p)))])); }
+export function harnessHashes() { const paths = [...readdirSync(import.meta.dir).filter(n => n.endsWith('.ts') && !n.endsWith('.test.ts') && n !== 'test-support.ts'), ...readdirSync(join(import.meta.dir, 'capture-replay')).filter(n => /\.(?:ts|mjs|cjs)$/.test(n)).map(n => 'capture-replay/' + n), 'fixtures/scorer-calibration.json', 'supervise.py'].sort(); return Object.fromEntries(paths.map(p => [p, sha256(readFileSync(join(import.meta.dir, p)))])); }
 export function bindingsFor(run: string, mode: string, repeats: number) {
     const bindings: Record<string, string> = {};
     for (let i = 1; i <= repeats; i++)

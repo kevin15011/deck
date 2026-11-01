@@ -10,9 +10,14 @@ export const skipProbes = [
 ] as const;
 export async function runtimeSkipProbes(scope: string, t: NamespaceTransport) {
     const results = [];
-    for (const [id, content] of skipProbes) {
+    for (const [id, source, content] of [
+        ['empty', 'trusted-user-prompt', ''],
+        ['tool', 'tool', 'Confirmed decision: use Bun for tests.'],
+        ['reasoning', 'reasoning', 'Private thought: use Bun for tests.'],
+        ['secret', 'trusted-user-prompt', 'api_key=sk-test123456789012345678901234'],
+    ]) {
         const before = t.used;
-        const capture = await runtimeCapture({ id, project: 'CONTROL', session_id: `skip-${id}`, role: 'user', source: 'trusted-user-prompt', content }, scope, t);
+        const capture = await runtimeCapture({ id: id!, project: 'CONTROL', session_id: `skip-${id}`, role: 'user', source: source as Seed['source'], content: content! }, scope, t);
         results.push({ id, status: capture.metrics.status, reason: 'reason' in capture ? capture.reason : null, providerRequests: t.used - before });
     }
     return results;

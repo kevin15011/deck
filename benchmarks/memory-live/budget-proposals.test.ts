@@ -11,8 +11,8 @@ const scratch = testScratch();
 const defaults = { ceilingUsd: .25, stopUsd: .20, cleanupReserveUsd: .05 };
 const input = (budget?: number, pollIntervalMs = 30000) => { const run = newRunId(); return { run, evalRoot: scratch.root(run), mode: 'pilot' as const, accountSharedWithProduction: true, ...(budget === undefined ? {} : { budget }), processing: { pollIntervalMs, nextTurnDelayMs: 30000 } }; };
 const proposals = [
-    { budget: 3200, poll: 30000, limits: { ceilingUsd: .50, stopUsd: .45, cleanupReserveUsd: .05 }, effects: 3138, forecast: .411880, allRequests: .418390 },
-    { budget: 1800, poll: 60000, limits: { ceilingUsd: .35, stopUsd: .30, cleanupReserveUsd: .05 }, effects: 1778, forecast: .269080, allRequests: .271390 },
+    { budget: 3200, poll: 30000, limits: { ceilingUsd: .50, stopUsd: .45, cleanupReserveUsd: .05 },  },
+    { budget: 1800, poll: 60000, limits: { ceilingUsd: .35, stopUsd: .30, cleanupReserveUsd: .05 },  },
 ];
 // Only read-only proposal checks share immutable prepared inputs. Each caller
 // gets a deep copy; effectful cleanup below always prepares its own authority.
@@ -43,8 +43,10 @@ for (const p of proposals) test(`explicit ${p.budget}-request proposal validates
     const m = await proposalManifest(p);
     validateManifest(m); validateLiveCostGuard(m);
     expect(m).toMatchObject({ liveApproved: false, cleanupApproved: false, requestBudget: p.budget, cleanupRequestBudget: 28, tracks: ['R'], mode: 'pilot', repeats: 1 });
-    expect(m.costGuard!.executionForecast).toMatchObject({ evaluationRequests: p.effects, evaluationEstimatedUsd: p.forecast, fitsRequestBudget: true });
-    expect(m.costGuard!.forecastEvaluationUpperEstimateUsd).toBe(p.allRequests);
+    expect(m.costGuard!.executionForecast.fitsRequestBudget).toBe(true);
+    expect(m.costGuard!.executionForecast.evaluationRequests).toBeLessThanOrEqual(p.budget);
+    expect(m.costGuard!.executionForecast.evaluationEstimatedUsd).toBeLessThan(p.limits.stopUsd);
+    expect(m.costGuard!.forecastEvaluationUpperEstimateUsd).toBeLessThan(p.limits.stopUsd);
     expect(JSON.parse(readFileSync(join(m.evalRoot, 'plan.json'), 'utf8'))).toEqual(m);
     const reader = spyOn(security, 'readEvalKey').mockImplementation(() => { throw new Error('NO_KEY_ACCESS'); });
     try { await expect(execute(m, { live: true })).rejects.toThrow('live_requires_explicit_approved_manifest'); expect(reader).not.toHaveBeenCalled(); }

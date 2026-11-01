@@ -1,7 +1,10 @@
+import { fingerprintSupermemoryProjectScope } from '../../../packages/core/src/memory/canonical-supermemory-project';
+import { deriveAdaptiveMemorySessionFingerprint } from '../../../packages/core/src/memory/adaptive-memory-observability-receipts';
+import { isDocumentWrite } from '../request-policy';
 import { join } from 'node:path';
 import { chmodSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { createSupermemoryRuntime, createSupermemoryHttpTransport, resolveSupermemoryRolePolicy, type SupermemoryRuntimeRole } from '../../../packages/adapter-supermemory/src/runtime';
+import { createSupermemoryRuntime, createSupermemoryHttpTransport, type SupermemoryRuntimeRole } from '../../../packages/adapter-supermemory/src/runtime';
 import { evaluateAdaptiveMemoryCaptureEligibility } from '../../../packages/core/src/memory/capture-eligibility';
 import { createSupermemoryRuntimeHost, type SupermemoryRuntimeHost } from '../../../apps/cli/src/supermemory-runtime-host';
 import { resolveCanonicalSupermemoryProjectScope } from '../../../packages/core/src/memory/canonical-supermemory-project';
@@ -33,8 +36,16 @@ export function makeProject(root: string, writer: string, project: string) {
     return { cwd, scope: identity.scope };
 }
 export function serializedRuntime(t: NamespaceTransport) { return createSupermemoryHttpTransport({ apiKey: 'NONFUNCTIONAL_LOCAL_RUNTIME_BEARER', fetchImpl: (url, init) => t.fetch(new URL(String(url)), init ?? {}) }); }
+// IDs are authorized from evaluator-owned seed/event identities before serialization,
+// never learned from an incoming transport request.
+function registerEvent(t: NamespaceTransport, scope: string, session: string, eventId: string, loopback = false) {
+    const identity = loopback ? deriveAdaptiveMemorySessionFingerprint({ scopeFingerprint: fingerprintSupermemoryProjectScope(scope), nativeSessionId: session }) : session;
+    t.registerCustomIds(scope, ['deck_conversation_' + sha256(`${scope}:${identity}:${eventId}`).slice(0, 16)]);
+}
 export function runtimeCapture(seed: Seed, scope: string, t: NamespaceTransport) {
-    return createSupermemoryRuntime({ canonicalScope: scope, sessionId: t.runtimeSession(scope, seed.session_id), transport: serializedRuntime(t), runnerId: 'eval-runtime' }).capture({ role: seed.role, source: seed.source, content: seed.content, capturedAt: new Date(Date.UTC(2026, 9, 21, 0, 0, seed.turn_order ?? 0)).toISOString() });
+    const session = t.runtimeSession(scope, seed.session_id);
+    registerEvent(t, scope, session, seed.id);
+    return createSupermemoryRuntime({ canonicalScope: scope, sessionId: session, transport: serializedRuntime(t), runnerId: 'pi' }).capture({ role: seed.role, source: seed.source, content: seed.content, correlationId: seed.id, capturedAt: new Date(Date.UTC(2026, 9, 21, 0, 0, seed.turn_order ?? 0)).toISOString() });
 }
 export async function recallHost(root: string, projectRoot: string, query: string, role: SupermemoryRuntimeRole, t: NamespaceTransport, sessionId: string, defer = false) {
     const identity = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
@@ -48,7 +59,9 @@ export function envelopeUnits(text?: string): string[] {
         return [];
     const line = text.split('\n').find(s => s.startsWith('{'));
     try {
-        return JSON.parse(line ?? '{}').items?.map((i: any) => i.content) ?? [];
+        const envelope = JSON.parse(line ?? '{}');
+        if (Array.isArray(envelope.responses)) return nativeRawUnits(envelope.responses.map((body: any) => ({ endpoint: body.profile ? '/v4/profile' : '/v4/search', body })));
+        return envelope.items?.map((i: any) => i.content) ?? [];
     }
     catch {
         return [];
@@ -56,7 +69,7 @@ export function envelopeUnits(text?: string): string[] {
 }
 export function rawUnits(observations: NamespaceTransport['observations']) { return nativeRawUnits(observations); }
 /** Execute the real bridge handler with a socket-free Bun server effect offline. */
-export async function bridgeClient(host: SupermemoryRuntimeHost, offline: boolean) {
+export async function bridgeClient(host: SupermemoryRuntimeHost, offline: boolean, t: NamespaceTransport, scope: string) {
     let handler: ((r: Request) => Promise<Response>) | undefined;
     const serve = Bun.serve;
     if (offline)
@@ -73,6 +86,7 @@ export async function bridgeClient(host: SupermemoryRuntimeHost, offline: boolea
     let ordinal = 0;
     return { close: () => bridge.close(), send: async (event: any) => {
             const body = { schema: 'deck-runner-memory-loopback-v1', runnerId: 'pi', sessionId: host.sessionId, eventId: `eval-${++ordinal}`, timestamp: Date.now(), ...event };
+            if (body.event === 'capture') registerEvent(t, scope, body.sessionId, body.eventId.replace(/:part\d+$/, ''), true);
             const request = new Request(bridge.endpoint, { method: 'POST', headers: { authorization: `Bearer ${bridge.token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
             const response = offline ? await handler!(request) : await fetch(request);
             return response.json() as Promise<any>;
@@ -87,8 +101,8 @@ export async function lifecycleControls(root: string, project: {
     const host = await recallHost(root, project.cwd, 'stable conversation identity', 'lead', t, 'lifecycle-main', true);
     if (!host.enabled)
         fail('control_host_disabled');
-    const bridge = await bridgeClient(host, offline);
-    const count = () => t.events.filter(e => e.endpoint === '/v3/documents').length;
+    const bridge = await bridgeClient(host, offline, t, project.scope);
+    const count = () => t.events.filter(e => isDocumentWrite(e.endpoint)).length;
     const record = (name: string, before: number, expected: number, extra: any = {}) => result.push({ name, status: count() - before === expected ? 'passed' : 'failed', expectedWrites: expected, observedWrites: count() - before, ...extra });
     try {
         let before = count();
@@ -99,7 +113,8 @@ export async function lifecycleControls(root: string, project: {
         await checkpoint();
         before = count();
         const resumed = await recallHost(root, project.cwd, 'resume', 'lead', t, 'lifecycle-main', true);
-        await resumed.captureOutcome({ exitCode: 0, finalAssistantMessage: 'Confirmed final outcome: session identity was preserved after resume.' });
+        const resumedBridge = await bridgeClient(resumed, offline, t, project.scope);
+        try { await resumedBridge.send({ event: 'capture', eventId: 'resumed-final', content: 'Confirmed final outcome: session identity was preserved after resume.', source: 'trusted-final-assistant' }); } finally { await resumedBridge.close(); }
         record('resume-same-session', before, 1);
         await checkpoint();
         before = count();
@@ -108,14 +123,15 @@ export async function lifecycleControls(root: string, project: {
         await bridge.send(event);
         record('successful-duplicate-event-replay', before, 1);
         await checkpoint();
-        // A failed capture is not cached: a supported retry with the same event ID must be attempted.
+        // Invalid public source is rejected before capture/cache. A corrected source may retry.
+        // Uncertain provider failures are cached by production and must never be replayed.
         before = count();
-        const failed = await bridge.send({ ...event, eventId: 'failed-retry', content: 'thanks' });
+        const failed = await bridge.send({ ...event, eventId: 'failed-retry', source: 'tool' });
         const retry = await bridge.send({ ...event, eventId: 'failed-retry' });
-        record('failed-event-retry', before, 1, { firstOk: failed.ok, retryOk: retry.ok });
+        record('failed-event-retry', before, 1, { firstOk: failed.ok, retryOk: retry.ok, status: count() - before === 1 && failed.ok === false && retry.ok === true ? 'passed' : 'failed' });
         await checkpoint();
         before = count();
-        await host.captureOutcome({ exitCode: 0, finalAssistantMessage: content });
+        await bridge.send({ event: 'capture', content, source: 'trusted-final-assistant' });
         const exclusion = await host.captureOutcome({ exitCode: 0 } as any);
         record('assistant-final-vs-tool-stdout', before, 1, { unsupported: exclusion.diagnostics.length > 0, toolEligibility: evaluateAdaptiveMemoryCaptureEligibility({ source: 'tool', content }).eligible });
         await checkpoint();
@@ -130,7 +146,7 @@ export async function lifecycleControls(root: string, project: {
         await checkpoint();
         before = count();
         const children = await Promise.all([bridge.send({ event: 'role_start', sessionId: 'child-a', role: 'quality', query: 'stable identity', logicalTurnId: 'turn-2', snapshotGeneration: 2 }), bridge.send({ event: 'role_start', sessionId: 'child-b', role: 'apply-fast', query: 'stable identity', logicalTurnId: 'turn-3', snapshotGeneration: 3 })]);
-        record('next-turn-and-concurrent-child-isolation', before, 0, { qualityHasContext: !!children[0].advisoryText, applyFastEmpty: !children[1].advisoryText });
+        record('next-turn-and-concurrent-child-isolation', before, 0, { qualityHasContext: !!children[0].advisoryText, applyFastHasContext: !!children[1].advisoryText, status: children.every(child => child.ok && !!child.advisoryText) ? 'passed' : 'failed' });
         await checkpoint();
         before = count();
         const pending = bridge.send({ event: 'capture', content, source: 'trusted-user-prompt' });
@@ -144,4 +160,3 @@ export async function lifecycleControls(root: string, project: {
     }
     return result;
 }
-export const roleCap = (role: string) => resolveSupermemoryRolePolicy(role as SupermemoryRuntimeRole).maxResults;

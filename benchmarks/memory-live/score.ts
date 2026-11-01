@@ -1,3 +1,4 @@
+import { isDocumentWrite, isMemoryProfile, isMemorySearch } from './request-policy';
 import { CANARIES, FAKE_SECRETS, foreignCanary } from './security';
 export type Fact = {
     id: string;
@@ -87,9 +88,9 @@ export function estimateCost(events: {
     profileWithQuery?: boolean;
     blocked?: boolean;
 }[]) {
-    const profileWithQuery = events.filter(e => e.endpoint === '/v4/profile' && e.profileWithQuery).length;
-    const writes = events.filter(e => e.endpoint === '/v3/documents');
-    const searchQueries = events.filter(e => e.endpoint === '/v4/search').length;
+    const profileWithQuery = events.filter(e => isMemoryProfile(e.endpoint) && e.profileWithQuery).length;
+    const writes = events.filter(e => isDocumentWrite(e.endpoint));
+    const searchQueries = events.filter(e => isMemorySearch(e.endpoint)).length;
     const memoryTokens = writes.reduce((n, e) => n + e.inputTokenEstimate, 0);
     const superRagTokens = events.reduce((n, e) => n + (e.superRagTokenEstimate ?? 0), 0);
     const operations = events.filter(e => e.status !== undefined && e.status < 300).reduce((n, e) => n + (e.operationEstimate ?? 0), 0);

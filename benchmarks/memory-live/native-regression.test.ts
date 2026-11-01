@@ -13,7 +13,7 @@ import { reportSummary } from './report';
 import { scoreArtifact } from './case-artifacts';
 import { dataset } from './dataset';
 const scratch = testScratch();
-test('pinned native routes retrieve seeded positive controls over IPC inside separate OS network namespaces', async () => {
+test('historical pinned native routes retrieve seeded positive controls over IPC inside separate OS network namespaces', async () => {
     await Promise.all((['claude', 'codex', 'opencode'] as const).map(async route => {
         const run = newRunId(), root = scratch.root(run), project = makeProject(root, `n_${route}_1`, 'CONTROL');
         const t = new NamespaceTransport({ run, bindings: { [project.scope]: `deck_eval_${run}_n_${route}_1_control` }, budget: 100, wire: simulatedWire() });
@@ -68,14 +68,14 @@ const settings=await post('/v3/settings','PATCH',{shouldLLMFilter:true,filterPro
     expect(Object.values(mapping).some(x => String(x).includes('q999') || String(x).includes('old-decision'))).toBe(false);
     replay.close();
 }, 15000);
-test('R and N use identical role-cap and @5 scores while native apply-fast injection stays a visible violation', () => {
+test('R and historical N score all returned units plus fixed @5; Apply Fast recall is allowed', () => {
     const q = dataset().questions.find(q => q.role === 'apply-fast')!, a: any = { injectedText: 'fact', injectedUnits: ['fact'], rawReturnedUnits: [], durationMs: 1, project: q.project_under_query, settledEligible: false };
     for (const track of ['R', 'N']) {
         const row = scoreArtifact(q, { ...a, track });
-        expect(row.cap).toBe(0);
-        expect(row.status).toBe('policy_skip');
-        expect(row.rolePolicyViolation).toBe(true);
-        expect(row.final.precisionAtK).toBeNull();
+        expect(row.cap).toBeNull();
+        expect(row.status).toBe('scored');
+        expect(row.rolePolicyViolation).toBe(false);
+        expect(row.final.occupancy).toBe(1);
         expect(row.at5).toBeDefined();
     }
 });

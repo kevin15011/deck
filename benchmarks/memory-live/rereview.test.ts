@@ -1,3 +1,4 @@
+import { isDocumentWrite, isMemorySearch } from './request-policy';
 import { test, expect } from 'bun:test';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -11,13 +12,13 @@ import { privateWrite, sha256 } from './security';
 import { testScratch, confirmSyntheticCleanup, syntheticConfirmation } from './test-support';
 const scratch = testScratch();
 const plan = () => { const run = newRunId(); return prepare({ run, evalRoot: scratch.root(run), mode: 'pilot' }); };
-const empty = (u: URL) => u.pathname === '/v4/search' ? Response.json({ results: [], total: 0 }) : Response.json({ profile: { static: [], dynamic: [] }, searchResults: { results: [], total: 0 } });
+const empty = (u: URL) => isMemorySearch(u.pathname) ? Response.json({ results: [], total: 0 }) : Response.json({ profile: { static: [], dynamic: [] }, searchResults: { results: [], total: 0 } });
 const written = (m: ReturnType<typeof prepare>) => { const tag = Object.values(m.bindings)[0]!; m.cleanupApproved = true; confirmSyntheticCleanup(m); privateWrite(join(m.evalRoot, 'ownership.json'), { run: m.run, bindingsHash: sha256(JSON.stringify(m.bindings)), owned: { [tag]: ['owned'] }, attemptedNamespaces: [tag] }); return tag; };
 test('re-review preflight rejects v5 404 with populated, denied, or malformed legacy reads', async () => {
     for (const mode of ['populated', 'denied', 'malformed']) {
         const m = plan(), t = new NamespaceTransport({ run: m.run, bindings: m.bindings, budget: 10, wire: async (u) => u.pathname.startsWith('/ns/') ? new Response('{}', { status: 404 }) : mode === 'denied' ? new Response('{}', { status: 403 }) : mode === 'malformed' ? Response.json({}) : Response.json({ profile: { static: ['legacy ghost'], dynamic: [] }, results: [{ memory: 'legacy ghost' }], total: 1 }) });
         await expect(t.preflightNamespace(Object.values(m.bindings)[0]!)).rejects.toThrow('legacy');
-        expect(t.events.some(e => e.endpoint === '/v3/documents')).toBe(false);
+        expect(t.events.some(e => isDocumentWrite(e.endpoint))).toBe(false);
     }
 });
 test('re-review cleanup refuses written v5-invisible namespaces without DELETE', async () => {
@@ -39,7 +40,7 @@ test('re-review cleanup needs v5 visibility before DELETE and empty legacy profi
                 }
                 if (u.pathname.startsWith('/ns/'))
                     return deleted.has(ns) ? new Response('{}', { status: 404 }) : Response.json({ namespace: ns });
-                if (ghost && u.pathname === '/v4/search')
+                if (ghost && isMemorySearch(u.pathname))
                     return Response.json({ results: [{ memory: 'legacy ghost' }], total: 1 });
                 return empty(u);
             } });
@@ -55,7 +56,7 @@ test('re-review pilot aborts after first write if v5 cannot see it and persists 
     const m = plan(), wire = simulatedWire();
     let writes = 0;
     const r = await execute(m, { wire: async (u, i) => {
-            if (u.pathname === '/v3/documents')
+            if (isDocumentWrite(u.pathname))
                 writes++;
             return u.pathname.startsWith('/ns/') ? new Response('{}', { status: 404 }) : wire(u, i);
         } });
@@ -124,7 +125,7 @@ test('re-review lost write acknowledgement still gets a visibility receipt and s
     const m = plan();
     let attempts = 0;
     const t = new NamespaceTransport({ run: m.run, bindings: m.bindings, budget: 5, verifyWriteVisibility: true, visibilityWait: async () => { }, wire: async (u) => {
-            if (u.pathname === '/v3/documents') {
+            if (isDocumentWrite(u.pathname)) {
                 attempts++;
                 throw new Error('simulated_lost_ack');
             }
@@ -141,7 +142,7 @@ test('third review first-write visibility retries at 2/4/8 seconds and stops at 
     for (const statuses of [[404, 200], [404, 503, 200]]) {
         const m = plan(), scope = Object.keys(m.bindings)[0]!, waits: number[] = [];
         let gets = 0;
-        const t = new NamespaceTransport({ run: m.run, bindings: m.bindings, budget: 10, verifyWriteVisibility: true, visibilityWait: async (ms) => { waits.push(ms); }, wire: async (u) => u.pathname === '/v3/documents' ? Response.json({ id: 'owned' }) : new Response('{}', { status: statuses[gets++]! }) });
+        const t = new NamespaceTransport({ run: m.run, bindings: m.bindings, budget: 10, verifyWriteVisibility: true, visibilityWait: async (ms) => { waits.push(ms); }, wire: async (u) => isDocumentWrite(u.pathname) ? Response.json({ id: 'owned' }) : new Response('{}', { status: statuses[gets++]! }) });
         await t.fetch('https://api.supermemory.ai/v3/documents', { method: 'POST', body: JSON.stringify({ containerTag: scope, customId: `deck_eval_${m.run}_${'a'.repeat(32)}`, content: 'safe synthetic fixture' }) });
         expect(gets).toBe(statuses.length);
         expect(t.used).toBe(1 + statuses.length);
@@ -155,7 +156,7 @@ test('third review visibility retries are bounded, fail closed, and cannot excee
     for (const budget of [10, 2]) {
         const m = plan(), scope = Object.keys(m.bindings)[0]!, waits: number[] = [];
         let gets = 0;
-        const t = new NamespaceTransport({ run: m.run, bindings: m.bindings, budget, verifyWriteVisibility: true, visibilityWait: async (ms) => { waits.push(ms); }, wire: async (u) => { if (u.pathname === '/v3/documents')
+        const t = new NamespaceTransport({ run: m.run, bindings: m.bindings, budget, verifyWriteVisibility: true, visibilityWait: async (ms) => { waits.push(ms); }, wire: async (u) => { if (isDocumentWrite(u.pathname))
                 return Response.json({ id: 'owned' }); gets++; return new Response('{}', { status: 404 }); } });
         await expect(t.fetch('https://api.supermemory.ai/v3/documents', { method: 'POST', body: JSON.stringify({ containerTag: scope, customId: `deck_eval_${m.run}_${'a'.repeat(32)}`, content: 'safe synthetic fixture' }) })).rejects.toThrow('namespace_visibility_unknown');
         const expected = budget === 2 ? 1 : 3;

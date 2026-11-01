@@ -1,5 +1,36 @@
 # Memory live evaluation harness
 
+## Current decision and attached supervision (2026-10-31)
+
+The objective is to prove incremental Supermemory value to Deck or remove it. R versus N compares integration routes; it is **not** Supermemory enabled versus disabled. An R pilot establishes processing, instrumentation and retrieval availability, not improved agent outcomes. Product retention requires a separately reviewed paired task protocol with ordinary Deck capabilities preserved in both arms. Local-buffer benefits must be measured separately.
+
+The original aggregate US$1 allocation is cumulative. Modeled/reserved spend is US$0.020955 and retained-run cleanup reserves total US$0.20. At most **US$0.779045 total / US$0.729045 evaluation stop / US$0.05 new cleanup reserve** remains for a future run. Recompute the production-serializer forecast; the older proposals below are historical and do not renew this allocation. Actual billing remains unknown pending user console reconciliation. No prepared manifest is approved by this documentation.
+
+`supervise.py` is a Linux attached launcher for the exact R pilot manifest. Its bytes participate in `harnessHashes`, and both launcher and evaluator check the supplied SHA-256 of the manifest bytes. A code/commit change requires fresh preparation and review. One owner must launch, await terminal exit, inspect receipts and only then end its task; do not hand off a running native exec session. Use bounded tool waits while supervising. There is no detach, session escape, retry or resume.
+
+The launcher writes exclusive mode-0600 `supervision/{stdout.log,stderr.log,lifecycle.jsonl}` inside the private run directory, using synchronous durable writes. Receipts record process identities/start ticks, five-second heartbeats, manifest/launcher hashes, reaping and exit code/signal. It passes only the explicit runtime environment and the approved key-file path, never reads the key itself, and disables Bun `.env` loading. The evaluator retains all existing approval, account, source, cost, single-use authority and retention guards.
+
+For live execution, paired UTC and Linux boot-clock deadlines start before evaluator launch and can only shorten the evaluator's original run deadline. The shared monotonic boot-clock deadline includes launch/validation time and system suspend; Linux `/proc/uptime` is read with a conservative 10ms resolution allowance (never a late cutoff). transport entry, wire send and header/body waits cannot regain elapsed allowance after a wall-clock rollback. An observed forward-clock expiry also stays closed. A ten-second monotonic outer drain permits final receipts, then a hard kill bounds local execution. UTC receipt timestamps and existing wall-clock processing/availability measurements retain their original semantics; they are not relabeled monotonic latency evidence. Supervisor signals kill/reap the evaluator; Linux parent-death guards kill it when the supervisor or its immediate owner dies. This is bounded to the current in-process R provider route, not arbitrary detached descendants or provider-side deferred processing. Missing terminal evidence is **interrupted/unfinalized**, never success or permission to rerun. A terminal process exit is not measurement validity: separately inspect `results.json`, processing validity, reservations and retained namespaces.
+
+The immediate waiting owner must supply `DECK_EVAL_OWNER_PID` and `DECK_EVAL_OWNER_START_TICKS` captured **before** creating the supervisor. Missing values, adoption or PID reuse reject before plan loading. Do not capture the supervisor's current PPID at initialization, and do not insert an intermediate shell/`unshare` process after capturing a different owner's identity. This guards actual OS ownership, not logical task completion while that parent remains alive.
+
+Offline exercise uses a **new synthetic-HOME plan**, the same launcher without `--live`, and a network namespace. This waiting Python owner establishes identity inside that namespace and directly starts the supervisor (pass the new synthetic plan and digest as arguments):
+
+```bash
+unshare -rn python3 -I -B - "$MANIFEST" "$MANIFEST_SHA256" <<'PY'
+import os, pathlib, subprocess, sys
+pid = os.getpid()
+raw = pathlib.Path(f'/proc/{pid}/stat').read_text()
+ticks = raw[raw.rfind(')') + 2:].split()[19]
+env = dict(os.environ, DECK_EVAL_OWNER_PID=str(pid), DECK_EVAL_OWNER_START_TICKS=ticks)
+child = subprocess.Popen([sys.executable, '-I', '-B', 'benchmarks/memory-live/supervise.py',
+    '--manifest', sys.argv[1], '--manifest-sha256', sys.argv[2]], env=env)
+raise SystemExit(child.wait())
+PY
+```
+
+This mode runs the existing simulated evaluator and consumes only that synthetic plan. Never use an old real-run manifest for a simulation. Offline process tests cover normal terminal output, signals, deadline exhaustion, owner loss, private receipts and plan rejection; simulation cannot establish provider latency or product value.
+
 Phase 0 measures selected production memory paths before product changes. This directory contains only evaluator code and synthetic inputs. A prior R pilot ran, but its quality scores are INVALID as a baseline because it recorded no processing readiness. This candidate has only offline evidence; the cause of the prior result remains a hypothesis. Quality reviews the candidate before the Lead approves a live manifest. `benchmarks/deckmemorybench.ts` remains the plumbing benchmark.
 
 ## Coverage after local main synchronization (2026-10-31)
@@ -32,15 +63,15 @@ R dry-run executes the real production composition against a FIFO simulated HTTP
 The evaluation key is dedicated to evaluation **inside the same Supermemory account as production**. No separate account is required or declared. After reviewing the candidate, prepare a fresh manifest with the truthful shared-account declaration:
 
 ```bash
-MANIFEST=$(bun run benchmarks/memory-live/run.ts prepare --mode pilot --repeats 1 --processing-schedule adaptive-v1 --request-timeout-ms 5000 --next-turn-delay-ms 30000 --budget 5994 --account-shared-with-production --estimated-cost-ceiling-usd 0.83 --estimated-cost-stop-usd 0.78 --cleanup-reserve-usd 0.05 --manifest-path-only)
+MANIFEST=$(bun run benchmarks/memory-live/run.ts prepare --mode pilot --repeats 1 --processing-schedule adaptive-v1 --request-timeout-ms 5000 --next-turn-delay-ms 30000 --budget 5994 --account-shared-with-production --estimated-cost-ceiling-usd 0.779045 --estimated-cost-stop-usd 0.729045 --cleanup-reserve-usd 0.05 --manifest-path-only)
 ```
 
 The command serializes the actual production R captures, pool/lifecycle controls and skip probes against an in-memory transport before writing the immutable plan. It reads no key and makes no provider requests. Inspect `plan.json.costGuard` before approval. The default 30-second polling forecast does not fit the existing request budget; it is an offline planning candidate and live validation rejects it. See the explicit polling options below. The default pilot budget remains **822 evaluation + 28 cleanup = 850 total requests**. Explicit guarded pilot configurations accept a positive safe integer evaluation budget up to 3,200 for fixed polling or 5,994 for `adaptive-v1` through the existing `--budget` flag; cleanup remains exactly 28 and the track/repeat remains R-only/one. This configuration range permits reviewable proposals, not spending authority. Preparation without the three explicit cost flags produces an offline-only plan; missing or invalid guards fail before the live credential reader.
 
-The user has authorized a **$1 estimated total**, with starting console balance **$19.97 already recorded**. After verification and a pre-start notice, Lead may approve and execute the exact fresh manifest if its forecast is at most $1; no further confirmation is required for that authorization. A forecast above $1 requires notifying the user before running. This implementation task does not approve or execute a manifest. Preparing or validating a configuration alone never grants approval. Then the pilot command is:
+The user authorized an **aggregate $1 estimated total**, including prior spend and retained cleanup reserves. Use the remaining allocation above, never a renewed $1 per run. Lead must review the current forecast and exact fresh manifest and give the immediate pre-start notice before a separately authorized execution. This implementation task does not approve or execute a live manifest. After that approval, supply the hash of the exact approved manifest bytes and keep the execution owner attached until terminal:
 
 ```bash
-SUPERMEMORY_EVAL_API_KEY_FILE="$HOME/.deck-eval/eval.key" bun run benchmarks/memory-live/run.ts run --live --manifest "$MANIFEST"
+SUPERMEMORY_EVAL_API_KEY_FILE="$HOME/.deck-eval/eval.key" python3 -I -B benchmarks/memory-live/supervise.py --live --manifest "$MANIFEST" --manifest-sha256 "$MANIFEST_SHA256"
 ```
 
 This task grants no live approval. Both `--live` and the approved explicit manifest are required. Live execution and live cleanup require `accountSharedWithProduction: true` exactly. Preparation accepts only the bare `--account-shared-with-production` flag; value forms such as `=false`, `=true` or a following boolean are rejected. False and absent declarations are refused before credential access. Historical absent/false declarations remain usable only offline. The old dedicated-account declaration is retired and rejected for execution; it must never be set. Historical manifests remain usable for offline rescoring. Execution verifies the source commit, product-source hashes, harness hashes and corpus hash. Do not run the parent live process under `unshare -rn`: cloud egress is its purpose. Native children remain isolated automatically.

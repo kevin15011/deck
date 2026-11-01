@@ -1,3 +1,4 @@
+import { isDocumentWrite, isMemoryProfile, isMemorySearch } from './request-policy';
 import { maximumStatusPolls, measurementBands, validateProcessingPlan } from './processing';
 import { initializeRunAuthority } from './run-authority';
 import { existsSync } from 'node:fs';
@@ -12,6 +13,7 @@ import { fail, privateWrite, sha256 } from './security';
 // Frozen planning assumptions, NOT a claim about provider billing or its tokenizer.
 // Rates are the existing 2026-10-21 evidence snapshot. Unknown work gets an explicit allowance.
 export const COST_POLICY = {
+    executionContract: 'current-pi-v5-public-events-v1',
     memoryUsdPerProxyToken: .000005,
     searchUsd: .000005,
     observedSearchUnits: 'Pilot console +171 searches reconciled as 49 v4/search plus 122 profile-with-query; per-unit dollar equivalence remains an assumption.',
@@ -70,7 +72,7 @@ export async function forecastR(m: Manifest): Promise<Forecast> {
     const writes: WriteMeasure[] = [];
     const fake = simulatedWire();
     const t = new NamespaceTransport({ run: m.run, bindings: m.bindings, budget: m.requestBudget, wire: async (url, init) => {
-        if (url.pathname === '/v3/documents') {
+        if (isDocumentWrite(url.pathname)) {
             const serialized = String(init.body), body = JSON.parse(serialized);
             writes.push({ phase: t.phase, contentUtf8Bytes: Buffer.byteLength(body.content, 'utf8'), serializedBodyUtf8Bytes: Buffer.byteLength(serialized, 'utf8'), contentHash: sha256(body.content), bodyHash: sha256(serialized) });
         }
@@ -190,13 +192,13 @@ export class CostLedger {
     }
     reserve(endpoint: string, body: any, cleanup: boolean, commit?: () => void) {
         if (!cleanup && this.#reason) fail('estimated_cost_guard_stopped');
-        const bytes = endpoint === '/v3/documents' ? Buffer.byteLength(String(body.content ?? ''), 'utf8') : 0;
-        const operations = Number(body.dreaming === 'instant') + Number(body.rerank === true) + Number(body.rewriteQuery === true) + Number(body.aggregate === true);
-        const charge = bytes * 5 + Number(endpoint === '/v4/search' || endpoint === '/v4/profile' && !!body.q) * 5 + operations * 100 + 100;
+        const bytes = isDocumentWrite(endpoint) ? Buffer.byteLength(String(body.content ?? ''), 'utf8') : 0;
+        const operations = Number(body.dreaming === 'instant') + Number(body.rerank === true || body.rerank === 'order' || body.rerank === 'aggregate') + Number(body.rewriteQuery === true) + Number(body.aggregate === true);
+        const charge = bytes * 5 + Number(isMemorySearch(endpoint) || isMemoryProfile(endpoint) && !!body.q) * 5 + operations * 100 + 100;
         const projectedEval = this.#evaluationMicros + (cleanup ? 0 : charge);
         const projectedCleanup = this.#cleanupMicros + (cleanup ? charge : 0);
         this.#projected = { evaluationUsd: usd(projectedEval), totalUsd: usd(projectedEval + (cleanup ? projectedCleanup : micros(this.#plan.cleanupReserveUsd))), ingestionTokens: this.#tokens + bytes };
-        const reason = endpoint === '/v3/documents' && this.#writes + 1 > this.#plan.maxWriteAttempts ? 'write_attempt_budget' : !cleanup && this.#tokens + bytes > this.#plan.ingestionTokenBudget ? 'ingestion_token_budget'
+        const reason = isDocumentWrite(endpoint) && this.#writes + 1 > this.#plan.maxWriteAttempts ? 'write_attempt_budget' : !cleanup && this.#tokens + bytes > this.#plan.ingestionTokenBudget ? 'ingestion_token_budget'
             : !cleanup && projectedEval >= micros(this.#plan.stopUsd) ? 'estimated_stop_threshold'
             : cleanup && projectedCleanup > micros(this.#plan.cleanupReserveUsd) ? 'cleanup_estimated_reserve'
             : projectedEval + (cleanup ? projectedCleanup : micros(this.#plan.cleanupReserveUsd)) > micros(this.#plan.ceilingUsd) ? 'estimated_total_ceiling' : null;
@@ -207,7 +209,7 @@ export class CostLedger {
             fail('estimated_cost_guard_stopped');
         }
         commit?.();
-        if (endpoint === '/v3/documents') this.#writes++;
+        if (isDocumentWrite(endpoint)) this.#writes++;
         this.#tokens += bytes;
         this.#estimatedTokens += Math.ceil(bytes / 4);
         if (cleanup) { this.#cleanupMicros = projectedCleanup; this.#cleanupRequests++; }

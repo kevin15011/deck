@@ -1,3 +1,4 @@
+import { isDocumentWrite, isMemoryProfile, isMemorySearch } from './request-policy';
 import { validateCleanupConfirmation, type CleanupConfirmation } from './cleanup-authorization';
 import { Database, constants as sql } from 'bun:sqlite';
 import { constants, openSync, closeSync, fsyncSync, lstatSync, readFileSync, existsSync } from 'node:fs';
@@ -24,7 +25,7 @@ function syncFile(path: string) { const fd = openSync(path, constants.O_RDONLY |
 function createDatabase(path: string) {
     const fd = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
     try { fsyncSync(fd); } finally { closeSync(fd); }
-    return openDatabase(path);
+    return runAuthorityStorage.open(path);
 }
 function openDatabase(path: string) {
     identity(path);
@@ -39,18 +40,28 @@ function openDatabase(path: string) {
     try { db.exec('PRAGMA busy_timeout=0; PRAGMA synchronous=EXTRA;'); return db; }
     catch (e) { db.close(); throw e; }
 }
+// Internal effect seam, never selected by a manifest, environment or CLI flag.
+// Production and subprocess recovery always use the durable database opener.
+export const runAuthorityStorage = { open: openDatabase };
 /** Prepared once, never recreated by execute/cleanup. Missing files mean unknown history. */
 export function initializeRunAuthority(m: Manifest) {
     secureDir(m.evalRoot);
     if ([MARKER, LOCK, LEDGER, ...receiptNames].some(n => existsSync(join(m.evalRoot, n)))) fail('run_authority_already_exists_use_new_run');
     const bindingsHash = sha256(JSON.stringify(m.bindings));
     const lock = createDatabase(join(m.evalRoot, LOCK));
-    try { lock.exec('CREATE TABLE identity (value TEXT NOT NULL)'); lock.query('INSERT INTO identity VALUES (?)').run(JSON.stringify({ run: m.run, bindingsHash })); } finally { lock.close(); }
+    try {
+        lock.exec('BEGIN IMMEDIATE; CREATE TABLE identity (value TEXT NOT NULL)');
+        lock.query('INSERT INTO identity VALUES (?)').run(JSON.stringify({ run: m.run, bindingsHash }));
+        lock.exec('COMMIT');
+    } finally { lock.close(); }
     const db = createDatabase(join(m.evalRoot, LEDGER));
     try {
-        db.exec('CREATE TABLE state (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL); CREATE TABLE effects (seq INTEGER PRIMARY KEY, value TEXT NOT NULL);');
+        // Publish each database's schema and initial state in one durable commit.
+        // No authority marker or external effect exists until both commits finish.
+        db.exec('BEGIN IMMEDIATE; CREATE TABLE state (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL); CREATE TABLE effects (seq INTEGER PRIMARY KEY, value TEXT NOT NULL);');
         const state: State = { schema: 'deck-run-spend-v1', run: m.run, bindingsHash, evaluationLimit: m.requestBudget, cleanupLimit: m.cleanupRequestBudget ?? 7 * Object.keys(m.bindings).length, evaluationStarted: false, evaluationFinished: false, cleanupCeilingMicros: m.costGuard ? Math.round(m.costGuard.cleanupReserveUsd * 1e6) : null, ...zero() };
         db.query('INSERT INTO state VALUES (1, ?)').run(JSON.stringify(state));
+        db.exec('COMMIT');
     } finally { db.close(); }
     privateWrite(join(m.evalRoot, MARKER), { schema: 'deck-run-authority-v1', run: m.run, bindingsHash, lock: identity(join(m.evalRoot, LOCK)), ledger: identity(join(m.evalRoot, LEDGER)) });
     syncFile(join(m.evalRoot, MARKER));
@@ -79,12 +90,12 @@ export class RunAuthority {
             const marker = JSON.parse(readFileSync(join(m.evalRoot, MARKER), 'utf8'));
             const bindingsHash = sha256(JSON.stringify(m.bindings));
             if (marker.schema !== 'deck-run-authority-v1' || marker.run !== m.run || marker.bindingsHash !== bindingsHash || JSON.stringify(marker.lock) !== JSON.stringify(identity(join(m.evalRoot, LOCK))) || JSON.stringify(marker.ledger) !== JSON.stringify(identity(join(m.evalRoot, LEDGER)))) fail('run_authority_missing_or_corrupt');
-            lock = openDatabase(join(m.evalRoot, LOCK));
+            lock = runAuthorityStorage.open(join(m.evalRoot, LOCK));
             try { lock.exec('BEGIN EXCLUSIVE'); }
             catch (e: any) { if (e.code === 'SQLITE_BUSY' || e.code === 'SQLITE_LOCKED') fail('run_in_use'); throw e; }
             const ids = lock.query('SELECT value FROM identity').all() as { value: string }[];
             if (ids.length !== 1 || ids[0]!.value !== JSON.stringify({ run: m.run, bindingsHash })) fail('run_authority_missing_or_corrupt');
-            ledger = openDatabase(join(m.evalRoot, LEDGER));
+            ledger = runAuthorityStorage.open(join(m.evalRoot, LEDGER));
             return new RunAuthority(m, purpose, lock, ledger, marker);
         } catch (e: any) {
             ledger?.close(); lock?.close();
@@ -198,15 +209,15 @@ export class RunAuthority {
     }
     reserve(endpoint: string, body: any, cleanup: boolean, tag: string) {
         this.beforeReservation(cleanup);
-        const tokens = endpoint === '/v3/documents' ? Buffer.byteLength(String(body.content ?? ''), 'utf8') : 0;
-        const operations = Number(body.dreaming === 'instant') + Number(body.rerank === true) + Number(body.rewriteQuery === true) + Number(body.aggregate === true);
-        const micros = tokens * 5 + Number(endpoint === '/v4/search' || endpoint === '/v4/profile' && !!body.q) * 5 + operations * 100 + 100;
+        const tokens = isDocumentWrite(endpoint) ? Buffer.byteLength(String(body.content ?? ''), 'utf8') : 0;
+        const operations = Number(body.dreaming === 'instant') + Number(body.rerank === true || body.rerank === 'order' || body.rerank === 'aggregate') + Number(body.rewriteQuery === true) + Number(body.aggregate === true);
+        const micros = tokens * 5 + Number(isMemorySearch(endpoint) || isMemoryProfile(endpoint) && !!body.q) * 5 + operations * 100 + 100;
         const s = { ...this.#state };
         s[cleanup ? 'cleanupRequests' : 'evaluationRequests']++;
         s[cleanup ? 'cleanupMicros' : 'evaluationMicros'] += micros;
         s.tokens += tokens; s.tokenEstimate += Math.ceil(tokens / 4);
         if (cleanup && s.cleanupCeilingMicros !== null && s.cleanupMicros > s.cleanupCeilingMicros) fail('estimated_cost_guard_stopped');
-        this.persist(s, { cleanup, micros, tokens, tokenEstimate: Math.ceil(tokens / 4), tag, write: endpoint === '/v3/documents' });
+        this.persist(s, { cleanup, micros, tokens, tokenEstimate: Math.ceil(tokens / 4), tag, write: isDocumentWrite(endpoint) });
     }
     close() {
         if (this.#closed) return;

@@ -72,8 +72,9 @@ test('status polling shares the existing request ceiling and never renews it', a
     const r = await f.gate.waitForAll(); expect(r.validity).toBe('invalid'); expect(f.t.used).toBe(100); expect(r.documents[0]!.reason).toBe('budget_stop');
 });
 test('deadline is rechecked after durable reservation immediately before wire dispatch', async () => {
-    const f = fixture(); let calls = 0, sends = 0;
-    const t = new NamespaceTransport({ run: f.m.run, bindings: f.m.bindings, budget: 1, now: () => calls++ === 0 ? 0 : 1001, deadlineAtMs: 1000, wire: async () => { sends++; return Response.json({}); } });
+    const f = fixture(); let now = 0, sends = 0;
+    // Advance after the reservation receipt, independent of constructor clock reads.
+    const t = new NamespaceTransport({ run: f.m.run, bindings: f.m.bindings, budget: 1, now: () => now, changed: () => { now = 1001; }, deadlineAtMs: 1000, wire: async () => { sends++; return Response.json({}); } });
     await expect(t.fetch('https://api.supermemory.ai/v4/profile', { method: 'POST', body: JSON.stringify({ containerTag: Object.keys(f.m.bindings)[0] }) })).rejects.toThrow();
     expect(sends).toBe(0); expect(t.used).toBe(1); // The uncertain reservation is not refunded.
 });

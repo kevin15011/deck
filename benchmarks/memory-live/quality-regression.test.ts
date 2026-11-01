@@ -1,3 +1,4 @@
+import { isDocumentWrite, isMemoryProfile, isMemorySearch } from './request-policy';
 import { draftManifest } from './manifest';
 import { initializeRunAuthority } from './run-authority';
 import { test, expect } from 'bun:test';
@@ -82,7 +83,7 @@ test('Quality cleanup journals and deletes unconfirmed-only namespaces after com
             }
             if (u.pathname.startsWith('/ns/'))
                 return deleted.has(u.pathname) ? new Response('{}', { status: 404 }) : Response.json({ namespace: 'synthetic' });
-            return u.pathname === '/v4/search' ? Response.json({ results: [], total: 0 }) : Response.json({ profile: { static: [], dynamic: [] } });
+            return isMemorySearch(u.pathname) ? Response.json({ results: [], total: 0 }) : Response.json({ profile: { static: [], dynamic: [] } });
         } });
     expect(r.complete).toBe(false);
     expect(r.retainedNamespaces.length).toBe(2);
@@ -112,7 +113,7 @@ test('Quality preflight aborts before a write if any namespace is populated or u
     const m = plan();
     let writes = 0;
     const r = await execute(m, { wire: async (u, i) => {
-            if (u.pathname === '/v3/documents')
+            if (isDocumentWrite(u.pathname))
                 writes++;
             return Response.json({ documents: [{ id: 'preexisting' }], pagination: { totalItems: 1 } });
         } });
@@ -190,9 +191,9 @@ test('v5 namespace preflight accepts only documented empty arrays/counts without
     const sent: string[] = [];
     const t = new NamespaceTransport({ run: m.run, bindings: m.bindings, budget: 10, wire: async (u, i) => {
             sent.push(String(i.method) + ' ' + u.pathname);
-            if (u.pathname === '/v4/profile')
+            if (isMemoryProfile(u.pathname))
                 return Response.json({ profile: { static: [], dynamic: [] } });
-            if (u.pathname === '/v4/search')
+            if (isMemorySearch(u.pathname))
                 return Response.json({ results: [], total: 0 });
             const type = u.pathname.split('/')[4];
             return type ? Response.json({ [type]: [], pagination: { totalItems: 0 } }) : Response.json({ namespace: u.pathname.split('/')[2] });
