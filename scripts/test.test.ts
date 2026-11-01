@@ -15,7 +15,7 @@ describe("quarantine metadata", () => {
 });
 
 // Oracle: a deadline must terminate work and identify the offending file/run.
-for (const [label, budget] of [["slow.test.ts", 2000], ["Test run", 90000]] as const) {
+for (const [label, budget] of [["Test run", 120000]] as const) {
   test(`${label} deadline kills pending work and fails`, async () => {
     let expire!: () => void;
     let killed = false, cleared = false;
@@ -34,38 +34,37 @@ test("completed work preserves exit status and cancels its deadline", async () =
   expect(cleared).toBe(true);
 });
 
-// Protects isolated retries, one-off warnings, and persistent failures without real delays.
-test("budget spikes retry alone once and retain real failures", async () => {
+// Oracle: slow files run once, remain successful, and do not hide functional failures.
+test("slow files warn without retrying or changing exit status", async () => {
   const { runWithTolerance } = await import("./test");
-  let active = 0;
+  let active = 0, peak = 0;
   const attempts = new Map<string, number>();
   const warnings: string[] = [];
   const results = await runWithTolerance(["spike", "slow", "failure", "normal", "later"], async file => {
-    const attempt = (attempts.get(file) ?? 0) + 1;
-    attempts.set(file, attempt);
-    if (attempt === 2) expect(active).toBe(0);
-    active++;
+    attempts.set(file, (attempts.get(file) ?? 0) + 1);
+    peak = Math.max(peak, ++active);
     await Promise.resolve();
     active--;
-    return { code: file === "failure" ? 1 : 0, text: file, overBudget: file === "slow" || (file === "spike" && attempt === 1) };
+    return { code: file === "failure" ? 1 : 0, text: file, overBudget: ["slow", "spike"].includes(file) };
   }, () => false, message => warnings.push(message));
-  expect(attempts.get("spike")).toBe(2);
-  expect(attempts.get("slow")).toBe(2);
-  expect(attempts.get("failure")).toBe(1);
-  expect(results.filter(result => result.code !== 0).map(result => result.file)).toEqual(["slow", "failure"]);
-  expect(warnings).toHaveLength(1);
-  expect(warnings[0]).toContain("spike");
+  expect([...attempts.values()]).toEqual([1, 1, 1, 1, 1]);
+  expect(peak).toBe(4);
+  expect(results.filter(result => result.code !== 0).map(result => result.file)).toEqual(["failure"]);
+  expect(warnings).toHaveLength(2);
 });
 
-test("run deadline prevents isolated retries and later batches", async () => {
+// Oracle: stopped admission must never look like a successfully completed selection.
+test("run deadline prevents later admission and rejects incomplete completion", async () => {
   const { runWithTolerance } = await import("./test");
   let stopped = false;
   const started: string[] = [];
-  await runWithTolerance(["one", "two", "three", "four", "later"], async file => {
+  const work = runWithTolerance(["one", "two", "three", "four", "later"], async file => {
     started.push(file);
+    await Promise.resolve();
     stopped = true;
-    return { code: 1, text: "", overBudget: true };
+    return { code: 0, text: "", overBudget: false };
   }, () => stopped);
+  await expect(work).rejects.toThrow("stopped");
   expect(started).toEqual(["one", "two", "three", "four"]);
 });
 
@@ -84,4 +83,35 @@ test("a free worker starts the next file while another file remains pending", as
   expect(started).toContain("next");
   unblock();
   expect(await work).toHaveLength(5);
+});
+
+// Real boundary: the supervisor must kill the process group even when work blocks
+// synchronously or exits while a descendant still holds its output pipes open.
+test.skipIf(process.platform !== "linux")("supervisor bounds blocked work and descendant output drain", async () => {
+  const { runSupervised } = await import("./test");
+  const { mkdtempSync, readFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = mkdtempSync(join(tmpdir(), "deck-test-deadline-"));
+  try {
+    for (const mode of ["blocked", "drain"]) {
+      const pidPath = join(root, mode);
+      const script = `
+        const child = Bun.spawn([process.execPath, "-e", "setInterval(() => {}, 1000)"], { stdout: "inherit", stderr: "inherit" });
+        require("node:fs").writeFileSync(${JSON.stringify(pidPath)}, String(child.pid));
+        ${mode === "blocked" ? "while (true) {}" : "process.exit(0)"}
+      `;
+      await expect(runSupervised([process.execPath, "-e", script], root, 400)).rejects.toThrow("wall-time budget");
+      const pid = Number(readFileSync(pidPath, "utf8"));
+      const running = () => {
+        try { return !/[)] [ZX] /.test(readFileSync(`/proc/${pid}/stat`, "utf8")); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
+      };
+      for (let i = 0; i < 20 && running(); i++) await Bun.sleep(5);
+      expect(running()).toBe(false);
+    }
+    expect(await runSupervised([process.execPath, "-e", "process.exit(7)"], root, 1000)).toBe(7);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

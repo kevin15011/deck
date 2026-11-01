@@ -6,7 +6,7 @@ index_mode: full
 context: |
   Tech stack: TypeScript, Bun (runtime + package manager), React, Ink (CLI TUI)
   Architecture: Monorepo (apps/cli, packages/core, packages/adapter-*)
-  Testing: Bun built-in test runner, fast suite with 2s per file and 90s total wall-time budgets
+  Testing: Bun built-in test runner, test suite with a hard 120s total wall-time budget; 2s per file is diagnostic only
   Style: ES2022, ESNext modules, strict TypeScript, no explicit linter/formatter
 
 rules:

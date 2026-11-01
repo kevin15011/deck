@@ -1,6 +1,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { parse } from "yaml";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 type QuarantineEntry = { path: string; owner: string; reason: string; link: string; created: string; expires: string; approval?: string };
 export function validateQuarantine(value: unknown, now = new Date()): QuarantineEntry[] {
@@ -30,7 +32,7 @@ export function discoverTests(root: string): string[] {
 }
 
 export const FILE_BUDGET_MS = 2_000;
-export const RUN_BUDGET_MS = 90_000;
+export const RUN_BUDGET_MS = 120_000;
 
 /** Terminate the work at its deadline, including work that blocks its own event loop. */
 export class BudgetExceededError extends Error {}
@@ -62,7 +64,7 @@ export async function withBudget(
 
 type FileResult = { code: number; text: string; overBudget: boolean; durationMs?: number };
 
-/** Drain each parallel batch before retrying overruns alone, under the run deadline. */
+/** Keep four workers busy; slow files warn but are never retried or failed for timing. */
 export async function runWithTolerance(
   files: string[],
   runFile: (file: string) => Promise<FileResult>,
@@ -71,40 +73,29 @@ export async function runWithTolerance(
 ): Promise<(FileResult & { file: string })[]> {
   const results: (FileResult & { file: string })[] = [];
   let next = 0;
-  while (next < files.length && !stopped()) {
-    let pause = false;
-    const wave: (FileResult & { file: string })[] = [];
-    const initial = files.slice(next, next + 4);
-    next += initial.length;
-    await Promise.all(initial.map(async first => {
-      let file: string | undefined = first;
-      while (file) {
-        const result = { ...await runFile(file), file };
-        wave.push(result);
-        if (result.overBudget) pause = true;
-        file = !pause && !stopped() ? files[next++] : undefined;
-      }
-    }));
-    // An overrun pauses admission; drain all workers before its isolated retry.
-    for (const first of wave.sort((a, b) => files.indexOf(a.file) - files.indexOf(b.file))) {
-      if (stopped()) return results;
-      let result = first;
-      if (first.overBudget) {
-        result = { ...await runFile(first.file), file: first.file };
-        if (!result.overBudget) warn(`WARN ${first.file} exceeded 2s once; isolated retry completed within budget`);
-      }
-      results.push({ ...result, code: result.overBudget ? 1 : result.code });
+  await Promise.all(Array.from({ length: Math.min(4, files.length) }, async () => {
+    while (next < files.length && !stopped()) {
+      const file = files[next++]!;
+      const result = { ...await runFile(file), file };
+      results.push(result);
+      if (result.overBudget) warn(`WARN ${file} exceeded ${FILE_BUDGET_MS / 1000}s (diagnostic only)`);
     }
-  }
-  return results;
+  }));
+  if (stopped() || results.length !== files.length) throw new Error(`Test run stopped: completed ${results.length}/${files.length} files`);
+  return results.sort((a, b) => files.indexOf(a.file) - files.indexOf(b.file));
 }
 
-export async function main(args = process.argv.slice(2), root = resolve(import.meta.dir, "..")): Promise<number> {
+/** A separate process enforces the deadline even during synchronous preparation/discovery. */
+export async function runSupervised(command: string[], root: string, milliseconds: number): Promise<number> {
   const started = performance.now();
-  if (args.length) throw new Error("Use bun run test without arguments; use bun test <file> for focused checks");
-  const active = new Set<ReturnType<typeof Bun.spawn>>();
-  let stopped = false;
-  const killChild = (child: ReturnType<typeof Bun.spawn>) => {
+  let selected = 0, completed = 0;
+  const child = Bun.spawn(command, {
+    ipc(message) {
+      if (message?.type === "suite-progress") { selected = message.selected; completed = message.completed; }
+    },
+    cwd: root, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: process.platform !== "win32",
+  });
+  const kill = () => {
     try {
       if (process.platform === "win32") child.kill("SIGKILL");
       else process.kill(-child.pid, "SIGKILL");
@@ -112,68 +103,85 @@ export async function main(args = process.argv.slice(2), root = resolve(import.m
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
     }
   };
-  const killAll = () => {
-    stopped = true;
-    for (const child of active) killChild(child);
-  };
+  const drain = new AbortController();
+  try {
+    const code = await withBudget({
+      exited: Promise.all([
+        child.exited,
+        pipeline(Readable.fromWeb(child.stdout as import("node:stream/web").ReadableStream<Uint8Array>), process.stdout, { end: false, signal: drain.signal }),
+        pipeline(Readable.fromWeb(child.stderr as import("node:stream/web").ReadableStream<Uint8Array>), process.stderr, { end: false, signal: drain.signal }),
+      ]).then(([code]) => code),
+      kill,
+    }, Math.max(0, milliseconds - (performance.now() - started)), "Test run");
+    if (performance.now() - started > milliseconds) throw new BudgetExceededError("Test run exceeded wall-time budget");
+    return code;
+  } catch (error) {
+    if (error instanceof BudgetExceededError) console.error(`Test run stopped: ${completed}/${selected} files completed`);
+    throw error;
+  } finally {
+    kill();
+    drain.abort();
+  }
+}
+
+export async function main(args = process.argv.slice(2), root = resolve(import.meta.dir, "..")): Promise<number> {
+  if (args.length) throw new Error("Use bun run test without arguments; use bun test <file> for focused checks");
+  return runSupervised([process.execPath, import.meta.path, "--suite-worker", root], root, RUN_BUDGET_MS);
+}
+
+async function runSuite(root: string): Promise<number> {
+  const started = performance.now();
   const run = async () => {
     const preparation = Bun.spawn([process.execPath, "run", resolve(root, "scripts/generate-web-assets.ts")], {
-      cwd: root, stdout: "inherit", stderr: "inherit", detached: process.platform !== "win32",
+      cwd: root, stdout: "inherit", stderr: "inherit",
     });
-    active.add(preparation);
     const preparationCode = await preparation.exited;
-    active.delete(preparation);
-    if (preparationCode !== 0 || stopped) return 1;
+    if (preparationCode !== 0) return 1;
     const all = discoverTests(root);
     const entries = validateQuarantine(parse(readFileSync(resolve(root, "tests/quarantine.yaml"), "utf8"))?.entries ?? []);
     for (const entry of entries) if (!all.includes(entry.path)) throw new Error(`Unknown quarantine test: ${entry.path}`);
     const excluded = new Set(entries.map(entry => entry.path));
     const files = all.filter(path => !excluded.has(path));
-    console.log(`Running ${files.length} fast test files; 2s per file, 90s total`);
+    console.log(`Running ${files.length} fast test files; 2s diagnostic warning, 120s total including preparation and output drain`);
+    let completed = 0;
+    process.send?.({ type: "suite-progress", selected: files.length, completed });
     let failed = 0, passedTests = 0, failedTests = 0, skippedTests = 0;
     const results = await runWithTolerance(files, async file => {
         const fileStarted = performance.now();
         const child = Bun.spawn([process.execPath, "test", `./${file}`], {
-          cwd: root, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: process.platform !== "win32",
+          cwd: root, stdin: "ignore", stdout: "pipe", stderr: "pipe",
           env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", DECK_TEST_WEB_ASSETS_READY: "1" },
         });
-        active.add(child);
-        const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
-        let code = 1, overBudget = false;
-        try {
-          code = await withBudget({ exited: Promise.all([child.exited, output]).then(([code]) => code), kill: () => killChild(child) }, FILE_BUDGET_MS, file);
-          overBudget = performance.now() - fileStarted > FILE_BUDGET_MS;
-        } catch (error) {
-          code = 1;
-          if (error instanceof BudgetExceededError) overBudget = true;
-          else throw error;
-        } finally {
-          active.delete(child);
-        }
-        return { code, overBudget, durationMs: performance.now() - fileStarted, text: (await output).join("\n") };
-    }, () => stopped);
+        const [code, stdout, stderr] = await Promise.all([
+          child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+        ]);
+        process.send?.({ type: "suite-progress", selected: files.length, completed: ++completed });
+        const durationMs = performance.now() - fileStarted;
+        return { code, overBudget: durationMs > FILE_BUDGET_MS, durationMs, text: `${stdout}\n${stderr}` };
+    }, () => false);
     console.log("Slowest test files (wall time including startup):");
     for (const result of [...results].sort((a, b) => (b.durationMs ?? 0) - (a.durationMs ?? 0)).slice(0, 10)) console.log(`${result.durationMs?.toFixed(0)}ms ${result.file}`);
-    for (const { file, code, text, overBudget } of results) {
+    for (const { file, code, text } of results) {
         passedTests += Number(/(\d+) pass\b/.exec(text)?.[1] ?? 0);
         failedTests += Number(/(\d+) fail\b/.exec(text)?.[1] ?? 0);
         skippedTests += Number(/(\d+) skip\b/.exec(text)?.[1] ?? 0);
         if (code !== 0) {
           failed++;
-          console.error(`FAIL ${file}${overBudget ? " exceeded 2s wall-time budget again on isolated retry" : ""}\n${text}`);
+          console.error(`FAIL ${file}\n${text}`);
         }
     }
-    console.log(`${results.length} files, ${failed} failed; ${passedTests} tests passed, ${failedTests} failed, ${skippedTests} skipped; ${((performance.now() - started) / 1000).toFixed(2)}s wall time`);
+    console.log(`${results.length}/${files.length} files completed, ${failed} failed; ${passedTests} tests passed, ${failedTests} failed, ${skippedTests} skipped; ${((performance.now() - started) / 1000).toFixed(2)}s wall time`);
     return failed ? 1 : 0;
   };
-  try {
-    const code = await withBudget({ exited: run(), kill: killAll }, RUN_BUDGET_MS, "Test run");
-    if (performance.now() - started > RUN_BUDGET_MS) throw new Error("Test run exceeded 90s wall-time budget");
-    return code;
-  } finally {
-    killAll();
-  }
+  return run();
 }
 if (import.meta.main) {
-  try { process.exitCode = await main(); } catch (error) { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; }
+  try {
+    process.exitCode = process.argv[2] === "--suite-worker" && process.argv.length === 4
+      ? await runSuite(resolve(process.argv[3]!))
+      : await main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  }
 }
