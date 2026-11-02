@@ -22,6 +22,41 @@ export function matchesCodexHookContribution(entry: CodexHookContribution, sourc
   return entry.hash === contributionHash(source) ||
     (entry.hookSemanticHash !== undefined && entry.hookSemanticHash === codexHookSemanticHash(source));
 }
+/** Deck-written hook locations. Older Deck versions wrote the same shape with other tool versions or install roots. */
+const DECK_HOOK_SCRIPT: Readonly<Record<string, RegExp>> = Object.freeze({
+  readiness: /\/deck\/hooks\/developer-team-execution\.js$/,
+  rtk: /\/deck\/hooks\/deck-rtk-hook\.cjs$/,
+  supermemory: /\/deck\/codex\/tools\/official-supermemory-[0-9][0-9A-Za-z.-]*\/(?:recall|flush)\.js$/,
+});
+const DECK_HOOK_FIELDS = new Set(["type", "command", "timeout", "statusMessage"]);
+
+/**
+ * True when a known hook block has exactly the shape Deck writes (a node binary running a Deck-managed
+ * script) but lost its ownership receipt. Customized blocks (other commands, extra fields) return false
+ * so they stay preserved and untrusted.
+ */
+export function isDeckManagedHookBlock(id: string, source: string): boolean {
+  const script = DECK_HOOK_SCRIPT[id];
+  if (!script) return false;
+  try {
+    const hooks = (Bun.TOML.parse(source) as { hooks?: Record<string, unknown> }).hooks;
+    if (!hooks || typeof hooks !== "object") return false;
+    let count = 0;
+    for (const groups of Object.values(hooks)) {
+      if (!Array.isArray(groups)) return false;
+      for (const group of groups as Array<Record<string, unknown>>) {
+        if (Object.keys(group).some(key => key !== "matcher" && key !== "hooks") || !Array.isArray(group.hooks)) return false;
+        for (const hook of group.hooks as Array<Record<string, unknown>>) {
+          if (Object.keys(hook).some(key => !DECK_HOOK_FIELDS.has(key)) || hook.type !== "command" || typeof hook.command !== "string") return false;
+          const match = /^'([^']+)' '([^']+)'$/.exec(hook.command);
+          if (!match || !/(?:^|\/)node$/.test(match[1]!) || !script.test(match[2]!)) return false;
+          count++;
+        }
+      }
+    }
+    return count > 0;
+  } catch { return false; }
+}
 function equivalentHookSettings(left: string, right: string): boolean {
   try { return codexHookSemanticHash(left) === codexHookSemanticHash(right); }
   catch { return false; }

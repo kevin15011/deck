@@ -22,7 +22,7 @@ import {
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 
-import { codexHookSemanticHash, matchesCodexHookContribution, type CodexHookContribution, equivalentCodexToml, CODEX_MEMORY_BRIDGE_HOOK_BLOCK, codexHooksFeatureDisabled, mergeCodexOwnedHooks, mergeCodexProjectConfig, type CodexOwnedHookBlock } from "./codex-config";
+import { codexHookSemanticHash, isDeckManagedHookBlock, matchesCodexHookContribution, type CodexHookContribution, equivalentCodexToml, CODEX_MEMORY_BRIDGE_HOOK_BLOCK, codexHooksFeatureDisabled, mergeCodexOwnedHooks, mergeCodexProjectConfig, type CodexOwnedHookBlock } from "./codex-config";
 import { rtkHookScript } from "@deck/core";
 import { translateCodexCapabilityInstructions, validateCodexInstructionTranslation } from "./instruction-translation";
 import { codexMcpReceiptCoversServer, buildCodexMcpServers, inspectCodexSupermemoryMcpState, mergeCodexMcpServers } from "./mcp-config";
@@ -542,6 +542,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
           const selector = { kind: "text" as const, start: `# deck-codex-hook:${id}:start`, end: `# deck-codex-hook:${id}:end` };
           const old = selectContributionContent(configSource, selector);
           if (old === undefined || old === selectContributionContent(hooks.content, selector)) return false;
+          if (isDeckManagedHookBlock(id, old)) return false; // Deck-shaped block that lost its receipt: refresh it and record ownership.
           return !priorContributions.some(entry => entry.selector.kind === "text" && entry.selector.start === selector.start && matchesCodexHookContribution(entry, old));
         });
         if (editedHookIds.length) {
@@ -623,7 +624,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
       const value = selectContributionContent(file.content, selector); if (value === undefined) continue;
       // Semantically equivalent desired hooks can reconstruct receipts from older installs.
       const identicalFile = selector.kind === "file" && old === value;
-      const identicalHook = selector.kind === "text" && !diagnostics.some(entry => entry.code === "trusted-hook-config-collision") && ["memory-bridge", "rtk", "supermemory", "readiness"].some(id => selector.start === `# deck-codex-hook:${id}:start`) && old !== undefined && codexHookSemanticHash(old) === codexHookSemanticHash(value);
+      const identicalHook = selector.kind === "text" && !diagnostics.some(entry => entry.code === "trusted-hook-config-collision") && ["memory-bridge", "rtk", "supermemory", "readiness"].some(id => selector.start === `# deck-codex-hook:${id}:start`) && old !== undefined && (codexHookSemanticHash(old) === codexHookSemanticHash(value) || isDeckManagedHookBlock(selector.start.slice("# deck-codex-hook:".length, -":start".length), old));
       if (old !== undefined && !dedicated && !provenFile && !identicalFile && !identicalHook && !(selector.kind === "toml" && adoptedMcpIds.has(selector.header.replace(/^mcp_servers\./, ""))) && (!prior || !(selector.kind === "text" ? matchesCodexHookContribution(prior, old) : prior.hash === hash(old)))) continue;
       // Native Codex may add unrelated tables inside a trailing marker. Preserve the
       // original raw cleanup receipt while the executable settings remain identical.

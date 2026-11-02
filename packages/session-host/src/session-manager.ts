@@ -1530,7 +1530,11 @@ export class SessionManager implements SessionService {
         const reason = /^(codebase-memory-(?:unavailable|unsupported|cancelled)|web-search-(?:credential-missing|provider-unconfigured)|codex-session-preparation-blocked|(?:claude|codex|opencode|pi)-session-skills-unverified|claude-(?:codebase-memory|web-search)-selection-stale|personal-mcp-(?:managed-exclusive|remote-config-isolation-unavailable|auth-config-unavailable))(?=:|$)/.exec(error.message)?.[1];
         if (reason) failureCode = reason;
       }
-      completion = { ...(error instanceof PersonalMcpPreparationError ? {personalMcpAvailability:validatePersonalMcpAvailability(error.availability)} : {}), status: signal.aborted && !timedOut ? "cancelled" : "failed", reasonCode: signal.aborted ? timedOut ? "preparation-timeout" : "preparation-cancelled" : failureCode };
+      // Reviewed check slug (adapter-provided, charset-restricted) so a blocked preparation says which check failed.
+      const failedCheck = (error as { detail?: unknown } | null)?.detail;
+      const failureFindings = typeof failedCheck === "string" && /^[a-z0-9][a-z0-9:._\/-]{0,80}$/.test(failedCheck)
+        ? [{ kind: "W" as const, code: "preparation-failed-check", item: "preparation", message: `Failed check: ${failedCheck}` }] : undefined;
+      completion = { ...(failureFindings ? { preparationFindings: failureFindings } : {}), ...(error instanceof PersonalMcpPreparationError ? {personalMcpAvailability:validatePersonalMcpAvailability(error.availability)} : {}), status: signal.aborted && !timedOut ? "cancelled" : "failed", reasonCode: signal.aborted ? timedOut ? "preparation-timeout" : "preparation-cancelled" : failureCode };
     } finally {
       try { await resolver?.release?.(); } catch { if(resolver?.release) (live.cleanupFailures??=[]).push(()=>resolver!.release!()); completion = { status: "failed", reasonCode: "preparation-release-failed" }; }
       this.clock.clearTimeout(timeout);
