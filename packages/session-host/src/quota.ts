@@ -1,9 +1,10 @@
 import { createReadStream } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { SessionEvent } from '@deck/core/session/events';
 import type { QuotaRunner, QuotaSnapshot, QuotaState, QuotaWindow } from '@deck/core/session/quota';
+const SEED_MTIME_SLACK_MS = 60_000;
 export type QuotaRefresh = (runner: QuotaRunner, signal: AbortSignal) => Promise<unknown>;
 const obj = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -62,19 +63,35 @@ export class QuotaStore {
     const historical = runner === 'claude' ? obj(obj(event.raw?.payload).rate_limit_info) : {};
     this.snapshots.set(runner, quotaSnapshot(runner, { ...historical, ...event.data }, ts));
   }
+  /**
+   * Rebuilds the latest snapshot per runner from session ledgers. `observe` keeps the newest
+   * event per runner, and no event is newer than the mtime of the segment holding it, so
+   * segments are read newest-first and the scan stops once both runners hold a snapshot newer
+   * than every remaining segment. The result equals a full scan without reading old history.
+   */
   async seed(sessionsDir: string): Promise<void> {
-    // Stream each segment, retaining two snapshots, never entire session histories.
+    const segments: { path: string; mtimeMs: number }[] = [];
     for (const session of await readdir(sessionsDir, { withFileTypes: true }).catch(() => [])) {
       if (!session.isDirectory()) continue;
       const dir = join(sessionsDir, session.name, 'events');
-      for (const file of (await readdir(dir).catch(() => [])).filter(f => /^\d{6}\.jsonl$/.test(f)).sort()) {
-        const lines = createInterface({ input: createReadStream(join(dir, file)), crlfDelay: Infinity });
-        try { for await (const line of lines) {
-          if (!line.includes('"rate-limit"')) continue;
-          try { this.observe(JSON.parse(line)); } catch { /* Damaged tail or version drift. */ }
-        } } catch { /* One unreadable ledger must not disable other snapshots. */ }
-        finally { lines.close(); }
+      for (const file of (await readdir(dir).catch(() => [])).filter(f => /^\d{6}\.jsonl$/.test(f))) {
+        const path = join(dir, file);
+        const info = await stat(path).catch(() => undefined);
+        if (info?.isFile()) segments.push({ path, mtimeMs: info.mtimeMs });
       }
+    }
+    segments.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const segment of segments) {
+      if (this.abort.signal.aborted) return;
+      const claude = this.snapshots.get('claude'), codex = this.snapshots.get('codex');
+      if (claude && codex && segment.mtimeMs + SEED_MTIME_SLACK_MS < Math.min(claude.updatedAt, codex.updatedAt)) return;
+      // Stream each segment, never entire session histories.
+      const lines = createInterface({ input: createReadStream(segment.path), crlfDelay: Infinity });
+      try { for await (const line of lines) {
+        if (!line.includes('"rate-limit"')) continue;
+        try { this.observe(JSON.parse(line)); } catch { /* Damaged tail or version drift. */ }
+      } } catch { /* One unreadable ledger must not disable other snapshots. */ }
+      finally { lines.close(); }
     }
   }
   read(): QuotaState {

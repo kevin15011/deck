@@ -124,7 +124,9 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       return options.quotaRefresh!(runner, signal);
     } : undefined, now: () => clock.now() });
     unsubscribeQuota = svc.subscribeEvents?.(event => quota?.observe(event));
-    await quota.seed(paths.sessionsDir);
+    // Seeding scans ledgers; keep it off the readiness path. `observe` is monotonic, so live events
+    // arriving meanwhile are never overwritten by older history, and close() aborts the scan.
+    void quota.seed(paths.sessionsDir).catch(() => logger.warn("quota.seed-failed"));
     // Older CLI compositions construct the manager with only the approval broker.
     const questionBroker = svc.questionBroker ?? defaultQuestionBroker;
     services.questionBroker = questionBroker;

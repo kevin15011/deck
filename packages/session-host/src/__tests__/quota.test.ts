@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { QuotaStore, quotaSnapshot } from '../quota';
@@ -38,4 +38,27 @@ test('historical Claude raw windows seed both bars and read snapshots cannot mut
  const first=store.read();expect(first.runners.claude.snapshot?.windows.map(w=>w.usedPercent)).toEqual([20,40]);expect(first.runners.claude.snapshot?.overageStatus).toBe('allowed');
  first.runners.claude.snapshot!.windows.length=0;expect(store.read().runners.claude.snapshot?.windows).toHaveLength(2);
  expect(JSON.stringify(store.read())).not.toContain('PRIVATE');
+});
+
+test('seed skips segments older than both runner snapshots and still returns the newest per runner',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'quota-seed-early-'));
+ try{
+  const write=(session:string,file:string,rows:unknown[],mtimeSec:number)=>{
+   const dir=join(root,session,'events');mkdirSync(dir,{recursive:true});
+   const path=join(dir,file);writeFileSync(path,rows.map(r=>JSON.stringify(r)).join('\n')+'\n');utimesSync(path,mtimeSec,mtimeSec);
+  };
+  const row=(runner:string,ts:number,data:any)=>({kind:'rate-limit',source:{runnerId:runner},data,ts:new Date(ts).toISOString()});
+  const day=86_400;
+  // Oracle: the old segment (mtime far in the past) must not be read once newer snapshots exist.
+  write('old','000001.jsonl',[row('codex',1_000,codex),row('claude',1_000,{utilization:.1,rateLimitType:'five_hour'})],10*day);
+  write('new','000001.jsonl',[row('codex',300*day*1000,codex),row('claude',300*day*1000,{utilization:.5,rateLimitType:'five_hour'})],300*day);
+  const store=new QuotaStore({});
+  const seen:string[]=[];const original=store.observe.bind(store);
+  store.observe=(event:any)=>{seen.push(String(event.ts));original(event);};
+  await store.seed(root);
+  const state=store.read().runners;
+  expect(state.codex.snapshot?.updatedAt).toBe(300*day*1000);
+  expect(state.claude.snapshot?.updatedAt).toBe(300*day*1000);
+  expect(seen).toHaveLength(2);
+ }finally{rmSync(root,{recursive:true,force:true});}
 });
