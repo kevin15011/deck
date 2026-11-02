@@ -41,3 +41,13 @@ test('read-only tasks can page local history without mutation tools',()=>{
   expect(servers[id].enabled_tools).toEqual(['deck_session_history']);
   expect(servers[id].enabled_tools).not.toContain('deck_memory_propose');
 });
+test('managed memory suppresses foreign userPromptSubmit/stop hooks for this session only, keeping other events',()=>{
+ const hook=(key:string,eventName:string,command:string,source='user')=>({key,eventName,command,source,handlerType:'command',enabled:true,trustStatus:'trusted',currentHash:`sha256:${key}`}) as any;
+ const foreign=[hook('hooks.json:user_prompt_submit:0:0','userPromptSubmit','tool codex-hook'),hook('hooks.json:stop:0:0','stop','tool codex-hook'),hook('hooks.json:session_start:0:0','sessionStart','tool codex-hook')];
+ const state=(task:DriverTaskInput)=>{const arg=buildCodexLaunch(task,{baseEnv:{}},foreign).args.find(x=>x.startsWith('hooks='))!;return arg;};
+ const ready=state({...input,nativeMemory});
+ expect(ready).toContain('hooks.json:user_prompt_submit:0:0');expect(ready).toContain('hooks.json:stop:0:0');expect(ready).not.toContain('hooks.json:session_start:0:0');
+ // Not managed by Deck: personal hooks are left alone.
+ const off=buildCodexLaunch({...input,nativeMemory:{...nativeMemory,status:'disabled'}},{baseEnv:{}},foreign).args.find(x=>x.startsWith('hooks='));
+ expect(off ?? '').not.toContain('hooks.json:user_prompt_submit:0:0');
+});

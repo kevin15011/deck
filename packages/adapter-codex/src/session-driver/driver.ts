@@ -15,7 +15,7 @@ import type { TurnFailure } from "@deck/core/session/failure";
 import { runnerTransportFailure } from '@deck/core/session/failure';
 import { classifyCodexFailure, codexNotificationFailure } from "./failure";
 import { CODEX_PROTOCOL, codexTurnStatus, mapCodexNotification } from "./mapper";
-import { buildCodexLaunch, matchesOwnedCodexMemoryCommand, isAdmittedCodexRoleHook, matchesCodexMemoryGroups, codexThreadMcpConfig, isAdmittedCodexMemoryHook, nativeCodexMcpId, verifyCodexConfig, type CodexHookMetadata, type CodexLaunchOptions } from "./launch";
+import { buildCodexLaunch, matchesOwnedCodexMemoryCommand, isAdmittedCodexRoleHook, matchesCodexMemoryGroups, codexThreadMcpConfig, isAdmittedCodexMemoryHook, isForeignCodexMemoryEventHook, nativeCodexMcpId, verifyCodexConfig, type CodexHookMetadata, type CodexLaunchOptions } from "./launch";
 import { CodexRpc, CodexRpcFrameError, object, type RpcMessage } from "./rpc";
 
 export const CODEX_TESTED_VERSIONS = { min: "0.162.1", maxTested: "0.162.1" } as const;
@@ -193,6 +193,8 @@ class CodexTask {
         // skills and plugins use this process's fresh native configuration directly.
         const inheritedHooks = await this.readHooks(inventory);
         admittedRoleHooks = inheritedHooks.filter(hook => isAdmittedCodexRoleHook(hook, this.input));
+        const suppressed = inheritedHooks.filter(hook => isForeignCodexMemoryEventHook(hook, this.input));
+        if (suppressed.length) this.emit({ kind: "diagnostic", data: { code: "codex-foreign-memory-hooks-suppressed", count: suppressed.length, events: [...new Set(suppressed.map(hook => hook.eventName))], sources: [...new Set(suppressed.map(hook => String(hook.source)))] } });
         await this.stopChild();
         rpc = await this.connect(inheritedHooks);
         runtimeConfig = object(object(await rpc.call("config/read", { cwd: this.input.cwd, includeLayers: false })).config);

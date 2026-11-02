@@ -73,6 +73,15 @@ export function isAdmittedCodexRoleHook(hook: CodexHookMetadata, input: DriverTa
   return (hook.source === "user" || isAdmittedCodexMemoryHook(hook, input)) && hook.handlerType === "command" && hook.async !== true
     && !!input.nativeRoleDescriptor?.hooks.some(expected => expected.event === hook.eventName && expected.command === hook.command);
 }
+/**
+ * With managed native memory, Deck's own recall/flush hooks must be the only active
+ * userPromptSubmit/stop hooks. Other sources (for example a user's hooks.json) are disabled
+ * in this session's hooks.state only; the user's files are never touched.
+ */
+export function isForeignCodexMemoryEventHook(hook: CodexHookMetadata, input: DriverTaskInput): boolean {
+  return input.nativeMemory?.status === "ready" && ["userPromptSubmit", "stop"].includes(hook.eventName)
+    && !isAdmittedCodexMemoryHook(hook, input) && !isAdmittedCodexRoleHook(hook, input) && !matchesOwnedCodexMemoryCommand(hook, input);
+}
 export function buildCodexLaunch(input: DriverTaskInput, options: CodexLaunchOptions = {}, inheritedHooks: readonly CodexHookMetadata[] = [], files?: Pick<import("@deck/core/session/driver").DriverHostIo, "writePrivateFile">) {
   // Under development in Codex 0.162.1; supervised questions use io.question in both approval modes.
   codexMemoryHooks(input);
@@ -88,7 +97,8 @@ export function buildCodexLaunch(input: DriverTaskInput, options: CodexLaunchOpt
       if (isAdmittedCodexMemoryHook(hook, input) || isAdmittedCodexRoleHook(hook, input)) return [[hook.key, { enabled: true, trusted_hash: hook.currentHash }]];
       const event = hook.eventName === "userPromptSubmit" ? "UserPromptSubmit" : hook.eventName === "stop" ? "Stop" : undefined;
       const expected = event ? (codexMemoryHooks(input)[event] as {hooks:{command:string}[]}[] | undefined)?.[0]?.hooks[0]?.command : undefined;
-      return expected && hook.command === expected ? [[hook.key, { enabled: false }]] : [];
+      if (expected && hook.command === expected) return [[hook.key, { enabled: false }]];
+      return isForeignCodexMemoryEventHook(hook, input) ? [[hook.key, { enabled: false }]] : [];
     }));
     args.push("-c", `hooks=${toml(hooks)}`);
   }
