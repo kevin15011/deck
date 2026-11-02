@@ -71,7 +71,7 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
             return;
         const run = { id: sessionId, scope, controller: new AbortController(), seq: 0, current: new CurrentEvents(), loading: false, latestRequested: false, live: [] as HistoryMessage[], floor: 0, pageRequest: undefined as AbortController | undefined };
         owner.current = run;
-        let socket: WebSocket | undefined, timer: ReturnType<typeof setTimeout> | undefined, deadline: ReturnType<typeof setTimeout> | undefined, request: AbortController | undefined, attempt = 0;
+        let socket: WebSocket | undefined, timer: ReturnType<typeof setTimeout> | undefined, deadline: ReturnType<typeof setTimeout> | undefined, request: AbortController | undefined, attempt = 0, failures = 0;
         const active = () => owner.current === run && selectedSession.current === run.scope && !run.controller.signal.aborted;
         const url = `/api/sessions/${encodeURIComponent(sessionId)}`;
         async function connect() {
@@ -102,7 +102,7 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
             };
             deadline = setTimeout(() => {
                 if (!current()) return;
-                callbacks.current.onError('Connection timed out. Retrying…');
+                if (++failures > 1) callbacks.current.onError('Connection timed out. Retrying…');
                 void connect();
             }, 10000);
             try {
@@ -163,6 +163,7 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
                 socket.onopen = () => {
                     if (current()) {
                         clearTimeout(deadline);
+                        failures = 0;
                         callbacks.current.onError('');
                         callbacks.current.onConnection('Connected');
                     }
@@ -226,31 +227,63 @@ export function useChatHistory({ api, sessionId, taskId, enabled, revision, onEv
                 if (current()) {
                     retry(2000);
                     callbacks.current.onConnection('Disconnected');
-                    callbacks.current.onError((error as Error).message);
+                    if (++failures > 1) callbacks.current.onError((error as Error).message);
                 }
             }
         }
-        // Visibility/online notifications are hints, not reasons to replace a healthy
-        // socket or an in-flight history request. Focus alone never reconnects.
+        // A suspended page can retain an apparently open but unusable socket.
+        let wasHidden = document.visibilityState === 'hidden';
+        let resumed = false;
+        let resumeTimer: ReturnType<typeof setTimeout> | undefined;
+        const recover = () => {
+            if (!active() || resumeTimer) return;
+            // Fence callbacks immediately, before the deferred replacement starts.
+            attempt++;
+            request?.abort();
+            if (run.pageRequest) {
+                run.pageRequest.abort();
+                run.pageRequest = undefined;
+                run.loading = false;
+                run.latestRequested = false;
+                setLoading(false);
+            }
+            clearTimeout(timer);
+            clearTimeout(deadline);
+            socket?.close();
+            resumeTimer = setTimeout(() => { resumeTimer = undefined; void connect(); }, 0);
+        };
+        const visibility = () => {
+            if (document.visibilityState === 'hidden') { wasHidden = true; resumed = false; return; }
+            if (wasHidden) { wasHidden = false; resumed = true; recover(); }
+        };
+        const pageshow = (event: PageTransitionEvent) => {
+            if (event.persisted && !resumed) { resumed = true; wasHidden = false; recover(); }
+        };
+        const pagehide = (event: PageTransitionEvent) => {
+            if (event.persisted) { wasHidden = true; resumed = false; }
+        };
         const resume = () => {
-            if (document.visibilityState === 'visible' && active() && socket?.readyState !== WebSocket.OPEN && socket?.readyState !== WebSocket.CONNECTING && (!request || request.signal.aborted)) {
+            if (!resumeTimer && document.visibilityState === 'visible' && active() && socket?.readyState !== WebSocket.OPEN && socket?.readyState !== WebSocket.CONNECTING && (!request || request.signal.aborted)) {
                 clearTimeout(timer);
                 timer = setTimeout(() => void connect(), 0);
             }
         };
-        document.addEventListener('visibilitychange', resume);
+        document.addEventListener('visibilitychange', visibility);
         window.addEventListener('online', resume);
-        window.addEventListener('pageshow', resume);
+        window.addEventListener('pageshow', pageshow);
+        window.addEventListener('pagehide', pagehide);
         void connect();
         return () => {
-            document.removeEventListener('visibilitychange', resume);
+            document.removeEventListener('visibilitychange', visibility);
             window.removeEventListener('online', resume);
-            window.removeEventListener('pageshow', resume);
+            window.removeEventListener('pageshow', pageshow);
+            window.removeEventListener('pagehide', pagehide);
             run.controller.abort();
             run.pageRequest?.abort();
             request?.abort();
             clearTimeout(deadline);
             clearTimeout(timer);
+            clearTimeout(resumeTimer);
             socket?.close();
             if (owner.current === run)
                 owner.current = undefined;
