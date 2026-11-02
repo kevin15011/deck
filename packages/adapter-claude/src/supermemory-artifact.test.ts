@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { isBuiltin } from "node:module";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { CLAUDE_SUPERMEMORY_COMMIT, CLAUDE_SUPERMEMORY_FILES, inspectClaudeSupermemoryArtifact, installClaudeSupermemoryArtifact } from "./supermemory-artifact";
+import { writeGeneratedPluginTypes } from "./fixtures/generated-plugin-types";
 
 const pinnedHooks = readFileSync(new URL("./fixtures/official-supermemory-hooks.json", import.meta.url));
 const sha = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
@@ -40,6 +41,46 @@ describe("official Claude Supermemory immutable artifact", () => {
         expect(paths.has(resolve(root, path))).toBe(true);
       }
       expect(manifest.hooks.Stop[0].hooks[0].async).toBe(true);
+      // Protects repeat installation/preparation while Claude owns generated types.
+      // Oracle: these editor artifacts may change; every pinned byte must still match.
+      writeGeneratedPluginTypes(root);
+      expect(inspectClaudeSupermemoryArtifact(root)).toBe("ready");
+      expect(await installClaudeSupermemoryArtifact(root, { fetchFile: async () => { throw Error("must reuse"); } })).toBe("unchanged");
+      await writeFile(join(root, ".claude-plugin/types/claude-code/index.d.ts"), "");
+      expect(inspectClaudeSupermemoryArtifact(root)).toBe("ready");
+      const hook = join(root, "hooks/capture.js");
+      const original = await readFile(hook);
+      await writeFile(hook, Buffer.alloc(original.length));
+      expect(inspectClaudeSupermemoryArtifact(root)).toBe("conflict");
+      await writeFile(hook, original);
+      for (const path of [".claude-plugin/types/foreign.js", ".claude-plugin/types/claude-code/package.json", ".claude-plugin/foreign.d.ts", "foreign.d.ts"]) {
+        const target = join(root, path);
+        await writeFile(target, "{}");
+        expect(inspectClaudeSupermemoryArtifact(root)).toBe("conflict");
+        await rm(target);
+      }
+      const generated = join(root, ".claude-plugin/types/claude-code/index.d.ts");
+      await chmod(generated, 0o666);
+      expect(inspectClaudeSupermemoryArtifact(root)).toBe("conflict");
+      await chmod(generated, 0o644);
+      const extra = join(root, ".claude-plugin/types/linked.d.ts");
+      await link(generated, extra);
+      expect(inspectClaudeSupermemoryArtifact(root)).toBe("conflict");
+      await rm(extra);
+      expect(Bun.spawnSync(["mkfifo", extra]).exitCode).toBe(0);
+      expect(inspectClaudeSupermemoryArtifact(root)).toBe("conflict");
+      await rm(extra);
+      await chmod(join(root, ".claude-plugin/types"), 0o777);
+      expect(inspectClaudeSupermemoryArtifact(root)).toBe("conflict");
+      await chmod(join(root, ".claude-plugin/types"), 0o755);
+      for (const path of ["tsconfig.json", ".claude-plugin/types/claude-code/index.d.ts", ".claude-plugin/types/claude-code", ".claude-plugin/types"]) {
+        const target = join(root, path);
+        await rm(target, { recursive: true });
+        await symlink(source, target);
+        expect(inspectClaudeSupermemoryArtifact(root)).toBe("conflict");
+        await rm(target);
+        expect(inspectClaudeSupermemoryArtifact(root)).toBe("ready");
+      }
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("pins the official hook entrypoints and authentic published hook bytes", () => {

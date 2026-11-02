@@ -51,7 +51,29 @@ function assertSafeEntry(entry: Entry): void {
   if (!/^(?:[a-zA-Z0-9_.-]+\/)*[a-zA-Z0-9_.-]+$/.test(name) || name.split("/").includes("..") || !/^[a-f0-9]{64}$/.test(checksum) || size < 1 || size > 256 * 1024) throw new Error("Pinned Claude Supermemory entry is invalid.");
 }
 
-/** Read-only verification; unknown bytes or extra files fail closed. */
+/** Claude writes mutable editor types with normal umask permissions, even during a live session. */
+function isSafeGeneratedEntry(root: string, target: string): boolean {
+  const name = relative(root, target).split(sep).join("/");
+  const types = ".claude-plugin/types";
+  if (name !== "tsconfig.json" && name !== types && !name.startsWith(`${types}/`)) return false;
+  try {
+    const stat = lstatSync(target);
+    if (typeof process.getuid === "function" && stat.uid !== process.getuid() || (stat.mode & 0o022) !== 0) return false;
+    if (stat.isDirectory()) {
+      if (name === "tsconfig.json") return false;
+      return readdirSync(target).every(child => isSafeGeneratedEntry(root, join(target, child)));
+    }
+    // Never admit runtime modules/configuration or follow links in the generated tree.
+    return stat.isFile() && stat.nlink === 1 && (stat.mode & 0o111) === 0
+      && (name === "tsconfig.json" || name === `${types}/tsconfig.json` || name === `${types}/.gitignore`
+        || name.startsWith(`${types}/`) && name.endsWith(".d.ts"));
+  } catch (error) {
+    // Optional generated entries can disappear while Claude refreshes them.
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
+}
+
+/** Read-only verification; pinned bytes stay exact, with only safe generated editor artifacts allowed. */
 export function inspectClaudeSupermemoryArtifact(root: string, entries: readonly Entry[] = CLAUDE_SUPERMEMORY_FILES): "absent" | "ready" | "conflict" {
   try { if (!existsSync(root)) { lstatSync(root); return "conflict"; } }
   catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "conflict"; }
@@ -65,7 +87,10 @@ export function inspectClaudeSupermemoryArtifact(root: string, entries: readonly
     for (const directory of directories) {
       const stat = lstatSync(directory);
       if (!stat.isDirectory() || (stat.mode & 0o077) !== 0 || typeof process.getuid === "function" && stat.uid !== process.getuid()) return "conflict";
-      for (const child of readdirSync(directory)) if (!directories.has(join(directory, child)) && !files.has(join(directory, child))) return "conflict";
+      for (const child of readdirSync(directory)) {
+        const target = join(directory, child);
+        if (!directories.has(target) && !files.has(target) && !isSafeGeneratedEntry(root, target)) return "conflict";
+      }
     }
     for (const [name, checksum, size] of entries) {
       const target = join(root, name);

@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
-import { CLAUDE_SUPERMEMORY_COMMIT, installClaudeSupermemoryArtifact } from "../../../../../packages/adapter-claude/src/supermemory-artifact";
+import { CLAUDE_SUPERMEMORY_COMMIT, inspectClaudeSupermemoryArtifact, installClaudeSupermemoryArtifact } from "../../../../../packages/adapter-claude/src/supermemory-artifact";
+import { writeGeneratedPluginTypes } from "../../../../../packages/adapter-claude/src/fixtures/generated-plugin-types";
 import { buildClaudeSupermemoryLaunchOverlay, configureClaudeSupermemoryCapture } from "../../../../../packages/adapter-claude/src/supermemory-settings";
 import { createClaudeRunnerAdapter } from "../../../../../packages/adapter-claude/src/runner-adapter";
 import { claudeModelMetadata, claudePluginName } from "../../../../../packages/adapter-claude/src/models";
 import { buildClaudeTurnLaunch } from "../../../../../packages/adapter-claude/src/session-driver/launch";
 import { resolveDefaultDeckDataRoot, type NormalizedDeckConfig } from "@deck/core";
 import type { DriverTaskInput, NativeMemoryDescriptor } from "@deck/core/session/driver";
+import { prepareSessionNativeMemory } from "../../session-native-memory";
 
 export async function installClaudeFixture(home: string) {
   const source = join(home,"claude-source"); mkdirSync(source,{mode:0o700});
@@ -18,6 +20,7 @@ export async function installClaudeFixture(home: string) {
   mkdirSync(parent,{recursive:true,mode:0o700});
   const root=join(parent,`official-supermemory-${CLAUDE_SUPERMEMORY_COMMIT.slice(0,12)}`);
   await installClaudeSupermemoryArtifact(root,{fetchFile:async path=>readFileSync(join(source,path))});
+  writeGeneratedPluginTypes(root);
   const settings=join(home,".supermemory-claude","settings.json");
   mkdirSync(join(settings,".."),{mode:0o700});
   writeFileSync(settings,JSON.stringify({signalExtraction:true,maxProfileItems:7,includeTools:["Read"]}),{mode:0o600});
@@ -47,6 +50,9 @@ export async function exerciseClaudeLaunch(home:string,repo:string,root:string,t
   assert.deepEqual(nativeMcp["plugin:supermemory:supermemory"].args, memoryServer.args);
   const overlay=buildClaudeSupermemoryLaunchOverlay({token,canonicalRepoTag:scope});
   assert.deepEqual(native.plan.envOverlay,overlay);
+  // Repeat both production preparation routes with the same generated artifacts.
+  assert.equal((await adapter.buildLaunchPlan!({projectRoot:repo,mode:"interactive",deckConfig:config} as any)).status,"ready");
+  assert.equal(prepareSessionNativeMemory("claude",repo,config,process.env,{credential:()=>({token,canonicalRepoTag:scope})})?.nativeMemory.status,"ready");
   const skills=await adapter.prepareSessionNativeSkills(config);
   const files=new Map<string,string>();
   const launch=buildClaudeTurnLaunch({taskId:"apply",memberId:"apply",cwd:repo,assignment:{runnerId:"claude",modelId:"opus"},rolePrompt:"Continue public work.",prompt:"hello",nativeSessionId:"3f2b8c1e-5d4a-4b7e-9a1c-0e2d3f4a5b6c",mcp:{servers:["ordinary"],sessionTools:[]},mcpServerSpecs:{ordinary:{command:"node",args:["ordinary.js"],env:{}}},approvals:"runner-default",disableNativeDelegation:true,credentialFile:"/fake",nativeMemory:memory,nativeSkills:skills,nativeRole:{roleId:"deck-apply-deep",roleRef:`${skills.pluginName}:deck-apply-deep`,generation:skills.contentHash}} as DriverTaskInput,
@@ -98,6 +104,8 @@ export async function exerciseClaudeHooks(root:string,repo:string,scope:string) 
     while(!existsSync(`${release}.waiting`) && performance.now()<deadline) await Bun.sleep(10);
     assert(existsSync(`${release}.waiting`),"capture must reach the held provider boundary");
     assert.equal(child.exitCode,null); assert.equal(saved().length,before);
+    assert.equal(inspectClaudeSupermemoryArtifact(root),"ready");
+    assert.equal(await installClaudeSupermemoryArtifact(root),"unchanged");
     assert.equal(state.readState(payload.session_id,"capture").status,"saving");
     assert.equal(tracker.getLastCapturedUuid(payload.session_id),null);
     writeFileSync(release,"");
