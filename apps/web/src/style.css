@@ -1611,3 +1611,12 @@ select:focus-visible, .question-panel textarea:focus-visible {
     .conversation-welcome h2 { font-size: 1.75rem; }
     .conversation-welcome p { margin-top: .5rem; font-size: .875rem; }
 }
+
+@media (max-width: 1000px) {
+    .app-header { display: flex; height: 56px; min-height: 0; flex: 0 0 56px; gap: .5rem; }
+    .app-header .connection { display: none; }
+    .session-identity { flex: 1 1 0; min-width: 0; }
+    .session-identity-text { min-width: 0; }
+    .session-controls-panel { top: calc(var(--mobile-viewport-top, 0px) + 60px); max-height: calc(var(--mobile-viewport-height, 100dvh) - 72px); }
+    .session-mobile-status { display: flex; gap: .5rem; color: var(--muted); text-transform: capitalize; }
+}

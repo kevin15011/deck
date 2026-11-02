@@ -5,7 +5,8 @@ import { mkdirSync } from 'node:fs';
 import { selectTheme } from './acceptance-theme';
 import { THEMES } from './src/theme';
 
-const build = await Bun.build({entrypoints:[`${import.meta.dir}/src/main.tsx`],target:'browser',minify:false});
+const baseline = process.env.DECK_MOBILE_BASELINE === '1';
+const build = await Bun.build({entrypoints:[`${import.meta.dir}/src/main.tsx`],target:'browser',minify:false,plugins:baseline?[{name:'baseline',setup(builder){builder.onLoad({filter:/\/src\/(main\.tsx|session-controls\.tsx|style\.css)$/},args=>{const file=args.path.split('/').at(-1)!;const result=Bun.spawnSync(['git','show',`HEAD:apps/web/src/${file}`]);assert.equal(result.exitCode,0);let contents=result.stdout.toString();if(file==='main.tsx'&&process.env.DECK_BASELINE_CAPTURE)contents=contents.replace('if(!selectedSession.current||!element?.clientHeight||routeReady!==nav.current.key)return;', 'if(following.current||!selectedSession.current||!element?.clientHeight||routeReady!==nav.current.key)return;');return {contents,loader:file.endsWith('.css')?'css':'tsx'};});}}]:[]});
 assert(build.success, build.logs.map(String).join('\n'));
 const assets = new Map(build.outputs.map(output=>[output.path.split('/').at(-1)!, output]));
 const project = {projectId:'project',name:'Layout audit',path:'/tmp/deck-layout-fixture',available:true};
@@ -70,6 +71,42 @@ async function separate(selectors:string[]){
 }
 try{
     await select('one');
+    await check('mobile header and follow behavior',async()=>{
+        for(const width of [360,390,1440]){
+            await page.setViewportSize({width,height:844});await page.emulateMedia({reducedMotion:width===390?'reduce':'no-preference'});await select('two');
+            await page.waitForTimeout(500);
+            const mobile=width<1000, toggle=page.locator('.session-compact-toggle');
+            const header=page.locator('.app-header');
+            assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+            if(mobile){
+                if(!baseline)assert.equal(await page.locator('.app-header .connection').isVisible(),false);
+                await page.screenshot({path:`/tmp/deck-mobile-${baseline?'before':'after'}-${width}.png`});
+                for(let i=0;i<3;i++){
+                    await page.getByRole('button',{name:'Open sessions',exact:true}).click();
+                    await page.getByRole('button',{name:'Close sessions',exact:true}).click();
+                    await page.waitForTimeout(100);
+                    assert.equal(await page.locator('.jump-latest').count(),0,'drawer must preserve following');
+                    await toggle.click();await toggle.click();
+                    assert.equal(await page.locator('.jump-latest').count(),0,'session menu must preserve following');
+                }
+                await page.waitForTimeout(300);
+                assert.equal(await page.locator('.jump-latest').count(),0,'opening menus at the tail must not show jump');
+                await toggle.focus();await page.keyboard.press('Enter');
+                if(!baseline){assert.equal(await page.locator('.session-mobile-status').isVisible(),true);assert.match(await page.locator('.session-mobile-status').innerText(),/Connected\s+idle/i);await page.screenshot({path:`/tmp/deck-mobile-menu-${width}.png`});}
+                await page.keyboard.press('Escape');assert.equal(await toggle.getAttribute('aria-expanded'),'false');
+            }else assert.equal(await page.locator('.app-header .connection').isVisible(),true);
+            await page.screenshot({path:`/tmp/deck-mobile-${baseline?'before':'after'}-${width}.png`});
+            if(!baseline)assert((await header.boundingBox())!.height<80);
+            await page.evaluate(()=>{const ws=(window as any).__sockets.findLast((socket:WebSocket)=>socket.url.includes('/sessions/two/events'));const event={v:1,sessionId:'two',seq:42,ts:'2026-01-01T00:00:00Z',source:{taskId:'lead',memberId:'lead'},kind:'message.completed',data:{role:'assistant',text:'New arrival'}};ws.dispatchEvent(new MessageEvent('message',{data:JSON.stringify({type:'event',event,message:{...event,historyId:42}})}));});
+            await page.getByText('New arrival',{exact:true}).waitFor();await page.waitForTimeout(150);
+            assert.equal(await page.locator('.jump-latest').count(),0,'new message while following remains at tail');
+            await page.locator('#conversation').evaluate(el=>{el.scrollTop=0;});
+            await page.locator('.jump-latest').waitFor();
+            await page.locator('.jump-latest').click();
+            await page.waitForTimeout(300);
+            assert.equal(await page.locator('.jump-latest').count(),0);
+        }
+    });
     await check('message copy source, hover, touch and stable geometry at 390 and 1440',async()=>{
         const userText='  Keep my exact spaces\n\n  <tags> & **literal markdown** 😀\n';
         const leadText='## Raw reply\n\n**Ready** [link](https://example.com)\n\n```ts\nconst x = 1;\n```\n';
