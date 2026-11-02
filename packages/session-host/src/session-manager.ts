@@ -67,6 +67,9 @@ import type { Supervisor } from "./supervisor";
 
 export const LEAD_TASK_ID = "lead";
 const LEAD_MEMBER_ID = "lead";
+/** Startup failures caused by static configuration; retrying cannot change the outcome until the user acts. */
+const DETERMINISTIC_START_FAILURE = /^codex-(?:hook|mcp-spec|feature)-isolation-violation$|^codex-hooks-inventory-invalid$|^codex-native-memory-(?:unavailable|invalid)$|^codex-invalid-assignment$/;
+function isDeterministicStartFailure(reason: string | undefined): boolean { return !!reason && DETERMINISTIC_START_FAILURE.test(reason); }
 const MAX_PROMPT_CHARS = 256 * 1024;
 const MAX_PENDING_PROMPTS = 32;
 const MAX_PENDING_PROMPT_BYTES = 1024 * 1024;
@@ -2404,6 +2407,8 @@ export class SessionManager implements SessionService {
         if (turn.gatedInput && prompt) drafts.push(...promptEndDrafts(prompt, task.state, this.closing ? 'daemon-restart' : task.reason));
         else drafts.push({ kind: "prompt.state", data: { promptId: turn.promptId, state: task.state, ...(task.reason ? { reason: task.reason } : {}) } });
       }
+      // A deterministic startup failure repeats identically on every attempt: keep the prompt queued but pause the queue so it is not redispatched forever.
+      if (drafts.some(d=>d.kind==="prompt.requeued") && turn.memberId === LEAD_MEMBER_ID && task.state === "failed" && isDeterministicStartFailure(task.reason)) drafts.push({ kind: "prompt.queue", data: { paused: true, reason: task.reason } });
       if (!drafts.some(d=>d.kind==="prompt.requeued") && turn.memberId === LEAD_MEMBER_ID && ["failed", "interrupted", "ownership-unsettled"].includes(task.state) && !(task.state === "interrupted" && (live.ledger.promptQueue.lastResumeSeq ?? 0) > (turn.admissionSeq ?? 0))) drafts.push({ kind: "prompt.queue", data: { paused: true, reason: task.reason ?? task.state } });
       this.append(live, drafts); this.flush(live);
     } catch (error) {
