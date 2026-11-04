@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { assertFixtureHome, materializedFixturePath, remapPublishedPiNativePlan, capturePublishedOpenCodeFiles } from './retirement-matrix-fixture';
 import { historicalSerenaEffects, historicalOpenCodeRtk, fixtureSharedRtk, fixtureSharedContextMode, fixtureSharedCodebase, historicalOpenCodeCodebase, runHistoricalCommand, upstreamPins } from './retirement-historical-effects';
+import { provisionManualFixture } from './retirement-manual-fixture';
 const [source, runner, home] = process.argv.slice(2) as [string, string, string];
 if (!source || !runner || resolve(home) !== process.env.HOME) throw Error('isolated HOME required');
 assertFixtureHome(home);
@@ -28,7 +29,8 @@ const selected = ['context-mode', 'rtk', ...(selectedVariants ? ['serena', 'code
 const operation = { runner, operationId: 'explicit-isolated-fixture-selected-install', explicitlySelected: true };
 const authorization = { kind: 'interactive-tui-explicit-selection', runner, operationId: operation.operationId };
 let serenaEffects: any;
-if (selectedVariants) {
+let manualFixture: any;
+if (selectedVariants && existsSync(join(source, `packages/adapter-${runner}/src/runner-adapter.ts`))) {
   try { serenaEffects = await historicalSerenaEffects(core, home); }
   catch (error) { gaps.push(`Selected Serena prerequisite: ${(error as Error).message}`); }
 }
@@ -212,7 +214,7 @@ if (existsSync(adapterPath)) {
     effects.push({ capability: 'context-mode', method: 'historical-native-package-installer', originalSpec: tool.source, pinnedInput: `npm:${upstreamPins.contextMode}`, outcome });
     if (outcome.length !== 1 || !outcome[0].success) gaps.push('Pre-adapter native Pi installer did not complete');
   }
-  if (selectedVariants) gaps.push('Pre-adapter selected variants require epoch-specific mapping');
+
 }
 if(!verified.valid){
  const collapsed=join(runner==='pi'?roots.pi:roots.opencode,'skills/SKILL.md/SKILL.md');
@@ -283,16 +285,21 @@ if (runner === 'opencode') {
     if (outcome.gap) gaps.push(outcome.gap);
   } else effects.push(await fixtureSharedRtk(home));
 }
+// Capture the original installer output before independent operator configuration.
+writeFileSync(join(home, 'historical-files.json'), JSON.stringify(files!.map(file => ({ path: materializedFixturePath(home, runner, file.path), content: readFileSync(materializedFixturePath(home, runner, file.path), 'utf8') }))));
+if (selectedVariants && !existsSync(adapterPath)) {
+  manualFixture = await provisionManualFixture(source, runner, home);
+  effects.push(...manualFixture.artifacts.map((artifact: any) => ({ ...artifact, method: 'observed-fixture-artifact', provisioningMethod: artifact.method, ownership: 'external manual fixture without a Deck receipt' })));
+  writeFileSync(join(home, 'historical-selected-effects.json'), JSON.stringify({ selected, effects, gaps, manualFixture }, null, 2));
+}
 const locks = [join(roots.data, runner, 'tools/package-lock.json'), join(home, 'npm/lib/node_modules/context-mode/package.json')]
   .filter(existsSync).map(path => ({ path, content: JSON.parse(readFileSync(path, 'utf8')) }));
 writeFileSync(join(home, 'historical-installation.json'), JSON.stringify({ runner, source, files: captured.length, changed: result.changedCount, verified: true,
   scope: 'verified published source with real installer effects; individual gaps remain explicit', effects, locks, gaps,
+  ...(manualFixture ? { manualFixture } : {}),
   ...(verificationCorrection?{verificationCorrection}:{}),
   ...(resumeCapture?{captureContinuation:'Actual old output compared exactly; no successful acquisition/content apply repeated'}:{}),
   ...(resumeSelected?{selectedContinuation:'Original successful package effects retained and reverified; only failed Serena action retried before the first content apply'}:{}),
   selectedVariants: { status: selectedVariants && !gaps.some(gap => /Selected|selected variants/.test(gap)) ? 'verified' : 'incomplete' },
   capabilityCoverage: { selected, incomplete: selectedVariants ? gaps : ['Serena selected-install epoch', 'Codebase Memory selected-install epoch'] },
   retiredInstructions: captured.filter(file => /context-mode|serena/i.test(file.content)).length }, null, 2));
-// Configuration actions may update a planned shared file; capture its final exact
-// bytes for subsequent explicit fixture review rather than its earlier template.
-writeFileSync(join(home, 'historical-files.json'), JSON.stringify(files!.map(file => ({ path: materializedFixturePath(home, runner, file.path), content: readFileSync(materializedFixturePath(home, runner, file.path), 'utf8') }))));

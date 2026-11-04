@@ -1,3 +1,5 @@
+import { validBuildIdentity, type BuildIdentity } from "@deck/core";
+import { decideDaemonAction } from "./daemon-build-policy";
 /** Client-side daemon discovery: ping, auto-start with a readiness budget, version-skew restart (design 6.3). */
 import { spawn } from "node:child_process";
 import { ControlClient } from "./control-client";
@@ -14,7 +16,7 @@ export class DaemonStartTimeoutError extends Error {
   }
 }
 
-export type DaemonIdentity = { pid: number; nonce: string; daemonVersion: string };
+export type DaemonIdentity = { pid: number; nonce: string; daemonVersion: string; protocol?: number; build?: BuildIdentity };
 
 /** Identity of the daemon answering on `socketPath`, or undefined when nothing (or no daemon) answers. */
 export async function pingDaemon(socketPath: string, options: { timeoutMs?: number } = {}): Promise<DaemonIdentity | undefined> {
@@ -26,7 +28,7 @@ export async function pingDaemon(socketPath: string, options: { timeoutMs?: numb
       client.request({ t: "hello", clientVersion: "ping" }, timeoutMs),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs).unref()),
     ]);
-    return hello.t === "hello" ? { pid: hello.pid, nonce: hello.nonce, daemonVersion: hello.daemonVersion } : undefined;
+    return hello.t === "hello" ? { pid: hello.pid, nonce: hello.nonce, daemonVersion: hello.daemonVersion, protocol: hello.protocol, ...(validBuildIdentity(hello.build) ? {build:hello.build} : {}) } : undefined;
   } catch { return undefined; } finally { client?.close(); }
 }
 
@@ -42,6 +44,8 @@ export function compareVersions(a: string, b: string): number {
 export type EnsureDaemonOptions = {
   paths: StatePaths;
   clientVersion: string;
+  clientBuild?: BuildIdentity;
+  clientIsInstalledTarget?: boolean;
   /** Start `deck internal session-daemon` detached (see spawnDetachedDaemon). */
   spawnDaemon: () => void;
   timeoutMs?: number;
@@ -54,6 +58,7 @@ export type EnsureDaemonResult = {
   daemon: { pid: number; nonce: string; version: string };
   started: boolean;
   restarted: boolean;
+  skew?: "daemon-update-pending" | "daemon-other-build" | "daemon-incompatible" | "daemon-incompatible-busy";
   versionSkew?: "daemon-older-busy";
 };
 
@@ -72,7 +77,10 @@ export async function ensureDaemon(options: EnsureDaemonOptions): Promise<Ensure
     const deadline = now() + timeoutMs;
     for (;;) {
       const found = await pingDaemon(socketPath, { timeoutMs: 500 });
-      if (found) return found;
+      if (found) {
+        if (options.clientBuild && found.protocol !== 1) throw new Error("daemon-incompatible: the daemon protocol is not supported by this client");
+        return found;
+      }
       if (now() >= deadline) throw new DaemonStartTimeoutError(timeoutMs);
       await sleep(pollMs);
     }
@@ -81,16 +89,29 @@ export async function ensureDaemon(options: EnsureDaemonOptions): Promise<Ensure
   const existing = await pingDaemon(socketPath, { timeoutMs: 1000 });
   let restarted = false;
   if (existing) {
-    if (compareVersions(options.clientVersion, existing.daemonVersion) <= 0) return result(existing);
+    let busy = true;
+    let statusClient: ControlClient | undefined;
+    try {
+      statusClient = await ControlClient.connect(socketPath, {timeoutMs:1000});
+      const reply = await statusClient.request({t:'daemon.status'},1000);
+      if (reply.t === 'daemon.status') {
+        const status = reply.status as {runningWork?: boolean; activeSessions?: boolean; pendingApprovals?: number; pendingQuestions?: number};
+        busy = status.runningWork !== false || status.activeSessions === true || (status.pendingApprovals ?? 0) > 0 || (status.pendingQuestions ?? 0) > 0;
+      }
+    } catch { /* Unknown busy state cannot authorize replacement. */ } finally {statusClient?.close();}
+    const action = options.clientBuild ? decideDaemonAction(options.clientBuild,{protocol:existing.protocol ?? 1,build:existing.build,version:existing.daemonVersion,busy},options.clientIsInstalledTarget === true)
+      : compareVersions(options.clientVersion, existing.daemonVersion) <= 0 ? 'use' : 'restart';
+    if (action === 'daemon-incompatible' || action === 'daemon-incompatible-busy') throw new Error(`${action}: restart the daemon when idle using the installed Deck command`);
+    if (action !== 'restart') return result(existing, action === 'use' ? {} : {skew:action});
     // A newer client asks an OLDER daemon to restart, but never while it has running work.
     let outcome: { ok: boolean } = { ok: false };
     let client: ControlClient | undefined;
     try {
       client = await ControlClient.connect(socketPath, { timeoutMs: 1000 });
-      const reply = await client.request({ t: "daemon.restart" }, 5000);
+      const reply = await client.request({ t: "daemon.restart", ...(options.clientBuild ? {requester:options.clientBuild} : {}) }, 5000);
       if (reply.t === "daemon.restart") outcome = reply.outcome;
     } catch { /* treat as not restartable */ } finally { client?.close(); }
-    if (!outcome.ok) return result(existing, { versionSkew: "daemon-older-busy" });
+    if (!outcome.ok) return result(existing, { versionSkew: "daemon-older-busy", skew:"daemon-update-pending" });
     const deadline = now() + timeoutMs;
     for (;;) {
       const holder = readLockHolder(options.paths);

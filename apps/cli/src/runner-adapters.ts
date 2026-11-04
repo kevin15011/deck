@@ -1,3 +1,5 @@
+import { currentBuildIdentity } from "./runtime/build-identity";
+import { contributionHash } from "@deck/core";
 import { guardRunnerAdapter } from "./runner-mutation-admission";
 /**
  * CLI adapter registry composition root.
@@ -71,7 +73,7 @@ export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOpti
     const { refreshSharedSkillCatalogView } = await import("../../../packages/core/src/skill-discovery/shared");
     // Install authority is not Setup authority: refresh the advisory view without publishing.
     await refreshSharedSkillCatalogView({ projectRoot, providers: registry.list().flatMap(a => a.skillDiscovery ? [a.skillDiscovery] : []) });
-  });
+  }, adapter.mutationRoot ? {path: join(getDeckStateDir(), "runner-fences", `${adapter.runnerId}-${contributionHash(resolve(adapter.mutationRoot)).slice(0,16)}.json`), self:currentBuildIdentity(),stateSchema:adapter.stateSchema ?? 1} : undefined);
   registry.register("pi", guard(createPiRunnerAdapter({
     codebaseGuardInvocation: deckCodebaseGuardInvocation,
 

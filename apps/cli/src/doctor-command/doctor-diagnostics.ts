@@ -1,3 +1,4 @@
+import { REMEDIATION_MESSAGES, type RunnerAdmissionResult } from "@deck/core";
 import { reviewRunnerCleanup } from "../runner-cleanup-doctor";
 /**
  * Doctor diagnostics orchestrator.
@@ -716,6 +717,7 @@ type DoctorDiagnosticsDependencies = Readonly<{
   readSupermemorySecret: () => string | undefined;
   checkSupermemoryApi: (input: { apiKey: string; containerTag: string }) => Promise<void | { operations: readonly string[] }>;
   checkSupermemoryObservabilitySink?: () => { ok: boolean; path: string; diagnostics: readonly string[] };
+  inspectRunnerAdmission?: (runnerId: string, projectRoot: string, config: NormalizedDeckConfig) => Promise<RunnerAdmissionResult | undefined>;
   inspectCodex: (projectRoot: string, deckConfig: NormalizedDeckConfig) => Promise<ReadonlyArray<{ category: string; status: DoctorStatus; message: string; suggestion?: string }>>;
 }>;
 
@@ -746,6 +748,12 @@ const defaultDoctorDiagnosticsDependencies: DoctorDiagnosticsDependencies = {
     return { operations: ["health", "profile", "search"] };
   },
   checkSupermemoryObservabilitySink,
+  inspectRunnerAdmission: async (runnerId, projectRoot, config) => {
+    const {getAdapter} = await import("../runner-adapters");
+    const adapter = getAdapter(runnerId);
+    if (!(await adapter.detectDeckInstall?.({projectRoot}))?.installed) return undefined;
+    return adapter.evaluateSessionAdmission?.({config});
+  },
   inspectCodex: async (projectRoot, deckConfig) => {
     const { getAdapter } = await import("../runner-adapters");
     const adapter = getAdapter("codex");
@@ -938,6 +946,7 @@ export async function runDoctorDiagnostics(
     checkSupermemoryApi: overrides.checkSupermemoryApi ?? defaultDoctorDiagnosticsDependencies.checkSupermemoryApi,
     checkSupermemoryObservabilitySink: overrides.checkSupermemoryObservabilitySink ?? defaultDoctorDiagnosticsDependencies.checkSupermemoryObservabilitySink,
     configStore: overrides.configStore,
+    inspectRunnerAdmission: overrides.inspectRunnerAdmission ?? defaultDoctorDiagnosticsDependencies.inspectRunnerAdmission,
     inspectCodex: overrides.inspectCodex ?? defaultDoctorDiagnosticsDependencies.inspectCodex,
   };
   const runtimes: DoctorRuntimeResult[] = [];
@@ -1001,6 +1010,16 @@ export async function runDoctorDiagnostics(
     } else if (status.runtime === "claude") {
       runtimes.push(checkClaudeOrCodexRuntime(status.runtime, status.installed));
     }
+  }
+
+  // Session admission uses the same read-only checks as install and preparation.
+  if (projectRoot && globalConfigCheck.config && dependencies.inspectRunnerAdmission) for (const runtime of runtimes.filter(r=>r.installed)) {
+    try {
+      const admission = await dependencies.inspectRunnerAdmission(runtime.runtimeId,projectRoot,globalConfigCheck.config);
+      if (!admission) continue;
+      const status = admission.verdict === "blocked" ? "error" as const : admission.verdict === "degraded" ? "warning" as const : "ok" as const;
+      runtime.checks.push({category:"Session admission",status,items:admission.checks.length ? admission.checks.map(check=>({status:check.status === "fail" && check.required ? "error" as const : check.status === "pass" ? "ok" as const : "warning" as const,message:check.id,suggestion:REMEDIATION_MESSAGES[check.remediation]})) : [{status,message:admission.verdict}]});
+    } catch { runtime.checks.push({category:"Session admission",status:"warning",items:[{status:"warning",message:"Installed session admission could not be inspected; run Review & Install."}]}); }
   }
 
   // 3. Memory providers

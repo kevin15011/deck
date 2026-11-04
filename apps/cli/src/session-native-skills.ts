@@ -1,4 +1,4 @@
-import type { RunnerAdapter, NormalizedDeckConfig } from "@deck/core";
+import { REMEDIATION_MESSAGES, type RunnerAdapter, type NormalizedDeckConfig } from "@deck/core";
 import type { ClaudeSessionMcpAdapter } from "../../../packages/adapter-claude/src/runner-adapter";
 import { ClaudeSkillsError, validateClaudeSessionIntent } from "../../../packages/adapter-claude/src/session-skills";
 
@@ -24,6 +24,9 @@ export async function prepareSessionNativeRole(adapter: RunnerAdapter, roleId: s
     if (!adapter.prepareSessionNativeRole) throw new Error("native-role-verifier-unavailable");
     const role = await adapter.prepareSessionNativeRole(roleId, config);
     for (const finding of role.preparation ?? []) if (finding.kind === "W") onWarning?.(`${finding.code}: ${finding.message}`);
+    const admission = await adapter.evaluateSessionAdmission?.({roleId,config});
+    const failed = admission?.checks.find(c => c.required && c.status === "fail");
+    if (failed) throw Object.assign(new Error(REMEDIATION_MESSAGES[failed.remediation]),{detail:failed.id});
     return role;
   } catch (cause) {
     const detail = (cause as { detail?: unknown } | null)?.detail;

@@ -1,3 +1,5 @@
+import { withBinaryUpgradeAdmission } from "./binary-admission";
+import { syncWithNewBinary } from "./new-binary-sync";
 /**
  * Upgrade orchestrator — coordinates the full upgrade state machine.
  *
@@ -288,6 +290,7 @@ export type OrchestratorDeps = {
    * does not provide a default; tests use it to fail-fast with a custom
    * error before any side effects.
    */
+  syncNewBinary?: typeof syncWithNewBinary;
   beforeAcquireLock?: (state: DeckUpdateState) => void;
 };
 
@@ -311,8 +314,8 @@ export type OrchestratorResult = {
   /** Backup used for atomic safety; may be undefined for content-only upgrades with nothing to back up. */
   backupId?: string;
   /** Per-kind item outcomes. */
-  binary: { status: "skipped" | "completed" | "skipped-homebrew" | "skipped_external" | "no-item-for-platform"; itemId?: string };
-  content: { status: "skipped" | "completed" | "partial_failure"; outcomes?: RunnerSyncResult["outcomes"]; recoveryError?: RunnerSyncResult["recoveryError"] };
+  binary: { status: "skipped" | "completed" | "skipped-homebrew" | "skipped_external" | "no-item-for-platform"; itemId?: string; verifiedDigest?: string };
+  content: { status: "skipped" | "completed" | "partial_failure" | "deferred"; outcomes?: RunnerSyncResult["outcomes"]; recoveryError?: RunnerSyncResult["recoveryError"] };
   migration: { status: "skipped" | "completed"; itemIds: string[] };
   advisory: { items: AdvisoryReleaseItem[] };
   channelEol: { items: ChannelEolReleaseItem[] };
@@ -455,7 +458,7 @@ export async function buildDefaultOrchestratorDeps(): Promise<OrchestratorDeps> 
     // process.execPath contains the actual binary path.
     currentBinaryPath: process.execPath ?? process.argv[0] ?? "",
     installKind: detectInstallKind(),
-    replaceBinary,
+    replaceBinary: input => withBinaryUpgradeAdmission(adapterRegistry.list().flatMap(adapter=>adapter.mutationRoot ? [adapter.mutationRoot] : []),()=>replaceBinary(input)),
     cleanupBinaryBackup,
   };
 }
@@ -653,7 +656,7 @@ export async function runUpgradeOrchestrator(
   // in the result without mutating anything.
   let binaryOutcome: OrchestratorResult["binary"] = { status: "skipped" };
   type ContentOutcome = {
-    status: "skipped" | "completed" | "partial_failure";
+    status: "skipped" | "completed" | "partial_failure" | "deferred";
     backupRecoveryRequired?: boolean;
     recoveryError?: RunnerSyncResult["recoveryError"];
     outcomes?: readonly { runnerId: string; status: string; filesWritten: readonly string[]; diagnostics: readonly string[]; adapterBackup: unknown; skippedReason?: string }[];
@@ -714,6 +717,8 @@ export async function runUpgradeOrchestrator(
           deps,
           descriptor.version,
           manifest,
+          binaryOutcome.status === "completed",
+          binaryOutcome.verifiedDigest,
         );
         contentOutcome = contentResult;
         if (contentResult.manifest) {
@@ -799,7 +804,7 @@ export async function runUpgradeOrchestrator(
 
   // Compute content status: partial_failure when at least one runner
   // sync reported failure, completed when all sync'd or skipped cleanly.
-  const hasFailures = recoveryRequired || (contentOutcome.outcomes ?? []).some((o) => o.status === "failed" || o.status === "deferred");
+  const hasFailures = recoveryRequired || contentOutcome.status !== "deferred" && (contentOutcome.outcomes ?? []).some((o) => o.status === "failed" || o.status === "deferred");
   const finalStatus: OrchestratorResult["status"] = hasFailures ? "partial_failure" : "completed";
 
   // Map the wider local ContentOutcome to the public OrchestratorResult shape.
@@ -1015,6 +1020,7 @@ async function runBinaryItem(
   const extracted = await extractStagedBinaryArchive(staged);
 
   try {
+    const verifiedDigest = computeFileSha256(extracted.binaryPath);
     // Mark phase=before atomic replace so an interrupted run can detect it.
     state = setActiveOperation(state, {
       ...(state.activeOperation ?? {
@@ -1044,7 +1050,7 @@ async function runBinaryItem(
           replaceInput.verifiedArchiveSha256 = item.sha256;
         }
         const account = state.activeOperation?.backupId ? prepareBackupPostimages(state.activeOperation.backupId,[{
-          sourcePath:deps.currentBinaryPath,sha256:computeFileSha256(extracted.binaryPath),owner:'deck',kind:'binary',
+          sourcePath:deps.currentBinaryPath,sha256:verifiedDigest,owner:'deck',kind:'binary',
         }]) : undefined;
         let replaceResult: ReplaceBinaryResult;
         try { replaceResult = await deps.replaceBinary(replaceInput); }
@@ -1080,7 +1086,9 @@ async function runBinaryItem(
       }
     }
 
-    return { status: "completed", itemId: item.id };
+    if (!deps.replaceBinary) return {status:"skipped_external",itemId:item.id};
+    if (computeFileSha256(deps.currentBinaryPath) !== verifiedDigest) throw new OrchestratorError(ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,"Installed binary does not match the verified staged executable.");
+    return { status: "completed", itemId: item.id, verifiedDigest };
   } finally {
     if (extracted.cleanupDir) {
       rmSync(extracted.cleanupDir, { recursive: true, force: true });
@@ -1094,8 +1102,10 @@ async function runContentItem(
   deps: OrchestratorDeps,
   targetVersion: string,
   manifest: ManifestJsonV2,
+  binaryReplaced = false,
+  expectedDigest?: string,
 ): Promise<{
-  status: "skipped" | "completed" | "partial_failure";
+  status: "skipped" | "completed" | "partial_failure" | "deferred";
   backupRecoveryRequired?: boolean;
   recoveryError?: RunnerSyncResult["recoveryError"];
   outcomes?: readonly { runnerId: string; status: string; filesWritten: readonly string[]; diagnostics: readonly string[]; adapterBackup: unknown; skippedReason?: string }[];
@@ -1112,17 +1122,16 @@ async function runContentItem(
   });
   writeState(state);
 
-  const config = deps.readGlobalDeckConfig();
-  const syncResult = await runRunnerSync({
+  const syncResult = binaryReplaced ? (deps.syncNewBinary ?? syncWithNewBinary)({ executable:deps.currentBinaryPath,expectedDigest,backupId:state.activeOperation?.backupId,projectRoot:deps.projectRoot }) : await runRunnerSync({
     backupId: state.activeOperation?.backupId,
-    config,
+    config: deps.readGlobalDeckConfig(),
     registry: deps.adapterRegistry,
     projectRoot: deps.projectRoot,
     deckVersion: targetVersion,
   });
   const nextManifest = applyRunnerSyncToManifest(manifest, syncResult, targetVersion);
   return {
-    status: syncResult.recoveryError || syncResult.backupRecoveryRequired || syncResult.outcomes.some((o) => o.status === "failed" || o.status === "deferred")
+    status: binaryReplaced && !syncResult.recoveryError && !syncResult.backupRecoveryRequired && syncResult.outcomes.length > 0 && syncResult.outcomes.every(o => o.status === "deferred") ? "deferred" : syncResult.recoveryError || syncResult.backupRecoveryRequired || syncResult.outcomes.some((o) => o.status === "failed" || o.status === "deferred")
       ? "partial_failure"
       : "completed",
     outcomes: syncResult.outcomes,

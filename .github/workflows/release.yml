@@ -72,9 +72,17 @@ jobs:
           name: retirement-fresh-contracts
           path: ${{ runner.temp }}/retirement-fresh
 
+  published-migration:
+    name: Published runner migration and admission
+    needs: metadata
+    if: needs.metadata.outputs.is_release == 'true'
+    uses: ./.github/workflows/retirement-historical-diagnostic.yml
+    secrets: inherit
+
   release-verification:
     name: Release verification gates
-    needs: [metadata, fresh-retirement]
+    needs: [metadata, fresh-retirement, published-migration]
+    if: ${{ always() && !cancelled() && needs.metadata.result == 'success' && needs.fresh-retirement.result == 'success' && (needs.published-migration.result == 'success' || needs.published-migration.result == 'skipped' && needs.metadata.outputs.is_release != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

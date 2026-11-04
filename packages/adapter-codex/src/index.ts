@@ -19,3 +19,5 @@ export { createCodexSessionDriver, CODEX_TESTED_VERSIONS, type CodexSessionDrive
 export { refreshCodexQuota } from "./quota";
 
 export * from "./supermemory-hosted";
+
+export { inspectCodexSupermemoryReadiness } from './supermemory-readiness';

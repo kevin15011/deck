@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, statSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getDefaultDeckConfig } from "@deck/core";
 import { createCodexRunnerAdapter } from "./runner-adapter";
@@ -10,7 +10,7 @@ import { prepareCodexNativeRole, verifyCodexNativeRole } from "./native-role";
 // Protects upgrade recovery, idempotence, customization preservation and read-only admission.
 // Oracle: resilient-verification slice 3; all mutable roots and tool effects are isolated.
 test("preparation heals old owned content once, warns on custom roles and rejects sandbox escalation", async () => {
-  const home = mkdtempSync('/tmp/deck-codex-refresh-');
+  const home = realpathSync(mkdtempSync('/tmp/deck-codex-refresh-'));
   const codexHome = join(home, '.codex');
   const previous = process.env.CODEX_HOME;
   process.env.CODEX_HOME = codexHome;

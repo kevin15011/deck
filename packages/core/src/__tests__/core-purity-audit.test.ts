@@ -116,6 +116,8 @@ const allowedContractLiterals: Record<string, readonly string[]> = {
   'teams/developer/instruction-bundles/adaptive-memory.ts': [
     '- Pi memory tools bind the project server-side. Official-plugin runners follow their native tool access contract and current project guidance.',
   ],
+  // Shared admission transport codes identify a wire outcome, not an adapter dependency.
+  'runner-admission.ts': ['opencode-session-preparation-blocked', 'opencode-session-skills-unverified', 'pi-session-skills-unverified'],
   'runner-contributions.ts': ['pi', 'deck-pi-manifest-v1'],
   'package-retirement.ts': ['opencode'],
   'session/task-continuity.ts': ['opencode-verified-input'],

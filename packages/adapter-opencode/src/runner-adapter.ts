@@ -1,3 +1,4 @@
+import { evaluateRoleAdmission, evaluateInstalledRoles, DEVELOPER_TEAM_AGENTS as ADMISSION_ROLES } from "@deck/core";
 import { authenticateOpenCodeExecutionPlugin, validateOpenCodeEffectiveRoles } from "./native-role-source";
 import { acquireInstallationUse, withInstallationUse, withInstallationMutation, trackInstallationProcess, InstallationBusyError } from "../../core/src/installation-use";
 import { planOpenCodeRefresh, applyOpenCodeRefresh, type OpenCodeRefresh } from "./content-refresh";
@@ -374,6 +375,9 @@ class OpenCodeRunnerAdapterImpl {
     };
   }
   readPreparationGeneration() { return JSON.stringify(prepareOpenCodeNativeRole(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), "deck-lead").source); }
+  readonly stateSchema = 1;
+  get mutationRoot() { return this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"); }
+  evaluateSessionAdmission(input?: { roleId?: string; config?: NormalizedDeckConfig }) { return evaluateInstalledRoles(input?.roleId ? [input.roleId] : ADMISSION_ROLES.map(r=>r.id), roleId => prepareOpenCodeNativeRole(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), roleId)); }
   async prepareSessionNativeRole(roleId: string, config?: NormalizedDeckConfig) {
     const root = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
     const findings: import("@deck/core/session/driver").RunnerPreparationFinding[] = [];
@@ -1619,7 +1623,7 @@ class OpenCodeRunnerAdapterImpl {
   // Developer team verification
   // -------------------------------------------------------------------------
 
-  verifyDeveloperTeamInstall(plan: unknown): { valid: boolean; diagnostics: readonly string[] } {
+  async verifyDeveloperTeamInstall(plan: unknown): Promise<import("@deck/core").RunnerVerifyResult> {
     const binding = this.#planBindings.get(plan as RunnerDeveloperTeamInstallPlan);
     if (!binding) throw new Error("The supplied developer-team plan was not built by this adapter instance.");
     const diagnostics: string[] = [];
@@ -1627,7 +1631,9 @@ class OpenCodeRunnerAdapterImpl {
       if (!existsSync(file.path) || readFileSync(file.path, "utf8") !== file.after) diagnostics.push(`OpenCode content changed after refresh: ${file.path}`);
     }
     // Execution is refused separately at launch if its plugin cannot be authenticated.
-    return { valid: diagnostics.length === 0, diagnostics: [...diagnostics, ...binding.refresh.findings.map(f => f.message)] };
+    const admission = await this.evaluateSessionAdmission();
+    if (admission.verdict === "blocked") diagnostics.push(...admission.checks.filter(c => c.status === "fail").map(c => `installed-not-launchable: ${c.id} (${c.remediation})`));
+    return { admission, valid: diagnostics.length === 0, diagnostics: [...diagnostics, ...binding.refresh.findings.map(f => f.message)] };
   }
 
   // -------------------------------------------------------------------------

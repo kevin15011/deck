@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const suites = [
+  'apps/cli/src/runner-lifecycle.integration.test.ts',
   'apps/cli/src/native-package-retirement-fresh.e2e.test.ts',
   'apps/cli/src/native-package-retirement-install.e2e.test.ts',
   'packages/core/src/config/package-retirement.test.ts',

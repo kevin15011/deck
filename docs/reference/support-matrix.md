@@ -106,3 +106,25 @@ Native standalone Claude and Codex Setup do not expose authenticated project rep
 - Generated bundles and build metadata remain generator-owned.
 
 Use [Runners](../runners.md) for operational details, [Skills](../skills.md) for the bundled inventory, and [Troubleshooting](../troubleshooting.md) when evidence is manual, incomplete, or indeterminate.
+
+### Integration state and migration evidence
+
+Runner integration state schema 1 is the current adapter contract. Schema numbers
+order state formats; build commits, channels and executable digests identify builds
+and never order compatibility. Compatible installed content remains usable while a
+refresh is deferred. A pending writer transaction requires journal-based recovery;
+its presence does not authorize overwriting preserved user content. Builds predating
+writer fences do not observe this contract and cannot be fenced retroactively.
+
+The published migration inventory is pinned in
+`scripts/fixtures/retirement-releases.json`. Stable release qualification requires
+that inventory's base and selected-capability evidence, including candidate session
+admission, through the historical migration workflow. Unsupported rows remain
+explicit. This is an exact tested inventory, not a rolling promise for arbitrary
+previous or future native runner versions. Live authenticated compatibility requires
+separate canary evidence for the exact Deck build, platform and native version.
+
+Legacy Codex command recognizers remain migration-only for pre-history layouts.
+They rewrite or remove recognized entries before issuing current ownership receipts;
+they never authorize prior bytes for session admission. Their removal requires an
+updated, passing published migration inventory covering those layouts.

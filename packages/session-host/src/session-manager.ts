@@ -1,3 +1,4 @@
+import { publishablePreparationCode } from "@deck/core";
 import { readLocalContext, renderLocalContext, localContextWatermark, type LocalContextPage } from "./local-session-context";
 import { reservePreparationMutation } from "./runner-mutation";
 import { summarizeActivity } from './activity-summary';
@@ -1527,7 +1528,7 @@ export class SessionManager implements SessionService {
       if (error instanceof PersonalMcpPreparationError) failureCode = error.reasonCode;
       if (failureCode === "preparation-tools-failed" && error instanceof Error) {
         // Publish only reviewed codes, never backend details or credentials.
-        const reason = /^(codebase-memory-(?:unavailable|unsupported|cancelled)|web-search-(?:credential-missing|provider-unconfigured)|codex-session-preparation-blocked|(?:claude|codex|opencode|pi)-session-skills-unverified|claude-(?:codebase-memory|web-search)-selection-stale|personal-mcp-(?:managed-exclusive|remote-config-isolation-unavailable|auth-config-unavailable))(?=:|$)/.exec(error.message)?.[1];
+        const reason = publishablePreparationCode(error.message);
         if (reason) failureCode = reason;
       }
       // Reviewed check slug (adapter-provided, charset-restricted) so a blocked preparation says which check failed.

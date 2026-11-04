@@ -8,6 +8,7 @@ import {historicalPreservationScenarios,migratedRecoveryScenario} from './retire
 import {cleanupRoots,planRunnerCleanup,runRunnerCleanupUpdate} from '../apps/cli/src/runner-cleanup-command';
 import {runRunnerSync} from '../apps/cli/src/upgrade-command/runner-sync';
 import {getDefaultDeckConfig,buildCapabilityInstructionBundle,getEnabledCapabilityInstructionIds,acquireRunnerGenerationReference,contributionHash,selectSearchRoute} from '../packages/core/src';
+import { historicalMigrationPreimages } from './retirement-manual-fixture';
 import { publicationGaps } from './retirement-publication-contract';
 import { probeOpenCodeLiveSearch, probeFallbackMcpSearch } from './retirement-live-search';
 import { TAVILY_PROVIDER_DESCRIPTOR } from '../packages/provider-tavily/src';
@@ -31,7 +32,11 @@ const fallbackFixture=runner!=='opencode'&&process.env.NRP_LIVE_SEARCH==='1';
 const liveFallback=fallbackFixture&&Boolean(process.env.TAVILY_API_KEY?.trim());
 if(liveFallback)config.webSearch={enabled:true,provider:'tavily'};
 const historicalInstallation=JSON.parse(readFileSync(join(home,'historical-installation.json'),'utf8'));
-const observedArtifacts=historicalInstallation.effects.filter((effect:any)=>effect.method==='observed-historical-artifact');
+// Keep original installer attribution immutable; validate independently published
+// operator bytes before any perturbation/cleanup, then review exact postimages.
+const captured=JSON.parse(readFileSync(join(home,'historical-files.json'),'utf8')) as {path:string;content:string}[];
+const migrationPreimages=historicalMigrationPreimages(home,runner,captured,historicalInstallation.manualFixture);
+const observedArtifacts=historicalInstallation.effects.filter((effect:any)=>['observed-historical-artifact','observed-fixture-artifact'].includes(effect.method));
 for(const artifact of observedArtifacts){assertFixtureHome(home,artifact.path);if(!existsSync(artifact.path)||contributionHash(readFileSync(artifact.path))!==artifact.sha256)throw Error('Historical selected artifact preimage changed');}
 const rtkCommands:string[]=[];
 const walk=(path:string)=>{if(!existsSync(path))return;for(const name of readdirSync(path)){const full=join(path,name);if(name==='node_modules')continue;const stat=statSync(full);if(stat.isDirectory())walk(full);else if(name==='rtk')rtkCommands.push(full);}};
@@ -61,12 +66,11 @@ const releaseReference=oldGeneration?acquireRunnerGenerationReference({...oldGen
 const preservedBefore=firstPlan.plans[0]!.entries.filter(entry=>entry.action!=='remove').length;
 const unattended=await runRunnerCleanupUpdate(roots,[runner],{admission});
 checkpoint('replacement-review-and-sync');
-const captured=JSON.parse(readFileSync(join(home,'historical-files.json'),'utf8')) as {path:string;content:string}[];
 // Unowned pre-manifest files must not be adopted by matching names. Explicit
 // fixture review authorizes only captured, still-exact old output that differs
 // from the new desired file. The product update continues to preserve it.
 const desired=adapter.buildDeveloperTeamInstallPlan({projectRoot:home,environmentId:`${runner}-development` as never,deckConfig:config,materializationScope:'content-only'});
-const replacementReview=runner==='opencode'?reviewHistoricalReplacement(home,captured,captured.filter(old=>existsSync(old.path)&&desired.files.some(file=>materializedFixturePath(home,runner,file.path)===old.path&&file.content!==old.content)).map(file=>file.path)):[];
+const replacementReview=runner==='opencode'?reviewHistoricalReplacement(home,migrationPreimages,migrationPreimages.filter(old=>existsSync(old.path)&&desired.files.some(file=>materializedFixturePath(home,runner,file.path)===old.path&&file.content!==old.content)).map(file=>file.path)):[];
 // The update entry point must replace Claude's selected old generation before its retired leaves can be collected.
 const sync=await runRunnerSync({config,registry,projectRoot:home,deckVersion:'candidate',runnerIds:[runner],retirement:{roots},mutationAdmission:admission});
 checkpoint('generation-reference-and-confirmed-cleanup');
@@ -118,6 +122,8 @@ const remaining=planRunnerCleanup(roots,fixtureRunnerIds).plans[0]!;
 const repeated=await runRunnerCleanupUpdate(roots,fixtureRunnerIds,{admission});
 const plan=adapter.buildDeveloperTeamInstallPlan({projectRoot:home,environmentId:`${runner}-development` as never,deckConfig:config,materializationScope:'content-only',...(getEnabledCapabilityInstructionIds(config,runner).includes('adaptive-memory')?{}:{capabilityInstructions:buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config,runner))})});
 const verified=await adapter.verifyDeveloperTeamInstall(plan);
+const admissionResult=await adapter.evaluateSessionAdmission?.({config});
+if(!admissionResult || admissionResult.verdict==='blocked')throw Error('candidate session admission failed: '+JSON.stringify(admissionResult));
 if(!verified.valid || remaining.entries.length || repeated.some(outcome=>outcome.status!=='complete'))throw Error('managed state incomplete: '+JSON.stringify({verified,remaining:remaining.entries.length,diagnostics:remaining.diagnostics,repeated}));
 const managedRoot=runner==='claude'?join(roots.data,'claude'):roots[runner as 'codex'|'pi'|'opencode'];
 const manifest=JSON.parse(readFileSync(join(managedRoot,runner==='claude'?'manifest.json':'deck/manifest.json'),'utf8'));
@@ -172,8 +178,8 @@ if(liveFallback){
 }
 const searchEvidence={...search,functional};
 const syncOutcomes=sync.outcomes.map(({adapterBackup,...outcome})=>({...outcome,...(adapterBackup===undefined?{}:{adapterBackup:retainFixtureBackup(home,adapterBackup)})}));
-const evidence={unattended,preservedBefore,confirmed,collected,repeated,verified:verified.valid,remaining:remaining.entries.length,initialRetiredEntries:firstPlan.plans[0]!.entries.length,replacementReview,legacyInstallReview,fixtureNativeOverrideRestoredAfterLegacyReview,syncOutcomes,scenarios,rtk,automaticRtk,search:searchEvidence};
-const installedArtifactChecks=observedArtifacts.map((artifact:any)=>({path:artifact.path,beforeHash:artifact.sha256,
+const evidence={unattended,preservedBefore,confirmed,collected,repeated,verified:verified.valid,admission:admissionResult,remaining:remaining.entries.length,initialRetiredEntries:firstPlan.plans[0]!.entries.length,replacementReview,legacyInstallReview,fixtureNativeOverrideRestoredAfterLegacyReview,syncOutcomes,scenarios,rtk,automaticRtk,search:searchEvidence};
+const installedArtifactChecks=observedArtifacts.map((artifact:any)=>({path:artifact.path,capability:artifact.capability,beforeHash:artifact.sha256,
  expected:artifact.preserveWhenDisabled?'preserved without ownership inference':'removed proven-owned installation artifact',
  ...(artifact.preserveWhenDisabled?{notAdopted:!manifest.contributions.some((entry:any)=>entry.path===artifact.path||entry.path===artifact.exposedAs)}:{}),
  status:artifact.preserveWhenDisabled?(existsSync(artifact.path)&&contributionHash(readFileSync(artifact.path))===artifact.sha256&&!manifest.contributions.some((entry:any)=>entry.path===artifact.path||entry.path===artifact.exposedAs)?'verified':'incomplete'):(existsSync(artifact.path)?'incomplete':'verified')}));

@@ -236,3 +236,37 @@ Use this manual procedure only during an independently established offline maint
 2. Preserve a private copy of the daemon coordination evidence and the affected operation's backups, contribution manifests and pending transaction receipts. Record the exact guard path from doctor. Inspect the directory without changing it; an unexpected owner, symlink, nonempty directory or unexplained evidence requires investigation.
 3. Only after that proof, manually remove **only the empty guard directory** at the reported path, using `rmdir` with the literal path quoted as one argument. Do not recursively delete it, and do not remove the sibling reservation, daemon locks, session history, backups or pending receipts. This is an operator action; doctor does not perform it.
 4. Keep launch sources blocked while reviewing `deck doctor` and `deck runner cleanup --plan --json` again. The existing admission machinery can reclaim a reservation only when its owner is verifiably absent. A live, unknown or corrupt reservation remains blocked; do not erase it to force admission. Pending contribution recovery or offline session evidence may independently block mutation and must be resolved through the existing recovery path. Verify existing postimages and use the retained backup/receipt to recover unchanged transaction-owned files; preserve later user edits. Replan the remaining work before explicitly retrying, then restore normal launch sources when recovery is complete.
+
+### Compatible installed generations
+
+Installation verification includes read-only session admission. A customized
+required executable or unsafe role policy is reported as `installed-not-launchable`
+with a check identifier. Preserve the conflicting item and review its replacement;
+changing a manifest marker does not authorize executable content.
+
+Same-version stable and canary preparations reuse an admitted installation without
+rewriting it. Older releases that implement writer fencing do not replace state
+managed by a newer release or unsupported schema. Explicit skipped mutations report
+`runner-write-not-applied`; compatible installed work can continue read-only.
+Interrupted effects retain their fence and existing transaction journals for review.
+Codex pending fences record the exact transaction identities: recovery validates
+completed postimages or rolls back through those journals and verifies preimages.
+Missing or conflicted journal evidence remains pending; it never authorizes writes.
+
+Daemon hello replies include build identity. Automatic replacement is limited to a
+verified installed target on the same channel and an idle daemon; differing channels
+continue using a compatible daemon. Protocol incompatibility defers the affected
+operation while busy. Explicit daemon restart remains the way to switch channels.
+
+After binary replacement, content synchronization runs in the new executable. An
+unconfirmed child result is reported as deferred with the upgrade backup retained.
+Retry through idle preparation or Review & Install.
+
+Internal hook and MCP commands retain immutable executable references. Canary
+installation retains old digest-named payloads; it does not garbage-collect them.
+Default binary replacement reserves installed native roots and defers while a
+Deck-launched native child holds its installation lease. No native-provided
+executable-pin environment variable is trusted or dispatched.
+Removing a referenced payload manually, or external Homebrew cleanup, can still
+require Review & Install before that command works. Do not remove payloads used by
+active sessions. See the support matrix for the exact migration evidence policy.

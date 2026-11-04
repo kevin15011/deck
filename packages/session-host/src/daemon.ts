@@ -1,3 +1,4 @@
+import type { BuildIdentity } from "@deck/core";
 import { QuotaStore, type QuotaRefresh } from "./quota";
 import { runnerMutationActive, acquireRunnerMutationMarker, releaseRunnerMutationMarker } from "./runner-mutation";
 import {WebRestart,type RestartIdentity,type RestartLauncher} from "./web-restart";
@@ -41,6 +42,9 @@ export type DaemonServices = {
 export type DaemonOptions = {
   paths: StatePaths;
   version: string;
+  build?: BuildIdentity;
+  isInstalledTarget?: () => boolean;
+  requesterIsInstalledTarget?: (identity: BuildIdentity) => boolean;
   restart?:{identity:Omit<RestartIdentity,"pid"|"nonce">;launcher:RestartLauncher};
   restartChannel?:"stable"|"canary";
   /** Command prefix that starts a child anchor, e.g. [deck, "internal", "child-anchor"]. */
@@ -190,12 +194,15 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
       onDiagnostic: (d) => logger.warn(`control.${d.code}`, d.detail ? { detail: d.detail } : {}),
       bridge: { call: (input, context) => admit(() => bridge.call(input, context)) },
       daemon: {
-        version: options.version, pid, nonce,
+        version: options.version, pid, nonce, build:options.build,
         status: () => ({
           pid, nonce, version: options.version, startedAt: new Date(startedAt).toISOString(), uptimeMs: clock.now() - startedAt,
           clients: server!.clientCount + (web?.clientCount ?? 0), web: web?.status(), runningWork: svc.hasRunningWork(), activeSessions: svc.hasActiveSessions?.() ?? false, pendingApprovals: broker.pending().length, pendingQuestions: questionBroker.pending().length, socketPath: paths.socket.path, stopping: draining, ...(options.restart?{executable:options.restart.identity}:{}),
         }),
-        requestRestart: () => {
+        requestRestart: (requester) => {
+          // An automatic replacement needs independently verified installed-target evidence.
+          // Explicit restarts omit requester and retain the existing user-driven path.
+          if (requester && (options.isInstalledTarget?.() || requester.channel !== options.build?.channel || !options.requesterIsInstalledTarget?.(requester))) return {ok:false as const,code:"daemon-current",message:"The current daemon remains compatible; automatic replacement is not eligible."};
           if (draining) return { ok: true as const };
           if (isBusy()) return { ok: false as const, code: "busy", message: "The daemon has running work" };
           draining = true;

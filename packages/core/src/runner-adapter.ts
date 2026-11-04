@@ -307,6 +307,7 @@ export type RunnerPostInstallFollowUp = {
 };
 
 export type RunnerVerifyResult = {
+  admission?: import("./runner-admission").RunnerAdmissionResult;
   valid: boolean;
   diagnostics: readonly string[];
   /** Non-secret post-apply facts available to later actions in the same plan. */
@@ -844,6 +845,12 @@ export interface RunnerAdapter {
   /** Hold installation use through native child exit, including preparation and refresh. */
   trackNativeInstallationProcess?(pid: number): () => void;
   withNativeInstallationUse?<T>(effect: () => Promise<T>): Promise<T>;
+  /** Global installation identity used by CLI mutation fencing, never a project root. */
+  readonly mutationRoot?: string;
+  readonly stateSchema?: number;
+  recoverPendingMutation?(journals: readonly import("./runner-writer-fence").RunnerMutationJournal[]): Promise<"preimage" | "postimage" | undefined>;
+  /** Read-only admission; must never refresh or materialize content. */
+  evaluateSessionAdmission?(input?: { roleId?: string; config?: NormalizedDeckConfig }): Promise<import("./runner-admission").RunnerAdmissionResult> | import("./runner-admission").RunnerAdmissionResult;
   prepareSessionNativeRole?(roleId: string, config?: NormalizedDeckConfig): Promise<import("./session/driver").NativeRoleDescriptor>;
 
   /** Resolve the selected managed Codebase identity for task-scoped readiness. Ordinary customizations stay native. */

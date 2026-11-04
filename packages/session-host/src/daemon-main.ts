@@ -5,6 +5,9 @@ import { resolveStatePaths } from "./paths";
 export type RunSessionDaemonOptions = {
   env?: Record<string, string | undefined>;
   version: string;
+  build?: DaemonOptions["build"];
+  isInstalledTarget?: DaemonOptions["isInstalledTarget"];
+  requesterIsInstalledTarget?: DaemonOptions["requesterIsInstalledTarget"];
   anchorCommand: readonly string[];
   createService?: DaemonOptions["createService"];
   web?: DaemonOptions["web"];
@@ -22,6 +25,7 @@ export async function runSessionDaemon(options: RunSessionDaemonOptions): Promis
   const started = await startDaemon({
     paths: resolveStatePaths({ env }),
     version: options.version,
+    build: options.build, isInstalledTarget:options.isInstalledTarget, requesterIsInstalledTarget:options.requesterIsInstalledTarget,
     anchorCommand: options.anchorCommand,
     createService: options.createService,
     web: options.web,

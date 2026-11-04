@@ -1,3 +1,4 @@
+import { validBuildIdentity, type BuildIdentity } from "@deck/core";
 /**
  * Local control server (XR-8.1, XR-1.5, XR-3.4, XR-3.5): Unix socket, NDJSON frames, command
  * dispatch with idempotency, and attach = backlog then live with a bounded per-client queue
@@ -19,9 +20,9 @@ export const DEFAULT_MAX_QUEUED_EVENTS = 2000;
 const DEFAULT_IDEMPOTENCY_WINDOW = 1000;
 
 export type DaemonControl = {
-  version: string; pid: number; nonce: string;
+  version: string; pid: number; nonce: string; build?: BuildIdentity;
   status(): unknown;
-  requestRestart(): CommandOutcome | Promise<CommandOutcome>;
+  requestRestart(requester?: BuildIdentity): CommandOutcome | Promise<CommandOutcome>;
 };
 export type BridgePort = { call(input: { token: string; tool: string; arguments?: unknown }, context?: { signal?: AbortSignal }): Promise<CommandOutcome> };
 
@@ -239,10 +240,10 @@ export class ControlServer {
     switch (frame.t) {
       case "hello": {
         const { daemon } = this.options;
-        return reply({ t: "hello", id, protocol: PROTOCOL_VERSION, daemonVersion: daemon.version, pid: daemon.pid, nonce: daemon.nonce });
+        return reply({ t: "hello", id, protocol: PROTOCOL_VERSION, daemonVersion: daemon.version, pid: daemon.pid, nonce: daemon.nonce, ...(daemon.build ? {build:daemon.build} : {}) });
       }
       case "daemon.status": return reply({ t: "daemon.status", id, status: this.options.daemon.status() });
-      case "daemon.restart": return reply({ t: "daemon.restart", id, outcome: await this.options.daemon.requestRestart() });
+      case "daemon.restart": return reply({ t: "daemon.restart", id, outcome: await this.options.daemon.requestRestart(validBuildIdentity(frame.requester) ? frame.requester : undefined) });
       case "detach": {
         if (typeof frame.sessionId === "string") conn.detach(frame.sessionId);
         return reply({ t: "detached", id, sessionId: String(frame.sessionId ?? "") });

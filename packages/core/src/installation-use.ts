@@ -9,6 +9,8 @@ export class InstallationBusyError extends Error {
   readonly code = 'runner-installation-in-use';
   constructor() { super('Runner content refresh deferred while another invocation uses the installation.'); }
 }
+type MutationScope = { root: string; active: boolean; children: Promise<PromiseSettledResult<unknown>>[] };
+const mutationContext = new AsyncLocalStorage<MutationScope>();
 const context = new AsyncLocalStorage<{ root: string; file: string; active: boolean }>();
 
 /** Birth identity survives exec but cannot be inherited by a reused PID. */
@@ -78,13 +80,42 @@ export async function withInstallationUse<T>(root: string, effect: () => Promise
   try { return await context.run(scope, effect); }
   finally { scope.active = false; held.release(); }
 }
-export async function withInstallationMutation<T>(root: string, effect: () => Promise<T>): Promise<T> {
-  const held = lease(root, 'write');
-  const scope = context.getStore();
-  try {
-    if (held.conflicts(scope?.active && scope.root === resolve(root) ? scope.file : undefined)) throw new InstallationBusyError();
-    return await effect();
-  } finally { held.release(); }
+/** Each invocation drains only its own descendants, never its parent or siblings. */
+async function runMutationEffect<T>(scope: MutationScope, effect: () => Promise<T>): Promise<T> {
+  let outcome: PromiseSettledResult<T>;
+  try { outcome = { status: 'fulfilled', value: await mutationContext.run(scope, effect) }; }
+  catch (reason) { outcome = { status: 'rejected', reason }; }
+  // Inherited work starting after this callback closes needs a new reservation.
+  // Still-running children have their own open scopes and drain their descendants.
+  scope.active = false;
+  const children = await Promise.all(scope.children);
+  if (outcome.status === 'rejected') throw outcome.reason;
+  const rejected = children.find(child => child.status === 'rejected');
+  if (rejected?.status === 'rejected') throw rejected.reason;
+  return outcome.value;
+}
+
+export function withInstallationMutation<T>(root: string, effect: () => Promise<T>): Promise<T> {
+  const current = mutationContext.getStore();
+  const mutation: MutationScope = { root: resolve(root), active: true, children: [] };
+  if (current?.active && current.root === mutation.root) {
+    const running = runMutationEffect(mutation, effect);
+    // Observe immediately, including detached rejections, without changing the
+    // promise returned to an awaiting caller. Parent failure keeps its identity.
+    current.children.push(running.then(
+      value => ({ status: 'fulfilled' as const, value }),
+      reason => ({ status: 'rejected' as const, reason }),
+    ));
+    return running;
+  }
+  return (async () => {
+    const held = lease(root, 'write');
+    const scope = context.getStore();
+    try {
+      if (held.conflicts(scope?.active && scope.root === mutation.root ? scope.file : undefined)) throw new InstallationBusyError();
+      return await runMutationEffect(mutation, effect);
+    } finally { mutation.active = false; held.release(); }
+  })();
 }
 
 /** Keep a surviving native child protected even if the Deck parent exits abruptly. */

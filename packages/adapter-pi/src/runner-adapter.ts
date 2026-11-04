@@ -1,3 +1,4 @@
+import { evaluateRoleAdmission } from "@deck/core";
 import { verifyPiInstallation } from "./installation-trust";
 import { withInstallationUse, withInstallationMutation, trackInstallationProcess, InstallationBusyError } from "../../core/src/installation-use";
 import { createPiSkillDiscoveryProvider } from "./skill-discovery-provider";
@@ -359,6 +360,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   }
 
   getSessionDriver() { return createPiSessionDriver({ command: this.#piCommand, baseEnv: this.#env }); }
+  readonly stateSchema = 1;
+  get mutationRoot() { return this.#readAgentDir(); }
+  evaluateSessionAdmission(input?: { roleId?: string; config?: NormalizedDeckConfig }) { return evaluateRoleAdmission(() => preparePiSessionRole(this.#readAgentDir(), input?.roleId ?? "deck-setup")); }
   async prepareSessionNativeRole(roleId: string, config?: NormalizedDeckConfig) {
     const findings: import("@deck/core/session/driver").RunnerPreparationFinding[] = [];
     if (config) {
@@ -1344,7 +1348,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // Developer team verification
   // -------------------------------------------------------------------------
 
-  verifyDeveloperTeamInstall(plan: unknown): { valid: boolean; diagnostics: readonly string[] } {
+  async verifyDeveloperTeamInstall(plan: unknown): Promise<import("@deck/core").RunnerVerifyResult> {
     if (!this.#lastMaterialization) {
       throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
     }
@@ -1352,7 +1356,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     for (const write of this.#lastMaterialization.enginePlan.writes) {
       if (this.#fileIO.readText(write.path) !== write.content) diagnostics.push(`Pi content changed after refresh: ${write.path}`);
     }
-    return {valid:diagnostics.length === 0, diagnostics};
+    const admission = await this.evaluateSessionAdmission();
+    if (admission.verdict === "blocked") diagnostics.push(...admission.checks.filter(c => c.status === "fail").map(c => `installed-not-launchable: ${c.id} (${c.remediation})`));
+    return { admission,valid:diagnostics.length === 0, diagnostics};
   }
 
   // -------------------------------------------------------------------------

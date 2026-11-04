@@ -1,3 +1,5 @@
+import { withInstallationUse, withInstallationMutation, trackInstallationProcess } from "../../core/src/installation-use";
+import { admissionFailure, type RunnerAdmissionResult } from "@deck/core";
 import { buildClaudeSupermemoryLaunchOverlay, configureClaudeSupermemoryCapture } from "./supermemory-settings";
 import { CLAUDE_SUPERMEMORY_MCP_ID, claudeSupermemoryProxyArgs } from "./supermemory-transport";
 import { createClaudeSkillDiscoveryProvider, type ClaudeSkillDiscoveryOptions } from "./skill-discovery-provider";
@@ -483,6 +485,16 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       },
     }),
     inspectNativeSearch: async (input) => inspectClaudeNativeSearch({ ...input, environment: input.environment ?? options.sessionDriver?.baseEnv, flags: input.flags ?? options.sessionDriver?.extraArgs }, home),
+    mutationRoot: parent, stateSchema: 1,
+    withNativeInstallationUse: effect => withInstallationUse(parent,effect),
+    trackNativeInstallationProcess: pid => trackInstallationProcess(parent,pid),
+    evaluateSessionAdmission() {
+      try {
+        const selected = active();
+        if (inspect(selected.location, selected.expected, home) !== "ready") return admissionFailure(undefined);
+        return { verdict: "admit", checks: [], ...(selected.contentHash ? { generation: selected.contentHash } : {}) } as RunnerAdmissionResult;
+      } catch (error) { return admissionFailure(error); }
+    },
     async prepareSessionNativeSkills(config) {
       const findings: RunnerPreparationFinding[] = [];
       try {
@@ -872,6 +884,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
     async prepareDeveloperTeamInstall() { return []; },
     buildDeveloperTeamInstallPlan: plan,
     async applyDeveloperTeamInstall(input) {
+      return withInstallationMutation(parent, async () => {
       const candidate = input.plan as RunnerDeveloperTeamInstallPlan & { modelAssignments?: Record<string, string>; thinkingAssignments?: Record<string, string>; capabilityIds?: string[]; providerId?: string; pluginName?: string; contentHash?: string };
       const assignments = normalizeClaudeAssignments(candidate.modelAssignments ?? readAssignments());
       const efforts = normalizeClaudeEfforts(candidate.thinkingAssignments ?? readSelection().efforts ?? {});
@@ -934,6 +947,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       const contributions = accounting.commit();
       return { contributions, contributionManifestPath, results: canonical.map((file) => ({ agentId: file.path, kind: file.kind, status: existing === "ready" ? "unchanged" : "created" })), changedCount: existing === "ready" ? 0 : canonical.length, unchangedCount: existing === "ready" ? canonical.length : 0 };
       } catch (error) { accounting.abandon(); throw error; }
+      });
     },
     getNextScreen() { return "complete"; },
     async inspectEnvironment() { return { status: "content-only", diagnostics: [warning] }; },
@@ -962,7 +976,8 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
         const selection = { assignments, capabilities, ...(providerId ? { providerId } : {}), plugin: snapshot.pluginName, ...(snapshot.contentHash ? { contentHash: snapshot.contentHash } : {}), ...(Object.keys(efforts).length ? { efforts } : {}) };
         const digest = hash(JSON.stringify(canonical.map((file) => [relative(selectedRoot, file.path), file.kind, hash(file.content)])));
         const validName = snapshot.contentHash ? snapshot.contentHash === digest && snapshot.pluginName === claudeContentPluginName(assignments, capabilities, providerId, digest) : snapshot.pluginName === claudePluginName(assignments, capabilities);
-        return { valid: validName && matchesCanonicalFiles(candidate, canonical) && JSON.stringify(readSelection()) === JSON.stringify(selection) && inspect(selectedRoot, canonical, home) === "ready", diagnostics: [warning] };
+        const admission = await adapter.evaluateSessionAdmission!();
+        return { admission, valid: admission.verdict !== "blocked" && validName && matchesCanonicalFiles(candidate, canonical) && JSON.stringify(readSelection()) === JSON.stringify(selection) && inspect(selectedRoot, canonical, home) === "ready", diagnostics: [warning, ...admission.checks.filter(c=>c.status === "fail").map(c=>`installed-not-launchable: ${c.id} (${c.remediation})`)] };
       } catch { return { valid: false, diagnostics: ["Claude model metadata or plugin verification failed."] }; }
     },
     resolveThinking() { return undefined; }, getDefaultThinking() { return "off"; },

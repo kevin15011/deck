@@ -48,7 +48,11 @@ export function readOpenCodeNativeRole(root: string, roleId: string): NativeRole
     capture(plugin);
     authenticateOpenCodeExecutionPlugin(root);
     return {runnerId:"opencode",roleId,roleRef:roleId,generation:files[manifestPath]!,source:{root,files},instructions,hooks:[{event:"plugin",command:pathToFileURL(plugin).href}], ...(preparation.length ? { preparation } : {})};
-  } catch (cause) { throw new Error(`opencode-session-security-boundary: ${cause instanceof Error ? cause.message : 'selected role could not be validated'}`,{cause}); }
+  } catch (cause) {
+    const code = cause instanceof Error ? cause.message.split(':')[0] : '';
+    const detail = code?.startsWith('read-only policy changed') ? 'read-only-policy-changed' : /^[a-z][a-z0-9-]{0,64}$/.test(code!) ? code : 'installed-security-boundary-unverified';
+    throw Object.assign(new Error(`opencode-session-security-boundary: ${cause instanceof Error ? cause.message : 'selected role could not be validated'}`, {cause}), {detail});
+  }
 }
 
 /** Shared executable trust boundary; inventory may run before Deck is installed. */

@@ -1,3 +1,7 @@
+import { inspectCodexSupermemoryReadiness } from './supermemory-readiness';
+import { recordRunnerMutationJournals, assertNoContributionSymlink, REMEDIATION_MESSAGES } from "@deck/core";
+import { appendRunnerHistory, readRunnerHistory, runnerHistoryPath, readContribution, contributionHash } from "@deck/core";
+import { evaluateRoleAdmission, evaluateInstalledRoles, DEVELOPER_TEAM_AGENTS as ADMISSION_ROLES } from "@deck/core";
 import { isCodexOfficialSupermemoryConfigured } from "./mcp-config";
 import { withCodexInstallationUse, withCodexInstallationMutation, trackCodexInstallationProcess, CodexInstallationBusyError } from "./installation-use";
 import { createCodexSkillDiscoveryProvider, type CodexSkillDiscoveryOptions } from "./skill-discovery-provider";
@@ -660,6 +664,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   /** One-use Serena and effective Deck proxy evidence for a matching full plan. */
   readonly #pendingSerenaPreparationByProject = new Map<string, PendingSerenaPreparation>();
   readonly #serenaReadinessByPlan = new WeakMap<object, ReadySerenaReadiness>();
+  readonly #admissionConfigs = new WeakMap<object, NormalizedDeckConfig>();
   readonly #nativePlans = new WeakMap<object, CodexMutationPlan>();
   readonly #planOperations = new WeakMap<object, CodexOperationRecord>();
 
@@ -732,6 +737,20 @@ class CodexRunnerAdapter implements RunnerAdapter {
     };
   }
   readPreparationGeneration() { return readCodexRootGeneration(this.#roots.codexHome); }
+  readonly stateSchema = 1;
+  get mutationRoot() { return this.#roots.codexHome; }
+  async evaluateSessionAdmission(input?: { roleId?: string; config?: NormalizedDeckConfig }) {
+    const result = await evaluateInstalledRoles(input?.roleId ? [input.roleId] : ADMISSION_ROLES.map(r=>r.id), roleId => prepareCodexNativeRole(this.#roots.codexHome, roleId));
+    if (input?.config?.adaptiveMemory.enabled && input.config.adaptiveMemory.activeProvider === "supermemory") {
+      result.checks.push(...inspectCodexSupermemoryReadiness(readGlobalConfigSource(this.#roots) ?? "",this.#tools));
+      if (result.checks.some(c=>c.required && c.status === "fail")) result.verdict = "blocked";
+    }
+    if (input?.config) for (const [id, capability] of Object.entries(this.readPreparationCapabilities(input.config))) if (capability.enabled && capability.prerequisites === "missing") {
+      result.checks.push({id:`capability-prerequisites-unavailable:${id}`,status:"warn",required:false,remediation:"run-review-install"});
+      if (result.verdict === "admit") result.verdict = "degraded";
+    }
+    return result;
+  }
   async prepareSessionNativeRole(roleId: string, config?: NormalizedDeckConfig) {
     const root = this.#roots.codexHome;
     const pending = refreshQueues.get(root) ?? Promise.resolve();
@@ -752,6 +771,10 @@ class CodexRunnerAdapter implements RunnerAdapter {
         if (refreshed && plan.files.length) findings.push({ kind: "H", code: "codex-content-refreshed", item: "codex-installation", message: "Refreshed owned Codex content; customized files remain intact." });
       }
       const role = prepareCodexNativeRole(root, roleId);
+      const admission = await this.evaluateSessionAdmission({roleId,config});
+      const failed = admission.checks.find(c=>c.required && c.status === "fail");
+      if (failed) throw Object.assign(new Error("codex-session-generation-unverified"),{detail:failed.id});
+      findings.push(...admission.checks.filter(c=>c.id.startsWith("capability-prerequisites-unavailable:")).map(c=>({kind:"W" as const,code:c.id,item:"capability",message:"A selected optional capability prerequisite is unavailable; review it in Review & Install."})));
       return { ...role, preparation: [...findings, ...role.preparation ?? []] };
     });
     refreshQueues.set(root, next);
@@ -916,10 +939,14 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const launch = this.#withWebSearchCredential(await this.#buildBaseLaunchPlan(input), input);
     if (launch.status !== "ready") return launch;
     // Never silently execute an edited script under a previously trusted command.
-    if (readGlobalConfigSource(this.#roots)?.includes("# deck-codex-hook:") && !this.#deckHooksMaterialized()) return {
-      ...launch, plan: { ...launch.plan, args: [...launch.plan.args, "-c", "features.hooks=false"] },
-      diagnostics: [...launch.diagnostics, { code: "codex-hooks-preserved", severity: "warning", message: "Installed hooks could not be authenticated. They are preserved and disabled for this launch; ordinary work remains available." }],
-    };
+    if (readGlobalConfigSource(this.#roots)?.includes("# deck-codex-hook:") && !this.#deckHooksMaterialized()) {
+      const admission = await this.evaluateSessionAdmission();
+      return {
+        ...launch, plan: { ...launch.plan, args: [...launch.plan.args, "-c", "features.hooks=false"] },
+        diagnostics: [...launch.diagnostics, { code: "codex-hooks-preserved", severity: "warning", message: "Installed hooks could not be authenticated. They are preserved and disabled for this static-compatible launch; protected execution remains unsupported." },
+          ...admission.checks.filter(c=>c.status === "fail").map(c=>({code:c.id,severity:"warning" as const,message:REMEDIATION_MESSAGES[c.remediation]}))],
+      };
+    }
     try { return { ...launch, plan: withCodexRootContext(launch.plan, input, this.#roots.codexHome) }; }
     catch { return launch; } // Ordinary unverified installations keep the existing static launch.
   }
@@ -1478,6 +1505,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     }
     return issues.length ? { valid: false, issues } : { valid: true, fingerprint: result.fingerprint };
   }
+  #historyPath() { return runnerHistoryPath(join(this.#roots.userHome, ".local/state/deck"), "codex", this.#roots.codexHome); }
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan & { diagnostics: readonly string[] } {
     const materializationScope = input.materializationScope ?? "full";
     const roots = this.#roots;
@@ -1507,6 +1535,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const supermemoryScripts = tools.supermemory.scripts();
     const rtkRequested = mcpCapabilityIds.includes("rtk") || (materializationScope === "full" && inspectCodexOwnedHookIds(existingCodexConfig).includes("rtk") && input.capabilityIds === undefined);
     let native = buildCodexDeveloperTeamInstallPlan({
+      ownershipHistory: readRunnerHistory(this.#historyPath()),
       projectRoot: roots.userHome,
       codexHome: roots.codexHome,
       existingFiles: existing.files,
@@ -1594,6 +1623,12 @@ class CodexRunnerAdapter implements RunnerAdapter {
         message: `Refusing to erase Codex assignments for ${lostAssignmentFields.join(", ")}; the generated roles do not contain the requested model or reasoning.`,
       });
     }
+    if (memoryProviderId === "supermemory" && materializationScope === "full") {
+      const plannedConfig = native.expectedFiles.find(file=>file.relativePath === ".codex/config.toml")?.content ?? existingCodexConfig;
+      const missing = inspectCodexSupermemoryReadiness(plannedConfig,tools);
+      extraDiagnostics.push(...missing.map(check=>({code:check.id,severity:"error" as const,message:`Required selected Supermemory artifact is unavailable (${check.id}); run Review & Install.`})));
+      if (missing.length) native = {...native,blocked:true};
+    }
     native = { ...native, blocked: native.blocked || unconfirmedAssignmentChanges.length > 0 || lostAssignmentFields.length > 0, diagnostics: [...native.diagnostics, ...extraDiagnostics] };
     const files = native.mutations.filter((mutation) => mutation.operation !== "delete").map((mutation) => ({
       path: mutation.relativePath,
@@ -1616,6 +1651,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       })),
     };
     this.#nativePlans.set(plan, native);
+    this.#admissionConfigs.set(plan,config);
     if (serenaPreparation?.readiness.state === "ready" && serenaPreparation.proxy.state === "ready") {
       this.#serenaReadinessByPlan.set(plan, serenaPreparation.readiness);
     }
@@ -1658,6 +1694,34 @@ class CodexRunnerAdapter implements RunnerAdapter {
   withNativeInstallationUse<T>(effect: () => Promise<T>): Promise<T> {
     return withCodexInstallationUse(this.#roots.codexHome, effect);
   }
+  async recoverPendingMutation(references: readonly import("@deck/core").RunnerMutationJournal[]): Promise<"preimage" | "postimage" | undefined> {
+    return withCodexInstallationMutation(this.#roots.codexHome, async () => {
+      if (!references.length) return undefined;
+      const effects = this.#fileEffects ?? createNodeCodexFileEffects({journalRoot:this.#journalRoot});
+      const journals: import("./transaction").CodexTransactionJournal[] = [];
+      for (const ref of references) {
+        if (!/^[a-f0-9-]{36}$/.test(ref.id) || !/^[a-f0-9-]{36}$/.test(ref.operationId)) return undefined;
+        const journal = await effects.readJournal(ref.id);
+        const expectedRoot = ref.kind === "native" ? this.#roots.codexHome : ref.kind === "native-skills" ? this.#roots.userHome : undefined;
+        if (!journal || !expectedRoot || resolve(journal.projectRoot) !== resolve(expectedRoot) || journal.operationId !== ref.operationId || journal.operationKind !== ref.kind) return undefined;
+        journals.push(journal);
+      }
+      const matches = async (post: boolean) => {
+        for (const journal of journals) for (const entry of journal.entries) {
+          const path = resolve(journal.projectRoot,entry.mutation.relativePath);
+          if (!path.startsWith(resolve(journal.projectRoot) + "/")) return false;
+          assertNoContributionSymlink(path);
+          const current = await effects.inspect(path);
+          const expected = post ? entry.mutation.operation === "delete" ? null : {content:entry.mutation.content,mode:entry.mutation.postimageMode} : entry.preimage;
+          if (expected === null ? current !== null : !current || current.kind !== "file" || sha256(current.content) !== sha256(expected.content) || (current.mode ?? 0o644) !== (expected.mode ?? 0o644)) return false;
+        }
+        return true;
+      };
+      if (journals.every(j=>j.state === "verified") && await matches(true)) return "postimage";
+      for (const journal of [...journals].reverse()) if ((await rollbackCodexTransaction(journal,effects)).status !== "rolled-back") return undefined;
+      return await matches(false) ? "preimage" : undefined;
+    });
+  }
   async applyDeveloperTeamInstall(input: DeveloperTeamApplyInput): Promise<DeveloperTeamApplyResult> {
     return withCodexInstallationMutation(this.#roots.codexHome, () => this.#applyDeveloperTeamInstall(input));
   }
@@ -1685,6 +1749,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
       }
     }
     const effects = this.#fileEffects ?? createNodeCodexFileEffects({ journalRoot: this.#journalRoot });
+    const changedKinds = new Set(this.#splitPlan(native).filter(part=>part.plan.mutations.length).map(part=>part.kind));
+    recordRunnerMutationJournals(operation.receipt.transactions.filter(ref=>changedKinds.has(ref.kind as never)).map(ref=>({...ref,operationId:operation.receipt.operationId})));
     try {
       const appliedJournals: Awaited<ReturnType<typeof applyCodexMutationPlan>>["journal"][] = [];
       try {
@@ -1699,6 +1765,14 @@ class CodexRunnerAdapter implements RunnerAdapter {
         // A later root failed after an earlier root committed: restore the earlier root so the install stays all-or-nothing.
         for (const journal of appliedJournals.reverse()) await rollbackCodexTransaction(journal, effects);
         throw error;
+      }
+      const canonicalManifest = native.expectedFiles.find(file => file.relativePath === CODEX_MANIFEST_PATH);
+      if (canonicalManifest && native.mutations.length) {
+        const receipts = (JSON.parse(canonicalManifest.content).contributions ?? []) as import("@deck/core").RunnerContribution[];
+        const proven = receipts.filter(entry => {
+          try { const current = readContribution(entry); return current !== undefined && contributionHash(current) === entry.hash; } catch { return false; }
+        });
+        appendRunnerHistory(this.#historyPath(), proven);
       }
       operation.state = "applied";
       const mutationByPath = new Map(native.mutations.map((mutation) => [mutation.relativePath, mutation]));
@@ -1850,7 +1924,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     }
     return { status: "rolled-back", conflicts: [], diagnostics: [] };
   }
-  async verifyDeveloperTeamInstall(plan: unknown): Promise<{ valid: boolean; diagnostics: readonly string[] }> {
+  async verifyDeveloperTeamInstall(plan: unknown): Promise<import("@deck/core").RunnerVerifyResult> {
     const native = this.#nativePlans.get(plan as object);
     if (!native) return { valid: false, diagnostics: ["Unknown Codex installation plan."] };
     const problems: string[] = [];
@@ -1891,7 +1965,10 @@ class CodexRunnerAdapter implements RunnerAdapter {
         problems.push("Serena launcher reachability could not be verified after configuration.");
       }
     }
+    const admission = await this.evaluateSessionAdmission({config:this.#admissionConfigs.get(plan as object)});
+    if (admission.verdict === "blocked") problems.push(...admission.checks.filter(c => c.status === "fail").map(c => `installed-not-launchable: ${c.id} (${c.remediation})`));
     return {
+      admission,
       valid: problems.length === 0,
       diagnostics: problems,
     };

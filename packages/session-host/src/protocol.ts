@@ -1,3 +1,4 @@
+import type { BuildIdentity } from "@deck/core";
 /**
  * Local control protocol (XR-8.1): newline-delimited JSON frames over the daemon Unix socket.
  * Used by the terminal client, the TUI and the session MCP bridge.
@@ -16,16 +17,16 @@ export type CommandOutcome =
 export type ExecuteOutcome = CommandOutcome & { duplicate?: boolean };
 
 export type ClientFrame =
-  | { t: "hello"; id?: string; clientVersion: string }
+  | { t: "hello"; id?: string; clientVersion: string; clientBuild?: BuildIdentity }
   | { t: "command"; id?: string; sessionId?: string; command: unknown }
   | { t: "detach"; id?: string; sessionId: string }
   | { t: "daemon.status"; id?: string }
-  | { t: "daemon.restart"; id?: string }
+  | { t: "daemon.restart"; id?: string; requester?: BuildIdentity }
   | { t: "bridge.call"; id?: string; token: string; tool: string; arguments?: unknown }
   | { t: "query"; id?: string; name: string; args?: unknown };
 
 export type ServerFrame =
-  | { t: "hello"; id?: string; protocol: number; daemonVersion: string; pid: number; nonce: string }
+  | { t: "hello"; id?: string; protocol: number; daemonVersion: string; pid: number; nonce: string; build?: BuildIdentity }
   | { t: "command.result"; id?: string; commandId?: string; outcome: CommandOutcome; duplicate?: boolean }
   | { t: "event"; sessionId: string; event: SessionEvent }
   | { t: "caught-up"; sessionId: string; seq: number }

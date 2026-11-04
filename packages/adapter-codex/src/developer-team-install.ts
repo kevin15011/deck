@@ -35,6 +35,7 @@ const AGENTS_OWNERSHIP_RELEASE = "AGENTS.md";
 
 export type BuildCodexInstallPlanInput = {
   projectRoot: string;
+  ownershipHistory?: import("@deck/core").RunnerHistory;
   existingFiles: ReadonlyMap<string, string>;
   existingModes?: ReadonlyMap<string, number>;
   agentsFile?:
@@ -217,6 +218,19 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
     } catch {
       blocked = true;
       diagnostics.push({ code: "ownership-manifest-invalid", severity: "error", message: "The existing Codex ownership manifest is malformed; managed files cannot be updated safely." });
+    }
+  }
+
+  // History authorizes migration only when the complete selected preimage still matches.
+  for (const [virtualPath, source] of input.existingFiles) {
+    const path = virtualPath.startsWith(".codex/") ? join(input.codexHome ?? join(input.projectRoot, ".codex"), virtualPath.slice(7)) : join(input.projectRoot, virtualPath);
+    for (const entries of Object.values(input.ownershipHistory ?? {})) {
+      const proven = entries.find(entry => entry.path === path && entry.id === contributionId(entry) && (() => {
+        try { const value = selectContributionContent(source, entry.selector); return value !== undefined && hash(value) === entry.hash; } catch { return false; }
+      })());
+      if (!proven) continue;
+      priorContributions = [...priorContributions.filter(entry => entry.id !== proven.id), proven];
+      if (proven.selector.kind === "file") priorHashes[virtualPath] = proven.hash;
     }
   }
 
@@ -484,11 +498,12 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         }
       }
       const ownedServerIds = priorContributions.filter(entry => entry.selector.kind === "toml" && entry.selector.header.startsWith("mcp_servers.") && selectContributionContent(config.content, entry.selector) !== undefined && hash(selectContributionContent(config.content, entry.selector)!) === entry.hash && codexMcpReceiptCoversServer(config.content, selectContributionContent(config.content, entry.selector)!, entry.selector.header.slice("mcp_servers.".length))).map(entry => (entry.selector as { header: string }).header.slice("mcp_servers.".length));
-      let mcp = mergeCodexMcpServers(config.content, desiredMcp.servers, { repairSelectedToolIds: input.repairSelectedToolIds, ownedServerIds, recordedServerIds: priorContributions.filter(entry => entry.selector.kind === "toml").map(entry => (entry.selector as { header: string }).header.replace(/^mcp_servers\./, "")), allowLegacyMigration: true });
+      const ownership = { ownedServerIds, recordedServerIds: priorContributions.filter(entry => entry.selector.kind === "toml").map(entry => (entry.selector as { header: string }).header.replace(/^mcp_servers\./, "")), allowLegacyMigration: true };
+      let mcp = mergeCodexMcpServers(config.content, desiredMcp.servers, { ...ownership, repairSelectedToolIds: input.repairSelectedToolIds });
       if (mcp.status === "blocked" && mcp.collisions.length) {
         const collisions = mcp.collisions;
         diagnostics.push(...mcp.diagnostics.map(message => ({ code: "mcp-config-collision", severity: "warning" as const, message })));
-        mcp = mergeCodexMcpServers(config.content, desiredMcp.servers.filter(server => !collisions.includes(server.id)), { ownedServerIds });
+        mcp = mergeCodexMcpServers(config.content, desiredMcp.servers.filter(server => !collisions.includes(server.id)), ownership);
       }
       if (mcp.status !== "blocked") for (const id of mcp.adoptedServerIds ?? []) adoptedMcpIds.add(id);
       if (mcp.status === "blocked") {
@@ -542,7 +557,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
           const selector = { kind: "text" as const, start: `# deck-codex-hook:${id}:start`, end: `# deck-codex-hook:${id}:end` };
           const old = selectContributionContent(configSource, selector);
           if (old === undefined || old === selectContributionContent(hooks.content, selector)) return false;
-          if (isDeckManagedHookBlock(id, old)) return false; // Deck-shaped block that lost its receipt: refresh it and record ownership.
+          if (!priorContributions.some(entry => entry.selector.kind === "text" && entry.selector.start === selector.start) && isDeckManagedHookBlock(id, old)) return false; // Deck-shaped block that lost its receipt: refresh it and record ownership.
           return !priorContributions.some(entry => entry.selector.kind === "text" && entry.selector.start === selector.start && matchesCodexHookContribution(entry, old));
         });
         if (editedHookIds.length) {
@@ -624,7 +639,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
       const value = selectContributionContent(file.content, selector); if (value === undefined) continue;
       // Semantically equivalent desired hooks can reconstruct receipts from older installs.
       const identicalFile = selector.kind === "file" && old === value;
-      const identicalHook = selector.kind === "text" && !diagnostics.some(entry => entry.code === "trusted-hook-config-collision") && ["memory-bridge", "rtk", "supermemory", "readiness"].some(id => selector.start === `# deck-codex-hook:${id}:start`) && old !== undefined && (codexHookSemanticHash(old) === codexHookSemanticHash(value) || isDeckManagedHookBlock(selector.start.slice("# deck-codex-hook:".length, -":start".length), old));
+      const identicalHook = selector.kind === "text" && !diagnostics.some(entry => entry.code === "trusted-hook-config-collision") && ["memory-bridge", "rtk", "supermemory", "readiness"].some(id => selector.start === `# deck-codex-hook:${id}:start`) && old !== undefined && (codexHookSemanticHash(old) === codexHookSemanticHash(value) || !prior && isDeckManagedHookBlock(selector.start.slice("# deck-codex-hook:".length, -":start".length), old));
       if (old !== undefined && !dedicated && !provenFile && !identicalFile && !identicalHook && !(selector.kind === "toml" && adoptedMcpIds.has(selector.header.replace(/^mcp_servers\./, ""))) && (!prior || !(selector.kind === "text" ? matchesCodexHookContribution(prior, old) : prior.hash === hash(old)))) continue;
       // Native Codex may add unrelated tables inside a trailing marker. Preserve the
       // original raw cleanup receipt while the executable settings remain identical.

@@ -1,3 +1,4 @@
+import {currentBuildIdentity,isInstalledBuildTarget} from "./runtime/build-identity";
 /** Process-level wiring for `deck cross developer` / `deck session ...`: real daemon connection, stdin and stdout. */
 import { realpathSync } from "node:fs";
 import { ControlClient, ensureDaemon, pingDaemon, resolveStatePaths, spawnDetachedDaemon } from "@deck/session-host";
@@ -13,7 +14,8 @@ export async function connectToSessionDaemon(options: { ensure: boolean; env?: N
   const version = options.version ?? getBuildInfo().version;
   const paths = resolveStatePaths({ env });
   if (options.ensure) {
-    await ensureDaemon({ paths, clientVersion: version, spawnDaemon: () => spawnDetachedDaemon(deckInternalCommand("session-daemon"), env) });
+    const ensured = await ensureDaemon({ paths, clientVersion: version, clientBuild:currentBuildIdentity(),clientIsInstalledTarget:isInstalledBuildTarget(), spawnDaemon: () => spawnDetachedDaemon(deckInternalCommand("session-daemon"), env) });
+    if (ensured.skew) process.stderr.write(`Deck daemon: ${ensured.skew}; compatible installed work continues.\n`);
   } else if (!(await pingDaemon(paths.socket.path))) {
     return undefined;
   }

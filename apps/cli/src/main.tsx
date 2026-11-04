@@ -95,6 +95,14 @@ if (parsed.command === "internal-codex-memory-hook") {
   process.exit(result.exitCode);
 }
 
+if (parsed.command === "internal-runner-sync") {
+  const {runRunnerSync} = await import("./upgrade-command/runner-sync");
+  const {createDefaultAdapterRegistry} = await import("./runner-adapters");
+  const result = await runRunnerSync({backupId:parsed.backupId,config:configStore.readRequired(),registry:createDefaultAdapterRegistry(),projectRoot:process.cwd(),deckVersion:getBuildInfo().version});
+  process.stdout.write(JSON.stringify(result) + "\n");
+  process.exit(0);
+}
+
 if (parsed.command === "internal-memory-mcp") {
   // Deck-owned stdio MCP server for Codex explicit memory tools; stdout carries only JSON-RPC frames.
   const { runCodexMemoryMcpStdio } = await import("@deck/adapter-codex");
@@ -137,7 +145,9 @@ if (parsed.command === "internal-session-daemon") {
   const crossRunner = configStore.read().crossRunner;
   const { validateDeckConfig } = await import("@deck/core/config/deck-config");
   const webConfig = crossRunner?.web ?? validateDeckConfig({crossRunner:{}}).crossRunner!.web;
+  const {currentBuildIdentity,isInstalledBuildTarget,isInstalledIdentity} = await import("./runtime/build-identity");
   process.exit(await runSessionDaemon({
+    build:currentBuildIdentity(),isInstalledTarget:isInstalledBuildTarget,requesterIsInstalledTarget:isInstalledIdentity,
     version: getBuildInfo().version,
     restart,
     restartChannel:getBuildInfo().channel==="dev"?"canary":"stable",

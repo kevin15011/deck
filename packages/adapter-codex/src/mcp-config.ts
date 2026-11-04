@@ -330,6 +330,29 @@ function repairSelectedToolServers(source: string, desired: readonly CodexMcpSer
   return source;
 }
 
+const sameList = (value: unknown, expected: readonly string[]) => Array.isArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index]);
+
+/**
+ * True when a Deck-marked block has exactly the launch shape Deck writes for its own tools. Executable paths change on
+ * every update (canary payloads, tool versions), which invalidates digests; shape, not digest, proves Deck wrote it.
+ * Any extra field, foreign command or different arguments returns false so customized entries stay preserved.
+ */
+// Legacy migration for pre-history Deck command layouts (through the 0.14 transition).
+// Recognition authorizes rewrite/removal only, never admission of the prior bytes.
+// Retain until the published migration matrix proves a replacement for these fixtures;
+// no untested native-version support window is implied by this recognizer.
+export function isDeckShapedMcpEntry(id: string, entry: unknown): boolean {
+  if (!entry || typeof entry !== "object") return false;
+  const { command, args, env_vars, ...rest } = entry as Record<string, unknown>;
+  if (Object.keys(rest).length > 0 || typeof command !== "string" || !command.startsWith("/")) return false;
+  const base = command.split("/").at(-1) ?? "";
+  const deckBinary = /^\.?deck(?:-canary)?(?:\.payload-[0-9a-f]{8,64})?$/.test(base);
+  if (id === "deck-memory") return deckBinary && sameList(args, ["internal", "memory-mcp"]) && sameList(env_vars, ["DECK_RUNNER_MEMORY_ENDPOINT", "DECK_RUNNER_MEMORY_TOKEN_FILE"]);
+  if (id === "serena") return deckBinary && sameList(args, ["internal", "serena-mcp"]) && Array.isArray(env_vars);
+  if (id === "web-search") return base === "npx" && Array.isArray(args) && args.length === 2 && args[0] === "-y" && /^tavily-mcp@\d+\.\d+\.\d+$/.test(String(args[1])) && sameList(env_vars, ["TAVILY_API_KEY"]);
+  return false;
+}
+
 export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpServer[], options: { repairSelectedToolIds?: readonly string[]; ownedServerIds?: readonly string[]; recordedServerIds?: readonly string[]; allowLegacyMigration?: boolean } = {}): CodexMcpMergeResult {
   const originalSource = source;
   let existing: Map<string, object>;
@@ -345,6 +368,8 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
   const managed = managedServerIds(source);
   const desiredIds = new Set<string>(desired.map((server) => server.id));
   const proven = new Set(options.ownedServerIds ?? []);
+  const legacyShaped = new Set<string>();
+  for (const id of managed) if (!proven.has(id) && !options.recordedServerIds?.includes(id) && isDeckShapedMcpEntry(id, existing.get(id))) { proven.add(id); legacyShaped.add(id); }
   const replaceManaged = new Set<string>([...managed].filter((id) => !desiredIds.has(id) && proven.has(id)));
   const adoptedServerIds: string[] = [];
   const collisions: CodexMcpServerId[] = [];
@@ -364,7 +389,7 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
           : undefined));
       if (managed.has(server.id) && (proven.has(server.id) || legacy)) {
         replaceManaged.add(server.id); missing.push(server);
-        if (legacy && !proven.has(server.id)) adoptedServerIds.push(server.id);
+        if (legacy || legacyShaped.has(server.id)) adoptedServerIds.push(server.id);
       }
       else collisions.push(server.id);
     } else if (managed.has(server.id)) {
