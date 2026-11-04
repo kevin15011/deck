@@ -116,6 +116,7 @@ export async function provisionManualFixture(source: string, runner: string, hom
   if (hash(readFileSync(uv)) !== upstreamPins.uvBinarySha256) throw Error('Manual UV binary identity mismatch');
   const input = join(root, 'requirements.in'), lock = join(root, 'requirements.txt');
   writeFileSync(input, upstreamPins.serena + '\n', { flag: 'wx' });
+  run(uv, ['python', 'install', '3.13.7']);
   run(uv, ['pip', 'compile', '--python-version', '3.13.7', '--generate-hashes', input, '--output-file', lock]);
   if (!readFileSync(lock, 'utf8').includes('--hash=sha256:')) throw Error('Manual dependency lock has no hashes');
   run(uv, ['venv', '--python', '3.13.7', join(root, 'venv')]);
