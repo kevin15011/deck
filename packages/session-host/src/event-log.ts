@@ -124,7 +124,7 @@ export class EventLog {
   private parseLine(text: string, path: string, expectedSeq: number): SessionEvent {
     let value: unknown;
     try { value = JSON.parse(text); } catch { throw new EventLogCorruptError(`Invalid JSON near seq ${expectedSeq}`, path, "malformed"); }
-    const result = validateSessionEvent(value);
+    const result = validateSessionEvent(value, { persisted: true });
     if (!result.ok) throw new EventLogCorruptError(`Invalid event near seq ${expectedSeq}: ${result.errors.join("; ")}`, path, "malformed");
     if (result.value.seq !== expectedSeq) throw new EventLogCorruptError(`Sequence gap: expected ${expectedSeq}, found ${result.value.seq}`, path);
     if (result.value.sessionId !== this.options.sessionId) throw new EventLogCorruptError(`Event belongs to session ${result.value.sessionId}`, path);

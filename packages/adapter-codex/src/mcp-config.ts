@@ -1,4 +1,3 @@
-import { CODEX_SUPERMEMORY_MCP_ENV, validCodexSupermemoryProxy, type CodexSupermemoryProxy } from "./supermemory-hosted";
 import { getStaticTOMLValue, parseTOML, type AST } from "toml-eslint-parser";
 import {
   isWebSearchProviderDescriptor,
@@ -6,10 +5,8 @@ import {
   type WebSearchProviderDescriptorV1,
 } from "@deck/core";
 
-import { CODEX_MEMORY_MCP_ENV_VARS, CODEX_MEMORY_MCP_SERVER_ID } from "./memory-mcp-server";
 
-export const CODEX_MCP_SERVER_IDS = ["context7", "context-mode", "codebase-memory", "serena", "supermemory", CODEX_MEMORY_MCP_SERVER_ID, WEB_SEARCH_CAPABILITY_ID] as const;
-export const CODEX_SUPERMEMORY_MCP_URL = "https://mcp.supermemory.ai/mcp";
+export const CODEX_MCP_SERVER_IDS = ["context7", "context-mode", "codebase-memory", "serena", WEB_SEARCH_CAPABILITY_ID] as const;
 
 
 export const CODEX_SERENA_PROXY_COMMAND = "deck";
@@ -27,7 +24,6 @@ export type CodexMcpMergeResult =
 
 const SECRET = /(?:token|secret|password|credential|api[-_]?key)/i;
 const ENV_NAME = /^[A-Z][A-Z0-9_]*$/;
-const CANONICAL_SUPERMEMORY_PROJECT_SCOPE = /^sm_project_v1_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9]+)*$/;
 
 function quote(value: string): string { return JSON.stringify(value); }
 
@@ -119,45 +115,6 @@ export function inspectCodexMcpServerCommand(source: string, serverId: string): 
   } catch { return undefined; }
 }
 
-export type CodexSupermemoryMcpState =
-  | Readonly<{ ok: true; scope: string }>
-  | Readonly<{ ok: false; code: "supermemory-mcp-missing" | "supermemory-endpoint-invalid" | "supermemory-project-scope-missing" | "supermemory-project-scope-invalid" | "supermemory-mcp-unmanaged" }>;
-
-export function inspectCodexSupermemoryMcpState(source: string): CodexSupermemoryMcpState {
-  try {
-    const server = existingServers(source).get("supermemory") as Record<string, unknown> | undefined;
-    if (!server) return { ok: false, code: "supermemory-mcp-missing" };
-    if (!isDeckManagedCodexMcpServer(source, "supermemory")) return { ok: false, code: "supermemory-mcp-unmanaged" };
-    if (server.url !== CODEX_SUPERMEMORY_MCP_URL) return { ok: false, code: "supermemory-endpoint-invalid" };
-    if (server.bearer_token_env_var !== undefined || server.env_http_headers !== undefined) return { ok: false, code: "supermemory-mcp-unmanaged" };
-    const scope = server.http_headers && typeof server.http_headers === "object"
-      ? (server.http_headers as Record<string, unknown>)["x-sm-project"]
-      : undefined;
-    if (typeof scope !== "string" || !scope.trim()) return { ok: false, code: "supermemory-project-scope-missing" };
-    if (!CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(scope.trim())) return { ok: false, code: "supermemory-project-scope-invalid" };
-    const expected = normalized({ id: "supermemory", transport: "streamable-http", url: CODEX_SUPERMEMORY_MCP_URL, httpHeaders: { "x-sm-project": scope.trim() } });
-    if (JSON.stringify(canonical(server)) !== JSON.stringify(canonical(expected))) return { ok: false, code: "supermemory-mcp-unmanaged" };
-    return { ok: true, scope: scope.trim() };
-  } catch {
-    return { ok: false, code: "supermemory-mcp-unmanaged" };
-  }
-}
-
-/** Confirms the exact credential-free Supermemory table that Deck is allowed to use. */
-export function isCodexSupermemoryMcpConfigured(source: string): boolean {
-  return inspectCodexSupermemoryMcpState(source).ok;
-}
-
-/** Launch readiness requires the exact owned stdio contract, independently of legacy HTTP checks. */
-export function isCodexOfficialSupermemoryConfigured(source: string, proxy: CodexSupermemoryProxy): boolean {
-  if (!validCodexSupermemoryProxy(proxy)) return false;
-  try {
-    const server = existingServers(source).get("supermemory");
-    const expected = normalized({ id: "supermemory", transport: "stdio", command: proxy.nodeCommand, args: [proxy.script], envVars: CODEX_SUPERMEMORY_MCP_ENV });
-    return isDeckManagedCodexMcpServer(source, "supermemory") && JSON.stringify(canonical(server)) === JSON.stringify(canonical(expected));
-  } catch { return false; }
-}
-
 /** Confirms the exact portable Deck proxy contract. */
 export function isCodexSerenaMcpConfigured(source: string, command: readonly string[] = [CODEX_SERENA_PROXY_COMMAND, ...CODEX_SERENA_PROXY_ARGS]): boolean {
   try {
@@ -198,35 +155,14 @@ export function isCodexWebSearchMcpConfigured(
   }
 }
 
-/** Confirms the exact Deck memory MCP entry: the pinned Deck command plus the two variable NAMES (never a bearer). */
-export function isCodexDeckMemoryMcpConfigured(source: string, command: readonly string[]): boolean {
-  try {
-    const server = existingServers(source).get(CODEX_MEMORY_MCP_SERVER_ID);
-    const expected = normalized({ id: CODEX_MEMORY_MCP_SERVER_ID, transport: "stdio", command: command[0]!, args: command.slice(1), envVars: [...CODEX_MEMORY_MCP_ENV_VARS] });
-    return server !== undefined && isDeckManagedCodexMcpServer(source, CODEX_MEMORY_MCP_SERVER_ID) && JSON.stringify(canonical(server)) === JSON.stringify(canonical(expected));
-  } catch {
-    return false;
-  }
-}
-
 function validate(server: CodexMcpServer): void {
   if (!CODEX_MCP_SERVER_IDS.includes(server.id)) throw new Error(`Unsupported Codex MCP server: ${server.id}`);
   if (server.transport === "stdio") {
     if (!server.command || /[\0\r\n]/.test(server.command)) throw new Error(`Invalid command for ${server.id}.`);
-    if (server.id === "supermemory" && (!validCodexSupermemoryProxy({ nodeCommand: server.command, script: server.args?.[0] ?? "" })
-      || server.args?.length !== 1 || JSON.stringify(server.envVars) !== JSON.stringify(CODEX_SUPERMEMORY_MCP_ENV))) {
-      throw new Error("Supermemory stdio requires the verified official proxy and its exact credential-name contract.");
-    }
     for (const name of server.envVars ?? []) if (!ENV_NAME.test(name)) throw new Error(`Invalid external environment name for ${server.id}.`);
   } else {
     const url = new URL(server.url);
     if (url.protocol !== "https:") throw new Error(`Codex remote MCP ${server.id} must use HTTPS.`);
-    if (server.id === "supermemory" && (server.bearerTokenEnvVar || server.envHttpHeaders)) {
-      throw new Error("Supermemory must use Codex native OAuth without bearer or header credentials.");
-    }
-    if (server.id === "supermemory" && !server.httpHeaders?.["x-sm-project"]) {
-      throw new Error("Supermemory requires canonical x-sm-project scope.");
-    }
     if (server.bearerTokenEnvVar && !ENV_NAME.test(server.bearerTokenEnvVar)) throw new Error(`Invalid bearer token environment name for ${server.id}.`);
     for (const [header, envName] of Object.entries(server.envHttpHeaders ?? {})) {
       if (!header || !ENV_NAME.test(envName)) throw new Error(`Invalid external header environment mapping for ${server.id}.`);
@@ -347,7 +283,6 @@ export function isDeckShapedMcpEntry(id: string, entry: unknown): boolean {
   if (Object.keys(rest).length > 0 || typeof command !== "string" || !command.startsWith("/")) return false;
   const base = command.split("/").at(-1) ?? "";
   const deckBinary = /^\.?deck(?:-canary)?(?:\.payload-[0-9a-f]{8,64})?$/.test(base);
-  if (id === "deck-memory") return deckBinary && sameList(args, ["internal", "memory-mcp"]) && sameList(env_vars, ["DECK_RUNNER_MEMORY_ENDPOINT", "DECK_RUNNER_MEMORY_TOKEN_FILE"]);
   if (id === "serena") return deckBinary && sameList(args, ["internal", "serena-mcp"]) && Array.isArray(env_vars);
   if (id === "web-search") return base === "npx" && Array.isArray(args) && args.length === 2 && args[0] === "-y" && /^tavily-mcp@\d+\.\d+\.\d+$/.test(String(args[1])) && sameList(env_vars, ["TAVILY_API_KEY"]);
   return false;
@@ -369,7 +304,7 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
   const desiredIds = new Set<string>(desired.map((server) => server.id));
   const proven = new Set(options.ownedServerIds ?? []);
   const legacyShaped = new Set<string>();
-  for (const id of managed) if (!proven.has(id) && !options.recordedServerIds?.includes(id) && isDeckShapedMcpEntry(id, existing.get(id))) { proven.add(id); legacyShaped.add(id); }
+  for (const id of managed) if (options.allowLegacyMigration !== false && !proven.has(id) && !options.recordedServerIds?.includes(id) && isDeckShapedMcpEntry(id, existing.get(id))) { proven.add(id); legacyShaped.add(id); }
   const replaceManaged = new Set<string>([...managed].filter((id) => !desiredIds.has(id) && proven.has(id)));
   const adoptedServerIds: string[] = [];
   const collisions: CodexMcpServerId[] = [];
@@ -421,16 +356,11 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
 
 export function buildCodexMcpServers(input: {
   packageIds: readonly string[];
-  memoryProvider: "none" | "supermemory";
-  supermemoryProjectScope?: string;
-  supermemoryProxy?: CodexSupermemoryProxy;
   /** A fresh Core probe confirmed the Deck-owned Serena launcher. */
   serenaLauncherAvailable?: boolean;
   /** The effective `deck` command has confirmed the hidden Serena proxy route. */
   serenaProxyAvailable?: boolean;
   serenaProxyCommand?: readonly string[];
-  /** Self-referencing Deck command (`<deck> internal memory-mcp`); omitted when the running Deck cannot be pinned. */
-  deckMemoryCommand?: readonly string[];
   /** Absolute, verified Context Mode executable; a bare PATH name is never written. */
   contextModeCommand?: string;
   /** Absolute verified shared Context7 executable. */
@@ -484,13 +414,6 @@ export function buildCodexMcpServers(input: {
   if (selected.has("context7")) {
     if (isAbsolutePinnedCommand(input.context7Command)) servers.push({ id: "context7", transport: "stdio", command: input.context7Command });
     else gaps.push("context7-not-ready");
-  }
-  if (input.memoryProvider === "supermemory") {
-    if (input.supermemoryProxy && validCodexSupermemoryProxy(input.supermemoryProxy)) servers.push({
-      id: "supermemory", transport: "stdio", command: input.supermemoryProxy.nodeCommand,
-      args: [input.supermemoryProxy.script], envVars: CODEX_SUPERMEMORY_MCP_ENV,
-    });
-    else gaps.push("supermemory-proxy-not-ready");
   }
   if (selected.has(WEB_SEARCH_CAPABILITY_ID)) {
     if (input.webSearchProviderConfigured !== true) {

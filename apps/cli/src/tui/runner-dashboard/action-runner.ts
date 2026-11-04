@@ -5,7 +5,7 @@
  * Each adapter provides its own implementations for runtime-specific actions.
  */
 
-import { readFileSync, existsSync, writeFileSync, appendFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, appendFileSync, readdirSync, statSync } from "node:fs";
 import { resolve as pathResolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import {
@@ -16,7 +16,6 @@ import {
   type PackageInstructionPackageId,
 } from "@deck/core/config/deck-config";
 import type { DeckConfigStore } from "../../deck-config-store";
-import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import {
   SERENA_MCP_ARGS,
   validateSerenaOperationAuthorization,
@@ -26,9 +25,8 @@ import {
   type SerenaReadinessEvidence,
   type RunnerPostInstallFollowUp,
   type RunnerVerificationEvidence,
-  type DeckSecretStore,
 } from "@deck/core";
-import { runnerRequiresExternalSupermemoryToken, type RunnerAction, type RunnerDashboardState, type RunnerDashboardEvidenceIdentity, type RunnerReviewPlan, type SupermemoryRuntimeCredentialEvidence } from "./state";
+import { type RunnerAction, type RunnerDashboardState, type RunnerReviewPlan } from "./state";
 import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments, WebSearchProviderDescriptorV1 } from "@deck/core";
 // Canonical server name for codebase-memory MCP — defined locally to avoid adapter dependency in the runner
 const CODEBASE_MEMORY_MCP_SERVER_NAME = "codebase-memory";
@@ -136,7 +134,6 @@ export type PackageInstallerFn = (
 export type TeamBundleInstallerFn = (
   projectRoot: string,
   options?: {
-    memoryProvider?: AdaptiveMemoryProvider;
     modelAssignments?: DeveloperTeamModelAssignments;
     thinkingAssignments?: DeveloperTeamThinkingAssignments;
     capabilityIds?: readonly string[];
@@ -157,7 +154,6 @@ export type McpConfigWriterFn = (options: {
   /** Verified project root for canonical non-secret project scope derivation. */
   projectRoot?: string;
   /** Optional token for runners that use API-key authentication. */
-  token?: string;
   /** MCP server type: local (npx command) or remote (URL) */
   type?: "local" | "remote";
   /** For local MCP servers: command to execute (e.g., ["npx", "-y", "@upstash/context7-mcp"]) */
@@ -170,19 +166,6 @@ export type McpConfigWriterFn = (options: {
 }, context?: RunnerSerenaActionContext) => Promise<{ ok: boolean; path: string; diagnostics?: string[] }>;
 
 /**
- * Generic MCP config validator — adapters provide their own.
- */
-export type McpConfigValidatorFn = (options: { token?: string; serverName?: string }) => { ok: boolean; diagnostics?: string[] };
-export type SupermemoryReadOnlyApiValidatorFn = (options: { apiKey: string; projectRoot?: string }) => Promise<{ ok: boolean; diagnostics?: string[] }>;
-
-/** Runner-native profile handling is supplied by the composition root, never by the generic TUI action runner. */
-export type RunnerProfileCredentialEffects = {
-  secretName: string;
-  hasUsableCredential: (raw: string | undefined) => boolean;
-  storeCredential: (input: { store: DeckSecretStore; token: string; alias?: string; makeDefault?: boolean; eligibleAliases: readonly string[] }) => void;
-};
-
-/**
  * Dependencies for the action runner.
  * Adapters inject their runtime-specific implementations.
  */
@@ -191,22 +174,14 @@ export type RunnerActionRunnerDependencies = {
   runnerCommand?: string;
   dashboardState?: RunnerDashboardState;
   packageInstructionIds?: readonly PackageInstructionPackageId[];
-  supermemoryToken?: string;
-  secretStore?: DeckSecretStore;
-  profileCredentialEffects?: RunnerProfileCredentialEffects;
-  validateSupermemoryReadOnlyApi?: SupermemoryReadOnlyApiValidatorFn;
-  memoryProvider?: AdaptiveMemoryProvider;
-  resolvedMemoryProvider?: AdaptiveMemoryProvider;
   /** Runtime-only provider descriptor selected by the CLI composition root. */
   webSearchProvider?: WebSearchProviderDescriptorV1;
   installPackages?: PackageInstallerFn;
   installTeamBundle?: TeamBundleInstallerFn;
   writeMcpConfig?: McpConfigWriterFn;
-  validateMcpConfig?: McpConfigValidatorFn;
   configStore?: DeckConfigStore;
   writeDeckConfig?: (projectRoot: string, config: unknown) => NormalizedDeckConfig;
   onActionResult?: (result: RunnerActionRunResult) => void;
-  onSupermemoryRuntimeCredentialEvidence?: (payload: { evidence: SupermemoryRuntimeCredentialEvidence; identity: RunnerDashboardEvidenceIdentity }) => void;
   onInstallResult?: (result: RunnerPackageInstallResult) => void;
   /** Current-operation Serena authorization and the single operation signal. */
   runnerId?: string;
@@ -227,144 +202,8 @@ export type RunnerActionRunnerDependencies = {
   serenaPlanValid?: boolean;
   // Backward-compatible aliases for Pi-specific tests
   piCommand?: string;
-  writeSupermemoryPiMcpConfig?: McpConfigWriterFn;
-  validateSupermemoryPiMcpConfig?: McpConfigValidatorFn;
-  buildDeveloperTeamInstallPlan?: (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider }) => { agents: unknown[]; skills: unknown[]; standaloneSkills: unknown[]; sddSkillFiles: unknown[]; };
-  applyDeveloperTeamInstall?: (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider }) => Promise<{ results: Array<{ agentId: string; kind: string; status: string }> }>;
   installInternalRunnerPackages?: (command: string | undefined, actions: Array<{ packageId: string; name: string; source: string; installKind: string; reason: string }>, onResult: (result: { success: boolean; message?: string }) => void) => Promise<Array<{ success: boolean; message?: string }>>;
-  resolveAdaptiveMemoryProvider?: (options: { provider: string; supermemoryToken?: string; projectRoot?: string }) => AdaptiveMemoryProvider | undefined;
 };
-
-/** Runners whose official Supermemory plugin reads a shared profile credential (not Deck's legacy runtime key). */
-export function isProfileBackedMemoryRunner(runnerId: string | undefined): boolean {
-  return runnerId === "opencode" || runnerId === "claude" || runnerId === "codex";
-}
-
-export function resolveSupermemoryRuntimeCredentialReadiness(options: {
-  setup?: { runtimeCredentialStored?: boolean; hasToken?: boolean; configured?: boolean };
-  secretStore?: Pick<DeckSecretStore, "read">;
-  runnerId?: string;
-  profileCredentialEffects?: RunnerProfileCredentialEffects;
-}): { ready: boolean; diagnostics: string[]; reason: "secret-ready" | "missing" | "read-error" } {
-  const credentialLabel = isProfileBackedMemoryRunner(options.runnerId)
-    ? "An official Supermemory plugin profile credential"
-    : "Supermemory Deck runtime API credential";
-  if (!options.secretStore) {
-    return { ready: false, diagnostics: [`${credentialLabel} must be validated and stored before Review & Install; no Deck secret store was available for readiness verification.`], reason: "missing" };
-  }
-  if (isProfileBackedMemoryRunner(options.runnerId) && !options.profileCredentialEffects) {
-    return { ready: false, diagnostics: [`${credentialLabel} cannot be verified without runner profile handling; Review & Install is blocked.`], reason: "missing" };
-  }
-  try {
-    const stored = options.secretStore.read(isProfileBackedMemoryRunner(options.runnerId) ? options.profileCredentialEffects!.secretName : "supermemory-api-key");
-    const ready = isProfileBackedMemoryRunner(options.runnerId)
-      ? options.profileCredentialEffects!.hasUsableCredential(stored)
-      : Boolean(stored?.trim());
-    if (ready) return { ready: true, diagnostics: [], reason: "secret-ready" };
-    return { ready: false, diagnostics: [`${credentialLabel} must be validated and stored before Review & Install.`], reason: "missing" };
-  } catch (error) {
-    return {
-      ready: false,
-      diagnostics: [`${credentialLabel} could not be read; Review & Install is blocked until the Deck secret store is readable. ${redact(error instanceof Error ? error.message : String(error))}`],
-      reason: "read-error",
-    };
-  }
-}
-
-export function resolveSupermemoryRuntimeCredentialEvidence(options: {
-  setup?: RunnerDashboardState["adaptiveMemory"]["supermemory"];
-  secretStore?: Pick<DeckSecretStore, "read">;
-  runnerId?: string;
-  profileCredentialEffects?: RunnerProfileCredentialEffects;
-}): { readiness: ReturnType<typeof resolveSupermemoryRuntimeCredentialReadiness>; evidence: SupermemoryRuntimeCredentialEvidence } {
-  const readiness = resolveSupermemoryRuntimeCredentialReadiness({ setup: options.setup, secretStore: options.secretStore, runnerId: options.runnerId, profileCredentialEffects: options.profileCredentialEffects });
-  return {
-    readiness,
-    evidence: {
-      configured: options.setup?.configured === true || readiness.ready,
-      runtimeCredentialStored: readiness.ready,
-      runtimeCredentialVerification: readiness.ready ? "verified-present" : readiness.reason === "read-error" ? "verified-error" : "verified-missing",
-      ephemeralTokenAvailable: false,
-      diagnostics: readiness.ready
-        ? options.setup?.diagnostics ?? []
-        : [...(options.setup?.diagnostics ?? []), ...readiness.diagnostics],
-    },
-  };
-}
-
-export function getRunnerReviewPlanRunBlockPreflight(
-  state?: RunnerDashboardState,
-  options: { supermemoryToken?: string; secretStore?: Pick<DeckSecretStore, "read">; profileCredentialEffects?: RunnerProfileCredentialEffects } = {},
-): { diagnostics: string[]; evidence?: SupermemoryRuntimeCredentialEvidence } {
-  if (state?.adaptiveMemory.provider !== "supermemory") return { diagnostics: [] };
-
-  const setup = state.adaptiveMemory.supermemory;
-  const { readiness, evidence } = resolveSupermemoryRuntimeCredentialEvidence({ setup, secretStore: options.secretStore, runnerId: state.runnerScope, profileCredentialEffects: options.profileCredentialEffects });
-  const diagnostics: string[] = [];
-  if (!setup?.configured && !readiness.ready) diagnostics.push("Supermemory setup is not configured for Review & Install.");
-  if (!readiness.ready) diagnostics.push(...readiness.diagnostics);
-  if (process.env.DECK_DEBUG) log(`Supermemory runtime readiness: ${readiness.ready ? "ready" : "not-ready"} (${readiness.reason}).`);
-  diagnostics.push(...(setup?.diagnostics ?? []).filter(isBlockingSetupDiagnostic));
-  return { diagnostics: redactDiagnostics(diagnostics), evidence };
-}
-
-export function getRunnerReviewPlanRunBlockDiagnostics(
-  state?: RunnerDashboardState,
-  options: { supermemoryToken?: string; secretStore?: Pick<DeckSecretStore, "read">; profileCredentialEffects?: RunnerProfileCredentialEffects } = {},
-): string[] {
-  return getRunnerReviewPlanRunBlockPreflight(state, options).diagnostics;
-}
-
-type SupermemoryPreflightIdentity =
-  | { kind: "not-supermemory" }
-  | { kind: "stale" }
-  | { kind: "current"; identity: RunnerDashboardEvidenceIdentity };
-
-function captureSupermemoryPreflightIdentity(
-  plan: RunnerReviewPlan,
-  dependencies: RunnerActionRunnerDependencies,
-): SupermemoryPreflightIdentity {
-  const state = dependencies.dashboardState;
-  if (state?.adaptiveMemory.provider !== "supermemory") return { kind: "not-supermemory" };
-  if (state.runnerScope === "all") return { kind: "stale" };
-  const stateOperation = state.currentOperation ?? (state.operationId ? {
-    runner: state.runnerScope,
-    operationId: state.operationId,
-    explicitlySelected: false,
-  } : undefined);
-  if (!stateOperation || stateOperation.runner !== state.runnerScope || stateOperation.operationId.length === 0) return { kind: "stale" };
-  const dependencyRunner = dependencies.currentOperation?.runner ?? dependencies.runnerId;
-  const dependencyOperationId = dependencies.currentOperation?.operationId ?? dependencies.operationId;
-
-  if (dependencyRunner && dependencyRunner !== state.runnerScope) return { kind: "stale" };
-  if (dependencyOperationId && dependencyOperationId !== stateOperation.operationId) return { kind: "stale" };
-  if (dependencies.currentOperation && dependencies.currentOperation.operationId !== stateOperation.operationId) return { kind: "stale" };
-  if (state.plan !== plan) return { kind: "stale" };
-  if (state.planGeneratedForRevision === undefined || state.planGeneratedForRevision !== state.planRevision) return { kind: "stale" };
-  return {
-    kind: "current",
-    identity: {
-      runnerId: state.runnerScope,
-      operation: stateOperation,
-      planRevision: state.planRevision,
-      planGeneratedForRevision: state.planGeneratedForRevision,
-    },
-  };
-}
-
-function isCurrentSupermemoryPreflightIdentity(
-  plan: RunnerReviewPlan,
-  dependencies: RunnerActionRunnerDependencies,
-  identity: RunnerDashboardEvidenceIdentity,
-): boolean {
-  const current = captureSupermemoryPreflightIdentity(plan, dependencies);
-  return current.kind === "current"
-    && current.identity.runnerId === identity.runnerId
-    && current.identity.operation.runner === identity.operation.runner
-    && current.identity.operation.operationId === identity.operation.operationId
-    && current.identity.planRevision === identity.planRevision
-    && current.identity.planGeneratedForRevision === identity.planGeneratedForRevision;
-}
 
 function getReviewedPlanExecutionBlocker(
   plan: RunnerReviewPlan,
@@ -986,37 +825,9 @@ export async function runRunnerReviewPlan(
 ): Promise<RunnerActionRunResult[]> {
   log(`runRunnerReviewPlan: START`);
   log(`runRunnerReviewPlan: configWrites=${plan.groups.configWrites.length} automaticInstalls=${plan.groups.automaticInstalls.length} manualSteps=${plan.groups.manualSteps.length} teamApplications=${plan.groups.teamApplications.length} validations=${plan.groups.validations.length}`);
-  log(`runRunnerReviewPlan: has installPackages=${!!dependencies.installPackages} has writeMcpConfig=${!!dependencies.writeMcpConfig} has installTeamBundle=${!!dependencies.installTeamBundle} has validateMcpConfig=${!!dependencies.validateMcpConfig}`);
+  log(`runRunnerReviewPlan: has installPackages=${!!dependencies.installPackages} has writeMcpConfig=${!!dependencies.writeMcpConfig} has installTeamBundle=${!!dependencies.installTeamBundle}`);
 
   if (dependencies.signal?.aborted) return [];
-  const preflightIdentity = captureSupermemoryPreflightIdentity(plan, dependencies);
-  const shouldEmitCredentialEvidence = Boolean(dependencies.onSupermemoryRuntimeCredentialEvidence);
-  if (shouldEmitCredentialEvidence && preflightIdentity.kind === "stale") return [];
-  const runBlockPreflight = preflightIdentity.kind !== "not-supermemory"
-    ? getRunnerReviewPlanRunBlockPreflight(dependencies.dashboardState, {
-        supermemoryToken: dependencies.supermemoryToken,
-        secretStore: dependencies.secretStore,
-        profileCredentialEffects: dependencies.profileCredentialEffects,
-      })
-    : { diagnostics: [] };
-  if (dependencies.signal?.aborted) return [];
-  if (shouldEmitCredentialEvidence && preflightIdentity.kind === "current" && !isCurrentSupermemoryPreflightIdentity(plan, dependencies, preflightIdentity.identity)) return [];
-  if (shouldEmitCredentialEvidence && preflightIdentity.kind === "current" && runBlockPreflight.evidence) dependencies.onSupermemoryRuntimeCredentialEvidence?.({
-    evidence: runBlockPreflight.evidence,
-    identity: preflightIdentity.identity,
-  });
-  const runBlockDiagnostics = runBlockPreflight.diagnostics;
-  if (runBlockDiagnostics.length > 0) {
-    const blockedResult: RunnerActionRunResult = {
-      actionId: "review-plan.preflight",
-      status: "failed",
-      message: "Review & Install is blocked until Supermemory setup is complete.",
-      diagnostics: runBlockDiagnostics,
-    };
-    dependencies.onActionResult?.(blockedResult);
-    return [blockedResult];
-  }
-
   const reviewedPlanBlocker = getReviewedPlanExecutionBlocker(plan, dependencies);
   if (reviewedPlanBlocker) {
     const blockedResult: RunnerActionRunResult = {
@@ -1151,22 +962,10 @@ export async function runRunnerReviewPlan(
     await runAndRecord(action);
   }
 
-  const memoryResolution = resolveMemoryProviderAfterConfigWrite(dependencies);
-  if (memoryResolution.blocker) {
-    results.push(memoryResolution.blocker);
-    dependencies.onActionResult?.(memoryResolution.blocker);
-    return results;
-  }
-
-  const teamDependencies = {
-    ...dependencies,
-    resolvedMemoryProvider: memoryResolution.provider,
-  };
-
   for (const action of plan.groups.teamApplications) {
     if (dependencies.signal?.aborted) return results;
     log(`runRunnerReviewPlan: team ${action.id} kind=${action.kind}`);
-    const result = await runAndRecord(action, teamDependencies);
+    const result = await runAndRecord(action, dependencies);
     log(`runRunnerReviewPlan: team ${action.id} done`);
   }
 
@@ -1222,11 +1021,9 @@ export async function runRunnerAction(
       case "install-opencode-plugin":
       case "npm-install":
         return await runPackageInstall(action, dependencies);
-      case "install-claude-supermemory":
       case "install-claude-rtk":
       case "install-claude-codebase":
       case "install-claude-tool":
-      case "install-codex-supermemory":
       case "install-codex-rtk":
       case "install-codex-codebase":
       case "install-codex-tool": {
@@ -1442,8 +1239,6 @@ function writeDeckConfigAction(
   if (!state) {
     return skippedResult(action, "Dashboard state is required to update global Deck preferences.");
   }
-  const provider = state.adaptiveMemory.provider ?? "none";
-  const writesAdaptiveMemory = action.id === "adaptive-memory.supermemory.deck-config";
 
   const store = dependencies.configStore;
   if (!store && !dependencies.writeDeckConfig) return skippedResult(action, "Global Deck config store is required to update Deck preferences.");
@@ -1462,15 +1257,7 @@ function writeDeckConfigAction(
     const webSearchProvider = state.webSearchProvider ?? current.webSearch.provider;
     return {
       ...current,
-      adaptiveMemory: writesAdaptiveMemory
-        ? provider === "supermemory"
-          ? {
-              enabled: true,
-              activeProvider: "supermemory" as const,
-              supermemory: current.adaptiveMemory.supermemory ?? {},
-            }
-          : { enabled: false, activeProvider: "none" as const }
-        : current.adaptiveMemory,
+
       webSearch: {
         enabled: webSearchEnabled,
         ...(webSearchProvider ? { provider: webSearchProvider } : {}),
@@ -1494,9 +1281,7 @@ function writeDeckConfigAction(
   return {
     actionId: action.id,
     status: "executed",
-    message: writesAdaptiveMemory
-      ? `Updated global Deck preferences with adaptive memory provider: ${provider}.`
-      : "Updated global Deck preferences without changing adaptive memory activation.",
+    message: "Updated global Deck preferences.",
     diagnostics: redactDiagnostics(action.diagnostics ?? []),
     raw: redactRaw(config),
   };
@@ -1506,19 +1291,7 @@ async function writeMcpConfigAction(
   action: RunnerAction,
   dependencies: RunnerActionRunnerDependencies,
 ): Promise<RunnerActionRunResult> {
-  // Support both generic writeMcpConfig and Pi-specific writeSupermemoryPiMcpConfig (backward compat)
-  let writer = dependencies.writeMcpConfig;
-  if (!writer && dependencies.writeSupermemoryPiMcpConfig) {
-    // Adapt Pi-specific writer to generic interface for write-pi-mcp-config actions
-    writer = async (options) => {
-      // Supermemory bearer credentials are stored in the Deck secret store, not in runner MCP config.
-      if (options.token) {
-        return dependencies.writeSupermemoryPiMcpConfig!({ serverName: "supermemory" });
-      }
-      // For local MCP servers, call with the server config
-      return dependencies.writeSupermemoryPiMcpConfig!(options);
-    };
-  }
+  const writer = dependencies.writeMcpConfig;
   if (!writer) {
     return skippedResult(action, "MCP config writer not provided; requires adapter-specific implementation.");
   }
@@ -1681,71 +1454,7 @@ async function writeMcpConfigAction(
     };
   }
 
-  // Migration-only Supermemory MCP action. It may retire an exact stale
-  // Deck-managed raw entry or report absent-safe/unmanaged state, but never
-  // materializes a new raw MCP entry.
-  const isSupermemoryMcpAction =
-    action.id.includes("supermemory") ||
-    action.capabilityId === "supermemory" ||
-    action.toolId === "supermemory";
-  if (!isSupermemoryMcpAction) {
-    return {
-      actionId: action.id,
-      status: "failed",
-      message: "Unsupported MCP config action; no MCP write was attempted.",
-      diagnostics: redactDiagnostics(action.diagnostics ?? []),
-    };
-  }
-
-  const result = await writer({
-    serverName: "supermemory",
-    projectRoot: dependencies.projectRoot,
-  });
-  const safeResultDiagnostics = (result.diagnostics ?? []).filter((diagnostic) => !/x-supermemory-api-key|authorization|bearer|token/i.test(String(diagnostic)));
-  const diagnosticText = safeResultDiagnostics.join(" ");
-  const redactedRaw = redactRaw(result);
-
-  if (result.ok) {
-    const absentSafe = /absent-safe|absent|no OpenCode MCP entry was present|no config directory was provided/i.test(diagnosticText);
-    return {
-      actionId: action.id,
-      status: absentSafe ? "skipped" : "executed",
-      ...(absentSafe ? { preconditionOutcome: "satisfied" as const } : {}),
-      message: absentSafe
-        ? "Raw Supermemory MCP is absent-safe; the official plugin owns memory behavior and no MCP config was written."
-        : "Retired stale Deck-managed raw Supermemory MCP entry; the official plugin owns memory behavior and no new MCP config was written.",
-      diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...safeResultDiagnostics]),
-      raw: redactedRaw,
-    };
-  }
-
-  if (/unmanaged|ambiguous|external-unobservable/i.test(diagnosticText)) {
-    return {
-      actionId: action.id,
-      status: "failed",
-      message: "Existing raw Supermemory MCP is unmanaged or external-unobservable; Deck left it unchanged and blocked official-plugin activation to avoid duplicate memory effects.",
-      diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...safeResultDiagnostics]),
-      raw: redactedRaw,
-    };
-  }
-  if (/absent|no OpenCode MCP entry was present|disabled/i.test(diagnosticText)) {
-    return {
-      actionId: action.id,
-      status: "skipped",
-      preconditionOutcome: "satisfied",
-      message: "Raw Supermemory MCP is absent-safe; the official plugin owns memory behavior and no MCP config was written.",
-      diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...safeResultDiagnostics]),
-      raw: redactedRaw,
-    };
-  }
-
-  return {
-    actionId: action.id,
-    status: "failed",
-    message: `Raw Supermemory MCP retirement failed at ${result.path ?? "unknown path"}; no new MCP config was written.`,
-    diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...safeResultDiagnostics]),
-    raw: redactedRaw,
-  };
+  return { actionId: action.id, status: "failed", message: "Unsupported MCP config action; no MCP write was attempted.", diagnostics: redactDiagnostics(action.diagnostics ?? []) };
 }
 
 async function applyTeamBundleAction(
@@ -1761,8 +1470,6 @@ async function applyTeamBundleAction(
   if (!installer) {
     return skippedResult(action, "Team bundle installer not provided; requires adapter-specific implementation.");
   }
-
-  const memoryProvider = dependencies.resolvedMemoryProvider ?? dependencies.memoryProvider;
   const developerTeam = dependencies.dashboardState?.teams?.["developer-team"];
   const modelAssignments = developerTeam?.modelAssignments as DeveloperTeamModelAssignments | undefined;
   const thinkingAssignments = developerTeam?.thinkingAssignments as DeveloperTeamThinkingAssignments | undefined;
@@ -1770,12 +1477,10 @@ async function applyTeamBundleAction(
   log(`applyTeamBundleAction: developerTeam.selected=${developerTeam?.selected} hasModelAssignments=${!!modelAssignments} modelKeys=${modelAssignments ? Object.keys(modelAssignments).join(",") : "none"} hasThinkingAssignments=${!!thinkingAssignments}`);
 
   const installerOptions: {
-    memoryProvider?: AdaptiveMemoryProvider;
     modelAssignments?: DeveloperTeamModelAssignments;
     thinkingAssignments?: DeveloperTeamThinkingAssignments;
     capabilityIds?: readonly string[];
   } = {};
-  if (memoryProvider) installerOptions.memoryProvider = memoryProvider;
   if (modelAssignments) installerOptions.modelAssignments = modelAssignments;
   if (thinkingAssignments) installerOptions.thinkingAssignments = thinkingAssignments;
   installerOptions.capabilityIds = Object.entries(dependencies.dashboardState?.selectedCapabilities ?? {}).filter(([, enabled]) => enabled).map(([id]) => id);
@@ -1795,200 +1500,12 @@ async function applyTeamBundleAction(
   };
 }
 
-export async function validateAndStoreSupermemoryRuntimeCredential(options: {
-  token?: string;
-  runnerId?: string;
-  alias?: string;
-  makeDefault?: boolean;
-  eligibleAliases?: readonly string[];
-  projectRoot?: string;
-  projectScope?: string;
-  secretStore?: DeckSecretStore;
-  profileCredentialEffects?: RunnerProfileCredentialEffects;
-  validateSupermemoryReadOnlyApi?: SupermemoryReadOnlyApiValidatorFn;
-  diagnostics?: string[];
-}): Promise<{ ok: true; diagnostics: string[] } | { ok: false; message: string; diagnostics: string[] }> {
-  const diagnostics = redactDiagnostics(options.diagnostics ?? []);
-  const token = options.token?.trim() || (isProfileBackedMemoryRunner(options.runnerId) ? undefined : options.secretStore?.read("supermemory-api-key")?.trim());
-  if (!token) {
-    return {
-      ok: false,
-      message: "Supermemory runtime API key is required for Deck runtime validation; runner-native MCP OAuth does not make Deck runtime-ready.",
-      diagnostics,
-    };
-  }
-
-  if (isProfileBackedMemoryRunner(options.runnerId)) {
-    if (!options.secretStore || !options.profileCredentialEffects) {
-      return {
-        ok: false,
-        message: options.runnerId === "opencode" ? "Deck secret store or OpenCode profile handling is unavailable; OpenCode Supermemory plugin setup is not ready." : `Deck shared profile store is unavailable; ${options.runnerId === "codex" ? "Codex" : "Claude"} Supermemory setup is not ready.`,
-        diagnostics,
-      };
-    }
-    try {
-      options.profileCredentialEffects.storeCredential({
-        store: options.secretStore,
-        token,
-        ...(options.alias ? { alias: options.alias } : {}),
-        makeDefault: options.makeDefault ?? !options.alias,
-        eligibleAliases: options.eligibleAliases ?? [],
-      });
-      diagnostics.push(options.runnerId === "opencode" ? "OpenCode Supermemory plugin credential stored in the protected Deck profile store." : `${options.runnerId === "codex" ? "Codex" : "Claude"} Supermemory profile credential stored in the shared protected Deck profile store.`);
-      return { ok: true, diagnostics };
-    } catch (error) {
-      return {
-        ok: false,
-        message: options.runnerId === "opencode" ? "OpenCode Supermemory plugin credential could not be stored; setup is not ready." : `Shared ${options.runnerId === "codex" ? "Codex" : "Claude"} Supermemory profile credential could not be stored; setup is not ready.`,
-        diagnostics: [...diagnostics, redact(error instanceof Error ? error.message : String(error))],
-      };
-    }
-  }
-
-  if (!options.validateSupermemoryReadOnlyApi) {
-    return {
-      ok: false,
-      message: "Supermemory runtime credential could not be validated with a read-only API check; setup is not runtime-ready.",
-      diagnostics,
-    };
-  }
-
-  const apiValidation = await options.validateSupermemoryReadOnlyApi({ apiKey: token, projectRoot: options.projectRoot });
-  if (!apiValidation.ok) {
-    return {
-      ok: false,
-      message: "Supermemory read-only API validation failed; credential was not stored and setup is not runtime-ready.",
-      diagnostics: redactDiagnostics([...diagnostics, ...(apiValidation.diagnostics ?? [])]),
-    };
-  }
-
-  diagnostics.push("Supermemory runtime API credential validated with a read-only API check.");
-  if (!options.secretStore) {
-    return {
-      ok: false,
-      message: "Deck secret store is unavailable; Supermemory setup is not runtime-ready.",
-      diagnostics,
-    };
-  }
-
-  try {
-    options.secretStore.write("supermemory-api-key", token);
-    diagnostics.push("Supermemory runtime API credential stored in the Deck secret store.");
-    return { ok: true, diagnostics };
-  } catch (error) {
-    return {
-      ok: false,
-      message: "Supermemory runtime credential could not be stored; setup is not runtime-ready.",
-      diagnostics: [...diagnostics, redact(error instanceof Error ? error.message : String(error))],
-    };
-  }
-}
-
 async function validateAction(
   action: RunnerAction,
   dependencies: RunnerActionRunnerDependencies,
 ): Promise<RunnerActionRunResult> {
-  if (action.id === "adaptive-memory.supermemory.validate") {
-    let validator = dependencies.validateMcpConfig;
-    if (!validator && dependencies.validateSupermemoryPiMcpConfig) {
-      // Backward-compatible Pi-specific validator alias
-      validator = dependencies.validateSupermemoryPiMcpConfig;
-    }
-
-    let redactedRaw: unknown;
-    if (validator) {
-      const result = validator({ serverName: "supermemory" });
-      redactedRaw = redactRaw(result);
-      if (!result.ok) {
-        return {
-          actionId: action.id,
-          status: "failed",
-          message: "Raw Supermemory MCP inspection found a stale or unmanaged entry. Deck Runtime did not authorize it as project memory.",
-          diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...((redactedRaw as { diagnostics?: Array<string | { message?: string; code?: string; severity?: string }> })?.diagnostics ?? [])]),
-          raw: redactedRaw,
-        };
-      }
-    }
-
-    const runtimeValidation = await validateAndStoreSupermemoryRuntimeCredential({
-      token: dependencies.supermemoryToken,
-      runnerId: dependencies.runnerId,
-      makeDefault: dependencies.runnerId === "opencode",
-      projectRoot: dependencies.projectRoot,
-      secretStore: dependencies.secretStore,
-      profileCredentialEffects: dependencies.profileCredentialEffects,
-      validateSupermemoryReadOnlyApi: dependencies.validateSupermemoryReadOnlyApi,
-      diagnostics: action.diagnostics,
-    });
-    if (!runtimeValidation.ok) {
-      return {
-        actionId: action.id,
-        status: "failed",
-        message: runtimeValidation.message,
-        diagnostics: runtimeValidation.diagnostics,
-        raw: redactedRaw,
-      };
-    }
-
-    const nativeOAuth = !runnerRequiresExternalSupermemoryToken(dependencies.dashboardState);
-    return {
-      actionId: action.id,
-      status: "executed",
-      message: nativeOAuth
-        ? "Supermemory Deck runtime API credential was validated and stored. Optional runner OAuth is separate and only affects ad-hoc MCP use."
-        : "Supermemory Deck runtime API credential was validated and stored; runner MCP authentication remains separate.",
-      diagnostics: runtimeValidation.diagnostics,
-      raw: redactedRaw,
-    };
-  }
 
   return informationalResult(action, "Validation action is informational.");
-}
-
-function resolveMemoryProviderAfterConfigWrite(
-  dependencies: RunnerActionRunnerDependencies,
-): { provider?: AdaptiveMemoryProvider; blocker?: RunnerActionRunResult } {
-  const state = dependencies.dashboardState;
-  if (!state || state.adaptiveMemory.provider === "none") {
-    return { provider: undefined };
-  }
-
-  if (state.adaptiveMemory.provider === "supermemory") {
-    const setup = state.adaptiveMemory.supermemory;
-    if (!setup?.configured) {
-      return {
-        blocker: {
-          actionId: "adaptive-memory.supermemory.resolve",
-          status: "failed",
-          message: "Supermemory configuration is required before team bundle installation.",
-          diagnostics: ["Supermemory setup is incomplete."],
-        },
-      };
-    }
-  }
-
-  const resolver = dependencies.resolveAdaptiveMemoryProvider;
-  if (!resolver) {
-    return { provider: dependencies.memoryProvider };
-  }
-
-  try {
-    const resolved = resolver({
-      provider: state.adaptiveMemory.provider,
-      supermemoryToken: dependencies.supermemoryToken,
-      projectRoot: dependencies.projectRoot,
-    });
-    return { provider: resolved };
-  } catch (error) {
-    return {
-      blocker: {
-        actionId: "adaptive-memory.resolve",
-        status: "failed",
-        message: `Failed to resolve adaptive memory provider: ${error instanceof Error ? error.message : String(error)}`,
-        diagnostics: [],
-      },
-    };
-  }
 }
 
 function informationalResult(action: RunnerAction, message: string): RunnerActionRunResult {
@@ -2009,16 +1526,6 @@ function skippedResult(action: RunnerAction, message: string): RunnerActionRunRe
   };
 }
 
-function isBlockingSetupDiagnostic(diagnostic: string): boolean {
-  const lower = diagnostic.toLowerCase();
-  if (lower.includes("required") || lower.includes("blocked") || lower.includes("failed")) return true;
-  // Security: any diagnostic mentioning a token sentinel (raw or redacted) is blocking.
-  // Token sentinel patterns: sk-{20+ alphanum/- } and [REDACTED]/[redacted].
-  if (/\bsk-[a-zA-Z0-9-]{20,}\b/.test(diagnostic)) return true;
-  if (/\[REDACTED\]/i.test(diagnostic)) return true;
-  return false;
-}
-
 function redactDiagnostics(diagnostics: Array<string | { message?: string; code?: string; severity?: string }>): string[] {
   return diagnostics.map((d) => {
     if (typeof d === "string") return redact(d);
@@ -2036,7 +1543,6 @@ function redactDiagnostics(diagnostics: Array<string | { message?: string; code?
 function redact(value: unknown): string {
   const str = typeof value === "string" ? value : String(value);
   return str
-    .replace(/(x-supermemory-api-key\s*:\s*)[^\s,;\"]+/gi, "$1[REDACTED]")
     .replace(/(authorization\s*:\s*bearer\s+)[^\s,;\"]+/gi, "$1[REDACTED]")
     .replace(/sk-[a-zA-Z0-9-]{20,}/g, "[REDACTED]")
     .replace(/eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g, "[REDACTED]");
@@ -2082,7 +1588,7 @@ function checkExecutableExists(executableName: string): boolean {
   for (const dir of pathDirs) {
     if (!dir) continue;
     const resolvedDir = pathResolve(dir);
-    
+
     // Check if directory exists
     let dirEntries: string[] = [];
     try {
@@ -2111,7 +1617,6 @@ function checkExecutableExists(executableName: string): boolean {
 
   return false;
 }
-export const getPiRunnerReviewPlanRunBlockDiagnostics = getRunnerReviewPlanRunBlockDiagnostics;
 export const runPiRunnerAction = runRunnerAction;
 export const runPiRunnerReviewPlan = runRunnerReviewPlan;
 export type PiRunnerActionRunStatus = RunnerActionRunStatus;

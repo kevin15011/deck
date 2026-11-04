@@ -61,7 +61,8 @@ export function planRunnerCleanup(roots: CleanupRoots, runnerIds = ['codex', 'cl
     } catch { diagnostics.push(`Ownership manifest unavailable/legacy/invalid; no ownership inferred: ${actualManifest}`); }
     const codebaseIntent = explicitCapabilities?.["codebase-memory"];
     const codebaseEnabled = intentUnreadable || (typeof codebaseIntent?.runners?.[runnerId] === "boolean" ? codebaseIntent.runners[runnerId] : codebaseIntent?.enabled) === true;
-    const capabilityIds = ["context-mode", "serena", ...(!codebaseEnabled ? ["codebase-memory"] : [])];
+    // Removal-only legacy IDs keep receipt-based decommissioning reachable.
+    const capabilityIds = ["context-mode", "serena", "supermemory", "deck-memory", "adaptive-memory", ...(!codebaseEnabled ? ["codebase-memory"] : [])];
     const targets: RetirementTarget[] = [];
     for (const contribution of contributions) {
       const capability = capabilityIds.find(id => contribution.sourceItemId === `package:${id}` || contribution.sourceItemId === `capability:${id}`);

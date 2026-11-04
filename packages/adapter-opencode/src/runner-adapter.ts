@@ -121,7 +121,7 @@ import {
   type OpenCodeRunnerReviewPlan,
   type BuildOpenCodeRunnerReviewPlanState as OpenCodeReviewPlanState,
 } from "./capability-plan";
-import { buildOpenCodeInstallationPlan, OPENCODE_INSTALLABLE_TOOLS, OPENCODE_SUPERMEMORY_INSTALLABLE_TOOL, type InstallableOpenCodeTool, getSelectableOpenCodeTools } from "./installation-plan";
+import { buildOpenCodeInstallationPlan, OPENCODE_INSTALLABLE_TOOLS, type InstallableOpenCodeTool, getSelectableOpenCodeTools } from "./installation-plan";
 import { getTeamsForEnvironment } from "./team-catalog";
 import {
   readOpenCodeDeveloperTeamModelConfigAssignments,
@@ -154,7 +154,6 @@ import {
 } from "./install-tools";
 import { assertOpenCodeProjectConfigAdmission } from "./personal-mcp";
 import { createOpenCodeSkillDiscoveryProvider, type OpenCodeSkillInventoryDiscovery } from "./skill-discovery-provider";
-import { inspectOpenCodeSupermemoryRegistrations, resolveOwnedOpenCodeSupermemoryPaths } from "./opencode-supermemory-plugin";
 export { createOpenCodeSkillDiscoveryProvider };
 export type { OpenCodeSkillDiscoveryProviderOptions, OpenCodeSkillInventoryDiscovery } from "./skill-discovery-provider";
 
@@ -409,7 +408,7 @@ class OpenCodeRunnerAdapterImpl {
   readonly runnerId: RunnerId = "opencode";
   readonly displayName: string = "OpenCode";
   readonly environmentIds: readonly RunnerEnvironmentId[] = [...OPENCODE_ENVIRONMENT_IDS];
-  readonly packageInstructionIds = PACKAGE_INSTRUCTION_PACKAGE_IDS.filter((id) => id !== "adaptive-memory");
+  readonly packageInstructionIds = PACKAGE_INSTRUCTION_PACKAGE_IDS;
   readonly ui = {
     environmentLabels: { "opencode-development": "OpenCode" },
     dashboard: {
@@ -421,13 +420,6 @@ class OpenCodeRunnerAdapterImpl {
       missingChecks: ["~/.config/opencode/opencode.json agent model entries", "opencode models"],
       remediation: "Run `opencode models` to confirm OpenCode can see your providers.",
       defaultThinkingLevels: ["off", "low", "medium", "high"],
-    },
-    adaptiveMemory: {
-      supermemory: {
-        requiresExternalToken: false,
-        selectionStatus: "Supermemory selected; OpenCode will request OAuth once through /connect.",
-        configuredDiagnostics: ["OpenCode will authenticate Supermemory through native OAuth on first connection."],
-      },
     },
   } as const;
   readonly skillDiscovery: SkillDiscoverySourceProviderV1;
@@ -463,7 +455,6 @@ class OpenCodeRunnerAdapterImpl {
   #webSearchProvider?: WebSearchProviderDescriptorV1;
   #webSearchProviderResolver?: OpenCodeRunnerAdapterOptions["webSearchProviderResolver"];
   #webSearchCredential?: OpenCodeRunnerAdapterOptions["webSearchCredential"];
-  #supermemoryRegistrationConflicts: readonly string[] = [];
   #serenaEvidenceByOperation = new Map<string, { authorization: SerenaBootstrapAuthorization; operation: SerenaOperationIdentity; evidence: SerenaReadinessEvidence }>();
 
   constructor(options?: OpenCodeRunnerAdapterOptions) {
@@ -564,24 +555,6 @@ class OpenCodeRunnerAdapterImpl {
     const toolsReview = this.getToolsReview(actionContext);
     const runnerScope = "opencode";
     const deckConfig = requireDeckConfig(input.deckConfig, "capability inventory");
-    if (deckConfig.adaptiveMemory.enabled && deckConfig.adaptiveMemory.activeProvider === "supermemory") {
-      const environment = {
-        ...sanitizeRunnerEnv(process.env),
-        ...(this.#developerTeamConfigDir ? { OPENCODE_CONFIG_DIR: this.#developerTeamConfigDir } : {}),
-      };
-      const homeDirectory = process.env.HOME ?? homedir();
-      const ownedPaths = resolveOwnedOpenCodeSupermemoryPaths({ environment, homeDirectory });
-      const registrations = inspectOpenCodeSupermemoryRegistrations({
-        projectRoot: input.projectRoot,
-        workspaceRoot: input.projectRoot,
-        environment,
-        homeDirectory,
-        loaderLocator: ownedPaths.loaderLocator,
-      });
-      this.#supermemoryRegistrationConflicts = registrations.conflicts.map((entry) => entry.registration);
-    } else {
-      this.#supermemoryRegistrationConflicts = [];
-    }
     const webSearchProvider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
     const webSearchConfigPath = join(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), "opencode.json");
     const webSearchMcp = inspectOpenCodeWebSearchMcpConfig(webSearchConfigPath, webSearchProvider);
@@ -734,17 +707,6 @@ class OpenCodeRunnerAdapterImpl {
       selectedCapabilities: state.selectedCapabilities,
       webSearchProvider: capabilities.find((entry) => entry.capabilityId === "web-search")?.webSearchProvider
         ?? state.webSearchProviderDescriptor,
-      adaptiveMemory: state.adaptiveMemory.provider !== "none" ? {
-        provider: state.adaptiveMemory.provider,
-        supermemory: state.adaptiveMemory.supermemory ? {
-          configured: state.adaptiveMemory.supermemory.configured,
-          hasToken: state.adaptiveMemory.supermemory.hasToken,
-          runtimeCredentialStored: state.adaptiveMemory.supermemory.runtimeCredentialStored,
-          ephemeralTokenAvailable: state.adaptiveMemory.supermemory.ephemeralTokenAvailable,
-          mcpOAuthReady: state.adaptiveMemory.supermemory.mcpOAuthReady,
-          registrationConflicts: this.#supermemoryRegistrationConflicts,
-        } : undefined,
-      } : undefined,
       teams: state.teams as Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }> | undefined,
       packageInstructions: {
         [state.runnerId]: buildCapabilityInstructionBundle(
@@ -854,9 +816,7 @@ class OpenCodeRunnerAdapterImpl {
 
         const toolId = action.toolId ?? action.capabilityId;
         const toolsReview = this.getToolsReview(context);
-        const plan = toolId === OPENCODE_SUPERMEMORY_INSTALLABLE_TOOL.id
-          ? [OPENCODE_SUPERMEMORY_INSTALLABLE_TOOL]
-          : buildOpenCodeInstallationPlan({
+        const plan = buildOpenCodeInstallationPlan({
               tools: toolsReview.tools,
               selectedToolIds: toolId ? [toolId] : [],
             });
@@ -1224,9 +1184,6 @@ class OpenCodeRunnerAdapterImpl {
             command: ["rtk", "mcp", "start"],
           });
         }
-        case "supermemory": {
-          return { ok: true, diagnostics: ["The official Supermemory plugin is registered only for Deck-managed OpenCode launches; raw Supermemory MCP config is not materialized."] };
-        }
         default: {
           if (source) {
             // Try to parse as MCP server URL
@@ -1376,9 +1333,7 @@ class OpenCodeRunnerAdapterImpl {
         return undefined;
       }
     })();
-    const capabilityInstructions = sourceInstructions
-      ? { instructions: Object.freeze(sourceInstructions.instructions.filter((fragment) => fragment.packageId !== "adaptive-memory")) }
-      : undefined;
+    const capabilityInstructions = sourceInstructions;
     const standaloneSkills = input.standaloneSkills ?? getStandaloneSkills().map(({ skillId }) => {
       const bundle = getStandaloneSkill(skillId);
       return { skillId, body: bundle.SKILL, files: bundle.files };
@@ -1490,35 +1445,6 @@ class OpenCodeRunnerAdapterImpl {
         ok: false,
         path: this.#serenaConfigPath ?? "",
         diagnostics: ["Serena configuration requires the current-operation evidence-gated action."],
-      };
-    }
-
-    // The official Supermemory plugin owns memory behavior. The raw OpenCode MCP
-    // surface is never materialized here; when the adapter has an explicit
-    // config directory, this path may retire an exact stale Deck-managed entry.
-    if (input.serverName === "supermemory") {
-      const configPath = this.#developerTeamConfigDir ? join(this.#developerTeamConfigDir, "opencode.json") : undefined;
-      if (!configPath) {
-        return {
-          ok: true,
-          path: "",
-          diagnostics: ["Raw OpenCode Supermemory MCP is absent-safe; no config directory was provided and no user config was inspected or written."],
-        };
-      }
-      const { writeSupermemoryOpenCodeMcpConfig } = require("./opencode-mcp-config");
-      const result = writeSupermemoryOpenCodeMcpConfig({
-        serverName: input.serverName,
-        configPath,
-        projectRoot: input.projectRoot,
-      });
-      const diagnosticsList: string[] = [];
-      if (result.diagnostics) {
-        for (const d of result.diagnostics) diagnosticsList.push(d);
-      }
-      return {
-        ok: result.ok,
-        path: result.path,
-        diagnostics: diagnosticsList,
       };
     }
 

@@ -27,7 +27,7 @@ import { prepareBackupPostimages, readBackupManifest } from './backup-store.js';
  *   - REQ-SYNC-002: Sync rewrites prompts, skills, subagents, config.
  *   - REQ-SYNC-003: Sync MUST NOT reinstall packages.
  *   - REQ-SYNC-004: Read selections from `packageInstructions[runnerId]`.
- *   - REQ-SYNC-005: Sync preserves model/memory settings.
+ *   - REQ-SYNC-005: Sync preserves model settings.
  *   - REQ-SYNC-006: Content-only release works without binary upgrade.
  *   - REQ-SYNC-007: Migration items require backup (handled in orchestrator).
  *
@@ -235,9 +235,7 @@ async function runAdmittedRunnerSync(input: RunnerSyncInput, progress: {outcomes
       getEnabledCapabilityInstructionIds(config, runnerId);
     // 3. Build the capability instruction bundle. An empty selection still
     // synchronizes base roles, skills, bootstrap content, and instructions.
-    const capabilityInstructions = enabledIds.includes("adaptive-memory")
-      ? undefined
-      : buildCapabilityInstructionBundle(enabledIds);
+    const capabilityInstructions = buildCapabilityInstructionBundle(enabledIds);
 
     // 4. Plan → backup → apply → verify.
     const plan: RunnerDeveloperTeamInstallPlan = await safeBuildPlan(adapter, {

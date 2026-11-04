@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { CODEX_MEMORY_BRIDGE_HOOK_BLOCK, TOML_PARSER_DECISION, codexHooksFeatureDisabled, inspectCodexOwnedHookIds, mergeCodexOwnedHooks, mergeCodexProjectConfig, renderCodexOwnedHookBlock, type CodexOwnedHookBlock } from "./codex-config";
+import { TOML_PARSER_DECISION, codexHooksFeatureDisabled, inspectCodexOwnedHookIds, mergeCodexOwnedHooks, mergeCodexProjectConfig, renderCodexOwnedHookBlock, type CodexOwnedHookBlock } from "./codex-config";
 
 describe("mergeCodexProjectConfig", () => {
   test("pins the maintained MIT ESM parser selected by the Bun source-range spike", () => {
@@ -59,36 +59,25 @@ describe("mergeCodexProjectConfig", () => {
 });
 
 const RTK_BLOCK: CodexOwnedHookBlock = { id: "rtk", hooks: [{ event: "PreToolUse", matcher: "^Bash$", command: "'/usr/bin/node' '/p/.codex/deck/hooks/deck-rtk-hook.cjs'", timeout: 10, statusMessage: "Optimizing" }] };
-const SM_BLOCK: CodexOwnedHookBlock = { id: "supermemory", hooks: [{ event: "UserPromptSubmit", command: "node recall.js", timeout: 60 }, { event: "Stop", command: "node flush.js", timeout: 30 }] };
+const READINESS_BLOCK: CodexOwnedHookBlock = { id: "readiness", hooks: [{ event: "SessionStart", command: "node readiness.js", timeout: 60 }] };
 
 describe("mergeCodexOwnedHooks", () => {
-  test("adds the memory bridge as a marker-owned block and is idempotent and removable", () => {
-    const first = mergeCodexOwnedHooks("[features]\nmulti_agent = true\n", [CODEX_MEMORY_BRIDGE_HOOK_BLOCK]);
-    expect(first.status).toBe("updated");
-    for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "Stop"]) expect(first.content).toContain(`[[hooks.${event}]]`);
-    expect(first.content).toContain('command = "deck internal codex-memory-hook"');
-    expect(first.content).toContain("# deck-codex-hook:memory-bridge:start");
-    expect(mergeCodexOwnedHooks(first.content, [CODEX_MEMORY_BRIDGE_HOOK_BLOCK]).status).toBe("unchanged");
-    const removed = mergeCodexOwnedHooks(first.content, []);
-    expect(removed.status).toBe("updated");
-    expect(removed.content).toBe("[features]\nmulti_agent = true\n");
-  });
 
   test("preserves user hooks (inline TOML) byte-for-byte while adding, replacing and removing only owned blocks", () => {
     const user = '[features]\nmulti_agent = true\n\n[[hooks.PreToolUse]]\nmatcher = "Bash"\n\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = "echo user-hook"\n\n[hooks.state."x:pre_tool_use:0:0"]\ntrusted_hash = "sha256:abc"\n';
-    const added = mergeCodexOwnedHooks(user, [RTK_BLOCK, SM_BLOCK]);
+    const added = mergeCodexOwnedHooks(user, [RTK_BLOCK, READINESS_BLOCK]);
     expect(added.status).toBe("updated");
     expect(added.content.startsWith(user)).toBe(true);
-    expect(mergeCodexOwnedHooks(added.content, [RTK_BLOCK, SM_BLOCK]).status).toBe("unchanged");
+    expect(mergeCodexOwnedHooks(added.content, [RTK_BLOCK, READINESS_BLOCK]).status).toBe("unchanged");
 
-    const replaced = mergeCodexOwnedHooks(added.content, [{ ...RTK_BLOCK, hooks: [{ ...RTK_BLOCK.hooks[0]!, command: "'/other/node' 'x'" }] }, SM_BLOCK]);
+    const replaced = mergeCodexOwnedHooks(added.content, [{ ...RTK_BLOCK, hooks: [{ ...RTK_BLOCK.hooks[0]!, command: "'/other/node' 'x'" }] }, READINESS_BLOCK]);
     expect(replaced.content.startsWith(user)).toBe(true);
     expect(replaced.content).toContain("/other/node");
     expect(replaced.content).not.toContain("/usr/bin/node");
 
-    const dropped = mergeCodexOwnedHooks(replaced.content, [SM_BLOCK]);
+    const dropped = mergeCodexOwnedHooks(replaced.content, [READINESS_BLOCK]);
     expect(dropped.content).not.toContain("deck-codex-hook:rtk");
-    expect(dropped.content).toContain("deck-codex-hook:supermemory:start");
+    expect(dropped.content).toContain("deck-codex-hook:readiness:start");
     expect(mergeCodexOwnedHooks(dropped.content, []).content).toBe(user);
   });
 
@@ -102,10 +91,10 @@ describe("mergeCodexOwnedHooks", () => {
 
   test("migrates the exact pre-v2 single block and refuses a tampered one", () => {
     const legacy = `[features]\nmulti_agent = true\n# deck-codex-hook-v1\n${["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "Stop"].map((event) => `[[hooks.${event}]]\nmatcher = "*"\nhooks = [{ type = "command", command = "deck internal codex-memory-hook" }]\n`).join("\n")}`;
-    const migrated = mergeCodexOwnedHooks(legacy, [CODEX_MEMORY_BRIDGE_HOOK_BLOCK]);
+    const migrated = mergeCodexOwnedHooks(legacy, []);
     expect(migrated.status).toBe("updated");
     expect(migrated.content).not.toContain("deck-codex-hook-v1");
-    expect(migrated.content).toContain("deck-codex-hook:memory-bridge:start");
+    expect(migrated.content).not.toContain("codex-memory-hook");
     expect(inspectCodexOwnedHookIds(legacy)).toEqual(["memory-bridge"]);
     const retired = mergeCodexOwnedHooks(legacy, []);
     expect(retired.content).toBe("[features]\nmulti_agent = true\n");
@@ -133,8 +122,8 @@ describe("mergeCodexOwnedHooks", () => {
 // upgrade/removal owns only hooks, not those preference tables.
 test("hook changes preserve native tables inside marker comments", () => {
   const native = '[tui]\nscreen_reader_detection_done = true';
-  const source = renderCodexOwnedHookBlock(CODEX_MEMORY_BRIDGE_HOOK_BLOCK).replace('# deck-codex-hook:memory-bridge:end', `${native}\n# deck-codex-hook:memory-bridge:end`);
-  for (const desired of [[], [{ ...CODEX_MEMORY_BRIDGE_HOOK_BLOCK, hooks: [{ event: 'Stop' as const, command: 'updated-command' }] }]]) {
+  const source = renderCodexOwnedHookBlock({ id: "readiness", hooks: [{ event: "SessionStart", command: "fixture" }] }).replace('# deck-codex-hook:readiness:end', `${native}\n# deck-codex-hook:readiness:end`);
+  for (const desired of [[], [{ id: "readiness" as const, hooks: [{ event: 'Stop' as const, command: 'updated-command' }] }]]) {
     const result = mergeCodexOwnedHooks(source, desired);
     expect(result.status).toBe('updated');
     expect((Bun.TOML.parse(result.content) as any).tui.screen_reader_detection_done).toBe(true);

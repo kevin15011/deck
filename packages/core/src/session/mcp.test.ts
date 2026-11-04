@@ -2,16 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { CROSS_RUNNER_LEAD_CONTINUITY_GUIDANCE, DECK_TASK_INTEGRATE_TOOL, computeChildMcpSet } from "./mcp";
 
 const base = {
-  runnerPackages: ["context7", "serena", "supermemory", "web-search"],
-  memoryProviderIds: ["supermemory"],
+  runnerPackages: ["context7", "serena", "personal", "web-search"],
   webSearch: { enabled: true },
   sessionMcp: { id: "deck" },
 };
 
 describe("computeChildMcpSet", () => {
-  test("removes adaptive-memory providers and adds the session server", () => {
-    const set = computeChildMcpSet({ ...base, role: "member" });
-    expect(set.servers).toEqual(["context7", "serena", "web-search", "deck"]);
+  test("keeps personal integrations and adds the authenticated session server", () => {
+    expect(computeChildMcpSet({ ...base, role: "member" }).servers).toEqual(["context7", "serena", "personal", "web-search", "deck"]);
   });
   test("web search included only when enabled", () => {
     const off = computeChildMcpSet({ ...base, webSearch: { enabled: false }, role: "member" });
@@ -28,17 +26,13 @@ describe("computeChildMcpSet", () => {
     expect(lead.sessionTools).toContain(DECK_TASK_INTEGRATE_TOOL.name);
     expect(member.sessionTools).not.toContain(DECK_TASK_INTEGRATE_TOOL.name);
     expect(member.sessionTools).not.toContain("deck_delegate");
-    expect(member.sessionTools).toContain("deck_memory_recall");
+    expect(member.sessionTools).toContain("deck_session_history");
     expect(member.sessionTools).toContain("deck_approve");
   });
   test("deduplicates and never lists the session id twice", () => {
     const set = computeChildMcpSet({ ...base, runnerPackages: ["deck", "serena", "serena"], role: "lead" });
     expect(set.servers.filter((s) => s === "deck").length).toBe(1);
     expect(set.servers.filter((s) => s === "serena").length).toBe(1);
-  });
-  test("memory provider removed even when it is the only package", () => {
-    const set = computeChildMcpSet({ ...base, runnerPackages: ["supermemory"], webSearch: { enabled: false }, role: "member" });
-    expect(set.servers).toEqual(["deck"]);
   });
 });
 

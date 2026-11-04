@@ -5,7 +5,6 @@ import { MenuList } from "../components/menu-list";
 import { ActivityIndicator } from "../components/activity-indicator";
 import type { RunnerActionRunResult, RunnerSerenaOutcome, RunnerSerenaStage } from "../runner-dashboard/action-runner";
 import {
-  getAdaptiveMemorySummary,
   getDashboardSectionSummaries,
   getPlanActionCounts,
   getPackageInstructionSummaries,
@@ -35,14 +34,12 @@ type RunnerDashboardScreensProps = {
  * Runtime-agnostic Runner Dashboard Screens.
  *
  * Works with any runner (Pi, OpenCode, etc.) via the capabilityResolver.
- * Dashboard sections: Packages, Adaptive Memory, Web Search, Teams, Review & Install.
+ * Dashboard sections: Packages, Web Search, Teams, Review & Install.
  */
 export function RunnerDashboardScreens({ state, installResults = [], completionStatus, canRunPlan, runBlockDiagnostics = [], capabilityResolver, serenaStages = [], serenaOutcome, cancellationRequested = false, runnerLabel }: RunnerDashboardScreensProps) {
   switch (state.screen) {
     case "packages-detail":
       return <PackagesDetail state={state} resolver={capabilityResolver} />;
-    case "adaptive-memory-detail":
-      return <AdaptiveMemoryDetail state={state} />;
     case "web-search-detail":
       return <WebSearchDetail state={state} />;
     case "teams-detail":
@@ -87,9 +84,7 @@ function runnerSetupName(displayName: string): string {
 
 function canRunPlanFromState(state: RunnerDashboardState): boolean {
   if (state.plan?.ready !== true) return false;
-  if (state.adaptiveMemory.provider !== "supermemory") return true;
-  const setup = state.adaptiveMemory.supermemory;
-  return Boolean(setup?.configured && (setup.runtimeCredentialStored ?? setup.hasToken));
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +97,7 @@ function DashboardOverview({ state, resolver, runnerLabel }: { state: RunnerDash
   return (
     <Box flexDirection="column">
       <Text bold>{runnerSetupName(runnerLabel)} Setup Dashboard</Text>
-      <Text dimColor>Configure Packages, Adaptive Memory, Web Search, Teams and Review &amp; Install.</Text>
+      <Text dimColor>Configure Packages, Web Search, Teams and Review &amp; Install.</Text>
       {state.runtime.inspectionState ? <Text>Runtime: {state.runtime.inspectionState}</Text> : null}
       {state.runtime.diagnostics?.map((diagnostic, index) => <Text key={`runtime-${index}`} color="yellow">{sanitizeDashboardText(diagnostic)}</Text>)}
       {executionRoutes.length > 0 ? (
@@ -148,35 +143,6 @@ function PackagesDetail({ state, resolver }: { state: RunnerDashboardState; reso
             { id: "back", label: "Back to dashboard" },
           ]}
         />
-      </Box>
-    </Box>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Adaptive Memory Detail
-// ---------------------------------------------------------------------------
-
-function AdaptiveMemoryDetail({ state }: { state: RunnerDashboardState }) {
-  const summary = getAdaptiveMemorySummary(state);
-  return (
-    <Box flexDirection="column">
-      <Text bold>Adaptive Memory</Text>
-      <Text dimColor>Adaptive memory is auxiliary; OpenSpec/Registry remain authoritative.</Text>
-      <Box marginTop={1}>
-        <MenuList
-          cursor={state.cursor}
-          items={[
-            ...summary.options.map((option) => ({
-              id: option.provider,
-              label: `${option.selected ? "> " : "  "}${option.label}`,
-            })),
-            { id: "back", label: "Back to dashboard" },
-          ]}
-        />
-      </Box>
-      <Box marginTop={1}>
-        <Text dimColor>{summary.detail}</Text>
       </Box>
     </Box>
   );
@@ -295,15 +261,7 @@ function ReviewPlanScreen({ state, canRunPlan, runBlockDiagnostics = [] }: { sta
   const readiness = resolveSessionRuntimeReadiness({
     topology: "deck-managed",
     staticIntegrationState,
-    adaptiveMemoryEnabled: state.adaptiveMemory.provider === "supermemory",
-    hasProjectIdentity: state.runtime.projectIdentity === "verified",
-    runtimeCredentialState: state.adaptiveMemory.provider === "supermemory"
-      ? state.adaptiveMemory.supermemory?.runtimeCredentialVerification === "verified-present"
-        ? "present"
-        : state.adaptiveMemory.supermemory?.runtimeCredentialVerification === "verified-error"
-          ? "deferred"
-          : "missing"
-      : "missing",
+
   });
 
   return (
@@ -312,8 +270,8 @@ function ReviewPlanScreen({ state, canRunPlan, runBlockDiagnostics = [] }: { sta
       <Text dimColor>{counts.total} actions planned: {counts.automatic} automatic, {counts.manual} manual, {counts.config} config, {counts.team} team, {counts.validation} validation.</Text>
       <Text dimColor>{formatSessionRuntimeReadiness(readiness)}</Text>
       {state.runnerUi?.dashboard?.managedLaunchSupported === false
-        ? <Text dimColor>{state.runnerUi.dashboard.launchHint ?? "Full Deck-managed launch is not verified for this runner. Installation here provides native content only; memory and protected execution remain unsupported."}</Text>
-        : <Text dimColor>After review/install, launch through the CLI-managed session: deck {state.runnerScope} developer. Automatic Adaptive Memory requires this Deck-managed session; direct runner launches remain static-compatible.</Text>}
+        ? <Text dimColor>{state.runnerUi.dashboard.launchHint ?? "Full Deck-managed launch is not verified for this runner. Installation here provides native content only; protected execution remains unsupported."}</Text>
+        : <Text dimColor>After review/install, launch through the CLI-managed session: deck {state.runnerScope} developer. Direct runner launches remain static-compatible.</Text>}
       {state.plan?.diagnostics && state.plan.diagnostics.length > 0 && (
         <Box marginTop={1} flexDirection="column">
           <Text bold>Plan diagnostics:</Text>

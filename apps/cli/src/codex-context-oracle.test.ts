@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { assertCodexContextSequence, codexRequestPhase, modelVisibleText } from "./__fixtures__/native-memory/codex-context-oracle";
+import { assertCodexContextSequence, codexRequestPhase, modelVisibleText } from "./__fixtures__/codex-context-oracle";
 
 test("telemetry cannot supply the current project to model context", () => {
   const body = {
@@ -10,19 +10,19 @@ test("telemetry cannot supply the current project to model context", () => {
   expect(modelVisibleText(body)).toContain("prior alpha history");
 });
 
-const prior = { root: "/project/alpha", scope: "alpha-memory" };
-const current = { root: "/project/beta", scope: "beta-memory" };
-const expected = { prior, current, required: ["root-role", "durable-role"], memoryEnabled: true };
+const prior = { root: "/project/alpha" };
+const current = { root: "/project/beta" };
+const expected = { prior, current, required: ["root-role", "durable-role"] };
 const request = (text: string, kind = "turn", history = "new", compaction?: object) => ({
   input: [{ type: "message", role: "developer", content: [{ type: "input_text", text }] }],
   client_metadata: { "x-codex-turn-metadata": JSON.stringify({
     request_kind: kind, history_initialization: history, compaction,
-    workspaces: { [current.root]: {} }, telemetry: "root-role durable-role beta-memory",
+    workspaces: { [current.root]: {} }, telemetry: "root-role durable-role",
   }) },
 });
-const startup = () => request("root-role durable-role /project/alpha alpha-memory");
-const compaction = () => request("root-role durable-role /project/alpha alpha-memory", "compaction", "cold_resume", { phase: "pre_turn" });
-const continuation = () => request("root-role durable-role /project/beta beta-memory", "turn", "cold_resume");
+const startup = () => request("root-role durable-role /project/alpha");
+const compaction = () => request("root-role durable-role /project/alpha", "compaction", "cold_resume", { phase: "pre_turn" });
+const continuation = () => request("root-role durable-role /project/beta", "turn", "cold_resume");
 
 test("prior-history compaction is followed by a current-project task", () => {
   const checks = assertCodexContextSequence([startup()], [compaction(), continuation()], expected);
@@ -34,14 +34,13 @@ test.each([
   ["root-role", "missing required role context"],
   ["durable-role", "missing required role context"],
   ["/project/beta", "missing project context"],
-  ["beta-memory", "missing memory scope"],
 ])("resumed task rejects missing %s even when telemetry contains it", (missing, error) => {
   const body = continuation();
   body.input[0]!.content[0]!.text = body.input[0]!.content[0]!.text.replace(missing, "");
   expect(() => assertCodexContextSequence([startup()], [compaction(), body], expected)).toThrow(error);
 });
 
-test.each(["root-role", "durable-role", "/project/alpha", "alpha-memory"])("prior-history phase retains %s", missing => {
+test.each(["root-role", "durable-role", "/project/alpha"])("prior-history phase retains %s", missing => {
   const body = compaction();
   body.input[0]!.content[0]!.text = body.input[0]!.content[0]!.text.replace(missing, "");
   expect(() => assertCodexContextSequence([startup()], [body, continuation()], expected)).toThrow();
@@ -73,14 +72,6 @@ test.each([
   request("context", "turn", "cold_resume", { phase: "pre_turn" }),
 ])("unknown or missing phases fail closed (%#)", body => {
   expect(() => codexRequestPhase(body)).toThrow();
-});
-
-test("disabled memory still requires roles and project, but not a memory scope", () => {
-  const bodies = [startup(), compaction(), continuation()];
-  for (const body of bodies) body.input[0]!.content[0]!.text = body.input[0]!.content[0]!.text.replace(/(?:alpha|beta)-memory/g, "");
-  expect(assertCodexContextSequence(bodies.slice(0, 1), bodies.slice(1), { ...expected, memoryEnabled: false })).toHaveLength(3);
-  bodies[2]!.input = [];
-  expect(() => assertCodexContextSequence(bodies.slice(0, 1), bodies.slice(1), { ...expected, memoryEnabled: false })).toThrow();
 });
 
 test("custom sessions exclude root role from model input, regardless of telemetry", () => {

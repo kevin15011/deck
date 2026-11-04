@@ -35,7 +35,6 @@ export type CanonicalCapabilityId =
   | "opencode-mermaid"
   | "pi-mermaid"
   | "serena"
-  | "supermemory-tool-bindings"
   | "pi-orchestrator-prompt-persistence"
    | "opencode-primary-orchestrator"
    | "deck-setup"
@@ -273,7 +272,6 @@ export const OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION = defineRunnerCapabilityCon
     { capabilityId: "rtk", runnerId: "opencode", status: "shared", adapterSource: "rtk", installKind: "shared-binary", provisionMode: "shared-binary", detectors: { commands: ["rtk"] }, parityChecks: ["binary-usable", "no-unnecessary-reinstall"] },
     { capabilityId: "context7", runnerId: "opencode", status: "supported", adapterSource: "@upstash/context7-mcp", installKind: "mcp-server", provisionMode: "mcp-server", detectors: { mcpServerNames: ["context7"] }, parityChecks: ["mcp-config-present"] },
     { capabilityId: "web-search", runnerId: "opencode", status: "supported", adapterSource: "@deck/provider-tavily", installKind: "native-mcp", provisionMode: "native-mcp", implementationId: TAVILY_IMPLEMENTATION_ID, detectors: { mcpServerNames: [TAVILY_MCP_SERVER_ID] }, parityChecks: ["mcp-config-present", "instruction-bundle-present"] },
-    { capabilityId: "supermemory-tool-bindings", runnerId: "opencode", status: "runner-specific", adapterSource: "opencode-supermemory@2.0.15", installKind: "opencode-plugin", provisionMode: "process-local-plugin" },
     { capabilityId: "opencode-primary-orchestrator", runnerId: "opencode", status: "supported", adapterSource: "opencode-primary-orchestrator", installKind: "opencode-plugin", provisionMode: "opencode-plugin" },
     { capabilityId: "opencode-mermaid", runnerId: "opencode", status: "runner-specific", adapterSource: "opencode-mermaid-renderer", installKind: "internal-required", provisionMode: "internal-required" },
     { capabilityId: "opencode-mermaid-renderer", runnerId: "opencode", status: "runner-specific", adapterSource: "opencode-mermaid-renderer", installKind: "internal-required", provisionMode: "internal-required" },

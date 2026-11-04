@@ -20,7 +20,6 @@ Deck's product docs explain the path from installation to an operating AI work e
 | First installation | [Getting started](getting-started.md) | [Runners](runners.md) |
 | Configure an existing environment | [Configuration](configuration.md) | [Operations](operations.md) |
 | Understand AI work routing | [Developer Team](developer-team.md) | [Cross-runner sessions](cross-runner-sessions.md) |
-| Add context carefully | [Adaptive memory](adaptive-memory.md) | [Troubleshooting](troubleshooting.md) |
 | Find a command or status | [CLI reference](reference/cli.md) | [Support matrix](reference/support-matrix.md) |
 
 ## Guides
@@ -31,7 +30,6 @@ Deck's product docs explain the path from installation to an operating AI work e
 - [Configuration](configuration.md) — Deck config, packages, MCP, models, reasoning, and runner-specific persistence.
 - [Developer Team](developer-team.md) — the seven roles, adaptive routing, and conditional Quality.
 - [Skills](skills.md) — lifecycle skills, all 59 bundled external skills, and project-local discovery boundaries.
-- [Adaptive memory](adaptive-memory.md) — none, Supermemory runtime, optional scoped MCP recall, governance, and authority.
 - [Operations](operations.md) — doctor, version, updates, release advisories, rollback, and recovery signals.
 - [Troubleshooting](troubleshooting.md) — symptom-first recovery paths.
 

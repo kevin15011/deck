@@ -30,8 +30,6 @@ import {
   type SerenaOperationIdentity,
   type WebSearchProviderDescriptorV1,
 } from "@deck/core";
-
-export type AdaptiveMemoryProviderChoice = "none" | "supermemory";
 export type PiRunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
 
 export type PiRunnerAction = {
@@ -81,10 +79,6 @@ type BuildPiRunnerReviewPlanState = {
   explicitlySelectedCapabilities?: Partial<Record<CapabilityId, boolean>>;
   operationId?: string;
   currentOperation?: SerenaOperationIdentity;
-  adaptiveMemory?: {
-    provider?: AdaptiveMemoryProviderChoice;
-    supermemory?: { configured?: boolean; hasToken?: boolean; runtimeCredentialStored?: boolean; ephemeralTokenAvailable?: boolean; mcpOAuthReady?: boolean; userId?: string; teamId?: string; organizationId?: string };
-  };
   teams?: Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>;
   runtime?: { toolsReview?: PiRequiredToolsReview };
   /** Package instruction bundle per runner scope. */
@@ -132,13 +126,9 @@ function buildParityRuntimeHints(inventory: PiRunnerCapabilityInventory): Parity
     }
   }
 
-  // Check supermemory from adaptiveMemory state (passed through inventory metadata)
-  const supermemoryConfigured = (inventory as any)._supermemoryConfigured ?? false;
-
   return {
     binariesInPath: binariesInPath.length > 0 ? binariesInPath : undefined,
     mcpServersConfigured: mcpServersConfigured.length > 0 ? mcpServersConfigured : undefined,
-    supermemoryConfigured,
     projectIndexVerified: (inventory as any)._codebaseMemoryIndexed ?? undefined,
     ...(webSearch ? { webSearch } : {}),
   };
@@ -161,15 +151,9 @@ export function buildPiRunnerReviewPlan(
   // Build runtime hints for parity resolution
   const runtimeHints = buildParityRuntimeHints(inventory);
 
-  // Add supermemory state if available
-  if (state.adaptiveMemory?.supermemory?.configured) {
-    (runtimeHints as any).supermemoryConfigured = true;
-  }
-
   addPrerequisiteActions(groups, state.runtime?.toolsReview);
   addCapabilityActions(groups, diagnostics, state, inventory, runnerScope);
   addInternalRunnerSupportActions(groups, state.runtime?.toolsReview, runnerScope);
-  addAdaptiveMemoryActions(groups, diagnostics, state, state.runtime?.toolsReview);
   addTeamActions(groups, diagnostics, state, inventory);
   addValidationActions(groups);
   addPackageInstructionActions(groups, diagnostics, state);
@@ -409,55 +393,6 @@ function addInternalRunnerSupportActions(
       required: true,
     });
   }
-}
-
-function addAdaptiveMemoryActions(
-  groups: PiRunnerReviewPlan["groups"],
-  diagnostics: PiRunnerPlanDiagnostic[],
-  state: BuildPiRunnerReviewPlanState,
-  review: PiRequiredToolsReview | undefined,
-): void {
-  const provider = state.adaptiveMemory?.provider ?? "none";
-  if (provider === "none") return;
-
-  const supermemory = state.adaptiveMemory?.supermemory;
-  const configured = Boolean(supermemory?.configured);
-  const runtimeCredentialReady = Boolean(supermemory?.runtimeCredentialStored ?? supermemory?.hasToken);
-  const supermemoryReady = configured && runtimeCredentialReady;
-  groups.configWrites.push({
-    id: "adaptive-memory.supermemory.deck-config",
-    kind: "write-deck-config",
-    title: "Write Supermemory non-secret Deck config",
-    description: "Records Supermemory as the selected Adaptive Memory provider without storing tokens in Deck config.",
-    status: configured ? "ready" : "pending",
-    required: true,
-    diagnostics: ["Supermemory tokens must be stored in Deck's secret store after read-only validation, not Deck config or Pi MCP config."],
-  });
-  groups.configWrites.push({
-    id: "adaptive-memory.supermemory.pi-mcp-config",
-    kind: "write-pi-mcp-config",
-    title: "Retire legacy Deck Supermemory MCP configuration",
-    description: "Removes only exact stale Deck-managed entries; no new raw MCP configuration or repository identity is required.",
-    status: runtimeCredentialReady ? "ready" : "pending",
-    required: true,
-    diagnostics: ["Credential value must be redacted, read-only validated, and never persisted in Deck config or Pi MCP config."],
-  });
-  groups.validations.push({
-    id: "adaptive-memory.supermemory.validate",
-    kind: "validate",
-    title: "Validate Supermemory provider configuration",
-    description: "Validate the Supermemory account without project-memory access; bind the project only when a work session starts.",
-    status: supermemoryReady ? "ready" : "pending",
-    required: true,
-  });
-  diagnostics.push({
-    code: "SUPERMEMORY_CONFIGURATION_REQUIRED",
-    severity: supermemoryReady ? "info" : "warning",
-    message: supermemoryReady
-      ? "Supermemory uses config/validation/provider handoff only; no package install action is generated."
-      : "Supermemory requires token configuration before provider injection; no package install action is generated.",
-    actionId: "adaptive-memory.supermemory.deck-config",
-  });
 }
 
 function addTeamActions(

@@ -1,16 +1,17 @@
 import { expect, test } from "bun:test";
 import { isDeckShapedMcpEntry, mergeCodexMcpServers } from "./mcp-config";
 
-// Protects: Deck migrates its own marked MCP blocks after their receipts were lost, never customized ones.
-// Oracle: ownership is the exact launch shape Deck writes for its own tools, independent of binary path/version.
-// Fails if: a stale Deck memory block survives migration, or a customized/foreign block is removed.
+// Protects: retired MCP bytes without ownership receipts survive migration.
+// Oracle: the retirement spec requires exact receipts; names and launch shapes are insufficient.
+// Fails if: a familiar marker or binary path authorizes deletion without a receipt.
 const memory = (command: string, extra = "") => `# deck-codex-mcp:deck-memory\n[mcp_servers.deck-memory]\ncommand = "${command}"\nargs = ["internal", "memory-mcp"]\nenv_vars = ["DECK_RUNNER_MEMORY_ENDPOINT", "DECK_RUNNER_MEMORY_TOKEN_FILE"]\n${extra}`;
 
-test("removes a receipt-less Deck memory block whatever its payload path", () => {
+test("preserves a receipt-less retired MCP block whatever its payload path", () => {
   for (const command of ["/h/.local/bin/.deck-canary.payload-853772f299f0b8c2654dd83bfc8f12707526f984ada1bebdf9f987f6d0a992ee", "/usr/local/bin/deck"]) {
-    const result = mergeCodexMcpServers(`${memory(command)}\n[model]\nname = "x"\n`, []);
-    expect(result.status).toBe("updated");
-    expect((result as { content: string }).content).not.toContain("deck-memory");
+    const source = `${memory(command)}\n[model]\nname = "x"\n`;
+    const result = mergeCodexMcpServers(source, []);
+    expect(result.status).toBe("unchanged");
+    expect(result.content).toBe(source);
   }
 });
 

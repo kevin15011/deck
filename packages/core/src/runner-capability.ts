@@ -10,7 +10,6 @@
  * - tool installation
  * - team management and Developer Team manifest
  * - model catalog and assignment
- * - memory provider registry
  *
  * Each facet is its own type so callers can consume only what they need.
  */
@@ -117,7 +116,6 @@ export type DeveloperTeamManifestInput = {
   projectRoot: string;
   environmentId: RunnerEnvironmentId;
   modelAssignments?: readonly DeveloperTeamModelAssignmentInput[];
-  memoryProviderId?: string;
   /** Optional capability instruction bundle for the manifest */
   capabilityInstructions?: CapabilityInstructionBundle;
   /** Caller-resolved global Deck preferences. */
@@ -135,7 +133,6 @@ export type DeveloperTeamManifest = {
   agents: readonly DeveloperTeamManifestAgent[];
   skills: readonly DeveloperTeamManifestSkill[];
   standaloneSkills?: readonly DeveloperTeamManifestStandaloneSkill[];
-  memoryDiagnostics: readonly MemoryDiagnostic[];
 };
 
 export type TeamEntry = {
@@ -150,14 +147,12 @@ export type DeveloperTeamManifestAgent = {
   instruction: string;
   model?: string;
   reasoning?: string;
-  memoryBundle?: MemoryInjectionBundle;
 };
 
 export type DeveloperTeamManifestSkill = {
   agentId: string;
   skillId: string;
   body: string;
-  memoryBundle?: MemoryInjectionBundle;
 };
 
 export type DeveloperTeamManifestStandaloneSkill = {
@@ -166,33 +161,6 @@ export type DeveloperTeamManifestStandaloneSkill = {
   body: string;
   /** Support files keyed by relative POSIX path. Core emits {} when none exist. */
   files?: Record<string, string>;
-};
-
-export type MemoryDiagnostic = {
-  code: string;
-  message: string;
-  providerId?: string;
-  details?: Readonly<Record<string, unknown>>;
-};
-
-export type MemoryInjectionBundle = {
-  instructions: readonly MemoryInstructionFragment[];
-  toolBindings: readonly MemoryToolBinding[];
-};
-
-export type MemoryInstructionFragment = {
-  surface: "session" | "agent" | "skill";
-  markdown: string;
-  teamId?: string;
-  agentIds?: readonly string[];
-  skillIds?: readonly string[];
-};
-
-export type MemoryToolBinding = {
-  capability: string;
-  serverName: string;
-  toolNames: readonly string[];
-  metadata?: Readonly<Record<string, unknown>>;
 };
 
 export type DeveloperTeamInstallPlanInput = {
@@ -320,34 +288,6 @@ export type RunnerModelAssignments = {
 };
 
 // ---------------------------------------------------------------------------
-// Memory capabilities
-// ---------------------------------------------------------------------------
-
-export type RunnerMemoryProviderInput = {
-  projectRoot: string;
-  environmentId: RunnerEnvironmentId;
-};
-
-export type AdaptiveMemoryProvider = {
-  id: string;
-  displayName: string;
-  buildInjection(context: { teamId?: string }): MemoryInjectionBundle;
-  health?(): Promise<AdaptiveMemoryHealthResult> | AdaptiveMemoryHealthResult;
-};
-
-export type AdaptiveMemoryHealthResult = {
-  providerId: string;
-  status: "available" | "unavailable" | "degraded" | "unknown";
-  checkedAt?: string;
-  diagnostics?: readonly MemoryDiagnostic[];
-};
-
-export type RunnerMemoryCapabilities = {
-  getProviders(input: RunnerMemoryProviderInput): readonly AdaptiveMemoryProvider[];
-  getSupportedProviderIds(): readonly string[];
-};
-
-// ---------------------------------------------------------------------------
 // Capability catalog (for dashboard / UI)
 // ---------------------------------------------------------------------------
 
@@ -446,7 +386,6 @@ export type DeveloperTeamInstallInput = {
   projectRoot: string;
   modelAssignments?: readonly DeveloperTeamModelAssignmentInput[];
   reasoningEffortOverrides?: readonly DeveloperTeamModelAssignmentInput[];
-  memoryProviderId?: string;
   capabilityInstructions?: import("./teams/developer/instruction-bundles/index").CapabilityInstructionBundle;
 };
 
@@ -553,7 +492,6 @@ export type RunnerCapabilities = {
   tools: RunnerToolCapabilities;
   teams: RunnerTeamCapabilities;
   models: RunnerModelCapabilities;
-  memory: RunnerMemoryCapabilities;
   /** Dashboard UI capability resolver — adapters provide their own catalogs. */
   capabilities?: {
     getCapability(capabilityId: string): RunnerCapabilityCatalogEntry | undefined;

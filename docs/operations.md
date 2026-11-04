@@ -13,7 +13,7 @@ Deck treats an installed binary, its runner content, configuration, state, relea
 deck doctor
 ```
 
-The report groups checks into Deck installation, runtimes, memory providers, MCP configuration, binary validation, and runner configuration. Depending on the installed features it can inspect:
+The report groups checks into Deck installation, runtimes, MCP configuration, binary validation, and runner configuration. Depending on the installed features it can inspect:
 
 - manifest integrity and filesystem drift;
 - state directory, current version, and active operation locks;
@@ -21,7 +21,7 @@ The report groups checks into Deck installation, runtimes, memory providers, MCP
 - Pi and OpenCode versions and package evidence;
 - Claude presence in `PATH` only (no version or installation verification in that runtime check);
 - Codex adapter project diagnostics when detected, requiring a verified project root and readable global config;
-- Supermemory and Serena binary visibility;
+- Serena binary visibility;
 - known runner MCP entries;
 - release availability, executable identity, and bundled skill count.
 

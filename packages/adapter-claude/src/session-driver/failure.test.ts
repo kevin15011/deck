@@ -41,9 +41,9 @@ test("a successful retry clears the API fallback; unrelated later terminal error
 });
 test("driver-scoped mapping never borrows API/reset fields from an uncorrelated session or native child", () => {
   for (const patch of [{}, { session_id: "foreign" }, { session_id: "current", parent_tool_use_id: "child-tool" }]) {
-    const mapper = new ClaudeStreamMapper(undefined, "current"); mapper.map({ ...assistant, ...patch });
+    const mapper = new ClaudeStreamMapper("current"); mapper.map({ ...assistant, ...patch });
     expect(mapper.map({ type: "result", session_id: "current", subtype: "success", is_error: true, terminal_reason: "api_error" }).result?.failure).toBeUndefined();
   }
-  const mapper = new ClaudeStreamMapper(undefined, "current"); mapper.map({ ...assistant, session_id: "current" });
+  const mapper = new ClaudeStreamMapper("current"); mapper.map({ ...assistant, session_id: "current" });
   expect(mapper.map({ ...result, session_id: "current" }).result?.failure?.resetAt).toBe(new Date(1792607400 * 1000).toISOString());
 });

@@ -94,13 +94,13 @@ describe("page based TUI screens", () => {
     const calls: Array<{ projectRoot?: string }> = [];
     const result: DoctorDiagnosticsResult = {
       runtimes: [],
-      memory: [],
-      mcp: [{ category: "Supermemory Project Scope", status: "ok", items: [{ status: "ok", message: "scope checked" }] }],
+      optionalTools: [],
+      mcp: [{ category: "Project Inspection", status: "ok", items: [{ status: "ok", message: "scope checked" }] }],
       hasCriticalErrors: false,
       deck: [],
       binaryCheck: [],
       runnerConfig: [],
-      summary: { ok: 1, warning: 0, error: 0, sections: ["Supermemory Project Scope"] },
+      summary: { ok: 1, warning: 0, error: 0, sections: ["Project Inspection"] },
     };
     const loaded = await runDoctorScreenDiagnostics(async (_overrides, projectRoot) => {
       calls.push({ projectRoot });

@@ -1,0 +1,19 @@
+schema: spec-registry-v1
+changeId: retire-conversational-memory
+name: Retire conversational memory
+currentPhase: verify
+status: in_progress
+artifacts:
+  exploration: working-brief.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  verify: verify-report.md
+  preconditions: preconditions.md
+provenance:
+  - phase: verify
+    agent: deck-lead
+    timestamp: "2026-11-04"
+    registryWrite: non-deferred
+    note: Source and isolated verification passed; actual installed-state audit pending.

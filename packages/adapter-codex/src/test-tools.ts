@@ -25,11 +25,10 @@ export function testTools(overrides: Partial<CodexToolOptions> = {}): CodexToolO
 }
 
 /**
- * Fully provisioned fixture tools: a fake owned RTK, an owned Codebase Memory, a shared Context Mode and (optionally)
- * the official Supermemory hook artifact, each registered through the same inspection code production uses.
+ * Fully provisioned fixture tools: a fake owned RTK, an owned Codebase Memory, a shared Context Mode, each registered through the same inspection code production uses.
  */
-export function readyTestTools(overrides: Partial<CodexToolOptions> & { supermemory?: boolean } = {}): CodexToolOptions {
-  const { supermemory = false, ...rest } = overrides;
+export function readyTestTools(overrides: Partial<CodexToolOptions> & { } = {}): CodexToolOptions {
+  const rest = overrides;
   const base = testTools(rest);
   const toolRoot = join(base.dataRoot!, "codex", "tools");
   const platform = `${process.platform}-${process.arch}`;
@@ -44,17 +43,11 @@ export function readyTestTools(overrides: Partial<CodexToolOptions> & { supermem
   put(join(toolRoot, "rtk-v0.50.0", platform), "rtk", rtk, 0o700);
   const codebase = "codebase fixture binary";
   put(join(toolRoot, "codebase-native-v0.11.0", platform), "codebase-memory-mcp", codebase, 0o700);
-  const manifest = supermemory ? [["recall.js", "x", sha("recall"), 6], ["flush.js", "y", sha("flush"), 5]] as const : undefined;
-  if (manifest) {
-    put(join(toolRoot, "official-supermemory-1.0.19"), "recall.js", "recall", 0o600);
-    put(join(toolRoot, "official-supermemory-1.0.19"), "flush.js", "flush", 0o600);
-  }
   return {
     ...base,
     resolveCommand: (name) => name === "context-mode" ? process.execPath : undefined,
     rtkReleaseOverride: { asset: "fixture", archiveSha256: "0".repeat(64), archiveBytes: 1, binarySha256: sha(rtk), binaryBytes: rtk.length },
     codebaseReleaseOverride: { asset: "fixture", archiveSha256: "0".repeat(64), archiveBytes: 1, binarySha256: sha(codebase), binaryBytes: codebase.length },
-    ...(manifest ? { supermemoryManifest: manifest } : {}),
     ...rest,
   };
 }

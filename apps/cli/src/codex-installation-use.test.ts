@@ -1,14 +1,16 @@
 // Protects native CLI composition: the installation lease spans preparation through child exit,
 // and deferred refresh still launches the installed generation with a warning.
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { getDefaultDeckConfig, type RunnerAdapter } from '@deck/core';
 import { withCodexInstallationUse, trackCodexInstallationProcess, CodexInstallationBusyError } from '../../../packages/adapter-codex/src/installation-use';
 import { runRunnerLaunch, createNodeRunnerProcessEffects } from './runner-launch-command';
+import { _resetDeckPathCache } from './runtime/paths';
 
 for (const deferred of [false, true]) test(`native Codex lease spans launch (deferred=${deferred})`, async () => {
-  const home = mkdtempSync('/tmp/deck-native-lease-'), codexHome = join(home, '.codex');
+  const home = mkdtempSync(join(realpathSync(tmpdir()), 'deck-native-lease-')), codexHome = join(home, '.codex');
   const leases = () => readdirSync(join(codexHome, 'deck/installation-use'));
   let spawns = 0, tracked = 0;
   const processEffects = createNodeRunnerProcessEffects();
@@ -32,20 +34,28 @@ for (const deferred of [false, true]) test(`native Codex lease spans launch (def
     buildLaunchPlan: () => ({ status: 'ready', diagnostics: [], plan: { command: process.execPath, args: ['-e', 'process.exit(0)'], cwd: home, stdio: 'pipe', stdin: 'closed' } }),
   } as unknown as RunnerAdapter;
   const config = getDefaultDeckConfig();
+  const previousStateHome = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = join(home, 'state');
+  _resetDeckPathCache();
   try {
-    const result = await runRunnerLaunch({ adapter, cliMemoryProvider: 'none', yes: true, interactive: false,
-      launch: { projectRoot: home, teamId: 'developer-team', mode: 'interactive', deckConfig: { ...config, adaptiveMemory: { ...config.adaptiveMemory, enabled: false } } },
+    const result = await runRunnerLaunch({ adapter, yes: true, interactive: false,
+      launch: { projectRoot: home, teamId: 'developer-team', mode: 'interactive', deckConfig: config },
       presentPreview: async message => { messages.push(message); },
       processEffects: { inheritedEnv: { HOME: home, CODEX_HOME: codexHome, XDG_CONFIG_HOME: join(home, 'config') }, spawn: async (command, args, options) => {
         expect(leases().length).toBe(1); spawns++; return processEffects.spawn(command, args, options);
       } },
     });
-    expect(result.status).toBe('launched');
+    expect(result).toMatchObject({ status: 'launched' });
     expect(spawns).toBe(1);
     expect(tracked).toBe(1);
     expect(leases()).toEqual([]);
     if (deferred) expect(messages.some(message => message.includes('deferred'))).toBe(true);
-  } finally { rmSync(home, { recursive: true, force: true }); }
+  } finally {
+    if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previousStateHome;
+    _resetDeckPathCache();
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 // R3: no installation access is allowed before child protection succeeds.

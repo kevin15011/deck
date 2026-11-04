@@ -167,7 +167,7 @@ function renderBinary(binary: DoctorBinaryResult): void {
  *
  * Output is organized:
  * - Executive summary at the top
- * - Sections in order: Deck → Runtimes → Memory → MCP → Binary → Runner Config
+ * - Sections in order: Deck → Runtimes → Optional Tools → MCP → Binary → Runner Config
  *
  * Each item shows a status icon (✓/⚠/✗), the diagnostic message,
  * and an actionable fix suggestion for non-OK items.
@@ -182,7 +182,7 @@ function renderBinary(binary: DoctorBinaryResult): void {
  *
  * Output is organized:
  * - Executive summary at the top
- * - Sections in order: Deck → Runtimes → Memory → MCP → Binary → Runner Config
+ * - Sections in order: Deck → Runtimes → Optional Tools → MCP → Binary → Runner Config
  *
  * Each item shows a status icon (✓/⚠/✗), the diagnostic message,
  * and an actionable fix suggestion for non-OK items.
@@ -226,11 +226,11 @@ export function renderDoctorReport(result: DoctorDiagnosticsResult): void {
     }
   }
 
-  // ── Memory Providers ───────────────────────────────────────────────────
-  if (result.memory.length > 0) {
-    console.log(c(pc.bold, "▸ Memory Providers"));
+  // ── Optional Tools ───────────────────────────────────────────────────
+  if (result.optionalTools.length > 0) {
+    console.log(c(pc.bold, "▸ Optional Tools"));
     console.log();
-    for (const category of result.memory) {
+    for (const category of result.optionalTools) {
       renderCategory(category);
     }
   }
@@ -271,7 +271,7 @@ export function renderDoctorReport(result: DoctorDiagnosticsResult): void {
 
   // Footer summary
   const allOk = result.runtimes.every((r) => r.checks.every((c) => c.status === "ok"))
-    && result.memory.every((c) => c.status === "ok")
+    && result.optionalTools.every((c) => c.status === "ok")
     && result.mcp.every((c) => c.status === "ok")
     && (result.deck ?? []).every((c) => c.status === "ok")
     && (result.binaryCheck ?? []).every((c) => c.status === "ok")

@@ -21,7 +21,7 @@ For a source checkout, use the workspace path from [Getting started](getting-sta
 
 The no-argument command expects an interactive terminal. In a pipe or other non-interactive context, Deck renders a static home view instead of navigating screens. Run it directly from a terminal, then use the keyboard hints shown by the TUI.
 
-If the screen opens but a plan cannot run, inspect the dashboard's blocked diagnostic. Common causes are missing runner evidence, incomplete MCP setup, or a selected memory provider that still needs configuration.
+If the screen opens but a plan cannot run, inspect the dashboard's blocked diagnostic. Common causes are missing runner evidence, incomplete MCP setup.
 
 ## A runner is detected but cannot be configured
 
@@ -44,17 +44,6 @@ Read the remediation text instead of reinstalling everything blindly. Pi checks 
 
 Nested skill directories and legacy SDD files are reported as cleanup warnings. Preserve any project content you still need, then make the runner's directory shape match its documented layout before retrying the Deck plan.
 
-## Memory setup is blocked
-
-Choose `none` to continue without adaptive memory, or complete the selected provider's runner setup. For Supermemory, follow the active runner's path:
-
-- **Pi:** re-run setup so Deck validates the token and stores it in the Deck secret store. Pi receives only the loopback endpoint and token-file path. Run `deck doctor` to check the install, conflicting packages, and stale memory handoff directories.
-- **OpenCode/Codex/Claude:** select the official Supermemory integration in Review & Install and configure its shared protected profile. The official plugin owns recall/capture; Deck supplies the credential to the launched process and does not register a raw Supermemory MCP entry alongside it. Claude's developer launcher has no `--memory` flag.
-
-Check the active route's authenticated readiness rather than assuming a detected plugin is ready. Claude requires verified plugin content, a matching protected profile, and canonical Git repository identity for memory activation. A missing repository identity disables Deck's selected memory for that launch without changing saved settings; invalid identity or missing required credentials blocks the selected launch.
-
-Supermemory is the durable adaptive-memory backend, with runner-specific route limits. Pi uses the Deck loopback; official plugins own OpenCode, Claude, and Codex memory. Runtime memory failures are intended to be fail-open for normal work, while setup and launch validation can require remediation. See [Adaptive memory](adaptive-memory.md).
-
 ## Skill registry is not ready
 
 Use the active runner explicitly:
@@ -74,7 +63,7 @@ Run the validator in JSON mode to inspect the stable issue shape:
 deck openspec validate --json --root .
 ```
 
-Fix the active change's official artifact or lifecycle state; do not treat adaptive memory or a local registry snapshot as a replacement. If a requested change ID is absent, the command exits with a runtime failure rather than silently validating a different change.
+Fix the active change's official artifact or lifecycle state; do not treat a local registry snapshot as a replacement. If a requested change ID is absent, the command exits with a runtime failure rather than silently validating a different change.
 
 ## An update fails
 
@@ -90,7 +79,7 @@ If the backup is protected by an active operation, stop and inspect the state be
 
 ## A path or secret appears in output
 
-Stop copying the output into an issue or memory entry until it is redacted. Doctor and dashboard diagnostics are designed to redact home paths, temporary paths, URLs with credential-like query parameters, tokens, and secret-like fields. Report the bounded diagnostic code and surrounding non-sensitive context instead.
+Stop copying the output into an issue until it is redacted. Doctor and dashboard diagnostics are designed to redact home paths, temporary paths, URLs with credential-like query parameters, tokens, and secret-like fields. Report the bounded diagnostic code and surrounding non-sensitive context instead.
 
 ## Still blocked
 

@@ -53,7 +53,6 @@ if (!resumeCapture&&runner === 'pi' && piContextKind?.startsWith('shared-binary'
 }
 const adapterPath = join(source, `packages/adapter-${runner}/src/runner-adapter.ts`);
 const config = core.getDefaultDeckConfig?.() ?? {};
-config.adaptiveMemory = { enabled: false, activeProvider: 'none' };
 config.webSearch = { enabled: false };
 const capabilityInstructions = runner === 'claude' ? undefined : core.buildCapabilityInstructionBundle?.(selected);
 let plan: any, result: any, verified: any, files: any[], adapter: any, verificationCorrection: any;

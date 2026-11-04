@@ -29,21 +29,12 @@ describe("Codex app-server notification mapping", () => {
       expect(events).toMatchObject([{ kind: "diagnostic", data: { code: "codex-hook-invalid" } }]);
     }
   });
-  test("maps actual hook lifecycle and attributes only the trusted native plugin source", () => {
-    const nativeMemory = { provider: "supermemory", integration: "runner-plugin", status: "ready", plugin: { root: "/trusted/plugin", hookConfigPath: "/trusted/plugin/hooks/hooks.json" } } as const;
-    const run = { id: "h1", eventName: "userPromptSubmit", handlerType: "command", executionMode: "sync", source: "plugin", sourcePath: nativeMemory.plugin.hookConfigPath, status: "running", entries: [{ kind: "context", text: "private recalled content" }] };
-    const started = mapCodexNotification({ method: "hook/started", params: { threadId: "th", turnId: "t", run } }, nativeMemory)[0]!;
-    expect(started).toMatchObject({ kind: "hook.started", data: { hookId: "h1", hookEvent: "userPromptSubmit", status: "running", provenance: "codex-app-server", executionMode: "sync", handlerType: "command", provider: "supermemory", integration: "runner-plugin" } });
-    expect(JSON.stringify(started)).not.toContain("/trusted");
-    expect(JSON.stringify(started)).not.toContain("private recalled");
-    expect(mapCodexNotification({ method: "hook/completed", params: { run: { ...run, status: "failed", durationMs: 42, statusMessage: "private details" } } }, nativeMemory)[0]).toMatchObject({ kind: "hook.completed", data: { status: "failed", durationMs: 42 } });
-    for (const changed of [{ sourcePath: "/other/supermemory/hooks.json" }, { source: "project" }]) {
-      expect(mapCodexNotification({ method: "hook/started", params: { run: { ...run, ...changed } } }, nativeMemory)[0]!.data.provider).toBeUndefined();
-    }
-    expect(mapCodexNotification({ method: "hook/started", params: { run } })[0]!.data.provider).toBeUndefined();
-    const exclusive = { ...nativeMemory, plugin: { ...nativeMemory.plugin, exclusiveHookEvents: ["userPromptSubmit"] } };
-    expect(mapCodexNotification({ method: "hook/started", params: { run: { ...run, source: "sessionFlags" } } }, exclusive)[0]!.data.provider).toBe("supermemory");
-    expect(mapCodexNotification({ method: "hook/started", params: { run: { ...run, source: "sessionFlags", eventName: "stop" } } }, exclusive)[0]!.data.provider).toBeUndefined();
+  test("maps native hook lifecycle without exposing commands or private output", () => {
+    const run = { id: "h1", eventName: "userPromptSubmit", status: "running", handlerType: "command", source: "user", command: "private-command", statusMessage: "private details" };
+    const started = mapCodexNotification({ method: "hook/started", params: { run } })[0]!;
+    expect(started).toMatchObject({ kind: "hook.started", data: { status: "running", hookEvent: "userPromptSubmit" } });
+    expect(JSON.stringify(started)).not.toContain("private");
+    expect(mapCodexNotification({ method: "hook/completed", params: { run: { ...run, status: "failed", durationMs: 42 } } })[0]).toMatchObject({ kind: "hook.completed", data: { status: "failed", durationMs: 42 } });
   });
   test("maps native terminal outcomes and unknown payloads", () => {
     expect(mapCodexNotification({ method: "turn/completed", params: { turn: { id: "t", status: "interrupted" } } })[0]?.data.status).toBe("interrupted");

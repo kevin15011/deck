@@ -8,11 +8,10 @@
 import type { RunnerDashboardAction } from "./reducer";
 import { PACKAGE_INSTRUCTION_PACKAGE_IDS } from "@deck/core";
 import { getDashboardSectionSummaries, getToggleablePackageInstructionIds, type CapabilityResolver } from "./selectors";
-import { runnerRequiresExternalSupermemoryToken, type RunnerDashboardState, type RunnerOperationIdentity } from "./state";
+import { type RunnerDashboardState, type RunnerOperationIdentity } from "./state";
 
 export type RunnerDashboardContinueEffect =
   | { type: "dispatch"; action: RunnerDashboardAction }
-  | { type: "select-supermemory-and-open-setup"; action: RunnerDashboardAction }
   | { type: "open-web-search-credential" }
   | { type: "open-developer-team-model-config" }
   | { type: "reuse-developer-team-model-config" }
@@ -102,16 +101,6 @@ export function getDashboardContinueEffect(
     return action ? { type: "dispatch", action } : { type: "none" };
   }
 
-  if (state.screen === "adaptive-memory-detail") {
-    const providers = ["none", "supermemory"] as const;
-    const provider = providers[state.cursor];
-    if (!provider) return { type: "dispatch", action: { type: "go-dashboard" } };
-    const action: RunnerDashboardAction = { type: "select-adaptive-memory", provider };
-    return provider === "supermemory" && runnerRequiresExternalSupermemoryToken(state)
-      ? { type: "select-supermemory-and-open-setup", action }
-      : { type: "dispatch", action };
-  }
-
   if (state.screen === "web-search-detail") {
     if (state.cursor === 0) {
       if (state.selectedCapabilities["web-search"]) {
@@ -155,7 +144,7 @@ export function getDashboardContinueEffect(
       if (!options.canRunPlan) {
         return {
           type: "block-review-install",
-          status: "Supermemory requires token captured before executing Review & Install.",
+          status: "Review & Install is blocked. Resolve plan diagnostics before continuing.",
         };
       }
       return { type: "dispatch", action: { type: "start-install" } };

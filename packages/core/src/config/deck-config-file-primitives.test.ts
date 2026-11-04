@@ -47,13 +47,13 @@ describe("path-parameterized Deck config file primitives", () => {
       activeProfile: "legacy-local",
     });
 
-    expect(written.adaptiveMemory.supermemory).toEqual({ mcpServerName: "custom-sm", searchMode: "documents" });
+    expect(written).not.toHaveProperty("adaptiveMemory");
     expect(readDeckConfigFile(configPath).activeProfile).toBe("legacy-local");
-    expect(readFileSync(configPath, "utf8")).toContain('"mcpServerName": "custom-sm"');
+    expect(JSON.parse(readFileSync(configPath, "utf8"))).not.toHaveProperty("adaptiveMemory");
     expect(existsSync(join(root, "deck", ".config.json.tmp"))).toBe(false);
   });
 
-  test("patch preserves unrelated global fields, project-local legacy profiles, and custom Supermemory settings", () => {
+test("patch preserves unrelated global fields and project-local legacy profiles while projecting retired fields", () => {
     const root = tempRoot();
     const configPath = join(root, "config.json");
     writeDeckConfigFileAtomic(configPath, validateDeckConfig({
@@ -70,7 +70,7 @@ describe("path-parameterized Deck config file primitives", () => {
     }));
 
     expect(patched.webSearch).toEqual({ enabled: true, provider: "tavily" });
-    expect(patched.adaptiveMemory.supermemory).toEqual({ mcpServerName: "custom-sm", searchMode: "documents" });
+    expect(patched).not.toHaveProperty("adaptiveMemory");
     expect(patched.packageInstructions.opencode).not.toHaveProperty("context-mode");
     expect(patched.orchestratorPersonality).toBe("guia");
     expect(patched.activeProfile).toBe("legacy-local");

@@ -9,7 +9,6 @@ const repoRoot = join(import.meta.dir, "..", "..", "..", "..");
 const allowed = new Set([
   "apps/cli/src/deck-config-store.ts",
   "apps/cli/src/deck-config-store.test.ts",
-  "apps/cli/src/pi-launch-command-legacy-compatibility.test-support.ts",
   "apps/cli/src/__tests__/global-config-production-audit.test.ts",
   "packages/core/src/config/deck-config.ts",
   "packages/core/src/config/deck-config.test.ts",

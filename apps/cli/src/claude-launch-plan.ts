@@ -3,15 +3,8 @@ import type { RunnerLaunchInput, RunnerLaunchResult } from "@deck/core";
 
 const MAX_SESSION_ID_BYTES = 1024;
 
-/** Native Claude launch planning only; installation and plugin handoff are separate gates. */
+/** Native Claude launch planning only; installation is a separate gate. */
 export function buildClaudeLaunchPlan(input: RunnerLaunchInput): RunnerLaunchResult {
-  if (input.deckConfig.adaptiveMemory.enabled || input.deckConfig.adaptiveMemory.activeProvider === "supermemory") {
-    return {
-      status: "blocked",
-      code: "claude-memory-handoff-unverified",
-      diagnostics: [{ code: "claude-memory-handoff-unverified", severity: "error", message: "Claude adaptive memory needs a verified Deck-managed plugin and credential handoff before launch." }],
-    };
-  }
   if (input.mode === "exec") {
     return {
       status: "unsupported",
@@ -56,7 +49,7 @@ export function buildClaudeLaunchPlan(input: RunnerLaunchInput): RunnerLaunchRes
       stdin: "inherit",
       executionClass: "static-compatible",
     },
-    diagnostics: [{ code: "claude-native-permissions-only", severity: "warning", message: "Claude runs in safe mode with native permissions; Deck team, tools, plugins and memory are not installed on this route. Managed policy may still run hooks." }],
+    diagnostics: [{ code: "claude-native-permissions-only", severity: "warning", message: "Claude runs in safe mode with native permissions; Deck team, tools and plugins are not installed on this route. Managed policy may still run hooks." }],
   };
 }
 

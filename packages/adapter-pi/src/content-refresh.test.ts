@@ -58,7 +58,7 @@ test('trust rejects edited and unreceipted extensions but permits narrowed roles
   writeFileSync(role,original.replace(/^tools:.*$/m,'tools: bash'));
   expect(()=>verifyPiInstallation(root)).toThrow(/deck-quality.*bash/);
   writeFileSync(role,original);
-  const extension=join(root,'deck/package/extensions/deck-memory/impl.js');
+  const extension=join(root,'deck/package/extensions/deck-tool-policy/impl.js');
   writeFileSync(extension,readFileSync(extension,'utf8')+'\n// edit');
   expect(()=>verifyPiInstallation(root)).toThrow(/edited or unreceipted/);
  } finally {rmSync(root,{recursive:true,force:true});}

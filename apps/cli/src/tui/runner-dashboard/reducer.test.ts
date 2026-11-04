@@ -66,12 +66,11 @@ describe("Pi Runner dashboard reducer", () => {
   test("keeps Codebase opt-in and retired packages absent without enabling a provider", () => {
     const configured = validateDeckConfig({});
     const expectedDefaults = {
-      "codebase-memory": false, "code-economy": true, rtk: true, "adaptive-memory": true,
+      "codebase-memory": false, "code-economy": true, rtk: true,
     };
 
     expect(createDefaultPiRunnerDashboardState().packageInstructions).toEqual(expectedDefaults);
     expect(createDefaultPiRunnerDashboardState().explicitlySelectedCapabilities).toEqual({});
-    expect(createDefaultPiRunnerDashboardState().adaptiveMemory.provider).toBe("none");
     expect(loadRunnerPackageInstructionsFromConfig(configured, "opencode")).toEqual(expectedDefaults);
   });
 
@@ -112,7 +111,6 @@ describe("Pi Runner dashboard reducer", () => {
       expect(visible.length).toBeGreaterThan(0);
       expect(visible.every((entry) => entry.selected === (entry.capabilityId !== "codebase-memory"))).toBe(true);
       expect(fresh.explicitlySelectedCapabilities.serena).toBeUndefined();
-      expect(fresh.adaptiveMemory.provider).toBe("none");
       const saved = validateDeckConfig({ packageInstructions: { [runner]: { serena: false, rtk: false } } });
       const hydrated = createDefaultPiRunnerDashboardState({
         runnerScope: runner, runnerUi: adapter.ui,
@@ -150,8 +148,7 @@ describe("Pi Runner dashboard reducer", () => {
       operationId: "opencode-current-operation",
     });
     const builder: PlanBuilderFn = () => ({
-      plan: { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } },
-      state: { adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, runtimeCredentialVerification: "verified-present", diagnostics: [] } } },
+      ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] },
     });
 
     const stale = reduce(current, {
@@ -163,75 +160,6 @@ describe("Pi Runner dashboard reducer", () => {
     expect(stale).toBe(current);
     expect(stale.screen).toBe("dashboard");
     expect(stale.plan).toBeUndefined();
-    expect(stale.adaptiveMemory.provider).toBe("none");
-  });
-
-  test("ignores stale credential evidence action for a different operation", () => {
-    const currentOperation = { runner: "opencode" as const, operationId: "opencode-current-operation", explicitlySelected: false };
-    const state = createDefaultPiRunnerDashboardState({
-      runnerScope: "opencode",
-      operationId: currentOperation.operationId,
-      currentOperation,
-      adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: false, diagnostics: [] } },
-    });
-
-    const stale = reduce(state, {
-      type: "apply-supermemory-runtime-credential-evidence",
-      evidence: { configured: true, runtimeCredentialStored: true, runtimeCredentialVerification: "verified-present", ephemeralTokenAvailable: false, diagnostics: [] },
-      identity: {
-        runnerId: "opencode",
-        operation: { runner: "opencode", operationId: "opencode-stale-operation", explicitlySelected: false },
-        planRevision: 0,
-        planGeneratedForRevision: 0,
-      },
-    });
-
-    expect(stale).toBe(state);
-    expect(stale.adaptiveMemory.supermemory).not.toHaveProperty("runtimeCredentialVerification");
-    expect(stale.adaptiveMemory.supermemory?.runtimeCredentialStored).toBe(false);
-  });
-
-  test("ignores credential evidence action after plan generation changes", () => {
-    const currentOperation = { runner: "opencode" as const, operationId: "opencode-current-operation", explicitlySelected: false };
-    const plan = { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } };
-    const state = createDefaultPiRunnerDashboardState({
-      runnerScope: "opencode",
-      operationId: currentOperation.operationId,
-      currentOperation,
-      plan,
-      planRevision: 1,
-      planGeneratedForRevision: 1,
-      adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: false, diagnostics: [] } },
-    });
-
-    const stale = reduce(state, {
-      type: "apply-supermemory-runtime-credential-evidence",
-      evidence: { configured: true, runtimeCredentialStored: true, runtimeCredentialVerification: "verified-present", ephemeralTokenAvailable: false, diagnostics: [] },
-      identity: {
-        runnerId: "opencode",
-        operation: currentOperation,
-        planRevision: 0,
-        planGeneratedForRevision: 0,
-      },
-    });
-
-    expect(stale).toBe(state);
-    expect(stale.adaptiveMemory.supermemory).not.toHaveProperty("runtimeCredentialVerification");
-    expect(stale.adaptiveMemory.supermemory?.runtimeCredentialStored).toBe(false);
-  });
-
-  test("uses adapter-owned memory behavior for an arbitrary runner identity", () => {
-    const nativeOAuthUi = getAdapter("opencode").ui!;
-    const state = reduce(createDefaultPiRunnerDashboardState({
-      runnerScope: "atlas",
-      runnerUi: { ...nativeOAuthUi, environmentLabels: { "atlas-development": "Atlas Development" } },
-      screen: "adaptive-memory-detail",
-      backStack: ["dashboard"],
-    }), { type: "select-adaptive-memory", provider: "supermemory" });
-
-    expect(state.screen).toBe("adaptive-memory-detail");
-    expect(state.adaptiveMemory.supermemory).toMatchObject({ configured: false, hasToken: false });
-    expect(state.adaptiveMemory.status).toContain("runtime API token");
   });
 
   test("clearing legacy Serena selection removes transient authorization", () => {
@@ -328,11 +256,11 @@ describe("Pi Runner dashboard reducer", () => {
 
   test("cursor se limita por sección", () => {
     let state = createDefaultPiRunnerDashboardState();
-    // Dashboard has 5 sections: Packages, Adaptive Memory, Web Search, Teams, Review & Install
+    // Dashboard has 4 sections: Packages, Web Search, Teams, Review & Install
     state = reduce(state, { type: "cursor", cursor: 99 });
-    expect(state.cursor).toBe(4);
+    expect(state.cursor).toBe(3);
 
-    state = reduce(state, { type: "navigate", screen: "adaptive-memory-detail" });
+    state = reduce(state, { type: "navigate", screen: "web-search-detail" });
     state = reduce(state, { type: "cursor", cursor: 99 });
     expect(state.cursor).toBe(2);
 
@@ -371,61 +299,6 @@ describe("Pi Runner dashboard reducer", () => {
     expect(state.selectedCapabilities.serena).toBe(false);
   });
 
-  test("Adaptive Memory inicia en None y no agrega acciones de memoria", () => {
-    let state = createDefaultPiRunnerDashboardState();
-    expect(state.adaptiveMemory.provider).toBe("none");
-
-    state = reduce(state, { type: "enter-review", inventory }, piPlanBuilder);
-
-    const ids = allActionIds(state.plan);
-    expect(ids.some((id) => id.includes("engram"))).toBe(false);
-    expect(ids.some((id) => id.includes("supermemory"))).toBe(false);
-  });
-
-  test("Adaptive Memory can be disabled after Supermemory and clears configuration", () => {
-    let state = createDefaultPiRunnerDashboardState();
-
-    state = reduce(state, { type: "select-adaptive-memory", provider: "supermemory" });
-    state = reduce(state, {
-      type: "update-supermemory",
-      values: { configured: true, hasToken: true, diagnostics: ["ok"] },
-    });
-    expect(state.adaptiveMemory.provider).toBe("supermemory");
-    expect(state.adaptiveMemory.supermemory?.hasToken).toBe(true);
-
-    state = reduce(state, { type: "select-adaptive-memory", provider: "none" });
-    state = reduce(state, { type: "regenerate-plan", inventory }, piPlanBuilder);
-    expect(state.adaptiveMemory.provider).toBe("none");
-    expect(allActionIds(state.plan).some((id) => id.includes("engram") || id.includes("supermemory"))).toBe(false);
-  });
-
-  test("Claude unverified memory handoff cannot enter credential setup", () => {
-    const state = createDefaultPiRunnerDashboardState({ runnerScope: "claude", runnerUi: { environmentLabels: {}, model: { providerSource: "none", missingChecks: [], remediation: "none", defaultThinkingLevels: [] }, adaptiveMemory: { supermemory: { supported: false, requiresExternalToken: true, selectionStatus: "Claude official plugin handoff is unverified." } } } });
-    const selected = reduce(state, { type: "select-adaptive-memory", provider: "supermemory" });
-    expect(selected.adaptiveMemory.provider).toBe("none");
-    expect(selected.adaptiveMemory.status).toContain("unverified");
-    expect(selected.adaptiveMemory.supermemory).toBeUndefined();
-  });
-
-  test("OpenCode requires runtime token setup before optional MCP OAuth", () => {
-    let state = createDefaultPiRunnerDashboardState({
-      runnerScope: "opencode",
-      runnerUi: getAdapter("opencode").ui,
-      screen: "adaptive-memory-detail",
-      backStack: ["dashboard"],
-    });
-
-    state = reduce(state, { type: "select-adaptive-memory", provider: "supermemory" });
-
-    expect(state.screen).toBe("adaptive-memory-detail");
-    expect(state.adaptiveMemory.provider).toBe("supermemory");
-    expect(state.adaptiveMemory.supermemory).toMatchObject({
-      configured: false,
-      hasToken: false,
-    });
-    expect(state.adaptiveMemory.status).toContain("runtime API token");
-  });
-
   test("Developer Team se selecciona y deselecciona; el plan lo refleja", () => {
     let state = createDefaultPiRunnerDashboardState();
 
@@ -442,13 +315,11 @@ describe("Pi Runner dashboard reducer", () => {
 
   test("Review & Install regenera plan y bloquea instalación con plan stale", () => {
     let state = createDefaultPiRunnerDashboardState();
-    state = reduce(state, { type: "select-adaptive-memory", provider: "supermemory" });
     state = reduce(state, { type: "enter-review", inventory }, piPlanBuilder);
 
     const firstRevision = state.planGeneratedForRevision;
     expect(state.screen).toBe("review-plan");
     expect(firstRevision).toBe(state.planRevision);
-    expect(allActionIds(state.plan).some((id) => id.includes("supermemory"))).toBe(true);
 
     // Toggle OFF first (rtk is already true by default), then back ON to invalidate
     state = reduce(state, { type: "set-capability", capabilityId: "rtk", selected: false });

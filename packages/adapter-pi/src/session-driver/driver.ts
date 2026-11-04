@@ -70,7 +70,7 @@ export function createPiSessionDriver(options: Options = {}): RunnerSessionDrive
           }));
           const system=io.writePrivateFile('pi-session-prompt.md',[role.instructions,input.rolePrompt].filter(Boolean).join('\n\n'));
           const env:Record<string,string>={};
-          for(const [key,value] of Object.entries(options.baseEnv??process.env)) if(value!==undefined&&!key.startsWith('DECK_PI_')&&!key.startsWith('DECK_RUNNER_MEMORY_'))env[key]=value;
+          for(const [key,value] of Object.entries(options.baseEnv??process.env)) if(value!==undefined&&!key.startsWith('DECK_PI_'))env[key]=value;
           Object.assign(env,{PI_CODING_AGENT_DIR:role.source.root,DECK_PI_SESSION:'1',DECK_PI_CHILD:'1',DECK_PI_ROLE:'setup',
             DECK_PI_INSTALLATION_GATE:'1',DECK_PI_CROSS_CONFIG:config,DECK_PI_CONTAINMENT:containment,DECK_PI_CLARIFICATION_NONCE:nonce,
             DECK_PI_PARENT_SESSION:'deck-session-host',DECK_PI_TASK_ID:input.taskId,DECK_PI_CHILD_SESSION:sessionFile,DECK_PI_ATTEMPT:'1'});

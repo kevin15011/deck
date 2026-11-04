@@ -53,7 +53,7 @@ deck codex developer
 deck claude developer
 ```
 
-Pi also accepts `--continue` and `--resume`. Memory is explicit per launch with `--memory=supermemory` or `--memory=none` on the Pi, OpenCode and Codex launchers; `deck claude developer` has no memory flag and uses the official plugin when it was selected. To run one team across several runners from the browser, use `deck web` (see [Cross-runner sessions](cross-runner-sessions.md)).
+Pi also accepts `--continue` and `--resume`. To run one team across several runners from the browser, use `deck web` (see [Cross-runner sessions](cross-runner-sessions.md)).
 
 ## Project workflows
 
@@ -73,7 +73,6 @@ Human output groups issues by change; JSON output is stable for automation. Exit
 
 - OpenSpec artifacts and Spec Registry entries are the official record for requirements, design, tasks, and change state.
 - Source, tests, and current runner evidence define volatile runtime facts.
-- Adaptive memory can add context but never outranks official artifacts or runner evidence.
 - Runner hooks provide trusted execution context; agent-supplied context is not authority.
 - Protected writes require the applicable authorization and Git-safety boundaries.
 - Verification starts focused and broadens only when the change or risk requires it.

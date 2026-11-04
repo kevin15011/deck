@@ -9,8 +9,6 @@ import { parseCodebaseGuardArgs, type CodebaseGuardArgs } from "@deck/adapter-pi
  * - `deck pi developer` → launch Pi with Developer Team
  * - `deck pi developer --continue` → continue Developer Team session
  * - `deck pi developer --resume` → resume picker for Developer Team session
- * - `deck pi developer --memory=supermemory` → enable Supermemory adaptive memory
- * - `deck pi developer --memory=none` → explicitly disable memory provider (default)
  */
 
 import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, type RunnerStdinPayload } from "@deck/core";
@@ -37,20 +35,11 @@ export type ParsedArgs =
   | { command: "doctor" }
   | { command: "claude-native-launch"; launch: { mode: "interactive" } | { mode: "resume-by-id"; sessionId: string } | { mode: "resume-latest" } }
   | { command: "claude-team-launch" }
-  | {
-      command: "supermemory-migration-dry-run";
-      flags: {
-        destinationScope: string;
-        inventoryPath: string;
-      };
-    }
   | { command: "version" }
   | { command: "internal-codebase-mcp-guard-v1"; guard: CodebaseGuardArgs }
   | { command: "internal-serena-mcp"; probe: boolean }
-  | { command: "internal-supermemory-runtime-smoke" }
-  | { command: "internal-codex-memory-hook" }
+  | { command: "internal-retired-native-hook" }
   | { command: "internal-runner-sync"; backupId?: string }
-  | { command: "internal-memory-mcp" }
   | { command: "internal-session-daemon" }
   | { command: "internal-daemon-restart-helper"; intentPath:string }
   | { command: "internal-session-mcp" }
@@ -107,8 +96,6 @@ export type ParsedArgs =
         continue?: boolean;
         resume?: boolean;
       };
-      /** Legacy CLI memory override. Undefined means no memory; Supermemory is the only supported backend. */
-      memoryProvider?: string;
     }
   | {
       command: "runner-launch";
@@ -126,7 +113,6 @@ export type ParsedArgs =
 
       verbose?: boolean;
       yes?: boolean;
-      memoryProvider?: "supermemory" | "none";
     }
   | {
       command: "error";
@@ -139,12 +125,6 @@ export type ParsedArgs =
 const PI_TEAM_SLUGS: Record<string, string> = {
   developer: "developer-team",
 };
-
-/**
- * Supported memory provider identifiers for Pi.
- */
-export const SUPPORTED_MEMORY_PROVIDERS = ["supermemory"] as const;
-export type SupportedMemoryProvider = (typeof SUPPORTED_MEMORY_PROVIDERS)[number];
 
 function parseBooleanFlag(value: string | undefined): boolean | undefined {
   if (value === undefined || value === "") return true;
@@ -180,18 +160,9 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
   const verbose = deckFlagRegion.includes("--verbose");
   const yes = deckFlagRegion.includes("--yes");
   const installOnly = deckFlagRegion.includes("--install-only");
-  let memoryProvider: "supermemory" | "none" | undefined;
-  for (const flag of deckFlagRegion) {
-    if (flag === "--memory") return { command: "error", message: "--memory requires a value: supermemory or none." };
-    if (flag.startsWith("--memory=")) {
-      const value = flag.slice("--memory=".length);
-      if (value !== "supermemory" && value !== "none") return { command: "error", message: `Unsupported memory provider: ${value}. Available providers: supermemory, none` };
-      memoryProvider = value;
-    }
-  }
   const deckFlags = new Set(["--dry-run", "--local-only", "--yes", "--install-only", "--verbose"]);
   const filtered = [
-    ...deckFlagRegion.filter((token) => !deckFlags.has(token) && !token.startsWith("--memory=")),
+    ...deckFlagRegion.filter((token) => !deckFlags.has(token)),
     ...(separatorIndex >= 0 ? ["--", ...tokens.slice(separatorIndex + 1)] : []),
   ];
 
@@ -229,7 +200,6 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
 
     ...(verbose ? { verbose: true } : {}),
     ...(yes ? { yes: true } : {}),
-    ...(memoryProvider ? { memoryProvider } : {}),
   };
 }
 
@@ -345,10 +315,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (rest.length === 2 && rest[0] === "serena-mcp" && rest[1] === "--probe") return { command: "internal-serena-mcp", probe: true };
     if (rest.length === 1 && rest[0] === "serena-mcp") return { command: "internal-serena-mcp", probe: false };
-    if (rest.length === 1 && rest[0] === "supermemory-runtime-smoke") return { command: "internal-supermemory-runtime-smoke" };
-    if (rest.length === 1 && rest[0] === "codex-memory-hook") return { command: "internal-codex-memory-hook" };
+    if (rest.length === 1 && rest[0] === "codex-memory-hook") return { command: "internal-retired-native-hook" };
     if (rest[0] === "runner-sync" && rest.at(-1) === "--json" && (rest.length === 2 || rest.length === 4 && rest[1] === "--backup-id" && /^[a-zA-Z0-9_.-]{1,128}$/.test(rest[2]!))) return {command:"internal-runner-sync", ...(rest.length === 4 ? {backupId:rest[2]} : {})};
-    if (rest.length === 1 && rest[0] === "memory-mcp") return { command: "internal-memory-mcp" };
     if (rest.length === 2 && rest[0] === "daemon-restart-helper" && rest[1]!.startsWith("/")) return {command:"internal-daemon-restart-helper",intentPath:rest[1]!};
     if (rest.length === 1 && rest[0] === "session-daemon") return { command: "internal-session-daemon" };
     if (rest.length === 1 && rest[0] === "session-mcp") return { command: "internal-session-mcp" };
@@ -379,6 +347,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return rest.length === 0 ? { command: "version" } : { command: "error", message: "`deck --version` takes no arguments." };
   }
 
+  if (first === "supermemory") return { command: "error", message: "Unknown command: supermemory" };
+
   if (first === "doctor") {
     if (rest.length > 0) {
       return {
@@ -389,42 +359,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return { command: "doctor" };
   }
 
-  if (first === "supermemory") {
-    if (rest[0] !== "migrate" || rest[1] !== "--dry-run") {
-      return {
-        command: "error",
-        message: "Usage: deck supermemory migrate --dry-run --destination-scope <scope> --inventory <path>",
-      };
-    }
-    let destinationScope: string | undefined;
-    let inventoryPath: string | undefined;
-    for (let i = 2; i < rest.length; i += 1) {
-      const flag = rest[i]!;
-      if (flag === "--destination-scope") {
-        destinationScope = rest[i + 1];
-        i += 1;
-      } else if (flag.startsWith("--destination-scope=")) {
-        destinationScope = flag.slice("--destination-scope=".length);
-      } else if (flag === "--inventory") {
-        inventoryPath = rest[i + 1];
-        i += 1;
-      } else if (flag.startsWith("--inventory=")) {
-        inventoryPath = flag.slice("--inventory=".length);
-      } else {
-        return { command: "error", message: `Unknown Supermemory migration flag: ${flag}` };
-      }
-    }
-    if (!destinationScope?.trim() || !inventoryPath?.trim()) {
-      return {
-        command: "error",
-        message: "Usage: deck supermemory migrate --dry-run --destination-scope <scope> --inventory <path>",
-      };
-    }
-    return {
-      command: "supermemory-migration-dry-run",
-      flags: { destinationScope: destinationScope.trim(), inventoryPath: inventoryPath.trim() },
-    };
-  }
 
   if (first === "version") {
     if (rest.length > 0) {
@@ -570,7 +504,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   if (first === "claude") {
     if (rest.length === 1 && rest[0] === "developer") return { command: "claude-team-launch" };
-    const usage = "Usage: deck claude developer | deck claude native [resume <session-id> | resume --last]. Developer delivers the team as plugin files; memory uses the official Supermemory plugin when selected, and protected execution is instruction-level. Native uses safe mode without Deck team files.";
+    const usage = "Usage: deck claude developer | deck claude native [resume <session-id> | resume --last]. Developer delivers the team as plugin files; protected execution is instruction-level. Native uses safe mode without Deck team files.";
     if (rest[0] !== "native") return { command: "error", message: usage };
     if (rest.length === 1) return { command: "claude-native-launch", launch: { mode: "interactive" } };
     if (rest.length === 3 && rest[1] === "resume") {
@@ -587,21 +521,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
 
   if (first === "opencode") {
-    let memoryProvider: "supermemory" | "none" | undefined;
     const valid = rest.every((token, index) => {
       if (index === 0) return token === "developer";
       if (["--yes", "--dry-run", "--install-only", "--verbose"].includes(token)) return true;
-      if (token.startsWith("--memory=")) {
-        const value = token.slice("--memory=".length);
-        if (value === "supermemory" || value === "none") {
-          memoryProvider = value;
-          return true;
-        }
-      }
       return false;
     });
     if (!valid) {
-      return { command: "error", message: "Usage: deck opencode developer [--install-only] [--dry-run] [--yes] [--verbose] [--memory=supermemory|none]" };
+      return { command: "error", message: "Usage: deck opencode developer [--install-only] [--dry-run] [--yes] [--verbose]" };
     }
     return {
       command: "runner-launch",
@@ -612,8 +538,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       ...(rest.includes("--dry-run") ? { dryRun: true } : {}),
       ...(rest.includes("--yes") ? { yes: true } : {}),
       ...(rest.includes("--verbose") ? { verbose: true } : {}),
-      ...(memoryProvider ? { memoryProvider } : {}),
-    };
+      };
   }
 
   if (first !== "pi") {
@@ -624,7 +549,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (rest.length === 0) {
     return {
       command: "error",
-      message: "Usage: deck pi <team> [--continue | --resume] [--memory=supermemory|none]\nAvailable teams: developer",
+      message: "Usage: deck pi <team> [--continue | --resume]\nAvailable teams: developer",
     };
   }
 
@@ -642,7 +567,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
   // Parse flags
   let shouldContinue = false;
   let shouldResume = false;
-  let memoryProvider: string | undefined;
 
 
   for (const flag of flags) {
@@ -656,10 +580,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     } else if (flag.startsWith("--resume=")) {
       const value = parseBooleanFlag(flag.slice("--resume=".length));
       shouldResume = value === true;
-    } else if (flag === "--memory") {
-      memoryProvider = "";
-    } else if (flag.startsWith("--memory=")) {
-      memoryProvider = flag.slice("--memory=".length);
+    } else if (flag === "--memory" || flag.startsWith("--memory=")) {
+      return { command: "error", message: `Unknown Pi developer argument: ${flag}` };
+
     }
   }
 
@@ -671,21 +594,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
     };
   }
 
-  // Validate memory provider if specified
-  if (memoryProvider !== undefined) {
-    if (memoryProvider === "") {
-      return { command: "error", message: "--memory requires a value: supermemory or none." };
-    } else if (memoryProvider === "none") {
-      // Explicitly disabled — preserve the override through launch.
-    } else if (!SUPPORTED_MEMORY_PROVIDERS.includes(memoryProvider as SupportedMemoryProvider)) {
-      const available = [...SUPPORTED_MEMORY_PROVIDERS, "none"].join(", ");
-      return {
-        command: "error",
-        message: `Unsupported memory provider: ${memoryProvider}. Available providers: ${available}`,
-      };
-    }
-  }
-
   return {
     command: "pi-launch",
     teamId,
@@ -694,7 +602,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
       ...(shouldResume ? { resume: true } : {}),
     },
 
-    ...(memoryProvider ? { memoryProvider } : {}),
   };
 }
 

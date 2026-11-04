@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { constants as osConstants } from "node:os";
 import type { Readable, Writable } from "node:stream";
 import { isCompatibleCodebaseExecutable, pinnedOwnedCodebaseRelease, type CodebaseNativeRelease } from "../../core/src/owned-tools/codebase-native-artifact";
-import { DECK_PI_MEMORY_ENV_BLANKS } from "./pi-mcp-env";
 import { canonicalJson } from "./pi-manifest";
 import { classifyNativeCodebase, nativeCodebaseFailureCode, readNativeCodebaseSelection } from "./pi-native-codebase-readiness";
 import { inspectCodebaseGuardEntry, type CodebaseGuardArgs } from "./pi-codebase-guard-command";
@@ -57,7 +56,7 @@ export async function runPiCodebaseGuard(args: CodebaseGuardArgs, options: {
   }
   options.afterVerification?.();
   options.signal?.throwIfAborted();
-  const child = spawn(executable, [], { stdio: ["pipe", "pipe", "pipe"], detached: false, shell: false, env: { ...process.env, ...DECK_PI_MEMORY_ENV_BLANKS } });
+  const child = spawn(executable, [], { stdio: ["pipe", "pipe", "pipe"], detached: false, shell: false, env: { ...process.env, } });
   return await new Promise<number>((resolve, reject) => {
     let stopping: number | undefined, finished = false, forced: ReturnType<typeof setTimeout> | undefined;
     let eofTimer: ReturnType<typeof setTimeout> | undefined;

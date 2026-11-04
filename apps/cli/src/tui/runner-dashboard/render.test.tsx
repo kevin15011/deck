@@ -7,7 +7,7 @@ import { createDefaultPiRunnerDashboardState, type PiRunnerReviewPlan } from "./
 /**
  * Pi Runner dashboard render tests.
  *
- * Dashboard sections (5): Packages, Adaptive Memory, Web Search, Teams, Review & Install
+ * Dashboard sections (4): Packages, Web Search, Teams, Review & Install
  */
 const plan: PiRunnerReviewPlan = {
   ready: false,
@@ -43,9 +43,9 @@ const plan: PiRunnerReviewPlan = {
     ],
     configWrites: [
       {
-        id: "adaptive-memory.supermemory.deck-config",
+        id: "package-instructions.pi.deck-config",
         kind: "write-deck-config",
-        title: "Write Supermemory non-secret Deck config",
+        title: "Write package preferences",
         status: "pending",
         required: true,
       },
@@ -70,59 +70,6 @@ const plan: PiRunnerReviewPlan = {
 };
 
 describe("Pi Runner dashboard render", () => {
-  test("DECK_DEBUG ready Supermemory runtime diagnostic is not rendered as a blocker", () => {
-    const readyPlan: PiRunnerReviewPlan = {
-      ready: true,
-      diagnostics: [],
-      groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] },
-    };
-    const state = createDefaultPiRunnerDashboardState({
-      runnerScope: "opencode",
-      screen: "review-plan",
-      cursor: 0,
-      plan: readyPlan,
-      adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: true, ephemeralTokenAvailable: false, diagnostics: [] } },
-    });
-    const output = renderToString(<RunnerDashboardScreens state={state} canRunPlan runBlockDiagnostics={[]} />);
-
-    expect(output).toContain("Run install");
-    expect(output).not.toContain("Blocked:");
-    expect(output).not.toContain("Supermemory runtime readiness");
-  });
-
-  test("Review readiness does not treat stale cached Supermemory token booleans as verified", () => {
-    const readyPlan: PiRunnerReviewPlan = { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } };
-    const state = createDefaultPiRunnerDashboardState({
-      runnerScope: "opencode",
-      screen: "review-plan",
-      plan: readyPlan,
-      runtime: { inspectionState: "ready", projectIdentity: "verified" },
-      adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true, runtimeCredentialStored: true, diagnostics: [] } },
-    });
-
-    const output = renderToString(<RunnerDashboardScreens state={state} canRunPlan runBlockDiagnostics={[]} />);
-
-    expect(output).toContain("reason=managed-runtime-auth-missing");
-    expect(output).not.toContain("reason=deck-managed-ready");
-  });
-
-  test("Review readiness renders verified Supermemory credential states", () => {
-    const readyPlan: PiRunnerReviewPlan = { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } };
-    const base = {
-      runnerScope: "opencode" as const,
-      screen: "review-plan" as const,
-      plan: readyPlan,
-      runtime: { inspectionState: "ready" as const, projectIdentity: "verified" as const },
-    };
-
-    const present = renderToString(<RunnerDashboardScreens state={createDefaultPiRunnerDashboardState({ ...base, adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, runtimeCredentialVerification: "verified-present", diagnostics: [] } } })} canRunPlan runBlockDiagnostics={[]} />);
-    const missing = renderToString(<RunnerDashboardScreens state={createDefaultPiRunnerDashboardState({ ...base, adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, runtimeCredentialVerification: "verified-missing", diagnostics: [] } } })} canRunPlan runBlockDiagnostics={[]} />);
-    const error = renderToString(<RunnerDashboardScreens state={createDefaultPiRunnerDashboardState({ ...base, adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, runtimeCredentialVerification: "verified-error", diagnostics: [] } } })} canRunPlan runBlockDiagnostics={[]} />);
-
-    expect(present).toContain("reason=deck-managed-ready");
-    expect(missing).toContain("reason=managed-runtime-auth-missing");
-    expect(error).toContain("reason=managed-runtime-auth-deferred");
-  });
 
   test("dashboard principal muestra las cuatro secciones con estados y contadores", () => {
     const state = createDefaultPiRunnerDashboardState({ plan });
@@ -137,11 +84,10 @@ describe("Pi Runner dashboard render", () => {
 
     expect(output).toContain("OpenCode Runner Setup Dashboard");
     expect(output).toContain("Packages");
-    expect(output).toContain("Adaptive Memory");
     expect(output).toContain("Web Search");
     expect(output).toContain("Teams");
     expect(output).toContain("Review & Install");
-    expect(output).toContain("Configure Packages, Adaptive Memory, Web Search, Teams and Review & Install.");
+    expect(output).toContain("Configure Packages, Web Search, Teams and Review & Install.");
     expect(output).toContain("actions:");
   });
 
@@ -178,18 +124,6 @@ describe("Pi Runner dashboard render", () => {
 
     expect(output).toContain("Package instructions");
     expect(output).toContain("Back to dashboard");
-  });
-
-  test("Adaptive Memory detail muestra Disabled y Enabled", () => {
-    const state = createDefaultPiRunnerDashboardState({ screen: "adaptive-memory-detail" });
-    const output = renderToString(<PiRunnerDashboardScreens state={state} />);
-
-    expect(output).toContain("Adaptive Memory");
-    expect(output).toContain("Disabled");
-    expect(output).not.toContain("Engram");
-    expect(output).toContain("Enabled");
-    expect(output).toContain("Back to dashboard");
-    expect(output).toContain("Adaptive Memory disabled");
   });
 
   test("Teams detail muestra Developer Team y back", () => {

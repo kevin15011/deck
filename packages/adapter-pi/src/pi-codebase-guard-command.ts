@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync } from "node:fs";
-import { DECK_PI_MEMORY_ENV_BLANKS } from "./pi-mcp-env";
 import { isAbsolute } from "node:path";
 
 export const CODEBASE_GUARD_COMMAND = "codebase-mcp-guard-v1";
@@ -44,10 +43,10 @@ export function parseCodebaseGuardArgs(args: readonly string[]): CodebaseGuardAr
   return { agentDir: args[1]!, binary: args[3]!, executableId: args[5]!, ...(args[7] ? { scriptId: args[7] } : {}) };
 }
 export function buildCodebaseGuardEntry(invocation: CodebaseGuardInvocation, agentDir: string, binary: string) {
-  return { command: invocation.command, args: [...(invocation.script ? [invocation.script] : []), "internal", CODEBASE_GUARD_COMMAND, ...codebaseGuardCliArgs({ agentDir, binary, executableId: invocation.executableId, scriptId: invocation.scriptId })], env: { ...DECK_PI_MEMORY_ENV_BLANKS }, exposure: "direct" as const };
+  return { command: invocation.command, args: [...(invocation.script ? [invocation.script] : []), "internal", CODEBASE_GUARD_COMMAND, ...codebaseGuardCliArgs({ agentDir, binary, executableId: invocation.executableId, scriptId: invocation.scriptId })], env: { }, exposure: "direct" as const };
 }
 /** Shape-only parser for owned transactional migration; never grants permission to execute. */
-export function parseCodebaseGuardEntry(value: unknown, agentDir: string): (CodebaseGuardArgs & { command: string; script?: string }) | undefined {
+export function parseCodebaseGuardEntry(value: unknown, agentDir: string, options: { ownedLegacyMigration?: boolean } = {}): (CodebaseGuardArgs & { command: string; script?: string }) | undefined {
   if (!value || typeof value !== "object") return undefined;
   const config = value as { command?: unknown; args?: unknown };
   if (!Array.isArray(config.args) || !config.args.includes(CODEBASE_GUARD_COMMAND)) return undefined;
@@ -56,7 +55,10 @@ export function parseCodebaseGuardEntry(value: unknown, agentDir: string): (Code
   if (args[offset] !== "internal" || args[offset + 1] !== CODEBASE_GUARD_COMMAND || args.some(arg => typeof arg !== "string") || typeof config.command !== "string") throw new Error("pi-codebase-guard-invalid");
   if (Object.keys(config).some(key => !["command", "args", "env", "exposure", "enabled"].includes(key)) || (config as { exposure?: unknown }).exposure !== "direct") throw new Error("pi-codebase-guard-invalid");
   const env = (config as { env?: unknown }).env;
-  if (!env || typeof env !== "object" || Array.isArray(env) || Object.keys(env).length !== Object.keys(DECK_PI_MEMORY_ENV_BLANKS).length || Object.entries(DECK_PI_MEMORY_ENV_BLANKS).some(([key, value]) => (env as Record<string, unknown>)[key] !== value)) throw new Error("pi-codebase-guard-invalid");
+  // Read-only migration tolerance for the exact previous receipt shape, never runtime validation.
+  const legacyKeys = ["DECK_RUNNER_MEMORY_ENDPOINT", "DECK_RUNNER_MEMORY_TOKEN", "DECK_RUNNER_MEMORY_TOKEN_FILE"];
+  const legacyEnv = options.ownedLegacyMigration && env && typeof env === "object" && Object.keys(env).length === legacyKeys.length && legacyKeys.every(key => (env as Record<string, unknown>)[key] === "");
+  if (!env || typeof env !== "object" || Array.isArray(env) || (Object.keys(env).length !== 0 && !legacyEnv)) throw new Error("pi-codebase-guard-invalid");
   const parsed = parseCodebaseGuardArgs(args.slice(offset + 2) as string[]);
   const script = offset ? args[0] as string : undefined;
   if (!parsed || parsed.agentDir !== agentDir || Boolean(script) !== Boolean(parsed.scriptId) || parsed.binary === config.command || parsed.binary === script) throw new Error("pi-codebase-guard-invalid");

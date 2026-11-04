@@ -6,7 +6,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { PI_READ_ONLY_BUILTIN_TOOLS, PI_READ_ONLY_MEMORY_TOOLS } from "../../pi-mcp-catalog";
+import { PI_READ_ONLY_BUILTIN_TOOLS } from "../../pi-mcp-catalog";
 import { isThinkingLevel, PI_THINKING_LEVEL_NAMES } from "../shared/thinking";
 import type { DeckAgent } from "./agents";
 import { claimExecution, executionGroupSettled } from "./execution-lease";
@@ -17,11 +17,9 @@ import { validateClarification, MAX_CLARIFICATIONS, type Clarify } from "./clari
 const DEFAULT_KILL_GRACE_MS = 5_000;
 const DEFAULT_TIMEOUT_MS = 30 * 60_000;
 const STDERR_EXCERPT_CHARS = 1_500;
-const READ_ONLY_FALLBACK_TOOLS = [...PI_READ_ONLY_BUILTIN_TOOLS, ...PI_READ_ONLY_MEMORY_TOOLS] as const;
+const READ_ONLY_FALLBACK_TOOLS = [...PI_READ_ONLY_BUILTIN_TOOLS] as const;
 
 export type PiInvocation = Readonly<{ command: string; args: readonly string[] }>;
-export type { MemoryHandoff } from "../shared/memory-handoff";
-import type { MemoryHandoff } from "../shared/memory-handoff";
 
 export type ChildRunnerOptions = {
   /** Trusted host callback, never a model tool argument. Identity alone grants no repair. */
@@ -32,8 +30,6 @@ export type ChildRunnerOptions = {
   piInvocation?: (args: readonly string[]) => PiInvocation;
   /** Parent environment the child inherits. Default: `process.env`. */
   env?: Readonly<Record<string, string | undefined>>;
-  /** Memory loopback handoff to forward explicitly (endpoint + token-file path, never the bearer token). */
-  memory?: () => MemoryHandoff | undefined;
   /**
    * Deck package root passed to children as a CLI package source (`--extension`). Pi keeps the first skill per
    * name and CLI package sources precede auto-discovered `<agentDir>/skills` and `~/.agents/skills`, so this makes
@@ -127,20 +123,15 @@ function failure(agent: DeckAgent, task: string, errorMessage: string, extra: Pa
 }
 
 /** Role-specific child environment: parent env + Deck markers + explicit memory handoff (never the token). */
-function childEnv(parent: Readonly<Record<string, string | undefined>>, role: string, memory: MemoryHandoff | undefined): Record<string, string> {
+function childEnv(parent: Readonly<Record<string, string | undefined>>, role: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(parent)) {
     if (value === undefined) continue;
-    if (key.startsWith("DECK_RUNNER_MEMORY_")) continue;
     env[key] = value;
   }
   env.DECK_PI_SESSION = "1";
   env.DECK_PI_CHILD = "1";
   env.DECK_PI_ROLE = role;
-  if (memory?.endpoint && memory.tokenFile) {
-    env.DECK_RUNNER_MEMORY_ENDPOINT = memory.endpoint;
-    env.DECK_RUNNER_MEMORY_TOKEN_FILE = memory.tokenFile;
-  }
   return env;
 }
 
@@ -220,7 +211,7 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
             // across Node and Bun; retain the nonce/PID-bound startup proof.
             stdio: ["ignore", "pipe", "pipe", "ipc"],
             serialization: "json",
-            env: { ...childEnv(options.env ?? process.env, agent.role, options.memory?.()), DECK_PI_SUPERVISOR_NONCE: supervisorNonce, DECK_PI_INSTALLATION_GATE: installation ? "1" : "0", DECK_PI_CONTAINMENT: containmentNonce ?? "", DECK_PI_CLARIFICATION_NONCE: clarificationNonce ?? "", DECK_PI_CHILD_SESSION: request.sessionFile ?? "", DECK_PI_ATTEMPT: String(request.attempt ?? 1), ...(request.parentId ? { DECK_PI_PARENT_SESSION: request.parentId } : {}), ...(request.taskId ? { DECK_PI_TASK_ID: request.taskId } : {}) },
+            env: { ...childEnv(options.env ?? process.env, agent.role), DECK_PI_SUPERVISOR_NONCE: supervisorNonce, DECK_PI_INSTALLATION_GATE: installation ? "1" : "0", DECK_PI_CONTAINMENT: containmentNonce ?? "", DECK_PI_CLARIFICATION_NONCE: clarificationNonce ?? "", DECK_PI_CHILD_SESSION: request.sessionFile ?? "", DECK_PI_ATTEMPT: String(request.attempt ?? 1), ...(request.parentId ? { DECK_PI_PARENT_SESSION: request.parentId } : {}), ...(request.taskId ? { DECK_PI_TASK_ID: request.taskId } : {}) },
           });
         } catch (error) {
           state.spawnError = true;

@@ -27,7 +27,7 @@ const projectSemantics: Record<string, readonly string[]> = {
   "skill-registry": ["degraded:registry-stale:project", "ready:registry-current:none","indeterminate:runner-exposure-unverified:none", "degraded:registry-missing:report-only", "degraded:registry-missing:project", "degraded:registry-invalid:report-only", "degraded:registry-invalid:project", "degraded:registry-truncated:report-only", "degraded:registry-truncated:project", "indeterminate:repair-outcome-uncertain:none", "indeterminate:registry-unreadable:none"],
   "codebase-memory-index": ["indeterminate:index-state-unverified:none", "ready:index-evidence-current:none", "degraded:index-refresh-required:project", "indeterminate:repair-outcome-uncertain:none"],
 };
-const runnerComponents = new Set(["codebase-memory", "rtk", "adaptive-memory", "web-search", "context7"]);
+const runnerComponents = new Set(["codebase-memory", "rtk", "web-search", "context7"]);
 const runnerSemantics = ["ready:runtime-evidence:none", "degraded:runner-remediation-required:report-only", "indeterminate:runtime-unverified:none"];
 function validObservations(snapshot: PreparationSnapshot): boolean {
   const identifier = /^[a-zA-Z0-9_.:@-]{1,256}$/;

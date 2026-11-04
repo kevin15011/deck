@@ -7,7 +7,6 @@ import { PI_THINKING_LEVELS, supportsDeveloperTeamModel, supportsThinkingForMode
 import { OPENCODE_THINKING_LEVELS } from "@deck/adapter-opencode";
 import type { CapabilityStatus, PiModel, PiProvider, PiThinkingLevel } from "@deck/adapter-pi";
 import type { OpenCodeThinkingLevel } from "@deck/adapter-opencode";
-import type { AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
 import type { RunnerUiMetadata } from "@deck/core";
 import { MenuList } from "../components/menu-list";
 import { ActivityIndicator } from "../components/activity-indicator";
@@ -15,7 +14,6 @@ import { getAdapter } from "../../runner-adapters";
 
 type DeveloperTeamDashboardContext = {
   source?: "home" | "dashboard";
-  adaptiveMemoryProvider?: AdaptiveMemoryActiveProvider;
   capabilityStatuses?: Partial<Record<string, CapabilityStatus>>;
   returnLabel?: string;
 };
@@ -58,7 +56,6 @@ function DashboardContextSummary({ context }: { context: DeveloperTeamDashboardC
   return (
     <Box marginTop={1} flexDirection="column">
       <Text bold>Dashboard context</Text>
-      <Text>Adaptive Memory selected in dashboard: <Text color="cyan">{context.adaptiveMemoryProvider ?? "none"}</Text></Text>
       <Text dimColor>Model provider/model/thinking semantics are reused unchanged.</Text>
       {Object.entries(statuses).length > 0 ? (
         <Text dimColor>Capability states: {Object.entries(statuses).map(([id, status]) => `${id}=${status}`).join(", ")}</Text>
@@ -88,158 +85,6 @@ export function DeveloperTeamInstallingScreen({
       <Text color="cyan">Installing Developer Team{progress}...</Text>
       {currentItem ? <Text dimColor>  {currentItem}</Text> : null}
       <Text dimColor>Writing the Developer Team bundle to the project.</Text>
-    </Box>
-  );
-}
-
-export type SupermemorySetupValues = {
-  /** OpenCode-only explicit SSH Host alias, or the literal `default`. */
-  profile?: string;
-  /** Distinguishes the fallback credential from an SSH alias literally named `default`. */
-  profileKind?: "fallback-default" | "ssh-alias";
-  /** Secret credential, retained only while the masked input is active. */
-  token: string;
-  /** @deprecated - no longer used. User is derived from token */
-  userId?: never;
-  /** @deprecated - no longer used. Deck derives one canonical project scope. */
-  teamId?: never;
-  /** @deprecated - no longer used */
-  orgId?: never;
-};
-
-type MemoryProviderSelectionScreenProps = {
-  cursor: number;
-  selectedProvider: AdaptiveMemoryActiveProvider;
-  status?: string;
-  runtime?: string;
-};
-
-export function MemoryProviderSelectionScreen({ cursor, selectedProvider, status, runtime = "pi" }: MemoryProviderSelectionScreenProps) {
-  const isCodex = runtime === "codex";
-  return (
-    <Box flexDirection="column">
-      <Text bold>Adaptive Memory</Text>
-      <Text dimColor>{isCodex
-        ? "Codex uses the pinned official Supermemory plugin hooks: a profile credential is stored in Deck's protected profile store and passed only to the managed Codex child process."
-            : "Enable or disable Adaptive Memory. Supermemory is the only durable backend and credentials are never written to Deck config."}</Text>
-      <Box marginTop={1}>
-        <MenuList
-          cursor={cursor}
-          items={[
-            { id: "none", label: "None", hint: selectedProvider === "none" ? "active" : "disable adaptive memory" },
-            { id: "supermemory", label: "Supermemory", hint: selectedProvider === "supermemory" ? "active" : isCodex ? "requires a profile credential (official plugin)" : "requires Deck secret-store token" },
-          ]}
-        />
-      </Box>
-      {status ? <Text color="green">{status}</Text> : null}
-    </Box>
-  );
-}
-
-type SupermemorySetupScreenProps = {
-  screen: "supermemory-profile" | "supermemory-token";
-  values: SupermemorySetupValues;
-  error?: string;
-  runtime?: string;
-  profileAliases?: readonly string[];
-  configuredProfiles?: readonly string[];
-  fallbackDefaultConfigured?: boolean;
-  configuredAliases?: readonly string[];
-  profileDiscoveryStatus?: "trusted" | "uncertain";
-  profileStoreReadable?: boolean;
-  cursor?: number;
-};
-
-export type SupermemoryProfileMenuEntry =
-  | { id: "fallback-default"; kind: "fallback-default"; profile: "default"; label: string; hint: string }
-  | { id: `ssh-alias:${string}`; kind: "ssh-alias"; profile: string; label: string; hint: string }
-  | { id: "continue"; kind: "continue"; label: "Continue"; hint: string };
-
-export function buildSupermemoryProfileMenuEntries(input: {
-  aliases: readonly string[];
-  fallbackDefaultConfigured: boolean;
-  configuredAliases: readonly string[];
-}): SupermemoryProfileMenuEntry[] {
-  const aliasConfiguration = new Set(input.configuredAliases.map((alias) => alias.toLowerCase()));
-  const hasDefaultAlias = input.aliases.some((alias) => alias.toLowerCase() === "default");
-  return [
-    {
-      id: "fallback-default",
-      kind: "fallback-default",
-      profile: "default",
-      label: hasDefaultAlias ? "default (fallback)" : "default",
-      hint: input.fallbackDefaultConfigured ? "Configured" : "Not configured",
-    },
-    ...input.aliases.map((alias): SupermemoryProfileMenuEntry => ({
-      id: `ssh-alias:${alias.toLowerCase()}`,
-      kind: "ssh-alias",
-      profile: alias,
-      label: alias.toLowerCase() === "default" ? "default (SSH alias)" : alias,
-      hint: aliasConfiguration.has(alias.toLowerCase()) ? "Configured" : "Not configured",
-    })),
-    { id: "continue", kind: "continue", label: "Continue", hint: "Finish profile setup" },
-  ];
-}
-
-export function SupermemorySetupScreen({
-  screen,
-  values,
-  error,
-  runtime = "pi",
-  profileAliases = [],
-  configuredProfiles = [],
-  fallbackDefaultConfigured = configuredProfiles.some((profile) => profile.toLowerCase() === "default"),
-  configuredAliases = configuredProfiles.filter((profile) => profile.toLowerCase() !== "default"),
-  profileDiscoveryStatus = "trusted",
-  profileStoreReadable = true,
-  cursor = 0,
-}: SupermemorySetupScreenProps) {
-  const field = screen === "supermemory-profile" ? "profile" : "token";
-  const label = field === "profile" ? "Supermemory profiles" : runtime === "opencode" ? "Supermemory API key (OpenCode plugin)" : runtime === "codex" ? "Supermemory API key (Codex plugin)" : "Supermemory API key (Deck Runtime)";
-  const required = true;
-  const value = values[field] ?? "";
-  const displayValue = field === "token" && value.length > 0 ? "[redacted]" : value;
-  const profileItems = buildSupermemoryProfileMenuEntries({
-    aliases: profileAliases,
-    fallbackDefaultConfigured,
-    configuredAliases,
-  });
-
-  return (
-    <Box flexDirection="column">
-      <Text bold>{label} {required ? "(required)" : ""}</Text>
-      {field === "profile" ? (
-        <>
-          <Text dimColor>Select a profile to add or replace its credential. Choose Continue when finished.</Text>
-          {profileDiscoveryStatus === "uncertain" ? (
-            <Text color="yellow">SSH profile discovery could not be trusted. Only the explicit default profile is available.</Text>
-          ) : null}
-          {!profileStoreReadable ? (
-            <Text color="yellow">Protected profile status could not be read. Profiles are shown as not configured.</Text>
-          ) : null}
-          <Box marginTop={1}>
-            <MenuList items={profileItems} cursor={cursor} />
-          </Box>
-        </>
-      ) : (
-        <Text dimColor>
-        {runtime === "pi"
-          ? "API key is validated now and stored only in Deck's owner-only secret store. Pi MCP receives only credential-free endpoint/canonical scope config; user identity is derived from the key at runtime."
-          : runtime === "opencode"
-            ? "API key is validated now and stored only in Deck's protected profile store. It is passed only to the managed OpenCode child process and overrides plugin login/config credentials."
-            : runtime === "codex"
-              ? "API key is stored only in Deck's protected profile store. It is passed only to the managed Codex child process for the official Supermemory plugin hooks; no Codex config file receives it."
-            : "API key is validated now and stored only in Deck's owner-only secret store. Optional runner MCP OAuth is configured separately and does not replace this runtime credential."}
-        </Text>
-      )}
-      {field === "token" ? <Box marginTop={1}>
-        <Text>{label}: <Text color="cyan">{displayValue}</Text></Text>
-      </Box> : null}
-      {field === "token" && value.length > 0 ? <Text dimColor>Summary will show token as [redacted].</Text> : null}
-      {error ? <Text color="yellow">{error}</Text> : null}
-      <Box marginTop={1}>
-        <Text dimColor>{field === "profile" ? "↑/↓ or j/k navigate, Enter selects, Esc goes back." : "Type value, Backspace to edit, Enter to save, Esc goes back."}</Text>
-      </Box>
     </Box>
   );
 }
@@ -474,7 +319,6 @@ export function AgentModelConfigListScreen({
     </Box>
   );
 }
-
 
 type OpenCodeModelDiscoveryScreenProps = {
   cursor: number;

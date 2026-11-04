@@ -9,7 +9,7 @@ import {claudeRequestInput} from "@deck/core/session/request-input";
  */
 import { boundRaw, sanitizeContextObservation, contextTokenSum, type ContextObservation } from "@deck/core/session/events";
 import { redactText } from "@deck/core/session/redaction";
-import type { DriverEvent, NativeMemoryDescriptor } from "@deck/core/session/driver";
+import type { DriverEvent } from "@deck/core/session/driver";
 import type { TurnFailure } from "@deck/core/session/failure";
 import { classifyClaudeFailure } from "./failure";
 
@@ -119,7 +119,7 @@ export class ClaudeStreamMapper {
   private streamingMessageId?: string;
   private contextCompacted = false;
   private contextObservation?: ContextObservation;
-  constructor(private readonly nativeMemory?: NativeMemoryDescriptor, private readonly sessionId?: string, private readonly contextTurnId?: string) {}
+  constructor(private readonly sessionId?: string, private readonly contextTurnId?: string) {}
 
   map(message: unknown): MapOutput {
     if (!isObj(message)) return { events: [] };
@@ -166,11 +166,9 @@ export class ClaudeStreamMapper {
         const completed = subtype === "hook_response";
         const exitCode = num(m.exit_code);
         const status = !completed ? "running" : exitCode !== undefined ? (exitCode === 0 ? "completed" : "failed") : m.outcome === "success" ? "completed" : ["error", "failed"].includes(String(m.outcome)) ? "failed" : "unknown";
-        const attributed = this.nativeMemory?.status === "ready" && this.nativeMemory.plugin?.exclusiveHookEvents?.includes(nativeEvent);
         events.push({ kind: completed ? "hook.completed" : "hook.started", data: {
           hookId, hookEvent, hookName: hookEvent, status, provenance: CLAUDE_PROTOCOL,
           ...(exitCode !== undefined ? { exitCode } : {}),
-          ...(attributed ? { provider: "supermemory", integration: "runner-plugin" } : {}),
         } });
       }
       return { events, hookSeen: true };

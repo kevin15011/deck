@@ -9,7 +9,7 @@ describe("launch diagnostic presentation", () => {
   const warning = {
     code: "claude-static-compatible",
     severity: "warning" as const,
-    message: "Pinned official Supermemory plugin owns recall/capture; Deck only supplies the selected process-local profile and verified scope. Co-loaded user plugins may see the process credential; protected execution remains unsupported.",
+    message: "Runner is operating in static-compatible mode.",
   };
 
   test("renders the static-compatible warning in yellow with unchanged text", () => {
@@ -17,8 +17,8 @@ describe("launch diagnostic presentation", () => {
   });
 
   test("renders errors in red", () => {
-    const error = { code: "claude-memory-handoff-unverified", severity: "error" as const, message: "blocked" };
-    expect(formatLaunchDiagnostic(error, true)).toBe(`${RED}[claude-memory-handoff-unverified] blocked${RESET}`);
+    const error = { code: "runner-launch-blocked", severity: "error" as const, message: "blocked" };
+    expect(formatLaunchDiagnostic(error, true)).toBe(`${RED}[runner-launch-blocked] blocked${RESET}`);
   });
 
   test("emits plain text when color is disabled or severity is informational", () => {
@@ -41,7 +41,7 @@ describe("launch diagnostic presentation", () => {
 
 describe("quiet launch diagnostics", () => {
   test("routine notes are quiet while errors, actionable warnings and the safety disclosure are not", () => {
-    for (const code of ["node-path-cas-residual-risk", "codex-static-compatible", "codex-hook-trust-bypass", "codex-supermemory-profile", "mcp-foreign-duplicate", "runner-inspection"]) {
+    for (const code of ["node-path-cas-residual-risk", "codex-static-compatible", "codex-hook-trust-bypass", "mcp-foreign-duplicate", "runner-inspection"]) {
       expect(isQuietDiagnostic({ code, severity: "warning", message: "m" })).toBe(true);
     }
     expect(isQuietDiagnostic({ code: "anything", severity: "info", message: "m" })).toBe(true);

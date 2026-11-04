@@ -10,8 +10,6 @@ export * from "./installation-plan";
 export * from "./internal-opencode-packages";
 export * from "./model-config";
 export * from "./opencode-mcp-config";
-export * from "./opencode-supermemory-plugin";
-export * from "./opencode-supermemory-profiles";
 export * from "./preflight";
 export * from "./prompt-generation";
 export * from "./required-tools";

@@ -25,10 +25,9 @@ Configuration is read and written only in the primary XDG layout. Runner-native 
 The supported top-level fields are:
 
 - `version` — currently `1`.
-- `adaptiveMemory` — active provider and non-secret Supermemory options.
 - `webSearch` — `enabled` and the selected `provider` (for example Tavily); the provider credential stays in its environment variable.
 - `capabilities.codebase-memory` — explicit global activation (default false), with optional boolean `runners` exceptions. A runner exception overrides the global value.
-- `packageInstructions` — per-runner guidance for Code Economy, RTK and Adaptive Memory. The Codebase Memory view derives from explicit activation.
+- `packageInstructions` — per-runner guidance for Code Economy and RTK. The Codebase Memory view derives from explicit activation.
 - `orchestratorPersonality` — `guia` or `pragmatica`; the default is `pragmatica`.
 - `developerTeamExecution` — advanced execution-contract, routing, authorization, prompt, telemetry, and cohort controls.
 - `profiles` and `activeProfile` — named configuration profiles.
@@ -39,9 +38,6 @@ A minimal, credential-free example is:
 ```json
 {
   "version": 1,
-  "adaptiveMemory": {
-    "enabled": false
-  },
   "capabilities": {
     "codebase-memory": { "enabled": false, "runners": {} }
   },
@@ -65,20 +61,8 @@ Unknown fields, unsupported versions, invalid enum values, malformed JSON, and c
 
 The runner dashboard shows package evidence and lets you toggle configurable or optional capabilities. Required or internal runner packages are not treated as ordinary toggles. Deck checks whether a binary is usable and whether an MCP entry is configured; a package declaration by itself is not proof of a working tool.
 
-The shared capability set includes explicitly activated Codebase Memory, RTK, Context7, and Supermemory tool bindings. Legacy Context Mode and Serena keys are ignored and omitted from canonical writes; legacy Codebase Memory package toggles do not enable the capability. The exact install/configuration action is runner-specific. Use [Runners](runners.md) when the same capability has different effects on each runner.
+The shared capability set includes explicitly activated Codebase Memory, RTK, and Context7. Legacy Context Mode and Serena keys are ignored and omitted from canonical writes; legacy Codebase Memory package toggles do not enable the capability. The exact install/configuration action is runner-specific. Use [Runners](runners.md) when the same capability has different effects on each runner.
 
-Package instructions are separate from adaptive-memory context. Enabled package instructions are official configured prompt content; memory is auxiliary context injected by the selected provider.
-
-## Adaptive memory
-
-Adaptive Memory is a boolean product setting: **Disabled** or **Enabled**. Legacy `activeProvider` values are normalized only for compatibility (`supermemory` maps to enabled, `none` maps to disabled). The launch flag `--memory=none` overrides globally enabled config for that launch on `deck pi developer`, `deck opencode developer` and `deck codex developer`; `deck claude developer` has no memory flag. Supermemory setup is runner-specific:
-
-| Runner | Setup input and effect | Persisted configuration boundary |
-|---|---|---|
-| Pi | The TUI validates a token and stores the runtime credential in Deck's owner-only secret store. Pi receives only the Deck loopback endpoint and a `0600` token-file path; no credential or Supermemory MCP entry is written to Pi configuration. | Deck config stores only Adaptive Memory enablement and non-secret options; the token is not written to Deck's `config.json` or Pi configuration. |
-| OpenCode, Claude and Codex | Deck installs the pinned official Supermemory plugin for the runner. The TUI validates the Supermemory key and stores it as a shared profile credential in Deck's owner-only secret store; Deck injects it only into the runner process it starts. | No credential is written to runner configuration, and a raw Supermemory MCP entry is never registered beside the plugin. |
-
-See [Adaptive memory](adaptive-memory.md) for provider behavior and governance.
 
 ## Profiles
 
@@ -122,7 +106,6 @@ The safe default keeps execution in observe/shadow mode with no cohort rollout a
 
 1. Select the active runner in the TUI.
 2. Review the package and MCP evidence before applying changes.
-3. Keep the Supermemory credential in Deck's protected secret store (a shared profile for OpenCode, Claude, and Codex; the Deck runtime key for Pi). Do not place bearer tokens in runner MCP or hook config.
 4. Run `deck doctor` after changing runner configuration.
 5. Use [Troubleshooting](troubleshooting.md) when a value is rejected or a runner remains indeterminate.
 

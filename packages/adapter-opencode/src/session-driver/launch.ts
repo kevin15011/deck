@@ -1,4 +1,3 @@
-import { createCaptureTicket } from "./capture-drain";
 import { validateOpenCodeEffectiveRoles } from "../native-role-source";
 import { PersonalMcpPreparationError } from "@deck/core/session/personal-mcp";
 import { assertOpenCodeControlName, assertOpenCodeProjectConfigAdmission, openCodeProjectConfigDisabled } from "../personal-mcp";
@@ -13,10 +12,7 @@ export type OpenCodeLaunchOptions = { executable?: string; baseEnv?: Readonly<Re
 
 /** Native user/global sources retain their paths and identity. Only Deck fields are added. */
 export function buildOpenCodeLaunch(input: DriverTaskInput, io: Pick<DriverHostIo, "writePrivateFile">, options: OpenCodeLaunchOptions = {}) {
-  if (input.nativeMemory?.status === "unavailable") throw new Error("opencode-native-memory-unavailable");
-  const loader = input.nativeMemory?.status === "ready" ? input.nativeMemory.plugin?.loaderPath : undefined;
-  if (input.nativeMemory?.status === "ready" && (!loader || !isAbsolute(loader) || !(input.nativeMemory.scopeMode === "global" ? input.nativeMemory.projectScope === undefined : /^sm_project_v1_[a-z0-9_]+$/.test(input.nativeMemory.projectScope ?? "")))) throw new Error("opencode-native-memory-invalid");
-  const plugins = loader ? [pathToFileURL(loader).href] : [];
+  const plugins: string[] = [];
   const base = options.baseEnv ?? process.env;
   const projectDisabled = !input.projectConfigTrusted || openCodeProjectConfigDisabled(base);
   const flag = (name: string) => ["true","1"].includes(base[name]?.toLowerCase() ?? "");
@@ -69,16 +65,12 @@ export function buildOpenCodeLaunch(input: DriverTaskInput, io: Pick<DriverHostI
     ...(projectDisabled ? {OPENCODE_DISABLE_EXTERNAL_SKILLS:"true"} : {}),
     OPENCODE_SERVER_PASSWORD: randomBytes(32).toString("hex"), OPENCODE_SERVER_USERNAME: "opencode",
   });
-  if (input.nativeMemory?.scopeMode === "global") for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
-  delete env.DECK_NATIVE_CAPTURE_TICKET;
-  const captureTicket = loader ? createCaptureTicket(input.taskId, io) : undefined;
-  if (captureTicket) env.DECK_NATIVE_CAPTURE_TICKET = captureTicket.path;
   if (input.nativeRoleDescriptor) validateOpenCodeEffectiveRoles(input.nativeRoleDescriptor.source.root, input.cwd, env);
   const expectedMcpSpecs = Object.fromEntries(input.mcp.servers.map(id => {
     const value = mcp[id] as Record<string, any>;
     return [id, value.headers ? { ...value, headers: Object.fromEntries(Object.entries(value.headers).map(([name, reference]) => [name, env[String(reference).slice(5, -1)] ?? ""])) } : value];
   }));
-  return { captureTicket, command: options.executable ?? "opencode", args: ["serve", "--hostname", "127.0.0.1", "--port", "0"], env, expectedMcpServers: [...input.mcp.servers], expectedMcpSpecs, expectedPlugins: plugins, expectedGlobalSkillPaths:globalSkillPaths };
+  return { command: options.executable ?? "opencode", args: ["serve", "--hostname", "127.0.0.1", "--port", "0"], env, expectedMcpServers: [...input.mcp.servers], expectedMcpSpecs, expectedPlugins: plugins, expectedGlobalSkillPaths:globalSkillPaths };
 }
 
 /** Compare only protected Deck declarations; unrelated native additions remain native. */

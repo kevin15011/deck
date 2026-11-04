@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-/** Opt-in native CLI acceptance; never imported by tests. No provider memory writes. */
+/** Opt-in native CLI acceptance; never imported by tests. Read-only session history and status. */
 import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -23,13 +23,8 @@ const base = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), "deck-cross-l
 const project = join(base, "project"); mkdirSync(project);
 const paths = resolveStatePaths({ env: { HOME: base, XDG_STATE_HOME: join(base, "state") }, tmpdir: base });
 const config: CrossRunnerConfig = { enabled: true, members: { lead: { runnerId: "claude", modelId: "haiku" }, architect: { runnerId: "codex", modelId: "gpt-6-luna" }, "apply-fast": { runnerId: "opencode", modelId: "opencode/big-pickle" } }, approvals: { claude: "relay", codex: "relay", opencode: "relay" }, maxConcurrentTasks: 4, claudeTosAcknowledgedAt: new Date().toISOString(), web: { port: 7421, trustedProxy: null, allowedOrigins: [], allowFunnel: false } };
-const captured: Record<string, { promptRecall: boolean; promptPropose: boolean; advertisedRecall: boolean; advertisedPropose: boolean }> = {};
-const drivers = [createClaudeSessionDriver({ tosAcknowledged: () => true, extraArgs: ["--tools", ""] }), createCodexSessionDriver(), createOpenCodeSessionDriver()].map((driver) => ({ ...driver, startTask: (input: Parameters<typeof driver.startTask>[0], io: Parameters<typeof driver.startTask>[1]) => {
-  captured[input.memberId] = { promptRecall: input.prompt.includes("deck_memory_recall"), promptPropose: input.prompt.includes("deck_memory_propose"), advertisedRecall: input.mcp.sessionTools.includes("deck_memory_recall"), advertisedPropose: input.mcp.sessionTools.includes("deck_memory_propose") };
-  return driver.startTask(input, io);
-} }));
+const drivers = [createClaudeSessionDriver({ tosAcknowledged: () => true, extraArgs: ["--tools", ""] }), createCodexSessionDriver(), createOpenCodeSessionDriver()];
 const checks: Record<string, boolean | number> = {};
-const writes: string[] = [];
 let daemon: RunningDaemon | undefined;
 let client: ControlClient | undefined;
 let manager!: SessionManager;
@@ -52,7 +47,7 @@ try {
   checks.driversReady = probes.every((probe) => probe.status !== "blocked");
   if (!checks.driversReady) throw new Error("native-driver-blocked");
   const started = await startDaemon({ paths, version: "cross-live", anchorCommand: [...command, "internal", "child-anchor"], createService: (services) => {
-    manager = new SessionManager({ ...services, drivers: { get: (id) => drivers.find((driver) => driver.runnerId === id), list: () => drivers }, config: () => config, sessionMcpCommand: [...command, "internal", "session-mcp"], rolePrompt: (member) => `You are ${member} in a bounded integration check. Use only Deck MCP tools. Do not use shell, files, native tasks, or web search. Do not repeat completed work. Memory is advisory. Delegate only when explicitly requested by the initial user instruction. Completion notices require results only.`, memory: async () => ({ recall: async () => ({ ok: true, advisoryText: "Synthetic project memory for acceptance only." }), propose: async (content) => { writes.push(content); return { ok: true }; } }) });
+    manager = new SessionManager({ ...services, drivers: { get: (id) => drivers.find((driver) => driver.runnerId === id), list: () => drivers }, config: () => config, sessionMcpCommand: [...command, "internal", "session-mcp"], rolePrompt: (member) => `You are ${member} in a bounded integration check. Use only Deck MCP tools. Do not use shell, files, native tasks, or web search. Do not repeat completed work. Delegate only when explicitly requested by the initial user instruction. Completion notices require results only.` });
     return manager;
   } });
   if (!started.ok) throw new Error("daemon-start-failed");
@@ -70,7 +65,7 @@ try {
     } catch { checks.approvalPolicyHealthy = false; cancelled = true; void daemon?.stop("live-approval-failed"); }
   }, 50);
   try {
-    const task = 'Call deck_memory_recall with query "acceptance". Call deck_memory_propose with content "cross acceptance shared proposal". Then reply exactly "worker-ok". Use only these Deck MCP tools.';
+    const task = 'Call deck_session_history to read this session evidence, then call deck_status. Reply exactly "worker-ok". Use only these Deck MCP tools.';
     const sent = await client.command({ v: 1, commandId: randomUUID(), type: "prompt.send", text: `Use deck_delegate exactly twice: agent architect, task ${JSON.stringify(task)}; agent apply-fast, task ${JSON.stringify(task)}. Wait for both with deck_task_wait and read both with deck_task_result. Do not perform their tasks yourself. Finish with "cross-ok". Do not delegate again after a completion notice.` }, sessionId);
     if (!sent.outcome.ok) throw new Error("prompt-refused");
     await wait(() => events().filter((event) => event.kind === "task.created" && event.source.taskId !== "lead").length >= 2);
@@ -88,14 +83,10 @@ try {
     checks.leadCompleted = all.some((event) => event.kind === "task.state" && event.source.taskId === "lead" && event.data.state === "completed");
     for (const member of ["architect", "apply-fast"]) {
       checks[`${member}Completed`] = all.some((event) => event.kind === "task.state" && event.source.memberId === member && event.data.state === "completed");
-      checks[`${member}Recalled`] = all.some((event) => event.kind === "memory.recalled" && event.source.memberId === member && event.data.ok === true);
-      checks[`${member}Proposed`] = all.some((event) => event.kind === "memory.proposed" && event.source.memberId === member);
     }
-    checks.sharedWrites = writes.length;
-    checks.singleWriterDeduped = writes.length === 1;
     checks.noUnexpectedTasks = all.filter((event) => event.kind === "task.created" && event.source.taskId !== "lead").length === 2;
     if (Object.values(checks).some((value) => value === false)) {
-      const members = ["lead", "architect", "apply-fast"].map((memberId) => ({ memberId, ...captured[memberId], approvalsRequested: all.filter((event) => event.kind === "approval.requested" && event.source.memberId === memberId).length, approvalsDenied: all.filter((event) => event.kind === "approval.resolved" && event.source.memberId === memberId && event.data.decision === "deny").length, memoryToolEvents: all.filter((event) => ["tool.started", "tool.completed"].includes(event.kind) && event.source.memberId === memberId && Object.values(event.data).some((value) => typeof value === "string" && value.includes("deck_memory"))).length }));
+      const members = ["lead", "architect", "apply-fast"].map(memberId => ({ memberId, approvalsRequested: all.filter(event => event.kind === "approval.requested" && event.source.memberId === memberId).length, approvalsDenied: all.filter(event => event.kind === "approval.resolved" && event.source.memberId === memberId && event.data.decision === "deny").length }));
       console.error(JSON.stringify({ members }));
       console.error(JSON.stringify({ workerResults: all.filter((event) => event.kind === "task.result" && event.source.taskId !== "lead").map((event) => ({ memberId: event.source.memberId, text: redactText(String(event.data.summary ?? ""), 1200) })) }));
     }

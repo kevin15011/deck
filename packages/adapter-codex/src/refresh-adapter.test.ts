@@ -57,7 +57,7 @@ test("preparation heals old owned content once, warns on custom roles and reject
       expect(secondLaunch.diagnostics.some(item => item.code === 'codex-hooks-preserved')).toBe(false);
     }
     // A changed executable hook remains unauthenticated even with the native preference present.
-    writeFileSync(configPath, nativeConfig.replace('deck internal codex-memory-hook', 'user-custom-command'));
+    writeFileSync(configPath, nativeConfig.replace('developer-team-execution.js', 'user-custom-command.js'));
     expect(() => prepareCodexNativeRole(codexHome, 'deck-quality')).toThrow('codex-session-generation-unverified');
     writeFileSync(configPath, nativeConfig);
     const custom = readFileSync(rolePath, 'utf8') + '\nuser_setting = true\n';

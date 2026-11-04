@@ -24,14 +24,13 @@ function setup(ids?: ClaudeCapabilityId[]) {
 
 test("no owned Claude selection needs no install and yields no ordinary child servers", async () => {
   const e = setup();
-  const adapter = createClaudeRunnerAdapter({ ...e, resolveMemoryCredential: () => { throw new Error("must not read credentials"); } });
+  const adapter = createClaudeRunnerAdapter({ ...e });
   expect(await adapter.readSessionCapabilityOverrides()).toEqual({});
 });
 
 test("session additions read only guarded Codebase; ordinary native packages are not reconstructed", async () => {
   const e = setup(["context-mode", "codebase-memory", "context7", "web-search", "rtk"]);
   const adapter = createClaudeRunnerAdapter({ ...e, resolveCommand: () => process.execPath,
-    resolveMemoryCredential: () => { throw new Error("must not read memory credentials"); },
     webSearchCredential: () => { throw new Error("must not read web credentials"); },
     installSharedTool: async () => { throw new Error("must not install"); },
   });

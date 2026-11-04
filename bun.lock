@@ -11,7 +11,6 @@
       "devDependencies": {
         "@types/bun": "latest",
         "@types/react": "latest",
-        "opencode-supermemory": "2.1.0",
         "typescript": "latest",
       },
     },
@@ -22,7 +21,6 @@
         "@deck/adapter-codex": "workspace:*",
         "@deck/adapter-opencode": "workspace:*",
         "@deck/adapter-pi": "workspace:*",
-        "@deck/adapter-supermemory": "workspace:*",
         "@deck/core": "workspace:*",
         "@deck/provider-tavily": "workspace:*",
         "@deck/session-host": "workspace:*",
@@ -71,7 +69,6 @@
       "name": "@deck/adapter-opencode",
       "version": "0.0.0",
       "dependencies": {
-        "@deck/adapter-supermemory": "workspace:*",
         "@deck/core": "workspace:*",
         "@deck/provider-tavily": "workspace:*",
         "@deck/sdd-runtime": "workspace:*",
@@ -86,16 +83,8 @@
         "@deck/sdd-runtime": "workspace:*",
       },
       "devDependencies": {
-        "@deck/adapter-supermemory": "workspace:*",
         "@earendil-works/pi-ai": "1.0.0",
         "@earendil-works/pi-coding-agent": "1.0.0",
-      },
-    },
-    "packages/adapter-supermemory": {
-      "name": "@deck/adapter-supermemory",
-      "version": "0.0.0",
-      "dependencies": {
-        "@deck/core": "workspace:*",
       },
     },
     "packages/core": {
@@ -188,8 +177,6 @@
     "@deck/adapter-opencode": ["@deck/adapter-opencode@workspace:packages/adapter-opencode"],
 
     "@deck/adapter-pi": ["@deck/adapter-pi@workspace:packages/adapter-pi"],
-
-    "@deck/adapter-supermemory": ["@deck/adapter-supermemory@workspace:packages/adapter-supermemory"],
 
     "@deck/cli": ["@deck/cli@workspace:apps/cli"],
 
@@ -622,8 +609,6 @@
     "onetime": ["onetime@5.1.2", "", { "dependencies": { "mimic-fn": "^2.1.0" } }, "sha512-kbpaSSGJTWdAY5KPVeMOKXSrPtr8C8C7wodJbcsd51jRnmD+GZu8Y0VoU6Dm5Z4vWr0Ig/1NKuWRKf7j5aaYSg=="],
 
     "openai": ["openai@7.19.0", "", { "peerDependencies": { "@aws-sdk/credential-provider-node": ">=3.972.0 <4", "@smithy/hash-node": ">=4.3.0 <5", "@smithy/signature-v4": ">=5.4.0 <6", "undici": ">=5 <9", "ws": "^8.21.0", "zod": "^3.25 || ^4.0" }, "optionalPeers": ["@aws-sdk/credential-provider-node", "@smithy/hash-node", "@smithy/signature-v4", "undici", "ws", "zod"] }, "sha512-MX2s3u2L5racTO0CC/SWpCOasJQBCJrqLKXK+l82cAhdeF8mPMBEe/gxMm0ZFa2xpKpOFLRjxv5afYEZbBXmbQ=="],
-
-    "opencode-supermemory": ["opencode-supermemory@2.1.0", "", { "peerDependencies": { "@opentui/core": ">=0.5.8", "@opentui/solid": ">=0.5.8", "solid-js": ">=1.9.0" }, "optionalPeers": ["@opentui/core", "@opentui/solid", "solid-js"], "bin": { "opencode-supermemory": "dist/cli.js" } }, "sha512-yzLuEoe0T2BU/YS8kct5CAgK4U+5UyM084Q0/bpo2avLJsC6Owqw0qUnnoTz3UQBdgiQiSxSfk9WxLMlZ+nlCw=="],
 
     "p-retry": ["p-retry@4.6.2", "", { "dependencies": { "@types/retry": "0.12.0", "retry": "^0.13.1" } }, "sha512-312Id396EbJdvRONlngUx0NydfrIQ5lsYu0znKVUzVvArzEIt08V1qhtyESbGVd1FGX7UKtiFp5uwKZdM8wIuQ=="],
 

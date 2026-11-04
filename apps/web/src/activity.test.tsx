@@ -167,18 +167,18 @@ test('completion-first hooks retain their terminal outcome after late starts; un
     expect(activityEvents([start, event(2, 'task.state', { taskId: 'lead', state: 'failed' })])[0]).toMatchObject({ status: 'unfinished' });
     expect(activityEvents([start, event(2, 'turn.completed', { status: 'completed' }), hook(3, 'hook.completed', { attempt: 1, status: 'stopped' })])[0]).toMatchObject({ status: 'stopped' });
 });
-test('hook rendering is generic unless native provider attribution exists and never exposes omitted payloads or claims memory success', () => {
+test('hook rendering remains generic and does not expose omitted payloads', () => {
     const html = renderToStaticMarkup(<Activity events={[
         hook(1, 'hook.started', { hookName: '<script>native</script>', command: 'PRIVATE COMMAND', output: 'PRIVATE OUTPUT', path: 'PRIVATE PATH' }),
         hook(2, 'hook.completed', { status: 'completed' }),
-        hook(3, 'hook.completed', { hookId: 'memory', hookEvent: 'UserPromptSubmit', provider: 'supermemory', integration: 'runner-plugin', status: 'failed', durationMs: 200, exitCode: 1 }),
+        hook(3, 'hook.completed', { hookId: 'prompt', hookEvent: 'UserPromptSubmit', status: 'failed', durationMs: 200, exitCode: 1 }),
         hook(4, 'hook.completed', { hookId: 'unknown', hookEvent: 'Stop', status: 'unknown' }),
     ]}/>);
-    expect(html).toContain('Native hook'); expect(html).toContain('Supermemory runner plugin'); expect(html).toContain('Outcome unknown'); expect(html).toContain('Failed');
+    expect(html).toContain('Native hook'); expect(html).toContain('Outcome unknown'); expect(html).toContain('Failed');
     expect(html).not.toContain('<script');
-    for (const text of ['PRIVATE COMMAND', 'PRIVATE OUTPUT', 'PRIVATE PATH', 'Memory saved', 'Memory recalled']) expect(html).not.toContain(text);
+    for (const text of ['PRIVATE COMMAND', 'PRIVATE OUTPUT', 'PRIVATE PATH', 'Private provider result']) expect(html).not.toContain(text);
     const generic = renderToStaticMarkup(<Activity events={[hook(1, 'hook.completed')]}/>);
-    expect(generic).not.toContain('Supermemory'); expect(generic).toContain('SessionStart');
+    expect(generic).toContain('SessionStart');
 });
 test('Lead generations retain activity and isolate reused hook IDs by actual task identity', () => {
     const old = hook(1, 'hook.completed', { attempt: 1 });

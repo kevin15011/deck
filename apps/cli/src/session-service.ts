@@ -5,7 +5,6 @@ import { renderSessionOverlay, type SessionOverlaySection } from "@deck/core/ses
 import { composeSkillSessionStartContext } from "../../../packages/sdd-runtime/src/execution/session-start-context";
 import { createHash } from "node:crypto";
 import { ProjectPreparationService } from "../../../packages/sdd-runtime/src/execution/project-preparation";
-import { isCodebaseMemoryEnabled } from "@deck/core";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import { prepareSessionNativeRole, prepareSessionNativeSkills } from "./session-native-skills";
 import {readScopedTaskDiff} from "./session-task-diff";
@@ -13,7 +12,7 @@ import {readScopedTaskDiff} from "./session-task-diff";
  * Production composition of the session daemon's service (D-6: apps/cli is the only place that
  * knows adapters). Builds the driver lookup from the adapter registry, wires live config,
  * and constructs the SessionManager. Resolves ordinary selected MCP packages
- * read-only through each adapter, with session-scoped memory and Web Search composition.
+ * read-only through each adapter, with Web Search composition.
  */
 import { getAgentContent, type RunnerAdapter } from "@deck/core";
 import type { CrossRunnerConfig } from "@deck/core/config/deck-config";
@@ -22,10 +21,8 @@ import { SessionManager, type DaemonServices, type DriverLookup } from "@deck/se
 import type { DeckConfigStore } from "./deck-config-store";
 import { createDefaultAdapterRegistry, deckInternalCommand } from "./runner-adapters";
 import { join } from "node:path";
-import { createSessionMemoryPort, resolveSessionChildMcp } from "./session-shared-services";
-import type { createSupermemoryRuntimeHost } from "./supermemory-runtime-host";
+import { resolveSessionChildMcp } from "./session-shared-services";
 import { SessionCodebaseReadiness } from "./session-codebase-readiness";
-import type { NativeMemoryPreparationEffects } from "./session-native-memory";
 import { discoverSessionModels } from "./session-model-catalog";
 
 export function createCrossSessionDrivers(adapters: readonly RunnerAdapter[], onError?: (runnerId: string, error: Error) => void): DriverLookup {
@@ -47,7 +44,6 @@ export function sessionRolePrompt(memberId: string, context: SessionRolePromptCo
   if (!DEVELOPER_TEAM_AGENTS.some(agent => agent.id === roleId)) throw new Error(`Unknown Deck session role: ${memberId}`);
   const sections: SessionOverlaySection[] = [{ kind: "session-notice" }];
   if (isLead) sections.push({ kind: "delegation", context }, { kind: "task-roster", tasks: context.tasks });
-  sections.push({ kind: "memory-status" });
   if (context.changeId) sections.push({ kind: "change-binding", changePath: join(context.projectRoot, "openspec", "changes", context.changeId) });
   return [role?.agentBody, renderSessionOverlay(roleId, sections)].filter(Boolean).join("\n\n");
 }
@@ -56,10 +52,8 @@ export type CrossSessionServiceOptions = {
   configStore: Pick<DeckConfigStore, "read">;
   adapters?: () => readonly RunnerAdapter[];
   sessionMcpCommand?: readonly string[];
-  memoryRuntime?: typeof createSupermemoryRuntimeHost;
   environment?: Readonly<Record<string, string | undefined>>;
   codebaseReadiness?: SessionCodebaseReadiness;
-  nativeMemoryEffects?: NativeMemoryPreparationEffects;
 };
 
 export function createCrossSessionService(services: DaemonServices, options: CrossSessionServiceOptions): SessionManager {
@@ -90,7 +84,7 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
       // Keep each turn's resolved specs isolated from concurrent sessions.
       const adapter = list.find((adapter) => adapter.runnerId === runnerId);
       const nativeSkills = await prepareSessionNativeSkills(adapter, options.configStore.read(), check => services.logger.warn("claude.session-skills-unverified", { check }));
-      const resolver = await resolveSessionChildMcp(adapter, options.configStore.read(), options.environment, { readiness, context, nativeSkills }, options.nativeMemoryEffects);
+      const resolver = await resolveSessionChildMcp(adapter, options.configStore.read(), options.environment, { readiness, context, nativeSkills });
       const validateLaunch = nativeSkills ? () => validateClaudeSessionIntent(nativeSkills, options.configStore.read()) : undefined;
       // Managed preparation may await a backend. Recheck intent after that wait,
       // and release the binding if the generation was revoked in the meantime.
@@ -103,7 +97,6 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
       };
     },
     closeChildMcp: () => readiness.close(),
-    memory: async (context) => createSessionMemoryPort(context, options.configStore.read(), options.memoryRuntime),
     rolePrompt: sessionRolePrompt,
     assignedRoleId: memberId => { const roleId=memberId.startsWith("deck-")?memberId:`deck-${memberId}`; return DEVELOPER_TEAM_AGENTS.some(role => role.id === roleId) ? roleId : undefined; },
     scopedDiff: readScopedTaskDiff,

@@ -29,7 +29,7 @@ The web sidebar groups persistent sessions by project. Add a project using folde
 
 Use the three-dot menu beside a project to **Rename** it or **Remove project** from the sidebar. Removal persists across reloads and daemon restarts; it does not delete files or history, or stop running sessions. Adding the same directory again restores the original project and its sessions. Renaming changes only the display name.
 
-Opening a session first reconnects its event stream. Prepare the session before writing: Deck checks the project, runner and configured tools, instructions and memory without sending a model prompt. Preparation can be cancelled or retried; drafts survive connection changes. A daemon restart or Lead assignment change requires preparation again. Successful preparation does not keep a model process warm: actual turns still start or resume the runner and revalidate resources.
+Opening a session first reconnects its event stream. Prepare the session before writing: Deck checks the project, runner and configured tools and instructions without sending a model prompt. Preparation can be cancelled or retried; drafts survive connection changes. A daemon restart or Lead assignment change requires preparation again. Successful preparation does not keep a model process warm: actual turns still start or resume the runner and revalidate resources.
 
 **Close session** stops that session's work and releases its owned resources. Its history remains visible, and **Prepare session** reconnects the same session with its history, images and compatible native context. Previously closed sessions can also be prepared in place. The shared daemon and other sessions remain available. Closing the browser only detaches the client.
 
@@ -104,13 +104,12 @@ Sessions ask for approval by default (`relay`). Enable YOLO explicitly for a ses
 
 Claude cross turns also receive the project's root `AGENTS.md` explicitly, including resumed turns and delegated Claude tasks. The file must be regular UTF-8, at most 64 KiB, and not a symlink; invalid present files produce a visible preparation failure. Codex and OpenCode retain native project instruction loading. This does not enable unrelated runner settings or hooks.
 
-## Memory and tools
+## Tools and native hooks
 
-Each child gets the explicit MCP package set selected for its runner plus Deck's session bridge. When adaptive memory is enabled, Claude, Codex and OpenCode use their configured official Supermemory integration with the same canonical project identity prepared for normal Deck developer launches. Each execution has one memory integration: these native runners do not also receive `deck_memory_recall` or `deck_memory_propose`. Missing scope, unavailable plugins or conflicting configuration fail preparation explicitly; Deck does not fall back to a default namespace or silently switch to daemon memory. Pi's existing Deck integration is unchanged. Memory remains advisory and does not override OpenSpec.
+Each child gets the explicit MCP package set selected for its runner plus Deck's session bridge.
 
-Activity shows native hook execution when the runner exposes it, including hooks unrelated to Supermemory. Hook entries show the observed lifecycle and outcome, available duration and trusted provider attribution. A completed hook means the hook completed; it does not establish that a provider recalled or saved memory. Explicit memory tools remain ordinary tool entries. Claude and Codex expose hook lifecycle events; OpenCode's internal plugin hooks do not currently expose equivalent verified events, so their execution is not fabricated in Activity. Hook output, commands and filesystem paths are not displayed.
+Activity shows native hook execution when the runner exposes it, when available. Hook entries show the observed lifecycle and outcome, available duration. Claude and Codex expose hook lifecycle events; OpenCode's internal plugin hooks do not currently expose equivalent verified events, so their execution is not fabricated in Activity. Hook output, commands and filesystem paths are not displayed.
 
-Native plugin readiness does not certify automatic storage. Claude's asynchronous Stop capture has no verified completion barrier in the managed per-turn lifecycle. OpenCode's native event dispatcher does not await its plugin's background capture, and its disposal endpoint is not a capture-completion barrier. The Lead receives this limitation explicitly; use native explicit memory tools when available for an operation with a reported result. Codex exposes its Stop hook lifecycle, but hook completion alone still does not certify provider persistence. No live provider write is implied by the configuration and offline contract checks.
 
 Web Search uses the configured provider and its existing credential environment variable. Credentials are passed in process environment, not command arguments or event payloads. A missing credential fails the configured tool setup instead of silently enabling another provider.
 
@@ -118,7 +117,7 @@ Codebase Memory is checked through its actual MCP protocol before the native run
 
 ## Personal-use and security boundary
 
-Deck starts the unmodified native CLIs as the signed-in OS user. Native CLIs retain responsibility for their own authentication; Deck does not read or copy their credential files or substitute API keys for native subscriptions. Unrelated user-global MCPs, plugins, hooks and native delegation remain excluded; only the reviewed configured memory integration is selectively admitted. Displaying hook activity does not enable additional hooks. See the [driver matrix](reference/support-matrix.md#cross-runner-session-drivers) for their exact scope.
+Deck starts the unmodified native CLIs as the signed-in OS user. Native CLIs retain responsibility for their own authentication; Deck does not read or copy their credential files or substitute API keys for native subscriptions. Unrelated user-global MCPs, plugins, hooks and native delegation remain excluded. Displaying hook activity does not enable additional hooks. See the [driver matrix](reference/support-matrix.md#cross-runner-session-drivers) for their exact scope.
 
 Claude setup and launch use the existing native login without a separate subscription notice or acknowledgement step. Legacy acknowledgement settings remain readable but do not gate sessions. The compatibility command `deck session ack-claude-tos` still records an optional acknowledgement; `--yes` skips its interactive prompt. It is not a setup or readiness prerequisite.
 

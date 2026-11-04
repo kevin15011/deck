@@ -144,7 +144,7 @@ test('Lead/cards share one index, while new immutable events or another session 
 });
 
 test('synthetic Claude API error cannot replace valid usage in live/result/rebuilt snapshot UI', () => {
-    const mapper = new ClaudeStreamMapper(undefined, 'thread-lead', 'turn'), current = new CurrentEvents();
+    const mapper = new ClaudeStreamMapper('thread-lead', 'turn'), current = new CurrentEvents();
     const all: SessionEvent[] = [];
     const append = (kind: SessionEvent['kind'], data: Record<string, unknown>) => {
         const event = e(all.length + 1, kind, data); event.source.runnerId = 'claude'; all.push(event); current.apply(event);

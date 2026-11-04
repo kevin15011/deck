@@ -7,7 +7,6 @@ describe("workspace test dependencies", () => {
     ["core", "@deck/adapter-codex"],
     ["core", "@deck/adapter-opencode"],
     ["core", "@deck/adapter-pi"],
-    ["adapter-pi", "@deck/adapter-supermemory"],
   ])("%s explicitly declares %s for tests only", (workspace, dependency) => {
     const manifest = JSON.parse(readFileSync(
       join(import.meta.dir, "..", "packages", workspace, "package.json"), "utf-8",

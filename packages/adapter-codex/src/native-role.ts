@@ -54,7 +54,7 @@ export function prepareCodexNativeRole(root:string,roleId:string):NativeRoleDesc
     for(const entry of hookContributions) { const content=selectContributionContent(config,entry.selector); if(content===undefined || !matchesCodexHookContribution(entry,content)) throw new Error(`hook-receipt-mismatch:${hookId(entry)}`); }
     const hooks:NativeRoleDescriptor["hooks"][number][]=[];
     for(const match of config.matchAll(/^# deck-codex-hook:([a-z-]+):start\n([\s\S]*?)^# deck-codex-hook:\1:end$/gm)) {
-      if(!["memory-bridge","rtk","supermemory","readiness"].includes(match[1]!) || !hookContributions.some(entry=>entry.selector.kind==="text" && entry.selector.start===`# deck-codex-hook:${match[1]}:start`)) throw new Error(`hook-not-in-manifest:${match[1]}`);
+      if(!["rtk","readiness"].includes(match[1]!) || !hookContributions.some(entry=>entry.selector.kind==="text" && entry.selector.start===`# deck-codex-hook:${match[1]}:start`)) throw new Error(`hook-not-in-manifest:${match[1]}`);
       const parsed=Bun.TOML.parse(match[2]!) as any;
       for(const [event,groups] of Object.entries(parsed.hooks??{})) for(const group of groups as any[]) for(const hook of group.hooks??[]) {
         if(hook.type!=="command" || typeof hook.command!=="string" || hook.async===true) throw new Error(`hook-unsupported-shape`);

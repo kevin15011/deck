@@ -16,7 +16,6 @@ import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import { getAgentContent, getTeamSessionInstructions, type DeveloperTeamPromptProfileV1 } from "@deck/core/teams/developer/content-registry";
 import type { CapabilityInstructionBundle } from "@deck/core";
 import { type OrchestratorPersonality } from "@deck/core/config/deck-config";
-import { type MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
 import { composeApplyAgentPrompt } from "@deck/core/teams/developer/orchestrator-content";
 import type { ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
 
@@ -39,10 +38,6 @@ export type GeneratePromptFilesOptions = {
   personality?: OrchestratorPersonality;
   /** Effective profile selected by the rollout gate. Defaults to legacy. */
   promptProfile?: DeveloperTeamPromptProfileV1;
-  /** @deprecated OpenCode memory is owned by the official plugin; ignored. */
-  memoryBundle?: MemoryInjectionBundle;
-  /** @deprecated Raw Supermemory MCP detection no longer affects OpenCode prompts; ignored. */
-  activeMemoryProviderFromConfig?: "supermemory";
   /**
    * Optional modification authorization for apply agents.
    * When provided for apply agents (general/backend/frontend), the authorization card
@@ -97,22 +92,8 @@ const APPLY_AGENT_IDS = [
   "deck-apply-deep",
 ] as const;
 
-export function removeDeckMemoryClaimsForOpenCode(content: string): string {
-  return content
-    .split("\n")
-    .map((line) => line
-      .replace(
-        "- Use only the configured capabilities relevant to the outcome. OpenSpec, source, tests, and current runner evidence outrank adaptive memory.",
-        "- Use only the configured capabilities relevant to the outcome. OpenSpec, source, tests, and current runner evidence are authoritative.",
-      )
-      .replace("configured adaptive memory, and ", ""))
-    .filter((line) => !/adaptive[ -](?:context|memory)/i.test(line))
-    .join("\n");
-}
-
 /**
- * Build prompt content without Deck-owned memory policy. The official
- * Supermemory plugin owns all OpenCode memory behavior.
+ * Build canonical prompt content with runner-native skill references.
  *
  * @param agent - The agent to build prompt for
  * @param skillPath - Path to the skill file
@@ -145,7 +126,6 @@ function buildPromptContent(
     }) ??
       content.agentBody)
     : content.agentBody;
-  baseContent = removeDeckMemoryClaimsForOpenCode(baseContent);
 
   // REQ-OA-005: Inject authorization card for apply agents when authorization is provided
   // This ensures the apply agent receives real authorization context at runtime,
@@ -187,10 +167,6 @@ export function buildPromptGenerationPlan(
     capabilityInstructions?: CapabilityInstructionBundle;
     personality?: OrchestratorPersonality;
     promptProfile?: DeveloperTeamPromptProfileV1;
-    /** @deprecated OpenCode memory is owned by the official plugin; ignored. */
-    memoryBundle?: MemoryInjectionBundle;
-    /** @deprecated Raw Supermemory MCP detection no longer affects OpenCode prompts; ignored. */
-    activeMemoryProviderFromConfig?: "supermemory";
     /**
      * Optional modification authorization for apply agents.
      * When provided, authorization card is injected into apply-agent prompts (REQ-OA-005).
@@ -201,9 +177,7 @@ export function buildPromptGenerationPlan(
   const { configDir, capabilityInstructions, personality, authorization } = options;
   const promptProfile = options.promptProfile ?? "compact";
 
-  const effectiveCapabilityInstructions = capabilityInstructions
-    ? { instructions: Object.freeze(capabilityInstructions.instructions.filter((fragment) => fragment.packageId !== "adaptive-memory")) }
-    : undefined;
+  const effectiveCapabilityInstructions = capabilityInstructions;
 
   const promptsDir = join(configDir, "prompts", "deck-team");
 

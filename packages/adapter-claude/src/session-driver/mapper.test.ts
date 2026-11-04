@@ -3,7 +3,7 @@ import { fixtureLines } from "./fixtures";
 import { ClaudeLineSplitter, ClaudeStreamMapper, parseClaudeLine } from "./mapper";
 
 test('Claude context uses the latest main assistant API input and exact-model result capacity', () => {
-  const mapper = new ClaudeStreamMapper(undefined, 'session', 'execution');
+  const mapper = new ClaudeStreamMapper('session', 'execution');
   const assistant = { type: 'assistant', session_id: 'session', parent_tool_use_id: null, message: { id: 'msg1', model: 'claude-model', content: [], usage: { input_tokens: 2, cache_creation_input_tokens: 381, cache_read_input_tokens: 3485, output_tokens: 900 } } };
   const result = { type: 'result', session_id: 'session', subtype: 'success', usage: { input_tokens: 99999, output_tokens: 999, cache_read_input_tokens: 99999 }, modelUsage: { 'claude-model': { contextWindow: 200000 }, other: { contextWindow: 1000000 } } };
   expect(mapper.map(result).events[0].data.context).toBeUndefined();
@@ -23,7 +23,7 @@ test('Claude context uses the latest main assistant API input and exact-model re
 
 test('Claude sanitized fixture has per-call usage distinct from result accounting', () => {
   const messages = fixtureLines('turn-success.jsonl').map(line => JSON.parse(line));
-  const mapper = new ClaudeStreamMapper(undefined, messages.find(m => m.type === 'assistant').session_id, 'execution');
+  const mapper = new ClaudeStreamMapper(messages.find(m => m.type === 'assistant').session_id, 'execution');
   const observations = messages.flatMap(m => mapper.map(m).events).filter(e => e.data.context);
   expect(observations).toHaveLength(2);
   expect(observations[0].data.context).toMatchObject({ tokens: 3868, capacity: null, basis: 'claude-last-request-input', modelId: 'claude-haiku-5-5' });
@@ -118,12 +118,11 @@ describe("Claude mapper (synthetic tool and error shapes)", () => {
     const raw = { type: "system", subtype: "future", payload: "regular data" };
     expect(mapper.map(raw).events[0]!.raw).toBe(raw);
   });
-  test("hook attribution requires an exclusive trusted event set and never exposes hook context", () => {
-    const nativeMemory = { provider: "supermemory", integration: "runner-plugin", status: "ready", plugin: { root: "/trusted/plugin", exclusiveHookEvents: ["SessionStart"] } } as const;
-    const mapper = new ClaudeStreamMapper(nativeMemory);
+  test("hook lifecycle never exposes executable commands or private hook context", () => {
+    const mapper = new ClaudeStreamMapper();
     const events = mapper.map({ type: "system", subtype: "hook_response", hook_id: "h1", hook_event: "SessionStart", hook_name: "node /private/plugin/hook.js token=synthetic-secret", exit_code: 0, outcome: "success", output: "private recalled context", stdout: "private context", stderr: "token=synthetic-secret" }).events;
     const hook = events.find(e => e.kind === "hook.completed")!;
-    expect(hook.data).toMatchObject({ provider: "supermemory", integration: "runner-plugin", status: "completed" });
+    expect(hook.data).toMatchObject({ status: "completed" });
     expect(JSON.stringify(hook)).not.toContain("private");
     expect(JSON.stringify(hook)).not.toContain("synthetic-secret");
     expect(JSON.stringify(events)).not.toContain("/private/");
@@ -238,7 +237,7 @@ describe("Claude partial message stream", () => {
 
 test('Claude incomplete, invalid or overflowing per-call usage does not carry the previous call', () => {
   for (const usage of [undefined, { input_tokens: 1 }, ...[NaN, Infinity, -1, 0.5, Number.MAX_SAFE_INTEGER].map(input_tokens => ({ input_tokens, cache_creation_input_tokens: 1, cache_read_input_tokens: 0 }))]) {
-    const mapper = new ClaudeStreamMapper(undefined, 's', 'execution');
+    const mapper = new ClaudeStreamMapper('s', 'execution');
     const message = { type: 'assistant', session_id: 's', message: { model: 'model', usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } };
     mapper.map(message);
     expect(mapper.map({ ...message, message: { model: 'model', usage } }).events.at(-1)?.data.context).toMatchObject({ tokens: null, capacity: null });
@@ -250,7 +249,7 @@ test('recorded synthetic API error shape preserves the last valid context and vi
   // Reviewed retained seq27013 fields; identifiers/text are sanitized, no history read.
   const error = JSON.parse(fixtureLines('context-synthetic-api-error.jsonl')[0]!);
   for (const patch of [{}, { is_api_error_message: true, message: { ...error.message, model: 'model' } }, { is_api_error_message: false }, { is_api_error_message: false, message: { ...error.message, model: 'model' }, error: 'rate_limit', api_error_status: 429, api_error_origin: 'first_party' }]) {
-    const mapper = new ClaudeStreamMapper(undefined, 'session', 'execution');
+    const mapper = new ClaudeStreamMapper('session', 'execution');
     mapper.map({ type: 'assistant', session_id: 'session', message: { model: 'model', usage: { input_tokens: 148000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } });
     const out = mapper.map({ ...error, ...patch });
     expect(out.events.some(e => e.kind === 'usage')).toBe(false);
@@ -263,7 +262,7 @@ test('recorded synthetic API error shape preserves the last valid context and vi
 });
 
 test('continuity input is last main request with cache and real identity; later failure invalidates it without changing UI',()=>{
- const mapper=new ClaudeStreamMapper(undefined,'s','turn');
+ const mapper=new ClaudeStreamMapper('s','turn');
  const message={type:'assistant',session_id:'s',message:{id:'r',model:'m',content:[],usage:{input_tokens:1,cache_creation_input_tokens:2,cache_read_input_tokens:3}}};
  expect(mapper.map(message).events.find(e=>e.kind==='usage')?.data.requestInput).toMatchObject({tokens:6,nativeRequestId:'r',final:false});
  expect(mapper.map({...message,parent_tool_use_id:'nested'}).events.some(e=>e.data.requestInput)).toBe(false);
@@ -271,7 +270,7 @@ test('continuity input is last main request with cache and real identity; later 
  const error=mapper.map({...message,is_api_error_message:true});expect(error.events.some(e=>e.data.code==='request.input-invalidated')).toBe(true);expect(error.events.some(e=>e.kind==='usage')).toBe(false);
 });
 test.each(['Edit','Write','NotebookEdit'])('successful correlated %s records edits; nested/failed results do not',name=>{
- const mapper=new ClaudeStreamMapper(undefined,'s','turn');
+ const mapper=new ClaudeStreamMapper('s','turn');
  const assistant={type:'assistant',session_id:'s',message:{id:'r',model:'m',content:[{type:'tool_use',id:'edit',name,input:{file_path:'/project/a.ts',notebook_path:'/project/a.ipynb'}}]}};
  mapper.map(assistant);
  const result={type:'user',session_id:'s',message:{content:[{type:'tool_result',tool_use_id:'edit',is_error:false,content:'success'}]}};
@@ -281,7 +280,7 @@ test.each(['Edit','Write','NotebookEdit'])('successful correlated %s records edi
 });
 
 test('a delayed older request snapshot cannot establish continuity input after a newer request',()=>{
- const mapper=new ClaudeStreamMapper(undefined,'s','turn');
+ const mapper=new ClaudeStreamMapper('s','turn');
  const assistant=(id:string,tokens:number)=>({type:'assistant',session_id:'s',message:{id,model:'m',content:[],usage:{input_tokens:tokens,cache_creation_input_tokens:0,cache_read_input_tokens:0}}});
  mapper.map(assistant('r1',10));mapper.map(assistant('r2',20));
  expect(mapper.map(assistant('r1',10)).events.find(e=>e.kind==='usage')?.data.requestInput).toBeNull();

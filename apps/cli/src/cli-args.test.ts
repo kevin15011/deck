@@ -34,8 +34,8 @@ describe("parseArgs", () => {
   test("parses only the hidden Serena proxy route and its bounded capability probe", () => {
     expect(parseArgs(["internal", "serena-mcp"])).toEqual({ command: "internal-serena-mcp", probe: false });
     expect(parseArgs(["internal", "serena-mcp", "--probe"])).toEqual({ command: "internal-serena-mcp", probe: true });
-    expect(parseArgs(["internal", "codex-memory-hook"])).toEqual({ command: "internal-codex-memory-hook" });
-    expect(parseArgs(["internal", "memory-mcp"])).toEqual({ command: "internal-memory-mcp" });
+    expect(parseArgs(["internal", "codex-memory-hook"])).toEqual({ command: "internal-retired-native-hook" });
+    expect(parseArgs(["internal", "memory-mcp"])).toMatchObject({ command: "error" });
     expect(parseArgs(["internal", "memory-mcp", "--x"])).toMatchObject({ command: "error" });
     expect(parseArgs(["internal", "serena-mcp", "--anything"])).toMatchObject({ command: "error" });
   });
@@ -217,68 +217,10 @@ describe("parseArgs", () => {
     });
   });
 
-  test("rejects removed Engram memory provider", () => {
-    const result = parseArgs(["pi", "developer", "--memory=engram"]);
-    expect(result).toEqual<ParsedArgs>({
-      command: "error",
-      message: expect.stringContaining("Unsupported memory provider: engram"),
-    });
-  });
-
-  test("parses --memory=supermemory as memory provider", () => {
-    const result = parseArgs(["pi", "developer", "--memory=supermemory"]);
-    expect(result).toEqual<ParsedArgs>({
-      command: "pi-launch",
-      teamId: "developer-team",
-      flags: {},
-      memoryProvider: "supermemory",
-    });
-  });
-
-  test("parses --memory=none as an explicit memory-disable override", () => {
-    const result = parseArgs(["pi", "developer", "--memory=none"]);
-    expect(result).toEqual<ParsedArgs>({
-      command: "pi-launch",
-      teamId: "developer-team",
-      flags: {},
-      memoryProvider: "none",
-    });
-  });
-
-  test("returns error for unsupported memory provider", () => {
-    const result = parseArgs(["pi", "developer", "--memory=unknown"]);
-    expect(result).toEqual<ParsedArgs>({
-      command: "error",
-      message: expect.stringContaining("Unsupported memory provider: unknown"),
-    });
-  });
-
-  test("rejects removed Engram memory provider even with --continue flag", () => {
-    const result = parseArgs(["pi", "developer", "--continue", "--memory=engram"]);
-    expect(result).toEqual<ParsedArgs>({
-      command: "error",
-      message: expect.stringContaining("Unsupported memory provider: engram"),
-    });
-  });
-
-  test("combines --memory=supermemory with --continue flag", () => {
-    const result = parseArgs(["pi", "developer", "--continue", "--memory=supermemory"]);
-    expect(result).toEqual<ParsedArgs>({
-      command: "pi-launch",
-      teamId: "developer-team",
-      flags: { continue: true },
-      memoryProvider: "supermemory",
-    });
-  });
-
-  test("omits memoryProvider when no --memory flag is provided", () => {
-    const result = parseArgs(["pi", "developer"]);
-    expect(result).toEqual<ParsedArgs>({
-      command: "pi-launch",
-      teamId: "developer-team",
-      flags: {},
-    });
-    expect("memoryProvider" in result).toBe(false);
+  test("rejects retired memory options on each runner", () => {
+    for (const runner of ["pi", "codex", "opencode"]) {
+      expect(parseArgs([runner, "developer", "--memory=supermemory"])).toMatchObject({ command: "error" });
+    }
   });
 
   // -------------------------------------------------------------------------
@@ -290,12 +232,8 @@ describe("parseArgs", () => {
     expect(result).toEqual<ParsedArgs>({ command: "doctor" });
   });
 
-  test("parses Supermemory migration inventory dry-run without copy or delete flags", () => {
-    expect(parseArgs(["supermemory", "migrate", "--dry-run", "--destination-scope", "sm_project_v1_kevin15011_deck", "--inventory", "/tmp/inventory.json"])).toEqual<ParsedArgs>({
-      command: "supermemory-migration-dry-run",
-      flags: { destinationScope: "sm_project_v1_kevin15011_deck", inventoryPath: "/tmp/inventory.json" },
-    });
-    expect(parseArgs(["supermemory", "migrate", "--delete"])).toMatchObject({ command: "error" });
+  test("rejects the retired Supermemory command", () => {
+    expect(parseArgs(["supermemory", "migrate", "--dry-run"])).toMatchObject({ command: "error" });
   });
 
   test("parses 'deck doctor --fix' as error with no extra args message", () => {

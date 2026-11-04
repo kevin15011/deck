@@ -161,12 +161,6 @@ These tools are explicitly disabled because OpenCode or other packages handle th
 - \`find_file\` — use codebase-memory graph queries
 - \`create_text_file\` — the runner handles file creation
 - \`execute_shell_command\` — the runner provides shell execution
-- \`write_memory\` — use adaptive-memory package
-- \`read_memory\` — use adaptive-memory package
-- \`list_memories\` — use adaptive-memory package
-- \`edit_memory\` — use adaptive-memory package
-- \`delete_memory\` — use adaptive-memory package
-- \`rename_memory\` — use adaptive-memory package
 
 ### Coexistence Rules
 

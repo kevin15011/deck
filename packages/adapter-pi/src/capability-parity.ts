@@ -22,14 +22,13 @@ function legacyPiCode(entry: ParityReportEntry): string | undefined {
     case "capability-index-unverified":
       return entry.capabilityId === "codebase-memory" ? "codebase-memory-index-unverified" : entry.code;
     case "capability-configuration-unverified":
-      return entry.capabilityId === "supermemory-tool-bindings" ? "memory-tools-unverified" : entry.code;
+      return entry.code;
     case "capability-mapping-gap":
       return entry.capabilityId === "rtk" ? "pi-rtk-mapping-missing" : entry.code;
     case "capability-mcp-not-configured":
       if (entry.capabilityId === "context-mode") return "pi-context-mode-mcp-missing";
       if (entry.capabilityId === "codebase-memory" || entry.capabilityId === "codebase-memory-mcp") return "codebase-memory-mcp-missing";
       if (entry.capabilityId === "context7") return "mcp-standard-blocked";
-      if (entry.capabilityId === "supermemory-tool-bindings") return "memory-tools-unverified";
       return entry.code;
     default:
       return entry.code;

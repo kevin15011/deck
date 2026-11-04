@@ -6,8 +6,6 @@ import { tmpdir } from "node:os";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
 import { buildCapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
-import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
-import type { MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
 import { applyPromptGeneration, buildPromptGenerationPlan, buildPromptReference } from "./prompt-generation";
 
 const IDS = DEVELOPER_TEAM_AGENTS.map((agent) => agent.id);
@@ -92,74 +90,6 @@ describe("configured capability composition", () => {
       expect(plan.find(({ agent }) => agent.id === id)!.content).not.toContain("Serena");
     }
     expect(plan.find(({ agent }) => agent.id === "deck-quality")!.content).not.toContain("Serena Package");
-  });
-});
-
-describe("adaptive memory provider filtering", () => {
-  const providerBundle = (): MemoryInjectionBundle => ({
-    instructions: [{
-      surface: "agent",
-      markdown: "### Provider: Supermemory\n\nUse memory.\n\n### Provider: Legacy\n\nUse Legacy.",
-    }],
-    toolBindings: [{ capability: "memory.write", serverName: "supermemory", toolNames: ["memory", "recall"] }],
-  });
-
-  test("ignores legacy caller-supplied memory bundles", () => {
-    const supermemory = buildPromptGenerationPlan({
-      configDir: "/tmp/.config/opencode",
-      projectRoot: "/tmp/project",
-      memoryBundle: providerBundle(),
-    });
-
-    for (const planned of supermemory) {
-      expect(planned.content).not.toContain("### Provider: Supermemory");
-      expect(planned.content).not.toContain("### Provider: Legacy");
-    }
-  });
-
-  test("detected Supermemory MCP without materialized scope does not imply scoped recall instructions", () => {
-    const root = tempDir();
-    try {
-      const configDir = join(root, ".config", "opencode");
-      mkdirSync(configDir, { recursive: true });
-      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({
-        mcp: { supermemory: { type: "remote", url: "https://mcp.supermemory.ai/mcp" } },
-      }));
-      const detected = buildPromptGenerationPlan({ configDir, projectRoot: root });
-      expect(detected).toHaveLength(7);
-      expect(detected.map(({ content }) => content).join("\n")).not.toContain("containerTag:");
-      expect(detected.map(({ content }) => content).join("\n")).not.toContain("bounded recall");
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  test("legacy Supermemory bundles and raw MCP config do not add Deck memory guidance", () => {
-    const root = tempDir();
-    try {
-      const configDir = join(root, ".config", "opencode");
-      mkdirSync(configDir, { recursive: true });
-      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({
-        mcp: { supermemory: { type: "remote", url: "https://mcp.supermemory.ai/mcp", headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" } } },
-      }));
-      const memoryBundle = createSupermemoryMemoryProvider({
-        projectScope: "sm_project_v1_kevin15011_deck",
-        configuredProjectScope: "sm_project_v1_kevin15011_deck",
-      }).buildInjection({ teamId: "developer-team" });
-      const plan = buildPromptGenerationPlan({ configDir, projectRoot: root, memoryBundle });
-      const combined = plan.map((planned) => planned.content).join("\n");
-
-      expect(plan.find(({ agent }) => agent.id === "deck-lead")!.content).not.toContain("Deck Runtime binds the verified project scope server-side");
-      expect(plan.find(({ agent }) => agent.id === "deck-investigate")!.content).not.toContain("Deck Runtime binds the verified project scope server-side");
-      expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-      expect(combined).not.toContain("supermemory_add_memory");
-      expect(combined).not.toContain("supermemory_search_memory");
-      expect(combined).not.toContain("schemas permit model-selected project scope");
-      expect(combined).not.toContain("No manual containerTag required");
-      expect(combined).not.toContain("sm_project_default");
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
   });
 });
 

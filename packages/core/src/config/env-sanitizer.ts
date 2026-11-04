@@ -21,15 +21,9 @@ export const RUNNER_ENV_ALLOWLIST = new Set([
   "DECK_PI_SESSION",
   "DECK_PI_ROLE",
   "DECK_PI_CHILD",
-  "DECK_RUNNER_MEMORY_ENDPOINT",
-  "DECK_RUNNER_MEMORY_TOKEN",
-  // Pi receives the bearer token through a 0600 file; only the path is exported.
-  "DECK_RUNNER_MEMORY_TOKEN_FILE",
-  "DECK_CODEX_BRIDGE_ENDPOINT",
-  "DECK_CODEX_BRIDGE_TOKEN",
 ]);
 
-const SECRET_KEY = /(?:^|_)(?:API[_-]?KEY|TOKEN|PAT|PERSONAL[_-]?ACCESS[_-]?TOKEN|SECRET|PASSWORD|PASS(?:PHRASE)?|PRIVATE[_-]?KEY|CREDENTIAL|AUTH(?:ORIZATION)?|COOKIE|SESSION|DSN|URI|DATABASE[_-]?(?:URL|URI)|REDIS[_-]?(?:URL|URI)|MONGO(?:DB)?[_-]?(?:URL|URI)|SUPERMEMORY_API_KEY)(?:_|$)/i;
+const SECRET_KEY = /(?:^|_)(?:API[_-]?KEY|TOKEN|PAT|PERSONAL[_-]?ACCESS[_-]?TOKEN|SECRET|PASSWORD|PASS(?:PHRASE)?|PRIVATE[_-]?KEY|CREDENTIAL|AUTH(?:ORIZATION)?|COOKIE|SESSION|DSN|URI|DATABASE[_-]?(?:URL|URI)|REDIS[_-]?(?:URL|URI)|MONGO(?:DB)?[_-]?(?:URL|URI))(?:_|$)/i;
 const SECRET_VALUE = /(?:^Bearer\s+\S+|Cookie:\s*\S+|Set-Cookie:\s*\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|amqp|sentry|https?):\/\/[^\s/@:]+:[^\s/@]+@|\b(?:sqlite|file|libsql):\/\/(?:\/)?[^\s]*(?:\.db|\.sqlite|\.sqlite3)\b|^\/(?:Users|home|var|private|tmp)\/[^\s]*(?:\.db|\.sqlite|\.sqlite3)\b)/i;
 
 export function isSensitiveRunnerEnv(key: string, value: string | undefined): boolean {

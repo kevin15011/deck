@@ -29,13 +29,7 @@ const hookData: Json = {
     durationMs: { type: "number", minimum: 0 },
     executionMode: { enum: ["sync", "async"] },
     handlerType: { enum: ["command", "mcpTool", "prompt", "agent"] },
-    provider: { const: "supermemory" },
-    integration: { const: "runner-plugin" },
   },
-  allOf: [
-    { if: { required: ["provider"] }, then: { required: ["integration"] } },
-    { if: { required: ["integration"] }, then: { required: ["provider"] } },
-  ],
 };
 
 export function buildSessionEventSchema(): Json {

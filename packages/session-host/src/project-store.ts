@@ -108,7 +108,7 @@ export class ProjectStore {
   importLegacy(path: string): WorkspaceProject {
     if (!isAbsolute(path) || path.length > 4096 || path.includes("\0")) throw new Error("project-path-invalid");
     // Session roots were canonicalized at creation. Re-resolving a replaced path would
-    // silently change project identity and memory scope when it became a symlink.
+    // silently change project identity when it became a symlink.
     return this.remember(resolve(path));
   }
   directories(input: { path?: unknown; prefix?: unknown; limit?: unknown }): { root: string; path: string; directories: { name: string; path: string }[]; truncated: boolean } {

@@ -16,7 +16,6 @@ const productSurfaces = [
   "docs/configuration.md",
   "docs/developer-team.md",
   "docs/skills.md",
-  "docs/adaptive-memory.md",
   "docs/operations.md",
   "docs/troubleshooting.md",
   "docs/reference/cli.md",
@@ -223,7 +222,6 @@ function isDocumentedDeckCommandShape(args: string[]): boolean {
     if (rest[0] !== "developer") return false;
     let continueSeen = false;
     let resumeSeen = false;
-    let memorySeen = false;
     for (const flag of rest.slice(1)) {
       if (flag === "--continue") {
         if (continueSeen) return false;
@@ -233,11 +231,6 @@ function isDocumentedDeckCommandShape(args: string[]): boolean {
       if (flag === "--resume") {
         if (resumeSeen) return false;
         resumeSeen = true;
-        continue;
-      }
-      if (/^--memory=(?:none|supermemory)$/.test(flag)) {
-        if (memorySeen) return false;
-        memorySeen = true;
         continue;
       }
       return false;
@@ -329,7 +322,7 @@ const directCommandExpectations = [
   ["deck openspec validate --json --root .", true],
   ["deck pi developer --cleanup-legacy", false],
   ["deck skill-registry validate --runner pi", true],
-  ["deck pi developer --memory=supermemory", true],
+  ["deck pi developer --memory=supermemory", false],
   ["deck --help", false],
   ["deck --version", false],
   ["./dist/cli/deck --help", false],

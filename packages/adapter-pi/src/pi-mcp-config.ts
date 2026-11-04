@@ -12,10 +12,6 @@ import {
   type SerenaReadinessRevalidator,
 } from "@deck/core";
 
-export const SUPERMEMORY_MCP_SERVER_NAME = "supermemory";
-export const SUPERMEMORY_MCP_URL = "https://mcp.supermemory.ai/mcp";
-export const SUPERMEMORY_API_KEY_HEADER = "x-supermemory-api-key";
-
 // Standard MCP server names for Pi capabilities
 export const CONTEXT7_MCP_SERVER_NAME = "context7";
 export const SERENA_MCP_SERVER_NAME = "serena";
@@ -67,26 +63,7 @@ const defaultPiMcpConfigFileSystem: PiMcpConfigFileSystem = {
   rmSync: (path, options) => { rmSync(path, options); },
 };
 
-export type WriteSupermemoryPiMcpConfigOptions = {
-  /** @deprecated API tokens must stay in Deck's secret store and are ignored for Pi MCP config writes. */
-  token?: string;
-  /** MCP server entry name. Defaults to `supermemory`. */
-  serverName?: string;
-  /** Override for tests or advanced callers. Defaults to `~/.pi/agent/mcp.json`. */
-  configPath?: string;
-  /** Override home directory used to resolve the default path. */
-  homeDir?: string;
-  /** @deprecated Retirement is account-level and ignores the caller's project scope. */
-  projectScope?: string;
-};
-
-const CANONICAL_SUPERMEMORY_PROJECT_SCOPE = /^sm_project_v1_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9]+)*$/;
-
 type JsonRecord = Record<string, unknown>;
-
-type MergeOutcome =
-  | { ok: true; config: JsonRecord; changed: boolean; existed: boolean }
-  | { ok: false; diagnostics: PiMcpConfigDiagnostic[] };
 
 /**
  * Global Pi MCP config path. Without an explicit `homeDir` it follows `PI_CODING_AGENT_DIR` (when valid) so Deck and
@@ -100,93 +77,6 @@ export function defaultPiMcpConfigPath(homeDir?: string, env: Readonly<Record<st
   return join(homeDir, ".pi", "agent", "mcp.json");
 }
 
-export function writeSupermemoryPiMcpConfig(
-  options: WriteSupermemoryPiMcpConfigOptions,
-): PiMcpConfigWriteResult {
-  const configPath = options.configPath ?? defaultPiMcpConfigPath(options.homeDir);
-  const serverName = normalizeServerName(options.serverName);
-  // Retirement recognizes exact ownership on disk; it never creates a project-scoped entry.
-  const merged = readAndMergeConfig(configPath, serverName, "");
-  if (!merged.ok) {
-    return failedResult(configPath, serverName, merged.diagnostics);
-  }
-
-  if (!merged.changed) {
-    const diagnostics = [
-      infoDiagnostic(
-        "PI_MCP_CONFIG_UNCHANGED",
-        "Raw Supermemory Pi MCP is disabled; no stale Deck-managed entry was present to retire.",
-        configPath,
-        serverName,
-      ),
-    ];
-    diagnostics.push(...applyBestEffortPermissions(configPath));
-    return { ok: true, action: "unchanged", path: configPath, serverName, diagnostics };
-  }
-
-  try {
-    mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 });
-  } catch (error) {
-    return failedResult(configPath, serverName, [
-      errorDiagnostic(
-        "PI_MCP_CONFIG_WRITE_FAILED",
-        `Unable to create Pi MCP config directory: ${redact(String((error as Error).message ?? error))}`,
-        configPath,
-        serverName,
-      ),
-    ]);
-  }
-
-  const permissionDiagnostics = applyBestEffortDirectoryPermission(configPath);
-
-  try {
-    writeJsonAtomically(configPath, merged.config);
-  } catch (error) {
-    return failedResult(configPath, serverName, [
-      ...permissionDiagnostics,
-      errorDiagnostic(
-        "PI_MCP_CONFIG_WRITE_FAILED",
-        `Unable to write Pi MCP config: ${redact(String((error as Error).message ?? error))}`,
-        configPath,
-        serverName,
-      ),
-    ]);
-  }
-
-  const diagnostics = [
-    infoDiagnostic(
-      merged.existed ? "PI_MCP_CONFIG_UPDATED" : "PI_MCP_CONFIG_CREATED",
-      merged.existed
-        ? "Retired stale Deck-managed Supermemory Pi MCP server entry; raw Supermemory MCP is no longer authorized by Deck."
-        : "Raw Supermemory Pi MCP is disabled; no server entry was created.",
-      configPath,
-      serverName,
-    ),
-    ...permissionDiagnostics,
-    ...applyBestEffortFilePermission(configPath),
-  ];
-
-  return {
-    ok: true,
-    action: merged.existed ? "updated" : "created",
-    path: configPath,
-    serverName,
-    diagnostics,
-  };
-}
-
-/** Backward-compatible alias for callers that prefer configure terminology. */
-export const configureSupermemoryPiMcpConfig = writeSupermemoryPiMcpConfig;
-
-export type ValidateSupermemoryPiMcpConfigOptions = {
-  /** MCP server entry name. Defaults to `supermemory`. */
-  serverName?: string;
-  /** Override for tests or advanced callers. Defaults to `~/.pi/agent/mcp.json`. */
-  configPath?: string;
-  /** Override home directory used to resolve the default path. */
-  homeDir?: string;
-};
-
 export type PiMcpConfigValidationResult = {
   ok: boolean;
   path: string;
@@ -195,202 +85,8 @@ export type PiMcpConfigValidationResult = {
   diagnostics: PiMcpConfigDiagnostic[];
 };
 
-export function validateSupermemoryPiMcpConfig(
-  options?: ValidateSupermemoryPiMcpConfigOptions,
-): PiMcpConfigValidationResult {
-  const configPath = options?.configPath ?? defaultPiMcpConfigPath(options?.homeDir);
-  const serverName = normalizeServerName(options?.serverName);
-
-  if (!existsSync(configPath)) {
-    return {
-      ok: false,
-      path: configPath,
-      serverName,
-      diagnostics: [
-        errorDiagnostic(
-          "PI_MCP_CONFIG_WRITE_FAILED",
-          "Pi MCP config is missing; Supermemory tools were not injected. Configure ~/.pi/agent/mcp.json first.",
-          configPath,
-          serverName,
-        ),
-      ],
-    };
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(configPath, "utf-8"));
-  } catch {
-    return {
-      ok: false,
-      path: configPath,
-      serverName,
-      diagnostics: [errorDiagnostic("PI_MCP_CONFIG_MALFORMED", "Pi MCP config contains malformed JSON; Supermemory tools were not injected.", configPath, serverName)],
-    };
-  }
-
-  if (!isPlainRecord(parsed) || !isPlainRecord(parsed.mcpServers)) {
-    return {
-      ok: false,
-      path: configPath,
-      serverName,
-      diagnostics: [errorDiagnostic("PI_MCP_CONFIG_MALFORMED", "Pi MCP config must contain an object mcpServers map; Supermemory tools were not injected.", configPath, serverName)],
-    };
-  }
-
-  const server = parsed.mcpServers[serverName];
-  if (!isPlainRecord(server)) {
-    return {
-      ok: false,
-      path: configPath,
-      serverName,
-      diagnostics: [errorDiagnostic("PI_MCP_CONFIG_CONFLICT", `Pi MCP config is missing object server entry '${serverName}'; Supermemory tools were not injected.`, configPath, serverName)],
-    };
-  }
-
-  if (server.url !== SUPERMEMORY_MCP_URL || server.transport !== "http") {
-    return {
-      ok: false,
-      path: configPath,
-      serverName,
-      diagnostics: [errorDiagnostic("PI_MCP_CONFIG_CONFLICT", `Pi MCP server '${serverName}' must use the validated Supermemory HTTP endpoint; Supermemory tools were not injected.`, configPath, serverName)],
-    };
-  }
-
-  if (isPlainRecord(server.headers) && typeof server.headers[SUPERMEMORY_API_KEY_HEADER] === "string" && server.headers[SUPERMEMORY_API_KEY_HEADER].trim()) {
-    return {
-      ok: false,
-      path: configPath,
-      serverName,
-      diagnostics: [errorDiagnostic("PI_MCP_CONFIG_CONFLICT", `Pi MCP server '${serverName}' contains a legacy persisted Supermemory credential header; remove it because Deck stores runtime credentials only in its secret store.`, configPath, serverName)],
-    };
-  }
-
-  if (!isPlainRecord(server.headers) || typeof server.headers["x-sm-project"] !== "string" || !CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(server.headers["x-sm-project"].trim())) {
-    return {
-      ok: false,
-      path: configPath,
-      serverName,
-      diagnostics: [errorDiagnostic("PI_MCP_CONFIG_CONFLICT", `Pi MCP server '${serverName}' is missing canonical x-sm-project scope; Supermemory tools were not injected.`, configPath, serverName)],
-    };
-  }
-
-  return {
-    ok: true,
-    path: configPath,
-    serverName,
-    projectScope: server.headers["x-sm-project"].trim(),
-    diagnostics: [infoDiagnostic("PI_MCP_CONFIG_UNCHANGED", "Supermemory Pi MCP server entry is present without persisted bearer credentials.", configPath, serverName)],
-  };
-}
-
-
-export type SupermemoryPiMcpPublicServer = {
-  path: string;
-  serverName: string;
-  endpoint: string;
-};
-
-export function extractValidatedSupermemoryPiMcpServer(
-  options?: ValidateSupermemoryPiMcpConfigOptions,
-): SupermemoryPiMcpPublicServer {
-  const validation = validateSupermemoryPiMcpConfig(options);
-  if (!validation.ok) {
-    throw new Error(validation.diagnostics.map((diagnostic) => diagnostic.message).join(" "));
-  }
-
-  const parsed = JSON.parse(readFileSync(validation.path, "utf-8")) as JsonRecord;
-  const mcpServers = parsed.mcpServers as JsonRecord;
-  const server = mcpServers[validation.serverName] as JsonRecord;
-  return { path: validation.path, serverName: validation.serverName, endpoint: String(server.url) };
-}
-
 export function redactPiMcpConfigDiagnosticText(value: string): string {
   return redact(value);
-}
-
-function readAndMergeConfig(configPath: string, serverName: string, _projectScope?: string): MergeOutcome {
-  const existed = existsSync(configPath);
-  let config: JsonRecord = {};
-
-  if (existed) {
-    let raw: string;
-    try {
-      raw = readFileSync(configPath, "utf-8");
-    } catch (error) {
-      return {
-        ok: false,
-        diagnostics: [
-          errorDiagnostic(
-            "PI_MCP_CONFIG_WRITE_FAILED",
-            `Unable to read existing Pi MCP config: ${redact(String((error as Error).message ?? error))}`,
-            configPath,
-            serverName,
-          ),
-        ],
-      };
-    }
-
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!isPlainRecord(parsed)) {
-        return malformed(configPath, serverName, "Pi MCP config must be a JSON object.");
-      }
-      config = parsed;
-    } catch {
-      return malformed(configPath, serverName, "Pi MCP config contains malformed JSON; no changes were written.");
-    }
-  }
-
-  const existingServers = config.mcpServers;
-  if (existingServers !== undefined && !isPlainRecord(existingServers)) {
-    return malformed(configPath, serverName, "Pi MCP config `mcpServers` must be a JSON object; no changes were written.");
-  }
-
-  const mcpServers = existingServers === undefined ? {} : { ...(existingServers as JsonRecord) };
-  const existingServer = mcpServers[serverName];
-  if (existingServer === undefined) {
-    return { ok: true, config, changed: false, existed };
-  }
-  if (!isExactDeckManagedPiSupermemoryEntry(existingServer)) {
-    return {
-      ok: false,
-      diagnostics: [
-        errorDiagnostic(
-          "PI_MCP_CONFIG_CONFLICT",
-          `Existing Pi Supermemory MCP server entry '${serverName}' is unmanaged or ambiguous; Deck left it unchanged and did not authorize raw Supermemory MCP.`,
-          configPath,
-          serverName,
-        ),
-      ],
-    };
-  }
-
-  delete mcpServers[serverName];
-  const nextConfig: JsonRecord = {
-    ...config,
-    mcpServers,
-  };
-
-  return {
-    ok: true,
-    config: nextConfig,
-    changed: stableStringify(config) !== stableStringify(nextConfig),
-    existed,
-  };
-}
-
-function isExactDeckManagedPiSupermemoryEntry(entry: unknown): boolean {
-  if (!isPlainRecord(entry)) return false;
-  const keys = Object.keys(entry).sort();
-  if (JSON.stringify(keys) !== JSON.stringify(["headers", "transport", "url"])) return false;
-  if (entry.transport !== "http" || entry.url !== SUPERMEMORY_MCP_URL) return false;
-  if (!isPlainRecord(entry.headers)) return false;
-  const headerKeys = Object.keys(entry.headers);
-  if (headerKeys.length !== 1 || headerKeys[0] !== "x-sm-project") return false;
-  if (typeof entry.headers["x-sm-project"] !== "string") return false;
-  if (!CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(entry.headers["x-sm-project"].trim())) return false;
-  return true;
 }
 
 function writeJsonAtomically(configPath: string, config: JsonRecord) {
@@ -440,12 +136,6 @@ function permissionWarning(configPath: string, message: string): PiMcpConfigDiag
   };
 }
 
-function malformed(configPath: string, serverName: string, message: string): MergeOutcome {
-  return {
-    ok: false,
-    diagnostics: [errorDiagnostic("PI_MCP_CONFIG_MALFORMED", message, configPath, serverName)],
-  };
-}
 
 function failedResult(
   configPath: string,
@@ -481,20 +171,10 @@ export function redact(value: string): string {
   return value
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
     .replace(
-      new RegExp(`([\"']?${SUPERMEMORY_API_KEY_HEADER}[\"']?\\s*[:=]\\s*[\"']?)([^\"'\\s,}]+)([\"']?)`, "gi"),
-      "$1[REDACTED]$3",
-    )
-    .replace(
       /(["']?(?:api[_-]?key|token|credential|secret|password|authorization)["']?\s*[:=]\s*["']?)([^"',}]+)(["']?)/gi,
       "$1[REDACTED]$3",
     )
-    .replace(/\bsm_[A-Za-z0-9_-]+/g, "sm_[REDACTED]")
-    .replace(/(SUPERMEMORY_API_KEY\s*=\s*)[^\s]+/gi, "$1[REDACTED]");
-}
-
-function normalizeServerName(serverName: string | undefined): string {
-  const normalized = (serverName ?? SUPERMEMORY_MCP_SERVER_NAME).trim();
-  return normalized || SUPERMEMORY_MCP_SERVER_NAME;
+    .replace(/\bsm_[A-Za-z0-9_-]+/g, "sm_[REDACTED]");
 }
 
 function isPlainRecord(value: unknown): value is JsonRecord {
@@ -1156,4 +836,10 @@ export function validateMcpServerEntry(
       infoDiagnostic("PI_MCP_CONFIG_UNCHANGED", `MCP server '${normalizedName}' is properly configured.`, configPath, normalizedName),
     ],
   };
+}
+
+function normalizeServerName(serverName: string | undefined): string {
+  const name = serverName?.trim();
+  if (!name) throw new Error("MCP server name is required.");
+  return name;
 }

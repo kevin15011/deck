@@ -15,7 +15,7 @@ export function claudeQuotaArgs(): string[] {
 export async function refreshClaudeQuota(signal: AbortSignal, options: { executable?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}): Promise<unknown> {
   const cwd = await mkdtemp(join(tmpdir(), 'deck-quota-'));
   const env = { ...(options.env ?? process.env) };
-  for (const key of Object.keys(env)) if (/^(DECK_|MCP_|SUPERMEMORY_|CLAUDE_)/.test(key) && key !== 'CLAUDE_CODE_OAUTH_TOKEN') delete env[key];
+  for (const key of Object.keys(env))
   delete env.CLAUDECODE; delete env.NODE_OPTIONS; delete env.BUN_OPTIONS;
   try {
     signal.throwIfAborted();

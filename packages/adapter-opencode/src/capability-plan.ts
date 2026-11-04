@@ -13,13 +13,10 @@ import { isWebSearchProviderDescriptor, type SerenaOperationIdentity, type WebSe
 import { writeOpenCodeMcpConfig } from "./opencode-mcp-config";
 import { appendFileSync } from "node:fs";
 import { resolveRunnerParity, type ParityReport, type ParityRuntimeHints } from "@deck/core";
-import { OPENCODE_SUPERMEMORY_PACKAGE_SPEC } from "./opencode-supermemory-plugin";
 
 const LOG = "/tmp/deck-tui.log";
 function _ts() { return new Date().toISOString().slice(11, 23); }
 function log(msg: string) { if (!process.env.DECK_DEBUG) return; try { appendFileSync(LOG, `${_ts()} [capability-plan] ${msg}\n`); } catch {} }
-
-export type AdaptiveMemoryProviderChoice = "none" | "supermemory";
 export type OpenCodeRunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
 
 export type OpenCodeRunnerAction = {
@@ -68,10 +65,6 @@ export type BuildOpenCodeRunnerReviewPlanState = {
   /** Native alias accepted by focused adapter callers. */
   operation?: SerenaOperationIdentity;
   selectedCapabilities?: Partial<Record<string, boolean>>;
-  adaptiveMemory?: {
-    provider?: AdaptiveMemoryProviderChoice;
-    supermemory?: { configured?: boolean; hasToken?: boolean; runtimeCredentialStored?: boolean; ephemeralTokenAvailable?: boolean; mcpOAuthReady?: boolean; userId?: string; teamId?: string; organizationId?: string; registrationConflicts?: readonly string[] };
-  };
   teams?: Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>;
   runtime?: { toolsReview?: OpenCodeToolsReview };
   /** Package instruction toggles per runner scope. */
@@ -97,8 +90,6 @@ export function buildOpenCodeRunnerReviewPlan(
   try {
   addCapabilityActions(groups, diagnostics, state, inventory);
   log(`buildOpenCodeRunnerReviewPlan: addCapabilityActions done`);
-  addAdaptiveMemoryActions(groups, diagnostics, state);
-  log(`buildOpenCodeRunnerReviewPlan: addAdaptiveMemoryActions done`);
   addTeamActions(groups, diagnostics, state, inventory);
   log(`buildOpenCodeRunnerReviewPlan: addTeamActions done`);
   addPackageInstructionActions(groups, diagnostics, state);
@@ -369,77 +360,6 @@ function addCapabilityActions(
       : buildManualExternalAction(capabilityId, tool?.module);
     groups.manualSteps.push(action);
     addCapabilityDiagnostic(diagnostics, capabilityId, entry.status, action.id, entry.diagnostics?.join(" ") ?? "");
-  }
-}
-
-function addAdaptiveMemoryActions(
-  groups: OpenCodeRunnerReviewPlan["groups"],
-  diagnostics: OpenCodeRunnerPlanDiagnostic[],
-  state: BuildOpenCodeRunnerReviewPlanState,
-): void {
-  const provider = state.adaptiveMemory?.provider ?? "none";
-  if (provider === "none") return;
-
-  const supermemory = state.adaptiveMemory?.supermemory;
-  const configured = Boolean(supermemory?.configured);
-  const runtimeCredentialReady = Boolean(supermemory?.runtimeCredentialStored ?? supermemory?.hasToken);
-  const registrationConflict = (supermemory?.registrationConflicts?.length ?? 0) > 0;
-  const supermemoryReady = configured && runtimeCredentialReady && !registrationConflict;
-  const installActionId = "adaptive-memory.supermemory.install-official-plugin";
-  const actionStatus: OpenCodeRunnerActionStatus = registrationConflict ? "blocked" : supermemoryReady ? "ready" : "pending";
-
-  groups.automaticInstalls.push({
-    id: installActionId,
-    kind: "install-opencode-plugin",
-    title: "Install official Supermemory plugin",
-    description: "Installs and verifies the pinned official package and loader, and sets captureEveryNTurns to 1 in the provider's settings while preserving other options. Native capture completion remains unverified.",
-    toolId: "opencode-supermemory",
-    source: OPENCODE_SUPERMEMORY_PACKAGE_SPEC,
-    status: actionStatus,
-    required: true,
-  });
-
-  const retireActionId = "adaptive-memory.supermemory.retire-legacy-opencode-mcp";
-  groups.configWrites.push({
-    id: retireActionId,
-    kind: "write-mcp-config",
-    title: "Retire legacy raw Supermemory MCP config",
-    description: "Removes only an exact stale Deck-managed raw Supermemory MCP entry before the official plugin is used; unmanaged entries are preserved and reported.",
-    status: actionStatus,
-    required: true,
-    dependencies: [installActionId],
-  });
-  groups.configWrites.push({
-    id: "adaptive-memory.supermemory.deck-config",
-    kind: "write-deck-config",
-    title: "Write Supermemory non-secret Deck config",
-    description: "Records the official Supermemory plugin as enabled for Deck-managed OpenCode launches. Credentials remain in Deck's protected profile store at rest, but co-loaded global or project plugins can access the selected process credential.",
-    status: actionStatus,
-    required: true,
-    dependencies: [installActionId, retireActionId],
-    diagnostics: [registrationConflict
-      ? "A direct or conflicting external Supermemory plugin registration blocks the Deck loader-only adapter."
-      : runtimeCredentialReady
-        ? "An official Supermemory plugin profile credential is validated and stored in Deck's protected secret store."
-        : "An official Supermemory plugin profile credential must be validated and stored before Review & Install."],
-  });
-  diagnostics.push({
-    code: "SUPERMEMORY_CONFIGURATION_REQUIRED",
-    severity: registrationConflict ? "error" : supermemoryReady ? "info" : "warning",
-    message: registrationConflict
-      ? "A direct or conflicting external Supermemory plugin registration blocks Deck's loader-only compatibility adapter."
-      : supermemoryReady
-        ? "The official Supermemory plugin credential is validated and stored for Deck-managed OpenCode launches; co-loaded global or project plugins can access the selected process credential."
-        : "An official Supermemory plugin profile credential must be validated and stored before Adaptive Memory can run in a Deck-managed OpenCode launch.",
-    actionId: "adaptive-memory.supermemory.deck-config",
-  });
-  if (registrationConflict) {
-    diagnostics.push({
-      code: "SUPERMEMORY_PLUGIN_REGISTRATION_CONFLICT",
-      severity: "error",
-      message: "A direct or conflicting external Supermemory plugin registration must be removed explicitly before Deck can activate its loader-only compatibility adapter; unrelated plugins are preserved.",
-      actionId: installActionId,
-    });
   }
 }
 

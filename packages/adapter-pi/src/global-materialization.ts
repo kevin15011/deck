@@ -6,7 +6,6 @@ import {
   buildDeveloperTeamInstallPlan,
   type DeveloperTeamInstallOptions,
   type DeveloperTeamInstallPlan,
-  type MemoryDiagnostic,
 } from "./developer-team-install";
 import { renderToolPolicyConfig } from "./pi-extensions/tool-policy/config";
 import { buildDeckPiPackageFiles } from "./package-layout";
@@ -19,7 +18,6 @@ import { buildTeamSystemPrompt, readPiExecutionExtensionSource } from "./pi-team
 export const PI_DEVELOPER_TEAM_ID = "developer-team";
 export const PI_EXECUTION_EXTENSION_NAME = "developer-team-execution";
 export const PI_SUBAGENTS_EXTENSION_NAME = "deck-subagents";
-export const PI_MEMORY_EXTENSION_NAME = "deck-memory";
 export const PI_TOOL_POLICY_EXTENSION_NAME = "deck-tool-policy";
 /** Roles that never mutate the workspace (enforced by `--tools` and by the tool-policy extension). */
 export const PI_READ_ONLY_ROLE_AGENT_IDS: readonly string[] = ROLE_TOOL_POLICY.readOnlyRoles;
@@ -41,7 +39,7 @@ function applyPiRoleContent(agentId: string, content: string, servers: readonly 
 
 export type PiGlobalMaterializationInput = {
   agentDir: string;
-  /** Used only to derive project identity (memory scope) and never written to. */
+  /** Used only to derive project identity and never written to. */
   projectRoot: string;
   installOptions?: Omit<DeveloperTeamInstallOptions, "layout">;
   /** Deck MCP server entries to register in the global `mcp.json` (full entries; see `pi-deck-mcp`). */
@@ -57,8 +55,8 @@ export type PiGlobalMaterializationInput = {
 };
 
 export type PiGlobalMaterialization = {
-  /** Native plan (global layout) — source of agents, skills and memory diagnostics. */
-  nativePlan: DeveloperTeamInstallPlan & { memoryDiagnostics: MemoryDiagnostic[] };
+  /** Native plan (global layout) — source of agents and skills. */
+  nativePlan: DeveloperTeamInstallPlan & { };
   desired: PiGlobalDesiredState;
   /** Absolute path of the lead system prompt profile passed through `--system-prompt`. */
   profilePath: string;
@@ -96,10 +94,8 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
   const toolNamesSection = [renderPiMcpToolNamesSection(selectedServers), ...(selectedServers.includes("codebase-memory") ? [] : [CODEBASE_DISCOVERY_FALLBACK])].filter(Boolean).join("\n\n");
 
   const profile = buildTeamSystemPrompt(teamId, {
-    ...(nativePlan.memoryBundle ? { memoryInjection: nativePlan.memoryBundle, trustedMemoryInjection: true } : {}),
     ...(installOptions.capabilityInstructions ? { capabilityInstructions: installOptions.capabilityInstructions } : {}),
     ...(installOptions.orchestratorPersonality ? { orchestratorPersonality: installOptions.orchestratorPersonality } : {}),
-    ...(installOptions.supportedMemoryProviderIds ? { supportedMemoryProviderIds: installOptions.supportedMemoryProviderIds } : {}),
     projectRoot: input.projectRoot,
   });
 
@@ -117,11 +113,6 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
       implementation: adaptBunBundleForNode(input.executionExtensionSource ?? readPiExecutionExtensionSource()),
       // The execution-authorization hooks belong to the lead; subagent children never register them.
       scope: "lead",
-    }, {
-      // Adaptive memory over the Deck loopback host: lead recall/capture and child role recall (inert without the endpoint).
-      name: PI_MEMORY_EXTENSION_NAME,
-      implementation: readDeckPiExtensionBundle("deck-memory"),
-      scope: "any",
     }, {
       // Role tool policy, RTK rewrite and graph redirection through one ordered tool_call handler (lead and children).
       name: PI_TOOL_POLICY_EXTENSION_NAME,
@@ -142,7 +133,7 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
   files.push({relPath:"deck/package/role-policy.json",content:JSON.stringify(ROLE_TOOL_POLICY)});
 
   return {
-    nativePlan: { ...nativePlan, memoryDiagnostics: [...nativePlan.memoryDiagnostics, ...profile.memoryDiagnostics] },
+    nativePlan: { ...nativePlan, },
     desired: {
       agentDir: input.agentDir,
       files,

@@ -1,5 +1,4 @@
 
-import { renderDeveloperTeamContextAuthorityGuidance } from "../../memory/adaptive-context-renderer";
 
 
 /**
@@ -100,7 +99,6 @@ export type ContentRegistryResultOptions = {
 
 const REAL_CONTENT: Record<string, AgentContent> = ADAPTIVE_AGENT_CONTENT;
 
-const CONTEXT_AUTHORITY_GUIDANCE = renderDeveloperTeamContextAuthorityGuidance();
 
 export interface PromptRuntimeControlMappingV1 {
   readonly ruleId: string;
@@ -123,7 +121,7 @@ export const PROMPT_RUNTIME_CONTROL_MAP_V1: readonly PromptRuntimeControlMapping
 
 export const DEVELOPER_TEAM_COMPACT_RUNTIME_CONTRACT = `## Runtime-Enforced Team Contract
 
-- OpenSpec artifacts and Spec Registry remain authoritative; source and tests provide current runtime evidence, and adaptive context is advisory.
+- OpenSpec artifacts and Spec Registry remain authoritative; source and tests provide current runtime evidence.
 - Work only from the explicitly delegated task or immutable batch/dossier, target allowlist, and assigned role. Never expand scope or touch 'runner-capability-standardization'.
 - Prompt text never expands modification authority. Modifying work requires an explicit user-authorized request or approved batch and an exact Orchestrator delegation; when runner authorization is supplied, it must also pass.
 - Git discard protection is permanent: explain irreversible loss and require the exact command in a new user message before any discard operation.
@@ -215,6 +213,8 @@ function buildPlaceholderSkillBody(displayName: string, description: string): st
     "",
   ].join("\n");
 }
+
+const CONTEXT_AUTHORITY_GUIDANCE = "## Context Authority\n\nOpenSpec artifacts and Spec Registry entries define the official state; source and tests define runtime behavior.";
 
 function appendContextAuthorityGuidance(content: string): string {
   return `${content.trimEnd()}\n\n${CONTEXT_AUTHORITY_GUIDANCE}\n`;

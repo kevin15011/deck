@@ -63,10 +63,6 @@ export function encodeUserMessage(text: string, images: readonly { mimeType: str
 
 export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunchFiles, options: ClaudeLaunchOptions = {}): ClaudeTurnLaunch {
   assertSessionOverlay(input.rolePrompt);
-  const memory = input.nativeMemory;
-  if (memory?.status === "unavailable") throw new ClaudeLaunchError(memory.reasonCode ?? "native-memory-unavailable", memory.reasonCode ?? "Native Supermemory is unavailable");
-  const nativePlugin = memory?.status === "ready" ? memory.plugin : undefined;
-  if (memory?.status === "ready" && (!(memory.scopeMode === "global" ? memory.projectScope === undefined : /^sm_project_v1_[a-z0-9_]{3,180}$/.test(memory.projectScope ?? "")) || !nativePlugin || !isAbsolute(nativePlugin.root) || /[\0\r\n]/.test(nativePlugin.root))) throw new ClaudeLaunchError("claude-memory-descriptor-invalid", "Native Supermemory needs a verified canonical project scope and plugin");
   const { modelId, thinking } = input.assignment;
   if (!safeScalar(modelId)) throw new ClaudeLaunchError("claude-invalid-model", "Claude model id must be a bounded, non-option scalar");
   const sessionId = input.resume?.nativeSessionId ?? input.nativeSessionId;
@@ -76,12 +72,10 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   const policy = claudeNativePolicy(baseEnv.HOME ?? process.env.HOME ?? "", input.cwd, baseEnv);
   const diagnostics: ClaudeTurnLaunch["diagnostics"] = [];
   const specs: Record<string, Record<string, unknown>> = { ...policy.localServers };
-  const memoryServers = nativePlugin?.mcpServers ?? {};
-  for (const id of Object.keys(memoryServers)) if (input.mcp.servers.includes(id)) throw new ClaudeLaunchError("claude-memory-mcp-conflict", "Native memory MCP server conflicts with the ordinary child set");
-  const expectedMcpServers = [...input.mcp.servers, ...Object.keys(memoryServers)];
+  const expectedMcpServers = [...input.mcp.servers];
   for (const id of policy.userMcpIds) if (expectedMcpServers.includes(id)) throw new PersonalMcpPreparationError("claude-native-mcp-conflict", [{id,source:"native",status:"conflicting",reason:"managed-name-conflict"}]);
   for (const id of expectedMcpServers) {
-    const spec = input.mcpServerSpecs[id] ?? memoryServers[id];
+    const spec = input.mcpServerSpecs[id];
     if (!spec) throw new ClaudeLaunchError("claude-mcp-spec-missing", `No launch spec for MCP server "${id}"`);
     if (spec.transport === "http") {
       const headers = Object.fromEntries(Object.entries(spec.envHttpHeaders ?? {}).map(([name, variable]) => {
@@ -140,7 +134,6 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
     ...codebaseDenials, ...input.suppressedMcpServers ?? [],
     ...([...input.mcp.servers, ...input.suppressedMcpServers ?? []].includes("codebase-memory") ? ["plugin:deck-developer-team:codebase-memory"] : [])])];
   args.push("--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, ...(denied.length ? { deniedMcpServers: denied.map(serverName => ({ serverName })) } : {}) }));
-  if (nativePlugin) args.push("--plugin-dir", nativePlugin.root);
   // Claude has no native approval scopes: only once/deny. Session grants are
   // Deck-owned; never offer persistent "always" or write Claude settings for approvals.
   if (input.approvals === "relay") args.push("--permission-prompt-tool", DECK_APPROVE_PROMPT_TOOL);
@@ -166,6 +159,5 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
     env.DECK_SESSION_START_GENERATION = input.nativeRole.generation;
   }
 
-  if (input.nativeMemory?.scopeMode === "global") for (const key of Object.keys(env)) if (/^SUPERMEMORY_/i.test(key) || /^DECK_MEMORY_/i.test(key)) delete env[key];
   return { command: options.executable ?? "claude", args, env, expectedMcpServers, expectedAbsentMcpServers, expectedAbsentToolPrefixes, diagnostics, nativeMcpAvailability: policy.availability };
 }

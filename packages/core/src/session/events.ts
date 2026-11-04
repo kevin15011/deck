@@ -21,13 +21,15 @@ export const SESSION_EVENT_KINDS = [
   "message.delta", "message.completed", "reasoning.delta", "tool.started", "tool.completed",
   "hook.started", "hook.completed",
   "question.requested", "question.resolved",
-  "approval.requested", "approval.resolved", "memory.recalled", "memory.proposed", "memory.written",
+  "approval.requested", "approval.resolved",
   "usage", "rate-limit", "diagnostic", "runner.unmapped", "client.attached", "client.detached",
   /** Durable idempotency receipt: a command was accepted and its outcome is recorded (XR-1.5, survives daemon restart). */
   "command.accepted",
   "decision.command", "decision.opened", "decision.revised", "decision.state", "decision.reply",
   "prompt.steering", "prompt.steered", "prompt.queued", "prompt.dispatched", "prompt.handoff", "prompt.requeued", "prompt.state", "prompt.queue",
 ] as const;
+// Persisted version-1 ledgers retain their original events forever; these are never emittable.
+export const LEGACY_SESSION_EVENT_KINDS = ["memory.recalled", "memory.proposed", "memory.written"] as const;
 export type SessionEventKind = (typeof SESSION_EVENT_KINDS)[number];
 
 /** Driver wire protocol id (e.g. "claude-stream-json"); concrete values are declared by drivers, not core. */
@@ -37,7 +39,7 @@ export const TURN_COMPLETED_STATUSES = ["completed", "interrupted", "interrupted
 export type SessionEventSource = { memberId?: string; taskId?: string; runnerId?: string; nativeSessionId?: string };
 export type SessionEventRaw = { runnerId: string; protocol: DriverProtocol | string; payload: unknown; truncated: boolean };
 export type SessionEvent = {
-  v: 1; sessionId: string; seq: number; ts: string; kind: SessionEventKind;
+  v: 1; sessionId: string; seq: number; ts: string; kind: SessionEventKind | (typeof LEGACY_SESSION_EVENT_KINDS)[number];
   source: SessionEventSource; data: Record<string, unknown>; raw?: SessionEventRaw;
 };
 
@@ -46,6 +48,7 @@ export type SessionValidation<T> = { ok: true; value: T } | { ok: false; errors:
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isStr = (v: unknown): v is string => typeof v === "string" && v.length > 0;
 const KINDS = new Set<string>(SESSION_EVENT_KINDS);
+const READ_KINDS = new Set<string>([...SESSION_EVENT_KINDS, ...LEGACY_SESSION_EVENT_KINDS]);
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 export const HOOK_STATUSES = ["running", "completed", "failed", "blocked", "stopped", "unknown"] as const;
 const hookData = (d: Record<string, unknown>): string | null => {
@@ -56,7 +59,6 @@ const hookData = (d: Record<string, unknown>): string | null => {
   if (d.durationMs !== undefined && (typeof d.durationMs !== "number" || !Number.isFinite(d.durationMs) || d.durationMs < 0)) return "data.durationMs invalid";
   if (d.executionMode !== undefined && !["sync", "async"].includes(d.executionMode as string)) return "data.executionMode invalid";
   if (d.handlerType !== undefined && !["command", "mcpTool", "prompt", "agent"].includes(d.handlerType as string)) return "data.handlerType invalid";
-  if ((d.provider !== undefined || d.integration !== undefined) && (d.provider !== "supermemory" || d.integration !== "runner-plugin")) return "data.provider/integration invalid";
   return null;
 };
 
@@ -90,14 +92,14 @@ const DATA_RULES: Partial<Record<SessionEventKind, (d: Record<string, unknown>) 
   "command.accepted": (d) => !isStr(d.commandId) ? "data.commandId required" : !isStr(d.type) ? "data.type required" : !isObj(d.outcome) || typeof d.outcome.ok !== "boolean" ? "data.outcome required" : null,
 };
 
-export function validateSessionEvent(input: unknown): SessionValidation<SessionEvent> {
+export function validateSessionEvent(input: unknown, options: { persisted?: boolean } = {}): SessionValidation<SessionEvent> {
   const errors: string[] = [];
   if (!isObj(input)) return { ok: false, errors: ["event must be an object"] };
   if (input.v !== SESSION_EVENT_VERSION) errors.push("v must be 1");
   if (!isStr(input.sessionId)) errors.push("sessionId required");
   if (!Number.isInteger(input.seq) || (input.seq as number) < 1) errors.push("seq must be an integer >= 1");
   if (typeof input.ts !== "string" || !ISO.test(input.ts) || Number.isNaN(Date.parse(input.ts))) errors.push("ts must be ISO 8601");
-  if (typeof input.kind !== "string" || !KINDS.has(input.kind)) errors.push("unknown kind");
+  if (typeof input.kind !== "string" || !(options.persisted ? READ_KINDS : KINDS).has(input.kind)) errors.push("unknown kind");
   if (!isObj(input.source)) errors.push("source must be an object");
   else for (const k of ["memberId", "taskId", "runnerId", "nativeSessionId"])
     if (input.source[k] !== undefined && typeof input.source[k] !== "string") errors.push(`source.${k} must be a string`);

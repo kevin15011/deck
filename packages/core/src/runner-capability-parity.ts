@@ -249,19 +249,11 @@ function resolveCapabilityParity(
       ? [capability.sharedBinary.mcpServerName]
       : [];
   const missingMcpServer = mcpServerNames.find((serverName) => !isMcpServerConfigured(serverName, runtimeHints));
-  if (missingMcpServer && !(capabilityId === "supermemory-tool-bindings" && runtimeHints?.supermemoryConfigured === true)) {
+  if (missingMcpServer) {
     return failure(
       "capability-mcp-not-configured",
       `required MCP server ${missingMcpServer} is not configured`,
       `Configure MCP server ${missingMcpServer} for runner ${runnerId}`,
-    );
-  }
-
-  if (capabilityId === "supermemory-tool-bindings" && runtimeHints?.supermemoryConfigured === false) {
-    return failure(
-      "capability-configuration-unverified",
-      "required runtime configuration could not be verified",
-      `Verify configuration for ${capabilityId} on runner ${runnerId}`,
     );
   }
 

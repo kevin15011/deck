@@ -6,7 +6,6 @@ export function preparationCapabilities(config: NormalizedDeckConfig, runnerId: 
   return {
     "codebase-memory": { enabled: isCodebaseMemoryEnabled(config, runnerId) },
     rtk: { enabled: config.packageInstructions?.[runnerId]?.rtk === true },
-    "adaptive-memory": { enabled: config.adaptiveMemory.enabled === true && config.adaptiveMemory.activeProvider !== "none", inputDigest: config.adaptiveMemory.activeProvider },
     "web-search": { enabled: config.webSearch.enabled, inputDigest: config.webSearch.provider ?? "native" },
   };
 }

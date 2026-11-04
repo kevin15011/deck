@@ -78,7 +78,10 @@ export type CodexConfigMergeResult =
 export const CODEX_HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "Stop"] as const;
 export type CodexHookEvent = (typeof CODEX_HOOK_EVENTS)[number];
 /** Stable ownership identities; each owns exactly one marker-delimited block. */
-export const CODEX_OWNED_HOOK_IDS = ["memory-bridge", "rtk", "supermemory", "readiness"] as const;
+export const CODEX_OWNED_HOOK_IDS = ["rtk", "readiness"] as const;
+// Removal-only version-1 ownership identities; retire after legacy install migration support ends.
+export const RETIRED_CODEX_HOOK_IDS = ["memory-bridge", "supermemory"] as const;
+const RECOGNIZED_HOOK_IDS = [...CODEX_OWNED_HOOK_IDS, ...RETIRED_CODEX_HOOK_IDS];
 export type CodexOwnedHookId = (typeof CODEX_OWNED_HOOK_IDS)[number];
 
 export type CodexOwnedHook = Readonly<{
@@ -95,12 +98,6 @@ const CODEX_HOOK_COMMAND = "deck internal codex-memory-hook";
 const LEGACY_HOOK_MARKER = "# deck-codex-hook-v1";
 const LEGACY_HOOK_BLOCK = `${LEGACY_HOOK_MARKER}\n[[hooks.SessionStart]]\nmatcher = "*"\nhooks = [{ type = "command", command = "${CODEX_HOOK_COMMAND}" }]\n\n[[hooks.UserPromptSubmit]]\nmatcher = "*"\nhooks = [{ type = "command", command = "${CODEX_HOOK_COMMAND}" }]\n\n[[hooks.PreToolUse]]\nmatcher = "*"\nhooks = [{ type = "command", command = "${CODEX_HOOK_COMMAND}" }]\n\n[[hooks.PostToolUse]]\nmatcher = "*"\nhooks = [{ type = "command", command = "${CODEX_HOOK_COMMAND}" }]\n\n[[hooks.SubagentStart]]\nmatcher = "*"\nhooks = [{ type = "command", command = "${CODEX_HOOK_COMMAND}" }]\n\n[[hooks.Stop]]\nmatcher = "*"\nhooks = [{ type = "command", command = "${CODEX_HOOK_COMMAND}" }]\n`;
 
-/** Deck's loopback memory bridge: fail-open lifecycle forwarding through the installed `deck` binary. */
-export const CODEX_MEMORY_BRIDGE_HOOK_BLOCK: CodexOwnedHookBlock = Object.freeze({
-  id: "memory-bridge",
-  hooks: CODEX_HOOK_EVENTS.map((event) => Object.freeze({ event, matcher: "*", command: CODEX_HOOK_COMMAND })),
-});
-
 const blockStart = (id: string) => `# deck-codex-hook:${id}:start`;
 const blockEnd = (id: string) => `# deck-codex-hook:${id}:end`;
 
@@ -110,6 +107,7 @@ function tomlQuote(value: string): string {
 }
 
 export function renderCodexOwnedHookBlock(block: CodexOwnedHookBlock): string {
+  if (!(CODEX_OWNED_HOOK_IDS as readonly string[]).includes(block.id)) throw new Error("Unsupported Codex hook identity.");
   const lines = [blockStart(block.id)];
   block.hooks.forEach((hook, index) => {
     if (!CODEX_HOOK_EVENTS.includes(hook.event)) throw new Error(`Unsupported Codex hook event: ${hook.event}`);
@@ -161,7 +159,7 @@ function lineArray(source: string): string[] {
  * never read as ownership evidence and never rewritten, because Codex loads hooks from every source together.
  * Every `CODEX_OWNED_HOOK_IDS` entry absent from `desired` is removed; unknown marker ids are left untouched.
  */
-export function mergeCodexOwnedHooks(source: string, desired: readonly CodexOwnedHookBlock[]): CodexConfigMergeResult {
+export function mergeCodexOwnedHooks(source: string, desired: readonly CodexOwnedHookBlock[], options: { removeOnly?: readonly string[] } = {}): CodexConfigMergeResult {
   const blocked = (message: string): CodexConfigMergeResult => ({ status: "blocked", content: source, diagnostics: [message], ownedRanges: [] });
   try { parse(source); } catch { return blocked("Malformed TOML cannot be changed safely."); }
   const desiredIds = new Set(desired.map((block) => block.id));
@@ -172,7 +170,7 @@ export function mergeCodexOwnedHooks(source: string, desired: readonly CodexOwne
 
   let working = source;
   // Exact legacy single-block migration: any divergence is treated as user content and refused.
-  if (working.includes(LEGACY_HOOK_MARKER)) {
+  if (working.includes(LEGACY_HOOK_MARKER) && (!options.removeOnly || options.removeOnly.includes("memory-bridge"))) {
     if (working.split(LEGACY_HOOK_MARKER).length - 1 !== 1 || !working.includes(LEGACY_HOOK_BLOCK)) return blocked("Deck Codex trusted-hook configuration is tampered or ambiguous.");
     const at = working.indexOf(LEGACY_HOOK_BLOCK);
     const after = working.slice(at + LEGACY_HOOK_BLOCK.length).replace(/^\n/, "");
@@ -188,9 +186,9 @@ export function mergeCodexOwnedHooks(source: string, desired: readonly CodexOwne
   for (const block of located.blocks) {
     out.push(...lines.slice(cursor, block.from));
     cursor = block.to + 1;
-    const known = (CODEX_OWNED_HOOK_IDS as readonly string[]).includes(block.id);
+    const known = (RECOGNIZED_HOOK_IDS as readonly string[]).includes(block.id);
     const replacement = rendered.get(block.id);
-    if (!known) { out.push(...lines.slice(block.from, block.to + 1)); continue; }
+    if (!known || options.removeOnly && !options.removeOnly.includes(block.id)) { out.push(...lines.slice(block.from, block.to + 1)); continue; }
     present.add(block.id);
     const original = lines.slice(block.from, block.to + 1).join("");
     // Marker comments are not a TOML boundary: native Codex may append tables
@@ -246,10 +244,10 @@ export function codexHooksFeatureDisabled(source: string): boolean {
 }
 
 /** Ids of Deck-owned hook blocks currently present (including the pre-v2 single block as "memory-bridge"). */
-export function inspectCodexOwnedHookIds(source: string): readonly CodexOwnedHookId[] {
-  const ids = new Set<CodexOwnedHookId>();
+export function inspectCodexOwnedHookIds(source: string): readonly string[] {
+  const ids = new Set<string>();
   const located = locateOwnedBlocks(lineArray(source));
-  for (const block of located.blocks) if ((CODEX_OWNED_HOOK_IDS as readonly string[]).includes(block.id)) ids.add(block.id as CodexOwnedHookId);
+  for (const block of located.blocks) if ((RECOGNIZED_HOOK_IDS as readonly string[]).includes(block.id)) ids.add(block.id);
   if (source.includes(LEGACY_HOOK_MARKER)) ids.add("memory-bridge");
   return [...ids];
 }

@@ -53,7 +53,7 @@ deck-canary codex developer
 deck-canary claude developer
 ```
 
-Claude's Developer mode delivers the team as plugin files: memory comes from the official Supermemory plugin when it was selected, and protected execution controls are instruction-level. For configured cross-runner sessions, use:
+Claude's Developer mode delivers the team as plugin files: protected execution controls are instruction-level. For configured cross-runner sessions, use:
 
 ```sh
 deck-canary cross developer

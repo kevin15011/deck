@@ -52,7 +52,8 @@ function combinedJsonRemovalRanges(text: string, entries: RetirementEntry[]): Re
   visit(root);
   return ranges;
 }
-const retired = ['context-mode', 'serena'] as const;
+// Removal-only identifiers for receipted legacy installation contributions.
+const retired = ['context-mode', 'serena', 'supermemory', 'deck-memory', 'adaptive-memory'] as const;
 const inRoot = (path: string, root: string) => { const rel = relative(resolve(root), resolve(path)); return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
 const sensitiveField = /secret|token|password|credential|api.?key|headers?|^key$|^env$|environment|authorization|authentication/i;
 function redact(value: unknown, key = ''): unknown {
@@ -97,11 +98,15 @@ export function planPackageRetirement(input: {
         const record = contributionsById ? contributionsById.get(recordId) : input.contributions?.find(item => item.id === recordId);
         const dedicated = input.dedicatedRoots.some(root => inRoot(path, root));
         const manifest = validContributionHash(record?.hash) && record.hash === entryHash;
-        const ownership = dedicated ? 'dedicated-location' : manifest ? 'manifest-proven' : 'ambiguous';
+        const editedReceipt = Boolean(record) && !manifest;
+        // Shared config/dependency entries need granular evidence even under Deck's tools root.
+        const receiptRequired = retired.some(id => id === capability && id !== 'context-mode' && id !== 'serena');
+        const dedicatedOwnership = dedicated && !receiptRequired;
+        const ownership = dedicatedOwnership && !editedReceipt ? 'dedicated-location' : manifest ? 'manifest-proven' : 'ambiguous';
         const id = contributionHash(`${input.runnerId}\0${path}\0${selector}`);
         plan.entries.push({ id, runnerId: input.runnerId, path, selector, capability, ownership,
-          action: ownership === 'ambiguous' ? 'conditional-remove' : 'remove',
-          reason: dedicated ? 'Exact retired contribution inside a dedicated Deck location' : manifest ? 'Current entry matches recorded ownership hash' : record ? 'Recorded entry changed or hash is invalid; individual confirmation required' : 'No granular ownership evidence; individual confirmation required',
+          action: editedReceipt ? 'preserve' : ownership === 'ambiguous' ? 'conditional-remove' : 'remove',
+          reason: editedReceipt ? 'Recorded entry changed or its hash is invalid; preserve it and review the customized contribution' : dedicatedOwnership ? 'Exact retired contribution inside a dedicated Deck location' : manifest ? 'Current entry matches recorded ownership hash' : 'No granular ownership evidence; individual confirmation required',
           fileHash, entryHash, preview: target.format === "symlink" ? `Retired installation link; unlink this exact path without following its target` : target.format === "file" ? `Retired installation artifact, ${Buffer.byteLength(String(value))} bytes; delete this exact path` : JSON.stringify(redact(displayValue), null, 2),
           contribution, context: `File ${path}; selected ${selector}; preserve every sibling and unrelated section`, ranges });
       };

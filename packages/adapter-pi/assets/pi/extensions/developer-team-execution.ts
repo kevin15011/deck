@@ -30,7 +30,6 @@ export interface PiDeveloperTeamExecutionExtensionOptionsV1 {
   readonly invocationAuthorization?: "static-compatible" | "invocation-required";
   readonly resolveExecutionEvent?: (event: Readonly<Record<string, unknown>>, input: Readonly<Record<string, unknown>>) => unknown | Promise<unknown>;
   readonly qaAuthority?: QaRunnerHostAuthorityV1;
-  readonly memoryLoopback?: MemoryLoopbackOptionsV1;
 }
 
 const HOST_CONTEXT = Symbol.for("deck.developer-team.execution-context.v1");
@@ -45,14 +44,7 @@ type PiHostProviderV1 = {
   ) => unknown | Promise<unknown>;
   readonly clearSessionPreparationSession?: (sessionId: string) => unknown | Promise<unknown>;
   readonly qaAuthority?: QaRunnerHostAuthorityV1;
-  readonly memoryLoopback?: MemoryLoopbackOptionsV1;
 };
-
-type MemoryLoopbackOptionsV1 = Readonly<{
-  endpoint?: string;
-  token?: string;
-  post?: (endpoint: string, token: string, body: string) => Promise<{ ok?: boolean; advisoryText?: string; diagnostics?: readonly string[] }>;
-}>;
 
 function digestInput(text: unknown): `sha256:${string}` {
   const value = typeof text === "string" ? text : JSON.stringify(text ?? null);
@@ -62,40 +54,6 @@ function digestInput(text: unknown): `sha256:${string}` {
 function applyAgent(input: Record<string, unknown>): boolean {
   const role = input.subagent_type ?? input.agent ?? input.role;
   return typeof role === "string" && APPLY_AGENTS.has(role);
-}
-
-function memoryRole(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  if (value === "deck-apply-fast") return "apply-fast";
-  if (value === "deck-apply-deep") return "apply-deep";
-  if (value === "deck-quality") return "quality";
-  if (value === "deck-setup") return "setup";
-  if (value === "deck-investigate") return "investigate";
-  if (value === "deck-architect") return "architect";
-  return undefined;
-}
-
-async function sendMemoryLoopback(options: MemoryLoopbackOptionsV1 | undefined, event: Record<string, unknown>): Promise<{ advisoryText?: string } | undefined> {
-  const endpoint = options?.endpoint ?? process.env.DECK_RUNNER_MEMORY_ENDPOINT;
-  const token = options?.token ?? process.env.DECK_RUNNER_MEMORY_TOKEN;
-  if (!endpoint || !token) return undefined;
-  const body = JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "pi", ...event });
-  try {
-    const post = options?.post ?? (async (url, bearer, payload) => {
-      const parsed = new URL(url);
-      if (parsed.protocol !== "http:" || (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost")) throw new Error("invalid loopback endpoint");
-      const response = await fetch(parsed, { method: "POST", headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" }, body: payload });
-      return await response.json() as { ok?: boolean; advisoryText?: string; diagnostics?: readonly string[] };
-    });
-    const result = await post(endpoint, token, body);
-    return typeof result.advisoryText === "string" ? { advisoryText: result.advisoryText } : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function memoryEvent(base: Record<string, unknown>): Record<string, unknown> {
-  return { timestamp: Date.now(), ...base };
 }
 
 function qaRole(input: Record<string, unknown>): "verify" | "review" | undefined {
@@ -196,7 +154,6 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
   const modeIsValid = rawMode === "invocation-required" || rawMode === "static-compatible";
   const mode = modeIsValid ? (rawMode as "invocation-required" | "static-compatible") : "static-compatible";
   const resolveExecutionEvent = options.resolveExecutionEvent ?? provider?.resolvePi;
-  const memoryLoopback = options.memoryLoopback ?? provider?.memoryLoopback;
   let latestReceipt: `sha256:${string}` | undefined;
   const pendingQaInvocations = new Map<string, Readonly<{ sessionId: string; invocation: PiQaInvocationV1 }>>();
   const settledQaInvocationKeys = new Set<string>();
@@ -217,11 +174,8 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
     pi.on("input", async (event, context) => {
       const text = typeof event?.text === "string" ? event.text : undefined;
       const sessionId = context?.sessionManager?.getSessionId?.();
-      const memorySessionId = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : "pi-session";
       latestReceipt = digestInput(text ?? event);
-      const recall = await sendMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${memorySessionId}:input:session_start`, event: "session_start", sessionId: memorySessionId, role: "lead", query: text }));
-      if (text) await sendMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${memorySessionId}:input:capture:${digestInput(text)}`, event: "capture", sessionId: memorySessionId, source: "trusted-user-prompt", content: text }));
-      return recall?.advisoryText ? { type: "continue", advisoryText: recall.advisoryText } : { type: "continue" };
+      return { type: "continue" };
     });
     pi.on("tool_call", async (event, context) => {
       const input = event?.input;
@@ -231,9 +185,6 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
       delete input.deckQaInvocation;
       delete input.deckQaResult;
       const role = input.subagent_type ?? input.agent ?? input.role;
-      const sessionIdForMemory = context?.sessionManager?.getSessionId?.();
-      const roleAdvisory = await sendMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${typeof sessionIdForMemory === "string" ? sessionIdForMemory : "pi-session"}:${event.toolCallId ?? "tool"}:role_start`, event: "role_start", sessionId: typeof sessionIdForMemory === "string" ? sessionIdForMemory : "pi-session", role: memoryRole(role), query: typeof role === "string" ? role : undefined }));
-      const roleAdvisoryOutput = roleAdvisory?.advisoryText ? { advisoryText: roleAdvisory.advisoryText } : undefined;
       if (role === "deck-setup") {
         const sessionId = context?.sessionManager?.getSessionId?.();
         if (event.toolName !== "subagent" || typeof event.toolCallId !== "string" || typeof sessionId !== "string" || sessionId.length === 0) {
@@ -242,7 +193,7 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
         // The native tool owns exact delegation and authenticated child repair. This
         // route exists only while that extension has a live matching parent session.
         try {
-          if (routeNativePreparation(sessionId, context?.sessionManager?.getSessionFile?.(), input.preparation, context.cwd)) return roleAdvisoryOutput;
+          if (routeNativePreparation(sessionId, context?.sessionManager?.getSessionFile?.(), input.preparation, context.cwd)) return undefined;
         } catch { return { block: true, reason: "invalid-evidence" }; }
         if (!preparationAuthorizationService) {
           return { block: true, reason: "modification-not-authorized:AUTHZ_PROVIDER_MISSING" };
@@ -278,7 +229,7 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
           kind: "deck-preparation-authority-reference-v1",
           ...validation.reference,
         });
-        return roleAdvisoryOutput;
+        return undefined;
       }
       const requestedRole = qaRole(input);
       if (requestedRole) {
@@ -292,7 +243,7 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
         if (!qaAuthority) {
           return failClosed
             ? { block: true, reason: "modification-not-authorized:AUTHZ_MISSING" }
-            : roleAdvisoryOutput;
+            : undefined;
         }
         const key = qaInvocationKey(sessionId, event.toolCallId);
         if (pendingQaInvocations.has(key) || settledQaInvocationKeys.has(key)) return { block: true, reason: "invalid-evidence" };
@@ -307,19 +258,19 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
         } catch {
           return failClosed
             ? { block: true, reason: "invalid-evidence" }
-            : roleAdvisoryOutput;
+            : undefined;
         }
         input.deckQaInvocation = invocation;
         pendingQaInvocations.set(key, Object.freeze({ sessionId, invocation }));
-        return roleAdvisoryOutput;
+        return undefined;
       }
-      if (!applyAgent(input)) return roleAdvisoryOutput;
+      if (!applyAgent(input)) return undefined;
       if (!modeIsValid) return { block: true, reason: "invalid-evidence" };
       const failClosed = mode === "invocation-required";
       if (!resolveExecutionEvent) {
         return failClosed
           ? { block: true, reason: "modification-not-authorized:AUTHZ_MISSING" }
-          : roleAdvisoryOutput;
+          : undefined;
       }
       let rawEvent: unknown;
       try {
@@ -327,14 +278,14 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
       } catch {
         return failClosed
           ? { block: true, reason: "invalid-evidence" }
-          : roleAdvisoryOutput;
+          : undefined;
       }
       if (!rawEvent || typeof rawEvent !== "object" || !event.toolCallId) {
         return failClosed
           ? { block: true, reason: "invalid-evidence" }
-          : roleAdvisoryOutput;
+          : undefined;
       }
-      if (mode === "static-compatible" && (rawEvent as Record<string, unknown>).mode !== "shadow") return roleAdvisoryOutput;
+      if (mode === "static-compatible" && (rawEvent as Record<string, unknown>).mode !== "shadow") return undefined;
       if (!latestReceipt) {
         return { block: true, reason: "invalid-evidence" };
       }
@@ -358,13 +309,13 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
         if (outcome.code !== "executed" && outcome.code !== "shadow-complete" && outcome.code !== "legacy-complete") {
           return failClosed
             ? { block: true, reason: outcome.authorizationCode ? `modification-not-authorized:${outcome.authorizationCode}` : outcome.code }
-            : roleAdvisoryOutput;
+            : undefined;
         }
-        return roleAdvisoryOutput;
+        return undefined;
       } catch {
         return failClosed
           ? { block: true, reason: "invalid-evidence" }
-          : roleAdvisoryOutput;
+          : undefined;
       }
     });
     pi.on("tool_result", async (event, context) => {
@@ -404,7 +355,6 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
           if (clearSessionPreparation) await clearSessionPreparation(sessionId);
         } finally {
           qaAuthority?.clearSession(sessionId);
-          await sendMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${sessionId}:shutdown_flush`, event: "shutdown_flush", sessionId, role: "lead" }));
         }
       }
     });

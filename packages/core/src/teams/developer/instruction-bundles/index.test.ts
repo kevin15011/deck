@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { buildAdaptiveMemoryInstructionBundle } from "./adaptive-memory";
 
 import {
   DEFAULT_ORCHESTRATOR_PERSONALITY,
@@ -9,7 +8,6 @@ import {
 import {
   buildCapabilityInstructionBundle,
   buildCapabilityToolPolicyBundle,
-  bindAdaptiveMemoryInstructionBundle,
   composeCapabilityInstructions,
   getEnabledCapabilityInstructionIds,
   getEnabledPackageInstructionIds,
@@ -26,14 +24,14 @@ function makeConfig(overrides: Partial<NormalizedDeckConfig["packageInstructions
   return {
     ...getDefaultDeckConfig(),
     capabilities: { 'codebase-memory': { enabled: false, runners: Object.fromEntries(Object.entries(overrides).map(([runner, selection]) => [runner, selection?.['codebase-memory'] === true])) } },
-    packageInstructions: Object.fromEntries(Object.entries(getDefaultDeckConfig().packageInstructions).map(([runner, selection]) => [runner, { ...selection, 'code-economy': false, rtk: false, 'adaptive-memory': false, ...overrides[runner as keyof typeof overrides] }])),
+    packageInstructions: Object.fromEntries(Object.entries(getDefaultDeckConfig().packageInstructions).map(([runner, selection]) => [runner, { ...selection, 'code-economy': false, rtk: false, ...overrides[runner as keyof typeof overrides] }])),
   } as NormalizedDeckConfig;
 }
 
 test("Codex defaults preserve continuing package order and valid surface metadata", () => {
   const config = getDefaultDeckConfig();
-  expect(Object.keys(config.packageInstructions.codex)).toEqual(["codebase-memory", "code-economy", "rtk", "adaptive-memory"]);
-  expect(getEnabledPackageInstructionIds(config, "codex")).toEqual(["code-economy", "rtk", "adaptive-memory"]);
+  expect(Object.keys(config.packageInstructions.codex)).toEqual(["codebase-memory", "code-economy", "rtk"]);
+  expect(getEnabledPackageInstructionIds(config, "codex")).toEqual(["code-economy", "rtk"]);
   const bundle = buildCapabilityInstructionBundle(["serena", "code-economy", "context-mode", "code-economy"]);
   expect([...new Set(bundle.instructions.map((fragment) => fragment.packageId))]).toEqual(["code-economy"]);
   expect(validateCapabilityInstructionMetadata(bundle)).toEqual([]);
@@ -127,63 +125,6 @@ describe("buildCapabilityInstructionBundle", () => {
       expect(fragment.markdown.length).toBeGreaterThan(10);
     }
   });
-
-  test("fragments do not include toolBindings (unlike memory bundle)", () => {
-    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
-
-    for (const fragment of bundle.instructions) {
-      expect(fragment).not.toHaveProperty("toolBindings");
-    }
-  });
-
-  test("rebinds caller-supplied adaptive-memory fragments while preserving unrelated package fragments", () => {
-    const callerBundle: CapabilityInstructionBundle = {
-      instructions: [
-        { packageId: "code-economy", surface: "agent", markdown: "preserve code economy", teamId: "developer-team" },
-        { packageId: "adaptive-memory", surface: "agent", markdown: "stale unscoped adaptive memory", teamId: "developer-team" },
-        { packageId: "adaptive-memory", surface: "skill", markdown: "No manual containerTag required", teamId: "developer-team" },
-        { packageId: "serena", surface: "agent", markdown: "preserve serena", teamId: "developer-team" },
-      ],
-    };
-
-    const rebound = bindAdaptiveMemoryInstructionBundle(callerBundle, {
-      supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
-      configuredSupermemoryProjectScope: "sm_project_v1_kevin15011_deck",
-    });
-    expect(rebound).toBeDefined();
-    const text = rebound!.instructions.map((fragment) => fragment.markdown).join("\n");
-
-    expect(text).toContain("preserve code economy");
-    expect(text).toContain("preserve serena");
-    expect(text).toContain("Runtime-managed recall and capture bind project scope server-side");
-    expect(rebound!.instructions.filter(fragment => fragment.packageId === "adaptive-memory")).toEqual(
-      [...buildAdaptiveMemoryInstructionBundle({
-        supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
-        configuredSupermemoryProjectScope: "sm_project_v1_kevin15011_deck",
-      }).instructions],
-    );
-    expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-    expect(text).not.toContain("supermemory_search_memory");
-    expect(text).not.toContain("stale unscoped adaptive memory");
-    expect(text).not.toContain("No manual containerTag required");
-  });
-
-  test("can add fail-closed adaptive-memory guidance when a memory provider is active but scopes are not verified", () => {
-    const callerBundle = buildCapabilityInstructionBundle(["code-economy"]);
-
-    const rebound = bindAdaptiveMemoryInstructionBundle(callerBundle, {
-      supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
-      configuredSupermemoryProjectScope: "sm_project_default",
-      includeWhenMissing: true,
-    });
-    expect(rebound).toBeDefined();
-    const text = rebound!.instructions.map((fragment) => fragment.markdown).join("\n");
-
-    expect(text).toContain("Anti-Overengineering Rules");
-    expect(text).toContain("Adaptive-memory project operations are disabled");
-    expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-    expect(text).not.toContain("sm_project_default");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -199,7 +140,7 @@ describe("getEnabledPackageInstructionIds", () => {
 
   test("returns only enabled packages for pi runner", () => {
     const config = makeConfig({
-      pi: { "codebase-memory": true, "code-economy": true, "context-mode": false, rtk: true, "adaptive-memory": false, serena: false },
+      pi: { "codebase-memory": true, "code-economy": true, "context-mode": false, rtk: true, serena: false },
     });
 
     const ids = getEnabledPackageInstructionIds(config, "pi");
@@ -208,7 +149,7 @@ describe("getEnabledPackageInstructionIds", () => {
 
   test("returns only enabled packages for opencode runner", () => {
     const config = makeConfig({
-      opencode: { "codebase-memory": false, "code-economy": true, "context-mode": true, rtk: false, "adaptive-memory": false, serena: false },
+      opencode: { "codebase-memory": false, "code-economy": true, "context-mode": true, rtk: false, serena: false },
     });
 
     const ids = getEnabledPackageInstructionIds(config, "opencode");
@@ -223,7 +164,7 @@ describe("getEnabledPackageInstructionIds", () => {
 
   test("preserves canonical order even when enabled in different order", () => {
     const config = makeConfig({
-      pi: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": false, serena: false, "code-economy": true },
+      pi: { "codebase-memory": true, "context-mode": true, rtk: true, serena: false, "code-economy": true },
     });
 
     const ids = getEnabledPackageInstructionIds(config, "pi");

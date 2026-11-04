@@ -94,7 +94,7 @@ export interface DoctorPresentationModel {
  */
 export interface DoctorDiagnosticsResult {
   runtimes: DoctorRuntimeResult[];
-  memory: DoctorCategoryResult[];
+  optionalTools: DoctorCategoryResult[];
   mcp: DoctorCategoryResult[];
   binary?: DoctorBinaryResult;
   hasCriticalErrors: boolean;

@@ -4,7 +4,6 @@
  * Core builds this manifest from:
  * - Canonical agent definitions and content (from content-registry)
  * - Optional model assignments (from ModelCatalog + caller overrides)
- * - Optional memory injection bundle (from AdaptiveMemoryProvider resolution)
  *
  * Adapters serialize this manifest to their runner-native format.
  *
@@ -21,8 +20,6 @@ import type {
 } from "../../model-catalog";
 import type {
   TeamEntry,
-  MemoryInjectionBundle,
-  MemoryDiagnostic,
   DeveloperTeamManifest,
   DeveloperTeamManifestAgent,
   DeveloperTeamManifestSkill,
@@ -43,8 +40,6 @@ export type { DeveloperTeamManifest, DeveloperTeamManifestAgent, DeveloperTeamMa
 export type BuildManifestOptions = {
   team: TeamEntry;
   modelAssignments?: readonly DeveloperTeamModelAssignmentOverride[];
-  memoryBundle?: MemoryInjectionBundle;
-  memoryDiagnostics?: readonly MemoryDiagnostic[];
   /** Optional capability instruction bundle to compose into agent and skill content */
   capabilityInstructions?: CapabilityInstructionBundle;
   /** When true, validate manifest completeness and add errors/warnings. Default: false */
@@ -76,17 +71,15 @@ export type DeveloperTeamModelAssignmentOverride = {
  * Build a canonical DeveloperTeamManifest from core content and optional inputs.
  *
  * The builder accepts optional inputs without knowing provider-specific details.
- * Memory injection is passed through unchanged — core does not build it.
  *
  * In strict mode, performs validations:
  * - Placeholder detection: warns if any agent uses placeholder content
  * - Model assignment validation: errors if modelAssignments references unknown agents
- * - Memory/capability conflict: warns if both memoryBundle and capabilityInstructions inject to same surface
  *
  * @returns ManifestBuildResult containing the manifest plus any warnings or errors
  */
 export function buildDeveloperTeamManifest(options: BuildManifestOptions): ManifestBuildResult {
-  const { team, modelAssignments = [], memoryBundle, memoryDiagnostics = [], capabilityInstructions, strict = false } = options;
+  const { team, modelAssignments = [], capabilityInstructions, strict = false } = options;
 
   // Index overrides by agentId for fast lookup
   const overrideByAgent = new Map<string, DeveloperTeamModelAssignmentOverride>();
@@ -126,7 +119,6 @@ export function buildDeveloperTeamManifest(options: BuildManifestOptions): Manif
       instruction,
       model: modelId,
       reasoning,
-      memoryBundle: memoryBundle,
     });
 
     // Strict mode: check for placeholder
@@ -146,7 +138,6 @@ export function buildDeveloperTeamManifest(options: BuildManifestOptions): Manif
       agentId: agentDef.id,
       skillId: agentDef.skillId,
       body,
-      memoryBundle: memoryBundle,
     });
   }
 
@@ -171,48 +162,12 @@ export function buildDeveloperTeamManifest(options: BuildManifestOptions): Manif
     }
   }
 
-  // Strict mode: check memory/capability conflict per (agentId, surface)
-  if (strict && memoryBundle && capabilityInstructions) {
-    // Build sets of (agentId, surface) targeted by each bundle
-    // Memory targets: specific agent IDs or '*' for global
-    const memoryTargets = new Map<string, boolean>(); // key = "agentId:surface", value = isGlobal
-    for (const frag of memoryBundle.instructions) {
-      if (frag.agentIds && frag.agentIds.length > 0) {
-        for (const agentId of frag.agentIds) {
-          memoryTargets.set(`${agentId}:${frag.surface}`, false);
-        }
-      } else if (!frag.agentIds && !frag.skillIds) {
-        // Global fragment — applies to all agents
-        memoryTargets.set(`*:${frag.surface}`, true);
-      }
-    }
-
-    // Capability targets: all are global (no per-agent targeting in current design)
-    const capabilityHasGlobal = new Set<string>(); // surfaces with global capability injection
-    for (const frag of capabilityInstructions.instructions) {
-      capabilityHasGlobal.add(frag.surface);
-    }
-
-    // Report conflicts:
-    // - Specific memory target + capability has global for same surface = conflict
-    // - Global memory target + capability has global for same surface = conflict
-    for (const [target, isGlobal] of memoryTargets) {
-      const surface = target.split(":")[1];
-      if (capabilityHasGlobal.has(surface)) {
-        warnings.push(
-          `Memory and capability both inject to ${target} — verify they don't conflict`,
-        );
-      }
-    }
-  }
-
   return {
     manifest: {
       team,
       agents,
       skills,
       standaloneSkills,
-      memoryDiagnostics,
     },
     warnings,
     errors,

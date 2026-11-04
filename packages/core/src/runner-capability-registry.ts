@@ -8,7 +8,6 @@ export type CanonicalCapabilityCategory =
   | "shared-binaries"
   | "runner-silent-packages"
   | "prompts-profiles"
-  | "memory-tool-bindings"
   | "execution-controls";
 
 export type RunnerCapabilitySupportStatus =
@@ -21,7 +20,7 @@ export type RunnerCapabilitySupportStatus =
   | "unsupported"
   | "not-applicable";
 
-export type InstructionBundleId = "adaptive-memory" | "codebase-memory" | "context-mode" | "rtk" | "serena" | "web-search";
+export type InstructionBundleId = "codebase-memory" | "context-mode" | "rtk" | "serena" | "web-search";
 export type CapabilitySurface = "agent" | "skill" | "session" | "mcp" | "install" | "prompt-profile";
 
 export type SharedBinaryConfig = {
@@ -91,7 +90,6 @@ export type ParityRuntimeHints = {
   mcpServersConfigured?: readonly string[];
   packagesInstalled?: readonly string[];
   projectIndexVerified?: boolean;
-  supermemoryConfigured?: boolean;
   profilePromptPath?: string;
   authenticatedRuntimeValidated?: boolean;
   codebaseMemoryIndexed?: boolean;
@@ -140,15 +138,6 @@ const CORE_CAPABILITIES: readonly CanonicalRunnerCapability[] = Object.freeze([
     requiredSurfaces: ["agent", "skill", "session", "mcp", "install"],
   },
   { id: "context7", label: "Context7", category: "mcps", requirement: "configurable", userFacing: true, requiredSurfaces: ["install", "mcp"] },
-  {
-    id: "supermemory-tool-bindings",
-    label: "Supermemory Tool Bindings",
-    category: "memory-tool-bindings",
-    requirement: "configurable",
-    userFacing: true,
-    instructionBundleId: "adaptive-memory",
-    requiredSurfaces: ["mcp", "session"],
-  },
   { id: "code-economy", label: "Code Economy", category: "packages", requirement: "required", userFacing: true, requiredSurfaces: ["agent", "skill", "session"] },
   { id: "trusted-runner-host-bridge", label: "Trusted Runner Host Bridge", category: "execution-controls", requirement: "required", userFacing: false },
   { id: "invocation-authorization", label: "Invocation Authorization", category: "execution-controls", requirement: "required", userFacing: false },
@@ -312,7 +301,6 @@ export const CANONICAL_CATEGORIES: readonly CanonicalCapabilityCategory[] = Obje
   "shared-binaries",
   "runner-silent-packages",
   "prompts-profiles",
-  "memory-tool-bindings",
   "execution-controls",
 ]);
 

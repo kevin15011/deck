@@ -6,10 +6,7 @@ import { join } from "node:path";
 import * as adapterPi from "./index";
 
 import {
-  SUPERMEMORY_API_KEY_HEADER,
-  SUPERMEMORY_MCP_URL,
   defaultPiMcpConfigPath,
-  extractValidatedSupermemoryPiMcpServer,
   redactPiMcpConfigDiagnosticText,
   writeCodebaseMemoryMcpConfig,
   writeContextModeMcpConfig,
@@ -17,7 +14,6 @@ import {
   writeGatedLocalMcpConfig,
   writeLocalMcpConfig,
   writeSerenaMcpConfig,
-  writeSupermemoryPiMcpConfig,
 } from "./pi-mcp-config";
 import type { SerenaReadinessEvidence } from "@deck/core";
 
@@ -213,339 +209,6 @@ describe("Pi Serena MCP config writer", () => {
   test("legacy compatibility calls cannot claim success or write Serena", () => {
     const result = writeSerenaMcpConfig();
     expect(result).toMatchObject({ ok: false, action: "failed" });
-  });
-});
-
-describe("Pi global MCP config writer", () => {
-  test("does not materialize raw Supermemory MCP and retires exact stale Deck-managed entries", () => {
-    const home = tempHome();
-    try {
-      const configPath = defaultPiMcpConfigPath(home);
-      mkdirSync(join(configPath, ".."), { recursive: true });
-      writeFileSync(configPath, JSON.stringify({
-        mcpServers: {
-          supermemory: { transport: "http", url: SUPERMEMORY_MCP_URL, headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" } },
-          other: { command: "other" },
-        },
-      }));
-
-      const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
-      const config = readJson(configPath);
-
-      expect(result).toMatchObject({ ok: true, action: "updated" });
-      expect(config.mcpServers.supermemory).toBeUndefined();
-      expect(config.mcpServers.other).toEqual({ command: "other" });
-      expect(allDiagnosticsText(result).toLowerCase()).toContain("retired");
-    } finally {
-      cleanup(home);
-    }
-  });
-
-  test("retires exact stale Deck-managed entries even when the stored scope belongs to an old project", () => {
-    const home = tempHome();
-    try {
-      const configPath = defaultPiMcpConfigPath(home);
-      mkdirSync(join(configPath, ".."), { recursive: true });
-      writeFileSync(configPath, JSON.stringify({
-        mcpServers: {
-          supermemory: { transport: "http", url: SUPERMEMORY_MCP_URL, headers: { "x-sm-project": "sm_project_v1_acme_project_a" } },
-          other: { command: "other" },
-        },
-      }));
-
-      const first = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_acme_project_b" });
-      const second = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_acme_project_b" });
-      const config = readJson(configPath);
-
-      expect(first).toMatchObject({ ok: true, action: "updated" });
-      expect(second).toMatchObject({ ok: true, action: "unchanged" });
-      expect(config.mcpServers.supermemory).toBeUndefined();
-      expect(config.mcpServers.other).toEqual({ command: "other" });
-    } finally {
-      cleanup(home);
-    }
-  });
-
-  test("preserves ambiguous external Supermemory Pi MCP entries as unmanaged", () => {
-    const home = tempHome();
-    try {
-      const configPath = defaultPiMcpConfigPath(home);
-      mkdirSync(join(configPath, ".."), { recursive: true });
-      const original = {
-        mcpServers: {
-          supermemory: { transport: "http", url: SUPERMEMORY_MCP_URL, headers: { "x-sm-project": "sm_project_v1_other_repo" }, note: "external" },
-        },
-      };
-      writeFileSync(configPath, JSON.stringify(original));
-
-      const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
-
-      expect(result.ok).toBe(false);
-      expect(readJson(configPath)).toEqual(original);
-      expect(allDiagnosticsText(result)).toContain("unmanaged");
-    } finally {
-      cleanup(home);
-    }
-  });
-
-  test("resolves default Pi MCP config path under the provided home directory", () => {
-    const home = "/tmp/example-home";
-    expect(defaultPiMcpConfigPath(home)).toBe(join(home, ".pi", "agent", "mcp.json"));
-  });
-
-  test("does not create ~/.pi/agent/mcp.json with a raw Supermemory server entry", () => {
-    const home = tempHome();
-    try {
-      const configPath = defaultPiMcpConfigPath(home);
-      const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
-
-      expect(result.ok).toBe(true);
-      expect(result.action).toBe("unchanged");
-      expect(result.path).toBe(configPath);
-      expect(result.serverName).toBe("supermemory");
-      expect(allDiagnosticsText(result)).not.toContain(SENTINEL_TOKEN);
-      expect(existsSync(configPath)).toBe(false);
-    } finally {
-      cleanup(home);
-    }
-  });
-
-  test("preserves unrelated servers and blocks ambiguous existing Supermemory entries", () => {
-    const home = tempHome();
-    try {
-      const configPath = defaultPiMcpConfigPath(home);
-      mkdirSync(join(home, ".pi", "agent"), { recursive: true });
-      writeFileSync(
-        configPath,
-        JSON.stringify(
-          {
-            mcpServers: {
-              filesystem: {
-                command: "npx",
-                args: ["-y", "@modelcontextprotocol/server-filesystem"],
-              },
-              supermemory: {
-                transport: "http",
-                url: "https://old.example.invalid",
-                headers: {
-                  "x-existing-header": "keep-me",
-                  [SUPERMEMORY_API_KEY_HEADER]: "old-token",
-                },
-                extraSetting: true,
-              },
-            },
-            topLevel: "preserved",
-          },
-          null,
-          2,
-        ),
-      );
-
-      const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
-      expect(result.ok).toBe(false);
-      expect(result.action).toBe("failed");
-      expect(allDiagnosticsText(result)).not.toContain(SENTINEL_TOKEN);
-
-      const config = readJson(configPath);
-      expect(config.topLevel).toBe("preserved");
-      expect(config.mcpServers.filesystem).toEqual({
-        command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-filesystem"],
-      });
-      expect(config.mcpServers.supermemory.extraSetting).toBe(true);
-      expect(config.mcpServers.supermemory.transport).toBe("http");
-      expect(config.mcpServers.supermemory.url).toBe("https://old.example.invalid");
-      expect(config.mcpServers.supermemory.headers["x-existing-header"]).toBe("keep-me");
-      expect(config.mcpServers.supermemory.headers[SUPERMEMORY_API_KEY_HEADER]).toBe("old-token");
-    } finally {
-      cleanup(home);
-    }
-  });
-
-  test("supports a configured server name", () => {
-    const home = tempHome();
-    try {
-      const result = writeSupermemoryPiMcpConfig({
-        homeDir: home,
-        token: SENTINEL_TOKEN,
-        serverName: "team-supermemory",
-        projectScope: "sm_project_v1_kevin15011_deck",
-      });
-
-      expect(result.ok).toBe(true);
-      expect(result.serverName).toBe("team-supermemory");
-      expect(result.action).toBe("unchanged");
-      expect(existsSync(defaultPiMcpConfigPath(home))).toBe(false);
-    } finally {
-      cleanup(home);
-    }
-  });
-
-  test("fails closed on malformed JSON without partial writes", () => {
-    const home = tempHome();
-    try {
-      const configPath = defaultPiMcpConfigPath(home);
-      mkdirSync(join(home, ".pi", "agent"), { recursive: true });
-      const original = "{ this is not json";
-      writeFileSync(configPath, original);
-
-      const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
-
-      expect(result.ok).toBe(false);
-      expect(result.action).toBe("failed");
-      expect(result.diagnostics[0]?.code).toBe("PI_MCP_CONFIG_MALFORMED");
-      expect(readFileSync(configPath, "utf-8")).toBe(original);
-      expect(allDiagnosticsText(result)).not.toContain(SENTINEL_TOKEN);
-    } finally {
-      cleanup(home);
-    }
-  });
-
-  test("fails closed on conflicting config shapes without overwriting existing file", () => {
-    const home = tempHome();
-    try {
-      const configPath = defaultPiMcpConfigPath(home);
-      mkdirSync(join(home, ".pi", "agent"), { recursive: true });
-      const originalConfig = { mcpServers: { supermemory: { headers: "not-an-object" } } };
-      writeFileSync(configPath, JSON.stringify(originalConfig, null, 2));
-
-      const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
-
-      expect(result.ok).toBe(false);
-      expect(result.action).toBe("failed");
-      expect(result.diagnostics[0]?.code).toBe("PI_MCP_CONFIG_CONFLICT");
-      expect(readJson(configPath)).toEqual(originalConfig);
-      expect(allDiagnosticsText(result)).not.toContain(SENTINEL_TOKEN);
-    } finally {
-      cleanup(home);
-    }
-  });
-
-  test("returns unchanged when the existing entry already matches", () => {
-    const home = tempHome();
-    try {
-      const first = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
-      const second = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
-
-      expect(first.ok).toBe(true);
-      expect(second.ok).toBe(true);
-      expect(second.action).toBe("unchanged");
-      expect(allDiagnosticsText(second)).not.toContain(SENTINEL_TOKEN);
-    } finally {
-      cleanup(home);
-    }
-  });
-
-  test("attempts restrictive directory and file permissions where supported", () => {
-    const home = tempHome();
-    try {
-      const configPath = defaultPiMcpConfigPath(home);
-      const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
-
-      expect(result.ok).toBe(true);
-      expect(result.action).toBe("unchanged");
-      expect(existsSync(configPath)).toBe(false);
-    } finally {
-      cleanup(home);
-    }
-  });
-
-  test("does not export secret-bearing runtime server extraction from public adapter API", () => {
-    expect("extractValidatedSupermemoryPiMcpRuntimeServer" in adapterPi).toBe(false);
-  });
-
-  test("extracting a Supermemory MCP endpoint fails closed after raw MCP retirement", () => {
-    const home = tempHome();
-    try {
-      writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
-      expect(() => extractValidatedSupermemoryPiMcpServer({ homeDir: home })).toThrow(/missing/);
-    } finally {
-      cleanup(home);
-    }
-  });
-
-  test("redacts token-like diagnostic text and header values", () => {
-    const redacted = redactPiMcpConfigDiagnosticText(
-      `token=${SENTINEL_TOKEN} ${SUPERMEMORY_API_KEY_HEADER}: ${SENTINEL_TOKEN} Bearer ${SENTINEL_TOKEN}`,
-    );
-
-    expect(redacted).not.toContain(SENTINEL_TOKEN);
-    expect(redacted).toContain("[REDACTED]");
-  });
-
-  test("redacts quoted JSON, env-style, authorization, and bearer secrets", () => {
-    const redacted = redactPiMcpConfigDiagnosticText(
-      JSON.stringify({
-        headers: {
-          [SUPERMEMORY_API_KEY_HEADER]: SENTINEL_TOKEN,
-          Authorization: `Bearer ${SENTINEL_TOKEN}`,
-        },
-        token: SENTINEL_TOKEN,
-        apiKey: SENTINEL_TOKEN,
-      }) + ` SUPERMEMORY_API_KEY=${SENTINEL_TOKEN}`,
-    );
-
-    expect(redacted).not.toContain(SENTINEL_TOKEN);
-    expect(redacted).toContain("[REDACTED]");
-  });
-
-  test("ignores blank legacy tokens and still does not create raw Supermemory config", () => {
-    const home = tempHome();
-    try {
-      const configPath = defaultPiMcpConfigPath(home);
-      const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: "   ", projectScope: "sm_project_v1_kevin15011_deck" });
-
-      expect(result.ok).toBe(true);
-      expect(result.action).toBe("unchanged");
-      expect(existsSync(configPath)).toBe(false);
-      expect(allDiagnosticsText(result)).not.toContain(SENTINEL_TOKEN);
-    } finally {
-      cleanup(home);
-    }
-  });
-
-  test("retirement requires no current project and writes no new Supermemory config", () => {
-    const home = tempHome();
-    const configPath = join(home, ".pi", "agent", "mcp.json");
-
-    const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN } as any);
-
-    expect(result.ok).toBe(true);
-    expect(result.action).toBe("unchanged");
-    expect(existsSync(configPath)).toBe(false);
-    expect(allDiagnosticsText(result)).not.toContain(SENTINEL_TOKEN);
-  });
-
-  test("retirement ignores obsolete caller scope because it never creates scoped config", () => {
-    const home = tempHome();
-    const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_default" });
-
-    expect(result.ok).toBe(true);
-    expect(result.action).toBe("unchanged");
-  });
-
-  test("validation rejects legacy non-canonical project scope headers", () => {
-    const home = tempHome();
-    try {
-      const configPath = defaultPiMcpConfigPath(home);
-      mkdirSync(join(home, ".pi", "agent"), { recursive: true });
-      writeFileSync(configPath, JSON.stringify({
-        mcpServers: {
-          supermemory: {
-            transport: "http",
-            url: SUPERMEMORY_MCP_URL,
-            headers: { "x-sm-project": "sm_project_default", [SUPERMEMORY_API_KEY_HEADER]: SENTINEL_TOKEN },
-          },
-        },
-      }));
-
-      const result = extractValidatedSupermemoryPiMcpServer({ homeDir: home });
-      expect(result).toBeUndefined();
-    } catch (error) {
-      expect(String(error)).toMatch(/canonical x-sm-project|legacy persisted Supermemory credential/);
-    } finally {
-      cleanup(home);
-    }
   });
 });
 
@@ -748,8 +411,8 @@ describe("writeGatedLocalMcpConfig", () => {
     try {
       const configPath = defaultPiMcpConfigPath(home);
 
-      // Raw Supermemory MCP is no longer created.
-      writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
+      mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+      writeFileSync(configPath, JSON.stringify({ mcpServers: { personal: { command: "personal" } } }));
 
       // Then add context-mode via gated write
       const result = await writeGatedLocalMcpConfig({
@@ -767,7 +430,7 @@ describe("writeGatedLocalMcpConfig", () => {
       expect(result.ok).toBe(true);
 
       const config = readJson(configPath);
-      expect(config.mcpServers.supermemory).toBeUndefined();
+      expect(config.mcpServers.personal).toEqual({ command: "personal" });
       expect(config.mcpServers["context-mode"]).toBeDefined();
     } finally {
       cleanup(home);
@@ -1050,3 +713,27 @@ describe("defaultPiMcpConfigPath", () => {
     expect(defaultPiMcpConfigPath(undefined, { PI_CODING_AGENT_DIR: "relative" })).toBe(`${homedir()}/.pi/agent/mcp.json`);
   });
 });
+
+test("redacts token-like diagnostic text and header values", () => {
+    const redacted = redactPiMcpConfigDiagnosticText(
+      `token=${SENTINEL_TOKEN} ${"x-api-key"}: ${SENTINEL_TOKEN} Bearer ${SENTINEL_TOKEN}`,
+    );
+
+    expect(redacted).not.toContain(SENTINEL_TOKEN);
+    expect(redacted).toContain("[REDACTED]");
+  });
+test("redacts quoted JSON, env-style, authorization, and bearer secrets", () => {
+    const redacted = redactPiMcpConfigDiagnosticText(
+      JSON.stringify({
+        headers: {
+          ["x-api-key"]: SENTINEL_TOKEN,
+          Authorization: `Bearer ${SENTINEL_TOKEN}`,
+        },
+        token: SENTINEL_TOKEN,
+        apiKey: SENTINEL_TOKEN,
+      }) + ` EXTERNAL_API_KEY=${SENTINEL_TOKEN}`,
+    );
+
+    expect(redacted).not.toContain(SENTINEL_TOKEN);
+    expect(redacted).toContain("[REDACTED]");
+  });

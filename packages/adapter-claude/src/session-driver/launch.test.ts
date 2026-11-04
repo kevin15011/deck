@@ -161,42 +161,6 @@ test.each<Record<string, string>>([{ "X-Key": "inline-secret-value" }, { "X-Key"
   expect(() => build({ mcp: { servers: ["deck"], sessionTools: [] }, mcpServerSpecs: { deck: { transport: "http", url: "https://example.com/mcp", envHttpHeaders } } })).toThrow("HTTP headers require valid");
 });
 
-
-describe("prepared official native Supermemory", () => {
-  const memory = { provider: "supermemory", integration: "runner-plugin", status: "ready", projectScope: "sm_project_v1_acme_deck", plugin: { root: "/owned/official", exclusiveHookEvents: ["SessionStart", "UserPromptSubmit", "Stop"], mcpServers: { plugin_supermemory_supermemory: { command: "node", args: ["/owned/official/hooks/mcp-proxy.js"], env: {} } } } } as const;
-  test("admit the official plugin alongside native user sources and explicit managed MCP in fresh and resumed execution", () => {
-    for (const resumed of [false, true]) {
-      const { launch, files } = build({ nativeMemory: memory, ...(resumed ? { resume: { nativeSessionId: SID } } : {}) });
-      expect(valueAfter(launch.args, "--plugin-dir")).toBe(memory.plugin.root);
-      expect(valueAfter(launch.args, "--setting-sources")).toBe("user");
-      expect(JSON.parse(valueAfter(launch.args, "--settings")!).disableAllHooks).toBeUndefined();
-      expect(launch.expectedMcpServers).toEqual(["serena", "deck", "plugin_supermemory_supermemory"]);
-      expect(JSON.parse(files.get("mcp-config.json")!).mcpServers.plugin_supermemory_supermemory.args).toEqual(["/owned/official/hooks/mcp-proxy.js"]);
-      expect(launch.args).not.toContain("--strict-mcp-config");
-      expect(valueAfter(launch.args, "--disallowedTools")).toBe("Task,Agent");
-    }
-  });
-  test("unavailable or malformed prepared scope never starts an unscoped plugin", () => {
-    expect(() => build({ nativeMemory: { ...memory, status: "unavailable", reasonCode: "native-memory-profile-unavailable" } })).toThrow("native-memory-profile-unavailable");
-    expect(() => build({ nativeMemory: { ...memory, projectScope: "sm_project_default" } })).toThrow("canonical");
-  });
-  test("disabled Deck memory preserves native hooks and adds no managed plugin", () => {
-    const { launch } = build({ nativeMemory: { provider: "supermemory", integration: "runner-plugin", status: "disabled" } });
-    expect(launch.args).not.toContain("--plugin-dir");
-    expect(JSON.parse(valueAfter(launch.args, "--settings")!).disableAllHooks).toBeUndefined();
-  });
-});
-
-test("global memory requires explicit admission and drops inherited provider selectors and credentials", () => {
-  const plugin = { root: "/owned/official" };
-  const memory = { provider: "supermemory", integration: "runner-plugin", status: "ready", scopeMode: "global", plugin } as const;
-  const launch = buildClaudeTurnLaunch(input({ nativeMemory: memory }), { writePrivateFile: name => `/private/${name}` }, { baseEnv: { HOME: "/home/u", SUPERMEMORY_CC_API_KEY: "real-key", SUPERMEMORY_REPO_TAG: "foreign", SUPERMEMORY_API_URL: "https://foreign", DECK_MEMORY_CONTAINER: "foreign" } });
-  expect(launch.env).toMatchObject({ HOME: "/home/u" });
-  expect(Object.keys(launch.env).some(key => /^(SUPERMEMORY_|DECK_MEMORY_)/.test(key))).toBe(false);
-  expect(() => build({ nativeMemory: { ...memory, scopeMode: undefined } })).toThrow("canonical");
-  expect(() => build({ nativeMemory: { ...memory, projectScope: "sm_project_v1_owner_repo" } })).toThrow("canonical");
-});
-
 // Protects current human input provenance and keeps historical observations out
 // of installed roles/readiness. The native append-system file carries context.
 test('local session evidence is attached separately from the current user turn', () => {

@@ -16,9 +16,8 @@ export type PiDoctorStatus = "ok" | "warning" | "error";
 export type PiDoctorItem = { status: PiDoctorStatus; message: string; suggestion?: string };
 export type PiDoctorCategory = { category: string; status: PiDoctorStatus; items: PiDoctorItem[] };
 
-export const PI_DOCTOR_EXTENSIONS = ["developer-team-execution", "deck-memory", "deck-subagents", "deck-tool-policy"] as const;
-const GENERATED_EXTENSIONS = new Set(["deck-memory", "deck-subagents", "deck-tool-policy"]);
-const MEMORY_ENV_BLANKS = ["DECK_RUNNER_MEMORY_ENDPOINT", "DECK_RUNNER_MEMORY_TOKEN", "DECK_RUNNER_MEMORY_TOKEN_FILE"];
+export const PI_DOCTOR_EXTENSIONS = ["developer-team-execution", "deck-subagents", "deck-tool-policy"] as const;
+const GENERATED_EXTENSIONS = new Set(["deck-subagents", "deck-tool-policy"]);
 const REINSTALL = "Run 'deck pi developer' (or Review & Install for Pi) to repair the Deck package.";
 
 export type InspectPiDeckInstallInput = {
@@ -31,13 +30,8 @@ export type InspectPiDeckInstallInput = {
   piListOutput?: string;
   /** True when the path exists and is executable. */
   isExecutable: (path: string) => boolean;
-  /** Deck session runtime directory that holds `pi-memory-*` token handoff directories. */
-  runtimeDirectory?: string;
-  /** Lists a directory with modification times; undefined when it cannot be read. */
-  listDirectory?: (path: string) => Array<{ name: string; mtimeMs: number }> | undefined;
   /** `source-sha256` header of the extension bundles embedded in this Deck build, by extension name. */
   expectedBundleDigests?: Readonly<Record<string, string | undefined>>;
-  now?: () => number;
 };
 
 function category(name: string, items: PiDoctorItem[]): PiDoctorCategory {
@@ -185,26 +179,12 @@ export function inspectPiDeckInstall(input: InspectPiDeckInstallInput): PiDoctor
     else if (!input.isExecutable(command)) problems.push(`the command ${command} does not exist or is not executable`);
     if (entry.exposure !== "direct") problems.push('exposure is not "direct" (mcp__* tool names will not exist)');
     const env = entry.env && typeof entry.env === "object" ? entry.env as Record<string, unknown> : {};
-    if (MEMORY_ENV_BLANKS.some((key) => env[key] !== "")) problems.push("the memory environment blanks are missing");
     mcpItems.push(problems.length === 0
-      ? { status: "ok", message: `MCP server "${name}": absolute command, direct exposure, memory variables blanked.` }
+      ? { status: "ok", message: `MCP server "${name}": absolute command, direct exposure.` }
       : { status: "error", message: `MCP server "${name}": ${problems.join("; ")}.`, suggestion: REINSTALL });
   }
   result.push(category("Pi MCP (built-in)", mcpItems));
 
-  // --- Memory ----------------------------------------------------------------------------------------------
-  const memoryItems: PiDoctorItem[] = [];
-  memoryItems.push(manifest.files["deck/package/extensions/deck-memory/impl.js"] !== undefined
-    ? { status: "ok", message: "The deck-memory extension is installed (loopback recall/capture in Deck-managed sessions only)." }
-    : { status: "error", message: "The deck-memory extension is not installed.", suggestion: REINSTALL });
-  if (input.runtimeDirectory && input.listDirectory) {
-    const now = (input.now ?? Date.now)();
-    const stale = (input.listDirectory(input.runtimeDirectory) ?? []).filter((entry) => entry.name.startsWith("pi-memory-") && now - entry.mtimeMs > 24 * 60 * 60_000).map((entry) => join(input.runtimeDirectory!, entry.name));
-    memoryItems.push(stale.length === 0
-      ? { status: "ok", message: "No stale pi-memory-* token handoff directories." }
-      : { status: "warning", message: `${stale.length} stale pi-memory-* token handoff director${stale.length === 1 ? "y" : "ies"} older than 24h: ${truncated(stale, 3)}.`, suggestion: "They are swept on the next Deck-managed Pi launch; remove them manually if no Pi session is running." });
-  }
-  result.push(category("Pi adaptive memory", memoryItems));
   result.push(inspectPackageConflicts(input, agentDir, globalSources, manifest.settings.addedPackages));
 
   return result;

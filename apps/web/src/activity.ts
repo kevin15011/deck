@@ -13,7 +13,7 @@ export type AssignmentActivity = ActivityBase & { kind: 'transition'; title: str
 export type HookActivity = ActivityBase & {
     kind: 'hook'; name: string; hookId: string; hookEvent: string; provenance: string;
     status: 'running' | 'completed' | 'failed' | 'blocked' | 'stopped' | 'unknown' | 'unfinished';
-    executionMode?: string; handlerType?: string; durationMs?: number; exitCode?: number; provider?: 'supermemory'; orphan: boolean;
+    executionMode?: string; handlerType?: string; durationMs?: number; exitCode?: number; orphan: boolean;
 };
 export type LeadActivity = ToolActivity | ReasoningActivity | HookActivity | AssignmentActivity;
 const string = (value: unknown): string | undefined => typeof value === 'string' && value.length ? value : undefined;
@@ -131,7 +131,6 @@ export function activityEvents(events: SessionEvent[]): LeadActivity[] {
             row.handlerType = string(event.data.handlerType) ?? row.handlerType;
             if (typeof event.data.durationMs === 'number' && Number.isFinite(event.data.durationMs) && event.data.durationMs >= 0) row.durationMs = event.data.durationMs;
             if (typeof event.data.exitCode === 'number' && Number.isInteger(event.data.exitCode)) row.exitCode = event.data.exitCode;
-            if (event.data.provider === 'supermemory' && event.data.integration === 'runner-plugin') row.provider = 'supermemory';
             if (event.kind === 'hook.started') row.orphan = false;
             if (event.kind === 'hook.completed' || !record.settled) {
                 row.status = ['running', 'completed', 'failed', 'blocked', 'stopped', 'unknown'].includes(String(event.data.status)) ? event.data.status as HookActivity['status'] : 'unknown';

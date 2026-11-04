@@ -9,7 +9,6 @@ export type ParityLaunchShape = {
   codebase?: { route: "native" | "managed"; omitted: boolean; evidence?: CodebaseAvailabilityDisposition };
   mcpNative: Record<string, string>; mcpAdded: string[]; mcpOverridden: string[];
   webSearch: { route: "disabled" | "native" | "fallback"; serverId?: string };
-  memory: { scope: "project" | "global" | "off"; envSecrets: string[] };
   settingSources: string; projectInstructions: "native" | "native-hook" | "none";
   model?: string; effort?: string; permissionMode: "native" | "relay" | "yolo";
   delegation: "native" | "deck"; overlaySections: string[];
@@ -28,7 +27,6 @@ export const SESSION_PARITY_ALLOWLIST: readonly ParityAllowEntry[] = [
   { runner: "*", field: "permissionMode", rule: "yolo", category: "session-mode", justification: "Explicit session choice." },
   ...(["model", "effort"] as const).map(field => ({ runner: "*", field, rule: "assignment", category: "ledger" as const, justification: "Explicit cross-runner assignment." })),
   { runner: "*", field: "mcpOverridden", rule: "codebase-memory", category: "capability-override", justification: "Shared task binding, digest verification and release.", necessityTest: "apps/cli/src/session-codebase-readiness.test.ts" },
-  ...["claude", "codex", "opencode"].map(runner => ({ runner, field: "memory" as const, rule: "global-memory", category: "temporary-tracked" as const, justification: "Global-scope memory: session-only until memory redesign", temporary: { owner: "adaptive-memory-redesign", expiresWhen: "memory redesign makes native and session global scope identical", reviewBy: "2026-11-23" } })),
   { runner: "codex", field: "hooks", rule: "exact-trusted-hash", category: "approval-relay", justification: "Stricter native hook admission." },
   { runner: "opencode", field: "*", rule: "headless-transport", category: "headless-transport", justification: "Loopback serve, sharing and updates disabled." },
   { runner: "pi", field: "*", rule: "unsupported", category: "unsupported", justification: "No session driver." },
@@ -94,7 +92,7 @@ export function diffParity(native: ParityLaunchShape, session: ParityLaunchShape
       const withoutCodebase = (record: Record<string, string>) => Object.fromEntries(Object.entries(record).filter(([id]) => id !== "codebase-memory"));
       if (canonical(withoutCodebase(native.mcpNative)) === canonical(withoutCodebase(session.mcpNative))) continue;
     }
-    if (["mcpNative", "webSearch", "roleTools"].includes(field) || field === "memory" && (native.memory.scope === "project" || session.memory.scope === "project")) { errors.push(`${field}: protected-difference`); continue; }
+    if (["mcpNative", "webSearch", "roleTools"].includes(field)) { errors.push(`${field}: protected-difference`); continue; }
     let eligible: ParityAllowEntry["field"] = field;
     if (field === "sessionStartContext") {
       const a = native.sessionStartContext, b = session.sessionStartContext;
@@ -104,7 +102,6 @@ export function diffParity(native: ParityLaunchShape, session: ParityLaunchShape
     }
     const entry = options.allow.find(e => (e.runner === "*" || e.runner === options.runner) && e.field === eligible
       && (field !== "permissionMode" || e.rule === session.permissionMode)
-      && (field !== "memory" || e.category === "temporary-tracked" && session.memory.scope === "global")
       && (field !== "mcpAdded" || session.mcpAdded.every(id => id === "deck")));
     if (entry) used.add(entry); else errors.push(`${field}: unlisted-difference`);
   }

@@ -31,7 +31,7 @@ export function verifyPiInstallation(root: string): void {
   }
  };
  for(const path of Object.keys(parsed.manifest.files))if(path.startsWith('deck/package/extensions/'))owned(path);
- for(const name of ['deck-tool-policy','deck-subagents','deck-memory','developer-team-execution']) {
+ for(const name of ['deck-tool-policy','deck-subagents','developer-team-execution']) {
   owned(`deck/package/extensions/${name}/index.js`); owned(`deck/package/extensions/${name}/impl.js`);
  }
  walk('deck/package/extensions');

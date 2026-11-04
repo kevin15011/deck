@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,7 +10,7 @@ installGlobalConfigRealEnvSentinel();
 
 const roots: string[] = [];
 function root(): string {
-  const dir = mkdtempSync(join(tmpdir(), "deck-global-store-"));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "deck-global-store-")));
   roots.push(dir);
   return dir;
 }
@@ -82,22 +82,22 @@ describe("DeckConfigStore", () => {
     expect(existsSync(join(outside, "config.json"))).toBe(false);
   });
 
-  test("merges full preference writes so stale partial writers preserve custom Supermemory settings", () => {
+  test("merges preference writes while preserving unrelated runner settings", () => {
     const home = root();
     const xdg = join(home, "xdg");
     const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
-    store.write({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "custom-sm", searchMode: "documents", maxMemoriesPerSession: 6 } } });
+    store.write({ packageInstructions: { codex: { rtk: false } } });
 
     const updated = store.write({ webSearch: { enabled: true, provider: "tavily" } });
 
     expect(updated.webSearch).toEqual({ enabled: true, provider: "tavily" });
-    expect(updated.adaptiveMemory.supermemory).toEqual({ mcpServerName: "custom-sm", searchMode: "documents" });
+    expect(updated.packageInstructions.codex.rtk).toBe(false);
   });
 
   test("reports invalid config values without echoing attacker-controlled values", () => {
     const home = root();
     const xdg = join(home, "xdg");
-    writeJson(join(xdg, "deck", "config.json"), { version: "not-secret-version", adaptiveMemory: { activeProvider: "supermemory", supermemory: { searchMode: "secret-mode" } } });
+    writeJson(join(xdg, "deck", "config.json"), { version: "not-secret-version" });
     const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
     expect(() => store.read()).toThrow("version");
   });

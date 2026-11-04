@@ -19,7 +19,6 @@ export * from "./pi-global-install";
 export * from "./pi-manifest";
 export * from "./pi-mcp-catalog";
 export * from "./pi-mcp-config";
-export * from "./pi-mcp-runtime-validation";
 export * from "./pi-owned-tools";
 export * from "./pi-team-launch";
 export * from "./pi-team-profile";

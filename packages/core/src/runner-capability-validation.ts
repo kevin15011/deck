@@ -9,7 +9,6 @@ export const REQUIRED_CAPABILITIES = [
   "tools",
   "teams",
   "models",
-  "memory",
 ] as const;
 
 // Optional capabilities that may be absent without invalidating the runner

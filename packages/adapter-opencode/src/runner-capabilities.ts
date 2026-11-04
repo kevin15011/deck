@@ -265,7 +265,6 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
   const plan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
     configModelOverrides: modelAssignments,
     reasoningEffortOverrides: reasoningAssignments,
-    supportedMemoryProviderIds: ["supermemory"],
     capabilityInstructions: resolvedCapabilityInstructions,
   });
 
@@ -283,7 +282,6 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
       instruction: s.content,
       model: modelAssignments[s.agent.id],
       reasoning: reasoningAssignments[s.agent.id],
-      memoryBundle: plan.memoryBundle,
     };
   });
 
@@ -291,7 +289,6 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
     agentId: s.agent.id,
     skillId: s.agent.skillId,
     body: s.content,
-    memoryBundle: plan.memoryBundle,
   }));
 
   const standaloneSkills = getStandaloneSkills().map(({ skillId }) => {
@@ -304,7 +301,6 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
     agents,
     skills,
     standaloneSkills,
-    memoryDiagnostics: plan.memoryDiagnostics,
   };
 }
 
@@ -369,7 +365,6 @@ async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyIn
       absolutePath: join(skillsDir, splitSkillInstallFile(f)?.skillId ?? "", ...(splitSkillInstallFile(f)?.packagePath ?? "SKILL.md").split("/")),
       content: f.content,
     })),
-    memoryDiagnostics: [],
     promptProfile: "compact",
     agentEntries: {},
     promptGenerationPlan: [] as ReturnType<typeof import("./prompt-generation").buildPromptGenerationPlan>,
@@ -441,20 +436,6 @@ function resolveAssignment(input: import("@deck/core").RunnerModelResolveInput):
     modelId: input.modelId ?? configuredModel ?? "",
     reasoning: input.reasoning ?? configuredReasoning as import("@deck/core").ReasoningLevel | undefined,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Memory capabilities
-// ---------------------------------------------------------------------------
-
-function getProviders(_input: import("@deck/core").RunnerMemoryProviderInput): readonly import("@deck/core").AdaptiveMemoryProvider[] {
-  // Providers are registered at composition time (Task 17).
-  // Return empty array here; the CLI registry injects actual providers.
-  return [];
-}
-
-function getSupportedProviderIds(): readonly string[] {
-  return ["supermemory"];
 }
 
 // ---------------------------------------------------------------------------
@@ -568,7 +549,6 @@ function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApply
         absolutePath: join(skillsDir, splitSkillInstallFile(f)?.skillId ?? "", ...(splitSkillInstallFile(f)?.packagePath ?? "SKILL.md").split("/")),
         content: f.content,
       })),
-    memoryDiagnostics: [],
     promptProfile: "compact",
     agentEntries: {},
     promptGenerationPlan: [] as ReturnType<typeof import("./prompt-generation").buildPromptGenerationPlan>,
@@ -632,7 +612,6 @@ function backupTeamFiles(plan: import("@deck/core").RunnerDeveloperTeamInstallPl
         absolutePath: f.path,
         content: f.content,
       })),
-    memoryDiagnostics: [],
     promptProfile: "compact",
     agentEntries: {},
     promptGenerationPlan: {} as ReturnType<typeof import("./prompt-generation").buildPromptGenerationPlan>,
@@ -716,10 +695,6 @@ export function createOpenCodeRunnerCapabilities(): RunnerCapabilities {
       getCatalog,
       readAssignments,
       resolveAssignment,
-    },
-    memory: {
-      getProviders,
-      getSupportedProviderIds,
     },
     capabilities: {
       getCapability: getOpenCodeCapability,

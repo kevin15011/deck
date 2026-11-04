@@ -1,3 +1,4 @@
+import type { CapabilityInstructionBundle } from "@deck/core";
 import { evaluateRoleAdmission } from "@deck/core";
 import { verifyPiInstallation } from "./installation-trust";
 import { withInstallationUse, withInstallationMutation, trackInstallationProcess, InstallationBusyError } from "../../core/src/installation-use";
@@ -69,9 +70,7 @@ import { PI_THINKING_LEVELS, supportsThinkingForModel, getDefaultThinkingForMode
 import { getPiRunnerCapability, getUserFacingCapability, PI_RUNNER_CAPABILITY_CONTRIBUTION, PI_RUNNER_CAPABILITY_IDS, type CapabilityId } from "./capability-catalog";
 import { getOptionalPiTools } from "./installation-plan";
 import {
-  writeSupermemoryPiMcpConfig,
   writeSerenaMcpConfig,
-  validateSupermemoryPiMcpConfig,
   type PiMcpConfigFileSystem,
   type PiMcpConfigWriteResult,
   type WriteSerenaMcpConfigOptions,
@@ -122,14 +121,12 @@ import {
   getRunnerCapabilityMapping,
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   buildCapabilityInstructionBundle,
-  bindAdaptiveMemoryInstructionBundle,
   getEnabledCapabilityInstructionIds,
   getConfigurablePackageInstructionMetadata,
   runEvidenceGatedSerenaWriter,
   createSerenaReadinessRevalidator,
   resolveSerenaOwnedRoot,
   SERENA_MCP_ARGS,
-  resolveCanonicalSupermemoryProjectScope,
   validateSerenaOperationAuthorization,
   hasWebSearchProviderCredential,
   isWebSearchProviderDescriptor,
@@ -301,12 +298,6 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       defaultThinkingLevels: PI_THINKING_LEVELS,
       usesNativeCompatibilityChecks: true,
     },
-    adaptiveMemory: {
-      supermemory: {
-        requiresExternalToken: true,
-        selectionStatus: "Supermemory selected; the API key stays in Deck's secret store and reaches Pi only through the Deck loopback during Deck-managed sessions.",
-      },
-    },
   } as const;
 
   // Store last native plan for backup/restore/verify operations
@@ -431,7 +422,6 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       diagnostics: [{ code: "PI_MCP_CONFIG_UNCHANGED", severity: "info", message: `${server ?? capabilityId} MCP server is ready; it is ${PI_MCP_DEFERRED_MARK}.`, path: configPath, serverName: server ?? capabilityId }],
     });
     if (!server) return { ok: false, action: "failed", path: configPath, serverName: capabilityId, diagnostics: [] };
-    if (capabilityId === "supermemory") return { ok: false, action: "failed", path: configPath, serverName: capabilityId, diagnostics: [] };
     let resolved: ReturnType<typeof resolveDeckPiMcpServers>;
     try {
       resolved = resolveDeckPiMcpServers({
@@ -577,7 +567,6 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
               explicitlySelected: state.explicitlySelectedCapabilities?.serena === true,
             }
           : undefined,
-        adaptiveMemory: state.adaptiveMemory as { provider?: "none" | "supermemory"; supermemory?: { configured?: boolean; hasToken?: boolean; runtimeCredentialStored?: boolean; ephemeralTokenAvailable?: boolean; mcpOAuthReady?: boolean; userId?: string; teamId?: string; organizationId?: string } },
         teams: {} as Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>,
         runtime: { toolsReview: review },
         packageInstructions: {
@@ -924,7 +913,6 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       DECK_PI_SESSION: { value: "1" },
       DECK_PI_ROLE: { value: "lead" },
       // With memory off the Deck memory extension stays silent instead of reporting "unavailable" on every launch.
-      ...(input.deckConfig.adaptiveMemory.enabled === true && input.deckConfig.adaptiveMemory.activeProvider === "supermemory" ? {} : { DECK_PI_MEMORY: { value: "disabled" } }),
       // A non-default agent directory must reach Pi itself, not only the Deck process.
       PI_CODING_AGENT_DIR: { value: this.#agentDirResolution.dir },
     };
@@ -1064,31 +1052,8 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   }
 
   /** Capability instructions and install options shared by the plan and the legacy template check. */
-  #resolveInstallOptions(input: DeveloperTeamAdapterInstallInput, agentDir: string): { capabilityInstructions: ReturnType<typeof bindAdaptiveMemoryInstructionBundle>; installOptions: DeveloperTeamInstallOptions } {
-    const derivedSupermemoryProjectScope = (() => {
-      const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
-      return resolved.ok ? resolved.scope : undefined;
-    })();
-    const configuredSupermemoryProjectScope = (() => {
-      const validation = validateSupermemoryPiMcpConfig({
-        configPath: piAgentPaths(agentDir).mcp,
-        homeDir: this.#homeDirectory,
-      });
-      return validation.ok ? validation.projectScope : undefined;
-    })();
-    const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(input.capabilityInstructions ?? (() => {
-      try {
-        return buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(requireDeckConfig(input.deckConfig, "developer team install"), "pi"), {
-          supermemoryProjectScope: derivedSupermemoryProjectScope,
-          configuredSupermemoryProjectScope,
-        });
-      } catch {
-        return undefined;
-      }
-    })(), {
-      supermemoryProjectScope: derivedSupermemoryProjectScope,
-      configuredSupermemoryProjectScope,
-    });
+  #resolveInstallOptions(input: DeveloperTeamAdapterInstallInput, agentDir: string): { capabilityInstructions: CapabilityInstructionBundle | undefined; installOptions: DeveloperTeamInstallOptions } {
+    const capabilityInstructions = input.capabilityInstructions ?? buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(requireDeckConfig(input.deckConfig, "developer team install"), "pi"));
 
     const preserved = this.#mergeInstalledAssignments(input, agentDir);
     return {
@@ -1096,12 +1061,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       installOptions: {
         modelAssignments: preserved.modelAssignments,
         thinkingAssignments: preserved.thinkingAssignments,
-        memoryProvider: input.memoryProvider,
         capabilityInstructions,
         orchestratorPersonality: requireDeckConfig(input.deckConfig, "developer team install").orchestratorPersonality,
         standaloneSkills: input.standaloneSkills,
-        piMcpConfigPath: piAgentPaths(agentDir).mcp,
-        piMcpHomeDir: this.#homeDirectory,
       },
     };
   }
@@ -1164,7 +1126,15 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
           hashJsonValue(existingCodebase) === readPiManifest(this.#fileIO, agentDir)?.mcp.servers["codebase-memory"]) mcpServers["codebase-memory"] = existingCodebase as Record<string, unknown>;
       if (this.#codebaseGuardInvocation && mcpServers["codebase-memory"]) {
         const current = mcpServers["codebase-memory"]!;
-        const binary = parseCodebaseGuardEntry(current, agentDir)?.binary ?? current.command;
+        const ownedLegacyMigration = hashJsonValue(current) === readPiManifest(this.#fileIO, agentDir)?.mcp.servers["codebase-memory"];
+        let binary: unknown;
+        try { binary = parseCodebaseGuardEntry(current, agentDir, { ownedLegacyMigration })?.binary ?? current.command; }
+        catch {
+          this.#lastMaterialization = null;
+          const message = "Pi Codebase guard configuration is customized or invalid; preserve it and review the entry before installation.";
+          diagnosticEntries.push({ code: "PI_CODEBASE_GUARD_INVALID", severity: "error", message });
+          return { files: [], mutationPreview: [], blocked: true, diagnostics: diagnosticEntries.map(entry => entry.message), diagnosticEntries };
+        }
         if (typeof binary !== "string") throw new Error("pi-codebase-guard-invalid");
         const guarded = buildCodebaseGuardEntry(this.#codebaseGuardInvocation(), agentDir, binary);
         mcpServers["codebase-memory"] = guarded;
@@ -1233,23 +1203,6 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       contributionManifestPath: join(this.#readAgentDir(), "deck", "manifest.json"),
       changedCount: applied.changedCount,
       unchangedCount: results.filter((result) => result.status === "unchanged").length,
-    };
-  }
-
-  // -------------------------------------------------------------------------
-  // MCP config (optional)
-  // -------------------------------------------------------------------------
-
-  async writeMcpConfig(input: RunnerMcpConfigInput): Promise<RunnerMcpConfigResult> {
-    const result = writeSupermemoryPiMcpConfig({
-      serverName: input.serverName,
-      configPath: join(this.#readAgentDir(), "mcp.json"),
-    });
-
-    return {
-      ok: result.ok,
-      path: result.path,
-      diagnostics: result.diagnostics.map((d: { message: string }) => d.message),
     };
   }
 
@@ -1452,20 +1405,6 @@ function inferSerenaOwnedRoot(executablePath: string): string | undefined {
   return executablePath.endsWith("/bin/serena")
     ? executablePath.slice(0, -"/bin/serena".length)
     : undefined;
-}
-
-function resolvePiSupermemoryProjectScope(projectRoot: string): string | undefined {
-  try {
-    const remote = execSync("git remote get-url origin", {
-      cwd: projectRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: remote ? [remote] : [] });
-    return resolved.ok ? resolved.scope : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function toRuntimeStatus(preflight: PiPreflightResult): RuntimeStatus {

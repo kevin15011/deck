@@ -35,7 +35,7 @@ for(const missing of ['intermediate','final','reconciled'] as const)test(`Claude
  const add=(kind:SessionEventKind,data:Record<string,unknown>)=>rows.push({v:1,sessionId:'s',seq:++seq,ts:new Date(seq*10).toISOString(),kind,source:{taskId:'t',memberId:'quality',nativeSessionId:'native'},data});
  add('task.created',{taskId:'t',memberId:'quality',runnerId:'claude',modelId:'m',continuityRole:'review'});
  add('task.state',{taskId:'t',state:'running',nativeSessionId:'native',launched:true});
- const mapper=new ClaudeStreamMapper(undefined,'native','turn');
+ const mapper=new ClaudeStreamMapper('native','turn');
  const assistant=(id:string,tokens?:number)=>{for(const e of mapper.map({type:'assistant',session_id:'native',message:{id,model:'m',content:[{type:'text',text:'response'}],...(tokens===undefined?{}:{usage:{input_tokens:tokens,cache_creation_input_tokens:0,cache_read_input_tokens:0}})}}).events)add(e.kind as SessionEventKind,e.data);};
  const request=(id:string,tokens?:number)=>{for(const e of mapper.map({type:'stream_event',session_id:'native',event:{type:'message_start',message:{id}}}).events)add(e.kind as SessionEventKind,e.data);assistant(id,tokens);};
  request('r1',10);request('r2');if(missing!=='final')request('r3',30);

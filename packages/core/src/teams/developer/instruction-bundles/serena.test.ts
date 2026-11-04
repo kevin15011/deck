@@ -94,14 +94,10 @@ describe("buildSerenaInstructionBundle", () => {
   });
 
   // Agent fragment documents all disabled tools
-  test("agent markdown mentions all 13 disabled tools", () => {
-    const agentFragment = bundle.instructions.find((f) => f.surface === "agent");
-    expect(agentFragment).toBeDefined();
-
-    const md = agentFragment!.markdown;
-    for (const tool of DISABLED_TOOLS) {
-      expect(md).toContain(tool);
-    }
+  test("tool policy excludes every disallowed tool", () => {
+    const policy = getSerenaToolPolicy();
+    expect(policy.disabledTools).toEqual(expect.arrayContaining(DISABLED_TOOLS));
+    for (const tool of DISABLED_TOOLS) expect(policy.enabledTools).not.toContain(tool);
   });
 
   // Agent markdown contains coexistence rules

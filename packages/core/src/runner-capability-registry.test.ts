@@ -112,12 +112,6 @@ describe("Runner Capability Registry", () => {
       expect(capability?.id).toBe("context7");
     });
 
-    it("should include supermemory-tool-bindings", () => {
-      const capability = getCanonicalCapability("supermemory-tool-bindings");
-      expect(capability).toBeDefined();
-      expect(capability?.id).toBe("supermemory-tool-bindings");
-    });
-
   });
 
   describe("Categories", () => {
@@ -129,9 +123,8 @@ describe("Runner Capability Registry", () => {
       expect(CANONICAL_CATEGORIES).toContain("shared-binaries");
       expect(CANONICAL_CATEGORIES).toContain("runner-silent-packages");
       expect(CANONICAL_CATEGORIES).toContain("prompts-profiles");
-      expect(CANONICAL_CATEGORIES).toContain("memory-tool-bindings");
       expect(CANONICAL_CATEGORIES).toContain("execution-controls");
-      expect(CANONICAL_CATEGORIES.length).toBe(9);
+      expect(CANONICAL_CATEGORIES.length).toBe(8);
     });
 
     it("should have runner-silent-packages category", () => {

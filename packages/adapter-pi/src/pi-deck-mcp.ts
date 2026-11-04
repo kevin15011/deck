@@ -8,8 +8,6 @@ import type { PiPlanDiagnostic } from "./pi-global-install";
  * MCP stdio children inherit the Pi environment (verified against Pi 1.0.0). Deck blanks every memory variable in
  * each Deck entry's `env`, which Pi applies on top of the inherited environment (the child sees an empty value).
  */
-export { DECK_PI_MEMORY_ENV_BLANKS } from "./pi-mcp-env";
-import { DECK_PI_MEMORY_ENV_BLANKS } from "./pi-mcp-env";
 
 export type DeckPiMcpEntry = {
   command: string;
@@ -20,7 +18,7 @@ export type DeckPiMcpEntry = {
 
 export function buildDeckPiMcpEntry(input: { command: string; args: readonly string[] }): DeckPiMcpEntry {
   if (!isAbsolute(input.command) || /[\0\r\n]/.test(input.command)) throw new Error(`Deck MCP commands must be absolute executable paths (got "${input.command}").`);
-  return { command: input.command, args: [...input.args], env: { ...DECK_PI_MEMORY_ENV_BLANKS }, exposure: "direct" };
+  return { command: input.command, args: [...input.args], env: { }, exposure: "direct" };
 }
 
 const SECRET_ENV = /(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/i;
@@ -34,11 +32,7 @@ export function validateDeckPiMcpEntry(entry: unknown, executableExists: (path: 
   else if (!executableExists(record.command)) problems.push(`command ${record.command} does not exist or is not executable`);
   if (record.exposure !== "direct") problems.push('exposure must be "direct"');
   const env = record.env && typeof record.env === "object" && !Array.isArray(record.env) ? (record.env as Record<string, unknown>) : {};
-  for (const name of Object.keys(DECK_PI_MEMORY_ENV_BLANKS)) {
-    if (env[name] !== "") problems.push(`env must blank ${name}`);
-  }
   for (const [name, value] of Object.entries(env)) {
-    if (name in DECK_PI_MEMORY_ENV_BLANKS) continue;
     if (SECRET_ENV.test(name) && typeof value === "string" && value.length > 0 && !/^\$[A-Z0-9_]+$/.test(value)) problems.push(`env ${name} embeds a credential`);
   }
   return problems;

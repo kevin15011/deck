@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, chmodSync, symlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { validateDeckConfig, type RunnerLaunchInput } from "@deck/core";
 import { createCodexRunnerAdapter } from "../../../packages/adapter-codex/src/runner-adapter";
@@ -12,7 +12,7 @@ import { withNativeProjectReadiness } from "./native-project-readiness";
 // adapter + authenticated refresh + native hook, independently of memory.
 // Oracle: only a verified Deck-created root can refresh Lead on resume/compact.
 test("verified roots refresh across cold launch while child, unrelated and stale contexts never acquire Lead", async () => {
-  const home = mkdtempSync("/tmp/deck-root-context-");
+  const home = realpathSync(mkdtempSync("/tmp/deck-root-context-"));
   const config = validateDeckConfig({});
   const adapter = createCodexRunnerAdapter({ userHome: home, codexHome: join(home, ".codex"),
     preflight: { probe: async () => ({ found: true, version: "0.162.1", help: release.help, execHelp: release.execHelp, resumeHelp: release.resumeHelp }) },
@@ -32,7 +32,7 @@ test("verified roots refresh across cold launch while child, unrelated and stale
   };
   const hook = async (environment: Record<string, string>, sessionId: string, source: string, extra = {}) => JSON.stringify(await forwardCodexTrustedHook({
     hook_event_name: "SessionStart", cwd: home, session_id: sessionId, source, ...extra,
-  }, { environment, endpoint: "", token: "" }));
+  }, { environment }));
   const active: Awaited<ReturnType<typeof launch>>[] = [];
   try {
     const fresh = await launch({ ...base, mode: "interactive" }); active.push(fresh);

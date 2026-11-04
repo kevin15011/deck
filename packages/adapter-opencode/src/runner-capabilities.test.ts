@@ -34,7 +34,6 @@ describe("OpenCode RunnerCapabilities factory", () => {
     expect(typeof capabilities.tools).toBe("object");
     expect(typeof capabilities.teams).toBe("object");
     expect(typeof capabilities.models).toBe("object");
-    expect(typeof capabilities.memory).toBe("object");
   });
 
   test("has id 'opencode'", () => {
@@ -71,17 +70,6 @@ describe("OpenCode RunnerCapabilities factory", () => {
     expect(typeof capabilities.models.resolveAssignment).toBe("function");
   });
 
-  test("memory facet has required methods", () => {
-    expect(typeof capabilities.memory.getProviders).toBe("function");
-    expect(typeof capabilities.memory.getSupportedProviderIds).toBe("function");
-  });
-
-  test("getSupportedProviderIds returns memory provider IDs", () => {
-    const ids = capabilities.memory.getSupportedProviderIds();
-    expect(Array.isArray(ids)).toBe(true);
-    expect(ids).toEqual(["supermemory"]);
-  });
-
   test("getTeamsForEnvironment returns teams for opencode-development", () => {
     const teams = capabilities.teams.getTeamsForEnvironment("opencode-development");
     expect(Array.isArray(teams)).toBe(true);
@@ -116,71 +104,6 @@ describe("OpenCode RunnerCapabilities factory", () => {
   test("no imports from removed @deck/adapter-engram", () => {
     const source = require("fs").readFileSync(__filename.replace(".test.ts", ".ts"), "utf-8");
     expect(source).not.toContain("@deck/adapter-engram");
-  });
-});
-
-describe("buildDeveloperTeamManifest — memoryBundle flow", () => {
-  const capabilities = createOpenCodeRunnerCapabilities();
-
-  test("manifest agents have memoryBundle: undefined when no provider configured", () => {
-    const manifest = capabilities.teams.buildDeveloperTeamManifest({
-      projectRoot: "/tmp/test-project",
-      environmentId: "opencode-development",
-      deckConfig: getDefaultDeckConfig(),
-      capabilityInstructions: undefined,
-      modelAssignments: [],
-    });
-
-    // Without a memoryProvider, plan.memoryBundle is undefined.
-    // Manifest agents/skills get memoryBundle from plan.memoryBundle.
-    expect(manifest.agents.every((a) => a.memoryBundle === undefined)).toBe(true);
-    expect(manifest.skills.every((s) => s.memoryBundle === undefined)).toBe(true);
-  });
-
-  test("manifest omits Deck-owned memory bundles for OpenCode", () => {
-    const manifest = capabilities.teams.buildDeveloperTeamManifest({
-      projectRoot: "/tmp/test-project",
-      environmentId: "opencode-development",
-      deckConfig: getDefaultDeckConfig(),
-      capabilityInstructions: undefined,
-      modelAssignments: [],
-    });
-
-    // Verify the manifest object structure is correct and memoryBundle wiring is clean
-    expect(Array.isArray(manifest.agents)).toBe(true);
-    expect(Array.isArray(manifest.skills)).toBe(true);
-    expect(manifest.team).toBeDefined();
-    expect(manifest.agents.length).toBeGreaterThan(0);
-
-    // All agents should have memoryBundle matching plan.memoryBundle (undefined in this case)
-    expect(manifest.agents.every((a) => a.memoryBundle === undefined)).toBe(true);
-    expect(manifest.skills.every((s) => s.memoryBundle === undefined)).toBe(true);
-  });
-
-  test("manifest agents have non-null memoryBundle when plan has memoryBundle", () => {
-    // NOTE: This scenario requires integration-level testing because
-    // buildDeveloperTeamManifest calls buildOpenCodeDeveloperTeamInstallPlan internally
-    // without accepting an external memoryBundle parameter. The plan's memoryBundle
-    // is set when a memoryProvider with valid auth probe is passed, but in a unit test
-    // context we cannot easily mock the full provider + auth probe flow.
-    //
-    // The positive path is covered by developer-team-install.int.test.ts which tests
-    // buildOpenCodeDeveloperTeamInstallPlan with memoryInjection directly.
-    // That test verifies plan.memoryBundle is non-null when memoryInjection is provided.
-    //
-    // Here we verify the manifest structure is correct and agents have memoryBundle.
-    const manifest = capabilities.teams.buildDeveloperTeamManifest({
-      projectRoot: "/tmp/test-project",
-      environmentId: "opencode-development",
-      deckConfig: getDefaultDeckConfig(),
-      capabilityInstructions: undefined,
-      modelAssignments: [],
-    });
-
-    // Manifest structure should be correct
-    expect(Array.isArray(manifest.agents)).toBe(true);
-    expect(Array.isArray(manifest.skills)).toBe(true);
-    expect(manifest.agents.length).toBeGreaterThan(0);
   });
 });
 

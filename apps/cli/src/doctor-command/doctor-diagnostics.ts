@@ -4,7 +4,7 @@ import { reviewRunnerCleanup } from "../runner-cleanup-doctor";
  * Doctor diagnostics orchestrator.
  *
  * Runs a battery of isolated diagnostic checks across runtimes, packages,
- * memory providers, and MCP configuration. Each sub-check is wrapped in
+ * tools and MCP configuration. Each sub-check is wrapped in
  * try/catch so a single failure does not abort the others (REQ-DIAG-007).
  *
  * The function never throws — it always returns a structured result
@@ -17,7 +17,7 @@ import { reviewRunnerCleanup } from "../runner-cleanup-doctor";
  * - Summary with counts by severity
  */
 
-import { accessSync, constants as fsConstants, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, readFileSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -28,15 +28,12 @@ import {
   inspectPiEnvironment,
   readDeckPiExtensionBundle,
   redact,
-  redactDiagnostic,
   resolvePiAgentDir,
   reviewPiRequiredTools,
   sourceDigestHeader,
-  validateSupermemoryPiMcpConfig,
   type PiDoctorCategory,
 } from "@deck/adapter-pi";
-import { inspectOpenCodeEnvironment, reviewOpenCodeTools, validateSupermemoryOpenCodeMcpConfig } from "@deck/adapter-opencode";
-import { inspectCodexSupermemoryMcpState } from "@deck/adapter-codex";
+import { inspectOpenCodeEnvironment, reviewOpenCodeTools } from "@deck/adapter-opencode";
 
 import { detectSelectedRuntimes, type EnvironmentId } from "../runtime-detection";
 import { getBuildInfo } from "../runtime/build-info.js";
@@ -44,13 +41,9 @@ import { getDeckXdgPaths } from "../runtime/paths.js";
 import { runDeckChecks } from "./doctor-checks";
 import { decideReleaseAvailability, fetchReleaseDescriptor } from "../upgrade-command/github-release.js";
 import type { DeckConfigStore } from "../deck-config-store";
-import { resolveCanonicalSupermemoryProjectScope, type NormalizedDeckConfig } from "@deck/core";
-import { createOwnerOnlyFileSecretStore, redactSecretDiagnostic } from "@deck/core";
-import { createSupermemoryRuntime, createSupermemoryHttpTransport } from "@deck/adapter-supermemory/runtime";
-import { checkSupermemoryObservabilitySink } from "../supermemory-observability";
+import type { NormalizedDeckConfig } from "@deck/core";
 import { checkSessionWeb } from "../session-web-doctor";
 import { reviewInteractiveSearchSessions } from "../interactive-search-review";
-import { formatSessionRuntimeReadiness, resolveSessionRuntimeReadiness } from "../session-runtime-readiness";
 import type {
   DoctorCategoryResult,
   DoctorCheckItem,
@@ -72,15 +65,9 @@ const ALL_ENVIRONMENT_IDS: EnvironmentId[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Known memory provider binaries (checked without instantiating providers)
-// ---------------------------------------------------------------------------
-const MEMORY_PROVIDERS: readonly { id: string; label: string; command: string }[] = [];
-
-// ---------------------------------------------------------------------------
 // Known MCP server entries to validate in OpenCode's opencode.json
 // ---------------------------------------------------------------------------
 const KNOWN_OPENCODE_MCP_SERVERS = [
-  { name: "supermemory", label: "Supermemory MCP" },
   { name: "codebase-memory-mcp", label: "Codebase Memory MCP" },
   { name: "serena", label: "Serena MCP" },
 ] as const;
@@ -97,7 +84,7 @@ function deriveCategoryStatus(items: DoctorCheckItem[]): DoctorStatus {
 }
 
 /** Check if a binary exists in PATH without instantiating any provider. */
-function memoryBinaryAvailable(command: string): boolean {
+function optionalToolBinaryAvailable(command: string): boolean {
   const path = process.env.PATH ?? "";
   const isWindows = process.platform === "win32";
   const suffixes = isWindows ? ["", ".exe"] : [""];
@@ -136,7 +123,6 @@ function inspectPiDeckInstallOnMachine(input: { command: string; projectRoot?: s
     const result = spawnSync(input.command, args, { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"] });
     return result.status === 0 && !result.error ? result.stdout : undefined;
   };
-  const stateDir = getDeckXdgPaths().stateDir;
   return inspectPiDeckInstall({
     io: createNodePiFileIO(),
     agentDir: resolvePiAgentDir(process.env, home),
@@ -144,9 +130,7 @@ function inspectPiDeckInstallOnMachine(input: { command: string; projectRoot?: s
     piVersionOutput: run(["--version"]),
     piListOutput: run(["list"]),
     isExecutable: (path) => { try { accessSync(path, fsConstants.X_OK); return statSync(path).isFile(); } catch { return false; } },
-    runtimeDirectory: join(stateDir, "runtime"),
-    listDirectory: (path) => { try { return readdirSync(path).map((name) => ({ name, mtimeMs: statSync(join(path, name)).mtimeMs })); } catch { return undefined; } },
-    expectedBundleDigests: Object.fromEntries((["deck-memory", "deck-subagents", "deck-tool-policy"] as const).map((name) => {
+    expectedBundleDigests: Object.fromEntries((["deck-subagents", "deck-tool-policy"] as const).map((name) => {
       try { return [name, sourceDigestHeader(readDeckPiExtensionBundle(name))]; } catch { return [name, undefined]; }
     })),
   });
@@ -189,7 +173,7 @@ function checkPiRuntime(
     });
   }
 
-  // Global Deck package: registration, manifest drift, extensions, MCP, memory, legacy and conflicts
+  // Global Deck package: registration, manifest drift, extensions, MCP, optional tools, legacy and conflicts
   try {
     for (const entry of dependencies.inspectPiDeckInstall({ command, projectRoot })) {
       result.checks.push({
@@ -332,41 +316,13 @@ function checkClaudeOrCodexRuntime(runtime: "claude" | "codex", installed: boole
 }
 
 // ---------------------------------------------------------------------------
-// Memory provider checks
+// Optional tool binary checks
 // ---------------------------------------------------------------------------
 
-function checkMemoryProviders(
-  binaryAvailable: typeof memoryBinaryAvailable,
+function checkOptionalToolBinaries(
+  binaryAvailable: typeof optionalToolBinaryAvailable,
 ): DoctorCategoryResult[] {
   const results: DoctorCategoryResult[] = [];
-
-  // Check configured memory providers.
-  for (const provider of MEMORY_PROVIDERS) {
-    const items: DoctorCheckItem[] = [];
-    try {
-      const available = binaryAvailable(provider.command);
-      items.push({
-        status: available ? "ok" : "warning",
-        message: available
-          ? `${provider.label} binary found in PATH`
-          : `${provider.label} binary not found in PATH`,
-        suggestion: available
-          ? undefined
-          : `Install ${provider.label} or ensure it is on your PATH`,
-      });
-    } catch (err) {
-      items.push({
-        status: "error",
-        message: `Unable to check ${provider.label}: ${redact(String(err))}`,
-      });
-    }
-
-    results.push({
-      category: provider.label,
-      status: deriveCategoryStatus(items),
-      items,
-    });
-  }
 
   // Check Serena binary separately
   const serenaItems: DoctorCheckItem[] = [];
@@ -397,156 +353,8 @@ function checkMemoryProviders(
   return results;
 }
 
-async function checkSupermemoryRuntimeReadiness(
-  config: NormalizedDeckConfig | undefined,
-  projectRoot: string | undefined,
-  dependencies: Pick<DoctorDiagnosticsDependencies, "readSupermemorySecret" | "checkSupermemoryApi" | "checkSupermemoryObservabilitySink">,
-  runtimeStatuses: Awaited<ReturnType<typeof detectSelectedRuntimes>> = [],
-  runtimeResults: readonly DoctorRuntimeResult[] = [],
-): Promise<DoctorCategoryResult> {
-  const items: DoctorCheckItem[] = [];
-  const staticIntegrationState = deriveDoctorStaticIntegrationState(runtimeResults);
-  const scope = projectRoot ? resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] }) : undefined;
-  const adaptiveMemoryEnabled = config?.adaptiveMemory.enabled === true;
-  let secret: string | undefined;
-  let runtimeCredentialState: "present" | "missing" | "deferred" = adaptiveMemoryEnabled ? "missing" : "missing";
-  let providerConnectivityState: "ready" | "degraded" | "blocked" = "ready";
-  let observabilityState: "ready" | "degraded" | "blocked" = "ready";
-
-  if (adaptiveMemoryEnabled) {
-    try {
-      secret = dependencies.readSupermemorySecret()?.trim() || undefined;
-      runtimeCredentialState = secret ? "present" : "missing";
-    } catch (error) {
-      runtimeCredentialState = "deferred";
-      items.push({ status: "warning", message: `Deck secret-store could not be inspected; automatic memory will fail open. ${redactSecretDiagnostic(error instanceof Error ? error.message : String(error))}` });
-    }
-  }
-
-  if (staticIntegrationState === "blocked") {
-    items.push({ status: "warning", message: "Deck-managed static integration has no installed OpenCode, Pi, or Codex runner evidence from Doctor checks." });
-  }
-
-  if (!config) {
-    items.push({ status: "warning", message: "Supermemory runtime readiness requires readable Deck config." });
-  } else if (!adaptiveMemoryEnabled) {
-    items.push({ status: "ok", message: "Adaptive Memory runtime is disabled; no automatic Supermemory effects will run." });
-  } else {
-    items.push({ status: "ok", message: "Adaptive Memory runtime is enabled for Supermemory." });
-    let scopeValue: string | undefined;
-    if (!projectRoot) {
-      items.push({ status: "error", message: "Supermemory runtime cannot verify canonical project scope without a verified project root." });
-    } else if (scope?.ok) {
-      scopeValue = scope.scope;
-      items.push({ status: "ok", message: "Canonical Supermemory runtime scope resolved." });
-    } else {
-      items.push({ status: "error", message: scope?.diagnostics.map((diagnostic) => diagnostic.message).join(" ") ?? "Canonical Supermemory runtime scope is unavailable." });
-    }
-
-    items.push(secret
-      ? { status: "ok", message: "Deck secret-store contains a Supermemory runtime credential." }
-      : runtimeCredentialState === "deferred"
-        ? { status: "warning", message: "Deck secret-store credential inspection was deferred; Adaptive Memory will remain fail-open until the credential can be read." }
-        : { status: "error", message: "Deck secret-store does not contain a Supermemory runtime credential; Adaptive Memory is blocked when managed until the credential is stored." });
-
-    if (secret && scopeValue) {
-      try {
-        const checked = await dependencies.checkSupermemoryApi({ apiKey: secret, containerTag: scopeValue });
-        const operations = checked?.operations ?? ["health", "profile", "search"];
-        items.push({ status: "ok", message: `Supermemory API connectivity succeeded for the canonical scope (${operations.join(", ")}).` });
-      } catch (error) {
-        providerConnectivityState = "degraded";
-        items.push({ status: "warning", message: `Supermemory API connectivity failed open. ${redactSecretDiagnostic(error instanceof Error ? error.message : String(error))}` });
-      }
-    }
-
-    const sink = dependencies.checkSupermemoryObservabilitySink?.() ?? { ok: true, path: "", diagnostics: [] };
-    if (sink.ok) {
-      items.push({ status: "ok", message: "Supermemory content-free observability sink path inspected read-only; Doctor did not create, rotate, or write metrics." });
-    } else {
-      observabilityState = "degraded";
-      items.push({ status: "warning", message: `Supermemory observability sink inspection found a readiness issue; runtime still fails open. ${redactSecretDiagnostic(sink.diagnostics.join(" "))}` });
-    }
-    items.push({ status: "ok", message: "Optional Supermemory MCP ad-hoc usage is unobservable-external-mcp: Deck cannot measure external MCP calls, and runtime metrics include only Deck-supervised automatic or explicit operations." });
-  }
-
-  const readiness = resolveSessionRuntimeReadiness({
-    topology: "deck-managed",
-    staticIntegrationState,
-    adaptiveMemoryEnabled,
-    hasProjectIdentity: scope?.ok === true,
-    runtimeCredentialState,
-    providerConnectivityState,
-    observabilityState,
-  });
-  items.unshift({
-    status: readiness.managedRuntime === "blocked" ? readiness.reasonCode === "static-integration-blocked" ? "warning" : "error" : readiness.managedRuntime === "degraded" ? "warning" : "ok",
-    message: formatSessionRuntimeReadiness(readiness),
-  });
-
-  const standalone = resolveSessionRuntimeReadiness({ topology: "runner-standalone", staticIntegrationState: "ready", adaptiveMemoryEnabled, hasProjectIdentity: scope?.ok === true, runtimeCredentialState: "missing" });
-  items.push({ status: "ok", message: `${formatSessionRuntimeReadiness(standalone)} Standalone automatic Adaptive Memory is not provided by design and does not make Doctor fail.` });
-  items.push(...supermemoryRouteMatrixItems(runtimeStatuses));
-  return { category: "Supermemory Runtime", status: deriveCategoryStatus(items), items };
-}
-
-function supermemoryRouteMatrixItems(runtimeStatuses: Awaited<ReturnType<typeof detectSelectedRuntimes>>): DoctorCheckItem[] {
-  const installed = new Set(runtimeStatuses.filter((status) => status.installed).map((status) => status.runtime));
-  const statusFor = (runtime: "opencode" | "pi" | "codex") => installed.has(runtime) ? "bridge-ready-on-deck-supervised-launch" : "runtime-not-detected";
-  return [
-    {
-      status: "ok",
-      message: `Deck-supervised native loopback route matrix: OpenCode interactive/resume ${statusFor("opencode")}; Pi interactive ${statusFor("pi")}; Codex exec/resume ${statusFor("codex")}. Direct runner launches are runner-standalone/static-compatible; automatic Adaptive Memory requires a Deck-managed session.`,
-    },
-    {
-      status: "ok",
-      message: "Native context injection uses runner hook contracts: OpenCode model-message transform, the Pi deck-memory extension (ephemeral system-prompt append over the loopback), and Codex hookSpecificOutput.additionalContext through the installed Deck binary. No Supermemory CLI package is required.",
-    },
-    {
-      status: "ok",
-      message: "Final-assistant capture remains runner-limited: OpenCode uses hook-exposed assistant chat events, Codex uses hook-exposed final events or its trusted bounded exec final-message file when available, and Pi captures the user prompt and the assistant text of each completed turn through the deck-memory extension in Deck-managed sessions.",
-    },
-  ];
-}
-
-function deriveDoctorStaticIntegrationState(runtimeResults: readonly DoctorRuntimeResult[]): "ready" | "degraded" | "blocked" {
-  const managed = runtimeResults.filter((runtime) => runtime.runtimeId === "opencode" || runtime.runtimeId === "pi" || runtime.runtimeId === "codex");
-  const installed = managed.filter((runtime) => runtime.installed);
-  if (installed.length === 0) return "blocked";
-  if (installed.some((runtime) => runtime.checks.every((check) => check.status !== "error"))) return "ready";
-  return "blocked";
-}
-
-// ---------------------------------------------------------------------------
-// MCP validation
-// ---------------------------------------------------------------------------
-
-function checkPiMcp(
-  validateSupermemoryPiMcpConfigFn: typeof validateSupermemoryPiMcpConfig,
-): DoctorCategoryResult {
-  try {
-    const validation = validateSupermemoryPiMcpConfigFn();
-    const items: DoctorCheckItem[] = validation.diagnostics.map((d) => ({
-      status: d.severity === "error" ? "error" : d.severity === "warning" ? "warning" : "ok",
-      message: redactDiagnostic(d).message,
-    }));
-    return {
-      category: "Pi MCP",
-      status: validation.ok ? "ok" : "error",
-      items,
-    };
-  } catch (err) {
-    return {
-      category: "Pi MCP",
-      status: "error",
-      items: [{ status: "error", message: `MCP validation threw: ${redact(String(err))}` }],
-    };
-  }
-}
-
 function checkOpenCodeMcp(
   readMcpSection: typeof readOpenCodeMcpSection,
-  validateSupermemoryMcp: typeof validateSupermemoryOpenCodeMcpConfig = validateSupermemoryOpenCodeMcpConfig,
 ): DoctorCategoryResult {
   const items: DoctorCheckItem[] = [];
 
@@ -559,7 +367,6 @@ function checkOpenCodeMcp(
       });
     } else {
       for (const known of KNOWN_OPENCODE_MCP_SERVERS) {
-        if (known.name === "supermemory") continue;
         const entry = mcpSection[known.name];
         if (entry && typeof entry === "object" && entry !== null) {
           const record = entry as Record<string, unknown>;
@@ -585,23 +392,6 @@ function checkOpenCodeMcp(
           });
         }
       }
-
-      const supermemoryValidation = validateSupermemoryMcp();
-      const supermemoryDiagnostics = supermemoryValidation.diagnostics.join(" ");
-      if (supermemoryValidation.ok) {
-        items.push({
-          status: "ok",
-          message: supermemoryDiagnostics || "Raw Supermemory MCP is absent; Deck Runtime owns Adaptive Memory project isolation.",
-        });
-      } else {
-        items.push({
-          status: "warning",
-          message: supermemoryDiagnostics || "Raw Supermemory MCP is present but not authorized for Deck project memory.",
-          suggestion: supermemoryDiagnostics.includes("stale Deck-managed")
-            ? "Run the Deck-owned retirement path; do not create a new raw Supermemory MCP entry."
-            : "Leave unmanaged external entries unchanged; Deck Runtime does not treat them as project memory.",
-        });
-      }
     }
   } catch (err) {
     items.push({
@@ -612,79 +402,6 @@ function checkOpenCodeMcp(
 
   return {
     category: "OpenCode MCP",
-    status: deriveCategoryStatus(items),
-    items,
-  };
-}
-
-export function checkSupermemoryProjectScopeAgreement(input: {
-  derivedScope?: string;
-  configuredScopes?: Readonly<Record<string, string | undefined>>;
-}): DoctorCategoryResult {
-  const items: DoctorCheckItem[] = [];
-  const scopePattern = /^sm_project_v1_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9]+)*$/;
-  const derived = input.derivedScope?.trim();
-  const derivedAvailable = !!derived && scopePattern.test(derived);
-  const configuredEntries = Object.entries(input.configuredScopes ?? {});
-
-  if (!derivedAvailable) {
-    items.push({
-      status: "warning",
-      message: "Supermemory canonical project scope is missing or invalid; adaptive-memory project operations fail closed.",
-      suggestion: "Run Doctor from a verified Git repository to compare runner MCP scopes; no default project scope is used.",
-    });
-  }
-
-  for (const [runner, configuredValue] of configuredEntries) {
-    const configured = configuredValue?.trim();
-    if (!configured) {
-      items.push({
-        status: "warning",
-        message: `Supermemory ${runner} MCP scope is missing; project memory operations are not authorized for that runner.`,
-      });
-      continue;
-    }
-    if (configured === "sm_project_default" || !scopePattern.test(configured)) {
-      items.push({
-        status: "error",
-        message: `Supermemory ${runner} MCP scope is invalid or legacy/default; project memory operations are not authorized.`,
-      });
-      continue;
-    }
-    if (!derivedAvailable) {
-      items.push({
-        status: "warning",
-        message: `Supermemory ${runner} MCP scope is present but could not be compared to a repository-derived scope; project memory operations remain fail-closed until verified.`,
-      });
-      continue;
-    }
-    if (configured !== derived) {
-      items.push({
-        status: "error",
-        message: `Supermemory ${runner} MCP scope does not match the repository-derived scope; project memory operations are not authorized.`,
-      });
-      continue;
-    }
-    items.push({
-      status: "ok",
-      message: `Supermemory ${runner} MCP scope matches the repository-derived scope fingerprint.`,
-    });
-  }
-
-  if (configuredEntries.length === 0) {
-    items.push(derivedAvailable
-      ? {
-          status: "ok",
-          message: "No raw Supermemory MCP scope materialization was found; Deck Runtime owns canonical project scope when Adaptive Memory is enabled.",
-        }
-      : {
-          status: "warning",
-          message: "No raw Supermemory MCP scope materialization was found, and no verified repository scope is available for Deck Runtime.",
-        });
-  }
-
-  return {
-    category: "Supermemory Project Scope",
     status: deriveCategoryStatus(items),
     items,
   };
@@ -705,18 +422,13 @@ type DoctorDiagnosticsDependencies = Readonly<{
   inspectPiEnvironment: typeof inspectPiEnvironment;
   reviewPiRequiredTools: typeof reviewPiRequiredTools;
   inspectPiDeckInstall: (input: { command: string; projectRoot?: string }) => PiDoctorCategory[];
-  validateSupermemoryPiMcpConfig: typeof validateSupermemoryPiMcpConfig;
   inspectOpenCodeEnvironment: typeof inspectOpenCodeEnvironment;
   reviewOpenCodeTools: typeof reviewOpenCodeTools;
-  validateSupermemoryOpenCodeMcpConfig: typeof validateSupermemoryOpenCodeMcpConfig;
   runDeckChecks: typeof runDeckChecks;
   fetchReleaseDescriptor: typeof fetchReleaseDescriptor;
-  memoryBinaryAvailable: typeof memoryBinaryAvailable;
+  optionalToolBinaryAvailable: typeof optionalToolBinaryAvailable;
   readOpenCodeMcpSection: typeof readOpenCodeMcpSection;
   configStore?: DeckConfigStore;
-  readSupermemorySecret: () => string | undefined;
-  checkSupermemoryApi: (input: { apiKey: string; containerTag: string }) => Promise<void | { operations: readonly string[] }>;
-  checkSupermemoryObservabilitySink?: () => { ok: boolean; path: string; diagnostics: readonly string[] };
   inspectRunnerAdmission?: (runnerId: string, projectRoot: string, config: NormalizedDeckConfig) => Promise<RunnerAdmissionResult | undefined>;
   inspectCodex: (projectRoot: string, deckConfig: NormalizedDeckConfig) => Promise<ReadonlyArray<{ category: string; status: DoctorStatus; message: string; suggestion?: string }>>;
 }>;
@@ -728,26 +440,12 @@ const defaultDoctorDiagnosticsDependencies: DoctorDiagnosticsDependencies = {
   inspectPiEnvironment,
   reviewPiRequiredTools,
   inspectPiDeckInstall: inspectPiDeckInstallOnMachine,
-  validateSupermemoryPiMcpConfig,
   inspectOpenCodeEnvironment,
   reviewOpenCodeTools,
-  validateSupermemoryOpenCodeMcpConfig,
   runDeckChecks,
   fetchReleaseDescriptor,
-  memoryBinaryAvailable,
+  optionalToolBinaryAvailable,
   readOpenCodeMcpSection,
-  readSupermemorySecret: () => createOwnerOnlyFileSecretStore({ configHome: process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config") }).read("supermemory-api-key"),
-  checkSupermemoryApi: async ({ apiKey, containerTag }) => {
-    const runtime = createSupermemoryRuntime({ canonicalScope: containerTag, sessionId: "deck-doctor-supermemory", runnerId: "doctor", transport: createSupermemoryHttpTransport({ apiKey, timeoutMs: 3_000 }) });
-    const health = await runtime.health({ dependency: "explicit-recall" });
-    if (!health.ok) throw new Error(health.diagnostics.join(" "));
-    const profile = await runtime.profile({ role: "setup", dependency: "explicit-recall" });
-    if (!profile.ok && profile.reason !== "role_policy_skip") throw new Error(profile.diagnostics.join(" "));
-    const search = await runtime.search({ role: "setup", query: "Deck Doctor Supermemory runtime connectivity", dependency: "explicit-recall" });
-    if (!search.ok && search.reason !== "empty_query") throw new Error(search.diagnostics.join(" "));
-    return { operations: ["health", "profile", "search"] };
-  },
-  checkSupermemoryObservabilitySink,
   inspectRunnerAdmission: async (runnerId, projectRoot, config) => {
     const {getAdapter} = await import("../runner-adapters");
     const adapter = getAdapter(runnerId);
@@ -872,7 +570,7 @@ function calculateSummary(
   binary: DoctorCategoryResult[],
   runnerConfig: DoctorCategoryResult[],
   runtimes: DoctorRuntimeResult[],
-  memory: DoctorCategoryResult[],
+  optionalTools: DoctorCategoryResult[],
   mcp: DoctorCategoryResult[],
 ): DoctorSummary {
   let ok = 0;
@@ -903,7 +601,7 @@ function calculateSummary(
     else ok++;
   }
 
-  countCategory(memory);
+  countCategory(optionalTools);
   countCategory(mcp);
 
   return { ok, warning, error, sections };
@@ -934,23 +632,18 @@ export async function runDoctorDiagnostics(
     inspectPiEnvironment: overrides.inspectPiEnvironment ?? defaultDoctorDiagnosticsDependencies.inspectPiEnvironment,
     reviewPiRequiredTools: overrides.reviewPiRequiredTools ?? defaultDoctorDiagnosticsDependencies.reviewPiRequiredTools,
     inspectPiDeckInstall: overrides.inspectPiDeckInstall ?? defaultDoctorDiagnosticsDependencies.inspectPiDeckInstall,
-    validateSupermemoryPiMcpConfig: overrides.validateSupermemoryPiMcpConfig ?? defaultDoctorDiagnosticsDependencies.validateSupermemoryPiMcpConfig,
     inspectOpenCodeEnvironment: overrides.inspectOpenCodeEnvironment ?? defaultDoctorDiagnosticsDependencies.inspectOpenCodeEnvironment,
     reviewOpenCodeTools: overrides.reviewOpenCodeTools ?? defaultDoctorDiagnosticsDependencies.reviewOpenCodeTools,
-    validateSupermemoryOpenCodeMcpConfig: overrides.validateSupermemoryOpenCodeMcpConfig ?? defaultDoctorDiagnosticsDependencies.validateSupermemoryOpenCodeMcpConfig,
     runDeckChecks: overrides.runDeckChecks ?? defaultDoctorDiagnosticsDependencies.runDeckChecks,
     fetchReleaseDescriptor: overrides.fetchReleaseDescriptor ?? defaultDoctorDiagnosticsDependencies.fetchReleaseDescriptor,
-    memoryBinaryAvailable: overrides.memoryBinaryAvailable ?? defaultDoctorDiagnosticsDependencies.memoryBinaryAvailable,
+    optionalToolBinaryAvailable: overrides.optionalToolBinaryAvailable ?? defaultDoctorDiagnosticsDependencies.optionalToolBinaryAvailable,
     readOpenCodeMcpSection: overrides.readOpenCodeMcpSection ?? defaultDoctorDiagnosticsDependencies.readOpenCodeMcpSection,
-    readSupermemorySecret: overrides.readSupermemorySecret ?? defaultDoctorDiagnosticsDependencies.readSupermemorySecret,
-    checkSupermemoryApi: overrides.checkSupermemoryApi ?? defaultDoctorDiagnosticsDependencies.checkSupermemoryApi,
-    checkSupermemoryObservabilitySink: overrides.checkSupermemoryObservabilitySink ?? defaultDoctorDiagnosticsDependencies.checkSupermemoryObservabilitySink,
     configStore: overrides.configStore,
     inspectRunnerAdmission: overrides.inspectRunnerAdmission ?? defaultDoctorDiagnosticsDependencies.inspectRunnerAdmission,
     inspectCodex: overrides.inspectCodex ?? defaultDoctorDiagnosticsDependencies.inspectCodex,
   };
   const runtimes: DoctorRuntimeResult[] = [];
-  let memoryCritical = false;
+  let optionalToolCritical = false;
   const globalConfigCheck = buildGlobalConfigDoctorCheck(dependencies.configStore);
 
   // 1. Runtime detection
@@ -1022,70 +715,26 @@ export async function runDoctorDiagnostics(
     } catch { runtime.checks.push({category:"Session admission",status:"warning",items:[{status:"warning",message:"Installed session admission could not be inspected; run Review & Install."}]}); }
   }
 
-  // 3. Memory providers
-  let memoryResults: DoctorCategoryResult[] = [];
+  // 3. Optional tool binaries
+  let optionalToolResults: DoctorCategoryResult[] = [];
   try {
-    memoryResults = checkMemoryProviders(dependencies.memoryBinaryAvailable);
-    memoryResults.push(await checkSupermemoryRuntimeReadiness(globalConfigCheck.config, projectRoot, dependencies, runtimeStatuses, runtimes));
+    optionalToolResults = checkOptionalToolBinaries(dependencies.optionalToolBinaryAvailable);
   } catch (err) {
-    memoryResults = [
+    optionalToolResults = [
       {
-        category: "Memory Providers",
+        category: "Optional Tools",
         status: "error",
-        items: [{ status: "error", message: `Memory check failed: ${redact(String(err))}` }],
+        items: [{ status: "error", message: `Optional tool check failed: ${redact(String(err))}` }],
       },
     ];
   }
 
-  if (memoryResults.some((r) => r.status === "error")) {
-    memoryCritical = true;
+  if (optionalToolResults.some((r) => r.status === "error")) {
+    optionalToolCritical = true;
   }
 
   // 4. MCP validation (synchronous, called directly)
-  const piMcpResult = checkPiMcp(dependencies.validateSupermemoryPiMcpConfig);
-  let openCodeMcpSection: Record<string, unknown> | null = null;
-  const opencodeMcpResult = checkOpenCodeMcp(() => {
-    openCodeMcpSection = dependencies.readOpenCodeMcpSection();
-    return openCodeMcpSection;
-  }, dependencies.validateSupermemoryOpenCodeMcpConfig);
-  const configuredScopes: Record<string, string | undefined> = {};
-  if (piMcpResult.status !== "warning") {
-    try {
-      const piValidation = dependencies.validateSupermemoryPiMcpConfig();
-      configuredScopes.Pi = piValidation.projectScope;
-    } catch {
-      configuredScopes.Pi = undefined;
-    }
-  }
-  if (openCodeMcpSection !== null) {
-    try {
-      const openCodeValidation = dependencies.validateSupermemoryOpenCodeMcpConfig();
-      if (openCodeValidation.ok && openCodeValidation.projectScope) {
-        configuredScopes.OpenCode = openCodeValidation.projectScope;
-      }
-    } catch {
-      // Raw OpenCode Supermemory MCP is optional; failed inspection is reported by the OpenCode MCP check.
-    }
-  }
-  if (projectRoot) {
-    try {
-      const codexConfigPath = join(projectRoot, ".codex", "config.toml");
-      if (existsSync(codexConfigPath)) {
-        const codexState = inspectCodexSupermemoryMcpState(readFileSync(codexConfigPath, "utf-8"));
-        configuredScopes.Codex = codexState.ok ? codexState.scope : undefined;
-      }
-    } catch {
-      configuredScopes.Codex = undefined;
-    }
-  }
-  const derivedScope = projectRoot
-    ? (() => {
-        const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
-        return resolved.ok ? resolved.scope : undefined;
-      })()
-    : undefined;
-  const scopeAgreementResult = checkSupermemoryProjectScopeAgreement({ derivedScope, configuredScopes });
-  const mcpResults: DoctorCategoryResult[] = [piMcpResult, opencodeMcpResult, scopeAgreementResult];
+  const mcpResults: DoctorCategoryResult[] = [checkOpenCodeMcp(dependencies.readOpenCodeMcpSection)];
 
   // 5. Deck-owned checks (manifest, state, config, binaries, runner config)
   let deckResults: DoctorCategoryResult[] = [];
@@ -1149,7 +798,7 @@ export async function runDoctorDiagnostics(
     binaryResults,
     runnerConfigResults,
     runtimes,
-    memoryResults,
+    optionalToolResults,
     mcpResults,
   );
 
@@ -1157,7 +806,7 @@ export async function runDoctorDiagnostics(
   const noRuntimes = runtimes.length === 0 || runtimes.every((r) => r.installed === false);
   const hasCriticalErrors =
     noRuntimes ||
-    memoryCritical ||
+    optionalToolCritical ||
     mcpResults.some((r) => r.status === "error") ||
     runtimes.some((r) => r.checks.some((c) => c.category === "Runtime" && c.status === "error")) ||
     // New: deck, binary, runnerConfig critical errors
@@ -1167,7 +816,7 @@ export async function runDoctorDiagnostics(
 
   return {
     runtimes,
-    memory: memoryResults,
+    optionalTools: optionalToolResults,
     mcp: mcpResults,
     hasCriticalErrors,
     // New fields from redesign-doctor-diagnostics

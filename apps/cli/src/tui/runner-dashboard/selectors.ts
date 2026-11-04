@@ -6,7 +6,6 @@
  */
 
 import {
-  type AdaptiveMemoryProviderChoice,
   type CapabilityId,
   type CapabilityStatus,
   type CanonicalInstructionPackageId,
@@ -23,7 +22,6 @@ import { getConfigurablePackageInstructionMetadata, type PackageInstructionPacka
  */
 export type DashboardSectionId =
   | "packages"
-  | "adaptive-memory"
   | "web-search"
   | "teams"
   | "review-install"
@@ -49,13 +47,6 @@ export type CapabilityOptionSummary = {
   selected: boolean;
   status: CapabilityStatus | "unknown";
   runnerScope: string;
-  detail: string;
-};
-
-export type AdaptiveMemorySummary = {
-  provider: AdaptiveMemoryProviderChoice;
-  options: { provider: AdaptiveMemoryProviderChoice; selected: boolean; label: string }[];
-  configured: boolean;
   detail: string;
 };
 
@@ -94,8 +85,7 @@ type SectionSignals = {
   actions: number;
 };
 
-const DASHBOARD_SECTION_COUNT = 5;
-const ADAPTIVE_MEMORY_OPTION_COUNT = 3; // none, supermemory, back
+const DASHBOARD_SECTION_COUNT = 4;
 const WEB_SEARCH_OPTION_COUNT = 3; // enable/disable, update credential, back
 const TEAMS_OPTION_COUNT = 3; // Developer Team, Developer Team detail, back
 const DEVELOPER_TEAM_DETAIL_OPTION_COUNT = 3; // configure models, use current/defaults, back
@@ -109,8 +99,6 @@ export function getCursorLimit(state: RunnerDashboardState, packageCount: number
       return DASHBOARD_SECTION_COUNT;
     case "packages-detail":
       return packageCount + 1; // capabilities + back
-    case "adaptive-memory-detail":
-      return ADAPTIVE_MEMORY_OPTION_COUNT;
     case "web-search-detail":
       return WEB_SEARCH_OPTION_COUNT;
     case "teams-detail":
@@ -159,7 +147,6 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
   const selectedTeams = Object.values(state.teams).filter((team) => team.selected).length;
   const packageInstructionIds = capabilityOptions.map((option) => option.capabilityId);
   const packagesSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("package-instructions.")));
-  const adaptiveSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("adaptive-memory.")));
   const webSearchSignals = signalsForActions(actionsMatching(state.plan, (action) => action.capabilityId === "web-search" || action.id.startsWith("capability.web-search.")));
   const teamSignals = signalsForActions(state.plan?.groups.teamApplications ?? []);
 
@@ -173,16 +160,6 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
       totalCount: packageInstructionIds.length,
       actionCount: packagesSignals.actions,
       detail: `${selectedPackages}/${packageInstructionIds.length} packages selected; ${formatSignals(packagesSignals)}.`,
-    },
-    {
-      id: "adaptive-memory",
-      title: "Adaptive Memory",
-      screen: "adaptive-memory-detail",
-      readiness: state.adaptiveMemory.provider === "none" ? "pending" : readinessForAdaptiveMemory(state, adaptiveSignals),
-      selectedCount: state.adaptiveMemory.provider === "none" ? 0 : 1,
-      totalCount: 1,
-      actionCount: adaptiveSignals.actions,
-      detail: `Provider selected: ${state.adaptiveMemory.provider}; ${formatSignals(adaptiveSignals)}.`,
     },
     {
       id: "web-search",
@@ -250,24 +227,6 @@ export function getToggleablePackageInstructionIds(state: RunnerDashboardState, 
   return getPackageInstructionSummaries(state, resolver).map((summary) => summary.capabilityId);
 }
 
-export function getAdaptiveMemorySummary(state: RunnerDashboardState): AdaptiveMemorySummary {
-  const provider = state.adaptiveMemory.provider;
-  const configured = provider !== "supermemory" || Boolean(state.adaptiveMemory.supermemory?.configured);
-  const supermemoryUi = state.runnerUi?.adaptiveMemory?.supermemory;
-
-  return {
-    provider,
-    configured,
-    options: [
-      { provider: "none", selected: provider === "none", label: "Disabled" },
-      { provider: "supermemory", selected: provider === "supermemory", label: "Enabled" },
-    ],
-    detail: provider === "none"
-      ? "Adaptive Memory disabled."
-      : supermemoryUi?.selectionStatus ?? "Supermemory uses non-secret config and redacted MCP credentials.",
-  };
-}
-
 export function getWebSearchSummary(state: RunnerDashboardState): WebSearchSummary {
   return {
     enabled: state.selectedCapabilities["web-search"] === true,
@@ -295,7 +254,7 @@ export function getTeamCapabilityProfile(state: RunnerDashboardState, teamId: st
       "codebase-memory": state.selectedCapabilities["codebase-memory"] ? "consumes-directly" : "not-used",
       rtk: state.selectedCapabilities.rtk ? "compatible" : "not-used",
       serena: state.selectedCapabilities.serena ? "consumes-directly" : "not-used",
-      "adaptive-memory": state.adaptiveMemory.provider === "none" ? "not-used" : "consumes-directly",
+
     },
     diagnostics: installable
       ? []
@@ -316,11 +275,6 @@ function signalsForActions(actions: RunnerAction[]): SectionSignals {
     else signals.unknown += 1;
     return signals;
   }, emptySignals());
-}
-
-function readinessForAdaptiveMemory(state: RunnerDashboardState, signals: SectionSignals): SectionReadiness {
-  if (state.adaptiveMemory.provider === "supermemory" && !state.adaptiveMemory.supermemory?.configured) return "pending";
-  return readinessFromSignals(signals);
 }
 
 function readinessForWebSearch(state: RunnerDashboardState, signals: SectionSignals): SectionReadiness {

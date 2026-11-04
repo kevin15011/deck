@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  type AdaptiveMemoryActiveProvider,
   DeckConfigError,
   DEFAULT_ORCHESTRATOR_PERSONALITY,
   getDeckConfigPath,
@@ -16,7 +15,6 @@ import {
   diagnoseDeckConfigDeprecations,
 
   readDeckConfig,
-  resolveActiveMemoryProvider,
   validateDeckConfig,
   writeDeckConfig,
   SDD_PHASES,
@@ -58,21 +56,11 @@ function expectDeckConfigError(fn: () => unknown, code: DeckConfigError["code"])
 // PACKAGE_INSTRUCTION_RUNNERS removed — runner keys are now dynamic
 
 describe("PACKAGE_INSTRUCTION_PACKAGE_IDS", () => {
-  test("contains codebase-memory, code-economy, context-mode, rtk, adaptive-memory, serena", () => {
-    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("codebase-memory");
-    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("code-economy");
-    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS as readonly string[]).not.toContain("context-mode");
-    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("rtk");
-    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("adaptive-memory");
-    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS as readonly string[]).not.toContain("serena");
-    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toHaveLength(4);
-  });
 
   test("derives the five configurable packages in canonical order and excludes the baseline", () => {
     expect(getConfigurablePackageInstructionMetadata(PACKAGE_INSTRUCTION_PACKAGE_IDS).map((entry) => entry.id)).toEqual([
       "codebase-memory",
       "rtk",
-      "adaptive-memory",
     ]);
     expect(PACKAGE_INSTRUCTION_CONFIGURATION_METADATA.find((entry) => entry.id === "code-economy")).toMatchObject({
       configurable: false,
@@ -81,7 +69,6 @@ describe("PACKAGE_INSTRUCTION_PACKAGE_IDS", () => {
     expect(PACKAGE_INSTRUCTION_CONFIGURATION_METADATA.filter((entry) => entry.configurable).map((entry) => [entry.id, entry.defaultEnabled])).toEqual([
       ["codebase-memory", false],
       ["rtk", true],
-      ["adaptive-memory", true],
     ]);
   });
 
@@ -89,14 +76,12 @@ describe("PACKAGE_INSTRUCTION_PACKAGE_IDS", () => {
     expect(normalizeSupportedPackageInstructionSelection({
       "code-economy": false,
       "context-mode": true,
-      "adaptive-memory": true,
       "pi-hud": true,
-    }, ["code-economy", "context-mode", "adaptive-memory"])).toEqual({
+    }, ["code-economy", "context-mode"])).toEqual({
       "codebase-memory": false,
       "code-economy": true,
 
       rtk: false,
-      "adaptive-memory": true,
 
     });
   });
@@ -115,13 +100,12 @@ describe("readDeckConfig", () => {
     expect(config).toEqual({
       version: 1,
       capabilities: { "codebase-memory": { enabled: false, runners: {} } },
-      adaptiveMemory: { enabled: false, activeProvider: "none" },
       webSearch: { enabled: false },
       packageInstructions: {
-        claude: { "codebase-memory": false, "code-economy": true, rtk: true, "adaptive-memory": true },
-        pi: { "codebase-memory": false, "code-economy": true, rtk: true, "adaptive-memory": true, },
-        opencode: { "codebase-memory": false, "code-economy": true, rtk: true, "adaptive-memory": true, },
-        codex: { "codebase-memory": false, "code-economy": true, rtk: true, "adaptive-memory": true, },
+        claude: { "codebase-memory": false, "code-economy": true, rtk: true },
+        pi: { "codebase-memory": false, "code-economy": true, rtk: true, },
+        opencode: { "codebase-memory": false, "code-economy": true, rtk: true, },
+        codex: { "codebase-memory": false, "code-economy": true, rtk: true, },
       },
       orchestratorPersonality: "pragmatica",
       developerTeamExecution: {
@@ -138,12 +122,6 @@ describe("readDeckConfig", () => {
       profiles: [],
       activeProfile: "default",
     });
-  });
-
-  test("defaults missing active provider to none", () => {
-    const config = validateDeckConfig({ version: 1, adaptiveMemory: {} });
-
-    expect(config.adaptiveMemory.activeProvider).toBe("none");
   });
 });
 
@@ -212,11 +190,11 @@ describe("validateDeckConfig - developerTeamExecution", () => {
 describe("validateDeckConfig — packageInstructions", () => {
   test("defaults all Codex packages on in canonical six-ID order", () => {
     const config = validateDeckConfig({});
-    expect(Object.keys(config.packageInstructions.codex)).toEqual(["codebase-memory", "code-economy", "rtk", "adaptive-memory"]);
-    expect(config.packageInstructions.codex).toEqual({ "codebase-memory": false, "code-economy": true, rtk: true, "adaptive-memory": true, });
+    expect(Object.keys(config.packageInstructions.codex)).toEqual(["codebase-memory", "code-economy", "rtk"]);
+    expect(config.packageInstructions.codex).toEqual({ "codebase-memory": false, "code-economy": true, rtk: true, });
   });
   test("defaults all configurable packages on when the field is absent", () => {
-    const config = validateDeckConfig({ version: 1, adaptiveMemory: { activeProvider: "none" } });
+    const config = validateDeckConfig({ version: 1 });
 
     expect(config.packageInstructions.pi["codebase-memory"]).toBe(false);
     expect(config.packageInstructions.pi["code-economy"]).toBe(true); // Always active baseline
@@ -233,7 +211,6 @@ describe("validateDeckConfig — packageInstructions", () => {
   test("accepts valid per-runner boolean toggles", () => {
     const config = validateDeckConfig({
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
       packageInstructions: {
         pi: { "codebase-memory": true, "context-mode": false },
         opencode: { rtk: true },
@@ -250,7 +227,6 @@ describe("validateDeckConfig — packageInstructions", () => {
   test("treats a missing runner inside packageInstructions as the safe package defaults", () => {
     const config = validateDeckConfig({
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
       packageInstructions: {},
     });
 
@@ -280,7 +256,6 @@ describe("validateDeckConfig — packageInstructions", () => {
         validateDeckConfig(
           {
             version: 1,
-            adaptiveMemory: { activeProvider: "none" },
             packageInstructions: { unknownRunner: { rtk: true } },
           },
           { registry },
@@ -297,7 +272,6 @@ describe("validateDeckConfig — packageInstructions", () => {
     const config = validateDeckConfig(
       {
         version: 1,
-        adaptiveMemory: { activeProvider: "none" },
         packageInstructions: {},
       },
       { registry },
@@ -321,7 +295,6 @@ describe("validateDeckConfig — packageInstructions", () => {
       "code-economy": true,
 
       rtk: false,
-      "adaptive-memory": false,
 
     });
   });
@@ -331,7 +304,6 @@ describe("validateDeckConfig — packageInstructions", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           packageInstructions: { pi: { "unknown-pkg": true } },
         }),
       "DECK_CONFIG_UNKNOWN_FIELD",
@@ -345,7 +317,6 @@ describe("validateDeckConfig — packageInstructions", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           packageInstructions: { pi: { rtk: "yes" } },
         }),
       "DECK_CONFIG_INVALID_SHAPE",
@@ -359,7 +330,6 @@ describe("validateDeckConfig — packageInstructions", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           packageInstructions: { pi: { "codebase-memory": 1 } },
         }),
       "DECK_CONFIG_INVALID_SHAPE",
@@ -373,7 +343,6 @@ describe("validateDeckConfig — packageInstructions", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           packageInstructions: { opencode: { rtk: null } },
         }),
       "DECK_CONFIG_INVALID_SHAPE",
@@ -387,7 +356,6 @@ describe("validateDeckConfig — packageInstructions", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           packageInstructions: "not-an-object",
         }),
       "DECK_CONFIG_INVALID_SHAPE",
@@ -401,7 +369,6 @@ describe("validateDeckConfig — packageInstructions", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           packageInstructions: { pi: { "codebase-memory": true, token: "secret" } },
         }),
       "DECK_CONFIG_SECRET_FIELD",
@@ -411,10 +378,9 @@ describe("validateDeckConfig — packageInstructions", () => {
   test("accepts all booleans set to true for both runners", () => {
     const config = validateDeckConfig({
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
       packageInstructions: {
-        pi: { "codebase-memory": true, "code-economy": true, "context-mode": true, rtk: true, "adaptive-memory": true, serena: true },
-        opencode: { "codebase-memory": true, "code-economy": true, "context-mode": true, rtk: true, "adaptive-memory": true, serena: true },
+        pi: { "codebase-memory": true, "code-economy": true, "context-mode": true, rtk: true, serena: true },
+        opencode: { "codebase-memory": true, "code-economy": true, "context-mode": true, rtk: true, serena: true },
       },
     });
 
@@ -431,35 +397,6 @@ describe("validateDeckConfig — packageInstructions", () => {
 // ---------------------------------------------------------------------------
 
 describe("validateDeckConfig", () => {
-  test("accepts non-secret Supermemory config with required userId", () => {
-    const config = validateDeckConfig({
-      version: 1,
-      adaptiveMemory: {
-        activeProvider: "supermemory",
-        supermemory: {
-          mcpServerName: "supermemory",
-          searchMode: "memories",
-          maxMemoriesPerSession: 7,
-        },
-      },
-    });
-
-    expect(config.adaptiveMemory.activeProvider).toBe("supermemory");
-    expect(config.adaptiveMemory.supermemory?.mcpServerName).toBe("supermemory");
-  });
-
-  test("allows Supermemory without userId (token-only)", () => {
-    const config = validateDeckConfig({
-      version: 1,
-      adaptiveMemory: {
-        activeProvider: "supermemory",
-        supermemory: { mcpServerName: "supermemory" },
-      },
-    });
-
-    expect(config.adaptiveMemory.activeProvider).toBe("supermemory");
-    expect(config.adaptiveMemory.supermemory?.userId).toBeUndefined();
-  });
 
   test("rejects token, credential, and secret-like fields anywhere in config", () => {
     const secretFieldCases = [
@@ -488,13 +425,6 @@ describe("validateDeckConfig", () => {
       expectDeckConfigError(() => validateDeckConfig(candidate), "DECK_CONFIG_SECRET_FIELD");
     }
   });
-
-  test("rejects empty string as provider", () => {
-    expectDeckConfigError(
-      () => validateDeckConfig({ version: 1, adaptiveMemory: { activeProvider: "" } }),
-      "ADAPTIVE_MEMORY_UNSUPPORTED_PROVIDER",
-    );
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -518,7 +448,7 @@ describe("writeDeckConfig", () => {
     const raw = readFileSync(path, "utf-8");
     expect(raw).not.toMatch(/token|credential|secret|apiKey/i);
     expect(JSON.parse(raw)).toEqual(written);
-    expect(written.adaptiveMemory.supermemory?.mcpServerName).toBe("supermemory");
+    expect(written).not.toHaveProperty("adaptiveMemory");
   });
 
   test("persists packageInstructions when provided", () => {
@@ -526,7 +456,6 @@ describe("writeDeckConfig", () => {
 
     const input = {
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
       packageInstructions: {
         pi: { "codebase-memory": true, "context-mode": false, rtk: false },
         opencode: { "codebase-memory": false, "context-mode": true, rtk: false },
@@ -568,7 +497,6 @@ describe("writeDeckConfig", () => {
 
     writeDeckConfig(root, {
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
       packageInstructions: {
         pi: { "codebase-memory": true, "context-mode": false, rtk: true },
         opencode: { "codebase-memory": false, "context-mode": true, rtk: false },
@@ -612,7 +540,6 @@ describe("Orchestrator Personality", () => {
     test("defaults to pragmatica when field is absent", () => {
       const config = validateDeckConfig({
         version: 1,
-        adaptiveMemory: { activeProvider: "none" },
       });
 
       expect(config.orchestratorPersonality).toBe("pragmatica");
@@ -628,7 +555,6 @@ describe("Orchestrator Personality", () => {
     test("accepts guia as valid personality value", () => {
       const config = validateDeckConfig({
         version: 1,
-        adaptiveMemory: { activeProvider: "none" },
         orchestratorPersonality: "guia",
       });
 
@@ -638,7 +564,6 @@ describe("Orchestrator Personality", () => {
     test("accepts pragmatica as valid personality value", () => {
       const config = validateDeckConfig({
         version: 1,
-        adaptiveMemory: { activeProvider: "none" },
         orchestratorPersonality: "pragmatica",
       });
 
@@ -650,7 +575,6 @@ describe("Orchestrator Personality", () => {
         () =>
           validateDeckConfig({
             version: 1,
-            adaptiveMemory: { activeProvider: "none" },
             orchestratorPersonality: "chatty",
           }),
         "DECK_CONFIG_INVALID_SHAPE",
@@ -667,7 +591,6 @@ describe("Orchestrator Personality", () => {
         () =>
           validateDeckConfig({
             version: 1,
-            adaptiveMemory: { activeProvider: "none" },
             orchestratorPersonality: 42,
           }),
         "DECK_CONFIG_INVALID_SHAPE",
@@ -682,7 +605,6 @@ describe("Orchestrator Personality", () => {
         () =>
           validateDeckConfig({
             version: 1,
-            adaptiveMemory: { activeProvider: "none" },
             orchestratorPersonality: { value: "pragmatica" },
           }),
         "DECK_CONFIG_INVALID_SHAPE",
@@ -699,35 +621,12 @@ describe("Orchestrator Personality", () => {
       for (const personality of ORCHESTRATOR_PERSONALITIES) {
         writeDeckConfig(root, {
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           orchestratorPersonality: personality,
         });
 
         const reRead = readDeckConfig(root);
         expect(reRead.orchestratorPersonality).toBe(personality);
       }
-    });
-
-    test("writing personality does not erase existing adaptiveMemory field", () => {
-      const root = createTempRoot();
-
-      // Write initial config with adaptiveMemory
-      writeDeckConfig(root, {
-        version: 1,
-        adaptiveMemory: { activeProvider: "none" },
-      });
-
-      // Write config with only orchestratorPersonality (adaptiveMemory omitted)
-      const mergedInput = {
-        version: 1,
-        adaptiveMemory: { activeProvider: "none" }, // must be provided to avoid being dropped
-        orchestratorPersonality: "guia",
-      };
-      writeDeckConfig(root, mergedInput);
-
-      const reRead = readDeckConfig(root);
-      expect(reRead.orchestratorPersonality).toBe("guia");
-      expect(reRead.adaptiveMemory.activeProvider).toBe("none");
     });
 
     test("write-then-read round-trip preserves personality for each valid value", () => {
@@ -736,7 +635,6 @@ describe("Orchestrator Personality", () => {
       for (const personality of ORCHESTRATOR_PERSONALITIES) {
         writeDeckConfig(root, {
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           orchestratorPersonality: personality,
         });
 
@@ -744,77 +642,6 @@ describe("Orchestrator Personality", () => {
         expect(reRead.orchestratorPersonality).toBe(personality);
       }
     });
-
-    test("write then read preserves adaptiveMemory when included in the write input", () => {
-      const root = createTempRoot();
-
-      // Write initial config
-      writeDeckConfig(root, {
-        version: 1,
-        adaptiveMemory: { activeProvider: "none" },
-      });
-
-      // Write again including adaptiveMemory in the input
-      writeDeckConfig(root, {
-        version: 1,
-        adaptiveMemory: { activeProvider: "none" },
-        orchestratorPersonality: "guia",
-      });
-
-      const reRead = readDeckConfig(root);
-      expect(reRead.orchestratorPersonality).toBe("guia");
-      expect(reRead.adaptiveMemory.activeProvider).toBe("none");
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// resolveActiveMemoryProvider (existing tests preserved)
-// ---------------------------------------------------------------------------
-
-describe("resolveActiveMemoryProvider", () => {
-  test("uses enabled as the first-class Adaptive Memory toggle", () => {
-    const enabled = validateDeckConfig({ version: 1, adaptiveMemory: { enabled: true } });
-    const disabled = validateDeckConfig({ version: 1, adaptiveMemory: { enabled: false, activeProvider: "supermemory" } });
-
-    expect(enabled.adaptiveMemory.activeProvider).toBe("supermemory");
-    expect(enabled.adaptiveMemory.enabled).toBe(true);
-    expect(disabled.adaptiveMemory.activeProvider).toBe("none");
-    expect(disabled.adaptiveMemory.enabled).toBe(false);
-  });
-
-  test("uses CLI override before config", () => {
-    const resolution = resolveActiveMemoryProvider({
-      cliProvider: "none",
-      config: {
-        version: 1,
-        adaptiveMemory: {
-          activeProvider: "supermemory",
-          supermemory: { userId: "user-123" },
-        },
-      },
-    });
-
-    expect(resolution.activeProvider).toBe("none");
-    expect(resolution.source).toBe("cli");
-  });
-
-  test("falls back to none when no CLI override or config file is present", () => {
-    const root = createTempRoot();
-
-    const resolution = resolveActiveMemoryProvider({ projectRoot: root });
-
-    expect(resolution.activeProvider).toBe("none");
-    expect(resolution.source).toBe("default");
-  });
-
-  test("resolves CLI Supermemory without userId (token-only)", () => {
-    const valid = resolveActiveMemoryProvider({
-      cliProvider: "supermemory" satisfies AdaptiveMemoryActiveProvider,
-      config: { version: 1, adaptiveMemory: { supermemory: { mcpServerName: "supermemory" } } },
-    });
-    expect(valid.activeProvider).toBe("supermemory");
-    expect(valid.supermemory?.userId).toBeUndefined();
   });
 });
 
@@ -840,7 +667,7 @@ describe("SDD_PHASES constant", () => {
 
 describe("Profile defaults", () => {
   test("getDefaultDeckConfig returns empty profiles and default activeProfile", () => {
-    const config = validateDeckConfig({ version: 1, adaptiveMemory: { activeProvider: "none" } });
+    const config = validateDeckConfig({ version: 1 });
     expect(config.profiles).toEqual([]);
     expect(config.activeProfile).toBe("default");
   });
@@ -855,7 +682,6 @@ describe("Profile defaults", () => {
   test("profile with no profiles field normalizes to empty array and default activeProfile", () => {
     const config = validateDeckConfig({
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
     });
     expect(config.profiles).toEqual([]);
     expect(config.activeProfile).toBe("default");
@@ -872,7 +698,6 @@ describe("Profile validation", () => {
   test("accepts valid profile with name only", () => {
     const config = validateDeckConfig({
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
       profiles: [{ name: "fast" }],
     });
     expect(config.profiles).toHaveLength(1);
@@ -883,7 +708,6 @@ describe("Profile validation", () => {
   test("accepts profile with phase overrides for valid phases", () => {
     const config = validateDeckConfig({
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
       profiles: [{
         name: "fast",
         description: "Fast track profile",
@@ -902,7 +726,6 @@ describe("Profile validation", () => {
   test("accepts profile with valid strategy value", () => {
     const config = validateDeckConfig({
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
       profiles: [{ name: "multi", strategy: "generated-multi" }],
     });
     expect(config.profiles[0].strategy).toBe("generated-multi");
@@ -911,7 +734,6 @@ describe("Profile validation", () => {
   test("accepts profile with external-single-active strategy", () => {
     const config = validateDeckConfig({
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
       profiles: [{ name: "single", strategy: "external-single-active" }],
     });
     expect(config.profiles[0].strategy).toBe("external-single-active");
@@ -922,7 +744,6 @@ describe("Profile validation", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           profiles: [{ name: "fast" }, { name: "fast" }],
         }),
       "DECK_CONFIG_INVALID_SHAPE",
@@ -934,7 +755,6 @@ describe("Profile validation", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           profiles: [{ name: "test", phaseOverrides: { unknownPhase: {} } }],
         }),
       "DECK_CONFIG_UNKNOWN_FIELD",
@@ -946,7 +766,6 @@ describe("Profile validation", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           profiles: [{ name: "bad", strategy: "invalid-strategy" }],
         }),
       "DECK_CONFIG_INVALID_SHAPE",
@@ -958,7 +777,6 @@ describe("Profile validation", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           profiles: [{ name: "fast" }],
           activeProfile: "nonexistent",
         }),
@@ -971,7 +789,6 @@ describe("Profile validation", () => {
   test("activeProfile 'default' is valid even with empty profiles array", () => {
     const config = validateDeckConfig({
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
       profiles: [],
       activeProfile: "default",
     });
@@ -984,7 +801,6 @@ describe("Profile validation", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           profiles: [{ name: "bad", strategy: 123 as unknown as string }],
         }),
       "DECK_CONFIG_INVALID_SHAPE",
@@ -996,7 +812,6 @@ describe("Profile validation", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           profiles: "not-an-array",
         }),
       "DECK_CONFIG_INVALID_SHAPE",
@@ -1008,7 +823,6 @@ describe("Profile validation", () => {
       () =>
         validateDeckConfig({
           version: 1,
-          adaptiveMemory: { activeProvider: "none" },
           profiles: [{ name: "" }],
         }),
       "DECK_CONFIG_INVALID_SHAPE",
@@ -1022,7 +836,6 @@ describe("Profile persistence round-trip", () => {
 
     const input = {
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
       profiles: [
         { name: "fast", description: "Fast track", phaseOverrides: { verify: { skip: true } } },
         { name: "full", description: "Full review" },
@@ -1045,7 +858,6 @@ describe("Profile persistence round-trip", () => {
 
     const input = {
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
       profiles: [{
         name: "all-phases",
         phaseOverrides: {
@@ -1070,88 +882,6 @@ describe("Profile persistence round-trip", () => {
     expect(reRead.profiles[0].phaseOverrides?.verify).toEqual({ skip: true });
     expect(reRead.profiles[0].phaseOverrides?.spec).toEqual({ mode: "detailed" });
     expect(reRead.activeProfile).toBe("all-phases");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Deprecated fields migration (R23/R24 hotfix)
-// ---------------------------------------------------------------------------
-
-describe("deprecated config fields migration", () => {
-  test("reads config with userId/teamId/orgId/projectId without error", () => {
-    const config = validateDeckConfig({
-      version: 1,
-      adaptiveMemory: {
-        activeProvider: "supermemory",
-        supermemory: {
-          mcpServerName: "supermemory",
-          searchMode: "memories",
-          maxMemoriesPerSession: 7,
-          userId: "kevin",
-          teamId: "developer",
-          orgId: "GCO",
-          projectId: "deck",
-        },
-      },
-      packageInstructions: {},
-      orchestratorPersonality: "pragmatica",
-    });
-
-    // Deprecated fields should be stripped, not present in output
-    expect(config.adaptiveMemory.supermemory).toBeDefined();
-    expect((config.adaptiveMemory.supermemory as { userId?: unknown }).userId).toBeUndefined();
-    expect((config.adaptiveMemory.supermemory as { teamId?: unknown }).teamId).toBeUndefined();
-    expect((config.adaptiveMemory.supermemory as { orgId?: unknown }).orgId).toBeUndefined();
-    expect((config.adaptiveMemory.supermemory as { projectId?: unknown }).projectId).toBeUndefined();
-  });
-
-  test("emits a deprecation diagnostic for valid legacy maxMemoriesPerSession", () => {
-    const diagnostics = diagnoseDeckConfigDeprecations({
-      adaptiveMemory: {
-        activeProvider: "supermemory",
-        supermemory: { maxMemoriesPerSession: 7 },
-      },
-    });
-
-    expect(diagnostics).toContainEqual(expect.objectContaining({
-      code: "SUPERMEMORY_CONFIG_DEPRECATED",
-      fieldPath: "adaptiveMemory.supermemory.maxMemoriesPerSession",
-    }));
-  });
-
-  test("write then read produces clean output without deprecated fields", () => {
-    const root = createTempRoot();
-
-    // Simulate reading a stale config with deprecated fields
-    const staleConfig = {
-      version: 1,
-      adaptiveMemory: {
-        activeProvider: "supermemory",
-        supermemory: { userId: "kevin", teamId: "developer" },
-      },
-    };
-    writeDeckConfig(root, staleConfig);
-
-    // Read back
-    const readBack = readDeckConfig(root);
-    expect(readBack.adaptiveMemory.supermemory).toBeDefined();
-    expect((readBack.adaptiveMemory.supermemory as { userId?: unknown }).userId).toBeUndefined();
-    expect((readBack.adaptiveMemory.supermemory as { teamId?: unknown }).teamId).toBeUndefined();
-  });
-
-  test("other unknown fields still fail", () => {
-    expectDeckConfigError(
-      () =>
-        validateDeckConfig({
-          version: 1,
-          adaptiveMemory: {
-            supermemory: {
-              unknownField: "should fail",
-            },
-          },
-        }),
-      "DECK_CONFIG_UNKNOWN_FIELD",
-    );
   });
 });
 

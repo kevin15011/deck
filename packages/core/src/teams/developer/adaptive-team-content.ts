@@ -10,7 +10,7 @@ export const ADAPTIVE_TEAM_RUNTIME_CONTRACT = `## Adaptive Developer Team Contra
 - Keep one vertical implementation owner through a functional candidate. Do not fragment a slice into agent-per-task handoffs.
 - Treat an in-scope reversible follow-up as a delta on the current candidate. Re-run only checks invalidated by that delta.
 - OpenSpec is official persistence. Lead is the centralized writer; specialists return compact results and references rather than racing on state.yaml or events.yaml.
-- Use only the configured capabilities relevant to the outcome. OpenSpec, source, tests, and current runner evidence outrank adaptive memory.
+- Use only the configured capabilities relevant to the outcome. OpenSpec, source, tests, and current runner evidence define the official state.
 - Skill content belongs in the executing role's context: specialists load the applicable execution skills themselves; do not reread content already supplied in their instructions. Required safety and authority guidance still applies.
 - Modifying work requires the user's request and the active runner's authority.
 - Ask the user only for missing required input, ambiguity that would materially change the result, a material product choice, scope expansion, protected-risk decision, irreversible action, or missing authority. Keep workflow mechanics internal.
@@ -131,7 +131,7 @@ export const SETUP_AGENT_BODY = `${deckSetupAgentContent}
 
 ## Adaptive activation reminder
 
-The deterministic preflight runs once per session and caches its ready result. A ready project does not launch Setup or cause writes. Repair only the degraded component or components reported by that preflight. Project readiness covers OpenSpec, the Skill Registry, explicitly enabled Codebase Memory, RTK, configured adaptive memory, and every active-runner project capability that exposes a bounded initializer.
+The deterministic preflight runs once per session and caches its ready result. A ready project does not launch Setup or cause writes. Repair only the degraded component or components reported by that preflight. Project readiness covers OpenSpec, the Skill Registry, explicitly enabled Codebase Memory, RTK, and every active-runner project capability that exposes a bounded initializer.
 
 ${VERIFICATION_DOCTRINE_CORE}`;
 

@@ -22,7 +22,7 @@ test("D-REACH-07 packaged hook assets and runtime dependencies are embedded inpu
   expect(piAsset).toContain('"tool_call"');
   expect(openCodeAsset).not.toContain("@deck/");
   expect(piAsset).not.toContain("@deck/");
-  expect(codexAsset).toContain("DECK_CODEX_BRIDGE_ENDPOINT");
+  expect(codexAsset).toContain("DECK_SESSION_START_CONTEXT");
   expect(codexAsset).not.toContain("@deck/");
   expect(openCodeAsset).toContain(`source-sha256:${createHash("sha256").update(new Uint8Array(openCodeEntry)).digest("hex")}`);
   expect(piAsset).toContain(`source-sha256:${createHash("sha256").update(new Uint8Array(piEntry)).digest("hex")}`);

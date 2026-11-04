@@ -20,7 +20,6 @@ import { createCodexRunnerAdapter } from "@deck/adapter-codex";
 import { createClaudeRunnerAdapter } from "../../../packages/adapter-claude/src/index";
 import { getWebSearchProviderDescriptor } from "./web-search-provider";
 import { readOwnedTavilyCredential } from "./web-search-shell-profile";
-import { resolveClaudeSupermemoryLaunchCredential } from "./claude-supermemory-launch";
 import { basename, join, resolve } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
 import { getDeckStateDir } from "./runtime/paths";
@@ -90,14 +89,12 @@ export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOpti
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     serenaProxyCommand: deckInternalCommand("serena-mcp"),
-    deckMemoryMcpCommand: deckInternalCommand("memory-mcp"),
     ...options.codex,
   })));
   registry.register("claude", guard(createClaudeRunnerAdapter({
     nativeSessionStartCommand: deckInternalCommand("project-readiness"),
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
-    resolveMemoryCredential: resolveClaudeSupermemoryLaunchCredential,
     serenaProxyCommand: deckInternalCommand("serena-mcp"),
     ...options.claude,
   })));

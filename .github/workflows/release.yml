@@ -105,15 +105,6 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
 
-      - name: Validate Supermemory OpenSpec change
-        run: bun run apps/cli/src/main.tsx openspec validate --json --root . --change canonical-supermemory-conversation-memory
-
-      - name: Supermemory deterministic runtime benchmark
-        run: bun run bench:memory
-
-      - name: Compiled Supermemory and Deck CLI runtime smoke
-        run: bun run verify:supermemory-compiled
-
   # Build binaries for all platforms
   build:
     name: Build (${{ matrix.target }})

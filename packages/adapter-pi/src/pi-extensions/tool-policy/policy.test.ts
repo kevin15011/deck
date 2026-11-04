@@ -14,7 +14,7 @@ describe("evaluateRolePolicy", () => {
     });
 
     test(`${role} may read: built-in read tools and read-only MCP tools proceed`, () => {
-      for (const tool of ["read", "grep", "find", "ls", "mcp__codebase_memory__search_graph", "mcp__context7__query_docs", "mcp__web_search__tavily_search", "memory_search", "memory_read"]) {
+      for (const tool of ["read", "grep", "find", "ls", "mcp__codebase_memory__search_graph", "mcp__context7__query_docs", "mcp__web_search__tavily_search"]) {
         expect(evaluateRolePolicy(role, tool)).toBeUndefined();
       }
     });

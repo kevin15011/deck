@@ -5,12 +5,8 @@
  * Adapters read normalized config, resolve enabled package IDs, build the bundle,
  * and pass it to the content registry for composition.
  *
- * This module is parallel to but separate from Adaptive Memory. Package instructions
- * are official configured prompt content; adaptive memory is auxiliary context.
- * Both can coexist without interference.
  */
 
-import { buildAdaptiveMemoryInstructionBundle } from "./adaptive-memory";
 import { buildCodebaseMemoryInstructionBundle } from "./codebase-memory";
 import { buildCodeEconomyInstructionBundle } from "./code-economy";
 
@@ -21,7 +17,6 @@ export { buildWebSearchInstructionBundle } from "./web-search";
 import { isCodebaseMemoryEnabled } from "../../../config/deck-config";
 import type { NormalizedDeckConfig } from "../../../config/deck-config";
 import type { PackageInstructionRunnerId, PackageInstructionPackageId } from "../../../config/deck-config";
-import type { ProjectBoundAdaptiveMemoryInstructionOptions } from "./adaptive-memory";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,7 +24,7 @@ import type { ProjectBoundAdaptiveMemoryInstructionOptions } from "./adaptive-me
 
 export type CapabilityInstructionSurface = "session" | "agent" | "skill";
 
-export type CapabilityInstructionPackageId = "adaptive-memory" | "codebase-memory" | "code-economy" | "context-mode" | "rtk" | "serena" | "web-search";
+export type CapabilityInstructionPackageId = "codebase-memory" | "code-economy" | "context-mode" | "rtk" | "serena" | "web-search";
 
 export type CapabilityInstructionFragment = {
   packageId: CapabilityInstructionPackageId;
@@ -43,8 +38,6 @@ export type CapabilityInstructionFragment = {
 export type CapabilityInstructionBundle = {
   instructions: readonly CapabilityInstructionFragment[];
 };
-
-export type CapabilityInstructionBuildOptions = ProjectBoundAdaptiveMemoryInstructionOptions;
 
 export type CapabilityInstructionCompositionContext = {
   surface: CapabilityInstructionSurface;
@@ -129,7 +122,6 @@ const PACKAGE_BUILDERS: Partial<Record<CapabilityInstructionPackageId, () => Cap
   "codebase-memory": buildCodebaseMemoryInstructionBundle,
   "code-economy": buildCodeEconomyInstructionBundle,
   rtk: buildRtkInstructionBundle,
-  "adaptive-memory": buildAdaptiveMemoryInstructionBundle,
   "web-search": buildWebSearchInstructionBundle,
 };
 
@@ -138,7 +130,6 @@ const PACKAGE_ORDER: CapabilityInstructionPackageId[] = [
   "codebase-memory",
   "code-economy",
   "rtk",
-  "adaptive-memory",
   "web-search",
 ];
 
@@ -189,7 +180,6 @@ export function getEnabledCapabilityInstructionIds(
  */
 export function buildCapabilityInstructionBundle(
   packageIds: readonly CapabilityInstructionPackageId[],
-  options: CapabilityInstructionBuildOptions = {},
 ): CapabilityInstructionBundle {
   // Deduplicate while preserving canonical order
   const seen = new Set<CapabilityInstructionPackageId>();
@@ -207,53 +197,12 @@ export function buildCapabilityInstructionBundle(
   for (const pkg of unique) {
     const builder = PACKAGE_BUILDERS[pkg];
     if (builder) {
-      const bundle = pkg === "adaptive-memory"
-        ? buildAdaptiveMemoryInstructionBundle(options)
-        : builder();
+      const bundle = builder();
       allFragments.push(...bundle.instructions);
     }
   }
 
   return { instructions: Object.freeze(allFragments) };
-}
-
-export type AdaptiveMemoryInstructionBindOptions = CapabilityInstructionBuildOptions & {
-  /** Add adaptive-memory fragments even when the caller bundle did not include them. */
-  includeWhenMissing?: boolean;
-};
-
-/**
- * Replace any caller-supplied adaptive-memory fragments with freshly rendered,
- * scope-bound canonical fragments while preserving all unrelated package
- * fragments byte-for-byte and in their original relative order.
- */
-export function bindAdaptiveMemoryInstructionBundle(
-  bundle: CapabilityInstructionBundle | undefined,
-  options: AdaptiveMemoryInstructionBindOptions = {},
-): CapabilityInstructionBundle | undefined {
-  if (!bundle && options.includeWhenMissing !== true) return bundle;
-
-  const original = bundle?.instructions ?? [];
-  const hasAdaptiveMemory = original.some((fragment) => fragment.packageId === "adaptive-memory");
-  if (!hasAdaptiveMemory && options.includeWhenMissing !== true) return bundle;
-
-  const replacement = buildAdaptiveMemoryInstructionBundle(options).instructions;
-  const instructions: CapabilityInstructionFragment[] = [];
-  let inserted = false;
-
-  for (const fragment of original) {
-    if (fragment.packageId !== "adaptive-memory") {
-      instructions.push(fragment);
-      continue;
-    }
-    if (!inserted) {
-      instructions.push(...replacement);
-      inserted = true;
-    }
-  }
-
-  if (!inserted) instructions.push(...replacement);
-  return { instructions: Object.freeze(instructions) };
 }
 
 /**

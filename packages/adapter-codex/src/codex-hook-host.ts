@@ -18,9 +18,6 @@ function digest(value: string): Buffer { return createHash("sha256").update(valu
 function normalizeCodexHookInput(value: unknown): Partial<CodexTrustedHookInputV1> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
-  if (record.schema === "deck-runner-memory-loopback-v1" && record.runnerId === "codex" && record.rawHook && typeof record.rawHook === "object" && !Array.isArray(record.rawHook)) {
-    return record.rawHook as Partial<CodexTrustedHookInputV1>;
-  }
   return record as Partial<CodexTrustedHookInputV1>;
 }
 

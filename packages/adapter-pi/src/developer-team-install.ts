@@ -5,7 +5,6 @@ import { getAgentContent, type DeveloperTeamPromptProfileV1 } from "@deck/core/t
 import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
 import {
   buildCapabilityInstructionBundle,
-  bindAdaptiveMemoryInstructionBundle,
   composeCapabilityInstructions,
   getEnabledPackageInstructionIds,
 } from "@deck/core/teams/developer/instruction-bundles";
@@ -61,16 +60,8 @@ function verifyInvariantPresence(
 
   return { pass: false, missing: criticalIds };
 }
-import {
-  composeAdaptiveMemory,
-  resolveMemoryInjection,
-  type AdaptiveMemoryCompositionResult,
-  type AdaptiveMemoryProvider,
-  type MemoryDiagnostic as CoreMemoryDiagnostic,
-  type MemoryInjectionBundle,
-} from "@deck/core/memory/adaptive-memory";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY } from "@deck/core/config/deck-config";
-import { resolveCanonicalSupermemoryProjectScope, type CapabilityInstructionBundle } from "@deck/core";
+import { type CapabilityInstructionBundle } from "@deck/core";
 import type { DeveloperTeamAgent } from "./developer-team-catalog";
 import { DEVELOPER_TEAM_AGENTS } from "./developer-team-catalog";
 import {
@@ -139,9 +130,6 @@ export type DeveloperTeamInstallPlan = {
   standaloneSkills: PlannedStandaloneSkillFile[];
   /** Standalone lifecycle skill files (deck-onboard, deck-archive). */
   sddSkillFiles: PlannedSDDSkillFile[];
-  memoryDiagnostics: MemoryDiagnostic[];
-  /** Memory injection bundle computed from memoryInjection/memoryProvider options. */
-  memoryBundle?: MemoryInjectionBundle;
   /** Effective prompt profile. Compact is selected for normal installations. */
   promptProfile: DeveloperTeamPromptProfileV1;
   /** Retained for API compatibility with earlier rollout-aware callers. */
@@ -299,38 +287,10 @@ export type ReadDeveloperTeamModelAssignmentsOptions = {
   agentsDir?: string;
 };
 
-/** Re-export MemoryDiagnostic from core for backward compatibility. */
-export type MemoryDiagnostic = CoreMemoryDiagnostic;
-
-const SUPPORTED_PI_MEMORY_PROVIDER_IDS = ["supermemory"] as const;
-
-/** Options for memory injection during Developer Team install. */
-export type MemoryInjectionOptions = {
-  /** A pre-built memory injection bundle (takes precedence over provider). */
-  memoryInjection?: MemoryInjectionBundle;
-  /** Pre-built bundles are accepted only from Deck's trusted composition root. */
-  trustedMemoryInjection?: boolean;
-  /** A memory provider that will build the injection bundle. Ignored if memoryInjection is set. */
-  memoryProvider?: AdaptiveMemoryProvider;
-  /** Provider IDs accepted by this adapter/caller registry. */
-  supportedMemoryProviderIds?: Iterable<string>;
-  /** Override for validating Pi global MCP config before Supermemory tool injection. */
-  piMcpConfigPath?: string;
-  /** Override home directory used to resolve the default Pi global MCP config path. */
-  piMcpHomeDir?: string;
-};
-
-export type DeveloperTeamInstallOptions = MemoryInjectionOptions & {
+export type DeveloperTeamInstallOptions = {
   modelAssignments?: DeveloperTeamModelAssignments;
   thinkingAssignments?: DeveloperTeamThinkingAssignments;
   preserveMissingThinkingAssignments?: boolean;
-  /**
-   * Resolved provider from the capability dashboard/TUI install path.
-   * Kept as an explicit alias so dashboard code can inject the same provider
-   * constructed by launch resolution without relying on legacy selection helpers.
-   * `memoryInjection` still takes precedence, then `memoryProvider`, then this alias.
-   */
-  dashboardMemoryProvider?: AdaptiveMemoryProvider;
   /**
    * Pre-built capability instruction bundle. When provided, the bundle's
    * fragments are composed into agent/skill content via the content registry.
@@ -355,100 +315,6 @@ export type DeveloperTeamInstallOptions = MemoryInjectionOptions & {
   layout?: DeveloperTeamInstallLayout;
 };
 
-// --- Legacy local resolveMemoryInjection (delegated to core) ---
-// Kept as a thin wrapper for any Pi-specific extensions in the future.
-// Currently delegates to the centralized core implementation with
-// fail-closed provider ID validation (REQ-AMI-003).
-
-function resolvePiMemoryInjection(
-  options?: MemoryInjectionOptions,
-  projectRoot?: string,
-): { bundle: MemoryInjectionBundle | undefined; diagnostics: MemoryDiagnostic[] } {
-  let memoryProvider = options?.memoryProvider;
-  let scopeDiagnostic: MemoryDiagnostic | undefined;
-  if (memoryProvider?.id === "supermemory") {
-    const derived = projectRoot ? resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] }) : undefined;
-    if (derived?.ok) {
-      // Keep the caller-provided provider, but only pass the verified runtime scope
-      // through the trusted build context. Pi does not materialize raw Supermemory MCP.
-    } else {
-      memoryProvider = undefined;
-      scopeDiagnostic = {
-        code: "memory_provider_unavailable",
-        providerId: "supermemory",
-        message: "Supermemory project identity is missing or invalid; omitted adaptive-memory injection with redacted diagnostics.",
-      };
-    }
-  }
-
-  const resolved = resolveMemoryInjection({
-    memoryInjection: options?.memoryInjection,
-    trustedMemoryInjection: options?.trustedMemoryInjection,
-    memoryProvider,
-    supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_PI_MEMORY_PROVIDER_IDS,
-    buildContext: {
-      teamId: "developer-team",
-      supermemoryProjectScope: memoryProvider?.id === "supermemory" && projectRoot
-        ? (() => {
-            const derived = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
-            return derived.ok ? derived.scope : undefined;
-          })()
-        : undefined,
-    },
-  });
-
-  return {
-    bundle: resolved.bundle,
-    diagnostics: [...resolved.diagnostics, ...(scopeDiagnostic ? [scopeDiagnostic] : [])],
-  };
-}
-
-/**
- * Map MemoryToolBinding entries to Pi frontmatter tool names.
- *
- * Pi uses a comma-separated `tools:` line in agent frontmatter. When memory
- * tool bindings are present and the agent content received a memory injection
- * (matching fragments), their MCP tool names are appended to the base
- * tools list. Only tool bindings from surfaces that have matching instruction
- * fragments are included.
- *
- * Supermemory exposes generic MCP tool names (`execute`, `search_docs`), so
- * preserve the binding server name in generated frontmatter to avoid granting
- * or colliding with a different server's generic `execute` tool.
- */
-function buildPiToolsLine(baseTools: string, toolBindings: readonly import("@deck/core/memory/adaptive-memory").MemoryToolBinding[]): string {
-  if (toolBindings.length === 0) return baseTools;
-
-  const memoryToolNames = toolBindings.flatMap((binding) => binding.toolNames.map((toolName) => toPiMemoryToolName(binding.serverName, toolName)));
-  // Deduplicate while preserving order
-  const seen = new Set<string>();
-  const allTools: string[] = [];
-
-  for (const tool of baseTools.split(",")) {
-    const trimmed = tool.trim();
-    if (trimmed && !seen.has(trimmed)) {
-      seen.add(trimmed);
-      allTools.push(trimmed);
-    }
-  }
-
-  for (const tool of memoryToolNames) {
-    if (!seen.has(tool)) {
-      seen.add(tool);
-      allTools.push(tool);
-    }
-  }
-
-  return allTools.join(",");
-}
-
-function toPiMemoryToolName(serverName: string | undefined, toolName: string): string {
-  if (serverName && (toolName === "execute" || toolName === "search_docs" || toolName === "memory" || toolName === "recall")) {
-    return `${serverName}.${toolName}`;
-  }
-  return toolName;
-}
-
 // --- Plan ---
 
 export function getPiExecutionProbeCapabilities() {
@@ -461,30 +327,13 @@ export function getPiExecutionProbeCapabilities() {
 export function buildDeveloperTeamInstallPlan(
   projectRoot: string,
   options?: DeveloperTeamInstallOptions,
-): DeveloperTeamInstallPlan & { memoryDiagnostics: MemoryDiagnostic[] } {
+): DeveloperTeamInstallPlan & { } {
   const layout = options?.layout;
   const agentsDir = layout ? join(layout.packageRoot, "agents") : join(projectRoot, ".pi", "agents");
   const skillsDir = layout ? join(layout.packageRoot, "skills") : join(projectRoot, ".pi", "skills");
   const modelAssignments = options?.modelAssignments;
   const thinkingAssignments = options?.thinkingAssignments;
-  const resolvedMemoryProvider = options?.memoryProvider ?? options?.dashboardMemoryProvider;
-
-  const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolvePiMemoryInjection({
-    memoryInjection: options?.memoryInjection,
-    trustedMemoryInjection: options?.trustedMemoryInjection,
-    memoryProvider: resolvedMemoryProvider,
-    supportedMemoryProviderIds: options?.supportedMemoryProviderIds,
-    piMcpConfigPath: options?.piMcpConfigPath,
-    piMcpHomeDir: options?.piMcpHomeDir,
-  }, projectRoot);
-
-  const derivedSupermemoryProjectScope = (() => {
-    const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
-    return resolved.ok ? resolved.scope : undefined;
-  })();
-  const capabilityInstructions = translatePiCapabilityInstructions(bindAdaptiveMemoryInstructionBundle(options?.capabilityInstructions, {
-    supermemoryProjectScope: derivedSupermemoryProjectScope,
-  }));
+  const capabilityInstructions = translatePiCapabilityInstructions(options?.capabilityInstructions);
 
   const personality = options?.orchestratorPersonality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
   const promptProfile = "compact" as const;
@@ -502,7 +351,6 @@ export function buildDeveloperTeamInstallPlan(
       agent,
       model,
       thinking,
-      memoryBundle,
       capabilityInstructions,
       personality,
       promptProfile,
@@ -522,7 +370,6 @@ export function buildDeveloperTeamInstallPlan(
     const absolutePath = layout ? join(skillsDir, agent.skillId, "SKILL.md") : join(projectRoot, relativePath);
     const content = buildSkillFileContent(
       agent,
-      memoryBundle,
       capabilityInstructions,
       personality,
       promptProfile,
@@ -556,8 +403,6 @@ export function buildDeveloperTeamInstallPlan(
     skills,
     standaloneSkills,
     sddSkillFiles,
-    memoryDiagnostics,
-    memoryBundle,
     promptProfile,
   };
 }
@@ -766,8 +611,6 @@ export function applyDeveloperTeamInstall(
   materializeTeamProfile({
     teamId: "developer-team",
     projectRoot: plan.projectRoot,
-    ...(plan.memoryBundle ? { memoryInjection: plan.memoryBundle } : {}),
-    ...(plan.memoryBundle ? { trustedMemoryInjection: true } : {}),
     mkdir,
     writeFile,
     readFile: (path, encoding) => readFileSync(path, encoding ?? "utf-8") as string,
@@ -994,7 +837,6 @@ export function rollbackDeveloperTeamFiles(
 
 function buildSkillFileContent(
   agent: DeveloperTeamAgent,
-  memoryBundle?: MemoryInjectionBundle,
   capabilityInstructions?: CapabilityInstructionBundle,
   personality?: import("@deck/core/config/deck-config").OrchestratorPersonality,
   promptProfile: DeveloperTeamPromptProfileV1 = "compact",
@@ -1009,13 +851,6 @@ function buildSkillFileContent(
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
 
-  const skillResult = memoryBundle
-    ? composeAdaptiveMemory(content.skillBody, memoryBundle, {
-        surface: "skill",
-        teamId: "developer-team",
-        skillId: agent.skillId,
-      })
-    : { content: content.skillBody, toolBindings: [] as readonly import("@deck/core/memory/adaptive-memory").MemoryToolBinding[] };
 
   return [
     "---",
@@ -1023,7 +858,7 @@ function buildSkillFileContent(
     `description: ${toYamlScalar(agent.description)}`,
     "---",
     "",
-    skillResult.content,
+    content.skillBody,
     "",
   ].join("\n");
 }
@@ -1048,7 +883,6 @@ function buildAgentFileContent(
   agent: DeveloperTeamAgent,
   model?: string,
   thinking?: PiThinkingLevel,
-  memoryBundle?: MemoryInjectionBundle,
   capabilityInstructions?: CapabilityInstructionBundle,
   personality?: import("@deck/core/config/deck-config").OrchestratorPersonality,
   promptProfile: DeveloperTeamPromptProfileV1 = "compact",
@@ -1073,25 +907,12 @@ function buildAgentFileContent(
       content.agentBody,
       model,
       thinking,
-      memoryBundle,
       capabilityInstructions,
       globalProfileReference,
     );
   }
 
-  const agentResult: AdaptiveMemoryCompositionResult = memoryBundle
-    ? composeAdaptiveMemory(content.agentBody, memoryBundle, {
-        surface: "agent",
-        teamId: "developer-team",
-        agentId: agent.id,
-      })
-    : { content: content.agentBody, toolBindings: [] as readonly import("@deck/core/memory/adaptive-memory").MemoryToolBinding[] };
-
-  const baseTools = "read,write,bash";
-  const toolsLine = memoryBundle
-    ? buildPiToolsLine(baseTools, agentResult.toolBindings)
-    : baseTools;
-
+  const toolsLine = "read,write,bash";
   const frontmatterLines = [
     "---",
     `name: ${agent.name}`,
@@ -1106,7 +927,7 @@ function buildAgentFileContent(
     "---",
   ];
 
-  return [...frontmatterLines, "", agentResult.content, ""].join("\n");
+  return [...frontmatterLines, "", content.agentBody, ""].join("\n");
 }
 
 /**
@@ -1121,21 +942,10 @@ function buildOrchestratorStub(
   agentBodyContent: string,
   model?: string,
   thinking?: PiThinkingLevel,
-  memoryBundle?: MemoryInjectionBundle,
   capabilityInstructions?: CapabilityInstructionBundle,
   globalProfileReference?: string,
 ): string {
-  // Build tool bindings from memory bundle - filter by surface matching "agent"
-  // This follows the same contract as composeAdaptiveMemory
-  const agentInstructions = memoryBundle?.instructions.filter((inst) => inst.surface === "agent") ?? [];
-  const toolBindings = agentInstructions.length > 0
-    ? (memoryBundle?.toolBindings ?? [])
-    : [];
-  const additionalTools = toolBindings.map((tb) => tb.toolNames).flat();
-  const toolsLine = additionalTools.length > 0
-    ? `read,write,bash,${additionalTools.join(",")}`
-    : "read,write,bash";
-
+  const toolsLine = "read,write,bash";
   const frontmatterLines: string[] = [
     "---",
     `name: ${agent.name}`,
@@ -1170,26 +980,12 @@ function buildOrchestratorStub(
     capabilityLines.push("These instructions are provided by the runner's native package instruction system.");
   }
 
-  // Build memory injection section if provided
-  const memoryLines: string[] = [];
-  if (memoryBundle && memoryBundle.instructions.length > 0) {
-    // Find agent-surface instructions from the bundle
-    const agentInstructions = memoryBundle.instructions.filter((inst) => inst.surface === "agent");
-    if (agentInstructions.length > 0) {
-      memoryLines.push("", "## Adaptive Memory (provider-injected)", "");
-      for (const inst of agentInstructions) {
-        memoryLines.push(inst.markdown);
-        memoryLines.push("");
-      }
-    }
-  }
 
   const stubBody = [
     "# Deck Lead",
     "",
     ...profileReference,
     ...capabilityLines,
-    ...memoryLines,
     "## Role",
     "",
     "- Own the user's outcome and keep decisions understandable in both directions.",

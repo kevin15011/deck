@@ -43,7 +43,7 @@ Runners are not equal, and pretending otherwise would be a promise the system ca
 
 ### Authority has an order
 
-OpenSpec artifacts, source code, tests and current runner evidence are authoritative. Adaptive memory is useful context, but advisory: it never outranks the official record. This keeps long-running AI work grounded in what is actually true in the repository rather than in what a model remembers.
+OpenSpec artifacts, source code, tests and current runner evidence are authoritative. This keeps long-running AI work grounded in what is actually true in the repository rather than in what a model remembers.
 
 ## The hardest decision: from 14 agents to 7
 

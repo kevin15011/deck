@@ -34,10 +34,6 @@ function makeCompleteAdapter(): RunnerCapabilities {
       readAssignments: () => ({ assignments: [] }),
       resolveAssignment: () => ({ agentId: "", modelId: "" }),
     },
-    memory: {
-      getProviders: () => [],
-      getSupportedProviderIds: () => [],
-    },
   };
 }
 

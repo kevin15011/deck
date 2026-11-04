@@ -6,7 +6,7 @@
   "packageManager": "bun@1.4.0",
   "scripts": {
     "deck": "bun run --cwd apps/cli deck",
-    "build": "bun run bench:memory && bun run verify:supermemory-compiled && bun run scripts/build-binaries.ts",
+    "build": "bun run scripts/build-binaries.ts",
     "build:dry-run": "bun run scripts/build-binaries.ts --dry-run",
     "canary:install": "bun run scripts/install-canary.ts",
     "sandbox:linux": "bash scripts/linux-install-sandbox.sh",
@@ -15,9 +15,7 @@
     "sandbox:update": "bash scripts/linux-install-sandbox.sh update",
     "deck:run": "DECK_DEBUG=1 bun run build:dry-run && DECK_DEBUG=1 ./dist/cli/deck",
     "test": "bun scripts/test.ts",
-    "bench:memory": "bun run benchmarks/deckmemorybench.ts",
-    "verify:supermemory-compiled": "bun run scripts/verify-supermemory-compiled-runtime.ts --dry-run",
-    "release:verify": "bun run bench:memory && bun run verify:supermemory-compiled && bun run build:dry-run"
+    "release:verify": "bun run build:dry-run"
   },
   "bin": {
     "deck": "./dist/cli/deck"
@@ -29,7 +27,6 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "latest",
-    "opencode-supermemory": "2.1.0",
     "typescript": "latest"
   },
   "dependencies": {

@@ -49,11 +49,6 @@ function verifyInvariantPresence(
 
   return { pass: false, missing: criticalIds };
 }
-import {
-  type AdaptiveMemoryProvider,
-  type MemoryDiagnostic as CoreMemoryDiagnostic,
-  type MemoryInjectionBundle,
-} from "@deck/core/memory/adaptive-memory";
 import { type ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
 import { translateOpenCodeCapabilityInstructions } from "./instruction-translation";
 import { getAgentContent, type DeveloperTeamPromptProfileV1 } from "@deck/core/teams/developer/content-registry";
@@ -61,7 +56,7 @@ import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "
 import { type CapabilityInstructionBundle } from "@deck/core";
 import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
 
-import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference, removeDeckMemoryClaimsForOpenCode } from "./prompt-generation";
+import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference, } from "./prompt-generation";
 import { buildCommandGenerationPlan, applyCommandGeneration } from "./command-generation";
 import { mergeAndWrite } from "./config-merge";
 import { resolveModelConfig, DEFAULT_OPENCODE_MODELS } from "./model-config";
@@ -109,7 +104,6 @@ export type OpenCodeDeveloperTeamInstallPlan = {
   skills: OpenCodePlannedSkillFile[];
   standaloneSkills: OpenCodePlannedStandaloneSkillFile[];
   executionPlugin?: OpenCodePlannedExecutionPluginFile;
-  memoryDiagnostics: MemoryDiagnostic[];
   /** Agent entries for opencode.json config merge */
   agentEntries: Record<string, AgentEntry>;
   promptGenerationPlan: ReturnType<typeof buildPromptGenerationPlan>;
@@ -117,8 +111,6 @@ export type OpenCodeDeveloperTeamInstallPlan = {
   mermaidPluginStatus: "ready" | "missing";
   /** Captured capability instruction bundle for verify reconciliation */
   capabilityInstructions?: CapabilityInstructionBundle;
-  /** Memory injection bundle resolved from provider or pre-built injection. */
-  memoryBundle?: MemoryInjectionBundle;
   /** Resolved orchestrator personality used during plan construction */
   personality?: OrchestratorPersonality;
   /** Effective prompt profile after rollout receipt validation. */
@@ -157,32 +149,6 @@ export type OpenCodeDeveloperTeamVerifyResult = {
   agentResults: OpenCodeBundleVerifyResult[];
   skillResults: OpenCodeBundleVerifyResult[];
   pluginResults?: OpenCodeBundleVerifyResult[];
-};
-
-/** Re-export MemoryDiagnostic from core for backward compatibility. */
-export type MemoryDiagnostic = CoreMemoryDiagnostic;
-
-/** Options for memory injection during OpenCode Developer Team install. */
-export type MemoryInjectionOptions = {
-  /** A pre-built memory injection bundle (takes precedence over provider). */
-  memoryInjection?: MemoryInjectionBundle;
-  /** Pre-built bundles are accepted only from Deck's trusted composition root. */
-  trustedMemoryInjection?: boolean;
-  /** A memory provider that will build the injection bundle. Ignored if memoryInjection is set. */
-  memoryProvider?: AdaptiveMemoryProvider;
-  /** Provider IDs accepted by this adapter/caller registry. */
-  supportedMemoryProviderIds?: Iterable<string>;
-  /**
-   * Pre-built capability instruction bundle. When provided, the bundle's
-   * fragments are composed into skill content via the content registry.
-   */
-  capabilityInstructions?: CapabilityInstructionBundle;
-  /**
-   * Standalone skill definitions to include in the install plan.
-   * When provided, these skills are written as-is (verbatim) to .opencode/skills/{skillId}/SKILL.md
-   * without generating agent-bound frontmatter.
-   */
-  standaloneSkills?: readonly { skillId: string; body: string; files?: Record<string, string> }[];
 };
 
 function validateStandaloneSkillId(skillId: string): void {
@@ -225,14 +191,6 @@ function buildStandaloneSkillFiles(
     }
   }
   return planned;
-}
-
-function resolveOpenCodeMemoryInjection(
-  _options?: MemoryInjectionOptions,
-  _configDir?: string,
-  _projectRoot?: string,
-): { bundle: MemoryInjectionBundle | undefined; diagnostics: MemoryDiagnostic[] } {
-  return { bundle: undefined, diagnostics: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -320,7 +278,6 @@ function buildAgentEntry(
 
 function buildSkillFileContent(
   agent: DeveloperTeamAgent,
-  memoryBundle?: MemoryInjectionBundle,
   capabilityInstructions?: CapabilityInstructionBundle,
   personality?: OrchestratorPersonality,
   promptProfile: DeveloperTeamPromptProfileV1 = "compact",
@@ -332,10 +289,8 @@ function buildSkillFileContent(
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
 
-  // Skip adaptive memory injection for skill files - only apply to agent prompts
-  // The installed skill files DON'T have adaptive memory sections, so planned content must match
   // This ensures byte-for-byte match for verification
-  const skillBodyPlain = removeDeckMemoryClaimsForOpenCode(content.skillBody);
+  const skillBodyPlain = content.skillBody;
 
   // deck-onboard is user-invocable (no delegate_only), others are delegated
   const isUserInvocable = agent.skillId === "deck-onboard";
@@ -373,7 +328,7 @@ export function getOpenCodeExecutionProbeCapabilities() {
 
 export function buildOpenCodeDeveloperTeamInstallPlan(
   projectRoot: string,
-  options?: MemoryInjectionOptions & {
+  options?: {
     configDir?: string;
     cliModelOverride?: string;
     configModelOverrides?: Record<string, string>;
@@ -393,8 +348,8 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
      * This enables the TUI to pass runtime capability detection results.
      */
     capabilityMap?: Record<string, boolean | null>;
-    /** Retained for API compatibility; compact prompt selection no longer depends on rollout receipts. */
-
+    capabilityInstructions?: CapabilityInstructionBundle;
+    standaloneSkills?: readonly { skillId: string; body: string; files?: Record<string, string> }[];
   },
 ): OpenCodeDeveloperTeamInstallPlan {
   const configDir = options?.configDir ?? join(process.env.HOME ?? "/home/user", ".config", "opencode");
@@ -406,10 +361,8 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     content: readFileSync(typeof executionPluginAssetPath === "string" ? executionPluginAssetPath : new URL("../assets/opencode/plugins/developer-team-execution.generated.js", import.meta.url), "utf-8"),
   };
 
-  const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options, configDir, projectRoot);
-
   const capabilityInstructions = options?.capabilityInstructions
-    ? translateOpenCodeCapabilityInstructions({ instructions: Object.freeze(options.capabilityInstructions.instructions.filter((fragment) => fragment.packageId !== "adaptive-memory")) })
+    ? translateOpenCodeCapabilityInstructions(options.capabilityInstructions)
     : undefined;
 
   const resolvedPersonality: OrchestratorPersonality = options?.personality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
@@ -432,7 +385,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   const skills: OpenCodePlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `skills/${agent.skillId}/SKILL.md`;
     const absolutePath = join(skillsDir, agent.skillId, "SKILL.md");
-    const content = buildSkillFileContent(agent, memoryBundle, capabilityInstructions, resolvedPersonality, promptProfile);
+    const content = buildSkillFileContent(agent, capabilityInstructions, resolvedPersonality, promptProfile);
     return { agent, relativePath, absolutePath, content };
   });
 
@@ -448,7 +401,6 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     })),
   ];
 
-  // Prompt generation plan - pass memoryBundle for provider-specific adaptive memory injection
   // This ensures provider isolation and OpenSpec authority are maintained
   // REQ-OA-005: Pass authorization to enable runtime authorization card injection
   const promptGenerationPlan = buildPromptGenerationPlan({
@@ -457,7 +409,6 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     capabilityInstructions,
     personality: resolvedPersonality,
     promptProfile,
-    memoryBundle,
     authorization: options?.authorization,
   });
 
@@ -475,13 +426,11 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     skills,
     standaloneSkills,
     executionPlugin,
-    memoryDiagnostics,
     agentEntries,
     promptGenerationPlan,
     commandGenerationPlan,
     mermaidPluginStatus,
     capabilityInstructions,
-    memoryBundle,
     personality: resolvedPersonality,
     promptProfile,
     changedAgentIds: options?.changedAgentIds,

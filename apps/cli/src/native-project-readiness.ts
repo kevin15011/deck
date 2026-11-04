@@ -1,5 +1,4 @@
 import { preparationCapabilities } from "./preparation-capabilities";
-import { CODEX_LAUNCH_ENV_BINDING, CODEX_SUPERMEMORY_ENV_KEY, codexSupermemoryToolContext } from "@deck/adapter-codex";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -20,7 +19,6 @@ export async function startNativeProjectReadiness(input: {
   prerequisites?(config: NormalizedDeckConfig): import("@deck/core/session/preparation").PreparationMember["capabilities"];
   registryProviders?: () => readonly import("@deck/core").SkillDiscoverySourceProviderV1[];
   codebaseAvailability?(): "ready" | "unavailable" | "unverified";
-  launchContext?: string;
   nativeSessionStartContext?: RunnerLaunchPlan["nativeSessionStartContext"];
 }) {
   const root = realpathSync(input.projectRoot), epoch = randomUUID(), sessionId = randomUUID();
@@ -36,7 +34,7 @@ export async function startNativeProjectReadiness(input: {
     await service.prepareRegistryEvidence(scope, input.runnerId);
     input.validateGeneration?.();
     const preparation = service.status(scope);
-    return { root, epoch, generation: input.generation, preparation, text: [composeSkillSessionStartContext(preparation, input.runnerId), input.launchContext].filter(Boolean).join("\n\n") };
+    return { root, epoch, generation: input.generation, preparation, text: composeSkillSessionStartContext(preparation, input.runnerId) };
   };
   const initial = await snapshot(), token = randomUUID();
   const server = createServer(async (request, response) => {
@@ -87,10 +85,7 @@ export function withNativeProjectReadiness(plan: RunnerLaunchPlan, runnerId: str
       try {
         const generation = readGeneration ? createHash("sha256").update(readGeneration()).digest("hex") : plan.generationReference?.selectionHash ?? randomUUID();
         const adapters = (await import("./runner-adapters")).createDefaultAdapterRegistry().list();
-        const projectScope = plan.envOverlay?.SUPERMEMORY_REPO_TAG?.value;
-        const launchContext = runnerId === "codex" && projectScope && plan.sensitiveEnvAuthorization?.binding === CODEX_LAUNCH_ENV_BINDING && plan.sensitiveEnvAuthorization.keys.includes(CODEX_SUPERMEMORY_ENV_KEY)
-          ? codexSupermemoryToolContext(projectScope) : undefined;
-        context = await startNativeProjectReadiness({ registryProviders: () => adapters.flatMap(a => a.skillDiscovery ? [a.skillDiscovery] : []), projectRoot: plan.cwd, runnerId, config, codebaseAvailability, prerequisites, launchContext,
+        context = await startNativeProjectReadiness({ registryProviders: () => adapters.flatMap(a => a.skillDiscovery ? [a.skillDiscovery] : []), projectRoot: plan.cwd, runnerId, config, codebaseAvailability, prerequisites,
           nativeSessionStartContext: runnerId === "codex" ? plan.nativeSessionStartContext : undefined, validateGeneration: () => {
           try { if (readGeneration && createHash("sha256").update(readGeneration()).digest("hex") !== generation) generationRevoked = true; }
           catch { generationRevoked = true; }

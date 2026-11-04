@@ -1,16 +1,11 @@
 import {expect,test} from 'bun:test';
 import type {DriverTaskInput} from '@deck/core/session/driver';
-import {buildCodexLaunch,codexThreadMcpConfig,matchesCodexMemoryGroups,codexMemoryHooks,ISOLATION_FEATURES,verifyCodexConfig} from './launch';
+import {buildCodexLaunch,codexThreadMcpConfig,ISOLATION_FEATURES,verifyCodexConfig} from './launch';
 const input:DriverTaskInput={taskId:'t',memberId:'lead',cwd:'/work',assignment:{runnerId:'codex',modelId:'fake'},rolePrompt:'',prompt:'',mcp:{servers:['deck-task'],sessionTools:[]},mcpServerSpecs:{'deck-task':{command:'fixture',args:['FAKE_SECRET'],env:{TOKEN:'FAKE_SECRET'}}},approvals:'relay',credentialFile:'/private/credential',disableNativeDelegation:true};
 const features=Object.fromEntries(ISOLATION_FEATURES.map(f=>[f,false]));
 test('fresh native config can retain unrelated servers/plugins; an existing task alias cannot contaminate the addition',()=>{expect(()=>verifyCodexConfig({features,mcp_servers:{personal:{url:'https://example.invalid'}}},input)).not.toThrow();expect(()=>verifyCodexConfig({features,mcp_servers:{'deck-task':{command:'foreign'}}},input)).toThrow('codex-mcp-spec-isolation-violation');expect(()=>verifyCodexConfig({features:{multi_agent:true,multi_agent_v2:false}},input)).toThrow('codex-feature-isolation-violation');});
 test('only task additions and explicit suppressions enter private thread config; secrets never enter argv',()=>{const launch=buildCodexLaunch(input,{baseEnv:{HOME:'/user'}});expect(launch.args.join(' ')).not.toContain('FAKE_SECRET');expect(launch.args.some(x=>x.startsWith('mcp_servers=')||x.startsWith('plugins='))).toBe(false);expect(launch.args).not.toContain('features.plugins=false');expect(launch.args).not.toContain('features.hooks=false');expect(codexThreadMcpConfig({...input,suppressedMcpServers:['unavailable-codebase']},['unavailable-codebase','personal'])).toEqual({mcp_servers:{'unavailable-codebase':{enabled:false},'deck-task':{enabled:true,command:'fixture',args:['FAKE_SECRET'],env:{TOKEN:'FAKE_SECRET'}}}});});
-const nativeMemory:NonNullable<DriverTaskInput['nativeMemory']>={provider:'supermemory',integration:'runner-plugin',status:'ready',projectScope:'sm_project_v1_owner_repo',plugin:{root:'/plugins/supermemory',nodeCommand:'/usr/bin/node',scripts:{recall:'/plugins/supermemory/recall.js',flush:'/plugins/supermemory/flush.js'}}};
-test('managed memory hooks coexist with other native events and do not disable native plugins',()=>{const launch=buildCodexLaunch({...input,nativeMemory},{baseEnv:{}});expect(launch.args).toContain('features.hooks=true');expect(launch.args).not.toContain('features.plugins=false');const hooks=launch.args.find(x=>x.startsWith('hooks='))!;expect(hooks).not.toContain('SessionStart');expect(hooks).toContain('/plugins/supermemory/recall.js');expect(hooks).not.toContain('bypass');});
-test('unavailable memory blocks and global scope drops inherited provider selectors',()=>{expect(()=>buildCodexLaunch({...input,nativeMemory:{...nativeMemory,status:'unavailable'}},{baseEnv:{}})).toThrow('codex-native-memory-unavailable');expect(()=>buildCodexLaunch({...input,nativeMemory:{...nativeMemory,plugin:undefined}},{baseEnv:{}})).toThrow('codex-native-memory-invalid');const launch=buildCodexLaunch({...input,nativeMemory:{...nativeMemory,scopeMode:'global',projectScope:undefined}},{baseEnv:{HOME:'/user',SUPERMEMORY_API_KEY:'FAKE',SUPERMEMORY_REPO_TAG:'foreign'}});expect(launch.env).toEqual({HOME:'/user'});});
 test('default-mode questions remain enabled for supervised launches',()=>expect(buildCodexLaunch(input,{baseEnv:{}}).args).toContain('features.default_mode_request_user_input=true'));
-
-test('installed default matchers are compatible; a different memory command is an exact protected conflict',()=>{const inputWithMemory={...input,nativeMemory};const groups=(codexMemoryHooks(inputWithMemory).UserPromptSubmit as any[]).map(group=>({...group,matcher:'*'}));expect(matchesCodexMemoryGroups(groups,'UserPromptSubmit',inputWithMemory)).toBe(true);expect(matchesCodexMemoryGroups([{hooks:[{type:'command',command:'foreign'}]}],'UserPromptSubmit',inputWithMemory)).toBe(false);});
 
 test('absent suppressed names must not create invalid native MCP tables',()=>{expect(codexThreadMcpConfig({...input,suppressedMcpServers:['absent']})).toEqual(codexThreadMcpConfig(input));});
 
@@ -40,14 +35,4 @@ test('read-only tasks can page local history without mutation tools',()=>{
   const servers=codexThreadMcpConfig(review).mcp_servers as any;
   expect(servers[id].enabled_tools).toEqual(['deck_session_history']);
   expect(servers[id].enabled_tools).not.toContain('deck_memory_propose');
-});
-test('managed memory suppresses foreign userPromptSubmit/stop hooks for this session only, keeping other events',()=>{
- const hook=(key:string,eventName:string,command:string,source='user')=>({key,eventName,command,source,handlerType:'command',enabled:true,trustStatus:'trusted',currentHash:`sha256:${key}`}) as any;
- const foreign=[hook('hooks.json:user_prompt_submit:0:0','userPromptSubmit','tool codex-hook'),hook('hooks.json:stop:0:0','stop','tool codex-hook'),hook('hooks.json:session_start:0:0','sessionStart','tool codex-hook')];
- const state=(task:DriverTaskInput)=>{const arg=buildCodexLaunch(task,{baseEnv:{}},foreign).args.find(x=>x.startsWith('hooks='))!;return arg;};
- const ready=state({...input,nativeMemory});
- expect(ready).toContain('hooks.json:user_prompt_submit:0:0');expect(ready).toContain('hooks.json:stop:0:0');expect(ready).not.toContain('hooks.json:session_start:0:0');
- // Not managed by Deck: personal hooks are left alone.
- const off=buildCodexLaunch({...input,nativeMemory:{...nativeMemory,status:'disabled'}},{baseEnv:{}},foreign).args.find(x=>x.startsWith('hooks='));
- expect(off ?? '').not.toContain('hooks.json:user_prompt_submit:0:0');
 });

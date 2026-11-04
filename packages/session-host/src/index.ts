@@ -30,7 +30,6 @@ export {
   type ApprovalResolution, type PendingApproval, type RespondResult,
 } from "./approval-broker";
 export { CredentialRegistry, type CredentialGrant } from "./credentials";
-export { MemoryBroker, type SessionMemoryPort } from "./memory-broker";
 export { BridgeService, type BridgeServiceOptions } from "./bridge-service";
 export {
   DECK_APPROVE_TOOL, DECK_STATUS_TOOL, DEFAULT_ALLOWED_TOOLS, SESSION_CREDENTIAL_ENV, SESSION_MCP_SERVER_ID, sessionMcpServerSpec,

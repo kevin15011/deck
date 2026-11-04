@@ -6,7 +6,7 @@
  *
  * Includes:
  * - Summary with counts by severity
- * - Ordered sections (Deck → Runtime → Memory → MCP → Binary → Runner Config)
+ * - Ordered sections (Deck → Runtime → Optional Tools → MCP → Binary → Runner Config)
  * - Truncation logic (max N items per category)
  * - Semantic tokens for icons/severity (not colors)
  */
@@ -94,7 +94,7 @@ export function formatDoctorResult(
 ): DoctorPresentationModel {
   const limit = options.truncateLimit ?? DEFAULT_TRUNCATE_LIMIT;
 
-  // Build ordered sections: Deck → Runtime → Memory → MCP → Binary → Runner Config
+  // Build ordered sections: Deck → Runtime → Optional Tools → MCP → Binary → Runner Config
   const sections: DoctorCategoryResult[] = [];
 
   // Deck checks (manifest, state, config)
@@ -121,9 +121,9 @@ export function formatDoctorResult(
     }
   }
 
-  // Memory providers
-  if (result.memory && result.memory.length > 0) {
-    for (const cat of result.memory) {
+  // Optional tools
+  if (result.optionalTools && result.optionalTools.length > 0) {
+    for (const cat of result.optionalTools) {
       const truncated = truncateItems(cat.items, limit);
       sections.push({
         ...cat,
@@ -186,7 +186,7 @@ export function formatDoctorResult(
     countCategories(result.deck ?? []);
     countCategories(result.binaryCheck ?? []);
     countCategories(result.runnerConfig ?? []);
-    countCategories(result.memory ?? []);
+    countCategories(result.optionalTools ?? []);
     countCategories(result.mcp ?? []);
 
     for (const rt of result.runtimes ?? []) {

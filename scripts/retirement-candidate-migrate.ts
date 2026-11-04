@@ -120,7 +120,7 @@ const collected=await runRunnerCleanupUpdate(roots,fixtureRunnerIds,{admission,a
 checkpoint('repeat-and-verify');
 const remaining=planRunnerCleanup(roots,fixtureRunnerIds).plans[0]!;
 const repeated=await runRunnerCleanupUpdate(roots,fixtureRunnerIds,{admission});
-const plan=adapter.buildDeveloperTeamInstallPlan({projectRoot:home,environmentId:`${runner}-development` as never,deckConfig:config,materializationScope:'content-only',...(getEnabledCapabilityInstructionIds(config,runner).includes('adaptive-memory')?{}:{capabilityInstructions:buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config,runner))})});
+const plan=adapter.buildDeveloperTeamInstallPlan({projectRoot:home,environmentId:`${runner}-development` as never,deckConfig:config,materializationScope:'content-only',capabilityInstructions:buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config,runner))});
 const verified=await adapter.verifyDeveloperTeamInstall(plan);
 const admissionResult=await adapter.evaluateSessionAdmission?.({config});
 if(!admissionResult || admissionResult.verdict==='blocked')throw Error('candidate session admission failed: '+JSON.stringify(admissionResult));

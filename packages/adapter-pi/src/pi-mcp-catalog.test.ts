@@ -51,7 +51,7 @@ describe("catalog", () => {
 describe("piReadOnlyToolAllowlist", () => {
   test("starts with the Pi read-only built-ins and appends only selected servers' read-only MCP tools", () => {
     const allowlist = piReadOnlyToolAllowlist(["codebase-memory", "context7"]);
-    expect(allowlist.slice(0, 5)).toEqual(["read", "grep", "find", "ls", "memory_search"]);
+    expect(allowlist.slice(0, 4)).toEqual(["read", "grep", "find", "ls"]);
     expect(allowlist).not.toContain("memory_save");
     expect(allowlist).toContain("mcp__codebase_memory__search_graph");
     expect(allowlist).toContain("mcp__context7__query_docs");
@@ -59,8 +59,8 @@ describe("piReadOnlyToolAllowlist", () => {
     expect(allowlist).not.toContain("mcp__codebase_memory__index_repository");
   });
 
-  test("without selected servers it is the built-ins plus the read-only memory search", () => {
-    expect(piReadOnlyToolAllowlist([])).toEqual(["read", "grep", "find", "ls", "memory_search", "memory_read"]);
+  test("without selected servers it contains only read-only built-ins", () => {
+    expect(piReadOnlyToolAllowlist([])).toEqual(["read", "grep", "find", "ls"]);
   });
 
   test("never allows write-capable built-ins", () => {

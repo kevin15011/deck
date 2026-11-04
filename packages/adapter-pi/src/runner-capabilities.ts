@@ -30,7 +30,6 @@ import type {
   RunnerDeveloperTeamVerifyResult,
   DeveloperTeamManifest,
   DeveloperTeamInstallFile,
-  AdaptiveMemoryProvider,
   RunnerCapabilityCatalogEntry,
 } from "@deck/core";
 import { resolvePiRunnerParity } from "./capability-parity";
@@ -126,7 +125,6 @@ function buildPiAgentInstallPlanFromFiles(projectRoot: string, files: readonly D
         content: f.content,
       })),
     sddSkillFiles: [],
-    memoryDiagnostics: [],
     promptProfile: "compact",
   };
 }
@@ -273,7 +271,6 @@ function getPiUserFacingIds(): readonly string[] {
 export type PiCapabilityParityInput = {
   binariesInPath?: readonly string[];
   mcpServersConfigured?: readonly string[];
-  supermemoryConfigured?: boolean;
   projectIndexVerified?: boolean;
 };
 
@@ -317,7 +314,6 @@ export function getPiCapabilityParity(input: PiCapabilityParityInput): PiCapabil
   const runtimeHints = {
     binariesInPath: input.binariesInPath,
     mcpServersConfigured: input.mcpServersConfigured,
-    supermemoryConfigured: input.supermemoryConfigured,
     projectIndexVerified: input.projectIndexVerified,
   };
 
@@ -388,7 +384,6 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
   const plan = buildDeveloperTeamInstallPlan(input.projectRoot, {
     modelAssignments,
     thinkingAssignments,
-    supportedMemoryProviderIds: ["supermemory"],
     capabilityInstructions: resolvedCapabilityInstructions,
   });
 
@@ -398,14 +393,12 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
     instruction: a.content,
     model: modelAssignments[a.agent.id],
     reasoning: thinkingAssignments[a.agent.id],
-    memoryBundle: undefined,
   }));
 
   const skills = plan.skills.map((s) => ({
     agentId: s.agent.id,
     skillId: s.agent.skillId,
     body: s.content,
-    memoryBundle: undefined,
   }));
 
   const standaloneSkills = getStandaloneSkills().map(({ skillId }) => {
@@ -418,7 +411,6 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
     agents,
     skills,
     standaloneSkills,
-    memoryDiagnostics: plan.memoryDiagnostics,
   };
 }
 
@@ -488,7 +480,6 @@ async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyIn
         content: f.content,
       })),
     sddSkillFiles: [],
-    memoryDiagnostics: [],
     promptProfile: "compact",
   };
 
@@ -540,20 +531,6 @@ function resolveAssignment(input: import("@deck/core").RunnerModelResolveInput):
     modelId: input.modelId ?? defaultAssignment?.modelId ?? "",
     reasoning: input.reasoning ?? defaultAssignment?.reasoning,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Memory capabilities
-// ---------------------------------------------------------------------------
-
-function getProviders(_input: import("@deck/core").RunnerMemoryProviderInput): readonly AdaptiveMemoryProvider[] {
-  // Providers are registered at composition time (Task 17).
-  // Return empty array here; the CLI registry injects actual providers.
-  return [];
-}
-
-function getSupportedProviderIds(): readonly string[] {
-  return ["supermemory"];
 }
 
 // ---------------------------------------------------------------------------
@@ -736,10 +713,6 @@ export function createPiRunnerCapabilities(): RunnerCapabilities {
       getCatalog,
       readAssignments,
       resolveAssignment,
-    },
-    memory: {
-      getProviders,
-      getSupportedProviderIds,
     },
     capabilities: {
       getCapability: getPiCapability,

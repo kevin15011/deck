@@ -18,7 +18,6 @@ test("proof preserves Deck mutation consent instead of silently installing", asy
   try {
     const result = await runPiClientProof({ adapter, launch: { mode: "interactive", projectRoot: root, teamId: "developer-team", deckConfig: getDefaultDeckConfig() },
       channel: { input: Readable.from([]), output: new Writable({ write(_chunk, _encoding, cb) { cb(); } }) },
-      supermemoryRuntime: { stateHome: root, secretStore: { read: () => undefined, write: () => {}, remove: () => {} } as any },
     });
     expect(result).toMatchObject({ status: "blocked", message: "Mutation requires --yes in non-interactive mode." });
     expect(applied).toBe(false);
@@ -87,8 +86,7 @@ test("RPC launch registers its gated child lease before executing Pi", async()=>
  try {
   const result=await runPiClientProof({adapter,launch:{mode:"interactive",projectRoot:root,teamId:"developer-team",deckConfig:getDefaultDeckConfig()},
    inheritedEnv:{HOME:root,XDG_CONFIG_HOME:root,PATH:process.env.PATH},
-   channel:{input:Readable.from([]),output:new Writable({write(_c,_e,cb){cb();}})},
-   supermemoryRuntime:{stateHome:root,secretStore:{read:()=>undefined,write:()=>{},remove:()=>{}} as any}});
+   channel:{input:Readable.from([]),output:new Writable({write(_c,_e,cb){cb();}})}});
   expect(result).toMatchObject({status:"launched",outcome:{exitCode:0}});
   expect(registered).toBe(true);expect(released).toBe(true);
  }finally{rmSync(root,{recursive:true,force:true});}

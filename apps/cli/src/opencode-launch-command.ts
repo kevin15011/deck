@@ -4,16 +4,8 @@ import { delimiter, join } from "node:path";
 import {
   applyOpenCodeDeveloperTeamInstall,
   buildOpenCodeDeveloperTeamInstallPlan,
-  type MemoryDiagnostic,
-
 } from "@deck/adapter-opencode";
-import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
-import {
-  validateDeckConfig,
-  type AdaptiveMemoryActiveProvider,
-} from "@deck/core/config/deck-config";
-import type { AdaptiveMemoryProvider, MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
-import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
+import { validateDeckConfig } from "@deck/core/config/deck-config";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import {
   getEnabledCapabilityInstructionIds,
@@ -25,158 +17,27 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-/**
- * Default supported memory provider IDs for OpenCode launch.
- * Derived from installer/config; Supermemory is the only durable backend.
- * The launch will accept any provider that's been selected in the installer.
- * Providers not selected/configured will fail-open with a diagnostic.
- */
-const DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS = ["supermemory"] as const;
-
 export type RunOpenCodeLaunchOptions = {
   teamId: string;
   projectRoot: string;
-  memoryProvider?: AdaptiveMemoryProvider;
-  cliMemoryProvider?: string;
   deckConfig: unknown;
-  activeProvider?: AdaptiveMemoryActiveProvider;
-  supportedMemoryProviderIds?: Iterable<string>;
   commandExists?: (command: string) => boolean;
   opencodeCommand?: string;
   configDir?: string;
-  /** Retained for API compatibility; compact prompts are active by default. */
 
-  /** @deprecated Compatibility-only; managed runtime effects are owned exclusively by runRunnerLaunch. */
-  supermemoryRuntimeTransport?: SupermemoryRuntimeTransport;
-  /** @deprecated Compatibility-only; managed runtime effects are owned exclusively by runRunnerLaunch. */
-  supermemoryRuntimeStateHome?: string;
   dryRun?: boolean;
 };
 
 export type OpenCodeLaunchResult =
-  | { status: "error"; message: string; memoryDiagnostics: MemoryProviderDiagnostic[] }
-  | { status: "ready"; plan: OpenCodeLaunchPlan; memoryDiagnostics: MemoryProviderDiagnostic[] }
-  | { status: "launched"; plan: OpenCodeLaunchPlan; memoryDiagnostics: MemoryProviderDiagnostic[] };
+  | { status: "error"; message: string }
+  | { status: "ready"; plan: OpenCodeLaunchPlan }
+  | { status: "launched"; plan: OpenCodeLaunchPlan };
 
 export type OpenCodeLaunchPlan = {
   command: string;
   args: string[];
   cwd: string;
 };
-
-export type MemoryProviderDiagnostic = {
-  code: "unsupported_memory_provider" | "memory_provider_unavailable" | "multiple_memory_providers" | "untrusted_memory_injection" | "supermemory_runtime";
-  message: string;
-  providerId?: string;
-};
-
-// ---------------------------------------------------------------------------
-// Memory resolution
-// ---------------------------------------------------------------------------
-
-type ResolvedMemory = {
-  provider?: AdaptiveMemoryProvider;
-  memoryInjection?: MemoryInjectionBundle;
-  diagnostics: MemoryProviderDiagnostic[];
-};
-
-function resolveOpenCodeMemory(options: RunOpenCodeLaunchOptions): ResolvedMemory {
-  const diagnostics: MemoryProviderDiagnostic[] = [];
-
-  if (options.memoryProvider && hasConfigInput(options)) {
-    return {
-      diagnostics: [
-        {
-          code: "multiple_memory_providers",
-          providerId: options.memoryProvider.id,
-          message: "Exactly one memory provider may be active; preconstructed provider cannot be combined with CLI/config resolution.",
-        },
-      ],
-    };
-  }
-
-  if (options.memoryProvider) {
-    return { provider: options.memoryProvider, diagnostics };
-  }
-
-  // Resolve from config
-  if (options.activeProvider !== undefined) {
-    if (options.activeProvider === "none") return { diagnostics };
-    if (!supportsProvider(options.activeProvider, options.supportedMemoryProviderIds ?? DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS)) {
-      return {
-        diagnostics: [
-          {
-            code: "unsupported_memory_provider",
-            providerId: options.activeProvider,
-            message: `Unsupported memory provider '${options.activeProvider}'; launched without adaptive memory.`,
-          },
-        ],
-      };
-    }
-    if (options.activeProvider === "supermemory") {
-      try {
-        // Token-only config: user identity derived from token
-        return { provider: createSupermemoryMemoryProvider({}), diagnostics };
-      } catch {
-        return providerUnavailable("supermemory");
-      }
-    }
-    return { diagnostics };
-  }
-
-  // CLI override
-  if (options.cliMemoryProvider) {
-    if (!supportsProvider(options.cliMemoryProvider, options.supportedMemoryProviderIds ?? DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS)) {
-      return {
-        diagnostics: [
-          {
-            code: "unsupported_memory_provider",
-            providerId: options.cliMemoryProvider,
-            message: `Unsupported memory provider '${options.cliMemoryProvider}'; launched without adaptive memory.`,
-          },
-        ],
-      };
-    }
-    if (options.cliMemoryProvider === "supermemory") {
-      try {
-        // Token-only config: user identity derived from token
-        return { provider: createSupermemoryMemoryProvider({}), diagnostics };
-      } catch {
-        return providerUnavailable("supermemory");
-      }
-    }
-  }
-
-  return { diagnostics };
-}
-
-function providerUnavailable(providerId: string): ResolvedMemory {
-  return {
-    diagnostics: [
-      {
-        code: "memory_provider_unavailable",
-        providerId,
-        message: `Adaptive memory provider '${providerId}' could not be constructed. Launched without adaptive memory.`,
-      },
-    ],
-  };
-}
-
-function hasConfigInput(options: RunOpenCodeLaunchOptions): boolean {
-  return options.cliMemoryProvider !== undefined || options.deckConfig !== undefined || options.activeProvider !== undefined;
-}
-
-function supportsProvider(providerId: string, supportedIds: Iterable<string>): boolean {
-  return new Set(supportedIds).has(providerId);
-}
-
-function toMemoryDiagnostic(diagnostic: MemoryDiagnostic): MemoryProviderDiagnostic {
-  return {
-    code: diagnostic.code,
-    message: diagnostic.message,
-    ...(diagnostic.providerId ? { providerId: diagnostic.providerId } : {}),
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Main launch
@@ -192,40 +53,29 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
   if (!commandExists(opencodeCommand)) {
     return {
       status: "error",
-      memoryDiagnostics: [],
       message: `OpenCode command not found: "${opencodeCommand}". Install OpenCode first or check your PATH.`,
     };
   }
-
-  // 2. Resolve static memory provider guidance only. Managed runtime effects are owned by runRunnerLaunch.
-  const resolvedMemory = resolveOpenCodeMemory(options);
-  const allDiagnostics: MemoryProviderDiagnostic[] = [...resolvedMemory.diagnostics];
 
   // 3. Build capability instructions from config
   let capabilityInstructions: CapabilityInstructionBundle | undefined;
   if (options.deckConfig === undefined) {
     return {
       status: "error",
-      memoryDiagnostics: [{ code: "memory_provider_unavailable", message: "Global Deck config is not ready: DECK_CONFIG_REQUIRED at config." }],
       message: "OpenCode launch requires a valid caller-resolved global Deck config.",
     };
   }
   let deckConfig;
   try {
     deckConfig = validateDeckConfig(options.deckConfig);
-  } catch (error) {
+  } catch {
     return {
       status: "error",
-      memoryDiagnostics: [{ code: "memory_provider_unavailable", message: redactedConfigErrorMessage(error) }],
       message: "OpenCode launch requires a valid caller-resolved global Deck config.",
     };
   }
   try {
     const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, "opencode");
-    const activeMemoryEnabled = options.activeProvider === "supermemory" || deckConfig.adaptiveMemory.enabled === true;
-    if (activeMemoryEnabled && !enabledIds.includes("adaptive-memory")) {
-      enabledIds.push("adaptive-memory");
-    }
     if (enabledIds.length > 0) {
       capabilityInstructions = buildCapabilityInstructionBundle(enabledIds);
     }
@@ -233,23 +83,19 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
     // Config not available or invalid — continue without capability instructions
   }
 
-  // 4. Build install plan. Do not inject runtime recall/capture context here; standalone assets are static-compatible only.
+  // 4. Build the install plan with static-compatible standalone assets.
   const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => {
     const bundle = getStandaloneSkill(s.skillId);
     return { skillId: s.skillId, body: bundle.SKILL, files: bundle.files };
   });
   const installPlan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
     configDir,
-    memoryInjection: resolvedMemory.memoryInjection,
-    memoryProvider: resolvedMemory.provider,
-    supportedMemoryProviderIds: options.supportedMemoryProviderIds ?? DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS,
     capabilityInstructions,
     personality: deckConfig.orchestratorPersonality,
     standaloneSkills,
 
   });
 
-  allDiagnostics.push(...installPlan.memoryDiagnostics.map(toMemoryDiagnostic));
 
   // 4. Apply install (config merge + prompt/command/skill files)
   const applyResult = applyOpenCodeDeveloperTeamInstall(installPlan, { configDir });
@@ -266,16 +112,10 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
   };
 
   if (dryRun) {
-    return { status: "ready", plan, memoryDiagnostics: allDiagnostics };
+    return { status: "ready", plan };
   }
 
-  return { status: "launched", plan, memoryDiagnostics: allDiagnostics };
-}
-
-function redactedConfigErrorMessage(error: unknown): string {
-  const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "DECK_CONFIG_INVALID";
-  const field = typeof error === "object" && error !== null && "fieldPath" in error ? String((error as { fieldPath?: unknown }).fieldPath ?? "config") : "config";
-  return `Global Deck config is not ready: ${code} at ${field}.`;
+  return { status: "launched", plan };
 }
 
 function defaultCommandExists(command: string): boolean {

@@ -43,7 +43,7 @@ export function inspectCodexCompatibility(release: CodexReleaseFixture) {
         "bound-verification-evidence",
       ]),
       reason: hooksStable
-        ? "Released hooks expose trusted lifecycle events; Deck binds adaptive memory at launch time, while protected execution controls remain unpromoted."
+        ? "Released hooks expose trusted lifecycle events; protected execution controls remain unpromoted."
         : "No stable released trusted host surface is available.",
     },
   };

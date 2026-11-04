@@ -166,6 +166,22 @@ describe("ownership by hash", () => {
     expect(readFileSync(join(agentDir, "deck/package/agents/deck-lead.md"), "utf-8")).toBe("user edit\n");
   });
 
+  // Version-1 decommissioning: exact prior file receipts, never extension names, authorize removal.
+  test("retired extension files are removed only while their receipt bytes remain unchanged", () => {
+    const retired = "deck/package/extensions/deck-memory/impl.js";
+    const previous = desired({ files: [...desired().files, { relPath: retired, content: "legacy extension bytes" }] });
+    install(previous);
+    const first = install(desired()).plan;
+    expect(first.changes.some(change => change.action === "delete" && change.relPath === retired)).toBe(true);
+    expect(existsSync(join(agentDir, retired))).toBe(false);
+    install(previous);
+    writeFileSync(join(agentDir, retired), "user customization");
+    const second = planPiGlobalInstall(desired(), io());
+    applyPiGlobalPlan(second, io());
+    expect(readFileSync(join(agentDir, retired), "utf8")).toBe("user customization");
+    expect(second.kept.some(entry => entry.relPath === retired)).toBe(true);
+  });
+
   test("rejects desired files that escape the agent directory", () => {
     const plan = planPiGlobalInstall(desired({ files: [{ relPath: "../escape.txt", content: "x" }] }), io());
     expect(plan.blocked).toBe(true);

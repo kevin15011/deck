@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDeckConfigStore } from "./deck-config-store";
@@ -9,7 +9,7 @@ import { persistWebSearchCredentialAndEnable } from "./web-search-setup";
 const roots: string[] = [];
 
 function temporaryRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "deck-web-search-setup-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "deck-web-search-setup-")));
   roots.push(root);
   return root;
 }
@@ -54,7 +54,7 @@ describe("persistWebSearchCredentialAndEnable", () => {
     const environment: Record<string, string | undefined> = {};
     const configStore = testStore(root, projectRoot);
     mkdirSync(home);
-    configStore.write({ adaptiveMemory: { activeProvider: "none" }, packageInstructions: { codex: { rtk: true } } });
+    configStore.write({ packageInstructions: { codex: { rtk: true } } });
 
     const result = persistWebSearchCredentialAndEnable({
       credential: "interleaved-value",

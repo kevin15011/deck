@@ -3,7 +3,6 @@ import { isAbsolute } from "node:path";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
 
 import {
-  DECK_PI_MEMORY_ENV_BLANKS,
   buildDeckPiMcpEntry,
   resolveDeckPiMcpServers,
   selectDeckPiMcpServerIds,
@@ -17,11 +16,9 @@ const tools = (overrides: { codebase?: string } = {}) => ({
 });
 
 describe("buildDeckPiMcpEntry", () => {
-  test("is direct-exposed and blanks every memory variable", () => {
+  test("is direct-exposed and stores no credentials", () => {
     const entry = buildDeckPiMcpEntry({ command: "/usr/bin/npx", args: ["-y", "x"] });
-    expect(entry).toEqual({ command: "/usr/bin/npx", args: ["-y", "x"], env: { ...DECK_PI_MEMORY_ENV_BLANKS }, exposure: "direct" });
-    expect(Object.keys(DECK_PI_MEMORY_ENV_BLANKS).sort()).toEqual(["DECK_RUNNER_MEMORY_ENDPOINT", "DECK_RUNNER_MEMORY_TOKEN", "DECK_RUNNER_MEMORY_TOKEN_FILE"]);
-    expect(Object.values(DECK_PI_MEMORY_ENV_BLANKS).every((value) => value === "")).toBe(true);
+    expect(entry).toEqual({ command: "/usr/bin/npx", args: ["-y", "x"], env: {  }, exposure: "direct" });
   });
 
   test("rejects a bare command name", () => {
@@ -34,16 +31,15 @@ describe("validateDeckPiMcpEntry", () => {
     expect(validateDeckPiMcpEntry(buildDeckPiMcpEntry({ command: "/usr/bin/npx", args: [] }), () => true)).toEqual([]);
   });
 
-  test("flags relative commands, missing executables, wrong exposure and missing env blanks", () => {
+  test("flags relative commands, missing executables, wrong exposure", () => {
     const problems = validateDeckPiMcpEntry({ command: "context-mode", args: [], env: {}, exposure: "codemode" }, () => false);
     expect(problems.join(" ")).toMatch(/absolute/);
     expect(problems.join(" ")).toMatch(/exposure/);
-    expect(problems.join(" ")).toMatch(/DECK_RUNNER_MEMORY_TOKEN/);
-    expect(validateDeckPiMcpEntry({ command: "/nope", args: [], env: { ...DECK_PI_MEMORY_ENV_BLANKS }, exposure: "direct" }, () => false).join(" ")).toMatch(/does not exist|not executable/i);
+    expect(validateDeckPiMcpEntry({ command: "/nope", args: [], env: {  }, exposure: "direct" }, () => false).join(" ")).toMatch(/does not exist|not executable/i);
   });
 
   test("flags an inline credential", () => {
-    const problems = validateDeckPiMcpEntry({ command: "/usr/bin/npx", args: [], env: { ...DECK_PI_MEMORY_ENV_BLANKS, TAVILY_API_KEY: "tvly-secret" }, exposure: "direct" }, () => true);
+    const problems = validateDeckPiMcpEntry({ command: "/usr/bin/npx", args: [], env: { TAVILY_API_KEY: "tvly-secret" }, exposure: "direct" }, () => true);
     expect(problems.join(" ")).toMatch(/credential|secret/i);
   });
 });
@@ -83,7 +79,7 @@ describe("resolveDeckPiMcpServers", () => {
     for (const entry of Object.values(servers)) {
       expect(isAbsolute(entry.command as string)).toBe(true);
       expect(entry.exposure).toBe("direct");
-      expect(entry.env).toEqual(DECK_PI_MEMORY_ENV_BLANKS);
+      expect(entry.env).toEqual({});
     }
     expect(servers.context7).toMatchObject({ command: "/usr/bin/npx", args: ["-y", "@upstash/context7-mcp"] });
     expect(servers["context-mode"]).toBeUndefined();

@@ -45,10 +45,6 @@ describe("buildOpenCodeInstallationPlan", () => {
     expect(plan).toEqual([]);
   });
 
-  test("keeps the adaptive-memory-owned Supermemory package out of generic tool selection", () => {
-    expect(getSelectableOpenCodeTools().map((tool) => tool.id)).not.toContain("opencode-supermemory");
-  });
-
   test("ignores retired Serena selection", () => {
     const plan = buildOpenCodeInstallationPlan({
       tools: [{ name: "Serena", installed: false }],

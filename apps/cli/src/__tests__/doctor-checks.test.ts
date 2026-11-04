@@ -10,7 +10,6 @@ import {
   checkState,
   checkDeckConfig,
   checkBinaries,
-  checkRunnerConfig,
   type DoctorCheckDeps,
 } from "../doctor-command/doctor-checks";
 
@@ -130,18 +129,7 @@ describe("checkDeckConfig", () => {
     expect(result.status).toBe("ok");
   });
 
-  test("reports deprecated Supermemory maxMemoriesPerSession when raw config is readable", () => {
-    const mockDeps = createMockDeps({
-      exists: vi.fn().mockReturnValue(true),
-      access: vi.fn().mockReturnValue(true),
-      readText: vi.fn().mockReturnValue(JSON.stringify({ adaptiveMemory: { supermemory: { maxMemoriesPerSession: 7 } } })),
-    });
 
-    const result = checkDeckConfig(mockDeps);
-
-    expect(result.status).toBe("warning");
-    expect(JSON.stringify(result)).toContain("maxMemoriesPerSession");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -179,37 +167,6 @@ describe("checkBinaries", () => {
 
     // Verify redactPath was called on the stdout before processing
     expect(mockDeps.redactPath).toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Tests: checkRunnerConfig (B3 fix)
-// ---------------------------------------------------------------------------
-
-describe("checkRunnerConfig", () => {
-  test("validates OpenCode config using adapter", async () => {
-    // We can't easily test the adapter validation without more complex mocking
-    // Just verify the structure works
-    const mockDeps = createMockDeps({
-      exists: vi.fn().mockReturnValue(false), // Config not found
-    });
-
-    const result = checkRunnerConfig(mockDeps);
-
-    expect(result.category).toBe("Runner Config");
-    expect(result.items).toBeDefined();
-  });
-
-  test("reports canonical Supermemory scope and endpoint readiness without raw scope or credentials", () => {
-    const result = checkRunnerConfig(createMockDeps({ exists: vi.fn().mockReturnValue(false) }));
-    const text = JSON.stringify(result);
-
-    expect(text).toContain("x-sm-project scope");
-    expect(text).toContain("auth readiness");
-    expect(text).not.toContain("runner parity requires");
-    expect(text).toContain("automatic recall/capture uses Deck-supervised native loopback hooks");
-    expect(text).not.toContain("sm_project_v1_kevin15011_deck");
-    expect(text).not.toContain("Authorization");
   });
 });
 

@@ -12,12 +12,13 @@ afterEach(() => {
 });
 
 describe("owner-only Deck secret store fallback", () => {
-  test("writes Supermemory API key atomically to 0700/0600 protected path", () => {
+
+test("writes a credential atomically to 0700/0600 protected path", () => {
     const root = mkdtempSync(join(tmpdir(), "deck-secret-store-"));
     roots.push(root);
     const store = createOwnerOnlyFileSecretStore({ configHome: root });
 
-    const receipt = store.write("supermemory-api-key", "sm_secret_value");
+    const receipt = store.write("fixture-api-key", "sm_secret_value");
 
     expect(receipt.backend).toBe("owner-only-file");
     expect(receipt.limitation).toContain("filesystem-protected");
@@ -25,7 +26,7 @@ describe("owner-only Deck secret store fallback", () => {
     expect(statSync(join(root, "deck", "secrets")).mode & 0o777).toBe(0o700);
     expect(statSync(receipt.path).mode & 0o777).toBe(0o600);
     expect(readFileSync(receipt.path, "utf8")).toBe("sm_secret_value");
-    expect(store.read("supermemory-api-key")).toBe("sm_secret_value");
+    expect(store.read("fixture-api-key")).toBe("sm_secret_value");
   });
 
   test("diagnostics redact secret values and paths are constrained under config home", () => {

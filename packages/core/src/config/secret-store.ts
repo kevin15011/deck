@@ -3,7 +3,7 @@ import type { Stats } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join, relative, resolve } from "node:path";
 
-export type DeckSecretName = "supermemory-api-key" | (string & {});
+export type DeckSecretName = string;
 
 export type DeckSecretWriteReceipt = Readonly<{
   backend: "owner-only-file";
@@ -193,6 +193,6 @@ function receipt(target: string): DeckSecretWriteReceipt {
   return {
     backend: "owner-only-file",
     path: target,
-    limitation: "Supermemory credential is filesystem-protected by an owner-only Deck secret file, not by hardware/keychain-backed storage.",
+    limitation: "Credential is filesystem-protected by an owner-only Deck secret file, not by hardware/keychain-backed storage.",
   };
 }

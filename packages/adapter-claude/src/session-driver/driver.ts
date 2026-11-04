@@ -17,8 +17,6 @@ import { prepareImages, redactImagePayload } from "./images";
 import { buildClaudeTurnLaunch, ClaudeLaunchError, encodeUserMessage, type ClaudeTurnLaunch } from "./launch";
 import { CLAUDE_PROTOCOL, ClaudeLineError, ClaudeLineSplitter, ClaudeStreamMapper, parseClaudeLine, type ClaudeInit, type ClaudeResult } from "./mapper";
 import {claudeTranscriptPath,readClaudeTranscript,reconcileClaudeHistory} from './steering';
-import { claudeCaptureUuid, drainClaudeCapture } from './capture-drain';
-import type { NativeCaptureOutcome } from '@deck/core/session/driver';
 
 export const CLAUDE_TESTED_VERSIONS = { min: "2.1.296", maxTested: "2.1.296" } as const;
 export const INTERRUPT_ESCALATION_MS = 10_000;
@@ -65,11 +63,7 @@ function compareVersions(a: string, b: string): number {
 
 type PendingSteering = {input:SteeringInput;promise:Promise<SteeringOutcome>;resolve:(result:SteeringOutcome)=>void;settled:boolean};
 type TurnState = {
-  captureHome?: string;
-  previousCaptureUuid?: string;
   assistantUuid?: string;
-  captureAbort: AbortController;
-  captureDrain?: Promise<void>;
   executionId: string;
   guarded: boolean;
   originalObserved: boolean;
@@ -95,7 +89,6 @@ type TurnState = {
 };
 
 class ClaudeTask {
-  capture: NativeCaptureOutcome = { lifecycle: 'unknown', acceptance: 'unknown', reason: 'native-lifecycle-unobserved' };
   private current: TurnState | undefined;
   private closed = false;
   private transportCleanup?: Promise<void>;
@@ -143,9 +136,7 @@ class ClaudeTask {
     for (const d of launch.diagnostics) emit({ kind: "diagnostic", data: { ...d } });
 
     this.historyPath=claudeTranscriptPath(this.input.cwd,this.nativeId,launch.env);
-    const captureHome = this.input.nativeMemory?.status === 'ready' ? launch.env.HOME : undefined;
-    this.capture = { lifecycle: 'unknown', acceptance: 'unknown', reason: 'native-lifecycle-unobserved' };
-    const state: TurnState = {captureHome,previousCaptureUuid:claudeCaptureUuid(captureHome,this.nativeId),captureAbort:new AbortController(),executionId,guarded,originalObserved:false,historyVerified:false,originalText:prompt,stdinEnded:false,historyReads:0,steering:new Map(), interruptRequested: false, interruptDelivered: false, forced: false, closing: false, finished: false, stderr: "" };
+    const state: TurnState = {executionId,guarded,originalObserved:false,historyVerified:false,originalText:prompt,stdinEnded:false,historyReads:0,steering:new Map(), interruptRequested: false, interruptDelivered: false, forced: false, closing: false, finished: false, stderr: "" };
     this.current = state;
     let child: SupervisedChild;
     try {
@@ -157,8 +148,7 @@ class ClaudeTask {
     state.child = child;
     const splitter = new ClaudeLineSplitter();
     // Native personal hooks can share events. Event names alone no longer prove provider provenance.
-    const memory = this.input.nativeMemory;
-    const mapper = new ClaudeStreamMapper(memory?.plugin ? { ...memory, plugin: { ...memory.plugin, exclusiveHookEvents: [] } } : memory, this.nativeId, executionId);
+    const mapper = new ClaudeStreamMapper(this.nativeId, executionId);
     const onLine = (line: string) => this.onLine(line, mapper, state, launch, emit, Boolean(images?.length));
     const cleanupFailed = new Promise<SupervisedChildExit>(resolve => {
       state.cleanupFailed = () => resolve({ok:false,code:null,signal:null,drained:false,anchorLost:true});
@@ -180,15 +170,13 @@ class ClaudeTask {
     } else child.writeStdin(userMessage);
     // Claude -p kills async Stop hooks at EOF/teardown. Keep this one-turn input
     // stream owned until the original plugin records this exact assistant UUID.
-    if(!guarded&&!captureHome)this.endStdin(state);
+    if(!guarded)this.endStdin(state);
 
     let exit: SupervisedChildExit;
     try { exit = await Promise.race([child.exited, cleanupFailed]); } catch (error) {
       exit = { ok: false, code: null, signal: null, drained: false, anchorLost: true, error: (error as Error).message };
     }
     for (const line of splitter.flush()) onLine(line);
-    state.captureAbort.abort();
-    await state.captureDrain;
     await state.transportCleanup?.then(() => {
       if (this.transportCleanup === state.transportCleanup) this.transportCleanup = undefined;
     }, () => {});
@@ -226,12 +214,7 @@ class ClaudeTask {
     if (out.result) {
       if(state.guarded&&out.result.sessionId!==this.nativeId){this.fail(state,'claude-result-session-mismatch');return;}
       if(state.guarded)state.result ??= out.result;else state.result=out.result;
-      if (state.captureHome && out.result.sessionId === this.nativeId && out.result.subtype === 'success' && !out.result.isError) {
-        state.captureDrain ??= drainClaudeCapture(state.captureHome,this.nativeId,state.assistantUuid,state.previousCaptureUuid,state.captureAbort.signal).then(outcome => {
-          this.capture = outcome;
-          this.endStdin(state);
-        });
-      } else this.endStdin(state);
+      this.endStdin(state);
       if(state.guarded){emit({kind:'diagnostic',data:{code:'claude-steering-ended'}});this.refreshSteering(state);}
     }
     if (out.init) { state.init = out.init; this.checkInit(out.init, state, launch, emit); }
@@ -249,7 +232,7 @@ class ClaudeTask {
 
   /** Fail closed when the native CLI does not run the isolated configuration Deck asked for. */
   private checkInit(init: ClaudeInit, state: TurnState, launch: ClaudeTurnLaunch, emit: (e: DriverEvent) => void): void {
-    if(state.guarded&&init.version!=='2.1.296'){state.guarded=false;if(!state.captureHome)this.endStdin(state);}
+    if(state.guarded&&init.version!=='2.1.296'){state.guarded=false;this.endStdin(state);}
     const expected = launch.expectedMcpServers;
     const actual = init.mcpServers.map((s) => s.name);
     const missing = expected.filter((n) => !actual.includes(n));
@@ -376,7 +359,6 @@ class ClaudeTask {
     const state = this.current;
     if (!state || state.finished || state.interruptRequested) return;
     state.interruptRequested = true;
-    state.captureAbort.abort();
     this.endStdin(state);
     if (state.child) this.deliverInterrupt(state);
   }
@@ -402,7 +384,6 @@ class ClaudeTask {
     if (this.transportCleanup) { await this.transportCleanup; return; }
     const state = this.current;
     if (!state) return;
-    state.captureAbort.abort();
     state.closing = true;
     if (state.escalation !== undefined) this.options.clock.clearTimeout(state.escalation);
     if (state.child) await state.child.terminateGroup(this.options.killGraceMs).catch(() => {});
@@ -452,7 +433,6 @@ export function createClaudeSessionDriver(options: ClaudeSessionDriverOptions = 
         interrupt: () => task.interrupt(),
         done,
         close: () => task.close(),
-        captureOutcome: () => task.capture,
       };
     },
   };

@@ -63,9 +63,6 @@ export const SESSION_EVENT_SCHEMA = {
         "question.resolved",
         "approval.requested",
         "approval.resolved",
-        "memory.recalled",
-        "memory.proposed",
-        "memory.written",
         "usage",
         "rate-limit",
         "diagnostic",
@@ -1930,40 +1927,8 @@ export const SESSION_EVENT_SCHEMA = {
                   "prompt",
                   "agent"
                 ]
-              },
-              "provider": {
-                "const": "supermemory"
-              },
-              "integration": {
-                "const": "runner-plugin"
               }
-            },
-            "allOf": [
-              {
-                "if": {
-                  "required": [
-                    "provider"
-                  ]
-                },
-                "then": {
-                  "required": [
-                    "integration"
-                  ]
-                }
-              },
-              {
-                "if": {
-                  "required": [
-                    "integration"
-                  ]
-                },
-                "then": {
-                  "required": [
-                    "provider"
-                  ]
-                }
-              }
-            ]
+            }
           }
         }
       }
@@ -2037,40 +2002,8 @@ export const SESSION_EVENT_SCHEMA = {
                   "prompt",
                   "agent"
                 ]
-              },
-              "provider": {
-                "const": "supermemory"
-              },
-              "integration": {
-                "const": "runner-plugin"
               }
-            },
-            "allOf": [
-              {
-                "if": {
-                  "required": [
-                    "provider"
-                  ]
-                },
-                "then": {
-                  "required": [
-                    "integration"
-                  ]
-                }
-              },
-              {
-                "if": {
-                  "required": [
-                    "integration"
-                  ]
-                },
-                "then": {
-                  "required": [
-                    "provider"
-                  ]
-                }
-              }
-            ]
+            }
           }
         }
       }
@@ -3489,4 +3422,4 @@ export const SESSION_COMMAND_SCHEMA = {
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "89150d61849c3feee116b59503ed4d6247042afec769c5e4e5dd611be35ebd08";
+export const SESSION_SCHEMA_DIGEST = "0ace1eee188e69a49d2334ad6b7d144c9f14a8dd573431a7f7d490f9dbfcd37a";

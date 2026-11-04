@@ -1,3 +1,4 @@
+import { decommissionRetiredContributions, RETIRED_CODEX_MCP_IDS } from "./retired-contributions";
 import { codexRoleGeneration } from "./role-generation";
 import { isReadOnlyRole } from "@deck/core/session/role-tool-policy";
 import { CODEX_ROLE_SELECTION } from "./role-bootstrap";
@@ -22,10 +23,10 @@ import {
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 
-import { codexHookSemanticHash, isDeckManagedHookBlock, matchesCodexHookContribution, type CodexHookContribution, equivalentCodexToml, CODEX_MEMORY_BRIDGE_HOOK_BLOCK, codexHooksFeatureDisabled, mergeCodexOwnedHooks, mergeCodexProjectConfig, type CodexOwnedHookBlock } from "./codex-config";
+import { CODEX_OWNED_HOOK_IDS, RETIRED_CODEX_HOOK_IDS, codexHookSemanticHash, isDeckManagedHookBlock, matchesCodexHookContribution, type CodexHookContribution, equivalentCodexToml, codexHooksFeatureDisabled, mergeCodexOwnedHooks, mergeCodexProjectConfig, type CodexOwnedHookBlock } from "./codex-config";
 import { rtkHookScript } from "@deck/core";
 import { translateCodexCapabilityInstructions, validateCodexInstructionTranslation } from "./instruction-translation";
-import { codexMcpReceiptCoversServer, buildCodexMcpServers, inspectCodexSupermemoryMcpState, mergeCodexMcpServers } from "./mcp-config";
+import { codexMcpReceiptCoversServer, buildCodexMcpServers, mergeCodexMcpServers } from "./mcp-config";
 import type { CodexExpectedFile, CodexMutation, CodexMutationPlan, CodexOwnershipReleaseCheck } from "./types";
 
 const OWNED_MARKER = "deck-codex-v1";
@@ -45,9 +46,6 @@ export type BuildCodexInstallPlanInput = {
   modelAssignments?: DeveloperTeamModelAssignments;
   thinkingAssignments?: DeveloperTeamThinkingAssignments;
   capabilityInstructions?: CapabilityInstructionBundle;
-  memoryProvider?: "none" | "supermemory";
-  supermemoryProjectScope?: string;
-  supermemoryProxy?: import("./supermemory-hosted").CodexSupermemoryProxy;
   mcpCapabilityIds?: readonly string[];
   /** Full materialization may change runner config; content-only refreshes Deck content only. */
   materializationScope?: "full" | "content-only";
@@ -56,8 +54,6 @@ export type BuildCodexInstallPlanInput = {
   /** The effective `deck` executable has confirmed portable Serena proxy support. */
   serenaProxyAvailable?: boolean;
   serenaProxyCommand?: readonly string[];
-  /** Self-referencing `<deck> internal memory-mcp` command; written only with the Supermemory provider. */
-  deckMemoryCommand?: readonly string[];
   webSearchProviderSupported?: boolean;
   webSearchProviderConfigured?: boolean;
   webSearchProvider?: WebSearchProviderDescriptorV1;
@@ -76,8 +72,6 @@ export type BuildCodexInstallPlanInput = {
   repairSelectedToolIds?: readonly string[];
   /** Present only when the owned pinned RTK binary and a Node.js runtime are verified. */
   rtkHook?: { nodeCommand: string; rtkBinary: string };
-  /** Present only when the pinned official Codex Supermemory hook artifact is verified. */
-  supermemoryHooks?: { nodeCommand: string; recallScript: string; flushScript: string };
   executionNodeCommand?: string;
   confirmedModels?: readonly string[];
   confirmedReasoningByModel?: Readonly<Record<string, readonly string[]>>;
@@ -186,10 +180,16 @@ function ensureNativeSkillFrontmatter(content: string, skillId: string): string 
   ].join("\n");
 }
 
+function isRetiredConfigReceipt(entry: RunnerContribution): boolean {
+  return (entry?.selector?.kind === "text" && RETIRED_CODEX_HOOK_IDS.some(id => entry.selector.kind === "text" && entry.selector.start === `# deck-codex-hook:${id}:start`))
+    || (entry?.selector?.kind === "toml" && RETIRED_CODEX_MCP_IDS.some(id => entry.selector.kind === "toml" && entry.selector.header === `mcp_servers.${id}`));
+}
+
 export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanInput): CodexMutationPlan {
   const materializationScope = input.materializationScope ?? "full";
   const manifestPath = CODEX_MANIFEST_PATH;
   const diagnostics: RunnerDiagnostic[] = [];
+  const retiredContributionIds = new Set<string>();
   const capabilityInstructions = translateCodexCapabilityInstructions(input.capabilityInstructions);
   if (capabilityInstructions) {
     for (const message of validateCodexInstructionTranslation(capabilityInstructions)) diagnostics.push({ code: "codex-instruction-translation-invalid", severity: "error", message });
@@ -203,7 +203,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
     try {
       const parsed = JSON.parse(priorManifestSource) as { version?: unknown; files?: unknown; releases?: unknown; contributions?: RunnerContribution[] };
       if (parsed.version !== 1 || !parsed.files || typeof parsed.files !== "object" || Array.isArray(parsed.files)) throw new Error("invalid manifest");
-      priorContributions = Array.isArray(parsed.contributions) ? parsed.contributions.filter(entry => validContributionHash(entry.hash)) : [];
+      priorContributions = Array.isArray(parsed.contributions) ? parsed.contributions.filter(entry => validContributionHash(entry.hash) || isRetiredConfigReceipt(entry)) : [];
       priorHashes = Object.fromEntries(Object.entries(parsed.files).map(([path, value]) => {
         if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) throw new Error("invalid manifest hash");
         return [safeRelativePath(path), value];
@@ -424,11 +424,9 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
     } else {
       let desiredMcp = buildCodexMcpServers({
         packageIds: input.mcpCapabilityIds ?? [],
-        memoryProvider: input.memoryProvider ?? "none",
         serenaLauncherAvailable: input.serenaLauncherAvailable,
         serenaProxyAvailable: input.serenaProxyAvailable,
         serenaProxyCommand: input.serenaProxyCommand,
-        supermemoryProxy: input.supermemoryProxy,
         contextModeCommand: input.contextModeCommand,
         context7Command: input.context7Command,
         codebaseMemoryCommand: input.codebaseMemoryCommand,
@@ -443,21 +441,13 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         const canon = (path: string) => { try { return realpathSync(path); } catch { return path; } };
         const foreign = [...input.foreignMcpCommands].map(([name, command]) => [name, canon(command)] as const);
         const kept = desiredMcp.servers.filter((server) => {
-          if (server.transport !== "stdio" || server.id === "serena" || server.id === "supermemory") return true;
+          if (server.transport !== "stdio" || server.id === "serena") return true;
           const owners = foreign.filter(([name, command]) => name !== server.id && command === canon(server.command)).map(([name]) => name);
           if (owners.length === 0) return true;
           diagnostics.push({ code: "mcp-foreign-duplicate", severity: "info", message: `Deck did not add MCP server '${server.id}' because your own registration '${owners.join("', '")}' already runs the same executable; Deck leaves it untouched.` });
           return false;
         });
         desiredMcp = { ...desiredMcp, servers: kept };
-      }
-      const supermemoryMcpState = inspectCodexSupermemoryMcpState(configSource);
-      if (!supermemoryMcpState.ok && supermemoryMcpState.code === "supermemory-mcp-unmanaged") {
-        diagnostics.push({
-          code: "supermemory-mcp-unmanaged",
-          severity: "warning",
-          message: "Existing raw Supermemory Codex MCP configuration is unmanaged and external-unobservable; Deck Runtime did not authorize it as project memory.",
-        });
       }
       for (const gap of desiredMcp.gaps) {
         if (gap === "serena-launcher-not-ready") {
@@ -483,21 +473,18 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
           diagnostics.push({ code: gap, severity: "warning", message: "Web Search is enabled but its process credential is unavailable; no credential was persisted." });
         } else if (gap === "web-search-executable-missing") {
           diagnostics.push({ code: gap, severity: "warning", message: "Web Search is enabled but its configured MCP executable prerequisite is unavailable." });
-        } else if (gap === "supermemory-proxy-not-ready") {
-          diagnostics.push({ code: gap, severity: "info", message: "The pinned official Supermemory proxy is unavailable; install the current reviewed artifact to enable hosted tools." });
         } else if (gap === "context-mode-not-ready" || gap === "codebase-memory-not-ready" || gap === "context7-not-ready") {
           diagnostics.push({ code: gap, severity: "warning", message: `${gap === "context-mode-not-ready" ? "Context Mode" : gap === "context7-not-ready" ? "Context7" : "Codebase Memory"} is selected but no verified executable is available; no MCP entry was written. Install it through the Deck TUI (Review & Install) and rerun.` });
-        } else if (gap === "supermemory-project-scope-missing") {
-          blocked = true;
-          diagnostics.push({ code: gap, severity: "error", message: "Supermemory Codex MCP configuration is blocked because no canonical x-sm-project scope was resolved." });
-        } else if (gap === "supermemory-project-scope-invalid") {
-          blocked = true;
-          diagnostics.push({ code: gap, severity: "error", message: "Supermemory Codex MCP configuration is blocked because the resolved x-sm-project scope fingerprint is invalid/redacted." });
         } else {
           diagnostics.push({ code: gap, severity: "warning", message: "Optional provider configuration remains deferred because no verified Codex provider contract is available." });
         }
       }
-      const ownedServerIds = priorContributions.filter(entry => entry.selector.kind === "toml" && entry.selector.header.startsWith("mcp_servers.") && selectContributionContent(config.content, entry.selector) !== undefined && hash(selectContributionContent(config.content, entry.selector)!) === entry.hash && codexMcpReceiptCoversServer(config.content, selectContributionContent(config.content, entry.selector)!, entry.selector.header.slice("mcp_servers.".length))).map(entry => (entry.selector as { header: string }).header.slice("mcp_servers.".length));
+      const ownedServerIds = priorContributions.filter(entry => entry.path === join(input.codexHome ?? join(input.projectRoot, ".codex"), "config.toml") && entry.selector.kind === "toml" && entry.selector.header.startsWith("mcp_servers.") && selectContributionContent(config.content, entry.selector) !== undefined && hash(selectContributionContent(config.content, entry.selector)!) === entry.hash && codexMcpReceiptCoversServer(config.content, selectContributionContent(config.content, entry.selector)!, entry.selector.header.slice("mcp_servers.".length))).map(entry => (entry.selector as { header: string }).header.slice("mcp_servers.".length));
+      for (const id of RETIRED_CODEX_MCP_IDS) {
+        if (!ownedServerIds.includes(id) && selectContributionContent(config.content, { kind: "toml", header: `mcp_servers.${id}` }) !== undefined) {
+          diagnostics.push({ code: "retired-contribution-preserved", severity: "warning", message: `Preserved retired MCP '${id}': ownership receipt is absent, edited or belongs to another config path. Review its configuration before removing it.` });
+        }
+      }
       const ownership = { ownedServerIds, recordedServerIds: priorContributions.filter(entry => entry.selector.kind === "toml").map(entry => (entry.selector as { header: string }).header.replace(/^mcp_servers\./, "")), allowLegacyMigration: true };
       let mcp = mergeCodexMcpServers(config.content, desiredMcp.servers, { ...ownership, repairSelectedToolIds: input.repairSelectedToolIds });
       if (mcp.status === "blocked" && mcp.collisions.length) {
@@ -510,13 +497,10 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         blocked = true;
         diagnostics.push(...mcp.diagnostics.map((message) => ({ code: "mcp-config-collision", severity: "error" as const, message })));
       } else {
-        const memoryPlugin = input.memoryProvider === "supermemory";
         const hookBlocks: CodexOwnedHookBlock[] = [{
           id: "readiness",
           hooks: [{ event: "SessionStart", command: `${shellQuote(input.executionNodeCommand ?? "node")} ${shellQuote(posix.join(input.codexHome ?? posix.join(input.projectRoot, ".codex"), CODEX_EXECUTION_HOOK_PATH.slice(".codex/".length)))}`, timeout: 10 }],
         }];
-        // The loopback bridge belongs to Deck's own runtime; the official plugin owns memory alone when selected.
-        if (!memoryPlugin) hookBlocks.push(CODEX_MEMORY_BRIDGE_HOOK_BLOCK);
         if (input.rtkHook) {
           add(RTK_HOOK_SCRIPT_PATH, rtkHookScript(input.rtkHook.rtkBinary, "codex"), "bridge-hook", "deck-file", "deck-codex-rtk-hook-v1");
           hookBlocks.push({
@@ -530,20 +514,6 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
             }],
           });
         }
-        if (memoryPlugin) {
-          if (input.supermemoryHooks) {
-            const run = (script: string) => `${shellQuote(input.supermemoryHooks!.nodeCommand)} ${shellQuote(script)}`;
-            hookBlocks.push({
-              id: "supermemory",
-              hooks: [
-                { event: "UserPromptSubmit", command: run(input.supermemoryHooks.recallScript), timeout: 60, statusMessage: "Searching memories..." },
-                { event: "Stop", command: run(input.supermemoryHooks.flushScript), timeout: 30 },
-              ],
-            });
-          } else {
-            diagnostics.push({ code: "supermemory-plugin-not-ready", severity: "warning", message: "Supermemory hooks are unavailable; ordinary content can refresh without enabling memory. Configure the optional plugin to use it." });
-          }
-        }
         if (codexHooksFeatureDisabled(configSource) && hookBlocks.length > 0) {
           diagnostics.push({ code: "codex-hooks-feature-disabled", severity: "warning", message: "Codex hooks are disabled by [features] hooks=false; Deck-owned hooks are materialized but will not run until it is enabled." });
         }
@@ -553,10 +523,11 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         let hooks = mergeCodexOwnedHooks(mcp.content, hookBlocks);
         // Never replace an unowned known hook block whose bytes differ from Deck's canonical rendering.
         // Covers replacement of selected blocks and removal of deselected known blocks.
-        const editedHookIds = hooks.status === "blocked" ? [] : (["memory-bridge", "rtk", "supermemory", "readiness"] as const).filter(id => {
+        const editedHookIds = hooks.status === "blocked" ? [] : ([...CODEX_OWNED_HOOK_IDS, ...RETIRED_CODEX_HOOK_IDS] as const).filter(id => {
           const selector = { kind: "text" as const, start: `# deck-codex-hook:${id}:start`, end: `# deck-codex-hook:${id}:end` };
           const old = selectContributionContent(configSource, selector);
           if (old === undefined || old === selectContributionContent(hooks.content, selector)) return false;
+          if (RETIRED_CODEX_HOOK_IDS.some(retired => retired === id)) return !priorContributions.some(entry => entry.path === join(input.codexHome ?? join(input.projectRoot, ".codex"), "config.toml") && entry.selector.kind === "text" && entry.selector.start === selector.start && entry.hash === hash(old));
           if (!priorContributions.some(entry => entry.selector.kind === "text" && entry.selector.start === selector.start) && isDeckManagedHookBlock(id, old)) return false; // Deck-shaped block that lost its receipt: refresh it and record ownership.
           return !priorContributions.some(entry => entry.selector.kind === "text" && entry.selector.start === selector.start && matchesCodexHookContribution(entry, old));
         });
@@ -582,6 +553,14 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         }
       }
     }
+  }
+
+  if (materializationScope === "content-only") {
+    const original = input.existingFiles.get(".codex/config.toml") ?? "";
+    const retired = decommissionRetiredContributions(original, priorContributions.filter(entry => entry.path === join(input.codexHome ?? join(input.projectRoot, ".codex"), "config.toml")));
+    for (const id of retired.removedContributionIds ?? []) retiredContributionIds.add(id);
+    diagnostics.push(...retired.diagnostics.map(message => ({ code: "retired-contribution-preserved", severity: "warning" as const, message })));
+    if (retired.content !== original) add(".codex/config.toml", retired.content, "config", "toml-key", "retired-contributions");
   }
 
   for (const priorPath of Object.keys(priorHashes)) {
@@ -619,7 +598,8 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
     ...[...expected.values()].filter((file) => file.relativePath !== "AGENTS.md" && file.relativePath !== ".codex/config.toml").map((file) => [file.relativePath, file.hash] as const),
   ].sort(([left], [right]) => left.localeCompare(right)));
   const runtimeConfigPath = join(input.codexHome ?? join(input.projectRoot, ".codex"), "config.toml");
-  const contributions: CodexHookContribution[] = priorContributions.filter(entry => entry.sourceItemId?.startsWith("package:") || [...preserved].some(path => entry.path === (path.startsWith(".codex/") ? join(input.codexHome ?? join(input.projectRoot, ".codex"), path.slice(7)) : join(input.projectRoot, path))) || (materializationScope === "content-only" && isPreservedRuntimePath(`.codex/${relative(input.codexHome ?? join(input.projectRoot, ".codex"), entry.path).split("\\").join("/")}`)));
+  const contributions: CodexHookContribution[] = priorContributions.filter(entry => (isRetiredConfigReceipt(entry) && selectContributionContent(expected.get(".codex/config.toml")?.content ?? input.existingFiles.get(".codex/config.toml") ?? "", entry.selector) !== undefined) || entry.sourceItemId?.startsWith("package:") || [...preserved].some(path => entry.path === (path.startsWith(".codex/") ? join(input.codexHome ?? join(input.projectRoot, ".codex"), path.slice(7)) : join(input.projectRoot, path))) || (materializationScope === "content-only" && isPreservedRuntimePath(`.codex/${relative(input.codexHome ?? join(input.projectRoot, ".codex"), entry.path).split("\\").join("/")}`)));
+  for (let i = contributions.length - 1; i >= 0; i--) if (retiredContributionIds.has(contributions[i]!.id)) contributions.splice(i, 1);
   for (const file of expected.values()) {
     if (file.relativePath === "AGENTS.md") continue;
     const path = file.relativePath.startsWith(".codex/") ? join(input.codexHome ?? join(input.projectRoot, ".codex"), file.relativePath.slice(7)) : join(input.projectRoot, file.relativePath);
@@ -631,6 +611,8 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         ...[...file.content.matchAll(/^# deck-codex-hook:([a-z0-9-]+):start$/gm)].map(match => ({ kind: "text" as const, start: match[0], end: `# deck-codex-hook:${match[1]}:end` })),
       ] : [{ kind: "file" }];
     for (const selector of selectors) {
+      // Retired config keeps its original evidence; preservation never adopts current bytes.
+      if (isRetiredConfigReceipt({ selector } as RunnerContribution)) continue;
       const target = { path, selector }; const id = contributionId(target);
       const old = before === undefined ? undefined : selectContributionContent(before, selector);
       const prior = priorContributions.find(entry => entry.id === id);
@@ -639,7 +621,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
       const value = selectContributionContent(file.content, selector); if (value === undefined) continue;
       // Semantically equivalent desired hooks can reconstruct receipts from older installs.
       const identicalFile = selector.kind === "file" && old === value;
-      const identicalHook = selector.kind === "text" && !diagnostics.some(entry => entry.code === "trusted-hook-config-collision") && ["memory-bridge", "rtk", "supermemory", "readiness"].some(id => selector.start === `# deck-codex-hook:${id}:start`) && old !== undefined && (codexHookSemanticHash(old) === codexHookSemanticHash(value) || !prior && isDeckManagedHookBlock(selector.start.slice("# deck-codex-hook:".length, -":start".length), old));
+      const identicalHook = selector.kind === "text" && !diagnostics.some(entry => entry.code === "trusted-hook-config-collision") && CODEX_OWNED_HOOK_IDS.some(id => selector.start === `# deck-codex-hook:${id}:start`) && old !== undefined && (codexHookSemanticHash(old) === codexHookSemanticHash(value) || !prior && isDeckManagedHookBlock(selector.start.slice("# deck-codex-hook:".length, -":start".length), old));
       if (old !== undefined && !dedicated && !provenFile && !identicalFile && !identicalHook && !(selector.kind === "toml" && adoptedMcpIds.has(selector.header.replace(/^mcp_servers\./, ""))) && (!prior || !(selector.kind === "text" ? matchesCodexHookContribution(prior, old) : prior.hash === hash(old)))) continue;
       // Native Codex may add unrelated tables inside a trailing marker. Preserve the
       // original raw cleanup receipt while the executable settings remain identical.

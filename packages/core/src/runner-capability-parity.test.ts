@@ -93,8 +93,7 @@ describe("Runner Capability Parity Resolver", () => {
     it("should have minimal gaps for OpenCode with binaries in PATH", () => {
       const report = resolveRunnerParity("opencode", {
         binariesInPath: ["rtk", "context-mode", "codebase-memory-mcp", "serena"],
-        mcpServersConfigured: ["context-mode", "codebase-memory", "context7", "serena", "supermemory"],
-        supermemoryConfigured: true,
+        mcpServersConfigured: ["context-mode", "codebase-memory", "context7", "serena"],
       });
 
       // OpenCode has minimal gaps - deck-init doesn't have binary requirement
@@ -149,20 +148,6 @@ describe("Runner Capability Parity Resolver", () => {
 
       const context7Entry = report.capabilities.find((c) => c.capabilityId === "context7");
       expect(context7Entry?.status).toBe("gap");
-    });
-
-    it("should identify Supermemory gap when not configured", () => {
-      const report = resolveRunnerParity("pi", {
-        binariesInPath: [],
-        mcpServersConfigured: [],
-        supermemoryConfigured: false,
-      });
-
-      const supermemoryEntry = report.capabilities.find(
-        (c) => c.capabilityId === "supermemory-tool-bindings"
-      );
-      expect(supermemoryEntry?.status).toBe("gap");
-      expect(supermemoryEntry?.code).toBe("capability-mcp-not-configured");
     });
   });
 
@@ -268,8 +253,7 @@ describe("Runner Capability Parity Resolver", () => {
     it("should return minimal gaps for OpenCode with all binaries", () => {
       const report = resolveRunnerParity("opencode", {
         binariesInPath: ["rtk", "context-mode", "codebase-memory-mcp", "serena"],
-        mcpServersConfigured: ["context-mode", "codebase-memory", "context7", "serena", "supermemory"],
-        supermemoryConfigured: true,
+        mcpServersConfigured: ["context-mode", "codebase-memory", "context7", "serena"],
       });
 
       // Key core capabilities should not have gaps

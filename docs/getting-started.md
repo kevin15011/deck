@@ -76,11 +76,11 @@ The TUI follows this shape:
 1. Detect the available runner binaries.
 2. Select a runner (Pi, OpenCode, Codex or Claude), or the cross-runner setup, and review its preflight evidence.
 3. Review required and optional packages, MCP configuration, and shared binaries.
-4. Select the Developer Team, adaptive-memory provider, and model/reasoning assignments when those surfaces are available.
+4. Select the Developer Team and model/reasoning assignments when those surfaces are available.
 5. Review the planned actions.
 6. Apply the plan and inspect the completion diagnostics.
 
-Deck keeps runner differences visible. Every runner receives the full Developer Team. Pi and OpenCode also enforce Deck's protected execution controls through runner hooks; Claude and Codex carry those controls as instructions (instruction-level safety). Codex adaptive memory uses the pinned official Supermemory plugin hooks.
+Deck keeps runner differences visible. Every runner receives the full Developer Team. Pi and OpenCode also enforce Deck's protected execution controls through runner hooks; Claude and Codex carry those controls as instructions (instruction-level safety).
 
 The no-argument command is interactive. In a non-interactive terminal Deck renders a compact home view instead of attempting to drive the TUI.
 
@@ -92,7 +92,7 @@ Run diagnostics after the first setup:
 deck doctor
 ```
 
-The report checks Deck state and manifest data, detected runtimes, runner configuration, Supermemory runtime readiness, optional MCP configuration, binary information, and release information. Errors include an actionable suggestion; paths and credential-like values are redacted.
+The report checks Deck state and manifest data, detected runtimes, runner configuration, optional MCP configuration, binary information, and release information. Errors include an actionable suggestion; paths and credential-like values are redacted.
 
 Use [Runners](runners.md) to understand a runner-specific result, [Configuration](configuration.md) to change persisted choices, and [Troubleshooting](troubleshooting.md) when a check is blocked.
 
@@ -130,5 +130,5 @@ To mix runners in one session, open the browser workspace with `deck web` and se
 
 - [Runners](runners.md) — capability and detection boundaries.
 - [Cross-runner sessions](cross-runner-sessions.md) — one team across Claude, Codex and OpenCode in the web workspace.
-- [Configuration](configuration.md) — persisted settings, packages, memory, models, and reasoning.
+- [Configuration](configuration.md) — persisted settings, packages, models, and reasoning.
 - [Operations](operations.md) — diagnostics, updates, and rollback.

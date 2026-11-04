@@ -34,7 +34,7 @@ function fabCategory(overrides = {}) {
 function fabResult(overrides: Partial<DoctorDiagnosticsResult> = {}): DoctorDiagnosticsResult {
   return {
     runtimes: [],
-    memory: [],
+    optionalTools: [],
     mcp: [],
     hasCriticalErrors: false,
     ...overrides,
@@ -83,13 +83,13 @@ describe("renderDoctorReport", () => {
       expect(output).toContain("Runtimes");
     });
 
-    test("renders Memory Providers section when memory providers are present", () => {
+    test("renders Optional Tools section when optionalTools providers are present", () => {
       const result = fabResult({
-        memory: [fabCategory({ category: "Supermemory Runtime", status: "ok", items: [fabItem("ok", "Supermemory API connectivity succeeded")] })],
+        optionalTools: [fabCategory({ category: "Optional Tools", status: "ok", items: [fabItem("ok", "Tool binary detected")] })],
       });
 
       const output = captureStdout(() => renderDoctorReport(result));
-      expect(output).toContain("Memory Providers");
+      expect(output).toContain("Optional Tools");
     });
 
     test("renders MCP Configuration section when mcp results are present", () => {
@@ -146,11 +146,11 @@ describe("renderDoctorReport", () => {
 
     test("uses ⚠ for warning status items", () => {
       const result = fabResult({
-        memory: [
+        optionalTools: [
           fabCategory({
-            category: "Supermemory Runtime",
+            category: "Optional Tools",
             status: "warning",
-            items: [fabItem("warning", "Supermemory runtime credential missing", "Run Deck's Supermemory setup to store a runtime credential")],
+            items: [fabItem("warning", "Tool binary missing", "Install the optional tool")],
           }),
         ],
       });
@@ -163,17 +163,17 @@ describe("renderDoctorReport", () => {
   describe("fix suggestions (REQ-RPT-002)", () => {
     test("shows suggestion for warning items", () => {
       const result = fabResult({
-        memory: [
+        optionalTools: [
           fabCategory({
-            category: "Supermemory Runtime",
+            category: "Optional Tools",
             status: "warning",
-            items: [fabItem("warning", "Supermemory runtime credential missing", "Run Deck's Supermemory setup to store a runtime credential")],
+            items: [fabItem("warning", "Tool binary missing", "Install the optional tool")],
           }),
         ],
       });
 
       const output = captureStdout(() => renderDoctorReport(result));
-      expect(output).toContain("Run Deck's Supermemory setup to store a runtime credential");
+      expect(output).toContain("Install the optional tool");
     });
 
     test("shows suggestion for error items", () => {
@@ -200,11 +200,11 @@ describe("renderDoctorReport", () => {
 
     test("does not show suggestion for ok items", () => {
       const result = fabResult({
-        memory: [
+        optionalTools: [
           fabCategory({
-          category: "Supermemory Runtime",
+          category: "Optional Tools",
           status: "ok",
-          items: [fabItem("ok", "Supermemory API connectivity succeeded")],
+          items: [fabItem("ok", "Tool binary detected")],
           }),
         ],
       });
@@ -222,11 +222,11 @@ describe("renderDoctorReport", () => {
       const ESCAPE_PATTERN = /\x1b\[[0-9;]*m/;
 
       const result = fabResult({
-        memory: [
+        optionalTools: [
           fabCategory({
-            category: "Supermemory Runtime",
+            category: "Optional Tools",
             status: "ok",
-            items: [fabItem("ok", "Supermemory API connectivity succeeded")],
+            items: [fabItem("ok", "Tool binary detected")],
           }),
         ],
       });
@@ -273,11 +273,11 @@ describe("shouldExitWithError", () => {
   test("returns false when there are warnings but no critical errors", () => {
     const result = fabResult({
       hasCriticalErrors: false,
-      memory: [
+      optionalTools: [
         fabCategory({
-          category: "Supermemory Runtime",
+          category: "Optional Tools",
           status: "warning",
-          items: [fabItem("warning", "Supermemory runtime credential missing", "Run Deck's Supermemory setup")],
+          items: [fabItem("warning", "Tool binary missing", "Install the optional tool")],
         }),
       ],
     });

@@ -4,7 +4,7 @@ export const SESSION_MCP_SERVER_ID = "deck";
 export const SESSION_CREDENTIAL_ENV = "DECK_SESSION_CREDENTIAL_FILE";
 export const DECK_APPROVE_TOOL = "deck_approve";
 export const DECK_STATUS_TOOL = "deck_status";
-/** S1a surface: approval relay and status only. Delegation/memory tools arrive in later stages. */
+/** Approval relay and session status transport configuration. */
 export const DEFAULT_ALLOWED_TOOLS = [DECK_APPROVE_TOOL, DECK_STATUS_TOOL] as const;
 
 export type SessionMcpServerSpec = { command: string; args: string[]; env: Record<string, string> };

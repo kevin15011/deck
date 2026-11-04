@@ -6,12 +6,9 @@
  */
 
 import { existsSync, statSync, accessSync, constants, readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { spawn as spawnImpl } from "node:child_process";
-import { defaultPiMcpConfigPath, redact, validateSupermemoryPiMcpConfig } from "@deck/adapter-pi";
-import { validateSupermemoryOpenCodeMcpConfig } from "@deck/adapter-opencode";
-import { SUPERMEMORY_MCP_SERVER_URL } from "@deck/adapter-supermemory";
+import { redact } from "@deck/adapter-pi";
 import { diagnoseDeckConfigDeprecations } from "@deck/core";
 
 import { readManifest, detectManifestDrift } from "../upgrade-command/manifest-store";
@@ -134,27 +131,6 @@ function deriveStatus(items: DoctorCheckItem[]): DoctorStatus {
   if (items.some((i) => i.status === "error")) return "error";
   if (items.some((i) => i.status === "warning")) return "warning";
   return "ok";
-}
-
-function safeScopeFingerprint(scope: string | undefined): string {
-  if (!scope) return "missing";
-  return `smfp_${createHash("sha256").update(scope, "utf8").digest("hex").slice(0, 16)}`;
-}
-
-function readSupermemoryScopeFromJsonConfig(path: string, shape: "opencode" | "pi"): string | undefined {
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    const servers = shape === "opencode" ? parsed.mcp : parsed.mcpServers;
-    if (!servers || typeof servers !== "object" || Array.isArray(servers)) return undefined;
-    const server = (servers as Record<string, unknown>).supermemory;
-    if (!server || typeof server !== "object" || Array.isArray(server)) return undefined;
-    const headers = (server as Record<string, unknown>).headers;
-    if (!headers || typeof headers !== "object" || Array.isArray(headers)) return undefined;
-    const scope = (headers as Record<string, unknown>)["x-sm-project"];
-    return typeof scope === "string" && scope.trim() ? scope.trim() : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +332,7 @@ export function checkDeckConfig(deps: DoctorCheckDeps = defaultDoctorCheckDeps):
               items.push({
                 status: diagnostic.severity,
                 message: diagnostic.message,
-                suggestion: `Remove ${diagnostic.fieldPath}; Supermemory no longer uses semantic memory quotas.`,
+                suggestion: `Remove the retired field ${diagnostic.fieldPath}.`,
               });
             }
           } catch {
@@ -502,103 +478,6 @@ export async function checkBinaries(deps: DoctorCheckDeps = defaultDoctorCheckDe
 }
 
 // ---------------------------------------------------------------------------
-// Check: Runner Config (generic validation via existing adapters)
-// ---------------------------------------------------------------------------
-
-export type CheckRunnerConfigResult = DoctorCategoryResult;
-
-export function checkRunnerConfig(deps: DoctorCheckDeps = defaultDoctorCheckDeps): CheckRunnerConfigResult {
-  const items: DoctorCheckItem[] = [];
-
-  items.push({
-    status: "ok",
-    message: `Supermemory contract: endpoint ${SUPERMEMORY_MCP_SERVER_URL}; automatic recall/capture uses Deck-supervised native loopback hooks for OpenCode, Pi, and Codex where trusted lifecycle events exist; auth readiness comes from Deck Runtime; external raw MCP entries and their x-sm-project scope are inspected only when present and are not required for Deck Runtime readiness.`,
-  });
-
-    const home = homedir();
-
-    // OpenCode config validation
-  try {
-    const opencodeConfigPath = `${home}/.config/opencode/opencode.json`.replace(/^\/+/, "/");
-    if (deps.exists(opencodeConfigPath)) {
-      // Use adapter validation to check actual config content
-      const validation = validateSupermemoryOpenCodeMcpConfig({
-        configPath: opencodeConfigPath,
-        homeDir: home,
-      });
-
-      if (validation.ok) {
-        const fingerprint = validation.projectScope
-          ? safeScopeFingerprint(readSupermemoryScopeFromJsonConfig(opencodeConfigPath, "opencode"))
-          : "not-present";
-        items.push({
-          status: "ok",
-          message: validation.projectScope
-            ? `OpenCode raw Supermemory MCP scope is present; canonical scope fingerprint: ${fingerprint}; Deck Runtime remains the authority for Adaptive Memory.`
-            : `OpenCode raw Supermemory MCP is absent; Deck Runtime owns Adaptive Memory project isolation. ${validation.diagnostics.join(" ")}`,
-        });
-      } else {
-        // Report specific validation diagnostics (not errors)
-        const diagMessages = validation.diagnostics?.join("; ") ?? "Unknown validation issue";
-        items.push({
-          status: "warning",
-          message: `OpenCode config has issues: ${diagMessages}`,
-          suggestion: "Run OpenCode to fix configuration or re-initialize.",
-        });
-      }
-    } else {
-      items.push({
-        status: "warning",
-        message: "OpenCode config not found",
-        suggestion: "Run OpenCode to initialize configuration.",
-      });
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    items.push({
-      status: "warning",
-      message: `OpenCode config check failed: ${deps.redact(message)}`,
-    });
-  }
-
-  // Pi config validation (if Pi is installed)
-  try {
-    const piConfigPath = defaultPiMcpConfigPath(home);
-    if (deps.exists(piConfigPath)) {
-      // Use adapter validation to check actual config content
-      const validation = validateSupermemoryPiMcpConfig({
-        configPath: piConfigPath,
-        homeDir: home,
-      });
-
-      if (validation.ok) {
-        const fingerprint = safeScopeFingerprint(readSupermemoryScopeFromJsonConfig(piConfigPath, "pi"));
-        items.push({
-          status: "ok",
-          message: `Pi Supermemory config validated successfully; canonical scope fingerprint: ${fingerprint}; auth readiness: API key handoff redacted.`,
-        });
-      } else {
-        const diagMessages = validation.diagnostics?.map((d: { message: string }) => d.message).join("; ") ?? "Unknown validation issue";
-        items.push({
-          status: "warning",
-          message: `Pi config has issues: ${diagMessages}`,
-          suggestion: "Run 'deck doctor' with Pi to fix configuration or re-initialize.",
-        });
-      }
-    }
-    // Pi config is optional - no warning if not found
-  } catch {
-    // Ignore Pi config errors silently
-  }
-
-  return {
-    category: "Runner Config",
-    status: deriveStatus(items),
-    items,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Main: Run all Deck-owned checks
 // ---------------------------------------------------------------------------
 
@@ -622,9 +501,6 @@ export async function runDeckChecks(deps: DoctorCheckDeps = defaultDoctorCheckDe
 
   // Binary checks (async)
   binary.push(await checkBinaries(deps));
-
-  // Runner config
-  runnerConfig.push(checkRunnerConfig(deps));
 
   return { deck, binary, runnerConfig };
 }

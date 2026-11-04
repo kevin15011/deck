@@ -266,7 +266,7 @@ The member roster MUST distinguish disabled capability intent from enabled/ready
 
 ### Requirement: Native session-start delivery remains the sole readiness channel
 
-Claude MUST use its hashed plugin SessionStart hook; Codex its trusted Deck native hook; OpenCode its execution plugin lifecycle/system transform; Pi its native extension lifecycle. These mechanisms MUST be used in both native and supported cross-runner launches. Project instructions MUST be supplied only where the runner does not already load them. Readiness MUST NOT depend on optional memory enablement.
+Claude MUST use its hashed plugin SessionStart hook; Codex its trusted Deck native hook; OpenCode its execution plugin lifecycle/system transform; Pi its native extension lifecycle. These mechanisms MUST be used in both native and supported cross-runner launches. Project instructions MUST be supplied only where the runner does not already load them. Readiness MUST remain available independently of optional capability enablement.
 
 The session overlay MUST NOT carry readiness findings, repair instructions, the readiness marker or project instructions. Its existing Lead delegation/roster section MAY contain typed member capability data. A missing native delivery mechanism MUST be repaired in that adapter rather than bypassed through the overlay.
 
@@ -276,11 +276,11 @@ The session overlay MUST NOT carry readiness findings, repair instructions, the 
 - THEN the native SessionStart hook emits the consolidated block once
 - AND its overlay contains neither that block nor its findings copied into notices.
 
-#### Scenario: Memory disabled
-- GIVEN adaptive memory is disabled on every participant
+#### Scenario: Optional capabilities disabled
+- GIVEN optional capabilities are disabled on every participant
 - WHEN a project has a proven readiness defect
 - THEN the native readiness channel still delivers the finding
-- AND no memory plugin is loaded to provide that channel.
+- AND no optional integration is loaded to provide that channel.
 
 #### Scenario: Same scope, same bytes
 - GIVEN identical complete readiness scope and evidence for native and session launch on runner R

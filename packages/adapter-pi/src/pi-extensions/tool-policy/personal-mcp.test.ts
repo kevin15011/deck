@@ -10,7 +10,7 @@ test('native trust, transports/exposure/OAuth remain intact; control namespaces 
   const path=join(root,'mcp.json');writeFileSync(path,JSON.stringify({mcpServers:{docs:{url:'https://example.invalid',exposure:'deferred',oauth:{clientId:'identity'}},deck:{command:'never'},supermemory:{command:'never'},disabled:{command:'never',enabled:false}}}));
   writeFileSync(join(project,'.pi','mcp.json'),JSON.stringify({mcpServers:{project:{command:'project',exposure:'direct'}}}));const bytes=readFileSync(path);
   const reviewed=createReviewedPiMcp({agentDir:root});let trusted=false;const ctx={cwd:project,isProjectTrusted:()=>trusted,ui:{setStatus(){}}} as any;
-  const initial=reviewed.loadConfig(ctx);expect(initial.servers.map(x=>x.name)).toEqual(['docs','disabled']);expect(initial.servers[0]?.config).toMatchObject({oauth:{clientId:'identity'},exposure:'deferred'});
+  const initial=reviewed.loadConfig(ctx);expect(initial.servers.map(x=>x.name)).toEqual(['docs','supermemory','disabled']);expect(initial.servers[0]?.config).toMatchObject({oauth:{clientId:'identity'},exposure:'deferred'});
   expect(reviewed.personalAvailability().find(x=>x.id==='deck')?.status).toBe('conflicting');trusted=true;expect(reviewed.loadConfig(ctx).servers.some(x=>x.name==='project')).toBe(true);expect(readFileSync(path)).toEqual(bytes);
  }finally{rmSync(root,{recursive:true,force:true});}
 });

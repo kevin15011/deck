@@ -9,7 +9,7 @@ const ID = /^[A-Za-z0-9_][A-Za-z0-9_.:@/-]{0,191}$/;
 export const personalMcpNamespace = (id: string) => id.replace(/[^a-zA-Z0-9_]/g, "_");
 export function isReservedPersonalMcp(id: string): boolean {
   const normalized = personalMcpNamespace(id).toLowerCase();
-  return /^(deck$|deck_session_|codebase_memory(?:_mcp)?$|supermemory$|plugin_supermemory(?:_|$)|adaptive_memory$|web_search$)/.test(normalized);
+  return /^(deck$|deck_session_|codebase_memory(?:_mcp)?$|web_search$)/.test(normalized);
 }
 export function validatePersonalMcpAvailability(value: unknown): PersonalMcpAvailability[] {
   if (value === undefined) return [];

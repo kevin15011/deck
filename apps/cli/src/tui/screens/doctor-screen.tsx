@@ -32,7 +32,7 @@ const SECTION_ORDER = [
   "Deck Config",
   "Binaries",
   "Runner Config",
-  "Memory",
+  "Optional Tools",
   "MCP",
 ];
 
@@ -84,7 +84,7 @@ function RuntimeSection({ runtime }: { runtime: DoctorRuntimeResult }) {
 
 function DiagnosticsReport({ result }: { result: DoctorDiagnosticsResult }) {
   const hasContent =
-    result.runtimes.length > 0 || result.memory.length > 0 || result.mcp.length > 0 ||
+    result.runtimes.length > 0 || result.optionalTools.length > 0 || result.mcp.length > 0 ||
     (result.deck?.length ?? 0) > 0 || (result.binaryCheck?.length ?? 0) > 0 || (result.runnerConfig?.length ?? 0) > 0;
 
   if (!hasContent) {
@@ -130,11 +130,11 @@ function DiagnosticsReport({ result }: { result: DoctorDiagnosticsResult }) {
         </Box>
       ) : null}
 
-      {result.memory.length > 0 ? (
+      {result.optionalTools.length > 0 ? (
         <Box flexDirection="column" marginTop={1}>
-          <Text bold underline>Memory</Text>
-          {result.memory.map((category, i) => (
-            <CategorySection key={`memory-${i}-${category.category}`} category={category} />
+          <Text bold underline>Optional Tools</Text>
+          {result.optionalTools.map((category, i) => (
+            <CategorySection key={`optionalTools-${i}-${category.category}`} category={category} />
           ))}
         </Box>
       ) : null}

@@ -8,18 +8,13 @@
 import {
   createDefaultRunnerDashboardState,
   CANONICAL_INSTRUCTION_PACKAGE_IDS,
-  runnerRequiresExternalSupermemoryToken,
-  type AdaptiveMemoryProviderChoice,
   type CapabilityId,
   type CapabilityStatus,
   type CanonicalInstructionPackageId,
   type RunnerDashboardScreen,
   type RunnerDashboardState,
-  type RunnerDashboardEvidenceIdentity,
   type RunnerOperationIdentity,
   type RunnerReviewPlan,
-  type SupermemoryRuntimeCredentialEvidence,
-  type SupermemorySetupState,
   createRunnerReviewPlanFailure,
 } from "./state";
 import { clampCursor, getCursorLimit, type CapabilityResolver } from "./selectors";
@@ -36,9 +31,6 @@ export type RunnerDashboardAction =
   | { type: "toggle-capability"; capabilityId: CapabilityId }
   | { type: "set-capability"; capabilityId: CapabilityId; selected: boolean }
   | { type: "set-capability-statuses"; statuses: Partial<Record<CapabilityId, CapabilityStatus>> }
-  | { type: "select-adaptive-memory"; provider: AdaptiveMemoryProviderChoice }
-  | { type: "update-supermemory"; values: Partial<SupermemorySetupState> }
-  | { type: "apply-supermemory-runtime-credential-evidence"; evidence: SupermemoryRuntimeCredentialEvidence; identity: RunnerDashboardEvidenceIdentity }
   | { type: "toggle-team"; teamId: string }
   | { type: "set-team-selected"; teamId: string; selected: boolean }
   | { type: "toggle-package-instruction"; packageId: CanonicalInstructionPackageId }
@@ -53,15 +45,10 @@ export type RunnerDashboardAction =
   | { type: "complete" }
   | { type: "reset"; state?: Partial<RunnerDashboardState> };
 
-export type RunnerDashboardPlanBuildResult = RunnerReviewPlan | {
-  plan: RunnerReviewPlan;
-  state?: Pick<RunnerDashboardState, "adaptiveMemory">;
-};
-
 export type PlanBuilderFn = (
   state: RunnerDashboardState,
   inventory: unknown,
-) => RunnerDashboardPlanBuildResult;
+) => RunnerReviewPlan;
 
 const noopPlanBuilder: PlanBuilderFn = () => ({
   groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] },
@@ -103,12 +90,6 @@ export function reduceRunnerDashboard(
           ...action.statuses,
         },
       });
-    case "select-adaptive-memory":
-      return selectAdaptiveMemoryProvider(state, action.provider);
-    case "update-supermemory":
-      return updateSupermemory(state, action.values);
-    case "apply-supermemory-runtime-credential-evidence":
-      return applySupermemoryRuntimeCredentialEvidence(state, action.evidence, action.identity);
     case "toggle-team":
       return setTeamSelected(state, action.teamId, !state.teams[action.teamId]?.selected);
     case "set-team-selected":
@@ -276,100 +257,6 @@ function beginRunnerOperation(
   });
 }
 
-function selectAdaptiveMemoryProvider(
-  state: RunnerDashboardState,
-  provider: AdaptiveMemoryProviderChoice,
-): RunnerDashboardState {
-  if (provider === state.adaptiveMemory.provider) return state;
-
-  if (provider === "supermemory") {
-    const supermemoryUi = state.runnerUi?.adaptiveMemory?.supermemory;
-    if (supermemoryUi?.supported === false) return { ...state, adaptiveMemory: { ...state.adaptiveMemory, status: supermemoryUi.selectionStatus } };
-    const nativeOAuth = !runnerRequiresExternalSupermemoryToken(state);
-    const next = invalidatePlan({
-      ...state,
-      adaptiveMemory: {
-        provider,
-        supermemory: nativeOAuth
-          ? {
-              configured: true,
-              hasToken: false,
-              runtimeCredentialStored: false,
-              ephemeralTokenAvailable: false,
-              mcpOAuthReady: false,
-              diagnostics: [...(supermemoryUi?.configuredDiagnostics ?? [])],
-            }
-          : createEmptySupermemorySetup(),
-        status: "Supermemory selected; provide a Deck runtime API token for read-only validation and secret-store persistence. Optional runner MCP OAuth is configured separately.",
-      },
-    });
-    return nativeOAuth ? navigate(next, "dashboard") : next;
-  }
-
-  // After selecting a non-supermemory provider, go back to dashboard
-  return navigate(
-    invalidatePlan({
-      ...state,
-      adaptiveMemory: {
-        provider,
-        status: "No adaptive memory provider selected.",
-      },
-    }),
-    "dashboard",
-  );
-}
-
-function updateSupermemory(
-  state: RunnerDashboardState,
-  values: Partial<SupermemorySetupState>,
-): RunnerDashboardState {
-  const current = state.adaptiveMemory.supermemory ?? createEmptySupermemorySetup();
-
-  return invalidatePlan({
-    ...state,
-    adaptiveMemory: {
-      provider: "supermemory",
-          status: "Supermemory selected; secrets remain outside Deck config.",
-      supermemory: {
-        ...current,
-        ...values,
-        diagnostics: values.diagnostics ?? current.diagnostics,
-        configured: values.configured ?? current.configured,
-        runtimeCredentialStored: values.runtimeCredentialStored ?? values.hasToken ?? current.runtimeCredentialStored ?? current.hasToken,
-        ephemeralTokenAvailable: values.ephemeralTokenAvailable ?? false,
-      },
-    },
-  });
-}
-
-function applySupermemoryRuntimeCredentialEvidence(
-  state: RunnerDashboardState,
-  evidence: SupermemoryRuntimeCredentialEvidence,
-  identity: RunnerDashboardEvidenceIdentity,
-): RunnerDashboardState {
-  if (state.runnerScope !== identity.runnerId) return state;
-  if (!operationMatches(state, identity.operation)) return state;
-  if (state.planRevision !== identity.planRevision) return state;
-  if (state.planGeneratedForRevision !== identity.planGeneratedForRevision) return state;
-  if (state.adaptiveMemory.provider !== "supermemory") return state;
-  const current = state.adaptiveMemory.supermemory ?? createEmptySupermemorySetup();
-
-  return {
-    ...state,
-    adaptiveMemory: {
-      ...state.adaptiveMemory,
-      supermemory: {
-        ...current,
-        configured: evidence.configured,
-        runtimeCredentialStored: evidence.runtimeCredentialStored,
-        runtimeCredentialVerification: evidence.runtimeCredentialVerification,
-        ephemeralTokenAvailable: evidence.ephemeralTokenAvailable,
-        diagnostics: evidence.diagnostics,
-      },
-    },
-  };
-}
-
 function setTeamSelected(state: RunnerDashboardState, teamId: string, selected: boolean): RunnerDashboardState {
   const existing = state.teams[teamId] ?? { teamId, label: teamId, selected: false };
   if (existing.selected === selected) return state;
@@ -441,23 +328,15 @@ function withCurrentPlan(
 ): RunnerDashboardState {
   if (operation && !operationMatches(state, operation)) return state;
   let plan: RunnerReviewPlan;
-  let nextState: Pick<RunnerDashboardState, "adaptiveMemory"> | undefined;
   try {
-    const result = planBuilder(state, inventory);
-    if ("plan" in result) {
-      plan = result.plan;
-      nextState = result.state;
-    } else {
-      plan = result;
-    }
+    plan = planBuilder(state, inventory);
   } catch {
     plan = createRunnerReviewPlanFailure();
   }
-  const stateWithPlanEvidence = nextState ? { ...state, ...nextState } : state;
   return {
-    ...stateWithPlanEvidence,
+    ...state,
     plan,
-    planGeneratedForRevision: stateWithPlanEvidence.planRevision,
+    planGeneratedForRevision: state.planRevision,
   };
 }
 
@@ -481,15 +360,4 @@ function withClampedCursor(state: RunnerDashboardState, packageCount?: number): 
   const limit = getCursorLimit(state, effectivePackageCount);
   if (limit <= 0) return { ...state, cursor: 0 };
   return { ...state, cursor: clampCursor(state.cursor, state, effectivePackageCount) };
-}
-
-function createEmptySupermemorySetup(): SupermemorySetupState {
-  return {
-    configured: false,
-    hasToken: false,
-    runtimeCredentialStored: false,
-    ephemeralTokenAvailable: false,
-    mcpOAuthReady: false,
-    diagnostics: [],
-  };
 }

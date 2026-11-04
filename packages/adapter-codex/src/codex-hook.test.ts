@@ -1,81 +1,21 @@
 import { expect, test } from "bun:test";
 import { forwardCodexTrustedHook } from "../assets/codex/hooks/developer-team-execution";
 
-const event = { session_id: "session-1", turn_id: "turn-1", cwd: "/project", hook_event_name: "PreToolUse" };
+const event = { session_id: "session-1", cwd: "/project", hook_event_name: "PreToolUse" };
 
-const MEMORY_LOOPBACK_ENV_KEYS = ["DECK_CODEX_BRIDGE_ENDPOINT", "DECK_CODEX_BRIDGE_TOKEN"] as const;
+// Protects the shared input boundary after retiring the transport: invalid native data has no effects.
+test("invalid and authority-free native hook inputs reject before readiness effects", async () => {
+  expect(await forwardCodexTrustedHook({ ...event, hook_event_name: "PromptClaimedAuthority" }, { readiness: false })).toMatchObject({ decision: "block", reason: "invalid-evidence" });
+  expect(await forwardCodexTrustedHook({ ...event, session_id: "" }, { readiness: false })).toMatchObject({ decision: "block", reason: "invalid-evidence" });
+  expect(await forwardCodexTrustedHook(event, { readiness: false })).toEqual({});
+});
 
-async function withScrubbedMemoryLoopbackEnv<T>(fn: () => Promise<T>): Promise<T> {
-  const previous = new Map<string, string | undefined>();
-  for (const key of MEMORY_LOOPBACK_ENV_KEYS) {
-    previous.set(key, process.env[key]);
-    delete process.env[key];
-  }
-  try {
-    return await fn();
-  } finally {
-    for (const [key, value] of previous) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  }
-}
-
-test("trusted Codex hook forwards only bounded released lifecycle events", async () => {
+// Oracle: obsolete transport-shaped options cannot regain any forwarding or prompt injection effect.
+test("non-session hooks never forward prompt content through obsolete transport options", async () => {
   let calls = 0;
-  const output = await forwardCodexTrustedHook(event, {
-    endpoint: "http://127.0.0.1:43127/hook",
-    token: "external-one-use-token",
-    post: async (_endpoint, token, body) => {
-      calls += 1;
-      expect(token).toBe("external-one-use-token");
-      expect(JSON.parse(body)).toMatchObject({ schema: "deck-runner-memory-loopback-v1", runnerId: "codex", sessionId: "session-1", event: "role_start", eventId: expect.any(String), timestamp: expect.any(Number) });
-      return { accepted: true, output: { hookSpecificOutput: { hookEventName: "PreToolUse" } } };
-    },
-  });
-  expect(calls).toBe(1);
-  expect(output).toEqual({ hookSpecificOutput: { hookEventName: "PreToolUse" } });
-});
-
-test("Codex memory hook injects advisory through official hookSpecificOutput additionalContext", async () => {
-  const output = await forwardCodexTrustedHook({ ...event, hook_event_name: "UserPromptSubmit", prompt: "Remember that Codex recall is native." }, {
-    endpoint: "http://127.0.0.1:43127/hook",
-    token: "external-one-use-token",
-    post: async () => ({ ok: true, advisoryText: "<DECK_ADAPTIVE_CONTEXT_JSON_V1>safe</DECK_ADAPTIVE_CONTEXT_JSON_V1>" }),
-  });
-  expect(output).toEqual({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: expect.stringContaining("DECK_ADAPTIVE_CONTEXT_JSON_V1") } });
-  expect(output).not.toHaveProperty("deckAdaptiveMemoryContext");
-});
-
-test("invalid, tampered, and authority-free hook inputs reject with zero effects", async () => {
-  let calls = 0;
-  const post = async () => { calls += 1; return { accepted: true }; };
-  expect(await forwardCodexTrustedHook({ ...event, hook_event_name: "PromptClaimedAuthority" }, { endpoint: "http://127.0.0.1", token: "token", post })).toMatchObject({ decision: "block" });
-  expect(await forwardCodexTrustedHook({ ...event, session_id: "" }, { endpoint: "http://127.0.0.1", token: "token", post })).toMatchObject({ decision: "block" });
-  expect(await withScrubbedMemoryLoopbackEnv(() => forwardCodexTrustedHook(event, { post }))).toEqual({});
-  expect(calls).toBe(0);
-});
-
-test("Codex memory hook fails open for ineligible ordinary prompt and provider failures", async () => {
-  const ineligible = await forwardCodexTrustedHook({ ...event, hook_event_name: "UserPromptSubmit", prompt: "continue" }, {
-    endpoint: "http://127.0.0.1:43127/hook",
-    token: "external-one-use-token",
-    post: async () => ({ ok: false, reason: "trivial_operational_text" }),
-  });
-  expect(ineligible).toEqual({});
-
-  const providerFailure = await forwardCodexTrustedHook({ ...event, hook_event_name: "SessionStart", prompt: "current task" }, {
-    endpoint: "http://127.0.0.1:43127/hook",
-    token: "external-one-use-token",
-    post: async () => { throw new Error("provider down"); },
-  });
-  expect(providerFailure).toEqual({});
-});
-
-test("Codex memory hook blocks explicit memory dependency failures only", async () => {
-  await expect(forwardCodexTrustedHook({ ...event, hook_event_name: "UserPromptSubmit", prompt: "remember: Important limitation: retry this failed provider write." }, {
-    endpoint: "http://127.0.0.1:43127/hook",
-    token: "external-one-use-token",
-    post: async () => ({ ok: false, reason: "provider_error" }),
-  })).resolves.toMatchObject({ decision: "block" });
+  const output = await forwardCodexTrustedHook({ ...event, hook_event_name: "UserPromptSubmit", prompt: "remember this", response: "private output" }, {
+    readiness: false, endpoint: "http://127.0.0.1:43127/hook", token: "synthetic-fixture-token",
+    post: async () => { calls++; return { ok: true, advisoryText: "must not be injected" }; },
+  } as never);
+  expect(calls).toBe(0); expect(output).toEqual({});
 });

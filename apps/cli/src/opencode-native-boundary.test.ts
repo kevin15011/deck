@@ -31,8 +31,8 @@ for (const rejected of ['deck-quality', 'deck-lead', 'planning', 'admission']) t
   } as unknown as RunnerAdapter;
   const config = getDefaultDeckConfig();
   try {
-    const result = await runRunnerLaunch({ adapter, cliMemoryProvider: 'none', yes: true, interactive: false,
-      launch: { projectRoot: home, teamId: 'developer-team', mode: 'interactive', deckConfig: { ...config, adaptiveMemory: { ...config.adaptiveMemory, enabled: false } } },
+    const result = await runRunnerLaunch({ adapter, yes: true, interactive: false,
+      launch: { projectRoot: home, teamId: 'developer-team', mode: 'interactive', deckConfig: config },
       presentPreview: async () => {}, processEffects: { inheritedEnv: { HOME: home }, spawn: async () => { spawns++; return { exitCode: 0, stdout: "", stderr: "" }; } },
     });
     expect(result).toMatchObject({ status: 'blocked', message: expect.stringContaining(rejected === 'planning' ? 'symlink boundary' : rejected === 'deck-quality' ? 'deck-quality permission bash' : 'remove the conflicting plugin') });

@@ -7,7 +7,7 @@ import {projectTaskContinuityMetrics} from '@deck/session-host';
 export function readContinuityMetrics(eventsDir:string){
  function* events():Generator<SessionEvent>{
   for(const name of readdirSync(eventsDir).filter(n=>/^\d{6}\.jsonl$/.test(n)).sort())for(const line of readFileSync(join(eventsDir,name),'utf8').split('\n'))if(line.trim()){
-   const parsed=validateSessionEvent(JSON.parse(line));if(!parsed.ok)throw new Error(`Invalid event segment ${name}: ${parsed.errors.join(', ')}`);yield parsed.value;
+   const parsed=validateSessionEvent(JSON.parse(line),{persisted:true});if(!parsed.ok)throw new Error(`Invalid event segment ${name}: ${parsed.errors.join(', ')}`);yield parsed.value;
   }
  }
  return projectTaskContinuityMetrics(events());

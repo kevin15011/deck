@@ -22,33 +22,6 @@ export type ChildMcpServerSpec = (
   | { transport?: "stdio"; command: string; args: readonly string[]; env: Readonly<Record<string, string>> }
   | { transport: "http"; url: string; /** Header name to environment variable NAME; never a resolved credential. */ envHttpHeaders?: Readonly<Record<string, string>> });
 
-/** Prepared by the CLI composition after native artifact, profile and canonical scope checks.
- * Contains no credential values. Credentials travel only through the private spawn environment.
- */
-export type NativeMemoryDescriptor = {
-  provider: "supermemory";
-  integration: "runner-plugin";
-  status: "ready" | "disabled" | "unavailable";
-  reasonCode?: string;
-  /** Explicit global mode omits all provider container tags. Absence still requires a canonical project scope. */
-  scopeMode?: "global";
-  projectScope?: string;
-  /** Native hook activation is support evidence, not proof of provider success. */
-  automaticRecall?: "native-hook";
-  /** Managed native lifecycle may not report or await background persistence. */
-  automaticCapture?: "unverified";
-  plugin?: {
-    root: string;
-    hookConfigPath?: string;
-    exclusiveHookEvents?: readonly string[];
-    hooks?: Readonly<Record<string, unknown>>;
-    scripts?: { recall: string; flush: string };
-    nodeCommand?: string;
-    loaderPath?: string;
-    mcpServers?: Readonly<Record<string, ChildMcpServerSpec>>;
-  };
-};
-
 /** Preparation findings are data; they never grant repair or execution authority. */
 export type RunnerPreparationFinding = { kind: "H" | "W" | "B"; code: string; item: string; message: string };
 
@@ -86,7 +59,6 @@ export type DriverTaskInput = {
   mcp: ChildMcpSet;
   /** Launch spec for every id in `mcp.servers` (the Deck session server included). */
   mcpServerSpecs: Readonly<Record<string, ChildMcpServerSpec>>;
-  nativeMemory?: NativeMemoryDescriptor;
   nativeSkills?: NativeSkillsDescriptor;
   /** Host-owned canonical project grant. Absence never authorizes OpenCode project execution. */
   projectConfigTrusted?: boolean;
@@ -154,11 +126,7 @@ export type DriverHostIo = {
 
 export type TurnOutcome = { status: "completed" | "interrupted" | "interrupted-forced" | "failed"; error?: string; failure?: TurnFailure; reasonCode?: "native-session-not-found" };
 
-/** Native lifecycle evidence never implies remote acceptance or processing. */
-export type NativeCaptureOutcome = { lifecycle: "completed" | "pending" | "error" | "unknown"; acceptance: "unknown"; reason: string };
-
 export type DriverTaskHandle = {
-  captureOutcome?(): NativeCaptureOutcome;
   nativeSessionId: Promise<string>;
   /** Optional verified exact-turn text capability. Never use send for concurrent delivery. */
   steeringTarget?(): SteeringTarget | undefined;

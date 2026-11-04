@@ -11,7 +11,6 @@
     "@deck/adapter-codex": "workspace:*",
     "@deck/adapter-opencode": "workspace:*",
     "@deck/adapter-pi": "workspace:*",
-    "@deck/adapter-supermemory": "workspace:*",
     "@deck/core": "workspace:*",
     "@deck/provider-tavily": "workspace:*",
     "@deck/session-host": "workspace:*",

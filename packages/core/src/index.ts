@@ -14,7 +14,7 @@ export {
 
 // Runner-neutral capability interface — export aggregate type plus only the types
 // needed by consumers of the capability interface. Avoid re-exporting types that
-// have canonical definitions elsewhere (model-catalog, adaptive-memory).
+// have canonical definitions elsewhere (model-catalog).
 export type { RunnerCapabilities } from "./runner-capability";
 export {
   validateRunnerCapabilities,
@@ -32,7 +32,6 @@ export type {
   RunnerToolOptionalTool,
   RunnerTeamCapabilities,
   RunnerModelCapabilities,
-  RunnerMemoryCapabilities,
   RunnerCapabilityCatalogEntry,
   RunnerCapabilityResolver,
   ReasoningLevel,
@@ -60,7 +59,6 @@ export type {
   RunnerResolvedModelAssignment,
   RunnerModelAssignmentReadInput,
   RunnerModelAssignments,
-  RunnerMemoryProviderInput,
   RunnerInstallPlanInput,
   RunnerInstallPlan,
   RunnerInstallApplyOptions,
@@ -105,7 +103,6 @@ export {
 // Instruction bundle helpers (capability instruction injection)
 export {
   buildCapabilityInstructionBundle,
-  bindAdaptiveMemoryInstructionBundle,
   getEnabledPackageInstructionIds,
   getEnabledCapabilityInstructionIds,
   composeCapabilityInstructions,
@@ -115,24 +112,13 @@ export {
   type CapabilityInstructionBundle,
   type CapabilityInstructionCompositionContext,
   buildWebSearchInstructionBundle,
-  type CapabilityInstructionBuildOptions,
 } from "./teams/developer/instruction-bundles/index";
-export { renderProjectBoundAdaptiveMemoryInstructions } from "./teams/developer/instruction-bundles/adaptive-memory";
 
 // Deck project config contracts
 export * from "./config/deck-config";
 export * from "./config/secret-store";
 export * from "./config/env-sanitizer";
 
-// Adaptive memory provider-neutral contracts, governance, rendering, and compositor
-export * from "./memory/adaptive-memory";
-export * from "./memory/adaptive-memory-contract";
-export * from "./memory/adaptive-memory-governance";
-export * from "./memory/adaptive-context-renderer";
-export * from "./memory/canonical-supermemory-project";
-export * from "./memory/supermemory-session-scope";
-export * from "./memory/capture-eligibility";
-export * from "./memory/managed-project-memory-recall";
 
 // Bounded, task-scoped skill candidate search and native-load boundary.
 export * from "./skill-discovery";

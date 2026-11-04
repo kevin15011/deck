@@ -28,7 +28,6 @@ function baseState(overrides: Parameters<typeof buildPiRunnerReviewPlan>[0] = {}
   return {
     runnerScope: "pi",
     selectedCapabilities: {},
-    adaptiveMemory: { provider: "none" },
     teams: {},
     runtime: { toolsReview: review(["sub-agents", "MCP packages"]) },
     ...overrides,
@@ -121,42 +120,6 @@ describe("buildPiRunnerReviewPlan", () => {
     expect(plan.groups.configWrites.some((action) => action.capabilityId === "context7")).toBe(true);
   });
 
-  test("Adaptive Memory none generates no Supermemory actions", () => {
-    const inventory = buildPiRunnerCapabilityInventory(review(["sub-agents", "MCP packages"]), undefined, { runnerScope: "pi" });
-    const plan = buildPiRunnerReviewPlan(baseState(), inventory);
-    const text = actionText(plan).toLowerCase();
-
-    expect(text).not.toContain("supermemory");
-  });
-
-  test("Adaptive Memory Supermemory adds config writes and validation without package install", () => {
-    const toolsReview = review(["sub-agents", "MCP packages"]);
-    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
-    const plan = buildPiRunnerReviewPlan(
-      baseState({
-        adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true, userId: "user-1" } },
-        runtime: { toolsReview },
-      }),
-      inventory,
-    );
-
-    expect([...plan.groups.configWrites.map((action) => action.kind)].sort()).toEqual(["write-deck-config", "write-pi-mcp-config"]);
-    expect(plan.groups.validations.some((action) => action.id === "adaptive-memory.supermemory.validate")).toBe(true);
-    expect(allActions(plan).filter((action) => action.title.toLowerCase().includes("supermemory")).every((action) => action.kind !== "install-pi-package")).toBe(true);
-  });
-
-  test("Adaptive Memory Supermemory adds Supermemory actions without legacy Engram actions", () => {
-    const toolsReview = review(["sub-agents", "MCP packages"]);
-    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
-    const supermemoryPlan = buildPiRunnerReviewPlan(
-      baseState({ adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true } }, runtime: { toolsReview } }),
-      inventory,
-    );
-
-    expect(actionText(supermemoryPlan).toLowerCase()).not.toContain("engram");
-    expect(actionText(supermemoryPlan).toLowerCase()).toContain("supermemory");
-  });
-
   test("selected capabilities map ready, manual, pending, and automatic install actions into readiness", () => {
     // Note: context-mode, rtk, codebase-memory-mcp are NOT in the review, so they'll be missing and auto-installed
     const toolsReview = review(["sub-agents", "MCP packages"]);
@@ -214,7 +177,6 @@ describe("buildPiRunnerReviewPlan", () => {
       baseState({
         // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
         selectedCapabilities: { "context-mode": true, rtk: true, "codebase-memory-mcp": true, "pi-hud": true },
-        adaptiveMemory: { provider: "none" },
         runtime: { toolsReview },
       }),
       inventory,
@@ -248,7 +210,6 @@ describe("Repair #22: MCP config writes for selected capabilities", () => {
         explicitlySelectedCapabilities: { serena: true },
         operationId: "pi-operation-1",
         currentOperation: { runner: "pi", operationId: "pi-operation-1", explicitlySelected: true },
-        adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true } },
         runtime: { toolsReview },
       }),
       inventory,
@@ -520,64 +481,7 @@ describe("Task 5: silent internal visual support", () => {
   });
 });
 
-describe("buildDeveloperTeamInstallPlan dashboard memory regression", () => {
-  test("dashboardMemoryProvider preserves comparable output to memoryProvider for same assignments", () => {
-    const provider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "supermemory",
-      displayName: "Supermemory",
-      buildInjection: () => ({
-        instructions: [
-          { surface: "agent", markdown: "Dashboard provider memory instructions.", teamId: "developer-team" },
-          { surface: "skill", markdown: "Dashboard provider skill memory instructions.", teamId: "developer-team" },
-        ],
-        toolBindings: [{ capability: "memory.search", serverName: "supermemory", toolNames: ["search_memory"] }],
-      }),
-    };
-    const assignments = { "deck-developer-orchestrator": "openai-codex/gpt-5.5" } as const;
-    const thinking = { "deck-developer-orchestrator": "high" } as const;
-
-    const memoryProviderPlan = buildDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: provider,
-      modelAssignments: assignments,
-      thinkingAssignments: thinking,
-    });
-    const dashboardProviderPlan = buildDeveloperTeamInstallPlan("/tmp/project", {
-      dashboardMemoryProvider: provider,
-      modelAssignments: assignments,
-      thinkingAssignments: thinking,
-    });
-
-    expect(dashboardProviderPlan.memoryDiagnostics).toEqual(memoryProviderPlan.memoryDiagnostics);
-    expect(dashboardProviderPlan.agents.map((agent) => ({ id: agent.agent.id, content: agent.content }))).toEqual(
-      memoryProviderPlan.agents.map((agent) => ({ id: agent.agent.id, content: agent.content })),
-    );
-    expect(dashboardProviderPlan.skills.map((skill) => ({ id: skill.agent.id, content: skill.content }))).toEqual(
-      memoryProviderPlan.skills.map((skill) => ({ id: skill.agent.id, content: skill.content })),
-    );
-  });
-});
-
 describe("buildPiRunnerReviewPlan security and structural regressions", () => {
-  test("Supermemory with token-only (no userId) is now ready", () => {
-    const toolsReview = review(["sub-agents", "MCP packages"]);
-    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
-    const plan = buildPiRunnerReviewPlan(
-      baseState({
-        adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true } },
-        runtime: { toolsReview },
-      }),
-      inventory,
-    );
-
-    // Token-only: configured=true + hasToken=true = ready (no userId required)
-    expect(plan.ready).toBe(true);
-    expect(plan.groups.configWrites).toContainEqual(
-      expect.objectContaining({ id: "adaptive-memory.supermemory.deck-config", kind: "write-deck-config", status: "ready" }),
-    );
-    expect(plan.groups.configWrites).toContainEqual(
-      expect.objectContaining({ id: "adaptive-memory.supermemory.pi-mcp-config", kind: "write-pi-mcp-config", status: "ready" }),
-    );
-  });
 
   test("plan actions expose structured providers/exclusions metadata", () => {
     const toolsReview = review(["sub-agents", "MCP packages"]);
@@ -586,7 +490,6 @@ describe("buildPiRunnerReviewPlan security and structural regressions", () => {
       baseState({
         // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
         selectedCapabilities: { "context-mode": true, rtk: true, "codebase-memory-mcp": true, "pi-hud": true },
-        adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true, userId: "user-1" } },
         runtime: { toolsReview },
       }),
       inventory,
@@ -611,21 +514,16 @@ describe("buildPiRunnerReviewPlan security and structural regressions", () => {
       ]),
     );
     expect(plan.groups.configWrites).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: "adaptive-memory.supermemory.deck-config", kind: "write-deck-config", status: "ready" }),
-        expect.objectContaining({ id: "adaptive-memory.supermemory.pi-mcp-config", kind: "write-pi-mcp-config", status: "ready" }),
-      ]),
+      expect.arrayContaining([]),
     );
     expect(plan.groups.validations).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "adaptive-memory.supermemory.validate", kind: "validate", status: "ready" }),
         expect.objectContaining({ id: "validation.pi-runner-capabilities", kind: "validate", status: "ready" }),
       ]),
     );
     expect(plan.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "CAPABILITY_SOURCE_UNKNOWN", severity: "warning", capabilityId: "pi-hud" }),
-        expect.objectContaining({ code: "SUPERMEMORY_CONFIGURATION_REQUIRED", severity: "info" }),
       ]),
     );
 

@@ -34,7 +34,7 @@ for (const fault of ["ownership", "integrity", "missing"] as const) {
           buildLaunchPlan: () => ({ status: "ready", plan, diagnostics: [] }),
         } as unknown as RunnerAdapter;
         const config = getDefaultDeckConfig();
-        const result = await runRunnerLaunch({ cliMemoryProvider: "none", adapter, launch: { projectRoot: root, teamId: "developer-team", mode: "interactive", deckConfig: { ...config, adaptiveMemory: { ...config.adaptiveMemory, enabled: false } } }, yes: true, interactive: false, presentPreview: async () => {}, processEffects: effects });
+        const result = await runRunnerLaunch({ adapter, launch: { projectRoot: root, teamId: "developer-team", mode: "interactive", deckConfig: config }, yes: true, interactive: false, presentPreview: async () => {}, processEffects: effects });
         expect(result).toMatchObject({ status: "blocked", message: expect.stringContaining(fault === "ownership" ? "pi-codebase-ownership-invalid" : "codebase-memory-integrity-failed") });
         expect(spawns).toBe(0);
       }

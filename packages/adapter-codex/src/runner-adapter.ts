@@ -1,8 +1,8 @@
-import { inspectCodexSupermemoryReadiness } from './supermemory-readiness';
+
 import { recordRunnerMutationJournals, assertNoContributionSymlink, REMEDIATION_MESSAGES } from "@deck/core";
 import { appendRunnerHistory, readRunnerHistory, runnerHistoryPath, readContribution, contributionHash } from "@deck/core";
 import { evaluateRoleAdmission, evaluateInstalledRoles, DEVELOPER_TEAM_AGENTS as ADMISSION_ROLES } from "@deck/core";
-import { isCodexOfficialSupermemoryConfigured } from "./mcp-config";
+import { } from "./mcp-config";
 import { withCodexInstallationUse, withCodexInstallationMutation, trackCodexInstallationProcess, CodexInstallationBusyError } from "./installation-use";
 import { createCodexSkillDiscoveryProvider, type CodexSkillDiscoveryOptions } from "./skill-discovery-provider";
 import { readCodexSearchFallbackOwnership } from "./native-search";
@@ -25,14 +25,12 @@ import {
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   getConfigurablePackageInstructionMetadata,
   buildCapabilityInstructionBundle,
-  bindAdaptiveMemoryInstructionBundle,
   getEnabledCapabilityInstructionIds,
   getDefaultDeckConfig,
   getCanonicalCapability,
   getRunnerCapabilityMapping,
   resolveWebSearchReadiness,
   isWebSearchProviderDescriptor,
-  resolveCanonicalSupermemoryProjectScope,
   bootstrapSerena,
   resolveExistingSerenaReadiness,
   type CapabilityInventory,
@@ -89,7 +87,7 @@ import {
   buildCodexLaunchPlan,
   isSafeCodexLaunchScalar,
 } from "./launch";
-import { type CodexMcpServerId, buildCodexMcpServers, inspectCodexForeignMcpCommands, inspectCodexMcpServerCommand, inspectCodexMcpServerIds, inspectCodexSupermemoryMcpState, isCodexSerenaMcpConfigured, isCodexSupermemoryMcpConfigured, isCodexWebSearchMcpConfigured, isDeckManagedCodexMcpServer, mergeCodexMcpServers } from "./mcp-config";
+import { type CodexMcpServerId, buildCodexMcpServers, inspectCodexForeignMcpCommands, inspectCodexMcpServerCommand, inspectCodexMcpServerIds, isCodexSerenaMcpConfigured, isCodexWebSearchMcpConfigured, isDeckManagedCodexMcpServer, mergeCodexMcpServers } from "./mcp-config";
 import { createCodexTools, type CodexTools, type CodexToolOptions } from "./tools";
 import { createNodeCodexFileEffects } from "./node-effects";
 import {
@@ -118,7 +116,7 @@ export type CodexRunnerAdapterOptions = {
   codebaseIndexReadiness?: (projectRoot: string) => boolean | Promise<boolean>;
   /** Codex user configuration directory (read-only duplicate detection); defaults to $CODEX_HOME or ~/.codex. */
   codexHome?: string;
-  /** Deck-owned shared-tool seams (RTK, Codebase Memory, Context Mode, official Supermemory hooks). */
+  /** Deck-owned shared-tool seams (RTK, Codebase Memory, Context Mode). */
   tools?: CodexToolOptions;
   /** Read-only Core resolver for the exact Deck-owned Serena launcher. */
   serenaReadinessResolver?: (signal?: AbortSignal) => Promise<SerenaExistingReadinessResult>;
@@ -127,8 +125,6 @@ export type CodexRunnerAdapterOptions = {
   serenaBootstrapEffects?: SerenaBootstrapEffects;
   /** Checks whether the effective `deck` command can serve the portable Serena proxy. */
   serenaProxyCommand?: readonly string[];
-  /** Absolute self-referencing command for the Deck memory MCP server (opt-in; supplied by the CLI composition root). */
-  deckMemoryMcpCommand?: readonly string[];
   serenaProxyProbe?: () => Promise<DeckSerenaProxyReadiness>;
   /** Provider descriptor selected by the CLI composition root. */
   webSearchProvider?: WebSearchProviderDescriptorV1;
@@ -383,7 +379,6 @@ function readCodexRoleAssignments(codexHome?: string): CodexRoleAssignmentRead {
   return { modelAssignments, thinkingAssignments, diagnostics };
 }
 
-/** The official Codex plugin owns memory alone, so Deck-runtime adaptive-memory prose is never materialized. */
 /** Agents whose persisted assignment the caller would change; `undefined` means "keep persisted untouched". */
 function changedAssignmentAgents(
   persisted: Readonly<Record<string, string>>,
@@ -397,12 +392,7 @@ function changedAssignmentAgents(
     .filter((agentId) => slug(persisted[agentId]) !== slug(requested[agentId]));
 }
 
-function withoutAdaptiveMemoryFragments<T extends { instructions: readonly { packageId: string }[] } | undefined>(bundle: T): T {
-  if (!bundle) return bundle;
-  return { ...bundle, instructions: Object.freeze(bundle.instructions.filter((fragment) => fragment.packageId !== "adaptive-memory")) } as T;
-}
-
-/** Narrow binding for the only credentials Deck may hand a Codex child process (Web Search and official Supermemory plugin). */
+/** Narrow binding for the only credentials Deck may hand a Codex child process (Web Search). */
 export const CODEX_LAUNCH_ENV_BINDING = "deck-codex-launch-v1";
 
 function operationReceiptFrom(value: unknown): DeveloperTeamOperationReceipt | undefined {
@@ -633,13 +623,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
       remediation: "Run `codex debug models` to confirm the current Codex model inventory before retrying.",
       defaultThinkingLevels: [],
     },
-    adaptiveMemory: {
-      supermemory: {
-        requiresExternalToken: false,
-        selectionStatus: "Supermemory selected; Review & Install installs the pinned official Codex plugin hooks. Launch uses the stored profile credential (child process only).",
-        configuredDiagnostics: ["Official Supermemory plugin profile credentials are stored; no token is written to Codex configuration."],
-      },
-    },
   } as const;
   readonly #preflight: CodexPreflightEffects;
   readonly #fileEffects?: CodexFileEffects;
@@ -656,7 +639,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
   readonly #serenaBootstrap: NonNullable<CodexRunnerAdapterOptions["serenaBootstrap"]>;
   readonly #serenaBootstrapEffects?: SerenaBootstrapEffects;
   readonly #serenaProxyCommand: readonly string[];
-  readonly #deckMemoryMcpCommand: readonly string[] | undefined;
   readonly #serenaProxyProbe: NonNullable<CodexRunnerAdapterOptions["serenaProxyProbe"]>;
   readonly #webSearchProvider?: WebSearchProviderDescriptorV1;
   readonly #webSearchProviderResolver?: CodexRunnerAdapterOptions["webSearchProviderResolver"];
@@ -686,7 +668,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
     this.skillDiscovery = createCodexSkillDiscoveryProvider({ ...options.skillDiscovery, homeDir: this.#roots.userHome, codexHome: this.#roots.codexHome });
     this.#serenaBootstrapEffects = options.serenaBootstrapEffects;
     this.#serenaProxyCommand = [...(options.serenaProxyCommand ?? ["deck", "internal", "serena-mcp"])];
-    this.#deckMemoryMcpCommand = options.deckMemoryMcpCommand ? [...options.deckMemoryMcpCommand] : undefined;
     this.#serenaProxyProbe = options.serenaProxyProbe ?? createDeckSerenaProxyProbe({ command: this.#serenaProxyCommand });
     this.#serenaReadinessResolver = options.serenaReadinessResolver
       ?? ((signal) => resolveExistingSerenaReadiness(this.#serenaBootstrapEffects, signal));
@@ -741,10 +722,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
   get mutationRoot() { return this.#roots.codexHome; }
   async evaluateSessionAdmission(input?: { roleId?: string; config?: NormalizedDeckConfig }) {
     const result = await evaluateInstalledRoles(input?.roleId ? [input.roleId] : ADMISSION_ROLES.map(r=>r.id), roleId => prepareCodexNativeRole(this.#roots.codexHome, roleId));
-    if (input?.config?.adaptiveMemory.enabled && input.config.adaptiveMemory.activeProvider === "supermemory") {
-      result.checks.push(...inspectCodexSupermemoryReadiness(readGlobalConfigSource(this.#roots) ?? "",this.#tools));
-      if (result.checks.some(c=>c.required && c.status === "fail")) result.verdict = "blocked";
-    }
     if (input?.config) for (const [id, capability] of Object.entries(this.readPreparationCapabilities(input.config))) if (capability.enabled && capability.prerequisites === "missing") {
       result.checks.push({id:`capability-prerequisites-unavailable:${id}`,status:"warn",required:false,remediation:"run-review-install"});
       if (result.verdict === "admit") result.verdict = "degraded";
@@ -788,7 +765,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const source = readGlobalConfigSource(this.#roots) ?? "";
     const ids = ["codebase-memory"].filter((id) => isDeckManagedCodexMcpServer(source, id as CodexMcpServerId));
     if (!ids.length) return {};
-    const desired = buildCodexMcpServers({ packageIds: ids, memoryProvider: "none", codebaseMemoryCommand: this.#tools.codebase.command() });
+    const desired = buildCodexMcpServers({ packageIds: ids, codebaseMemoryCommand: this.#tools.codebase.command() });
     if (desired.gaps.some(gap => gap !== "codebase-memory-not-ready")) throw new Error("Codex session ordinary MCP readiness is stale.");
     const servers: Record<string, ChildMcpServerSpec> = Object.fromEntries(desired.servers.map((server) => [server.id, server.transport === "stdio" ? { command: server.command, args: server.args ?? [], env: {} } : { transport: "http" as const, url: server.url, ...(server.envHttpHeaders ? { envHttpHeaders: server.envHttpHeaders } : {}) }]));
     if (desired.gaps.includes("codebase-memory-not-ready")) {
@@ -863,43 +840,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
 
   #rememberPendingSerenaPreparation(projectRoot: string, preparation: PendingSerenaPreparation): void {
     this.#pendingSerenaPreparationByProject.set(resolve(projectRoot), preparation);
-  }
-
-  #inspectEffectiveConfiguredSupermemoryProjectScope(input: {
-    existingCodexConfig: string;
-    deckConfig: NormalizedDeckConfig;
-    memoryProviderId: "none" | "supermemory";
-    derivedSupermemoryProjectScope?: string;
-    mcpCapabilityIds: readonly string[];
-    serenaPreparation?: PendingSerenaPreparation;
-  }): string | undefined {
-    const existing = inspectCodexSupermemoryMcpState(input.existingCodexConfig);
-    const existingScope = existing.ok ? existing.scope : undefined;
-    const config = mergeCodexProjectConfig(input.existingCodexConfig, { multiAgent: true });
-    if (config.status === "blocked") return existingScope;
-    const webSearchProvider = this.resolveWebSearchProvider(input.deckConfig.webSearch.provider);
-    const desiredMcp = buildCodexMcpServers({
-      packageIds: input.mcpCapabilityIds,
-      context7Command: this.#tools.context7.command(),
-      memoryProvider: input.memoryProviderId,
-      supermemoryProjectScope: input.derivedSupermemoryProjectScope,
-      serenaLauncherAvailable: input.serenaPreparation?.readiness.state === "ready",
-      serenaProxyCommand: this.#serenaProxyCommand,
-      supermemoryProxy: this.#tools.supermemory.proxy() && this.#tools.node.command() ? { nodeCommand: this.#tools.node.command()!, script: this.#tools.supermemory.proxy()! } : undefined,
-      serenaProxyAvailable: input.serenaPreparation?.readiness.state === "ready" && input.serenaPreparation.proxy.state === "ready",
-      webSearchProviderSupported: webSearchProvider !== undefined,
-      webSearchProviderConfigured: input.deckConfig.webSearch.provider !== undefined,
-      webSearchProvider,
-      webSearchCredentialAvailable: this.#webSearchCredentialAvailable(webSearchProvider),
-      webSearchExecutableAvailable: this.#webSearchCommand(webSearchProvider) !== undefined,
-      webSearchCommand: this.#webSearchCommand(webSearchProvider),
-    });
-    const mcp = mergeCodexMcpServers(config.content, desiredMcp.servers);
-    if (mcp.status === "blocked") return existingScope;
-    const hooks = mergeCodexOwnedHooks(mcp.content, []);
-    if (hooks.status === "blocked") return existingScope;
-    const planned = inspectCodexSupermemoryMcpState(hooks.content);
-    return planned.ok ? planned.scope : existingScope;
   }
 
   #selectedMcpCapabilityIds(
@@ -1103,19 +1043,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
         ...(rtkState === "ready" && !hookIds.has("rtk") ? ["rtk: PreToolUse hook not materialized"] : []),
       ],
     };
-    const supermemoryScripts = tools.supermemory.scripts();
-    const supermemory = {
-      ...base("supermemory-tool-bindings", "Supermemory (official Codex plugin)"),
-      isInstalled: supermemoryScripts !== undefined && nodeReady && hookIds.has("supermemory") && isCodexOfficialSupermemoryConfigured(config, { nodeCommand: tools.node.command()!, script: tools.supermemory.proxy()! }),
-      isBlocked: tools.supermemory.state() === "conflict",
-      diagnostics: [
-        ...(tools.supermemory.state() === "conflict" ? ["supermemory: owned plugin artifact differs from the pinned release"] : []),
-        ...(supermemoryScripts === undefined && tools.supermemory.state() === "absent" ? ["supermemory: pinned official plugin hooks are not installed"] : []),
-        ...(!nodeReady ? ["supermemory: a Node.js 18+ runtime is required for the plugin hooks"] : []),
-        ...(supermemoryScripts !== undefined && !hookIds.has("supermemory") ? ["supermemory: plugin hooks not materialized in the project"] : []),
-        ...(supermemoryScripts && nodeReady && !isCodexOfficialSupermemoryConfigured(config, { nodeCommand: tools.node.command()!, script: tools.supermemory.proxy()! }) ? ["supermemory: official hosted proxy configuration needs Review & Install"] : []),
-      ],
-    };
     const webSearchEvidence = {
       nativeSearch: inspectCodexNativeSearch({ projectRoot: input.projectRoot }, this.#roots.codexHome),
       enabled: deckConfig.webSearch.enabled,
@@ -1149,7 +1076,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
       rtk,
       { ...base("context7", "Context7"), isInstalled: Boolean(tools.context7.command()) && inspectCodexMcpServerCommand(config, "context7") === tools.context7.command(), isBlocked: false, diagnostics: mcp.has("context7") ? [] : ["context7: MCP configuration missing"] },
       webSearch,
-      supermemory,
     ];
     const existing = new Set(capabilities.map((entry) => entry.capabilityId));
     for (const entry of CODEX_CAPABILITY_CATALOG) {
@@ -1267,19 +1193,13 @@ class CodexRunnerAdapter implements RunnerAdapter {
       if (capability.isBlocked) {
         if (isApprovedStaticCompatibleGap(capability.capabilityId)) addStaticCompatibleGap(capability);
         else addBlockedCapability(capability);
-      } else if (!capability.isInstalled && ["context-mode", "codebase-memory", "rtk", "context7", "web-search", "supermemory-tool-bindings"].includes(capabilityId)) {
+      } else if (!capability.isInstalled && ["context-mode", "codebase-memory", "rtk", "context7", "web-search"].includes(capabilityId)) {
         if (capabilityId === "web-search" && !capability.webSearchProvider) continue;
         const install = this.#toolInstallAction(capabilityId);
         if (install) automaticInstalls.push(install);
         configWrites.push({ id: `codex-config:${capabilityId}`, kind: "codex-config-preview", title: `Configure ${capability.label} through the reviewed Codex plan`, capabilityId, status: "ready", ...(["context-mode", "codebase-memory"].includes(capabilityId) ? { diagnostics: ["Repair standard existing MCP command and arguments to use the verified executable; preserve user tool policies. Configuration is backed up before applying."] } : {}) });
       }
-    }
-    if (state.adaptiveMemory.provider === "supermemory" && !byId.get("supermemory-tool-bindings")?.isInstalled) {
-      if (!automaticInstalls.some((action) => action.kind === "install-codex-supermemory")) {
-        const install = this.#toolInstallAction("supermemory-tool-bindings");
-        if (install) automaticInstalls.push(install);
-      }
-      configWrites.push({ id: "codex-config:supermemory", kind: "codex-config-preview", title: "Register the official Supermemory plugin hooks through the reviewed Codex plan", capabilityId: "supermemory-tool-bindings", status: "ready" });
+
     }
     const teamApplications: RunnerAction[] = [{ id: "codex-developer-team", kind: "apply-team-bundle", title: "Apply and verify Codex Developer Team content", capabilityId: "developer-team", status: "ready", required: true }];
     const validations: RunnerAction[] = [
@@ -1321,10 +1241,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
         return tools.contextMode.command() !== undefined
           ? undefined
           : { id: "codex.tool.context-mode.install", kind: "install-codex-tool", title: "Install and verify Context Mode in Deck-owned shared tools", capabilityId, status: "ready", required: true };
-      case "supermemory-tool-bindings":
-        return tools.supermemory.state() === "ready"
-          ? undefined
-          : { id: "codex.official-supermemory.install", kind: "install-codex-supermemory", title: "Install verified Codex Supermemory hooks with full-conversation capture", capabilityId: "adaptive-memory", status: tools.supermemory.state() === "conflict" ? "blocked" : "ready", required: true };
       default:
         return undefined;
     }
@@ -1336,7 +1252,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
         { action: "configure", tool: "codex", capabilityId: "developer-team", reason: "Materialize project-scoped Developer Team roles, skills, bootstrap content, and instructions" },
         ...selected.filter((id) => id === "serena").map((capabilityId) => ({ action: "install" as const, tool: capabilityId, capabilityId, reason: "Reuse or provision Serena through the explicitly authorized Core bootstrap before configuring Codex MCP" })),
         ...selected.filter((id) => ["context-mode", "codebase-memory", "rtk", "context7"].includes(id)).map((capabilityId) => ({ action: "install" as const, tool: capabilityId, capabilityId, reason: "Reuse or install the verified Deck-owned shared tool before pinning Codex MCP/hook configuration to its absolute path" })),
-        ...selected.filter((id) => ["context-mode", "codebase-memory", "rtk", "context7", "web-search", "supermemory-tool-bindings"].includes(id)).map((capabilityId) => ({ action: "configure" as const, tool: capabilityId, capabilityId, reason: "Apply reviewed Codex MCP/hook configuration pinned to verified executables" })),
+        ...selected.filter((id) => ["context-mode", "codebase-memory", "rtk", "context7", "web-search"].includes(id)).map((capabilityId) => ({ action: "configure" as const, tool: capabilityId, capabilityId, reason: "Apply reviewed Codex MCP/hook configuration pinned to verified executables" })),
         { action: "validate", tool: "codex", capabilityId: "codex-runtime", reason: "Verify managed content, trust activation, route classification, and capability readiness" },
       ],
     };
@@ -1436,11 +1352,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
           if (tools.contextMode.command()) return ok("Context Mode is already available and verified.");
           return await tools.contextMode.install() ? ok("Context Mode was installed and verified.") : fail("Context Mode installation failed or its executable was not verified.");
         }
-        case "install-codex-supermemory": {
-          if (action.capabilityId !== "adaptive-memory") return fail("Codex Supermemory install action is mismatched.");
-          const outcome = await tools.supermemory.install();
-          return ok(outcome === "installed" ? "Pinned official Codex Supermemory plugin hooks installed and verified." : "Pinned official Codex Supermemory plugin hooks verified without changes.");
-        }
         default:
           return undefined;
       }
@@ -1518,11 +1429,9 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const config = requireDeckConfig(input.deckConfig, "operation");
     const webSearchProvider = this.resolveWebSearchProvider(config.webSearch.provider);
     const existingCodexConfig = existing.files.get(".codex/config.toml") ?? "";
-    const memoryProviderId = (config.adaptiveMemory.enabled ? input.memoryProvider?.id ?? config.adaptiveMemory.activeProvider : "none") as "none" | "supermemory";
-    // The official Codex plugin owns memory alone; Deck's runtime-backed adaptive-memory prose would misdescribe it.
-    const enabledCapabilityInstructionIds = getEnabledCapabilityInstructionIds(config, "codex").filter((id) => id !== "adaptive-memory");
-    const capabilityInstructions = withoutAdaptiveMemoryFragments(input.capabilityInstructions
-      ?? buildCapabilityInstructionBundle(enabledCapabilityInstructionIds));
+    const enabledCapabilityInstructionIds = getEnabledCapabilityInstructionIds(config, "codex");
+    const capabilityInstructions = input.capabilityInstructions
+      ?? buildCapabilityInstructionBundle(enabledCapabilityInstructionIds);
     const mcpCapabilityIds = materializationScope === "full"
       ? this.#selectedMcpCapabilityIds(input, capabilityInstructions, existingCodexConfig, config.webSearch.enabled)
       : [];
@@ -1532,7 +1441,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const tools = this.#tools;
     const nodeCommand = tools.node.command();
     const rtkBinary = tools.rtk.command();
-    const supermemoryScripts = tools.supermemory.scripts();
     const rtkRequested = mcpCapabilityIds.includes("rtk") || (materializationScope === "full" && inspectCodexOwnedHookIds(existingCodexConfig).includes("rtk") && input.capabilityIds === undefined);
     let native = buildCodexDeveloperTeamInstallPlan({
       ownershipHistory: readRunnerHistory(this.#historyPath()),
@@ -1544,7 +1452,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
       modelAssignments,
       thinkingAssignments,
       capabilityInstructions,
-      memoryProvider: memoryProviderId,
       mcpCapabilityIds,
       contextModeCommand: tools.contextMode.command(),
       context7Command: tools.context7.command(),
@@ -1555,7 +1462,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
       repairSelectedToolIds: input.capabilityIds === undefined ? undefined : mcpCapabilityIds,
       foreignMcpCommands: this.#foreignMcpCommands(existingCodexConfig),
       ...(rtkRequested && rtkBinary && nodeCommand ? { rtkHook: { nodeCommand, rtkBinary } } : {}),
-      ...(memoryProviderId === "supermemory" && supermemoryScripts && nodeCommand ? { supermemoryHooks: { nodeCommand, recallScript: supermemoryScripts.recall, flushScript: supermemoryScripts.flush } } : {}),
       webSearchProviderSupported: webSearchProvider !== undefined,
       webSearchProviderConfigured: config.webSearch.provider !== undefined,
       webSearchProvider,
@@ -1565,7 +1471,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
       materializationScope,
       serenaLauncherAvailable: serenaPreparation?.readiness.state === "ready",
       serenaProxyCommand: this.#serenaProxyCommand,
-      supermemoryProxy: this.#tools.supermemory.proxy() && this.#tools.node.command() ? { nodeCommand: this.#tools.node.command()!, script: this.#tools.supermemory.proxy()! } : undefined,
       serenaProxyAvailable: serenaPreparation?.readiness.state === "ready" && serenaPreparation.proxy.state === "ready",
       // No ready inventory is not evidence of absence: persisted assignments stay mapped (fail safe) and changes
       // to them are refused below (fail closed) instead of silently dropping the configured model.
@@ -1622,12 +1527,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
         severity: "error",
         message: `Refusing to erase Codex assignments for ${lostAssignmentFields.join(", ")}; the generated roles do not contain the requested model or reasoning.`,
       });
-    }
-    if (memoryProviderId === "supermemory" && materializationScope === "full") {
-      const plannedConfig = native.expectedFiles.find(file=>file.relativePath === ".codex/config.toml")?.content ?? existingCodexConfig;
-      const missing = inspectCodexSupermemoryReadiness(plannedConfig,tools);
-      extraDiagnostics.push(...missing.map(check=>({code:check.id,severity:"error" as const,message:`Required selected Supermemory artifact is unavailable (${check.id}); run Review & Install.`})));
-      if (missing.length) native = {...native,blocked:true};
     }
     native = { ...native, blocked: native.blocked || unconfirmedAssignmentChanges.length > 0 || lostAssignmentFields.length > 0, diagnostics: [...native.diagnostics, ...extraDiagnostics] };
     const files = native.mutations.filter((mutation) => mutation.operation !== "delete").map((mutation) => ({
@@ -1860,14 +1759,10 @@ class CodexRunnerAdapter implements RunnerAdapter {
         status: capability.isBlocked ? "error" : capability.isInstalled ? "ok" : "warning",
         message: capability.diagnostics?.join("; ") || (notApplicable
           ? `Not applicable to ${this.runnerId}.`
-          : capability.capabilityId === "supermemory-tool-bindings" && capability.isInstalled
-            ? "The pinned official Supermemory plugin hooks are installed; the launch injects the selected profile credential into the Codex process only."
-            : capability.isInstalled ? "Ready." : "Not ready."),
+          : capability.isInstalled ? "Ready." : "Not ready."),
         suggestion: capability.isInstalled || notApplicable
           ? undefined
-          : capability.capabilityId === "supermemory-tool-bindings"
-            ? "Select Supermemory in the Deck TUI (Review & Install) to install the pinned official Codex plugin hooks and store the profile credential."
-            : capability.capabilityId === "serena"
+          : capability.capabilityId === "serena"
               ? capability.isBlocked
                 ? "Resolve the Deck-owned Serena launcher state before configuring Codex MCP."
                 : "Explicitly select Serena in Review to reuse or provision it before configuring Codex MCP."

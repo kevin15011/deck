@@ -17,7 +17,6 @@ import {
 export type RunnerDashboardScreen =
   | "dashboard"
   | "packages-detail"
-  | "adaptive-memory-detail"
   | "web-search-detail"
   | "teams-detail"
   | "developer-team-detail"
@@ -28,7 +27,7 @@ export type RunnerDashboardScreen =
 export const RUNNER_DASHBOARD_SCREENS: RunnerDashboardScreen[] = [
   "dashboard",
   "packages-detail",
-  "adaptive-memory-detail",
+
   "web-search-detail",
   "teams-detail",
   "developer-team-detail",
@@ -36,44 +35,6 @@ export const RUNNER_DASHBOARD_SCREENS: RunnerDashboardScreen[] = [
   "install-progress",
   "complete",
 ];
-
-export type AdaptiveMemoryProviderChoice = "none" | "supermemory";
-
-export type SupermemorySetupValues = {
-  userId?: string;
-  teamId?: string;
-  organizationId?: string;
-  /** @deprecated Use runtimeCredentialStored for persisted Deck runtime readiness. */
-  hasToken?: boolean;
-  /** Deck runtime API key has been validated and stored in Deck's owner-only secret store. */
-  runtimeCredentialStored?: boolean;
-  /** Ephemeral token input is currently present in TUI state; cleared after storage. */
-  ephemeralTokenAvailable?: boolean;
-  /** Current-run evidence from an authoritative Deck secret-store read. */
-  runtimeCredentialVerification?: "verified-present" | "verified-missing" | "verified-error";
-  /** Optional runner-native MCP OAuth status; not required for Deck runtime memory. */
-  mcpOAuthReady?: boolean;
-};
-
-export type SupermemorySetupState = SupermemorySetupValues & {
-  configured: boolean;
-  diagnostics: string[];
-};
-
-export type SupermemoryRuntimeCredentialEvidence = {
-  configured: boolean;
-  runtimeCredentialStored: boolean;
-  runtimeCredentialVerification: NonNullable<SupermemorySetupValues["runtimeCredentialVerification"]>;
-  ephemeralTokenAvailable: false;
-  diagnostics: string[];
-};
-
-export type RunnerDashboardEvidenceIdentity = {
-  runnerId: Exclude<RunnerScope, "all">;
-  operation: RunnerOperationIdentity;
-  planRevision: number;
-  planGeneratedForRevision: number;
-};
 
 /** Non-secret Web Search facts projected from adapter inventory for the dashboard. */
 export type WebSearchDashboardState = {
@@ -180,18 +141,12 @@ export type RunnerDashboardState = {
   /** Presentation/readiness facts only; credentials never enter dashboard state. */
   webSearch: WebSearchDashboardState;
   capabilityStatuses: Partial<Record<CapabilityId, CapabilityStatus>>;
-  adaptiveMemory: {
-    provider: AdaptiveMemoryProviderChoice;
-    supermemory?: SupermemorySetupState;
-    status?: string;
-  };
   teams: Record<string, RunnerTeamState>;
   runtime: {
     runnerCommand?: string;
     preflight?: unknown;
     toolsReview?: unknown;
     inspectionState?: "ready" | "degraded" | "blocked" | "unsupported";
-    projectIdentity?: "verified" | "unverified" | "deferred";
     diagnostics?: string[];
     executionRoutes?: Partial<Record<"interactive" | "exec" | "resume-by-id" | "resume-latest", "first-class" | "static-compatible" | "unsupported" | "blocked">>;
   };
@@ -201,11 +156,6 @@ export type RunnerDashboardState = {
   planRevision: number;
   planGeneratedForRevision?: number;
 };
-
-export function runnerRequiresExternalSupermemoryToken(state?: Pick<RunnerDashboardState, "runnerUi">): boolean {
-  void state;
-  return true;
-}
 
 export type RunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
 
@@ -278,7 +228,7 @@ export type TeamCapabilityConsumption =
 export type TeamCapabilityProfile = {
   teamId: string;
   installable: boolean;
-  capabilities: Partial<Record<CapabilityId | "adaptive-memory", TeamCapabilityConsumption>>;
+  capabilities: Partial<Record<CapabilityId, TeamCapabilityConsumption>>;
   diagnostics: string[];
 };
 
@@ -297,7 +247,7 @@ export const DEFAULT_RUNNER_REVIEW_PLAN: RunnerReviewPlan = {
 /**
  * Default state for the runner dashboard.
  *
- * Dashboard sections: Packages, Adaptive Memory, Web Search, Teams, Review & Install.
+ * Dashboard sections: Packages, Web Search, Teams, Review & Install.
  */
 export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
   screen: "dashboard",
@@ -322,9 +272,7 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
     readiness: "disabled",
   },
   capabilityStatuses: {},
-  adaptiveMemory: {
-    provider: "none",
-  },
+
   teams: {
     "developer-team": {
       teamId: "developer-team",
@@ -337,7 +285,7 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
     "codebase-memory": false,
     "code-economy": true,
     rtk: true,
-    "adaptive-memory": true,
+
   },
   plan: undefined,
   planRevision: 0,
@@ -381,10 +329,7 @@ export function createDefaultRunnerDashboardState(
       ...DEFAULT_RUNNER_DASHBOARD_STATE.capabilityStatuses,
       ...overrides.capabilityStatuses,
     },
-    adaptiveMemory: {
-      ...DEFAULT_RUNNER_DASHBOARD_STATE.adaptiveMemory,
-      ...overrides.adaptiveMemory,
-    },
+
     teams: {
       ...DEFAULT_RUNNER_DASHBOARD_STATE.teams,
       ...overrides.teams,

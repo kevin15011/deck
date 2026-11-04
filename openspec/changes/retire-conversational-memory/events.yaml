@@ -1,0 +1,11 @@
+schema: spec-registry-events-v1
+events:
+  - phase: verify
+    status: in_progress
+    event: verify.started
+    artifact: verify-report.md
+    timestamp: "2026-11-04"
+    actor: deck-lead
+    notes:
+      - Source implementation and independent safety repairs verified.
+      - Final pinned suite passes; installed-state audit remains pending.

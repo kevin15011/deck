@@ -38,7 +38,6 @@ describe("Codex web-search adapter", () => {
 
     const result = buildCodexMcpServers({
       packageIds: ["web-search"],
-      memoryProvider: "none",
       webSearchCredentialAvailable: credentialAvailable,
       webSearchExecutableAvailable: true,
       webSearchProviderSupported: true,
@@ -62,7 +61,7 @@ describe("Codex web-search adapter", () => {
       expect(serialized.content).not.toContain(syntheticCredential);
     }
 
-    const incomplete = buildCodexMcpServers({ packageIds: ["web-search"], memoryProvider: "none", webSearchCredentialAvailable: false, webSearchExecutableAvailable: true, webSearchProviderSupported: true, webSearchProviderConfigured: true, webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR });
+    const incomplete = buildCodexMcpServers({ packageIds: ["web-search"], webSearchCredentialAvailable: false, webSearchExecutableAvailable: true, webSearchProviderSupported: true, webSearchProviderConfigured: true, webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR });
     expect(incomplete.servers).toContainEqual(expect.objectContaining({ id: "web-search", envVars: ["TAVILY_API_KEY"] }));
     expect(incomplete.gaps).toContain("web-search-credential-missing");
   });
@@ -70,7 +69,6 @@ describe("Codex web-search adapter", () => {
   test("fails closed when Web Search has no selected provider descriptor", () => {
     const result = buildCodexMcpServers({
       packageIds: ["web-search"],
-      memoryProvider: "none",
       webSearchCredentialAvailable: true,
       webSearchExecutableAvailable: true,
     });

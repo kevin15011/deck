@@ -24,7 +24,6 @@ Deck treats this as an architecture problem:
 - **Define once, materialize natively.** A runner-neutral core describes the team; each adapter translates it into that runner's own files, packages and hooks, then verifies the result.
 - **Route by uncertainty and risk.** Process is proportional. The Lead picks the smallest safe route instead of running a ceremony.
 - **Evidence over claims.** Preflight, review-before-apply, ownership manifests, `deck doctor` and verified backups make the installation inspectable and reversible.
-- **Memory is advisory.** Adaptive memory adds context but never outranks OpenSpec artifacts, source, tests or current runner evidence.
 - **No false parity.** Runner differences stay visible in the support matrix rather than hidden behind a generic promise.
 
 ## Without Deck vs. with Deck
@@ -36,7 +35,7 @@ Deck treats this as an architecture problem:
 | Ask for a one-line fix | The agent either edits blindly or walks a full plan/design/review ritual. | The Lead edits directly and runs the minimum relevant check. |
 | Ask for a risky, cross-cutting change | One long agent context mixes discovery, design, code and review. | Investigate traces the code, Architect records decisions in OpenSpec, Apply implements, Quality verifies independently. |
 | Combine models from different vendors | Separate terminals and manual copy-paste between agents. | `deck web`: for example, a Claude Lead delegates to Codex and OpenCode members, with tasks, activity and approvals in one browser workspace. |
-| Know what is installed and healthy | Inspect scattered config files by hand. | `deck doctor` reports binaries, runner config, MCP checks, memory visibility and suggested fixes. |
+| Know what is installed and healthy | Inspect scattered config files by hand. | `deck doctor` reports binaries, runner config, MCP checks and suggested fixes. |
 
 ## Architecture
 
@@ -65,7 +64,7 @@ flowchart LR
         Cx["Codex CLI"]
         Cl["Claude Code"]
     end
-    Providers["Provider adapters<br/>Supermemory · Tavily"]
+    Providers["Provider adapters<br/>Tavily"]
 
     Core --> CLI
     SDD --> CLI
@@ -125,10 +124,9 @@ Details: [Developer Team](docs/developer-team.md).
 |---|---|---|
 | Pi | **Supported** | Detection, package review, global team install, per-role subagents and models, `deck pi developer`. Requires Pi 1.0.0 or newer. |
 | OpenCode | **Supported** | Detection, package and config review, native agents, team install through the TUI. |
-| Claude | **Full team, instruction-level safety** | Global Deck-owned plugin: all seven roles, subagents, per-role models, pinned shared tools, the official Supermemory plugin and supervised launches through the Deck CLI. Protected execution controls are guided by instructions rather than enforced by a runner hook. Full driver in cross-runner sessions. |
-| Codex | **Full team, instruction-level safety** | Native Codex roles and skills installed globally, per-role models, shared tools and hooks, the official Supermemory plugin, and interactive, exec and resume launches. Protected execution controls are guided by instructions rather than enforced by a runner hook. Full driver in cross-runner sessions. |
+| Claude | **Full team, instruction-level safety** | Global Deck-owned plugin: all seven roles, subagents, per-role models, pinned shared tools, and supervised launches through the Deck CLI. Protected execution controls are guided by instructions rather than enforced by a runner hook. Full driver in cross-runner sessions. |
+| Codex | **Full team, instruction-level safety** | Native Codex roles and skills installed globally, per-role models, shared tools and hooks, and interactive, exec and resume launches. Protected execution controls are guided by instructions rather than enforced by a runner hook. Full driver in cross-runner sessions. |
 | Cross-runner sessions and web workspace | **Experimental** | Local daemon and browser workspace with Claude, Codex and OpenCode drivers; Pi stays on its native workflow. |
-| Adaptive memory | **Optional** | Off by default; Supermemory integration differs per runner and never overrides official artifacts. |
 | Bundled skills | **Supported** | 59 standalone skills shipped as content and cataloged by goal. |
 
 Known gaps are listed explicitly in the [support matrix](docs/reference/support-matrix.md), the single source of truth for runner status.
@@ -172,7 +170,7 @@ Deck previews changes before applying them globally: marker blocks in `$CODEX_HO
 
 > **Warning:** Every non-install-only Codex Developer Team launch passes `--dangerously-bypass-approvals-and-sandbox`. Sandboxing and command approvals are disabled for that Codex process, so it may modify or delete files and run commands without approval. Deck does not persist this bypass in project or global Codex configuration.
 
-See [Runners](docs/runners.md#codex) for MCP, memory, ownership, rollback and known gaps.
+See [Runners](docs/runners.md#codex) for MCP, ownership, rollback and known gaps.
 
 </details>
 
@@ -186,7 +184,6 @@ See [Runners](docs/runners.md#codex) for MCP, memory, ownership, rollback and kn
 | Configure packages, MCP, models or reasoning | [Configuration](docs/configuration.md) |
 | Understand the seven roles and adaptive routing | [Developer Team](docs/developer-team.md) |
 | Browse lifecycle and bundled skills | [Skills](docs/skills.md) |
-| Decide whether memory belongs in your workflow | [Adaptive memory](docs/adaptive-memory.md) |
 | Run updates, rollback or diagnostics | [Operations](docs/operations.md) |
 | Validate OpenSpec or discover project-local skills | [Developer Team](docs/developer-team.md#project-workflows) and [Skills](docs/skills.md#project-local-skills) |
 | Look up exact command forms | [CLI reference](docs/reference/cli.md) |

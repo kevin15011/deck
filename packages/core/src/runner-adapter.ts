@@ -21,7 +21,6 @@ import type {
   DeveloperTeamApplyResult,
 } from "./runner-capability";
 import type { ChildMcpServerSpec, RunnerSessionDriver } from "./session/driver";
-import type { AdaptiveMemoryProvider } from "./memory/adaptive-memory";
 import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles";
 import type { RunnerCapabilitySupportStatus } from "./runner-capability-registry";
 import type {
@@ -92,15 +91,6 @@ export type RunnerUiMetadata = Readonly<{
     remediation: string;
     defaultThinkingLevels: readonly RunnerVariantKey[];
     usesNativeCompatibilityChecks?: boolean;
-  }>;
-  adaptiveMemory?: Readonly<{
-    supermemory: Readonly<{
-      /** False prevents an unverified runner from entering credential setup. */
-      supported?: boolean;
-      requiresExternalToken: boolean;
-      selectionStatus: string;
-      configuredDiagnostics?: readonly string[];
-    }>;
   }>;
 }>;
 
@@ -512,20 +502,6 @@ export type DashboardState = {
   /** Runtime-only descriptor selected by the CLI composition root. */
   webSearchProviderDescriptor?: WebSearchProviderDescriptorV1;
   packageInstructions: Record<string, boolean>;
-  adaptiveMemory: {
-    provider: "none" | "supermemory";
-    supermemory?: {
-      configured: boolean;
-      userId?: string;
-      teamId?: string;
-      organizationId?: string;
-      /** @deprecated Use runtimeCredentialStored for persisted Deck runtime readiness. */
-      hasToken?: boolean;
-      runtimeCredentialStored?: boolean;
-      ephemeralTokenAvailable?: boolean;
-      mcpOAuthReady?: boolean;
-    };
-  };
 };
 
 // ---------------------------------------------------------------------------
@@ -575,9 +551,6 @@ export type RunnerActionContext = {
   dashboardState?: DashboardState;
   /** Runtime-only provider descriptor; never persisted or logged. */
   webSearchProvider?: WebSearchProviderDescriptorV1;
-  supermemoryToken?: string;
-  /** Resolved adaptive memory provider — set by action-runner before calling runAction */
-  resolvedMemoryProvider?: import("./memory/adaptive-memory").AdaptiveMemoryProvider;
 };
 
 export type RunnerActionRunResult = {
@@ -615,7 +588,6 @@ export type DeveloperTeamAdapterInstallInput = {
   changedAgentIds?: readonly string[];
   /** Evidence from successful dynamic-inventory validation, if the runner uses it. */
   validatedInventoryFingerprint?: string;
-  memoryProvider?: AdaptiveMemoryProvider;
   capabilityInstructions?: CapabilityInstructionBundle;
   /** Reviewed capability selections whose runner-native configuration may be materialized. */
   capabilityIds?: readonly string[];
@@ -918,7 +890,7 @@ export interface RunnerAdapter {
 
   /**
    * Build an installation plan for the developer team.
-   * Considers model assignments, thinking assignments, memory provider, and
+   * Considers model assignments, thinking assignments, and
    * capability instructions.
    */
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan;

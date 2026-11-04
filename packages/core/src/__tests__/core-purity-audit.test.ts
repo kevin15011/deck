@@ -41,27 +41,11 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /^"opencode-plugin"$/, reason: "installKind enum value in RunnerCapabilities" },
   // Supermemory is a named adaptive memory provider; any string referencing it as
   // the named provider (not importing from it) is allowed in the config schema.
-  { pattern: /^"supermemory"$/, reason: "named provider key in deck-config schema" },
-  { pattern: /^"supermemory-api-key"$/, reason: "Deck secret-store key for Supermemory credential" },
-  { pattern: /^"adaptiveMemory\.supermemory(?:\.[\w]+)?"$/, reason: "config path in deck-config schema" },
-  { pattern: /^"Supermemory[^"]*"$/, reason: "named provider reference in config/validation messages" },
-  { pattern: /`Invalid Supermemory[^`]*`/, reason: "named provider reference in error message template" },
   { pattern: /Engram has been removed/, reason: "legacy provider migration diagnostic" },
-  { pattern: /supports only disabled or Supermemory/, reason: "adaptive memory config validation diagnostic" },
-  { pattern: /Supermemory effects are disabled/, reason: "canonical provider scope fail-closed diagnostic" },
-  { pattern: /Deprecated Supermemory maxMemoriesPerSession/, reason: "provider config deprecation diagnostic" },
-  { pattern: /canonical-supermemory-project/, reason: "provider-neutral canonical scope resolver module path" },
-  { pattern: /^"\.\/memory\/supermemory-session-scope"$/, reason: "provider-neutral session scope resolver module export path" },
-  { pattern: /When Supermemory is selected/, reason: "adaptive memory instruction content" },
-  { pattern: /Canonical Supermemory Scope/, reason: "adaptive memory instruction content" },
-  { pattern: /Supermemory owns extraction/, reason: "adaptive memory instruction content" },
   // Forbidden content reason string — explains why engram migration content is banned
   { pattern: /^"Engram migration payloads"$/, reason: "content classification label in governance rules" },
   // Provider labels in adaptive memory instruction content
-  { pattern: /^"Provider: Supermemory"$/, reason: "provider label in adaptive memory instruction content" },
   // Tool names in adaptive memory instruction content
-  { pattern: /supermemory_memory/, reason: "Supermemory tool name in adaptive memory instruction content" },
-  { pattern: /supermemory_recall/, reason: "Supermemory tool name in adaptive memory instruction content" },
   // OpenCode references in RTK instruction content about OpenCode hook
   { pattern: /--opencode/, reason: "RTK OpenCode hook flag in instruction content" },
   // Runner ID const arrays in deck-config.ts
@@ -78,7 +62,6 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /^"pi-team-profile"$/, reason: "canonical capability ID with runner prefix" },
   { pattern: /^"opencode-primary-orchestrator"$/, reason: "canonical capability ID with runner prefix" },
   { pattern: /^"opencode-mermaid"$/, reason: "canonical capability ID with runner prefix" },
-  { pattern: /^"supermemory-tool-bindings"$/, reason: "canonical capability ID" },
   // Capability display names: human-readable names with runner prefixes
   { pattern: /^"OpenCode Primary Orchestrator"$/, reason: "capability display name with runner prefix" },
   { pattern: /^"OpenCode Mermaid"$/, reason: "capability display name with runner prefix" },
@@ -93,7 +76,6 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /RTK via Bash hook in OpenCode/, reason: "parity gap notes referencing runner name" },
   { pattern: /Deck init is bundled with OpenCode/, reason: "capability notes referencing runner name" },
   { pattern: /OpenCode Mermaid renderer/, reason: "capability description referencing runner name" },
-  { pattern: /Configure Supermemory MCP with valid credentials/, reason: "parity gap recommended action" },
   { pattern: /Shared binary plus local MCP config in ~\/\.pi\//, reason: "capability notes referencing pi home path" },
   // runner-capability-registry.ts: capability descriptions and notes with runner/provider names
   // These are spec-authored catalog descriptions, not implementation references
@@ -102,24 +84,17 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /Pi Mermaid - internal runner-specific package/, reason: "capability description with runner name" },
   // adaptive-memory.ts: provider description strings in instruction content
   // These describe how to use named providers in agent sessions — spec-authored, not runtime
-  { pattern: /When the configured memory provider is "engram"/, reason: "provider description in adaptive memory instruction" },
-  { pattern: /When the configured memory provider is "supermemory"/, reason: "provider description in adaptive memory instruction" },
   // serena.ts: Serena-specific statement explaining why tools are disabled (OpenCode provides them)
   { pattern: /These tools are explicitly disabled because OpenCode or other packages handle them/, reason: "Serena instruction content explaining tool scope" },
 ];
 
 // Exact shared wire/schema identifiers; these do not import adapter implementations.
 const allowedContractLiterals: Record<string, readonly string[]> = {
-  // Credential recognition is shared privacy policy, not a provider dependency.
-  'memory/capture-redaction.ts': ['(?:authorization|x-api-key|x-supermemory-api-key)'],
-  // Canonical instructions describe each runner's accepted scope contract.
-  'teams/developer/instruction-bundles/adaptive-memory.ts': [
-    '- Pi memory tools bind the project server-side. Official-plugin runners follow their native tool access contract and current project guidance.',
-  ],
+  // Removal-only ownership identities; remove after version-1 install migration support ends.
   // Shared admission transport codes identify a wire outcome, not an adapter dependency.
   'runner-admission.ts': ['opencode-session-preparation-blocked', 'opencode-session-skills-unverified', 'pi-session-skills-unverified'],
   'runner-contributions.ts': ['pi', 'deck-pi-manifest-v1'],
-  'package-retirement.ts': ['opencode'],
+  'package-retirement.ts': ['opencode', 'supermemory'],
   'session/task-continuity.ts': ['opencode-verified-input'],
   'session/context-window.ts': ['opencode-message-input', 'opencode-assistant-context'],
   'session/failure.ts': ['opencode-sse-frame-too-large','opencode-sse-invalid-frame','opencode-http-body-too-large','opencode-http-invalid-body'],

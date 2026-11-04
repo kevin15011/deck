@@ -8,7 +8,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI, ExtensionContext } from "../shared/pi-api";
-import { resolveMemoryHandoff } from "../shared/memory-handoff";
 import { discoverAgents, findAgent } from "./agents";
 import { createChildRunner, type ChildRunnerOptions } from "./runner";
 import { BackgroundJobs, clean } from "./jobs";
@@ -93,7 +92,6 @@ export function createDeckSubagentsExtension(options: DeckSubagentsOptions = {})
       repair: (binding, request) => preparation.repair(binding, request),
       personalToolNames: () => personalPiToolNames(pi.getAllTools?.() ?? []),
       ...(existsSync(join(packageRoot, "package.json")) ? { packageRoot } : {}),
-      memory: () => resolveMemoryHandoff(env),
       ...(options.piInvocation ? { piInvocation: options.piInvocation } : {}),
       ...(options.killGraceMs !== undefined ? { killGraceMs: options.killGraceMs } : {}),
       ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),

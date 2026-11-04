@@ -23,8 +23,7 @@ test.each([
   const lead = new FakeDriver('codex'); (lead as any).supportsInputClaim = true;
   const manager = new SessionManager({ paths, broker: new ApprovalBroker({ sink: { emit() {} } }), credentials,
     supervisor: { spawn() { throw Error('fake process boundary'); } } as unknown as Supervisor, homeDir: home,
-    childMcp: async () => ({ runnerPackages: () => [], resolveServer: () => undefined, nativeMemory: { provider: 'supermemory', integration: 'runner-plugin', status: 'ready', projectScope: 'sm_project_v1_fixture', plugin: { root: home } } }),
-    memory: async () => { throw Error('native capture must not create a Deck writer'); },
+    childMcp: async () => ({ runnerPackages: () => [], resolveServer: () => undefined, }),
     drivers: { get: id => id === 'codex' ? lead : undefined, list: () => [lead] }, sessionMcpCommand: ['fixture'],
     config: () => ({ ...getDefaultDeckConfig().crossRunner!, enabled: true, maxConcurrentTasks: 2, members: { lead: { runnerId: 'codex', modelId: 'fixture' } } }) });
   try {

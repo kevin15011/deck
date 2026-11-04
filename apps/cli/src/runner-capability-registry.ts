@@ -3,7 +3,6 @@
  *
  * This module is the composition root for the Deck CLI. It wires together:
  * - Runner adapter factories (Pi, OpenCode)
- * - Memory provider factories (Supermemory)
  *
  * The registry produces a `RunnerCapabilityCatalog` that maps runner IDs to
  * their `RunnerCapabilities` objects. The CLI entry point (main.tsx) uses
@@ -12,7 +11,7 @@
  * This module MUST NOT import TUI components — only adapters and core.
  */
 
-import { composeRunnerCapabilityContributions, type RunnerCapabilities, type AdaptiveMemoryProvider, type RunnerCapabilityContribution } from "@deck/core";
+import { composeRunnerCapabilityContributions, type RunnerCapabilities, type RunnerCapabilityContribution } from "@deck/core";
 
 // ---------------------------------------------------------------------------
 // Runner adapter factories
@@ -22,31 +21,11 @@ import { createPiRunnerCapabilities, PI_RUNNER_CAPABILITY_CONTRIBUTION } from "@
 import { createOpenCodeRunnerCapabilities, OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION } from "@deck/adapter-opencode";
 import { CODEX_RUNNER_CAPABILITY_CONTRIBUTION } from "@deck/adapter-codex";
 
-// ---------------------------------------------------------------------------
-// Memory provider factories
-// ---------------------------------------------------------------------------
-
-import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import { getWebSearchProviderDescriptor, isSupportedWebSearchProvider, SUPPORTED_WEB_SEARCH_PROVIDER_IDS } from "./web-search-provider";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-/**
- * A memory provider registration entry.
- * The CLI uses this to discover available providers and create provider instances.
- */
-export type MemoryProviderRegistration = {
-  id: string;
-  displayName: string;
-  description?: string;
-  /**
-   * Creates a memory provider instance.
- * Supermemory is the only durable Adaptive Memory backend.
-   */
-  createProvider(config?: Record<string, string>): AdaptiveMemoryProvider;
-};
 
 /**
  * The runner capability catalog produced by the composition root.
@@ -57,9 +36,6 @@ export type RunnerCapabilityCatalog = {
 
   /** Ordered list of registered runner IDs */
   runnerIds: readonly string[];
-
-  /** Registered memory provider factories */
-  memoryProviders: readonly MemoryProviderRegistration[];
 
   /** Provider implementations accepted by the current CLI composition root. */
   webSearchProviderIds: readonly string[];
@@ -80,31 +56,6 @@ export type RunnerCapabilityCatalog = {
   getCapabilityResolver(runnerScope: string): import("@deck/core").RunnerCapabilityResolver | undefined;
 };
 
-// ---------------------------------------------------------------------------
-// Memory provider factory
-// ---------------------------------------------------------------------------
-
-/**
- * Creates the registry of available memory providers.
- *
- * CONTRACT (Repair 2026-05-29):
- * - Supermemory requires no userId/teamId/orgId manual configuration.
- * - The user is derived from the token/OAuth account; Deck binds project scope.
- */
-export function createMemoryProviders(): readonly MemoryProviderRegistration[] {
-  return [
-    {
-      id: "supermemory",
-      displayName: "Supermemory",
-      description: "First-class Adaptive Memory runtime with optional project-scoped external MCP recall that remains unobservable to Deck runtime metrics. Token-only config.",
-      createProvider: () => {
-        // CONTRACT: token-only — no userId required
-        return createSupermemoryMemoryProvider();
-      },
-    },
-  ];
-}
-
 export function createRunnerParityContributions(): readonly RunnerCapabilityContribution[] {
   const contributions = Object.freeze([
     PI_RUNNER_CAPABILITY_CONTRIBUTION,
@@ -124,8 +75,7 @@ export function createRunnerParityContributions(): readonly RunnerCapabilityCont
  *
  * This function:
  * 1. Creates RunnerCapabilities objects for each supported runner (Pi, OpenCode)
- * 2. Registers available memory providers
- * 3. Returns a catalog that maps runner IDs to capabilities
+ * 2. Returns a catalog that maps runner IDs to capabilities
  *
  * The TUI receives the catalog from the composition root; it never imports
  * adapter packages directly.
@@ -147,13 +97,9 @@ export function createRunnerCapabilityRegistry(): RunnerCapabilityCatalog {
 
   const runnerIds = Object.keys(runners);
 
-  // Create memory provider registrations
-  const memoryProviders = createMemoryProviders();
-
   return {
     runners,
     runnerIds: runnerIds as readonly string[],
-    memoryProviders,
     webSearchProviderIds: SUPPORTED_WEB_SEARCH_PROVIDER_IDS,
     getWebSearchProvider(provider: string | undefined) {
       return isSupportedWebSearchProvider(provider) ? getWebSearchProviderDescriptor(provider) : undefined;

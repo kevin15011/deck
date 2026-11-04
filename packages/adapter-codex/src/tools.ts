@@ -17,14 +17,6 @@ import {
   type RtkReleaseArtifact,
 } from "@deck/core";
 import { assertTrustedAncestors, ensurePrivatePath } from "./private-path";
-import { configureCodexSupermemoryCapture } from "./supermemory-settings";
-import {
-  CODEX_SUPERMEMORY_ROOT_NAME,
-  inspectCodexSupermemoryArtifact,
-  installCodexSupermemoryArtifact,
-  type CodexSupermemoryArtifactEffects,
-  type CodexSupermemoryFileEntry,
-} from "./supermemory-artifact";
 
 /** Pinned shared npm release, identical to the Claude adapter's reviewed Context Mode version. */
 export const CODEX_CONTEXT_MODE_PACKAGE = "context-mode@1.0.169";
@@ -54,8 +46,6 @@ export type CodexToolOptions = {
   /** Absolute Node.js used by Deck-owned hook scripts; production resolves `node` and checks the version. */
   nodeCommand?: string;
   verifyNodeRuntime?: (executable: string) => boolean;
-  supermemoryArtifactEffects?: CodexSupermemoryArtifactEffects;
-  supermemoryManifest?: readonly CodexSupermemoryFileEntry[];
 };
 
 function runVersion(executable: string, home: string, args: readonly string[] = ["--version"]) {
@@ -88,7 +78,7 @@ export function createCodexTools(options: CodexToolOptions = {}) {
     } catch { return undefined; }
   };
 
-  // ---- Node.js (needed by Deck-owned RTK and Supermemory hook scripts) ----
+  // ---- Node.js (needed by Deck-owned RTK hook scripts) ----
   const verifyNode = options.verifyNodeRuntime ?? ((executable: string) => {
     const probe = runVersion(executable, home);
     return probe.status === 0 && Number(`${probe.stdout}`.trim().match(/^v(\d+)\./)?.[1] ?? 0) >= CODEX_MIN_NODE_MAJOR;
@@ -186,15 +176,6 @@ export function createCodexTools(options: CodexToolOptions = {}) {
     return code === 0 && (id === "context7" ? context7Command() : contextModeCommand()) !== undefined;
   };
 
-  // ---- Official Supermemory plugin hooks ----
-  const supermemoryRoot = join(toolRoot, CODEX_SUPERMEMORY_ROOT_NAME);
-  const supermemoryState = (): "absent" | "ready" | "conflict" => {
-    try {
-      assertTrustedAncestors(supermemoryRoot, home);
-      return inspectCodexSupermemoryArtifact(supermemoryRoot, options.supermemoryManifest);
-    } catch { return "conflict"; }
-  };
-
   return Object.freeze({
     home,
     dataRoot,
@@ -236,21 +217,6 @@ export function createCodexTools(options: CodexToolOptions = {}) {
     }),
     contextMode: Object.freeze({ command: contextModeCommand, install: () => installSharedTool("context-mode") }),
     context7: Object.freeze({ command: context7Command, install: () => installSharedTool("context7") }),
-    supermemory: Object.freeze({
-      root: supermemoryRoot,
-      state: supermemoryState,
-      /** Absolute hook script paths, only when the pinned artifact verifies. */
-      proxy: (): string | undefined => supermemoryState() === "ready" ? join(supermemoryRoot, "mcp-proxy.js") : undefined,
-      scripts: (): { recall: string; flush: string } | undefined => supermemoryState() === "ready" ? { recall: join(supermemoryRoot, "recall.js"), flush: join(supermemoryRoot, "flush.js") } : undefined,
-      async install(): Promise<"installed" | "unchanged"> {
-        await ensurePrivatePath(toolRoot, home);
-        const result = await installCodexSupermemoryArtifact(supermemoryRoot, options.supermemoryArtifactEffects, options.supermemoryManifest);
-        if (supermemoryState() !== "ready") throw new Error("Official artifact verification failed.");
-        await configureCodexSupermemoryCapture(home);
-        recordOwnedRunnerArtifactTree({ runnerId: "codex", root: options.codexHome ?? join(home, ".codex"), manifestPath: join(options.codexHome ?? join(home, ".codex"), "deck", "manifest.json"), artifactRoot: supermemoryRoot, sourceItemId: "package:supermemory" });
-        return result;
-      },
-    }),
   });
 }
 

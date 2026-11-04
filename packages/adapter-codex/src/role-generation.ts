@@ -12,7 +12,7 @@ export function codexRoleGeneration(): string {
     schema: 1,
     sessionStartDelivery: 2,
     manifest: buildDeveloperTeamManifest({team:DEVELOPER_TEAM}).manifest,
-    capabilities: translateCodexCapabilityInstructions(buildCapabilityInstructionBundle(["adaptive-memory", "codebase-memory", "code-economy", "rtk", "web-search"])),
+    capabilities: translateCodexCapabilityInstructions(buildCapabilityInstructionBundle(["codebase-memory", "code-economy", "rtk", "web-search"])),
     roleSelection: CODEX_ROLE_SELECTION,
     policy: ROLE_TOOL_POLICY,
   })).digest("hex");

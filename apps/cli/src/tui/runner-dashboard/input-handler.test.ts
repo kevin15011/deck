@@ -28,8 +28,8 @@ describe("Pi Runner dashboard input mapping", () => {
       action: { type: "navigate", screen: "packages-detail" },
     });
 
-    // cursor: 4 = Review & Install after the first-class Web Search section
-    state = createDefaultPiRunnerDashboardState({ cursor: 4 });
+    // cursor: 3 = Review & Install after the first-class Web Search section
+    state = createDefaultPiRunnerDashboardState({ cursor: 3 });
     const effect = getPiRunnerDashboardContinueEffect(state, { inventory });
     expect(effect).toMatchObject({ type: "dispatch", action: { type: "enter-review" } });
     if (effect.type === "dispatch") {
@@ -39,15 +39,15 @@ describe("Pi Runner dashboard input mapping", () => {
     }
   });
 
-  test("OpenCode omits Deck adaptive-memory instructions while Pi and Codex retain them", () => {
-    const expected = ["codebase-memory", "rtk", "adaptive-memory"] as const;
+  test("runners expose the remaining supported package instructions", () => {
+    const expected = ["codebase-memory", "rtk"] as const;
     for (const runnerId of ["pi", "opencode", "codex"] as const) {
       const adapter = getAdapter(runnerId);
       const resolver: CapabilityResolver = {
         getSupportedPackageInstructionIds: () => adapter.packageInstructionIds ?? [],
       };
       const state = createDefaultPiRunnerDashboardState({ runnerScope: runnerId, screen: "packages-detail" });
-      const runnerExpected = runnerId === "opencode" ? expected.filter((id) => id !== "adaptive-memory") : [...expected];
+      const runnerExpected = [...expected];
       expect(getToggleablePackageInstructionIds(state, resolver)).toEqual(runnerExpected);
       expect(getDashboardSectionSummaries(state, resolver)[0]).toMatchObject({ totalCount: runnerExpected.length, selectedCount: runnerExpected.length - 1 });
     }
@@ -117,57 +117,6 @@ describe("Pi Runner dashboard input mapping", () => {
     };
     const state = createDefaultPiRunnerDashboardState({ runnerScope: "synthetic", screen: "packages-detail" });
     expect(getToggleablePackageInstructionIds(state, resolver)).toEqual(["codebase-memory", "rtk"]);
-  });
-
-  test("seleccionar Supermemory abre setup y bloquea ejecución hasta configurar", () => {
-    let state = createDefaultPiRunnerDashboardState({ screen: "adaptive-memory-detail", cursor: 1 });
-    const setupEffect = getPiRunnerDashboardContinueEffect(state, { inventory });
-    expect(setupEffect).toMatchObject({
-      type: "select-supermemory-and-open-setup",
-      action: { type: "select-adaptive-memory", provider: "supermemory" },
-    });
-
-    if (setupEffect.type === "select-supermemory-and-open-setup") state = reduce(state, setupEffect.action);
-    state = reduce(state, { type: "enter-review", inventory });
-    state = {
-      ...state,
-      cursor: 0,
-      plan: { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } },
-      planGeneratedForRevision: state.planRevision,
-    };
-
-    expect(getPiRunnerDashboardContinueEffect(state, { inventory, canRunPlan: false })).toEqual({
-      type: "block-review-install",
-      status: "Supermemory requires token captured before executing Review & Install.",
-    });
-  });
-
-  test("OpenCode Supermemory selection opens runtime token setup before optional OAuth", () => {
-    const state = createDefaultPiRunnerDashboardState({
-      runnerScope: "opencode",
-      runnerUi: getAdapter("opencode").ui,
-      screen: "adaptive-memory-detail",
-      cursor: 1,
-    });
-
-    expect(getPiRunnerDashboardContinueEffect(state, { inventory })).toEqual({
-      type: "select-supermemory-and-open-setup",
-      action: { type: "select-adaptive-memory", provider: "supermemory" },
-    });
-  });
-
-  test("Codex Supermemory selection opens runtime token setup before optional OAuth", () => {
-    const state = createDefaultPiRunnerDashboardState({
-      runnerScope: "codex",
-      runnerUi: getAdapter("codex").ui,
-      screen: "adaptive-memory-detail",
-      cursor: 1,
-    });
-
-    expect(getPiRunnerDashboardContinueEffect(state, { inventory })).toEqual({
-      type: "select-supermemory-and-open-setup",
-      action: { type: "select-adaptive-memory", provider: "supermemory" },
-    });
   });
 
   test("Developer Team detail model config/back y Review blocked/unblocked mapean acciones críticas", () => {

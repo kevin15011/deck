@@ -9,5 +9,5 @@ export function liveApprovalDecision(pending: PendingApproval, events: readonly 
   const runner = event?.source.runnerId;
   const prefix = runner === "codex" ? `mcp__deck-session-${pending.taskId}-deck__` : runner === "opencode" ? "deck_" : "mcp__deck__";
   if (!tool.startsWith(prefix)) return "deny";
-  return ["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel", "deck_memory_recall", "deck_memory_propose", "deck_status"].includes(tool.slice(prefix.length)) ? "allow-once" : "deny";
+  return ["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel", "deck_session_history", "deck_status"].includes(tool.slice(prefix.length)) ? "allow-once" : "deny";
 }

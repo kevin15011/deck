@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createRunnerCapabilityRegistry, createMemoryProviders, createRunnerParityContributions, type MemoryProviderRegistration, type RunnerCapabilityCatalog } from "./runner-capability-registry";
+import { createRunnerCapabilityRegistry, createRunnerParityContributions } from "./runner-capability-registry";
 import { composeRunnerCapabilityContributions } from "@deck/core";
 
 describe("runner-capability-registry", () => {
@@ -8,30 +8,6 @@ describe("runner-capability-registry", () => {
     const forward = composeRunnerCapabilityContributions(contributions);
     const reversed = composeRunnerCapabilityContributions([...contributions].reverse());
     expect(reversed).toEqual(forward);
-  });
-
-  describe("createMemoryProviders", () => {
-    test("creates supermemory memory provider factory", () => {
-      const providers = createMemoryProviders();
-      const supermemoryFactory = providers.find((p) => p.id === "supermemory");
-      expect(supermemoryFactory).toBeDefined();
-      expect(supermemoryFactory?.id).toBe("supermemory");
-    });
-
-    test("returns array of memory provider registrations", () => {
-      const providers = createMemoryProviders();
-      expect(Array.isArray(providers)).toBe(true);
-      expect(providers.length).toBe(1);
-    });
-
-    test("each provider has required metadata fields", () => {
-      const providers = createMemoryProviders();
-      for (const provider of providers) {
-        expect(typeof provider.id).toBe("string");
-        expect(provider.id.length).toBeGreaterThan(0);
-        expect(typeof provider.displayName).toBe("string");
-      }
-    });
   });
 
   describe("createRunnerCapabilityRegistry", () => {
@@ -73,7 +49,6 @@ describe("runner-capability-registry", () => {
         expect(runner).toHaveProperty("tools");
         expect(runner).toHaveProperty("teams");
         expect(runner).toHaveProperty("models");
-        expect(runner).toHaveProperty("memory");
 
         // Tool capabilities
         expect(typeof runner.tools.buildInstallationPlan).toBe("function");
@@ -92,31 +67,12 @@ describe("runner-capability-registry", () => {
         expect(typeof runner.models.readAssignments).toBe("function");
         expect(typeof runner.models.resolveAssignment).toBe("function");
 
-        // Memory capabilities
-        expect(typeof runner.memory.getProviders).toBe("function");
-        expect(typeof runner.memory.getSupportedProviderIds).toBe("function");
-      }
-    });
-
-    test("each runner returns supported provider IDs", () => {
-      const catalog = createRunnerCapabilityRegistry();
-
-      for (const runner of Object.values(catalog.runners)) {
-        const supportedIds = runner.memory.getSupportedProviderIds();
-        expect(Array.isArray(supportedIds)).toBe(true);
-        expect(supportedIds).toContain("supermemory");
       }
     });
 
     test("catalog exposes runner IDs", () => {
       const catalog = createRunnerCapabilityRegistry();
       expect(catalog.runnerIds).toEqual(["pi", "opencode"]);
-    });
-
-    test("catalog exposes memory provider registrations", () => {
-      const catalog = createRunnerCapabilityRegistry();
-      expect(Array.isArray(catalog.memoryProviders)).toBe(true);
-      expect(catalog.memoryProviders.length).toBe(1);
     });
 
     test("catalog exposes only the reviewed Web Search provider", () => {
@@ -128,15 +84,6 @@ describe("runner-capability-registry", () => {
         implementationId: "tavily-mcp",
       });
       expect(catalog.getWebSearchProvider("future-provider")).toBeUndefined();
-    });
-  });
-
-  describe("memory provider registration", () => {
-    test("memory providers are registered with only Supermemory", () => {
-      const providers = createMemoryProviders();
-      const ids = providers.map((p) => p.id);
-
-      expect(ids).toEqual(["supermemory"]);
     });
   });
 

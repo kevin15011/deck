@@ -123,29 +123,6 @@ describe("DeveloperTeamManifest", () => {
       expect(orchestrator?.reasoning).toBe("high");
     });
 
-    test("manifest has empty memory diagnostics by default", () => {
-      const result = buildDeveloperTeamManifest({
-        team: { id: "developer-team", displayName: "Developer Team" },
-      });
-
-      expect(Array.isArray(result.manifest.memoryDiagnostics)).toBe(true);
-      expect(result.manifest.memoryDiagnostics).toHaveLength(0);
-    });
-
-    test("manifest passes memory diagnostics through", () => {
-      const diagnostics = [
-        { code: "test", message: "Test diagnostic", providerId: "test-provider" },
-      ];
-
-      const result = buildDeveloperTeamManifest({
-        team: { id: "developer-team", displayName: "Developer Team" },
-        memoryDiagnostics: diagnostics,
-      });
-
-      expect(result.manifest.memoryDiagnostics).toHaveLength(1);
-      expect(result.manifest.memoryDiagnostics[0].code).toBe("test");
-    });
-
     test("returns ManifestBuildResult with empty errors and warnings in non-strict mode", () => {
       const result = buildDeveloperTeamManifest({
         team: { id: "developer-team", displayName: "Developer Team" },
@@ -191,31 +168,6 @@ describe("DeveloperTeamManifest", () => {
       expect(result.errors.length).toBeGreaterThan(0);
       expect(result.errors.some(e => e.includes("non-existent-agent"))).toBe(true);
     });
-
-    test("strict:true with memoryBundle and capabilityInstructions produces warning for same surface", () => {
-      const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
-      // memoryBundle has agent-surface instructions for specific agents
-      // capabilityInstructions also has agent-surface instructions (global)
-      // Both target agent surface → conflict
-      const result = buildDeveloperTeamManifest({
-        team: { id: "developer-team", displayName: "Developer Team" },
-        strict: true,
-        capabilityInstructions: bundle,
-        memoryBundle: {
-          instructions: [
-            {
-              surface: "agent",
-              markdown: "## Memory instructions for agents",
-              agentIds: ["deck-lead"],
-            },
-          ],
-          toolBindings: [],
-        },
-      });
-
-      expect(result.warnings.length).toBeGreaterThan(0);
-      expect(result.warnings.some(w => w.includes("Memory and capability both inject"))).toBe(true);
-    });
   });
 
   describe("isManifestModelComplete", () => {
@@ -236,7 +188,6 @@ describe("DeveloperTeamManifest", () => {
           { agentId: "deck-investigate", displayName: "Explorer", instruction: "test" }, // no model
         ],
         skills: [],
-        memoryDiagnostics: [],
       };
 
       expect(isManifestModelComplete(manifest)).toBe(false);
@@ -315,23 +266,6 @@ describe("DeveloperTeamManifest", () => {
       const explorer = result.manifest.agents.find((a) => a.agentId === "deck-investigate");
       expect(explorer!.instruction).toContain("Codebase Memory");
       expect(explorer!.instruction).toContain("RTK");
-    });
-
-    test("memoryBundle and capabilityInstructions coexist in manifest output", () => {
-      const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
-      const result = buildDeveloperTeamManifest({
-        team: { id: "developer-team", displayName: "Developer Team" },
-        capabilityInstructions: bundle,
-        memoryBundle: {
-          instructions: [],
-          toolBindings: [],
-        },
-      });
-
-      // Both should be present (they coexist independently)
-      const explorer = result.manifest.agents.find((a) => a.agentId === "deck-investigate");
-      expect(explorer!.memoryBundle).toBeDefined();
-      expect(explorer!.instruction).toContain("## Package Instructions");
     });
 
     test("empty bundle does not inject instructions", () => {

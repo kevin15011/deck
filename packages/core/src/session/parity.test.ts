@@ -5,11 +5,11 @@ const readiness = () => {
   const snapshot = { snapshotId: "fixture", scope: { projectRoot: "/fixture", sessionId: "s", epoch: "e", policyDigest: "p", members: [] }, observations: [] };
   return projectReadinessParity(snapshot, "", readinessContext(snapshot));
 };
-const base = (): ParityLaunchShape => ({ roleSource: { kind: "native-agent", ref: "deck-quality", hash: "h" }, roleTools: { builtins: ["read"], mcpAllowed: [], mcpDefault: "deny" }, skillsRoots: [], skillPreload: [], plugins: [], hooks: [], executionPolicy: [], mcpNative: { context7: "h" }, mcpAdded: [], mcpOverridden: [], webSearch: { route: "native" }, memory: { scope: "project", envSecrets: [] }, settingSources: "user", projectInstructions: "native-hook", permissionMode: "native", delegation: "native", overlaySections: [], sessionStartContext: readiness() });
+const base = (): ParityLaunchShape => ({ roleSource: { kind: "native-agent", ref: "deck-quality", hash: "h" }, roleTools: { builtins: ["read"], mcpAllowed: [], mcpDefault: "deny" }, skillsRoots: [], skillPreload: [], plugins: [], hooks: [], executionPolicy: [], mcpNative: { context7: "h" }, mcpAdded: [], mcpOverridden: [], webSearch: { route: "native" }, settingSources: "user", projectInstructions: "native-hook", permissionMode: "native", delegation: "native", overlaySections: [], sessionStartContext: readiness() });
 const opts = { runner: "claude", roleId: "deck-quality", allow: [], now: "2026-10-27", necessityTestExists: () => true };
 test("guard detects unlisted, protected and unsafe native differences without normalization", () => {
   expect(diffParity(base(), base(), opts)).toEqual([]);
-  for (const field of ["mcpNative", "webSearch", "roleTools", "memory"] as const) {
+  for (const field of ["mcpNative", "webSearch", "roleTools"] as const) {
     const session = base(); (session as any)[field] = { bad: true, scope: "project", builtins: [], mcpDefault: "deny" };
     expect(diffParity(base(), session, opts).some(e => e.startsWith(field))).toBe(true);
   }
@@ -25,13 +25,10 @@ test("exceptions must be used, necessity backed and temporary dates valid", () =
   expect(diffParity(base(), base(), { ...opts, allow: [override] })).toContain("mcpOverridden: unused-entry");
   const rebound = base(); rebound.mcpOverridden = ["codebase-memory"];
   expect(diffParity(base(), rebound, { ...opts, allow: [override], necessityTestExists: () => false })).toContain("necessity-test-missing");
-  const global = base(); global.memory = { scope: "global", envSecrets: ["TRANSPORT"] };
-  const native = base(); native.memory = { scope: "off", envSecrets: [] };
-  const memory = SESSION_PARITY_ALLOWLIST.find(e => e.field === "memory" && e.runner === "claude")!;
-  expect(diffParity(native, global, opts)).toContain("memory: unlisted-difference");
-  expect(diffParity(native, global, { ...opts, allow: [memory] })).toEqual([]);
-  expect(diffParity(native, global, { ...opts, allow: [memory], now: "2026-11-24" })).toContain("temporary-entry-invalid-or-expired");
-  expect(diffParity(native, global, { ...opts, allow: [{ ...memory, temporary: undefined }] })).toContain("temporary-entry-invalid-or-expired");
+  const native = base(), changed = base(); changed.settingSources = "foreign";
+  const temporary = { runner: "claude", field: "settingSources", rule: "fixture", category: "temporary-tracked", justification: "Fixture", temporary: { owner: "fixture", expiresWhen: "fixture ends", reviewBy: "2026-11-23" } } as const;
+  expect(diffParity(native, changed, { ...opts, allow: [temporary], now: "2026-11-24" })).toContain("temporary-entry-invalid-or-expired");
+  expect(diffParity(native, changed, { ...opts, allow: [{ ...temporary, temporary: undefined }] })).toContain("temporary-entry-invalid-or-expired");
 });
 test("coordination cannot waive native channel, base or equal-scope bytes", () => {
   const allow = SESSION_PARITY_ALLOWLIST.filter(e => e.field === "sessionStartContext.coordination");

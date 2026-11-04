@@ -76,7 +76,6 @@ export function getPiInstalledNextSteps(): string[] {
   return [
     "Review required tools",
     `Configure models ${placeholder()}`,
-    `Configure memory ${placeholder()}`,
     `Install environment ${placeholder()}`,
   ];
 }

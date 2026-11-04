@@ -104,7 +104,6 @@ describe("Pi installation next steps", () => {
     expect(getPiInstalledNextSteps()).toEqual([
       "Review required tools",
       `Configure models ${placeholder()}`,
-      `Configure memory ${placeholder()}`,
       `Install environment ${placeholder()}`,
     ]);
   });

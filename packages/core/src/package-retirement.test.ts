@@ -41,7 +41,7 @@ test('a retired owned symlink is removed as a link without reading or deleting i
   expect(existsSync(path)).toBe(false); expect(readFileSync(target, 'utf8')).toBe('private user bytes');
 });
 
-import { beginRunnerContributions, readRunnerContributions, canonicalContributionJson, contributionHash } from './runner-contributions';
+import { beginRunnerContributions, readRunnerContributions, canonicalContributionJson, contributionHash, contributionId } from './runner-contributions';
 for (const array of [false, true]) test(`grouped adjacent tail ${array ? 'array' : 'object'} removal publishes strict JSON and retryable receipts`, () => {
   const root = mkdtempSync(join(tmpdir(), 'deck-retirement-tail-'));
   const path = join(root, 'mcp.json'), manifestPath = join(root, 'manifest.json');
@@ -228,3 +228,47 @@ test('malformed legacy receipt rows remain preserved diagnostics rather than pla
   expect(plan.diagnostics).toHaveLength(1);
   expect(JSON.parse(readFileSync(f.path,'utf8')).mcpServers.serena.command).toBe('user-serena');
 });
+
+test('an edited receipt overrides dedicated location ownership during decommissioning', () => {
+  const f = fixture();
+  const target = { path: f.path, selector: { kind: 'json' as const, keys: ['mcpServers', 'serena'] } };
+  const manifestPath = join(f.root, 'contributions.json');
+  const transaction = beginRunnerContributions({ runnerId: 'pi', root: f.root, manifestPath, deckVersion: 'test', targets: [target], dedicatedRoots: [f.root] });
+  transaction.commit();
+  const contributions = readRunnerContributions(manifestPath)!.contributions;
+  expect(contributions).toHaveLength(1);
+  writeFileSync(f.path, readFileSync(f.path, 'utf8').replace('user-serena', 'customized-serena'));
+  const before = readFileSync(f.path, 'utf8');
+  const plan = planPackageRetirement({ runnerId: 'pi', targets: [{ path: f.path, format: 'json', container: ['mcpServers'] }], dedicatedRoots: [f.root], contributions });
+  expect(plan.entries[0]!.action).toBe('preserve');
+  expect(plan.entries[0]!.reason).toContain('changed');
+  applyPackageRetirement(plan, []);
+  expect(readFileSync(f.path, 'utf8')).toBe(before);
+});
+
+// Protects shared config entries under dedicated roots: only exact granular receipts authorize unattended removal.
+for (const format of ["json", "json-array", "toml"] as const) {
+ for (const evidence of ["missing", "matching", "invalid", "edited"] as const) {
+  test(`retired shared ${format} entries require receipts: ${evidence}`, () => {
+   const root=mkdtempSync(join(tmpdir(),"deck-retired-config-"));
+   const path=join(root,format === "toml" ? "config.toml" : "config.json");
+   const ids=["supermemory","deck-memory","adaptive-memory"];
+   const value={command:"/fixture/owned"};
+   const original=format === "toml" ? ids.map(id=>`[mcp_servers.${id}]\ncommand = "/fixture/owned"`).join("\n")+`\n[mcp_servers.keep]\ncommand = "/fixture/keep"\n` : JSON.stringify({mcpServers:format === "json-array" ? [...ids,"keep"] : Object.fromEntries([...ids.map(id=>[id,value]),["keep",{command:"/fixture/keep"}]])});
+   writeFileSync(path,original);
+   const target={path,format:format === "toml" ? "toml" as const : "json" as const,container:["mcpServers"],array:format === "json-array"};
+   const initial=planPackageRetirement({runnerId:"pi",targets:[target],dedicatedRoots:[root]});
+   // Receipts are independently hashed from the known fixture contribution values.
+   const contributions=initial.entries.map(entry=>({...entry.contribution!,id:contributionId(entry.contribution!),hash:evidence === "invalid" ? "invalid" : contributionHash(format === "toml" ? `[mcp_servers.${entry.capability}]\ncommand = "/fixture/owned"` : canonicalContributionJson(format === "json-array" ? entry.capability : value)),encoding:"bytes" as const,ownership:"prior-record" as const,scope:"global" as const}));
+   if(evidence === "edited") writeFileSync(path,ids.reduce((text,id)=>text.replaceAll(JSON.stringify(id),JSON.stringify(`${id}@custom`)),original.replaceAll("/fixture/owned","/fixture/custom")));
+   const before=readFileSync(path,"utf8");
+   const plan=planPackageRetirement({runnerId:"pi",targets:[target],dedicatedRoots:[root],contributions:evidence === "missing" ? [] : contributions});
+   applyPackageRetirement(plan,[]);
+   if(evidence === "matching") {
+    expect(plan.entries.every(entry=>entry.action === "remove")).toBe(true);
+    expect(readFileSync(path,"utf8")).toContain("keep");
+    expect(readFileSync(path,"utf8")).not.toContain("supermemory");
+   } else expect(readFileSync(path,"utf8")).toBe(before);
+  });
+ }
+}

@@ -1,4 +1,4 @@
-import type { DriverEvent, NativeMemoryDescriptor } from "@deck/core/session/driver";
+import type { DriverEvent } from "@deck/core/session/driver";
 import { boundRaw, HOOK_STATUSES, sanitizeContextObservation } from "@deck/core/session/events";
 import { redactText } from "@deck/core/session/redaction";
 import { object, type RpcMessage } from "./rpc";
@@ -12,7 +12,7 @@ function bounded(value: unknown): unknown {
 export function codexTurnStatus(value: unknown): "completed" | "interrupted" | "failed" {
   return value === "completed" ? "completed" : value === "interrupted" ? "interrupted" : "failed";
 }
-export function mapCodexNotification(message: RpcMessage, nativeMemory?: NativeMemoryDescriptor): DriverEvent[] {
+export function mapCodexNotification(message: RpcMessage): DriverEvent[] {
   const p = object(message.params), item = object(p.item), turn = object(p.turn);
   const event = (kind: string, data: Record<string, unknown>): DriverEvent[] => [{ kind, data, raw: message }];
   switch (message.method) {
@@ -23,17 +23,12 @@ export function mapCodexNotification(message: RpcMessage, nativeMemory?: NativeM
       if (!hookId) return [{ kind: "diagnostic", data: { code: "codex-hook-invalid" } }];
       const nativeEvent = typeof run.eventName === "string" ? run.eventName : "";
       const hookEvent = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/.test(nativeEvent) ? nativeEvent : "unknown";
-      const attributed = nativeMemory?.status === "ready" && (
-        run.source === "plugin" && typeof nativeMemory.plugin?.hookConfigPath === "string" && run.sourcePath === nativeMemory.plugin.hookConfigPath
-        || run.source === "sessionFlags" && nativeMemory.plugin?.exclusiveHookEvents?.includes(nativeEvent)
-      );
       return [{ kind: message.method === "hook/started" ? "hook.started" : "hook.completed", data: {
         hookId, hookEvent, hookName: hookEvent, provenance: CODEX_PROTOCOL,
         status: (HOOK_STATUSES as readonly unknown[]).includes(run.status) ? run.status : "unknown",
         ...(["sync", "async"].includes(String(run.executionMode)) ? { executionMode: run.executionMode } : {}),
         ...(["command", "mcpTool", "prompt", "agent"].includes(String(run.handlerType)) ? { handlerType: run.handlerType } : {}),
         ...(typeof run.durationMs === "number" && Number.isFinite(run.durationMs) && run.durationMs >= 0 ? { durationMs: run.durationMs } : {}),
-        ...(attributed ? { provider: "supermemory", integration: "runner-plugin" } : {}),
       } }];
     }
     case "turn/started": return event("turn.started", { nativeTurnId: turn.id, nativeThreadId: p.threadId });

@@ -13,13 +13,12 @@ const sourceExtensions = new Set([".ts", ".tsx"]);
 const forbiddenAdapterImports = new Set([
   "@deck/adapter-pi",
   "@deck/adapter-opencode",
-  "@deck/adapter-supermemory",
 ]);
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const tuiSourceDir = join(testDir, "../tui");
 
-// TODO(hexagonal-architecture-memory-refactor): app.tsx and developer-team-screens.tsx are temporarily
+// TODO(hexagonal-architecture-refactor): app.tsx and developer-team-screens.tsx are temporarily
 // allowed to keep adapter imports as runtime glue until orchestration moves out of TUI.
 const temporarilyAllowedFiles = new Set(["app.tsx", "screens/developer-team-screens.tsx"]);
 

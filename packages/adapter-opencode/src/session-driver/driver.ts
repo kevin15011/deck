@@ -1,5 +1,3 @@
-import { drainNativeCapture, type CaptureTicket } from "./capture-drain";
-import type { NativeCaptureOutcome } from "@deck/core/session/driver";
 import { acquireInstallationUse } from "../../../core/src/installation-use";
 import { verifyOpenCodeNativeRole } from "../native-role";
 import { ROLE_TOOL_POLICY, readOnlyMcpTools, isReadOnlyRole } from "@deck/core/session/role-tool-policy";
@@ -42,10 +40,7 @@ class OpenCodeTask {
   private child!: SupervisedChild;
   private installationUse?: ReturnType<typeof acquireInstallationUse>;
   private current?: Turn;
-  private captureTicket?: CaptureTicket;
   private lastOutcome?: TurnOutcome;
-  private readonly captureAbort = new AbortController();
-  capture: NativeCaptureOutcome = { lifecycle: 'unknown', acceptance: 'unknown', reason: 'native-lifecycle-unobserved' };
   private readonly lifetime = new AbortController();
   private closed = false;
   private closing?: Promise<void>;
@@ -101,7 +96,6 @@ class OpenCodeTask {
 
   async initialize(): Promise<void> {
     const launch = buildOpenCodeLaunch(this.input, this.io, this.options);
-    this.captureTicket = launch.captureTicket;
     this.authorization = `Basic ${Buffer.from(`opencode:${launch.env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`;
     const root = this.input.nativeRoleDescriptor?.source.root;
     if (root) this.installationUse = acquireInstallationUse(root);
@@ -159,11 +153,6 @@ class OpenCodeTask {
       if (pendingProject.length) this.emit({ kind: "diagnostic", data: { code: "personal-mcp.sources", servers: pendingProject } });
       if (launch.expectedPlugins.length && (!Array.isArray(config.plugin) || launch.expectedPlugins.some(plugin => !config.plugin.includes(plugin)))) throw new Error("opencode-plugin-isolation-violation");
       if (launch.expectedGlobalSkillPaths.some(path => !Array.isArray(config.skills?.paths) || !config.skills.paths.includes(path))) throw new Error("opencode-global-skills-unavailable");
-      if (this.input.nativeMemory?.status === "ready") {
-        const tools = await this.request("/experimental/tool/ids", undefined, startupSignal);
-        if (!Array.isArray(tools) || !tools.includes("supermemory")) throw new Error("opencode-native-memory-tool-unavailable");
-        this.emit({ kind: "diagnostic", data: { code: "native-memory-capture-unverified", provider: "supermemory", runnerId: "opencode", message: "Native Supermemory recall and explicit tools are enabled. Automatic capture completion is not acknowledged by this managed server lifecycle." } });
-      }
       const agents = await this.request("/agent", undefined, startupSignal);
       const nativeAgent = Array.isArray(agents) ? agents.find(agent => record(agent) && agent.name === (this.input.nativeRoleDescriptor?.roleRef ?? config.default_agent ?? "build")) : undefined;
       if (!record(nativeAgent) || !Array.isArray(nativeAgent.permission)) throw new Error("opencode-native-permission-policy-unavailable");
@@ -459,7 +448,6 @@ Patterns: ${raw.always.join("\n")}`,
   }
 
   async interrupt(): Promise<void> {
-    this.captureAbort.abort();
     const turn = this.current; if (!turn || turn.interrupted || this.serverDead) return;
     turn.interrupted = true;
     turn.timer = setTimeout(() => {
@@ -479,11 +467,6 @@ Patterns: ${raw.always.join("\n")}`,
     this.closed = true;
     return this.closing = (async () => {
       if (this.transportCleanup) { await this.transportCleanup; await this.stream; return; }
-      if (this.captureTicket && this.lastOutcome?.status === 'completed' && !this.serverDead && !this.current) {
-        this.capture = await drainNativeCapture(this.captureTicket, this.nativeId,
-          signal => this.request(`/instance/dispose?directory=${encodeURIComponent(this.input.cwd)}`, {}, signal),
-          AbortSignal.any([this.captureAbort.signal, this.lifetime.signal]));
-      }
       this.finish({ status: "interrupted-forced" }); this.lifetime.abort();
       if (this.child) await this.terminate();
       await this.stream;
@@ -511,7 +494,7 @@ export function createOpenCodeSessionDriver(options: OpenCodeSessionDriverOption
         verifyOpenCodeNativeRole(input.nativeRoleDescriptor);
       }
       const task = new OpenCodeTask(input, io, options); await task.initialize();
-      return { nativeSessionId: Promise.resolve(task.id), done: task.send(input.prompt, input.images), send: (prompt, images) => task.send(prompt, images), interrupt: () => task.interrupt(), close: () => task.close(), captureOutcome: () => task.capture };
+      return { nativeSessionId: Promise.resolve(task.id), done: task.send(input.prompt, input.images), send: (prompt, images) => task.send(prompt, images), interrupt: () => task.interrupt(), close: () => task.close() };
     },
   };
 }

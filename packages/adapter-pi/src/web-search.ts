@@ -47,7 +47,7 @@ function isDeckOwnedEntry(value: unknown, provider: WebSearchProviderDescriptorV
   if (basename(value.command) !== provider.command[0] || value.exposure !== "direct") return false;
   if (!Array.isArray(value.args) || value.args.length !== provider.command.length - 1 || !value.args.every((part, index) => part === provider.command[index + 1])) return false;
   const env = isRecord(value.env) ? value.env : {};
-  return Object.entries(env).every(([name, entry]) => name.startsWith("DECK_RUNNER_MEMORY_") && entry === "");
+  return Object.keys(env).length === 0;
 }
 
 export function inspectPiWebSearchMcpConfig(

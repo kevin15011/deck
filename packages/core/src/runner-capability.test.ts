@@ -10,7 +10,6 @@ import type {
   RunnerToolCapabilities,
   RunnerTeamCapabilities,
   RunnerModelCapabilities,
-  RunnerMemoryCapabilities,
   ReasoningLevel,
   ModelCatalog,
   ModelCatalogEntry,
@@ -141,7 +140,6 @@ describe("RunnerCapabilities core types", () => {
             team: { id: "developer-team", displayName: "Developer Team" },
             agents: [],
             skills: [],
-            memoryDiagnostics: [],
           }),
           buildDeveloperTeamInstallPlan: () => ({ files: [] }),
           applyDeveloperTeamInstall: async () => ({ success: true }),
@@ -152,10 +150,6 @@ describe("RunnerCapabilities core types", () => {
           readAssignments: () => ({ assignments: [] }),
           resolveAssignment: () => ({ agentId: "test", modelId: "test/model" }),
         },
-        memory: {
-          getProviders: () => [],
-          getSupportedProviderIds: () => [],
-        },
       };
 
       expect(capabilities.id).toBe("test-runner");
@@ -165,7 +159,6 @@ describe("RunnerCapabilities core types", () => {
       expect(typeof capabilities.tools.buildInstallationPlan).toBe("function");
       expect(typeof capabilities.teams.getTeamsForEnvironment).toBe("function");
       expect(typeof capabilities.models.getCatalog).toBe("function");
-      expect(typeof capabilities.memory.getProviders).toBe("function");
     });
   });
 });

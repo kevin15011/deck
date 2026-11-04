@@ -19,7 +19,7 @@ This reference lists parser-backed Deck commands. The CLI parser is authoritativ
 | `deck claude native resume session-id` | Resume a native Claude session by ID. |
 | `deck claude native resume --last` | Resume the latest native Claude session. |
 
-OpenCode and Codex developer launchers accept `--install-only`, `--dry-run`, `--yes`, `--verbose`, and `--memory=supermemory` or `--memory=none`. Codex also accepts `--local-only`. Codex exec and resume forms are:
+OpenCode and Codex developer launchers accept `--install-only`, `--dry-run`, `--yes`, `--verbose`. Codex also accepts `--local-only`. Codex exec and resume forms are:
 
 ```sh
 deck codex developer exec -- Review the current diff
@@ -27,7 +27,7 @@ deck codex developer resume session-id
 deck codex developer resume --last
 ```
 
-Codex `--install-only` cannot be combined with exec or resume. Deck flags belong before the exec prompt separator. Claude developer accepts no additional flags, including no `--memory` override; select its official Supermemory plugin through Review & Install. See [Runners](../runners.md) and [Adaptive memory](../adaptive-memory.md) for route-specific limits.
+Codex `--install-only` cannot be combined with exec or resume. Deck flags belong before the exec prompt separator. Claude developer accepts no additional flags. See [Runners](../runners.md) for route-specific limits.
 
 Pi launch options:
 
@@ -36,12 +36,9 @@ Pi launch options:
 | `deck pi developer` | Install or refresh the global Deck package for Pi when needed, then start Pi's normal interactive TUI as the Deck lead session (Pi >= 1.0.0). |
 | `deck pi developer --continue` | Continue the current Developer Team session. |
 | `deck pi developer --resume` | Open the resume picker for a Developer Team session. |
-| `deck pi developer --memory=none` | Explicitly disable adaptive memory for this launch. |
-| `deck pi developer --memory=supermemory` | Select Supermemory Adaptive Memory for the launch; Deck runtime handles supported supervised effects and optional external MCP remains scoped recall-only and unobservable to Deck runtime metrics. |
 
-`--continue` and `--resume` are mutually exclusive. Supported memory identifiers are `none` and `supermemory`; omitting the flag uses the configured global Adaptive Memory setting.
+`--continue` and `--resume` are mutually exclusive.
 
-The Deck developer launch commands are the canonical Deck-managed session entrypoints. Launching the runner binary directly is runner-standalone/static-compatible and does not provide automatic Adaptive Memory; use the Deck command when automatic recall/capture is required.
 
 ## Sessions and web workspace
 
@@ -89,9 +86,6 @@ All four daemon actions accept `--json`. Stop/restart refuse running work or pen
 | `deck doctor` | Run diagnostics; blocking errors produce a nonzero exit status. |
 | `deck version` | Print version, commit, date, target, and channel. |
 | deck --version | Same version output; deck -v is an alias. |
-| deck supermemory migrate --dry-run --destination-scope project --inventory inventory.json | Classify a supplied migration inventory without copying or deleting remote memory. |
-
-Migration requires `--dry-run` immediately after `migrate`, plus destination scope and inventory path; the two valued flags also accept equals forms.
 
 ### Updates and recovery
 
@@ -136,7 +130,7 @@ All three operations accept `--root` and `--json` where applicable. `validate` a
 
 ## Command boundaries
 
-Deck's Pi, OpenCode, Codex, and Claude forms above are Deck launchers. Calling the native runner binaries directly uses their own syntax and does not imply the same Deck lifecycle or memory behavior. Web and daemon have scoped help flags; do not infer generic help for other commands. Hidden deck internal forms exist for Deck's own bridges and subprocesses and are not a public command surface.
+Deck's Pi, OpenCode, Codex, and Claude forms above are Deck launchers. Calling the native runner binaries directly uses their own syntax and does not imply the same Deck lifecycle. Web and daemon have scoped help flags; do not infer generic help for other commands. Hidden deck internal forms exist for Deck's own bridges and subprocesses and are not a public command surface.
 
 ## Developer checkout canary helper
 

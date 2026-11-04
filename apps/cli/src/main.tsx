@@ -31,6 +31,13 @@ const getAdapterRegistry = () => adapterRegistry ??= createDefaultAdapterRegistr
 // Drop the runtime/script args — Bun passes them as argv[0] and argv[1]
 const userArgs = process.argv.slice(2);
 const parsed = parseArgs(userArgs);
+// Inert upgrade transition for exact old installed hook commands. Remove after
+// the next major release's receipted native-config cleanup migration is complete.
+if (parsed.command === "internal-retired-native-hook") {
+  process.stdout.write("{}\n");
+  process.exit(0);
+}
+
 const configStore = createDeckConfigStoreFromEnvironment({ projectRoot: resolveProjectRoot() ?? process.cwd() });
 
 if (parsed.command === "runner-cleanup") {
@@ -81,32 +88,11 @@ if (parsed.command === "internal-serena-mcp") {
   process.exit(result.exitCode);
 }
 
-if (parsed.command === "internal-supermemory-runtime-smoke") {
-  const { runInternalSupermemoryRuntimeSmoke } = await import("./internal-supermemory-runtime-smoke");
-  const result = await runInternalSupermemoryRuntimeSmoke();
-  console.log(result.output);
-  process.exit(result.exitCode);
-}
-
-if (parsed.command === "internal-codex-memory-hook") {
-  const { runInternalCodexMemoryHook } = await import("./internal-codex-memory-hook");
-  const result = await runInternalCodexMemoryHook();
-  if (result.output) process.stdout.write(result.output);
-  process.exit(result.exitCode);
-}
-
 if (parsed.command === "internal-runner-sync") {
   const {runRunnerSync} = await import("./upgrade-command/runner-sync");
   const {createDefaultAdapterRegistry} = await import("./runner-adapters");
   const result = await runRunnerSync({backupId:parsed.backupId,config:configStore.readRequired(),registry:createDefaultAdapterRegistry(),projectRoot:process.cwd(),deckVersion:getBuildInfo().version});
   process.stdout.write(JSON.stringify(result) + "\n");
-  process.exit(0);
-}
-
-if (parsed.command === "internal-memory-mcp") {
-  // Deck-owned stdio MCP server for Codex explicit memory tools; stdout carries only JSON-RPC frames.
-  const { runCodexMemoryMcpStdio } = await import("@deck/adapter-codex");
-  await runCodexMemoryMcpStdio({ input: process.stdin, write: (line) => { process.stdout.write(`${line}\n`); } });
   process.exit(0);
 }
 
@@ -187,17 +173,6 @@ if (parsed.command === "doctor") {
     console.error("deck doctor failed:", err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
-}
-
-if (parsed.command === "supermemory-migration-dry-run") {
-  const { runSupermemoryMigrationDryRun } = await import("./supermemory-migration-command");
-  const result = runSupermemoryMigrationDryRun({
-    destinationScope: parsed.flags.destinationScope,
-    inventoryPath: parsed.flags.inventoryPath,
-  });
-  const write = result.exitCode === 0 ? console.log : console.error;
-  write(result.output);
-  process.exit(result.exitCode);
 }
 
 if (parsed.command === "version") {
@@ -364,7 +339,6 @@ if (parsed.command === "runner-launch") {
     dryRun: parsed.dryRun,
     yes: parsed.yes,
     localOnly: parsed.localOnly,
-    cliMemoryProvider: parsed.memoryProvider,
     interactive,
     confirm: interactive ? async (question) => {
       const { createInterface } = await import("node:readline/promises");
@@ -415,7 +389,6 @@ if (parsed.command === "runner-launch") {
   const result = await runRunnerLaunch({
     adapter,
     launch: { projectRoot, teamId: parsed.teamId, mode: "interactive", runnerNative: parsed.flags, deckConfig },
-    cliMemoryProvider: parsed.memoryProvider,
     interactive,
     yes: !interactive,
     confirm: interactive ? async (question) => {

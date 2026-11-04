@@ -26,7 +26,6 @@ describe("Developer Team screens dashboard context regression", () => {
     expect(output).toContain("anthropic/claude-sonnet-4 · thinking medium");
     expect(output).toContain("Finish configuration");
     expect(output).not.toContain("Dashboard context");
-    expect(output).not.toContain("Adaptive Memory selected in dashboard");
   });
 
   test("Developer Team detail acepta contexto dashboard opcional sin cambiar provider/model/thinking", () => {
@@ -37,7 +36,6 @@ describe("Developer Team screens dashboard context regression", () => {
         thinkingAssignments={orchestratorThinking}
         dashboardContext={{
           source: "dashboard",
-          adaptiveMemoryProvider: "supermemory",
           capabilityStatuses: { "runner-mermaid": "pending-source", rtk: "manual" },
           returnLabel: "Volver al dashboard",
         }}
@@ -45,7 +43,6 @@ describe("Developer Team screens dashboard context regression", () => {
     );
 
     expect(output).toContain("Dashboard context");
-    expect(output).toContain("Adaptive Memory selected in dashboard: supermemory");
     expect(output).toContain("Capability states: runner-mermaid=pending-source, rtk=manual");
     expect(output).toContain("Model provider/model/thinking semantics are reused unchanged");
     expect(output).toContain("anthropic/claude-sonnet-4 · thinking medium");
@@ -90,7 +87,6 @@ describe("Developer Team screens dashboard context regression", () => {
         cursor={1}
         dashboardContext={{
           source: "dashboard",
-          adaptiveMemoryProvider: "supermemory",
           capabilityStatuses: { "context-mode": "ready" },
           returnLabel: "Volver a Teams",
         }}
@@ -100,7 +96,6 @@ describe("Developer Team screens dashboard context regression", () => {
     expect(dashboardOutput).toContain("Install Developer Team now");
     expect(dashboardOutput).toContain("Volver a Teams");
     expect(dashboardOutput).toContain("Dashboard context");
-    expect(dashboardOutput).toContain("Adaptive Memory selected in dashboard: supermemory");
     expect(dashboardOutput).toContain("Capability states: context-mode=ready");
   });
 
@@ -114,14 +109,12 @@ describe("Developer Team screens dashboard context regression", () => {
       <NoProvidersScreen
         dashboardContext={{
           source: "dashboard",
-          adaptiveMemoryProvider: "none",
           capabilityStatuses: { "runner-mermaid": "blocked" },
         }}
       />,
     );
     expect(dashboardOutput).toContain("No Pi providers detected");
     expect(dashboardOutput).toContain("Dashboard context");
-    expect(dashboardOutput).toContain("Adaptive Memory selected in dashboard: none");
     expect(dashboardOutput).toContain("runner-mermaid=blocked");
   });
 });

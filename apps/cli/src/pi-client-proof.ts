@@ -73,7 +73,7 @@ export async function runPiClientProof(input: Omit<RunRunnerLaunchInput, "proces
   if (input.launch.mode === "resume-by-id" && !supportsExactPiResume(typeof input.launch.runnerNative?.piCommand === "string" ? input.launch.runnerNative.piCommand : "pi", input.inheritedEnv)) throw new Error(PI_EXACT_RESUME_BLOCKED_REASON);
   if (input.adapter.runnerId !== "pi" || !isAbsolute(input.launch.projectRoot) || !statSync(input.launch.projectRoot).isDirectory()) throw new Error("Proof requires Pi and an explicit absolute project directory");
   if (input.launch.runnerNative?.continue || input.launch.runnerNative?.resume) throw new Error("Proof only creates fresh sessions");
-  // Keep all preparation, verification, policy and memory handoffs in runRunnerLaunch.
+  // Keep all preparation, verification, policy handoffs in runRunnerLaunch.
   // Translate transport only here: the ordinary adapter remains interactive-only.
   const adapter = new Proxy(input.adapter, {
     get(target, key) {

@@ -1,8 +1,7 @@
 import type { OpenCodeToolStatus } from "./required-tools";
 import type { CanonicalCapabilityId } from "./capability-catalog";
-import { OPENCODE_SUPERMEMORY_PACKAGE_SPEC } from "./opencode-supermemory-plugin";
 
-export type InstallableOpenCodeToolId = "rtk" | "context-mode" | "codebase-memory" | "context7" | "serena" | "opencode-supermemory";
+export type InstallableOpenCodeToolId = "rtk" | "context-mode" | "codebase-memory" | "context7" | "serena";
 
 /** Input for buildOpenCodeInstallationPlan */
 export type BuildOpenCodeInstallationPlanOptions = {
@@ -24,14 +23,6 @@ export type InstallableOpenCodeTool = {
   shellInstallUrl?: string;
   /** For shell-script: command to run after successful shell install (e.g., ["rtk", "init", "-g", "--opencode"]) */
   postInstallCommand?: string[];
-};
-
-export const OPENCODE_SUPERMEMORY_INSTALLABLE_TOOL: InstallableOpenCodeTool = {
-  id: "opencode-supermemory",
-  name: "Official Supermemory plugin",
-  module: OPENCODE_SUPERMEMORY_PACKAGE_SPEC,
-  required: true,
-  installKind: "deck-owned-opencode-plugin",
 };
 
 export const OPENCODE_INSTALLABLE_TOOLS: InstallableOpenCodeTool[] = [

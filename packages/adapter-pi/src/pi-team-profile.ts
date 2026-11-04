@@ -3,15 +3,7 @@ import { join } from "node:path";
 import { getTeamSessionInstructions } from "@deck/core/teams/developer/content-registry";
 import { translatePiCapabilityInstructions } from "./instruction-translation";
 import { composeCapabilityInstructions, type CapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
-import {
-  composeAdaptiveMemory,
-  resolveMemoryInjection,
-  type AdaptiveMemoryProvider,
-  type MemoryInjectionBundle,
-} from "@deck/core/memory/adaptive-memory";
-import { renderSddContextSections } from "@deck/core/memory/adaptive-context-renderer";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY } from "@deck/core/config/deck-config";
-import type { MemoryDiagnostic } from "./developer-team-install";
 import { buildTeamProfileDir } from "./pi-team-launch";
 import { getTeamsForEnvironment } from "./team-catalog";
 import executionExtensionAssetPath from "../assets/pi/extensions/developer-team-execution.generated.js" with { type: "file" };
@@ -28,23 +20,13 @@ export function readPiExecutionExtensionSource(): string {
 
 // --- Types ---
 
-const SUPPORTED_PI_PROFILE_MEMORY_PROVIDER_IDS = ["supermemory"] as const;
 
 export type MaterializeTeamProfileOptions = {
   teamId: string;
   projectRoot: string;
-  /** A pre-built memory injection bundle (takes precedence over provider). */
-  memoryInjection?: MemoryInjectionBundle;
-  /** Pre-built bundles are accepted only from Deck's trusted composition root. */
-  trustedMemoryInjection?: boolean;
-  /** A memory provider that will build the injection bundle. Ignored if memoryInjection is set. */
-  memoryProvider?: AdaptiveMemoryProvider;
   /** Launch-owned reason to render explicit adaptive-context unavailability without resolving a provider. */
-  memoryUnavailableReason?: string;
   /** Capability instructions to compose into the launch system prompt when provider effects are unavailable. */
   capabilityInstructions?: CapabilityInstructionBundle;
-  /** Provider IDs accepted by this adapter/caller registry. */
-  supportedMemoryProviderIds?: Iterable<string>;
   /** Injected fs functions for testability */
   mkdir?: (path: string, options?: { recursive: boolean }) => void;
   writeFile?: (path: string, data: string, encoding?: BufferEncoding) => void;
@@ -70,20 +52,13 @@ function validateTeamForProfile(teamId: string): void {
 }
 
 /**
- * Result of building a team system prompt, including any memory diagnostics.
  */
 export type BuildTeamSystemPromptResult = {
   content: string;
-  memoryDiagnostics: MemoryDiagnostic[];
 };
 
 export type BuildTeamSystemPromptOptions = {
-  memoryInjection?: MemoryInjectionBundle;
-  trustedMemoryInjection?: boolean;
-  memoryProvider?: AdaptiveMemoryProvider;
-  memoryUnavailableReason?: string;
   capabilityInstructions?: CapabilityInstructionBundle;
-  supportedMemoryProviderIds?: Iterable<string>;
   /** Optional orchestrator personality override. When absent, falls back to default. */
   orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
   /** Project root used only for project artifact materialization. */
@@ -99,11 +74,6 @@ export type BuildTeamSystemPromptOptions = {
  * then maps the result to Pi's runtime: the content is written to
  * .deck/pi/profiles/<team>/system-prompt.md and passed via --system-prompt.
  *
- * When a memory provider or injection bundle is provided, session-surface
- * memory instructions are composed into the system prompt.
- *
- * @returns An object with `content` (the prompt string) and `memoryDiagnostics`
- *   (any diagnostics from memory injection resolution).
  */
 export function buildTeamSystemPrompt(
   teamId: string,
@@ -144,44 +114,7 @@ Yielding the turn is not abandoning the task: use native completion admission an
     teamId,
   });
 
-  // Resolve memory injection using adapter/caller-owned provider ID validation.
-  const { bundle, diagnostics } = resolveMemoryInjection({
-    memoryInjection: options?.memoryInjection,
-    trustedMemoryInjection: options?.trustedMemoryInjection,
-    memoryProvider: options?.memoryProvider,
-    supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_PI_PROFILE_MEMORY_PROVIDER_IDS,
-    buildContext: { teamId },
-  });
-
-  if (!bundle) {
-    if (options?.memoryUnavailableReason && !options?.memoryInjection) {
-      const reason = `Adaptive context was not loaded: ${options.memoryUnavailableReason}`;
-      return {
-        content: `${renderSddContextSections({ officialContext: baseWithCapabilityInstructions, adaptiveContextUnavailableReason: reason })}
-`,
-        memoryDiagnostics: diagnostics,
-      };
-    }
-    if (options?.memoryProvider || options?.memoryInjection) {
-      const reason = diagnostics.length > 0
-        ? `Adaptive context was not loaded: ${diagnostics.map((diagnostic) => diagnostic.message).join("; ")}`
-        : "Adaptive context was not loaded; continue with official OpenSpec context only.";
-      return {
-        content: `${renderSddContextSections({ officialContext: baseWithCapabilityInstructions, adaptiveContextUnavailableReason: reason })}
-`,
-        memoryDiagnostics: diagnostics,
-      };
-    }
-    return { content: baseWithCapabilityInstructions, memoryDiagnostics: diagnostics };
-  }
-
-  // Compose session-surface memory into the system prompt
-  const result = composeAdaptiveMemory(baseWithCapabilityInstructions, bundle, {
-    surface: "session",
-    teamId,
-  });
-
-  return { content: result.content, memoryDiagnostics: diagnostics };
+  return { content: baseWithCapabilityInstructions };
 }
 
 // --- Profile Materializer ---
@@ -192,12 +125,8 @@ Yielding the turn is not abandoning the task: use native completion admission an
  * This is called before launching Pi to ensure the profile artifacts exist.
  * The function is idempotent — it won't overwrite unchanged files.
  *
- * When a memory provider or injection bundle is provided, session-surface
- * memory instructions are composed into the system prompt.
- *
- * @returns Any memory diagnostics from injection resolution.
  */
-export function materializeTeamProfile(options: MaterializeTeamProfileOptions): MemoryDiagnostic[] {
+export function materializeTeamProfile(options: MaterializeTeamProfileOptions): void {
   const { teamId, projectRoot } = options;
 
   const mkdir = options.mkdir ?? mkdirSync;
@@ -206,21 +135,10 @@ export function materializeTeamProfile(options: MaterializeTeamProfileOptions): 
   const exists = options.exists ?? existsSync;
 
   const profileDir = buildTeamProfileDir(projectRoot, teamId);
+  const { content } = buildTeamSystemPrompt(teamId, options);
   const systemPromptPath = join(profileDir, "system-prompt.md");
   const extensionDir = join(profileDir, "extensions");
   const extensionPath = join(extensionDir, "developer-team-execution.js");
-
-  const { content, memoryDiagnostics } = buildTeamSystemPrompt(teamId, {
-    memoryInjection: options.memoryInjection,
-    trustedMemoryInjection: options.trustedMemoryInjection,
-    memoryProvider: options.memoryProvider,
-    supportedMemoryProviderIds: options.supportedMemoryProviderIds,
-    memoryUnavailableReason: options.memoryUnavailableReason,
-    capabilityInstructions: options.capabilityInstructions,
-    orchestratorPersonality: options.orchestratorPersonality,
-
-    projectRoot: options.projectRoot,
-  });
 
   // Ensure directory exists
   if (!exists(profileDir)) {
@@ -231,5 +149,5 @@ export function materializeTeamProfile(options: MaterializeTeamProfileOptions): 
   if (!exists(extensionDir)) mkdir(extensionDir, { recursive: true });
   const extensionContent = readFileSync(typeof executionExtensionAssetPath === "string" ? executionExtensionAssetPath : new URL("../assets/pi/extensions/developer-team-execution.generated.js", import.meta.url), "utf-8");
   if (!exists(extensionPath) || readFile(extensionPath, "utf-8") !== extensionContent) writeFile(extensionPath, extensionContent, "utf-8");
-  return memoryDiagnostics;
+
 }

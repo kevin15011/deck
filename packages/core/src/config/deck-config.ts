@@ -9,33 +9,6 @@ import type { CrossTeamAssignments } from "../session/assignments";
 export const DECK_CONFIG_VERSION = 1;
 export const DECK_CONFIG_RELATIVE_PATH = join(".deck", "config.json");
 
-export type AdaptiveMemoryActiveProvider = "none" | "supermemory";
-
-export const SUPERMEMORY_SEARCH_MODES = ["memories", "documents", "hybrid"] as const;
-export type SupermemorySearchMode = (typeof SUPERMEMORY_SEARCH_MODES)[number];
-
-export type DeckSupermemoryConfig = {
-  /** Non-secret MCP server label used by Pi/MCP config. Defaults to "supermemory". */
-  mcpServerName?: string;
-  /** @deprecated - user identity derived from token automatically */
-  userId?: never;
-  /** @deprecated - project scoping uses Deck's canonical scope binding; do not configure manually */
-  projectId?: never;
-  /** @deprecated - project scoping uses Deck's canonical scope binding; do not configure manually */
-  teamId?: never;
-  /** @deprecated - no longer used */
-  orgId?: never;
-  searchMode?: SupermemorySearchMode;
-  maxMemoriesPerSession?: number;
-};
-
-export type DeckAdaptiveMemoryConfig = {
-  /** First-class product toggle. `true` enables Supermemory; `false` disables remote memory effects. */
-  enabled?: boolean;
-  activeProvider?: AdaptiveMemoryActiveProvider;
-  supermemory?: DeckSupermemoryConfig;
-};
-
 /** Provider-opaque project selection for the optional Web Search capability. */
 export type DeckWebSearchConfig = {
   enabled?: boolean;
@@ -57,7 +30,7 @@ export const DEFAULT_ORCHESTRATOR_PERSONALITY: OrchestratorPersonality = "pragma
 /** Dynamic runner ID for package instructions — validated at runtime against AdapterRegistry. */
 export type PackageInstructionRunnerId = string & {};
 
-export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "code-economy", "rtk", "adaptive-memory"] as const;
+export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "code-economy", "rtk"] as const;
 /** Legacy input names remain type-readable, never selectable or effective. */
 export type PackageInstructionPackageId = (typeof PACKAGE_INSTRUCTION_PACKAGE_IDS)[number] | "context-mode" | "serena";
 export type PackageInstructionSelection = Record<(typeof PACKAGE_INSTRUCTION_PACKAGE_IDS)[number], boolean> & { "context-mode"?: boolean; serena?: boolean };
@@ -75,7 +48,6 @@ export const PACKAGE_INSTRUCTION_CONFIGURATION_METADATA = Object.freeze([
   { id: "codebase-memory", label: "Codebase Memory", description: "Explicitly enable Codebase Memory installation, preparation and guidance for this runner.", configurable: true, defaultEnabled: false },
   { id: "code-economy", label: "Code Economy", description: "Always-on concise implementation guidance.", configurable: false, defaultEnabled: true },
   { id: "rtk", label: "RTK", description: "Inject RTK command guidance.", configurable: true, defaultEnabled: true },
-  { id: "adaptive-memory", label: "Adaptive Memory", description: "Inject adaptive-memory provider guidance.", configurable: true, defaultEnabled: true },
 ] as const satisfies readonly PackageInstructionConfigurationMetadata[]);
 
 function defaultPackageInstructionSelection(
@@ -186,7 +158,6 @@ export type DeckOptionalCapabilities = { "codebase-memory": { enabled: boolean; 
 export type DeckConfig = {
   capabilities?: { "codebase-memory"?: { enabled?: boolean; runners?: Record<string, boolean> } };
   version?: typeof DECK_CONFIG_VERSION;
-  adaptiveMemory?: DeckAdaptiveMemoryConfig;
   webSearch?: DeckWebSearchConfig;
   packageInstructions?: DeckPackageInstructionConfig;
   orchestratorPersonality?: OrchestratorPersonality;
@@ -202,11 +173,6 @@ export type DeckConfig = {
 export type NormalizedDeckConfig = {
   capabilities?: DeckOptionalCapabilities;
   version: typeof DECK_CONFIG_VERSION;
-  adaptiveMemory: {
-    enabled?: boolean;
-    activeProvider: AdaptiveMemoryActiveProvider;
-    supermemory?: DeckSupermemoryConfig;
-  };
   webSearch: {
     enabled: boolean;
     provider?: string;
@@ -236,7 +202,7 @@ export type CrossRunnerConfig = {
 };
 
 export type DeckConfigDiagnostic = Readonly<{
-  code: "SUPERMEMORY_CONFIG_DEPRECATED";
+  code: "DECK_CONFIG_RETIRED_FIELD";
   severity: "warning";
   message: string;
   fieldPath: string;
@@ -247,10 +213,7 @@ export type DeckConfigErrorCode =
   | "DECK_CONFIG_INVALID_SHAPE"
   | "DECK_CONFIG_UNSUPPORTED_VERSION"
   | "DECK_CONFIG_UNKNOWN_FIELD"
-  | "ADAPTIVE_MEMORY_UNSUPPORTED_PROVIDER"
   | "DECK_CONFIG_SECRET_FIELD"
-  | "SUPERMEMORY_USER_ID_REQUIRED"
-  | "SUPERMEMORY_CONFIG_INVALID"
   | "WEB_SEARCH_CONFIG_INVALID"
   | "DECK_CONFIG_UNSAFE_PATH"
   | "DECK_CONFIG_CONCURRENT_MODIFICATION"
@@ -274,26 +237,11 @@ export class DeckConfigError extends Error {
   }
 }
 
-export type ActiveMemoryProviderSource = "cli" | "config" | "default";
-
-export type ActiveMemoryProviderResolution = {
-  activeProvider: AdaptiveMemoryActiveProvider;
-  source: ActiveMemoryProviderSource;
-  config: NormalizedDeckConfig;
-  supermemory?: DeckSupermemoryConfig;
-};
-
 const SECRET_FIELD_PATTERN =
   /(?:token|secret|credential|credentials|api[-_]?key|password|private[-_]?key|access[-_]?key|auth(?:orization)?)/i;
 
 const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "webSearch", "capabilities", "packageInstructions", "orchestratorPersonality", "developerTeamExecution", "profiles", "activeProfile", "crossRunner"]);
-const ADAPTIVE_MEMORY_FIELDS = new Set(["enabled", "activeProvider", "supermemory"]);
 const WEB_SEARCH_FIELDS = new Set(["enabled", "provider"]);
-const SUPERMEMORY_FIELDS = new Set([
-  "mcpServerName",
-  "searchMode",
-  "maxMemoriesPerSession",
-]);
 const PACKAGE_INSTRUCTION_PACKAGE_FIELDS = new Set<string>(PACKAGE_INSTRUCTION_PACKAGE_IDS);
 const DEVELOPER_TEAM_EXECUTION_FIELDS = new Set([
   "schema", "executionContracts", "decisionKernel", "invocationAuthorization", "registryWriter",
@@ -310,10 +258,6 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
   return {
     version: DECK_CONFIG_VERSION,
     capabilities: { "codebase-memory": { enabled: false, runners: {} } },
-    adaptiveMemory: {
-      enabled: false,
-      activeProvider: "none",
-    },
     webSearch: {
       enabled: false,
     },
@@ -881,10 +825,6 @@ export function validateDeckConfig(
     );
   }
 
-  const adaptiveMemory = normalizeAdaptiveMemoryConfig(
-    config.adaptiveMemory,
-    options?.configPath,
-  );
 
   const webSearch = normalizeWebSearchConfig(config.webSearch, options?.configPath);
 
@@ -921,7 +861,6 @@ export function validateDeckConfig(
 
   return {
     version: DECK_CONFIG_VERSION,
-    adaptiveMemory,
     webSearch,
     capabilities,
     packageInstructions,
@@ -936,16 +875,14 @@ export function validateDeckConfig(
 export function diagnoseDeckConfigDeprecations(config: unknown): readonly DeckConfigDiagnostic[] {
   if (!config || typeof config !== "object" || Array.isArray(config)) return [];
   const diagnostics: DeckConfigDiagnostic[] = [];
-  const adaptiveMemory = (config as Record<string, unknown>).adaptiveMemory;
-  if (!adaptiveMemory || typeof adaptiveMemory !== "object" || Array.isArray(adaptiveMemory)) return diagnostics;
-  const supermemory = (adaptiveMemory as Record<string, unknown>).supermemory;
-  if (supermemory && typeof supermemory === "object" && !Array.isArray(supermemory) && Object.prototype.hasOwnProperty.call(supermemory, "maxMemoriesPerSession")) {
-    diagnostics.push({
-      code: "SUPERMEMORY_CONFIG_DEPRECATED",
-      severity: "warning",
-      fieldPath: "adaptiveMemory.supermemory.maxMemoriesPerSession",
-      message: "Deprecated Supermemory maxMemoriesPerSession is accepted for compatibility but ignored; conversation capture uses provider-native extraction instead.",
-    });
+  const raw = config as Record<string, unknown>;
+  const retired = (fieldPath: string) => diagnostics.push({ code: "DECK_CONFIG_RETIRED_FIELD", severity: "warning", fieldPath, message: "Retired config field is ignored and omitted on the next explicit write." });
+  // Version-1 read compatibility only; remove when version 1 is no longer readable.
+  if (Object.hasOwn(raw, "adaptiveMemory")) retired("adaptiveMemory");
+  if (raw.packageInstructions && typeof raw.packageInstructions === "object") {
+    for (const [runner, value] of Object.entries(raw.packageInstructions)) {
+      if (value && typeof value === "object" && Object.hasOwn(value, "adaptive-memory")) retired(`packageInstructions.${runner}.adaptive-memory`);
+    }
   }
   return diagnostics;
 }
@@ -1095,47 +1032,6 @@ function normalizeWebSearchConfig(
   return { enabled, provider: value.provider.trim() };
 }
 
-export function resolveActiveMemoryProvider(options?: {
-  cliProvider?: string;
-  config?: unknown;
-  projectRoot?: string;
-}): ActiveMemoryProviderResolution {
-  // Cache configPath to avoid double resolution
-  const configPath = options?.projectRoot ? getDeckConfigPath(options.projectRoot) : undefined;
-  const hasConfigFile = configPath ? existsSync(configPath) : false;
-  const config =
-    options?.config !== undefined
-      ? validateDeckConfig(options.config, { configPath })
-      : configPath && options?.projectRoot
-        ? readDeckConfig(options.projectRoot)
-        : getDefaultDeckConfig();
-
-  const cliProvider = options?.cliProvider;
-  if (cliProvider !== undefined) {
-    const activeProvider = parseActiveProvider(cliProvider, "cliProvider", configPath);
-    return buildResolution(activeProvider, "cli", config, configPath);
-  }
-
-  const activeProvider = config.adaptiveMemory.activeProvider ?? "none";
-  const source: ActiveMemoryProviderSource =
-    options?.config !== undefined || hasConfigFile ? "config" : "default";
-  return buildResolution(activeProvider, source, config, configPath);
-}
-
-function buildResolution(
-  activeProvider: AdaptiveMemoryActiveProvider,
-  source: ActiveMemoryProviderSource,
-  config: NormalizedDeckConfig,
-  configPath?: string,
-): ActiveMemoryProviderResolution {
-  if (activeProvider === "supermemory") {
-    const supermemory = config.adaptiveMemory.supermemory;
-    return { activeProvider, source, config, supermemory };
-  }
-
-  return { activeProvider, source, config };
-}
-
 function executionConfigEnum<T extends string>(
   value: unknown,
   allowed: readonly T[],
@@ -1209,82 +1105,6 @@ function normalizeDeveloperTeamExecutionConfig(
   };
 }
 
-function normalizeAdaptiveMemoryConfig(
-  value: unknown,
-  configPath?: string,
-): NormalizedDeckConfig["adaptiveMemory"] {
-  if (value === undefined || value === null) {
-    return { enabled: false, activeProvider: "none" };
-  }
-
-  assertPlainObject(value, "adaptiveMemory", configPath);
-  assertKnownFields(value, ADAPTIVE_MEMORY_FIELDS, "adaptiveMemory", configPath);
-
-  const enabled = value.enabled === undefined ? undefined : normalizeBoolean(value.enabled, "adaptiveMemory.enabled", configPath);
-  const activeProvider = enabled !== undefined
-    ? enabled ? "supermemory" : "none"
-    : value.activeProvider === undefined
-      ? "none"
-      : parseActiveProvider(value.activeProvider, "adaptiveMemory.activeProvider", configPath);
-
-  const supermemory = normalizeSupermemoryConfig(
-    value.supermemory,
-    activeProvider,
-    configPath,
-  );
-
-  return supermemory ? { enabled: activeProvider === "supermemory", activeProvider, supermemory } : { enabled: false, activeProvider };
-}
-
-const DEPRECATED_SUPERMEMORY_FIELDS = new Set(["userId", "teamId", "orgId", "projectId"]);
-
-/**
- * Strip deprecated fields from a raw config object in place.
- * These fields are no longer stored in config (identity now derived from token automatically).
- */
-function stripDeprecatedSupermemoryFields(value: Record<string, unknown>): void {
-  for (const field of DEPRECATED_SUPERMEMORY_FIELDS) {
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete value[field];
-  }
-}
-
-function normalizeSupermemoryConfig(
-  value: unknown,
-  activeProvider: AdaptiveMemoryActiveProvider,
-  configPath?: string,
-): DeckSupermemoryConfig | undefined {
-  if (value === undefined || value === null) {
-    if (activeProvider === "supermemory") {
-      return {
-        mcpServerName: "supermemory",
-        searchMode: "documents",
-      };
-    }
-    return undefined;
-  }
-
-  assertPlainObject(value, "adaptiveMemory.supermemory", configPath);
-
-  stripDeprecatedSupermemoryFields(value);
-  assertKnownFields(value, SUPERMEMORY_FIELDS, "adaptiveMemory.supermemory", configPath);
-
-  // maxMemoriesPerSession is accepted for compatibility but ignored as a behavioral control.
-  if (value.maxMemoriesPerSession !== undefined) {
-    normalizeDeprecatedMaxMemoriesPerSession(value.maxMemoriesPerSession, configPath);
-  }
-
-  return {
-    mcpServerName: normalizeOptionalString(
-      value.mcpServerName,
-      "adaptiveMemory.supermemory.mcpServerName",
-      configPath,
-      { defaultValue: "supermemory" },
-    ),
-    searchMode: normalizeSearchMode(value.searchMode, configPath),
-  };
-}
-
 function normalizePackageInstructionConfig(
   value: unknown,
   configPath?: string,
@@ -1334,7 +1154,7 @@ function normalizePackageInstructionConfig(
 
     // Validate each package key in this runner
     for (const pkgKey of Object.keys(runnerValue)) {
-      if (pkgKey === "context-mode" || pkgKey === "serena") continue;
+      if (pkgKey === "context-mode" || pkgKey === "serena" || pkgKey === "adaptive-memory") continue;
       if (!PACKAGE_INSTRUCTION_PACKAGE_FIELDS.has(pkgKey as PackageInstructionPackageId)) {
         throw new DeckConfigError(
           "DECK_CONFIG_UNKNOWN_FIELD",
@@ -1504,67 +1324,6 @@ function assertValidActiveProfile(activeProfile: string, profiles: Profile[], co
       { configPath, fieldPath: "activeProfile" },
     );
   }
-}
-
-function parseActiveProvider(
-  value: unknown,
-  fieldPath: string,
-  configPath?: string,
-): AdaptiveMemoryActiveProvider {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new DeckConfigError(
-      "ADAPTIVE_MEMORY_UNSUPPORTED_PROVIDER",
-      "Unsupported adaptive-memory provider value.",
-      { configPath, fieldPath },
-    );
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "none" || normalized === "supermemory") return normalized;
-  throw new DeckConfigError(
-    "ADAPTIVE_MEMORY_UNSUPPORTED_PROVIDER",
-    "Unsupported adaptive-memory provider value. Adaptive Memory supports only disabled or Supermemory.",
-    { configPath, fieldPath },
-  );
-}
-
-function normalizeSearchMode(value: unknown, configPath?: string): SupermemorySearchMode {
-  if (value === undefined) return "hybrid";
-  if (typeof value !== "string" || !SUPERMEMORY_SEARCH_MODES.includes(value as SupermemorySearchMode)) {
-    throw new DeckConfigError(
-      "SUPERMEMORY_CONFIG_INVALID",
-      `Invalid Supermemory searchMode. Expected one of: ${SUPERMEMORY_SEARCH_MODES.join(", ")}.`,
-      { configPath, fieldPath: "adaptiveMemory.supermemory.searchMode" },
-    );
-  }
-  return value as SupermemorySearchMode;
-}
-
-function normalizeDeprecatedMaxMemoriesPerSession(value: unknown, configPath?: string): void {
-  if (value === undefined) return;
-  if (!Number.isInteger(value) || typeof value !== "number" || value < 1) {
-    throw new DeckConfigError(
-      "SUPERMEMORY_CONFIG_INVALID",
-      "Deprecated Supermemory maxMemoriesPerSession must be a positive integer when present; it is ignored for behavior.",
-      { configPath, fieldPath: "adaptiveMemory.supermemory.maxMemoriesPerSession" },
-    );
-  }
-}
-
-function normalizeOptionalString(
-  value: unknown,
-  fieldPath: string,
-  configPath?: string,
-  options?: { defaultValue?: string },
-): string | undefined {
-  if (value === undefined) return options?.defaultValue;
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new DeckConfigError(
-      fieldPath.endsWith("userId") ? "SUPERMEMORY_USER_ID_REQUIRED" : "SUPERMEMORY_CONFIG_INVALID",
-      `${fieldPath} must be a non-empty string when provided.`,
-      { configPath, fieldPath },
-    );
-  }
-  return value.trim();
 }
 
 function hasNonEmptyString(value: unknown): value is string {
