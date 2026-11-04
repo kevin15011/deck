@@ -14,7 +14,7 @@ import { Supervisor } from '../../packages/session-host/src/supervisor';
 import { FakeDriver } from '../../packages/session-host/src/testing/fake-driver';
 import { WebService } from '../../packages/session-host/src/web-service';
 import { ensureStateLayout, resolveStatePaths } from '../../packages/session-host/src/paths';
-import { WEB_ASSETS } from '../cli/src/runtime/web-assets.generated';
+import { buildWebAssets } from '../../scripts/generate-web-assets';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'deck-workspace-browser-'))), home = join(root, 'home');
 const projectOne = join(home, 'project-one'), projectTwo = join(home, 'project-two');
@@ -28,7 +28,7 @@ for (const driver of drivers) driver.onStart = turn => {
     turn.emit('reasoning.delta', { text: 'Native test reasoning', format: 'snapshot', messageId: turn.input.taskId, partId: 'text:0' });
     turn.emit('tool.started', { toolCallId: 'browser-read', toolName: 'Read', input: { path: 'README.md' } });
 };
-const config: CrossRunnerConfig = { enabled: true, members: { lead: { runnerId: 'claude', modelId: 'opus' }, reviewer: { runnerId: 'claude', modelId: 'opus' } }, approvals: { claude: 'relay', codex: 'runner-default', opencode: 'relay' }, maxConcurrentTasks: 4, claudeTosAcknowledgedAt: null, web: { port: 0, trustedProxy: null, allowedOrigins: [], allowFunnel: false } };
+const config: CrossRunnerConfig = { enabled: true, members: Object.fromEntries((process.env.DECK_TEST_ASSIGNMENTS_ONLY ? ['lead', 'reviewer', 'investigate', 'architect', 'apply-fast', 'apply-deep', 'quality', 'setup'] : ['lead', 'reviewer']).map(role => [role, { runnerId: 'claude', modelId: 'opus' }])), approvals: { claude: 'relay', codex: 'runner-default', opencode: 'relay' }, maxConcurrentTasks: 4, claudeTosAcknowledgedAt: null, web: { port: 0, trustedProxy: null, allowedOrigins: [], allowFunnel: false } };
 const catalog = { runners: [
     { runnerId: 'claude', label: 'Claude', available: true, models: [{ modelId: 'opus', label: 'Opus', thinkingLevels: ['low', 'high'] }, { modelId: 'sonnet', label: 'Sonnet', thinkingLevels: ['low', 'high'] }] },
     { runnerId: 'codex', label: 'Codex', available: true, models: [{ modelId: 'codex-model', label: 'Codex model', thinkingLevels: ['low', 'high'] }] },
@@ -39,7 +39,7 @@ function createManager() {
     return new SessionManager({ paths, broker, credentials: new CredentialRegistry({ socketPath: paths.socket.path }), supervisor: new Supervisor({ anchorCommand: ['unused'] }), drivers: { get: id => drivers.find(driver => driver.runnerId === id), list: () => drivers }, config: () => config, sessionMcpCommand: ['/not-launched/deck', 'internal', 'session-mcp'], homeDir: home, modelCatalog: async () => catalog });
 }
 manager = createManager();
-const host = new WebService({ paths, assets: WEB_ASSETS, config: config.web, service: {
+const host = new WebService({ paths, assets: await buildWebAssets(), config: config.web, service: {
     execute: input => manager.execute(input), query: (name, args) => manager.query(name, args), openLog: id => manager.openLog(id), hasRunningWork: () => manager.hasRunningWork(),
 } }); host.enable();
 const browser = await chromium.launch({ executablePath: process.env.DECK_TEST_CHROME ?? join(homedir(), 'Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'), headless: true });
@@ -336,6 +336,88 @@ try {
     const first = await newSession('First session');
     assert.equal(await page.getByLabel('Message the lead').count(), 0);
     await prepare(); assert.equal(claude.turns.length, 0, 'Preparing does not run inference');
+    if (process.env.DECK_TEST_ASSIGNMENTS_ONLY) {
+        await page.getByRole('button', { name: /^Session:/ }).click();
+        await page.getByRole('button', { name: 'Assignments', exact: true }).click();
+        const rows = page.getByRole('dialog');
+        const roles = ['Lead', 'reviewer', 'investigate', 'architect', 'apply-fast', 'apply-deep', 'quality', 'setup'];
+        for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+            await page.setViewportSize(viewport);
+            for (const role of roles) {
+                const input = rows.getByLabel(`Runner for ${role}`, { exact: true });
+                await input.scrollIntoViewIfNeeded();
+                assert.equal(await input.isVisible(), true, `${role} is reachable`);
+                assert.equal(await input.evaluate(element => { const r = element.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }), true, `${role} is in viewport`);
+            }
+            assert.equal(await rows.evaluate(element => element.scrollWidth <= element.clientWidth), true);
+        }
+        await rows.getByLabel('Runner for reviewer').focus(); await page.keyboard.press('Tab');
+        assert.equal(await rows.getByLabel('Model for reviewer').evaluate(element => document.activeElement === element), true);
+        await rows.getByLabel('Runner for Lead').selectOption('codex');
+        await rows.getByLabel('Model for reviewer').selectOption('sonnet');
+        await rows.getByLabel('Model for architect').selectOption('sonnet');
+        await rows.getByRole('button', { name: 'Save Lead assignment' }).click();
+        await wait(async () => (await manager.query('sessions.list', { projectId }) as any).data.sessions.find((item: any) => item.sessionId === first).members.lead.runnerId === 'codex', 'saved lead');
+        assert.equal(await rows.getByLabel('Model for reviewer').inputValue(), 'sonnet');
+        assert.equal(await rows.getByLabel('Model for architect').inputValue(), 'sonnet');
+        await rows.getByRole('button', { name: 'Save reviewer assignment' }).click();
+        await wait(async () => (await manager.query('sessions.list', { projectId }) as any).data.sessions.find((item: any) => item.sessionId === first).members.reviewer.modelId === 'sonnet', 'saved reviewer');
+        await rows.getByRole('button', { name: 'Save architect assignment' }).click();
+        await wait(async () => (await manager.query('sessions.list', { projectId }) as any).data.sessions.find((item: any) => item.sessionId === first).members.architect.modelId === 'sonnet', 'saved architect');
+        await rows.press('Escape');
+        await page.getByRole('button', { name: /^Session:/ }).click();
+        await page.getByRole('button', { name: 'Assignments', exact: true }).click();
+        await rows.getByLabel('Runner for Lead').waitFor();
+        assert.equal(await rows.getByLabel('Runner for Lead').inputValue(), 'codex');
+        assert.equal(await rows.getByLabel('Model for reviewer').inputValue(), 'sonnet');
+        assert.equal(await rows.getByLabel('Model for architect').inputValue(), 'sonnet');
+        await rows.getByLabel('Model for reviewer').selectOption('opus');
+        await rows.getByLabel('Model for architect').selectOption('opus');
+        const prior = (await manager.query('sessions.list', { projectId }) as any).data.sessions.find((item: any) => item.sessionId === first);
+        await command({ type: 'session.assignMember', memberId: 'setup', assignment: { runnerId: 'claude', modelId: 'sonnet' }, expectedRevision: prior.assignmentRevision }, first);
+        await wait(async () => await rows.getByLabel('Model for setup').inputValue() === 'sonnet', 'external assignment reflected');
+        assert.equal(await rows.getByLabel('Model for architect').inputValue(), 'opus');
+        await rows.getByRole('button', { name: 'Save reviewer assignment' }).click();
+        await wait(async () => (await manager.query('sessions.list', { projectId }) as any).data.sessions.find((item: any) => item.sessionId === first).members.reviewer.modelId === 'opus', 'save after external update');
+        assert.equal(await rows.getByLabel('Model for architect').inputValue(), 'opus');
+        await rows.getByRole('button', { name: 'Save architect assignment' }).click();
+        await wait(async () => (await manager.query('sessions.list', { projectId }) as any).data.sessions.find((item: any) => item.sessionId === first).members.architect.modelId === 'opus', 'second draft after external update');
+        await rows.getByLabel('Model for reviewer').selectOption('sonnet');
+        await rows.getByLabel('Model for architect').selectOption('sonnet');
+        const concurrent = (await manager.query('sessions.list', { projectId }) as any).data.sessions.find((item: any) => item.sessionId === first);
+        await command({ type: 'session.assignMember', memberId: 'reviewer', assignment: { runnerId: 'claude', modelId: 'opus', thinking: 'high' }, expectedRevision: concurrent.assignmentRevision }, first);
+        await rows.getByRole('button', { name: 'Use latest for reviewer' }).waitFor();
+        assert.equal(await rows.getByRole('button', { name: 'Save reviewer assignment' }).isDisabled(), true);
+        assert.equal(await rows.getByLabel('Model for architect').inputValue(), 'sonnet');
+        await rows.getByRole('button', { name: 'Keep my draft for reviewer' }).click();
+        await rows.getByRole('button', { name: 'Save reviewer assignment' }).click();
+        await wait(async () => (await manager.query('sessions.list', { projectId }) as any).data.sessions.find((item: any) => item.sessionId === first).members.reviewer.modelId === 'sonnet', 'explicit overwrite');
+        await wait(async () => await rows.getByRole('button', { name: 'Save reviewer assignment' }).isDisabled(), 'reviewer save settled');
+        await rows.getByLabel('Model for setup').selectOption('opus');
+        let injectStale = true;
+        await page.route('**/api/commands', async route => {
+            const body = route.request().postDataJSON();
+            if (!injectStale || body.command.type !== 'session.assignMember' || body.command.memberId !== 'architect') { await route.continue(); return; }
+            injectStale = false;
+            const latest = (await manager.query('sessions.list', { projectId }) as any).data.sessions.find((item: any) => item.sessionId === first);
+            await command({ type: 'session.assignMember', memberId: 'architect', assignment: { runnerId: 'claude', modelId: 'opus', thinking: 'high' }, expectedRevision: latest.assignmentRevision }, first);
+            await route.continue();
+        });
+        await rows.getByRole('button', { name: 'Save architect assignment' }).click();
+        await rows.getByRole('button', { name: 'Use latest for architect' }).waitFor();
+        await rows.getByText('Assignments changed elsewhere. Review the latest values and save again.').waitFor();
+        assert.equal((await manager.query('sessions.list', { projectId }) as any).data.sessions.find((item: any) => item.sessionId === first).members.architect.thinking, 'high');
+        assert.equal(await rows.getByLabel('Model for setup').inputValue(), 'opus');
+        await page.screenshot({ path: '/tmp/deck-assignment-conflict.png' });
+        await rows.getByRole('button', { name: 'Use latest for architect' }).click();
+        assert.equal(await rows.getByLabel('Reasoning level for architect').inputValue(), 'high');
+        await rows.getByLabel('Model for architect').selectOption('sonnet');
+        await rows.getByRole('button', { name: 'Save architect assignment' }).click();
+        await wait(async () => (await manager.query('sessions.list', { projectId }) as any).data.sessions.find((item: any) => item.sessionId === first).members.architect.modelId === 'sonnet', 'retry after stale rejection');
+        assert.deepEqual(errors, []);
+        console.log('Assignment rows: full team, scrolling, keyboard, drafts, persistence and external update passed'); return;
+    }
+
     await page.getByLabel('Message the lead').fill('Keep this draft while reconnecting');
     let blockReplay = true;
     await page.route('**/api/sessions/**/events?**', route => blockReplay ? route.abort() : route.continue());
@@ -351,8 +433,8 @@ try {
     await wait(() => claude.turns.length === 1, 'first model turn');
     await page.locator('.lead-progress:visible').getByText('Using Read…', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Assignments', exact: true }).click(); dialog = page.getByRole('dialog');
-    await dialog.getByLabel('Runner', { exact: true }).selectOption('codex'); await dialog.getByLabel('Model', { exact: true }).selectOption('codex-model');
-    await dialog.getByRole('button', { name: 'Save assignment', exact: true }).click();
+    await dialog.getByLabel('Runner for Lead', { exact: true }).selectOption('codex'); await dialog.getByLabel('Model for Lead', { exact: true }).selectOption('codex-model');
+    await dialog.getByRole('button', { name: 'Save Lead assignment', exact: true }).click();
     await dialog.getByRole('alert').getByText(/session-busy/).waitFor();
     await dialog.press('Escape');
     const second = await newSession('Second session'); await prepare();
@@ -374,9 +456,20 @@ try {
     await wait(() => !manager.hasRunningWork(), 'idle sessions');
     await page.getByRole('button', { name: 'Second session', exact: true }).click();
     await page.getByRole('button', { name: 'Assignments', exact: true }).click(); dialog = page.getByRole('dialog');
-    await dialog.getByLabel('Runner', { exact: true }).selectOption('codex'); await dialog.getByLabel('Model', { exact: true }).selectOption('codex-model');
+    await dialog.getByLabel('Runner for Lead', { exact: true }).selectOption('codex'); await dialog.getByLabel('Model for Lead', { exact: true }).selectOption('codex-model');
+    assert.equal(await dialog.getByLabel('Runner for reviewer').count(), 1);
+    assert.equal(await dialog.getByLabel('Model for Lead').inputValue(), 'codex-model', 'Changing runner selects a model from that runner');
     await page.screenshot({ path: '/tmp/deck-workspace-assignments.png', fullPage: true });
-    await dialog.getByRole('button', { name: 'Save assignment', exact: true }).click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await dialog.getByLabel('Runner for reviewer').focus();
+    await page.keyboard.press('Tab');
+    assert.equal(await dialog.getByLabel('Model for reviewer').evaluate(element => document.activeElement === element), true);
+    assert.equal(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth), true, 'Assignment rows fit narrow dialog');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await dialog.getByRole('button', { name: 'Save Lead assignment', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Save Lead assignment', exact: true }).waitFor({ state: 'visible' });
+    await wait(async () => await dialog.getByRole('button', { name: 'Save Lead assignment', exact: true }).isDisabled(), 'lead assignment saved');
+    await dialog.press('Escape');
     await page.locator('.lead-identity').getByText('codex', { exact: true }).waitFor();
     await page.getByRole('tab', { name: 'Activity', exact: true }).click();
     await page.getByText('Lead assignment changed', { exact: true }).waitFor();
@@ -395,9 +488,10 @@ try {
     // Interrupt intentionally pauses future sends, even when the inbox is empty.
     await page.getByRole('region', { name: 'Queued messages', exact: true }).getByRole('button', { name: 'Resume queue', exact: true }).click();
     await page.getByRole('button', { name: 'Assignments', exact: true }).click(); dialog = page.getByRole('dialog');
-    await dialog.getByLabel('Member', { exact: true }).selectOption('reviewer'); await dialog.getByLabel('Model', { exact: true }).selectOption('sonnet');
-    await dialog.getByRole('button', { name: 'Save assignment', exact: true }).click();
+    await dialog.getByLabel('Model for reviewer', { exact: true }).selectOption('sonnet');
+    await dialog.getByRole('button', { name: 'Save reviewer assignment', exact: true }).click();
     await wait(async () => (await manager.query('sessions.list', { projectId }) as any).data.sessions.find((item: any) => item.sessionId === second).members.reviewer.modelId === 'sonnet', 'member override');
+    await dialog.press('Escape');
     // The selected session is deliberately pushed beyond the first page before an external change.
     for (let index = 0; index < 31; index++) await command({ type: 'session.create', projectId, title: `History ${index}` });
     await page.getByRole('button', { name: 'Refresh sessions', exact: true }).click();
@@ -440,7 +534,7 @@ try {
     await page.locator('.app-header').getByRole('heading', { name: 'Mobile session', exact: true }).waitFor();
     await prepare(); await page.getByRole('tab', { name: 'Activity', exact: true }).click();
     await page.getByRole('button', { name: 'Assignments', exact: true }).click();
-    await page.getByRole('dialog').getByLabel('Runner', { exact: true }).waitFor(); await bounds(page);
+    await page.getByRole('dialog').getByLabel('Runner for Lead', { exact: true }).waitFor(); await bounds(page);
     await page.getByRole('dialog').press('Escape');
     assert.equal(await page.getByRole('button', { name: 'Assignments', exact: true }).evaluate(element => document.activeElement === element), true);
     await page.getByRole('tab', { name: 'Chat', exact: true }).click();

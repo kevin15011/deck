@@ -1620,3 +1620,15 @@ select:focus-visible, .question-panel textarea:focus-visible {
     .session-controls-panel { top: calc(var(--mobile-viewport-top, 0px) + 60px); max-height: calc(var(--mobile-viewport-height, 100dvh) - 72px); }
     .session-mobile-status { display: flex; gap: .5rem; color: var(--muted); text-transform: capitalize; }
 }
+
+.assignments-dialog { width: min(800px, calc(100vw - 2rem)); }
+.assignment-rows { display: grid; gap: 1rem; }
+.assignment-row { display: grid; grid-template-columns: minmax(7rem, .7fr) minmax(0, 2fr) auto; gap: .75rem; align-items: start; }
+.assignment-row h3 { margin: .625rem 0 0; overflow-wrap: anywhere; }
+.assignment-row .assignment-fields { gap: .75rem; }
+.assignment-row .error { grid-column: 2 / -1; margin: 0; }
+@media (max-width: 600px) {
+  .assignment-row { grid-template-columns: minmax(0, 1fr); }
+  .assignment-row h3 { margin: 0; }
+  .assignment-row .error { grid-column: 1; }
+}
