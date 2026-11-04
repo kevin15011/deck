@@ -27,6 +27,7 @@ const server = Bun.serve({port:0,hostname:'127.0.0.1',fetch: async (request,serv
     if(path==='/')return new Response('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/main.css"></head><body><div id="root"></div><script type="module" src="/main.js"></script></body></html>',{headers:{'Content-Type':'text/html'}});
     const sessionId=path.split('/')[3]??'one';
     const json=(value:unknown)=>Response.json(value);
+    if(path.endsWith('/files'))return json({ok:true,data:{entries:[]}});
     if(path.endsWith('/history')){historyRequests++;await Bun.sleep(160);return json(history(sessionId));}
     if(path.endsWith('/summary')){if(summaryDelay)await Bun.sleep(summaryDelay);return json({ok:true,data:{session:sessions.find(s=>s.sessionId===sessionId)}});}
     if(path.endsWith('/readiness')){await Bun.sleep(160);return json({ok:true,data:{status:sessionId==='unprepared'?'unprepared':'ready',generation:0,personalMcpRunnerId:'codex',personalMcpAvailability:sessionId==='one'?[{id:'fixture-mcp',source:'user',status:'configured'}]:[]}});}
@@ -71,6 +72,38 @@ async function separate(selectors:string[]){
 }
 try{
     await select('one');
+    if(process.env.DECK_TAB_ONLY === '1'){
+        for(const width of [1440,390]) for(const reducedMotion of ['no-preference','reduce'] as const){
+            await page.setViewportSize({width,height:844}); await page.emulateMedia({reducedMotion}); await select('one');
+            await page.getByRole('tab',{name:'Activity',exact:true}).click(); await page.waitForTimeout(450);
+            const selectors=width<1000?['.view-nav','.workspace-pane']:['#conversation','.workspace-pane','.workspace-tabs'];
+            const before=await Promise.all(selectors.map(rect));
+            for(const name of ['Subagents','Review','Activity','Review','Subagents','Activity']){
+                await page.evaluate((selectors)=>{(window as any).__tabSamples=[];const start=performance.now();function sample(){(window as any).__tabSamples.push(selectors.map(selector=>document.querySelector(selector)!.getBoundingClientRect().toJSON()));if(performance.now()-start<420)requestAnimationFrame(sample);}sample();},selectors);
+                await page.getByRole('tab',{name,exact:true}).click(); await page.waitForTimeout(450);
+                const samples=await page.evaluate(()=>(window as any).__tabSamples);
+                for(const sample of samples) for(let i=0;i<selectors.length;i++) for(const axis of ['x','y','width','height'] as const) assert(Math.abs(sample[i][axis]-before[i]![axis])<1.1,`${width} ${reducedMotion} ${name} ${selectors[i]} ${axis}`);
+            }
+            if(width===1440){
+                const conversation=page.locator('#conversation');
+                await conversation.evaluate(el=>el.scrollTop=el.scrollHeight-el.clientHeight-600);
+                await page.locator('.jump-latest').waitFor();const reading=await conversation.evaluate(el=>el.scrollTop);const height=await conversation.evaluate(el=>el.scrollHeight);
+                for(const name of ['Subagents','Review','Activity']) await page.getByRole('tab',{name,exact:true}).click();
+                await page.evaluate(()=>{const event={v:1,sessionId:'one',seq:42,ts:'2026-01-01T00:00:00Z',kind:'message.completed',source:{taskId:'lead',memberId:'lead'},data:{role:'assistant',text:'Incoming while reading'}};(window as any).__sockets.findLast((ws:WebSocket)=>ws.url.includes('/sessions/one/events')).dispatchEvent(new MessageEvent('message',{data:JSON.stringify({type:'event',event,message:{...event,historyId:42}})}));});
+                await page.waitForFunction(height=>document.getElementById('conversation')!.scrollHeight>height,height,{timeout:3000});await page.waitForTimeout(150);
+                assert(Math.abs(await conversation.evaluate(el=>el.scrollTop)-reading)<2,'Tab switches and incoming activity preserve the reading position');
+                assert(await page.locator('.jump-latest').isVisible(),'Auto-scroll remains paused after tab switches');
+            }
+            const activity=page.getByRole('tab',{name:'Activity',exact:true}); await activity.focus(); await page.keyboard.press('ArrowRight');
+            assert.equal(await page.getByRole('tab',{name:'Subagents',exact:true}).getAttribute('aria-selected'),'true');
+            await page.getByRole('tab',{name:'Review',exact:true}).click(); await page.getByRole('tab',{name:'Activity',exact:true}).click(); await page.getByRole('tab',{name:'Subagents',exact:true}).click();
+            await page.waitForTimeout(450); assert.equal(await page.getByRole('tab',{name:'Subagents',exact:true}).getAttribute('aria-selected'),'true');
+            assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+            await page.screenshot({path:`/tmp/deck-tabs-${width}-${reducedMotion}.png`});
+            console.log(`PASS tab geometry and interaction ${width} ${reducedMotion}`);
+        }
+        assert.deepEqual(errors,[]); await browser.close();server.stop(true);process.exit(0);
+    }
     await check('mobile header and follow behavior',async()=>{
         for(const width of [360,390,1440]){
             await page.setViewportSize({width,height:844});await page.emulateMedia({reducedMotion:width===390?'reduce':'no-preference'});await select('two');

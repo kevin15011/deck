@@ -41,8 +41,10 @@ export function useViewMotion(ref: RefObject<HTMLElement | null>, key: unknown) 
         const panels = Array.from(root.querySelectorAll<HTMLElement>('.chat-pane, .workspace-pane, .workspace-panel'));
         if (previous.current !== key) {
             for (const panel of panels) {
-                gsap.killTweensOf(panel);
                 const wasVisible = visibility.current.get(panel), visible = !panel.hidden && !panel.parentElement?.closest('[hidden]');
+                // A tab change must not replay entrance motion on its still-visible ancestors.
+                if (visible && wasVisible) continue;
+                gsap.killTweensOf(panel);
                 panel.removeAttribute('data-view-exiting'); gsap.set(panel,{clearProps:'left,top,width,height'}); panel.inert = !!panel.hidden;
                 if (reducedMotion()) { gsap.set(panel, {clearProps:'opacity,transform,left,top,width,height'}); continue; }
                 if (!visible) {
@@ -78,7 +80,7 @@ export function useViewMotion(ref: RefObject<HTMLElement | null>, key: unknown) 
         const settle = () => { if (media.matches) for (const panel of root.querySelectorAll('.chat-pane, .workspace-pane, .workspace-panel')) { gsap.killTweensOf(panel); panel.removeAttribute('data-view-exiting'); panel.removeAttribute('aria-hidden'); gsap.set(panel, {clearProps:'opacity,transform,left,top,width,height'}); } };
         media.addEventListener('change', settle);
         return () => { resize.disconnect(); root.removeEventListener('scroll',rememberScroll,true); media.removeEventListener('change', settle); for (const panel of root.querySelectorAll('.chat-pane, .workspace-pane, .workspace-panel')) gsap.killTweensOf(panel); };
-    }, [key]);
+    }, [ref]);
 }
 
 /** Reversible height disclosure; accessibility changes immediately, painting may finish afterward. */

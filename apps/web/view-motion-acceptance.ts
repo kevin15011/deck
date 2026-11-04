@@ -13,6 +13,21 @@ mkdirSync('/tmp/deck-motion-frames',{recursive:true});
 try{
  const page=await browser.newPage({viewport:{width:1440,height:900}}); const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`http://127.0.0.1:${server.port}`);await page.locator('.moving-active-indicator').first().waitFor({state:'attached'});
+ // Interrupt a newly visible ancestor with a tab change before its entrance settles.
+ await page.getByRole('button',{name:'chat',exact:true}).click();await page.waitForTimeout(420);
+ await page.getByRole('button',{name:'both',exact:true}).click();
+ await page.getByRole('tab',{name:'Subagents',exact:true}).click();await page.waitForTimeout(450);
+ const ancestor=await page.locator('.workspace-pane').evaluate(e=>({opacity:Number(getComputedStyle(e).opacity),transform:getComputedStyle(e).transform}));
+ assert.equal(ancestor.opacity,1,`Interrupted ancestor must settle: ${JSON.stringify(ancestor)}`);
+ await page.getByRole('tab',{name:'Activity',exact:true}).click();await page.waitForTimeout(420);
+ if(process.env.DECK_VIEW_ONLY==='1'){
+  await page.getByRole('button',{name:'chat',exact:true}).click();await page.waitForTimeout(420);
+  await page.getByRole('button',{name:'both',exact:true}).click();await page.emulateMedia({reducedMotion:'reduce'});
+  await page.waitForFunction(()=>getComputedStyle(document.querySelector('.workspace-pane')!).opacity==='1',null,{timeout:1000});
+  await page.getByRole('tab',{name:'Activity',exact:true}).focus();await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('tab',{name:'Subagents',exact:true}).getAttribute('aria-selected'),'true');
+  console.log('PASS interrupted ancestor, live reduced motion, immediate keyboard');process.exitCode=0;
+ } else {
  await page.locator('textarea').fill('draft retained');
  await page.locator('.workspace-panel:not([hidden])').evaluate(e=>e.scrollTop=100);
  assert.equal(await page.locator('.workspace-panel:not([hidden])').evaluate(e=>e.scrollTop),100,'Fixture must actually overflow');
@@ -45,4 +60,5 @@ try{
  await page.emulateMedia({reducedMotion:'no-preference'});await page.getByRole('button',{name:'Usage',exact:true}).click();await page.getByRole('tab',{name:'Activity',exact:true}).click();
  const cleanup=await page.evaluate(async()=>{const f=(window as any).fixture,nodes=Array.from(document.querySelectorAll('.moving-active-indicator,.usage-body,.workspace-panel,.workspace-pane,.chat-pane'));f.dispose();await new Promise(r=>setTimeout(r,450));return nodes.every(n=>f.gsap.getTweensOf(n).length===0);});assert(cleanup);assert.deepEqual(errors,[]);
  console.log('PASS view/disclosure/indicator reversal, reduced motion, state, semantics and unmount');
+ }
 }finally{await browser.close();server.stop(true);}
