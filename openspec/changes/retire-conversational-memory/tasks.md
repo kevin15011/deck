@@ -11,6 +11,6 @@
 - [x] 9. Complete independent residual/security review and fix confirmed findings.
 - [x] 10. Verify focused/full/types/frozen install/native canary and old-state decommissioning.
 - [ ] 11. Inspect exact installed owned artifacts and execute only authorized idle cleanup.
-- [ ] 12. Commit removal and record source, installed-state and historical residual limits.
+- [x] 12. Commit removal and record source, installed-state and historical residual limits.
 
 No removal or zero-residue acceptance is claimed before the corresponding evidence.

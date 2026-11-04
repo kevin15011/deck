@@ -74,7 +74,15 @@ export function planRunnerCleanup(roots: CleanupRoots, runnerIds = ['codex', 'cl
       else diagnostics.push(`Recorded retired contribution needs selector-specific review: ${contribution.path}#${JSON.stringify(contribution.selector)}`);
     }
     if (!codebaseEnabled) for (const contribution of contributions.filter(entry => entry.sourceItemId === "package:codebase-memory" && entry.selector.kind === "file")) targets.push({ path: contribution.path, format: "file", capability: "codebase-memory" });
-    if (runnerId === 'codex') targets.push({ path: join(root, 'config.toml'), format: 'toml' });
+    if (runnerId === 'codex') {
+      const path = join(root, 'config.toml');
+      targets.push({ path, format: 'toml' });
+      // Native legacy receipts predate sourceItemId. These markers select only
+      // candidates at the active config path; core still requires exact receipts.
+      for (const [id, capability] of [['supermemory', 'supermemory'], ['memory-bridge', 'deck-memory']] as const) {
+        targets.push({ path, format: 'text', capability, selector: { kind: 'text', start: `# deck-codex-hook:${id}:start`, end: `# deck-codex-hook:${id}:end` } });
+      }
+    }
     if (runnerId === 'pi') {
       targets.push({ path: join(root, 'mcp.json'), format: 'json', container: ['mcpServers'] });
       targets.push({ path: join(root, 'settings.json'), format: 'json', container: ['packages'], array: true });

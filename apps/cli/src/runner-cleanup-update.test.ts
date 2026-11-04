@@ -4,8 +4,47 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {runRunnerCleanupUpdate,cleanupRoots} from './runner-cleanup-command';
 import {RunnerMutationDeferredError} from '@deck/session-host';
+import {contributionHash, contributionId} from '@deck/core';
 const fixture=()=>{const home=mkdtempSync(join(tmpdir(),'nrp-update-')),roots=cleanupRoots({HOME:home});mkdirSync(roots.codex,{recursive:true});mkdirSync(join(roots.codex,'deck'),{recursive:true});writeFileSync(join(roots.codex,'config.toml'),'[mcp_servers.serena]\ncommand="user-serena"\n[mcp_servers.context-mode]\ncommand="user-context"\n');writeFileSync(join(roots.codex,'deck/old-serena'),'owned');return roots;};
 const idle = async <T>(effect:()=>T|Promise<T>)=>effect();
+
+// Protects installed-style Codex hook retirement through the public CLI boundary.
+// Oracle: the retirement spec permits only exact receipted bytes under idle admission.
+// Legacy hook receipts have no sourceItemId; marker names identify candidates only.
+for (const hookId of ['supermemory', 'memory-bridge']) for (const evidence of ['matching', 'absent', 'customized', 'invalid', 'wrong-path', 'busy'] as const) {
+ test(`Codex native hook cleanup honors exact receipt and admission: ${hookId}/${evidence}`, async () => {
+  const roots = cleanupRoots({HOME: mkdtempSync(join(tmpdir(), 'deck-cleanup-hook-'))});
+  const path = join(roots.codex, 'config.toml');
+  const manifestPath = join(roots.codex, 'deck/manifest.json');
+  const selector = {kind: 'text' as const, start: `# deck-codex-hook:${hookId}:start`, end: `# deck-codex-hook:${hookId}:end`};
+  const hook = `${selector.start}\n[[hooks.UserPromptSubmit]]\nhooks = [{ type = "command", command = "'/usr/bin/node' '/fixture/deck/recall.js'", timeout = 60 }]\n${selector.end}`;
+  const prefix = '# personal configuration\nmodel = "custom"\n';
+  const sibling = '# deck-codex-hook:rtk:start\n[[hooks.PreToolUse]]\nhooks = [{ type = "command", command = "user-rtk" }]\n# deck-codex-hook:rtk:end\n';
+  const current = evidence === 'customized' ? hook.replace('timeout = 60', 'timeout = 61') : hook;
+  const before = prefix + current + '\n' + sibling;
+  const target = {path: evidence === 'wrong-path' ? join(roots.codex, 'other.toml') : path, selector};
+  const receipt = {...target, id: contributionId(target), hash: evidence === 'invalid' ? 'invalid' : contributionHash(hook), encoding: 'bytes', ownership: 'prior-record', scope: 'global'};
+  // Matches the native Codex manifest wrapper, rather than the generic manifest schema.
+  const manifest = JSON.stringify({version: 1, runnerId: 'codex', root: roots.codex, files: {}, contributions: evidence === 'absent' ? [] : [receipt]});
+  try {
+   mkdirSync(join(roots.codex, 'deck'), {recursive: true});
+   writeFileSync(path, before); writeFileSync(manifestPath, manifest);
+   const outcomes = await runRunnerCleanupUpdate(roots, ['codex'], {
+    admission: evidence === 'busy' ? async () => {throw new RunnerMutationDeferredError();} : idle,
+   });
+   if (evidence === 'matching') {
+    expect(readFileSync(path, 'utf8')).toBe(prefix + '\n' + sibling);
+    expect(JSON.parse(readFileSync(manifestPath, 'utf8')).contributions).toEqual([]);
+    expect(existsSync(join(roots.codex, 'deck/backups'))).toBe(true);
+   } else {
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    expect(readFileSync(manifestPath, 'utf8')).toBe(manifest);
+    expect(existsSync(join(roots.codex, 'deck/backups'))).toBe(false);
+    if (evidence === 'busy') expect(outcomes[0]?.status).toBe('deferred');
+   }
+  } finally {rmSync(roots.home, {recursive: true, force: true});}
+ });
+}
 test('unattended update preserves ambiguity; default, EOF and cancellation never consent',async()=>{
  for(const ask of [undefined,async()=>'',async()=>{throw Error('EOF');}]){
  const roots=fixture(),before=readFileSync(join(roots.codex,'config.toml'),'utf8');

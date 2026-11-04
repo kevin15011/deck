@@ -9,3 +9,12 @@ events:
     notes:
       - Source implementation and independent safety repairs verified.
       - Final pinned suite passes; installed-state audit remains pending.
+  - phase: verify
+    status: in_progress
+    event: verify.started
+    artifact: verify-report.md
+    timestamp: "2026-11-04"
+    actor: deck-lead
+    notes:
+      - Final source follow-up passes 4421 tests and fourteen isolated native scenarios.
+      - Host mutation admission deferred; actual installed cleanup remains incomplete.

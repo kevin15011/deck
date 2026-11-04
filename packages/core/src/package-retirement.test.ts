@@ -259,7 +259,7 @@ for (const format of ["json", "json-array", "toml"] as const) {
    const target={path,format:format === "toml" ? "toml" as const : "json" as const,container:["mcpServers"],array:format === "json-array"};
    const initial=planPackageRetirement({runnerId:"pi",targets:[target],dedicatedRoots:[root]});
    // Receipts are independently hashed from the known fixture contribution values.
-   const contributions=initial.entries.map(entry=>({...entry.contribution!,id:contributionId(entry.contribution!),hash:evidence === "invalid" ? "invalid" : contributionHash(format === "toml" ? `[mcp_servers.${entry.capability}]\ncommand = "/fixture/owned"` : canonicalContributionJson(format === "json-array" ? entry.capability : value)),encoding:"bytes" as const,ownership:"prior-record" as const,scope:"global" as const}));
+   const contributions=initial.entries.map(entry=>({...entry.contribution!,id:contributionId(entry.contribution!),hash:evidence === "invalid" ? "invalid" : contributionHash(format === "toml" ? `[mcp_servers.${entry.capability}]\ncommand = "/fixture/owned"` : canonicalContributionJson(format === "json-array" ? entry.capability : value)),encoding:format === "toml" ? "bytes" as const : "canonical-json-v1" as const,ownership:"prior-record" as const,scope:"global" as const}));
    if(evidence === "edited") writeFileSync(path,ids.reduce((text,id)=>text.replaceAll(JSON.stringify(id),JSON.stringify(`${id}@custom`)),original.replaceAll("/fixture/owned","/fixture/custom")));
    const before=readFileSync(path,"utf8");
    const plan=planPackageRetirement({runnerId:"pi",targets:[target],dedicatedRoots:[root],contributions:evidence === "missing" ? [] : contributions});
@@ -271,4 +271,155 @@ for (const format of ["json", "json-array", "toml"] as const) {
    } else expect(readFileSync(path,"utf8")).toBe(before);
   });
  }
+}
+
+// Protects exact installed receipt boundaries; oracle: only selected owned bytes may disappear.
+test('TOML retirement shares receipt selection and preserves following section comments', () => {
+  const root = mkdtempSync(join(tmpdir(), 'deck-retirement-toml-receipt-'));
+  const path = join(root, 'config.toml'), manifestPath = join(root, 'manifest.json');
+  const owned = '[mcp_servers.supermemory]\ncommand = "/fixture/proxy"\n[mcp_servers.supermemory.env]\nMODE = "fixture"';
+  const sibling = '\n\n# deck-codex-hook:keep:start\n[hooks]\nvalue = "keep"\n# deck-codex-hook:keep:end\n';
+  const target = { path, selector: { kind: 'toml' as const, header: 'mcp_servers.supermemory' } };
+  const tx = beginRunnerContributions({ runnerId: 'codex', root, manifestPath, deckVersion: 'test', targets: [target] });
+  writeFileSync(path, owned + sibling); tx.commit();
+  const contributions = readRunnerContributions(manifestPath)!.contributions;
+  const plan = planPackageRetirement({ runnerId: 'codex', targets: [{ path, format: 'toml' }], dedicatedRoots: [], contributions });
+  expect(plan.entries[0]!.action).toBe('remove');
+  expect(plan.entries[0]!.entryHash).toBe(contributionHash(owned));
+  applyPackageRetirement(plan, [], { manifestPath });
+  expect(readFileSync(path, 'utf8')).toBe(sibling);
+  expect(readRunnerContributions(manifestPath)!.contributions).toEqual([]);
+});
+
+// Protects destructive cleanup: even exact receipts cannot resolve ambiguous block markers.
+// Oracle: retirement requires one ordered pair and preservation without backup or receipt release.
+for (const hook of ['supermemory', 'memory-bridge']) {
+  for (const shape of ['duplicate-end-before', 'duplicate-end-after', 'duplicate-start', 'reversed', 'missing-start', 'missing-end', 'nested-same', 'nested-other', 'inside-other'] as const) {
+    test(`text retirement preserves ${hook} ${shape}`, () => {
+      const root = mkdtempSync(join(tmpdir(), 'deck-retirement-markers-'));
+      const path = join(root, 'config.toml'), manifestPath = join(root, 'manifest.json'), backupRoot = join(root, 'backups');
+      const start = `# deck-codex-hook:${hook}:start`, end = `# deck-codex-hook:${hook}:end`;
+      const selector = { kind: 'text' as const, start, end };
+      const body = '\n[hooks]\ncommand = "/fixture/owned"\n';
+      const block = start + body + end;
+      const tx = beginRunnerContributions({ runnerId: 'codex', root, manifestPath, deckVersion: 'test', targets: [{ path, selector }] });
+      writeFileSync(path, block); tx.commit();
+      const nested = '# deck-codex-hook:personal:start\n# deck-codex-hook:personal:end\n';
+      const malformed = shape === 'duplicate-end-before' ? end + '\n' + block
+        : shape === 'duplicate-end-after' ? block + '\n' + end
+        : shape === 'duplicate-start' ? start + '\n' + block
+        : shape === 'reversed' ? end + body + start
+        : shape === 'missing-start' ? body + end
+        : shape === 'missing-end' ? start + body
+        : shape === 'nested-same' ? start + '\n' + block + '\n' + end
+        : shape === 'inside-other' ? '# deck-codex-hook:personal:start\n' + block + '\n# deck-codex-hook:personal:end'
+        : start + body + nested + end;
+      const before = malformed + '\n\n[personal]\nkeep = true\n';
+      writeFileSync(path, before);
+      const receipt = readRunnerContributions(manifestPath)!;
+      // For nested foreign markers, prove matching bytes alone are insufficient.
+      if (shape === 'nested-other') receipt.contributions[0]!.hash = contributionHash(start + body + nested + end);
+      writeFileSync(manifestPath, JSON.stringify(receipt));
+      const manifestBefore = readFileSync(manifestPath, 'utf8');
+      const plan = planPackageRetirement({ runnerId: 'codex', targets: [{ path, format: 'text', capability: hook === 'supermemory' ? 'supermemory' : 'deck-memory', selector }], dedicatedRoots: [], contributions: receipt.contributions });
+      expect(plan.diagnostics.length).toBeGreaterThan(0);
+      expect(plan.entries.every(entry => entry.action === 'preserve')).toBe(true);
+      expect(applyPackageRetirement(plan, [], { manifestPath, backupRoot }).removed).toEqual([]);
+      expect(readFileSync(path, 'utf8')).toBe(before);
+      expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
+      expect(existsSync(backupRoot)).toBe(false);
+    });
+  }
+}
+
+for (const shape of ['crossing', 'contained', 'text-toml', 'text-toml-ambiguous'] as const) {
+  test(`overlapping retirement selections preserve all receipts: ${shape}`, () => {
+    // Protects sibling ownership: overlapping exact receipts do not authorize a union deletion.
+    const root = mkdtempSync(join(tmpdir(), 'deck-retirement-overlap-'));
+    const path = join(root, 'config.toml'), manifestPath = join(root, 'manifest.json'), backupRoot = join(root, 'backups');
+    const outer = { kind: 'text' as const, start: '# outer-start', end: '# outer-end' };
+    const inner = shape.startsWith('text-toml') ? { kind: 'toml' as const, header: 'mcp_servers.supermemory' }
+      : { kind: 'text' as const, start: '# inner-start', end: '# inner-end' };
+    const original = shape.startsWith('text-toml') ? '# outer-start\n[mcp_servers.supermemory]\ncommand = "owned"\n# outer-end\n' + (shape === 'text-toml-ambiguous' ? '# outer-end\n' : '')
+      : shape === 'crossing' ? '# outer-start\n# inner-start\n# outer-end\n# inner-end\n'
+      : '# outer-start\n# inner-start\n# inner-end\n# outer-end\n';
+    const tx = beginRunnerContributions({ runnerId: 'codex', root, manifestPath, deckVersion: 'test', targets: [{ path, selector: outer }, { path, selector: inner }] });
+    writeFileSync(path, original); tx.commit();
+    const manifestBefore = readFileSync(manifestPath, 'utf8');
+    const plan = planPackageRetirement({ runnerId: 'codex', targets: [
+      { path, format: 'text', capability: 'deck-memory', selector: outer },
+      inner.kind === 'text' ? { path, format: 'text', capability: 'supermemory', selector: inner } : { path, format: 'toml' },
+    ], dedicatedRoots: [], contributions: readRunnerContributions(manifestPath)!.contributions });
+    expect(plan.entries).toHaveLength(shape === 'text-toml-ambiguous' ? 1 : 2);
+    expect(plan.entries.every(entry => entry.action === 'preserve')).toBe(true);
+    expect(plan.diagnostics.length).toBeGreaterThan(0);
+    // Even confirmations cannot turn structurally ambiguous selections into deletions.
+    expect(applyPackageRetirement(plan, plan.entries, { manifestPath, backupRoot }).removed).toEqual([]);
+    expect(readFileSync(path, 'utf8')).toBe(original);
+    expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
+    expect(existsSync(backupRoot)).toBe(false);
+  });
+}
+
+test('adjacent receipted retired hook blocks remove independently and preserve personal bytes', () => {
+  // Protects valid cleanup: strict ambiguity rejection must still admit disjoint exact pairs.
+  const root = mkdtempSync(join(tmpdir(), 'deck-retirement-adjacent-'));
+  const path = join(root, 'config.toml'), manifestPath = join(root, 'manifest.json');
+  const selectors = ['supermemory', 'memory-bridge'].map(id => ({ kind: 'text' as const, start: `# deck-codex-hook:${id}:start`, end: `# deck-codex-hook:${id}:end` }));
+  const tx = beginRunnerContributions({ runnerId: 'codex', root, manifestPath, deckVersion: 'test', targets: selectors.map(selector => ({ path, selector })) });
+  const personal = '\n[personal]\nkeep = true\n';
+  writeFileSync(path, selectors.map(selector => selector.start + '\n# owned\n' + selector.end).join('') + personal); tx.commit();
+  const plan = planPackageRetirement({ runnerId: 'codex', targets: selectors.map(selector => ({ path, format: 'text', capability: 'supermemory', selector })), dedicatedRoots: [], contributions: readRunnerContributions(manifestPath)!.contributions });
+  expect(plan.entries).toHaveLength(2);
+  expect(plan.entries.every(entry => entry.action === 'remove')).toBe(true);
+  expect(applyPackageRetirement(plan, [], { manifestPath }).removed).toHaveLength(2);
+  expect(readFileSync(path, 'utf8')).toBe(personal);
+  expect(readRunnerContributions(manifestPath)!.contributions).toEqual([]);
+});
+
+for (const format of ['toml', 'text', 'file', 'json'] as const) {
+  for (const evidence of ['matching', 'missing', 'edited', 'invalid', 'wrong-path', 'wrong-selector', 'wrong-encoding'] as const) {
+    test(`exact ${format} retirement receipt boundary: ${evidence}`, () => {
+      // Protects path/selector/hash ownership; oracle: journaled exact bytes, never familiar names.
+      const root = mkdtempSync(join(tmpdir(), 'deck-retirement-selector-'));
+      const path = join(root, format === 'toml' || format === 'text' ? 'config.toml' : 'config.json');
+      const manifestPath = join(root, 'manifest.json');
+      const block = '# deck-codex-hook:supermemory:start\n[hooks]\ncommand = "/fixture/owned"\n# deck-codex-hook:supermemory:end';
+      const selector = format === 'text' ? { kind: 'text' as const, start: '# deck-codex-hook:supermemory:start', end: '# deck-codex-hook:supermemory:end' }
+        : format === 'toml' ? { kind: 'toml' as const, header: 'mcp_servers.supermemory' }
+        : format === 'json' ? { kind: 'json' as const, keys: ['mcpServers', 'supermemory'] } : { kind: 'file' as const };
+      const original = format === 'text' ? block + '\n\n# personal section\n[personal]\nkeep = true\n'
+        : format === 'toml' ? '[mcp_servers.supermemory]\ncommand = "/fixture/owned"\n\n# personal section\n[mcp_servers.personal]\ncommand = "keep"\n'
+        : JSON.stringify({ mcpServers: { supermemory: { command: '/fixture/owned' }, personal: { command: 'keep' } } });
+      const tx = beginRunnerContributions({ runnerId: 'codex', root, manifestPath, deckVersion: 'test', targets: [{ path, selector }] });
+      writeFileSync(path, original); tx.commit();
+      const contributions = readRunnerContributions(manifestPath)!.contributions;
+      const record = contributions[0]!;
+      if (evidence === 'edited') writeFileSync(path, original.replace('/fixture/owned', '/fixture/custom'));
+      if (evidence === 'invalid') record.hash = 'invalid';
+      if (evidence === 'wrong-encoding') record.encoding = format === 'json' ? 'bytes' : 'canonical-json-v1';
+      if (evidence === 'wrong-path') record.path = join(root, 'other');
+      if (evidence === 'wrong-selector') record.selector = { kind: 'file' };
+      // Retain the claimed ID to ensure it cannot substitute for the actual path/selector.
+      if (evidence === 'wrong-selector' && format === 'file') record.selector = { kind: 'json', keys: ['mcpServers'] };
+      const before = readFileSync(path, 'utf8');
+      const target = { path, format, capability: 'supermemory', container: ['mcpServers'], ...(format === 'text' ? { selector: selector as Extract<typeof selector, { kind: 'text' }> } : {}) };
+      const plan = planPackageRetirement({ runnerId: 'codex', targets: [target], dedicatedRoots: [root], contributions: evidence === 'missing' ? [] : contributions });
+      expect(plan.entries).toHaveLength(1);
+      if (evidence === 'matching') {
+        expect(plan.entries[0]!.action).toBe('remove');
+        applyPackageRetirement(plan, [], { manifestPath });
+        if (format === 'file') expect(existsSync(path)).toBe(false);
+        else {
+          expect(readFileSync(path, 'utf8')).toContain('personal');
+          expect(readFileSync(path, 'utf8')).not.toContain('/fixture/owned');
+        }
+        expect(readRunnerContributions(manifestPath)!.contributions).toEqual([]);
+      } else {
+        expect(plan.entries[0]!.action).not.toBe('remove');
+        applyPackageRetirement(plan, []);
+        expect(readFileSync(path, 'utf8')).toBe(before);
+      }
+    });
+  }
 }

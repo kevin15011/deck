@@ -194,3 +194,27 @@ types and audit passed. Independent re-review67244 executed32MCP/96plans and
 RETIRE-CODEX-MCP-01. All specific source findings are now closed; broad CLI and
 whole-retirement acceptance remain pending final full gate/native canary/residue
 and installed-state checks. Same backend owner continues final isolated gates.
+
+Source retirement committed as f01d41b; Python fixture follow-up as9ca07de.
+Installed audit70024 subsequently found37receiptmatched files, older unproven
+private trees, and missed Codex hook/MCP selectors. Actual deletion was not run.
+Core attempt6 found TOML slice/comment mismatch versus canonical receipt selector;
+combined core/CLI cleanup now uses exact canonical ranges and path/selector/
+encoding evidence, plus bounded text hook candidates.124combined tests and pinned
+types pass; readonly actual Codex entries now match ownership. Independent review
+and a new full gate are required before follow-up commit. Native activity remains
+unknown/active on macOS; no directory name or receipt is treated as idle proof.
+
+Independent text-cleanup review72776 reproduced duplicate END ambiguity. Core
+attempt7 added unique ordered pairs, nested/enclosing/overlap resource preservation,
+and public accounting regressions.147focused/pinnedtypes pass. Independent
+re-review74279 passed74scenarios/377assertions and matched5inputs. Lead resolved
+RETIRE-CLEANUP-MARKERS-01. New final full gate and updated isolated nativecanary
+are pending for this follow-up delta; prior4357pass gate is historical only.
+
+
+Final follow-up gate75141 passed4421tests/0fail/0skip in34.965s and pinnedtypes,
+frozeninstall,147protectedchecks, audit. Lead matched3689workspacehashes and ran
+14isolatednative canaryscenarios successfully. Host no-op mutationadmission returned
+runner-mutation-deferred; no actualinstalledcleanup. Sourcefollowup is ready for
+commit, while task11 and whole installed-state acceptance remain incomplete.

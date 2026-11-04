@@ -2,9 +2,9 @@ import { jsonRanges, type JsonNode } from './jsonc-ranges';
 import { guardRunnerGenerationRetirement } from './runner-generation-references';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { assertNoContributionSymlink, canonicalContributionJson, contributionHash, contributionId, recordRemovedRunnerContributions, validContributionHash, type ContributionTarget, type RunnerContribution } from './runner-contributions';
+import { assertNoContributionSymlink, canonicalContributionJson, contributionHash, contributionId, recordRemovedRunnerContributions, selectContributionContent, validContributionHash, type ContributionTarget, type RunnerContribution } from './runner-contributions';
 
-export type RetirementTarget = { path: string; format: 'json' | 'toml' | 'file' | 'symlink'; container?: string[]; capability?: string; array?: boolean; /** Exact JSON property name when package metadata uses a path as its key. */ key?: string };
+export type RetirementTarget = { path: string; format: 'json' | 'toml' | 'file' | 'symlink' | 'text'; /** Exact marked block; names identify candidates, never ownership. */ selector?: Extract<ContributionTarget['selector'], { kind: 'text' }>; container?: string[]; capability?: string; array?: boolean; /** Exact JSON property name when package metadata uses a path as its key. */ key?: string };
 export type RetirementEntry = {
   contribution?: ContributionTarget;
   generation?: { root: string; selectionPath: string };
@@ -80,6 +80,7 @@ export function planPackageRetirement(input: {
 }): RetirementPlan {
   const capabilityIds = input.capabilityIds ?? retired;
   const plan: RetirementPlan = { schema: 'deck-package-retirement-v1', runnerId: input.runnerId, entries: [], diagnostics: [] };
+  const ambiguousTextPaths = new Set<string>();
   // Preserve Array.find's first-record behavior for legacy duplicate IDs. The
   // lookup must not rehash each target for every recorded installation leaf.
   const contributionsById = (input.contributions ?? []).every(record => record != null && typeof record.id === 'string') ? new Map<string, RunnerContribution>() : undefined;
@@ -97,7 +98,9 @@ export function planPackageRetirement(input: {
         // Corrupt legacy rows retain the old per-target diagnostic behavior.
         const record = contributionsById ? contributionsById.get(recordId) : input.contributions?.find(item => item.id === recordId);
         const dedicated = input.dedicatedRoots.some(root => inRoot(path, root));
-        const manifest = validContributionHash(record?.hash) && record.hash === entryHash;
+        const manifest = validContributionHash(record?.hash) && record.hash === entryHash
+          && resolve(record.path) === path && contributionId(record) === recordId
+          && record.encoding === (target.format === 'json' ? 'canonical-json-v1' : target.format === 'symlink' ? 'link-target' : 'bytes');
         const editedReceipt = Boolean(record) && !manifest;
         // Shared config/dependency entries need granular evidence even under Deck's tools root.
         const receiptRequired = retired.some(id => id === capability && id !== 'context-mode' && id !== 'serena');
@@ -139,6 +142,32 @@ export function planPackageRetirement(input: {
           add(capability, keys.join('.'), property.node.value, ranges, { path, selector: { kind: 'json', keys } });
           plan.entries.at(-1)!.context = `Container ${(target.container ?? []).join('.') || '(root)'}; surrounding keys: ${[...container.properties!.keys()].join(', ')}; preserve all siblings.`;
         }
+      } else if (target.format === 'text') {
+        if (!target.capability || !capabilityIds.includes(target.capability) || !target.selector) continue;
+        const { start: startMarker, end: endMarker } = target.selector;
+        const start = text.indexOf(startMarker), end = text.indexOf(endMarker);
+        // Cleanup must establish one ordered pair across the entire preimage,
+        // including orphan ENDs before the selected START. Keep journal selection unchanged.
+        if (start < 0 && end < 0) continue;
+        if (!startMarker || !endMarker || startMarker === endMarker || start < 0 || end < start + startMarker.length
+          || text.indexOf(startMarker, start + 1) >= 0 || text.indexOf(endMarker, end + 1) >= 0) {
+          ambiguousTextPaths.add(path);
+          plan.diagnostics.push(`Preserved ambiguous text contribution markers: ${path}`); continue;
+        }
+        // A nested native hook, including a personal one without a retirement
+        // target, cannot be adopted as part of the outer hook's owned bytes.
+        const enclosing: string[] = [];
+        for (const marker of text.slice(0, start).matchAll(/# deck-codex-hook:([^\r\n]+):(start|end)/g)) {
+          if (marker[2] === 'start') enclosing.push(marker[1]!);
+          else if (enclosing.at(-1) === marker[1]) enclosing.pop();
+        }
+        if (enclosing.length || /# deck-codex-hook:[^\r\n]+:(?:start|end)/.test(text.slice(start + startMarker.length, end))) {
+          ambiguousTextPaths.add(path);
+          plan.diagnostics.push(`Preserved nested text contribution markers: ${path}`); continue;
+        }
+        const value = selectContributionContent(text, target.selector);
+        if (value === undefined) continue;
+        add(target.capability, target.selector.start, value, [{ start, end: start + value.length }], { path, selector: target.selector }, '[redacted marked configuration block]');
       } else if (target.format === 'toml') {
         const parsed = Bun.TOML.parse(text) as Record<string, any>;
         for (const capability of capabilityIds) {
@@ -146,13 +175,13 @@ export function planPackageRetirement(input: {
           const escaped = capability.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const matches = [...text.matchAll(new RegExp(`^\\[mcp_servers\\.(?:${escaped}|"${escaped}")\\][ \\t]*(?:#.*)?$`, 'gm'))];
           if (matches.length !== 1) { plan.diagnostics.push(`Preserved unsupported/ambiguous TOML spelling: ${path}#mcp_servers.${capability}`); continue; }
-          const start = matches[0]!.index!; let end = text.length;
-          for (const match of text.slice(start + matches[0]![0].length).matchAll(/^\s*\[/gm)) {
-            const position = start + matches[0]![0].length + match.index!;
-            const line = text.slice(position).split('\n')[0]!.trim();
-            if (!line.startsWith(`[mcp_servers.${capability}.`)) { end = position; break; }
+          const start = matches[0]!.index!;
+          // Use the journal's exact selection, including its trailing-comment boundary.
+          // Hash and deletion ranges must cover the same bytes.
+          const value = selectContributionContent(text, { kind: 'toml', header: `mcp_servers.${capability}` });
+          if (value === undefined || text.slice(start, start + value.length) !== value) {
+            plan.diagnostics.push(`Preserved unsupported TOML receipt selection: ${path}#mcp_servers.${capability}`); continue;
           }
-          const value = text.slice(start, end).trimEnd();
           add(capability, `mcp_servers.${capability}`, value, [{ start, end: start + value.length }], { path, selector: { kind: 'toml', header: `mcp_servers.${capability}` } }, parsed.mcp_servers[capability]);
         }
       } else if (target.capability && capabilityIds.includes(target.capability)) {
@@ -164,6 +193,26 @@ export function planPackageRetirement(input: {
     }
   }
   plan.entries = [...new Map(plan.entries.map(entry => [entry.id, entry])).values()];
+  const byPath = new Map<string, RetirementEntry[]>();
+  for (const entry of plan.entries) {
+    // An unselectable hook may enclose another valid selector. Without its
+    // boundary proof, no edit to that resource can be shown to preserve it.
+    if (ambiguousTextPaths.has(entry.path)) {
+      entry.action = 'preserve'; entry.reason = 'Ambiguous text markers in this resource require individual review';
+    }
+    const siblings = byPath.get(entry.path) ?? []; siblings.push(entry); byPath.set(entry.path, siblings);
+  }
+  for (const entries of byPath.values()) {
+    for (let i = 0; i < entries.length; i++) for (let j = i + 1; j < entries.length; j++) {
+      const a = entries[i]!, b = entries[j]!;
+      if (a.contribution?.selector.kind !== 'text' && b.contribution?.selector.kind !== 'text') continue;
+      if (!a.ranges.some(x => b.ranges.some(y => x.start < y.end && y.start < x.end))) continue;
+      for (const entry of [a, b]) {
+        entry.action = 'preserve'; entry.reason = 'Overlapping text contribution selections require individual review';
+      }
+      plan.diagnostics.push(`Preserved overlapping text contribution selections: ${a.path}`);
+    }
+  }
   return plan;
 }
 /** Uses reviewed exact edits; no heuristic matching and no bulk ambiguity approval. */
