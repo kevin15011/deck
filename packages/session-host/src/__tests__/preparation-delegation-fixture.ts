@@ -52,6 +52,8 @@ export async function exercisePreparationDelegation(fault: 'restart' | 'missing-
     preparationScope: input => ({ ...input, policyDigest: 'p', members: Object.entries(input.members).map(([memberId, a]) => ({ memberId, runnerId: a.runnerId, bindingId: memberId, capabilities: {} })) }),
   });
   const bridge = new BridgeService({ credentials, broker, status: g => manager.taskStatus(g), callTaskTool: (g, n, a, c) => manager.callTaskTool(g, n, a, c) });
+  const activation: Record<string, unknown>[] = [];
+  manager.subscribeEvents(event => { if (event.kind === 'diagnostic' && event.data.code === 'preparation.activation') activation.push(event.data); });
   try {
     const created = await manager.execute({ clientId: 'test', command: { v: 1, commandId: 'create', type: 'session.create', projectRoot: project } });
     expect(created.ok).toBe(true); const sessionId = (created as any).data.sessionId;
@@ -59,6 +61,8 @@ export async function exercisePreparationDelegation(fault: 'restart' | 'missing-
     await waitFor(() => inputs.length === 1);
     const call = (input: DriverTaskInput, tool: string, args?: unknown) => bridge.call({ token: JSON.parse(readFileSync(input.credentialFile, 'utf8')).token, tool, arguments: args });
     const lead = inputs[0]!;
+    expect(activation).toContainEqual(expect.objectContaining({ stage: 'assessment', snapshotId: lead.sessionStartContext!.snapshotId, status: 'eligible', attempt: 1 }));
+    expect(activation).toContainEqual(expect.objectContaining({ stage: 'handoff', boundary: 'driver-input', snapshotId: lead.sessionStartContext!.snapshotId }));
     const delegate = (args: object) => call(lead, 'deck_delegate', { agent: 'setup', task: 'Repair registry', ...args });
     service = createService(); // Actual loss of the daemon's process-local snapshot cache.
     const stale = await delegate({ preparation: { snapshotId: lead.sessionStartContext!.snapshotId, components: ['skill-registry'] } });
@@ -67,13 +71,17 @@ export async function exercisePreparationDelegation(fault: 'restart' | 'missing-
     expect(snapshot.snapshotId).toBe(lead.sessionStartContext!.snapshotId);
     expect(await delegate({ preparation: { components: ['skill-registry'] } })).toMatchObject({ ok: false, code: 'preparation-request-invalid' });
     expect(inputs).toHaveLength(1);
+    expect(activation).toContainEqual(expect.objectContaining({ stage: 'delegation', status: 'rejected', reason: 'preparation-snapshot-stale' }));
+    expect(activation).toContainEqual(expect.objectContaining({ stage: 'delegation', status: 'rejected', reason: 'preparation-request-invalid' }));
     const preparation = { snapshotId: snapshot.snapshotId, components: ['skill-registry'] };
     const accepted = await delegate({ preparation }); expect(accepted.ok).toBe(true);
     const taskId = (accepted as any).data.taskId;
+    expect(activation).toContainEqual(expect.objectContaining({ stage: 'delegation', status: 'delegated', setupTaskId: taskId, setupAttempt: 1, snapshotId: preparation.snapshotId }));
     if (fault === 'missing-role') {
       await waitFor(async () => (await manager.query('task.result', { sessionId, taskId }) as any).data.attempts.at(-1).state === 'failed');
       expect(inputs).toHaveLength(1);
       expect(JSON.stringify(await manager.query('task.result', { sessionId, taskId }))).toContain('preparation-launch-binding-unavailable');
+      expect(activation).toContainEqual(expect.objectContaining({ stage: 'setup-turn-ended', outcome: 'failed', reason: 'preparation-launch-binding-unavailable', snapshotId: preparation.snapshotId }));
       return;
     }
     await waitFor(() => inputs.length === 2);
@@ -81,6 +89,7 @@ export async function exercisePreparationDelegation(fault: 'restart' | 'missing-
     await call(lead, 'deck_task_cancel', { taskId });
     await waitFor(async () => (await manager.query('task.result', { sessionId, taskId }) as any).data.attempts.at(-1).state === 'cancelled');
     expect(await delegate({ continueTaskId: taskId })).toMatchObject({ ok: false, code: 'preparation-request-required' });
+    expect(activation).toContainEqual(expect.objectContaining({ stage: 'delegation', status: 'rejected', reason: 'preparation-request-required' }));
     const retried = await delegate({ continueTaskId: taskId, preparation }); expect(retried.ok).toBe(true);
     await waitFor(() => inputs.length === 3);
     const setup = inputs[2]!;
@@ -90,16 +99,20 @@ export async function exercisePreparationDelegation(fault: 'restart' | 'missing-
       const refused = await call(setup, 'deck_prepare_project', preparation);
       expect(refused).toMatchObject({ ok: false, code: 'preparation-authority-unavailable' });
       expect(JSON.parse((refused as any).message)).toMatchObject({ reason: 'launch-binding-unavailable', retry: expect.any(String) });
+      expect(activation).toContainEqual(expect.objectContaining({ stage: 'repair', status: 'rejected', reason: 'preparation-authority-unavailable', attempt: 2, snapshotId: preparation.snapshotId }));
       expect(() => readFileSync(join(project, '.atl/skill-registry.md'))).toThrow();
       return;
     }
     const mismatched = await call(setup, 'deck_prepare_project', { ...preparation, snapshotId: 'different' });
     expect(mismatched).toMatchObject({ ok: false, code: 'preparation-authority-revoked' });
     expect(JSON.parse((mismatched as any).message)).toMatchObject({ reason: 'request-snapshot-mismatch', retry: expect.any(String) });
+    expect(activation).toContainEqual(expect.objectContaining({ stage: 'repair', status: 'rejected', reason: 'preparation-authority-revoked', snapshotId: preparation.snapshotId }));
     expect(() => readFileSync(join(project, '.atl/skill-registry.md'))).toThrow();
     expect(await call(setup, 'deck_prepare_project', preparation)).toMatchObject({ ok: true, data: { status: 'changed' } });
     const bytes = readFileSync(join(project, '.atl/skill-registry.md'));
     expect(await call(setup, 'deck_prepare_project', preparation)).toMatchObject({ ok: true, data: { status: 'reconciled' } });
+    expect(activation).toContainEqual(expect.objectContaining({ stage: 'repair', status: 'completed', outcome: 'changed', snapshotId: preparation.snapshotId, attempt: 2 }));
+    expect(activation).toContainEqual(expect.objectContaining({ stage: 'repair', status: 'completed', outcome: 'reconciled', snapshotId: preparation.snapshotId, attempt: 2 }));
     expect(readFileSync(join(project, '.atl/skill-registry.md')).equals(bytes)).toBe(true);
     expect(readFileSync(join(project, '.atl/skill-registry.md'), 'utf8')).toContain('skill-registry');
     const token = JSON.parse(readFileSync(setup.credentialFile, 'utf8')).token;

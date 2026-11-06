@@ -1,4 +1,5 @@
 import { publishablePreparationCode } from "@deck/core";
+import { activationAssessment, activationReason } from './preparation-observability';
 import { readLocalContext, renderLocalContext, localContextWatermark, type LocalContextPage } from "./local-session-context";
 import { reservePreparationMutation } from "./runner-mutation";
 import { summarizeActivity } from './activity-summary';
@@ -177,6 +178,8 @@ type SessionMeta = {
 };
 
 type Turn = {
+  activation?: ReturnType<typeof activationAssessment>;
+  setupDelegated?: { snapshotId: string; taskId: string; attempt: number };
   preparationDelegation?: PreparationDelegation;
   validatedPreparationLaunch?: { roleId: string; generation: string; nativeSessionId: string; launchId: string; current(): boolean };
   taskId: string; memberId: string; assignment: RunnerQualifiedAssignment; prompt: string; resume?: { nativeSessionId: string }; reseeded?: boolean;
@@ -647,16 +650,22 @@ export class SessionManager implements SessionService {
               || task?.assignedRoleId !== "deck-setup" || !this.decisions(live).dependencies(task.dependsOn ?? [], task.action)) return undefined;
             return this.projectPreparationScope(live);
           };
-          if (!port || !binding || !exact || !current()) return fail("preparation-authority-unavailable", JSON.stringify({
+          if (!port || !binding || !exact || !current()) {
+            this.activationEvent(live, caller, 'repair', { status: 'rejected', reason: 'preparation-authority-unavailable' });
+            return fail("preparation-authority-unavailable", JSON.stringify({
             reason: "launch-binding-unavailable",
             retry: "Ask Lead to review fresh readiness and explicitly redelegate this repair. This attempt has no current authenticated repair binding.",
-          }));
+          })); }
           let rejection: string | undefined;
-          try { return ok(await port.repair(d, { ...binding, delegation: exact, runnerId: caller.assignment.runnerId, current,
+          try { const result = await port.repair(d, { ...binding, delegation: exact, runnerId: caller.assignment.runnerId, current,
             rejected: reason => { rejection = reason; this.append(live, { kind: "diagnostic", source: { taskId: caller.taskId, memberId: caller.memberId }, data: { code: "preparation.authority-rejected", reason, attempt: caller.attempt, delegationId: exact.id } }); this.flush(live); },
             previous: () => [...live.log.readAfter(0)].filter(e => e.kind === "diagnostic" && e.data.code === "preparation.effect").map(e => e.data.record as PreparationEffectRecord),
             record: record => { this.append(live, { kind: "diagnostic", source: { taskId: caller.taskId, memberId: caller.memberId }, data: { code: "preparation.effect", record } }); this.flush(live); },
-          })); } catch (error) {
+          });
+            this.activationEvent(live, caller, 'repair', { status: 'completed', outcome: ['changed', 'reconciled', 'unchanged'].includes(result.status) ? result.status : 'other' });
+            return ok(result);
+          } catch (error) {
+            this.activationEvent(live, caller, 'repair', { status: 'rejected', reason: activationReason((error as Error).message) });
             const allowed = ["invocation-revoked", "request-snapshot-mismatch", "snapshot-unavailable", "delegation-expired", "role-mismatch", "generation-missing", "launch-missing", "native-session-missing", "session-mismatch", "epoch-mismatch", "project-mismatch", "component-outside-delegation", "authority-scope-changed"];
             if ((error as Error).message !== "preparation-authority-revoked") throw error;
             return fail("preparation-authority-revoked", JSON.stringify({
@@ -671,6 +680,10 @@ export class SessionManager implements SessionService {
           return this.decisions(live).tool(name, d, caller);
         case "deck_delegate": {
           const outcome=this.delegate(live,d,caller);
+          const target = typeof d.continueTaskId === 'string' ? live.ledger.task(d.continueTaskId) : undefined;
+          const role = target?.assignedRoleId ?? (typeof d.agent === 'string' ? this.options.assignedRoleId?.(d.agent.replace(/^deck-/, '')) : undefined);
+          if (!outcome.ok && (d.preparation !== undefined || role === 'deck-setup' || d.agent === 'setup' || d.agent === 'deck-setup'))
+            this.activationEvent(live, caller, 'delegation', { status: 'rejected', reason: activationReason(outcome.code) });
           if(d.continuity==='native' && !outcome.ok){
             this.append(live,{kind:'diagnostic',source:{taskId:caller.taskId,memberId:LEAD_MEMBER_ID},data:{code:'continuity.request-rejected',reason:outcome.code,leadAttempt:caller.attempt,requestedNative:true}});this.flush(live);
           }
@@ -692,6 +705,15 @@ export class SessionManager implements SessionService {
 
   private decisions(live: Live): DecisionService {
     return new DecisionService({ ledger: live.ledger, lastSeq: () => live.log.lastSeq, append: draft => { this.append(live, draft); }, flush: () => this.flush(live) });
+  }
+
+  private activationEvent(live: Live, turn: Turn, stage: string, data: Record<string, unknown>): void {
+    const exact = turn.preparationDelegation;
+    this.append(live, { kind: 'diagnostic', source: { taskId: turn.taskId, memberId: turn.memberId, runnerId: turn.assignment.runnerId }, data: {
+      code: 'preparation.activation', stage, attempt: turn.attempt,
+      ...(exact ? { snapshotId: exact.snapshotId, delegationId: exact.id } : turn.activation?.snapshotId ? { snapshotId: turn.activation.snapshotId } : {}), ...data,
+    } });
+    this.flush(live);
   }
 
   private delegate(live: Live, d: Record<string, unknown>, caller?: Turn): ExecuteOutcome {
@@ -786,6 +808,13 @@ export class SessionManager implements SessionService {
     if (decisionCommand) this.flush(live);
     const nextTurn = this.newTurn(taskId, agent, { ...assignment }, attempt, d.task);
     nextTurn.preparationDelegation = preparationDelegation;
+    if (caller && assignedRoleId === 'deck-setup') {
+      if (preparationDelegation) caller.setupDelegated = { snapshotId: preparationDelegation.snapshotId, taskId, attempt };
+      this.activationEvent(live, caller, 'delegation', {
+        status: preparationDelegation ? 'delegated' : 'unarmed', setupTaskId: taskId, setupAttempt: attempt,
+        ...(preparationDelegation ? { snapshotId: preparationDelegation.snapshotId, delegationId: preparationDelegation.id } : {}),
+      });
+    }
     live.queue.push(nextTurn);
     this.schedule(live);
     return ok({ taskId });
@@ -1901,6 +1930,8 @@ export class SessionManager implements SessionService {
   ): Promise<void> {
     turn.gatedInput = driver.supportsInputClaim === true;
     turn.inputClaimed = false; turn.deliveryDrafts = undefined;
+    // Native recovery reuses the Turn object; evidence belongs to one attempt.
+    Object.assign(turn, { activation: undefined, setupDelegated: undefined });
     let outcome: TurnOutcome;
     let resolver: ChildMcpResolver | undefined;
     const preparationStartedAt = this.clock.now();
@@ -2028,6 +2059,10 @@ export class SessionManager implements SessionService {
       }
       if (readinessScope) await this.options.projectPreparation?.prepareRegistryEvidence?.(readinessScope, assignment.runnerId);
       const readinessSnapshot = readinessScope && this.options.projectPreparation?.status(readinessScope);
+      if (turn.memberId === LEAD_MEMBER_ID) {
+        turn.activation = activationAssessment(readinessSnapshot);
+        this.activationEvent(live, turn, 'assessment', turn.activation);
+      }
       const sessionStartContext = (assignment.runnerId === "claude" || (assignment.runnerId === "codex" || assignment.runnerId === "opencode" || assignment.runnerId === "pi") && nativeRoleDescriptor) && readinessSnapshot && this.options.sessionStartContext ? { text: this.options.sessionStartContext(readinessSnapshot, assignment.runnerId, { roleId: roleId ?? "", taskText: turn.prompt }), snapshotId: readinessSnapshot.snapshotId, epoch: this.preparationEpoch } : undefined;
       this.options.credentials.issue({ attempt: turn.attempt, epoch: this.preparationEpoch, sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId, allowedTools: child.mcp.sessionTools }, credentialFile);
       for (const id of child.skipped) this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: { code: "child-mcp-server-unresolved", server: id } });
@@ -2116,6 +2151,8 @@ export class SessionManager implements SessionService {
           if(turn.attempt!==launchedAttempt || live.turns.get(turn.taskId)!==turn || turn.nativeEnded || turn.controller.signal.aborted || turn.kind)throw new Error('driver-attempt-ended');
           const file = join(taskDir, assertSafeSegment(name, "file name"));
           writePrivateFile(file, content);
+          if (turn.memberId === LEAD_MEMBER_ID && sessionStartContext && name === 'session-start-context.json')
+            this.activationEvent(live, turn, 'handoff', { boundary: 'adapter-context-file', bytes: Buffer.byteLength(content), digest: digest(content) });
           return file;
         },
       };
@@ -2148,6 +2185,11 @@ export class SessionManager implements SessionService {
       turn.launched=true;
       if(turn.memberId===LEAD_MEMBER_ID){this.append(live,{kind:'task.state',source:{taskId:turn.taskId},data:{taskId:turn.taskId,state:'running',attempt:turn.attempt,launched:true}});this.flush(live);}
       resolver?.validateLaunch?.();
+      if (turn.memberId === LEAD_MEMBER_ID) this.activationEvent(live, turn, 'handoff', {
+        boundary: 'driver-input', status: input.sessionStartContext ? 'supplied' : 'unavailable',
+        continuity: input.resume ? 'native' : turn.reseeded ? 'reseeded' : 'fresh',
+        ...(input.sessionStartContext ? { bytes: Buffer.byteLength(input.sessionStartContext.text), digest: digest(input.sessionStartContext.text) } : {}),
+      });
       const handle = await driver.startTask(input, io);
       turn.handle = handle;this.publishSteering(live);this.pumpSteering(live);
       if (turn.kind) void handle.interrupt().catch(() => {});
@@ -2184,6 +2226,23 @@ export class SessionManager implements SessionService {
     }
     try { if (drained) await resolver?.release?.(); }
     catch { if(resolver?.release) (live.cleanupFailures??=[]).push(()=>resolver!.release!()); outcome = { status: "failed", error: "Unable to release the managed MCP binding", failure: { category: "deck", origin: "deck", certainty: "inferred" } }; }
+    if (outcome.error) outcome = {...outcome,error:this.redactImagePaths(outcome.error)};
+    try {
+      if (turn.memberId === LEAD_MEMBER_ID && turn.activation) this.activationEvent(live, turn, 'turn-ended', {
+        status: turn.setupDelegated ? 'delegated' : turn.activation.status === 'eligible' ? 'eligible-but-not-delegated' : turn.activation.status,
+        ...(turn.setupDelegated ? { delegatedSnapshotId: turn.setupDelegated.snapshotId, setupTaskId: turn.setupDelegated.taskId, setupAttempt: turn.setupDelegated.attempt } : {}),
+        outcome: outcome.status,
+      });
+      if (turn.preparationDelegation) this.activationEvent(live, turn, 'setup-turn-ended', {
+        outcome: outcome.status,
+        ...(outcome.status === 'failed' ? { reason: outcome.error?.includes('preparation-launch-binding-unavailable:') ? 'preparation-launch-binding-unavailable' : 'setup-turn-failed' } : {}),
+      });
+    } catch {
+      // append/flush already mark persistence as broken. Diagnostic failure must
+      // still enter finishTurn, whose finalizer revokes credentials and settles done.
+      this.finishTurn(live, turn, assignment.runnerId, outcome);
+      return;
+    }
     if (outcome.reasonCode === "native-session-not-found" && resume && !turn.reseeded && !turn.kind && !this.closing && !live.stopping) {
       this.options.broker.cancelTask(live.sessionId, turn.taskId, "task-ended");
       this.questionBroker.cancelTask(live.sessionId, turn.taskId, "task-ended");
@@ -2200,7 +2259,6 @@ export class SessionManager implements SessionService {
       ]);
       return this.launchTurn(live, turn, driver, assignment, turn.memberId===LEAD_MEMBER_ID ? this.leadRecoveryPrompt(live,turn) : turn.prompt, turn.nativeSessionId, undefined);
     }
-    if (outcome.error) outcome = {...outcome,error:this.redactImagePaths(outcome.error)};
     this.finishTurn(live, turn, assignment.runnerId, outcome);
   }
 
