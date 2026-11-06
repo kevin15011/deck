@@ -1,3 +1,5 @@
+import { compareReleaseVersions, validReleaseVersion } from './runner-writer-fence';
+import { backupManagedPreimages, planManagedWrites, type ManagedArtifactPolicy } from './managed-artifacts';
 import { jsonRanges } from './jsonc-ranges';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -90,13 +92,21 @@ export function readRunnerContributions(path: string): RunnerContributions | und
   }
   return value;
 }
-function atomic(path: string, value: unknown): void {
+function atomic(path: string, value: unknown, expected?: { content: string | undefined }): void {
   assertNoContributionSymlink(path);
+  const observed = existsSync(path) ? readFileSync(path, 'utf8') : undefined;
+  const before = expected ? expected.content : observed;
+  if (observed !== before) throw new Error('Contribution manifest changed before publication');
   const serialized = JSON.stringify(value, null, 2) + '\n';
-  if (existsSync(path) && readFileSync(path, 'utf8') === serialized) return;
+  if (observed === serialized) return;
   assertNoContributionSymlink(path); mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.tmp`;
-  try { writeFileSync(temporary, serialized, { mode: 0o600, flag: 'wx' }); renameSync(temporary, path); }
+  try {
+    writeFileSync(temporary, serialized, { mode: 0o600, flag: 'wx' });
+    assertNoContributionSymlink(path);
+    if ((existsSync(path) ? readFileSync(path, 'utf8') : undefined) !== before) throw new Error('Contribution manifest changed during publication');
+    renameSync(temporary, path);
+  }
   finally { if (existsSync(temporary)) unlinkSync(temporary); }
 }
 const activeContributionTransactions = new Set<string>();
@@ -115,10 +125,15 @@ const inside = (path: string, root: string): boolean => { const rel = relative(r
  * identities/hashes only. It is never created by planning. Unknown existing files are not adopted.
  */
 export function beginRunnerContributions(input: {
+  operationId?: string;
   runnerId: string; root: string; manifestPath: string; deckVersion: string;
   targets: ContributionTarget[]; dedicatedRoots?: string[];
+  managed?: ManagedArtifactPolicy;
   beforeMetadataWrite?: (path: string, sha256: string | null) => () => void;
-}): { commit(): RunnerContribution[]; abort(): void; abandon(): void } {
+}): { commit(): RunnerContribution[]; abort(): void; abandon(): void; backupPath?: string; replacedCount: number } {
+  const managed = input.managed;
+  const scope = managed?.scope ?? 'global';
+  if (scope !== 'global' && scope !== 'project') throw new Error('Invalid contribution scope');
   const pending = `${input.manifestPath}.pending`;
   assertNoContributionSymlink(pending);
   if (existsSync(pending)) {
@@ -128,12 +143,13 @@ export function beginRunnerContributions(input: {
       let alive = false; try { process.kill(owner, 0); alive = true; } catch { /* dead owner */ }
       if (alive) throw new Error(`Contribution transaction pending in another process: ${pending}`);
     }
-    recoverRunnerContributionTransaction(input.manifestPath);
+    recoverRunnerContributionTransaction(input.manifestPath, input);
   }
   const previous = readRunnerContributions(input.manifestPath);
   if (previous && (previous.runnerId !== input.runnerId || resolve(previous.root) !== resolve(input.root))) throw new Error('Contribution manifest root identity mismatch');
   const prior = new Map(previous?.contributions.map(entry => [entry.id, entry]));
-  const snapshots = input.targets.map(original => {
+  const managedPlan = managed ? planManagedWrites({ policy: managed, runnerId: input.runnerId, root: input.root, targets: input.targets.map(target => ({ sourceItemId: "developer-team", ...target })), receipts: previous?.contributions ?? [] }) : undefined;
+  const snapshots = managedPlan ? managedPlan.map(({ target, id, before, authority }) => ({ target, id, before, ownership: authority === 'generated-root' ? 'dedicated-location' as const : before === undefined ? 'new-write' as const : 'prior-record' as const })) : input.targets.map(original => {
     const target = { sourceItemId: "developer-team", ...original };
     const id = contributionId(target); const content = readContribution(target);
     const before = content === undefined ? undefined : contributionHash(content);
@@ -143,14 +159,18 @@ export function beginRunnerContributions(input: {
     if (!owned && !dedicated && before !== undefined && target.expectedHash && before !== target.expectedHash) throw new Error(`Unowned contribution conflicts with desired content: ${target.path}`);
     return { target, id, before, ownership: owned ? owned.ownership : dedicated ? 'dedicated-location' as const : before === undefined ? 'new-write' as const : undefined };
   });
+  const replacements = managedPlan?.filter(entry => entry.content !== undefined && entry.before !== entry.target.expectedHash) ?? [];
+  const backupPath = managed ? backupManagedPreimages({ stateRoot: managed.stateRoot, runnerId: input.runnerId, root: input.root, entries: replacements.map(entry => ({ target: entry.target, content: entry.preimage })) }) : undefined;
   mkdirSync(dirname(pending), { recursive: true, mode: 0o700 });
-  const pendingText = JSON.stringify({ pid: process.pid, runnerId: input.runnerId, root: resolve(input.root), deckVersion: input.deckVersion,
+  const pendingText = JSON.stringify({ ...(input.operationId ? { operationId: input.operationId } : {}), pid: process.pid, manifestPath: resolve(input.manifestPath), managed: !!managed, scope, runnerId: input.runnerId, root: resolve(input.root), deckVersion: input.deckVersion,
     targets: snapshots.map(({ target, id, before, ownership }) => ({ target, id, ownership, preimage: before ?? "absent", postimage: target.expectedHash ?? "verify-after-apply" })) });
   const accountPending = input.beforeMetadataWrite?.(pending, contributionHash(pendingText));
   accountedWrite(()=>writeFileSync(pending, pendingText, { flag: 'wx', mode: 0o600 }), accountPending);
   activeContributionTransactions.add(pending);
   let finished = false;
   return {
+    backupPath,
+    replacedCount: replacements.length,
     commit() {
       if (finished) throw new Error('Contribution transaction already finished');
       // Package installers may finish during an adapter's asynchronous publication. Preserve their
@@ -166,13 +186,13 @@ export function beginRunnerContributions(input: {
       for (const [id, receipt] of observedRecords) prior.set(id, receipt);
       const receipts: RunnerContribution[] = [];
       for (const { target, id, ownership } of snapshots) {
-        if (!ownership) continue;
+        if (!managed && !ownership) continue;
         const content = readContribution(target);
-        if (content === undefined) { prior.delete(id); continue; }
+        if (content === undefined) { if (managed) throw new Error(`Contribution postimage missing: ${target.path}`); prior.delete(id); continue; }
         const hash = contributionHash(content);
         if (target.expectedHash && hash !== target.expectedHash) throw new Error(`Contribution postimage mismatch: ${target.path}`);
         const { expectedHash: _, ...metadata } = target;
-        const receipt: RunnerContribution = { ...metadata, id, hash, ownership, scope: 'global', encoding: (target.selector.kind === 'json' || target.selector.kind === 'json-array') ? 'canonical-json-v1' : target.selector.kind === 'symlink' ? 'link-target' : 'bytes' };
+        const receipt: RunnerContribution = { ...metadata, id, hash, ownership: ownership!, scope, encoding: (target.selector.kind === 'json' || target.selector.kind === 'json-array') ? 'canonical-json-v1' : target.selector.kind === 'symlink' ? 'link-target' : 'bytes' };
         prior.set(id, receipt); receipts.push(receipt);
       }
       const next = { schema: 'deck-runner-contributions-v1', runnerId: input.runnerId, root: resolve(input.root), deckVersion: input.deckVersion, contributions: [...prior.values()] };
@@ -222,15 +242,16 @@ export function recordOwnedRunnerArtifactTree(input: { runnerId: string; root: s
   };
   if (input.expectedFiles) for (const file of input.expectedFiles) { const path = resolve(input.artifactRoot, file); if (!inside(path, input.artifactRoot)) throw new Error("Unsafe package receipt path"); walk(path); }
   else walk(input.artifactRoot);
+  const preimage = existsSync(input.manifestPath) ? readFileSync(input.manifestPath, 'utf8') : undefined;
   let previous: Record<string, any>;
-  if (existsSync(input.manifestPath)) previous = JSON.parse(readFileSync(input.manifestPath, 'utf8'));
+  if (preimage !== undefined) previous = JSON.parse(preimage);
   else if (input.runnerId === 'codex') previous = { version: 1, files: {} };
   else if (input.runnerId === 'pi') previous = { schema: 'deck-pi-manifest-v1', files: {}, settings: { packages: [], addedPackages: [], skillExclusions: [] }, mcp: { servers: {} } };
   else previous = { schema: 'deck-runner-contributions-v1', root: resolve(input.root), deckVersion: '0.13.0' };
   const current: RunnerContribution[] = Array.isArray(previous.contributions) ? previous.contributions : [];
   // Replace only this physical tree; a package can also own entries or leaves elsewhere.
   const retained = current.filter(entry => entry.sourceItemId !== input.sourceItemId || !inside(entry.path, input.artifactRoot));
-  atomic(input.manifestPath, { ...previous, runnerId: input.runnerId, contributions: [...retained, ...leaves] });
+  atomic(input.manifestPath, { ...previous, runnerId: input.runnerId, contributions: [...retained, ...leaves] }, { content: preimage });
   return leaves;
 }
 
@@ -246,30 +267,80 @@ export function hasRunnerContributionProof(manifestPath: string, target: Contrib
   } catch { return false; }
 }
 
-/** Recovery performs no installation writes. It accounts only verified postimages or an unchanged rollback. */
-export function recoverRunnerContributionTransaction(manifestPath: string): "rolled-back" | "completed" | "recovered-partial" {
+/** Recovery performs no installation writes. Journal hashes are claims, never publication authority.
+ * Every settlement requires caller authority. Rollback additionally requires caller-captured
+ * preimages independent of the journal; unproven legacy journals remain pending.
+ */
+export function recoverRunnerContributionTransaction(manifestPath: string, authority?: {
+  deckVersion?: string;
+  runnerId: string; root: string; targets: readonly ContributionTarget[]; managed?: ManagedArtifactPolicy;
+  rollbackPreimages?: readonly { target: ContributionTarget; hash: string | 'absent' }[];
+}): "rolled-back" | "completed" | "recovered-partial" {
   const pending = `${manifestPath}.pending`;
   assertNoContributionSymlink(pending);
   if (activeContributionTransactions.has(pending)) throw new Error("Contribution transaction is active");
-  const transaction = JSON.parse(readFileSync(pending, "utf8")) as { runnerId: string; root: string; deckVersion: string; targets: Array<{ target: ContributionTarget; id: string; ownership?: RunnerContribution["ownership"]; preimage: string; postimage: string }> };
+  const transaction = JSON.parse(readFileSync(pending, "utf8")) as {
+    runnerId: string; root: string; deckVersion: string; manifestPath?: string; managed?: boolean; scope?: RunnerContribution['scope'];
+    targets: Array<{ target: ContributionTarget; id: string; ownership?: RunnerContribution["ownership"]; preimage: string; postimage: string }>;
+  };
   if (!Array.isArray(transaction.targets) || !isAbsolute(transaction.root)) throw new Error("Invalid contribution recovery journal");
-  const states = transaction.targets.map(entry => {
-    if (entry.id !== contributionId(entry.target)) throw new Error("Invalid recovery identity");
-    const content = readContribution(entry.target); const hash = content === undefined ? "absent" : contributionHash(content);
-    return { entry, hash, pre: hash === entry.preimage, post: validContributionHash(entry.postimage) && hash === entry.postimage };
-  });
-  if (states.every(state => state.pre)) { unlinkSync(pending); return "rolled-back"; }
-  if (!states.every(state => state.post || state.pre)) throw new Error("Contribution recovery conflict: changed postimages preserved; restore the reviewed adapter backup before retrying");
-  const partial = states.some(state => !state.post && state.entry.ownership);
+  if (transaction.manifestPath !== undefined && resolve(transaction.manifestPath) !== resolve(manifestPath)) throw new Error('Contribution recovery manifest identity mismatch');
   const previous = readRunnerContributions(manifestPath);
   if (previous && (previous.runnerId !== transaction.runnerId || resolve(previous.root) !== resolve(transaction.root))) throw new Error('Contribution recovery manifest identity changed');
-  const records = new Map(previous?.contributions.map(entry => [entry.id, entry]));
-  for (const { entry, hash } of states) {
-    if (!entry.ownership || hash === "absent" || hash !== entry.postimage) continue;
-    const { expectedHash: _, ...target } = entry.target;
-    records.set(entry.id, { ...target, id: entry.id, hash, ownership: entry.ownership, scope: "global", encoding: target.selector.kind === "json" || target.selector.kind === "json-array" ? "canonical-json-v1" : target.selector.kind === "symlink" ? "link-target" : "bytes" });
+  if (authority && (transaction.runnerId !== authority.runnerId || resolve(transaction.root) !== resolve(authority.root))) throw new Error('Contribution recovery authority identity mismatch');
+  if (!authority) throw new Error('Contribution recovery authority required');
+  if (authority.deckVersion !== undefined) {
+    const compatible = (version: unknown) => typeof version === 'string' && validReleaseVersion(version) && compareReleaseVersions(version, authority.deckVersion!) <= 0;
+    if (!compatible(transaction.deckVersion) || previous && !compatible(previous.deckVersion)) throw new Error('Contribution recovery writer incompatible');
   }
-  atomic(manifestPath, { schema: "deck-runner-contributions-v1", runnerId: transaction.runnerId, root: transaction.root, deckVersion: transaction.deckVersion, contributions: [...records.values()] });
+  if (!transaction.targets.length) throw new Error('Contribution recovery conflict: empty journal');
+  const scope = authority?.managed?.scope ?? 'global';
+  if ((scope !== 'global' && scope !== 'project') || (transaction.scope ?? 'global') !== scope) throw new Error('Contribution recovery scope mismatch');
+  // Validate the current inventory BEFORE reading any journal-selected executable or clearing evidence.
+  // The plan freezes caller metadata and provides the sole source of managed receipt ownership.
+  const plan = authority?.managed ? planManagedWrites({ policy: authority.managed, runnerId: authority.runnerId, root: authority.root,
+    targets: authority.targets.map(target => ({ sourceItemId: 'developer-team', ...target })), receipts: previous?.contributions ?? [] }) : undefined;
+  const trusted = new Map((plan ?? authority?.targets.map(target => ({ target: { sourceItemId: 'developer-team', ...target }, id: contributionId(target) })) ?? []).map(entry => [entry.id, entry]));
+  if (trusted.size !== authority.targets.length) throw new Error('Invalid recovery authority: duplicate targets');
+  const rollback = new Map<string, string>();
+  for (const entry of authority.rollbackPreimages ?? []) {
+    const id = contributionId(entry.target);
+    if (!trusted.has(id) || rollback.has(id) || (entry.hash !== 'absent' && !validContributionHash(entry.hash))) throw new Error('Invalid recovery rollback authority');
+    rollback.set(id, entry.hash);
+  }
+  const ids = new Set<string>();
+  // Complete validation precedes state inspection/publication, including mixed valid/forged journals.
+  for (const entry of transaction.targets) {
+    if (entry.id !== contributionId(entry.target) || ids.has(entry.id)) throw new Error('Invalid recovery identity');
+    ids.add(entry.id);
+    if (entry.preimage !== 'absent' && !validContributionHash(entry.preimage)) throw new Error('Invalid recovery preimage');
+    if (authority) {
+      const expected = trusted.get(entry.id)?.target;
+      if (!expected || (!rollback.has(entry.id) && (!validContributionHash(expected.expectedHash) || entry.postimage !== expected.expectedHash))) throw new Error('Contribution recovery conflict: unproven target or postimage');
+    }
+  }
+  if (ids.size !== trusted.size) throw new Error('Contribution recovery conflict: incomplete target inventory');
+  const states = transaction.targets.map(entry => {
+    const target = trusted.get(entry.id)!.target;
+    const content = readContribution(target); const hash = content === undefined ? "absent" : contributionHash(content);
+    return { entry, target, hash, pre: hash === entry.preimage && rollback.get(entry.id) === hash, post: validContributionHash(target.expectedHash) && entry.postimage === target.expectedHash && hash === target.expectedHash };
+  });
+  if (states.every(state => state.pre)) { unlinkSync(pending); return "rolled-back"; }
+  if (!authority.deckVersion) throw new Error('Contribution recovery writer authority required');
+  if (transaction.managed && !authority.managed) throw new Error('Managed contribution recovery authority required for publication');
+  if (!states.every(state => state.post || state.pre)) throw new Error("Contribution recovery conflict: changed postimages preserved; restore the reviewed adapter backup before retrying");
+  const records = new Map(previous?.contributions.map(entry => [entry.id, entry]));
+  let partial = false;
+  for (const { entry, target, hash, post } of states) {
+    const planned = plan?.find(item => item.id === entry.id);
+    const ownership = planned ? planned.authority === 'generated-root' ? 'dedicated-location' : planned.before === undefined ? 'new-write' : 'prior-record' : entry.ownership;
+    if (ownership !== undefined && !['new-write', 'prior-record', 'dedicated-location'].includes(ownership)) throw new Error('Invalid recovery ownership');
+    if (!ownership) continue;
+    if (!post) { partial = true; continue; }
+    const { expectedHash: _, ...metadata } = target;
+    records.set(entry.id, { ...metadata, id: entry.id, hash, ownership, scope, encoding: target.selector.kind === "json" || target.selector.kind === "json-array" ? "canonical-json-v1" : target.selector.kind === "symlink" ? "link-target" : "bytes" });
+  }
+  atomic(manifestPath, { schema: "deck-runner-contributions-v1", runnerId: authority.runnerId, root: resolve(authority.root), deckVersion: authority.deckVersion, contributions: [...records.values()] });
   unlinkSync(pending); return partial ? "recovered-partial" : "completed";
 }
 

@@ -124,3 +124,9 @@ export function trackInstallationProcess(root: string, pid: number): () => void 
   if (!scope?.active || scope.root !== resolve(root) || !Number.isSafeInteger(pid) || pid <= 0) throw new Error('runner-installation-use-unreserved');
   return lease(root, 'use', pid).release;
 }
+
+/** Recovery must hold the same root reservation through assessment and all effects. */
+export function holdsInstallationMutation(root: string): boolean {
+  const scope = mutationContext.getStore();
+  return !!scope?.active && scope.root === resolve(root);
+}

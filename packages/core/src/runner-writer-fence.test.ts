@@ -36,3 +36,19 @@ test('fence retains interrupted effects, rejects stale CAS, and recovers only pr
   await expect(withRunnerFence({path,self:build(),stateSchema:1,expected:record,effect:async()=>{},changed:()=>true})).rejects.toThrow('runner-fence-changed');
  }finally{rmSync(root,{recursive:true,force:true});}
 });
+// Protects release ordering when valid SemVer includes build metadata.
+test('build metadata never hides a newer committed release', () => {
+ expect(decideRunnerWrite({...record, writer:build('2.0.0+build.42')},build('1.0.0'),'explicit',true,1)).toBe('managed-by-newer-deck');
+});
+
+import { compareReleaseVersions, validBuildIdentity } from './runner-writer-fence';
+// Protects one complete grammar and exact release ordering; channels intentionally converge.
+test('version identity and comparison share exact SemVer parsing', () => {
+ for (const version of ['1.0.0+.', '1.0.0-', '1.0.0-a..b', '01.0.0', '1.0.0-01', '1.0.0+', '1.0.0\n']) {
+  expect(validBuildIdentity(build(version))).toBe(false);
+  expect(() => compareReleaseVersions(version, '1.0.0')).toThrow();
+ }
+ expect(validBuildIdentity(build('1.0.0-beta.1+build.42'))).toBe(true);
+ expect(compareReleaseVersions('1.0.0-beta.1+build.42', '1.0.0')).toBe(0);
+ expect(compareReleaseVersions('9007199254740993.0.0', '9007199254740992.0.0')).toBeGreaterThan(0);
+});

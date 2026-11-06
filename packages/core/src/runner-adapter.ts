@@ -494,6 +494,8 @@ export type DashboardState = {
   runnerId: RunnerId;
   environmentId: RunnerEnvironmentId;
   selectedCapabilities: Record<string, boolean>;
+  /** Reviewed team selection forwarded by the Setup dashboard. */
+  teams?: Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>;
   /** Ephemeral current-operation provenance; it is never persisted by Core. */
   explicitlySelectedCapabilities?: Readonly<Record<string, boolean>>;
   operationId?: string;
@@ -821,8 +823,20 @@ export interface RunnerAdapter {
   readonly mutationRoot?: string;
   readonly stateSchema?: number;
   recoverPendingMutation?(journals: readonly import("./runner-writer-fence").RunnerMutationJournal[]): Promise<"preimage" | "postimage" | undefined>;
+  /** Read-only legacy journal qualification before opening a new CLI fence. */
+  precheckPendingMutation?(input: DeveloperTeamAdapterInstallInput): void;
+  /** Read-only assessment; callbacks execute only under canonical fence recovery. */
+  prepareCanonicalRecovery?(input: DeveloperTeamAdapterInstallInput, journals: readonly import("./runner-writer-fence").RunnerMutationJournal[], self: import("./runner-writer-fence").BuildIdentity): Promise<{
+    journalKinds: readonly string[];
+    maximumAdapterJournals: number;
+    archive(): Promise<void>;
+    reconcile(): Promise<unknown>;
+    verify(): Promise<boolean>;
+  }>;
   /** Read-only admission; must never refresh or materialize content. */
   evaluateSessionAdmission?(input?: { roleId?: string; config?: NormalizedDeckConfig }): Promise<import("./runner-admission").RunnerAdmissionResult> | import("./runner-admission").RunnerAdmissionResult;
+  /** Installed receipt drift only; generator differences between equal-version peers are not drift. */
+  readManagedContentDrift?(config: NormalizedDeckConfig): boolean | Promise<boolean>;
   prepareSessionNativeRole?(roleId: string, config?: NormalizedDeckConfig): Promise<import("./session/driver").NativeRoleDescriptor>;
 
   /** Resolve the selected managed Codebase identity for task-scoped readiness. Ordinary customizations stay native. */

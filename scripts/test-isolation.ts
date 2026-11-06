@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import { mock } from "bun:test";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ const { homedir, tmpdir } = os;
 // Loaded before production modules, once in each Bun test worker. Children inherit
 // the sandbox; another test worker gets its own directory even in the same process.
 export const realHome = process.env.DECK_TEST_REAL_HOME ?? homedir();
-export const testRoot = mkdtempSync(join(tmpdir(), "deck-test-"));
+export const testRoot = realpathSync(mkdtempSync(join(tmpdir(), "deck-test-")));
 export const isolatedPaths = {
   HOME: join(testRoot, "home"),
   CODEX_HOME: join(testRoot, "home", ".codex"),

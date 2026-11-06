@@ -1,9 +1,11 @@
+import { withInstallationMutation } from '../installation-use';
+import { repairNativeLeaf } from './native-repair';
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { get } from "node:https";
 import { gunzipSync } from "node:zlib";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 
 export const OWNED_RTK_VERSION = "0.50.0";
 export type RtkReleaseArtifact = Readonly<{ asset: string; archiveSha256: string; archiveBytes: number; binarySha256: string; binaryBytes: number }>;
@@ -76,9 +78,10 @@ async function fetchReleaseAsset(release: RtkReleaseArtifact): Promise<Uint8Arra
 
 /** Parent is already a validated owner-only Deck tools directory; never invokes an upstream installer or global init. */
 export async function installOwnedRtk(root: string, release: RtkReleaseArtifact, effects: { fetchArchive?: (asset: string) => Promise<Uint8Array> } = {}): Promise<"installed" | "unchanged"> {
+  return withInstallationMutation(dirname(root), async () => {
   const state = inspectOwnedRtk(root, release);
   if (state === "ready") return "unchanged";
-  if (state !== "absent") throw new Error("RTK owned installation conflicts with unknown content.");
+  if (state !== "absent") return repairNativeLeaf({ root, name: "rtk", verify: path => inspectOwnedRtk(path, release), acquire: stage => installOwnedRtk(stage, release, effects) });
   const archive = await (effects.fetchArchive?.(release.asset) ?? fetchReleaseAsset(release));
   const binary = extractPinnedRtk(archive, release); // all integrity checks precede publication
   if (inspectOwnedRtk(root, release) !== "absent") throw new Error("RTK owned destination changed during download.");
@@ -86,4 +89,5 @@ export async function installOwnedRtk(root: string, release: RtkReleaseArtifact,
   await writeFile(join(root, "rtk"), binary, { flag: "wx", mode: 0o700 });
   if (inspectOwnedRtk(root, release) !== "ready") throw new Error("RTK publication needs manual inspection; no indeterminate files were removed.");
   return "installed";
+  });
 }

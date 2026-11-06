@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { basename, dirname, join, resolve } from 'node:path';
 import { assertNoContributionSymlink, contributionHash } from './runner-contributions';
 
@@ -38,6 +39,29 @@ export function inspectRunnerGenerationReferences(root: string, selectionPath: s
     if (existsSync(references) && readdirSync(references).length) reasons.push('Launch reference receipts remain; active or interrupted launches must finish/recover before collection');
   } catch { reasons.push('Plugin selection or launch references cannot be safely inspected'); }
   // Covers launches made before reference receipts existed, and independently launched native processes.
+  if (process.platform === 'darwin') {
+    try {
+      if (typeof process.getuid !== 'function') throw new Error('User identity unavailable');
+      const uid = process.getuid();
+      const table = execFileSync('/bin/ps', ['-ww', '-axo', 'uid=,pid=,command='], {
+        encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let sawSelf = false;
+      for (const line of table.trim().split('\n')) {
+        const row = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(line);
+        if (!row) throw new Error('Incomplete process table');
+        if (Number(row[1]) !== uid) continue;
+        if (Number(row[2]) === process.pid) sawSelf = true;
+        if (/^(?:\?+|-|\(.*\)|\[.*\])$/.test(row[3]!)) throw new Error('Unreadable process arguments');
+        // Darwin ps flattens argv: quotes, spaces, relative paths and aliases
+        // cannot establish a different generation. Preserve on any plugin flag,
+        // even for a seemingly unrelated path. Never emit command/credential bytes.
+        if (row[3]!.includes('--plugin-dir')) reasons.push(`Native process ${row[2]} may reference a plugin generation; argument boundaries cannot be verified`);
+      }
+      if (!sawSelf) throw new Error('Incomplete process inventory');
+    } catch { reasons.push('Native process references cannot be completely inspected'); }
+    return reasons;
+  }
   if (process.platform !== 'linux' || !existsSync('/proc')) return [...reasons, 'Native process reference inspection is unavailable on this platform'];
   try {
     for (const pid of readdirSync('/proc').filter(name => /^\d+$/.test(name))) {

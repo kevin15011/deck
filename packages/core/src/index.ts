@@ -236,3 +236,10 @@ export * from "./runner-admission";
 export * from "./runner-history";
 
 export * from "./runner-writer-fence";
+
+export * from "./managed-artifacts";
+
+export * from "./owned-tools/npm-artifact";
+
+export * from "./durable-filesystem";
+export * from "./runner-recovery-archive";

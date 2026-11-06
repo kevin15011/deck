@@ -6,7 +6,7 @@ import { selectContributionContent, beginRunnerContributions, contributionHash, 
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'deck-contributions-'));
-  return { root, manifestPath: join(root, 'deck/manifest.json'), runnerId: 'codex', deckVersion: 'test' };
+  return { root, manifestPath: join(root, 'deck/manifest.json'), runnerId: 'codex', deckVersion: '0.14.0' };
 }
 test('enlists exact pending and receipt bytes before metadata writes and accounts deletion', () => {
   const input = fixture(), file = join(input.root,'agent.md');
@@ -37,14 +37,14 @@ describe('runner contribution accounting', () => {
     const input = fixture();
     const file = join(input.root, 'agent.md');
     const config = join(input.root, 'config.json');
-    writeFileSync(config, JSON.stringify({ secret: 'private' }));
+    writeFileSync(config, JSON.stringify({ secret: 'sibling-secret-sentinel' }));
     const tx = beginRunnerContributions({ ...input, targets: [{ path: file, selector: { kind: 'file' } }, { path: config, selector: { kind: 'json', keys: ['mcp', 'search'] } }] });
     writeFileSync(file, 'actual');
-    writeFileSync(config, JSON.stringify({ secret: 'private', mcp: { search: { command: 'search' } } }));
+    writeFileSync(config, JSON.stringify({ secret: 'sibling-secret-sentinel', mcp: { search: { command: 'search' } } }));
     const receipts = tx.commit();
     expect(receipts).toHaveLength(2);
     expect(receipts[0]!.hash).toBe(contributionHash('actual'));
-    expect(readFileSync(input.manifestPath, 'utf8')).not.toContain('private');
+    expect(readFileSync(input.manifestPath, 'utf8')).not.toContain('sibling-secret-sentinel');
     expect(readRunnerContributions(input.manifestPath)?.contributions).toHaveLength(2);
   });
   test('does not adopt discovered existing content, and refuses changed owned preimages', () => {
@@ -68,6 +68,7 @@ describe('runner contribution accounting', () => {
     expect(() => readRunnerContributions(input.manifestPath)).toThrow('hash');
   });
 });
+// Protects canonical retry and preservation of intervening user edits; oracle: caller-known postimages.
 test('failed publication retries only verified expected postimages and keeps intervening user edits', () => {
   const input = fixture(); const path = join(input.root,'file.md'); const target = { path, selector: { kind: 'file' as const }, expectedHash: contributionHash('expected') };
   const first = beginRunnerContributions({ ...input, targets:[target] }); writeFileSync(path,'expected'); first.abandon();

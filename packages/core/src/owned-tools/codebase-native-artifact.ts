@@ -1,3 +1,5 @@
+import { withInstallationMutation } from '../installation-use';
+import { repairNativeLeaf } from './native-repair';
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, openSync, readSync, closeSync, readdirSync, realpathSync, statSync, createReadStream, unlinkSync, rmdirSync } from "node:fs";
 import { mkdir, mkdtemp, open, realpath, rm, link } from "node:fs/promises";
@@ -229,11 +231,12 @@ export async function installOwnedCodebase(root: string, release: CodebaseNative
   fetchArchive?: (asset: string, signal?: AbortSignal) => Promise<Uint8Array>;
   signal?: AbortSignal;
 } = {}): Promise<"installed" | "unchanged"> {
+  return withInstallationMutation(dirname(root), async () => {
   const { signal } = effects;
   signal?.throwIfAborted();
   const before = inspectOwnedCodebase(root, release);
   if (before === "ready") return "unchanged";
-  if (before !== "absent") throw new Error("Codebase Memory native destination conflicts with unknown content.");
+  if (before !== "absent") return repairNativeLeaf({ root, name: "codebase-memory-mcp", verify: path => inspectOwnedCodebase(path, release), acquire: stage => installOwnedCodebase(stage, release, effects) });
   const archive = await (effects.fetchArchive?.(release.asset, signal) ?? download(release, signal));
   signal?.throwIfAborted();
   if (archive.length !== release.archiveBytes || sha(archive) !== release.archiveSha256) throw new Error("Codebase Memory release archive integrity mismatch.");
@@ -278,4 +281,5 @@ export async function installOwnedCodebase(root: string, release: CodebaseNative
     }
     throw error;
   }
+  });
 }
