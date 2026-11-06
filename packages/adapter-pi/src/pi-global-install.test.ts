@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
+import * as nodeFs from 'node:fs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -28,6 +29,23 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 const paths = () => piAgentPaths(agentDir);
+
+// Protects confidentiality during replacement, before the final chmod or rename.
+test('private replacement bytes are private as soon as they are written', () => {
+  const path = join(agentDir, 'private');
+  writeFileSync(path, 'old', { mode: 0o600 });
+  const original = nodeFs.writeFileSync;
+  let observed: number | undefined;
+  const spy = spyOn(nodeFs, 'writeFileSync').mockImplementation(((target: any, ...args: any[]) => {
+    (original as any)(target, ...args);
+    if (String(target).startsWith(path + '.deck-')) observed = statSync(target).mode & 0o777;
+  }) as typeof writeFileSync);
+  try {
+    createNodePiFileIO().writeText(path, 'private replacement');
+    expect(observed).toBe(0o600);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  } finally { spy.mockRestore(); }
+});
 const io = () => createNodePiFileIO();
 
 function desired(overrides: Partial<PiGlobalDesiredState> = {}): PiGlobalDesiredState {
@@ -450,4 +468,180 @@ describe("snapshot and restore (adapter backup/rollback)", () => {
     const snapshot = snapshotPiPlanTargets(plan, io());
     expect(JSON.parse(JSON.stringify(snapshot))).toEqual(snapshot);
   });
+});
+
+// Protects: generated package output is regenerated from trusted desired state, never adopted.
+// Oracle: managed authority decisions 1/2/6; shared settings and MCP remain foreign input.
+test('managed install regenerates modified and unreceipted package files with private backups', () => {
+ const state=desired();install(state);
+ const path=join(agentDir,'deck/package/agents/deck-lead.md');
+ writeFileSync(path,'altered executable instructions');
+ rmSync(paths().manifest);
+ const settings='{"custom":"foreign-setting","packages":["deck/package"]}\n';writeFileSync(paths().settings,settings);
+ const plan=planPiGlobalInstall(state,io(),{managed:true});
+ expect(plan.blocked).toBe(false);
+ const result=applyPiGlobalPlan(plan,io());
+ expect(readFileSync(path,'utf8')).toBe('# lead\n');
+ expect(result.backupPath).toBeString();
+ expect(readFileSync(result.backupPath!,'utf8')).not.toContain('foreign-setting');
+ expect(readFileSync(paths().settings,'utf8')).toBe(settings);
+ expect(verifyPiGlobalInstall(state,io()).valid).toBe(true);
+ expect(planPiGlobalInstall(state,io(),{managed:true}).writes).toHaveLength(0);
+});
+
+// Protects managed adapter wiring and drift without acquiring a live process lease.
+// Oracle: production planner repairs generated files; unrelated settings remain outside authority.
+test('Pi adapter selects managed file repair and exposes receipt drift', async () => {
+ const { createPiRunnerAdapter } = await import('./runner-adapter');
+ const adapter = createPiRunnerAdapter({ homeDirectory: root, env: { HOME: root, PI_CODING_AGENT_DIR: agentDir }, piVersionProbe: () => ({ exitCode: 0, stdout: '1.0.0' }) });
+ const { getDefaultDeckConfig } = await import('@deck/core');
+ const input = { projectRoot: root, environmentId: 'pi-development', deckConfig: getDefaultDeckConfig(), standaloneSkills: [] };
+ const initial = adapter.buildDeveloperTeamInstallPlan(input);
+ install(desired({ files: initial.files.map(file => ({ relPath: file.path.slice(agentDir.length + 1), content: file.content })) }));
+ expect(adapter.readManagedContentDrift!(input.deckConfig)).toBe(false);
+ const path = join(agentDir, 'deck/package/agents/deck-quality.md'), canonical = readFileSync(path, 'utf8');
+ writeFileSync(path, 'altered role');
+ expect(adapter.readManagedContentDrift!(input.deckConfig)).toBe(true);
+ const repair = adapter.buildDeveloperTeamInstallPlan(input);
+ expect(repair.blocked).toBe(false);
+ expect(repair.files.find(file => file.path === path)?.content).toBe(canonical);
+});
+
+// Protects recognized shared entries, generated package selectors, and edited retirement.
+// Oracle: managed policy preserves foreign bytes and repairs only bounded generated/recorded identities.
+test('managed Pi repairs recognized shared entries and retires edited generated files', () => {
+ const state = desired({ mcpServers: { context7: { command: '/verified/context7' } } });
+ install(state);
+ const foreign = '"foreign" : { "keep" : [1,  2] }';
+ writeFileSync(paths().mcp, '{' + foreign + ', "mcpServers": {"context7":{"command":"/edited"}, "personal" : { "command" : "foreign" }}}\n');
+ writeFileSync(paths().settings, '{' + foreign + ', "packages": [{"source":"deck/package", "extensions":[]}, "personal"]}\n');
+ const retired = 'deck/package/agents/deck-obsolete.md';
+ writeFileSync(join(agentDir, retired), 'edited retired role');
+ const manifest = readJson(paths().manifest); manifest.files[retired] = hashContent('previous retired role');
+ writeFileSync(paths().manifest, JSON.stringify(manifest));
+ const plan = planPiGlobalInstall(state, io(), { managed: true });
+ expect(plan.blocked).toBe(false);
+ expect(plan.conflicts).toHaveLength(0);
+ applyPiGlobalPlan(plan, io());
+ expect(readJson(paths().mcp).mcpServers.context7.command).toBe('/verified/context7');
+ expect(readFileSync(paths().mcp, 'utf8')).toContain('"personal" : { "command" : "foreign" }');
+ expect(readFileSync(paths().mcp, 'utf8')).toContain(foreign);
+ expect(readFileSync(paths().settings, 'utf8')).toContain(foreign);
+ expect(readJson(paths().settings).packages).toEqual(['personal', 'deck/package']);
+ expect(existsSync(join(agentDir, retired))).toBe(false);
+ expect(planPiGlobalInstall(state, io(), { managed: true }).changes).toHaveLength(0);
+});
+
+// Protects corrupt metadata recovery through the existing preimage-guarded transaction.
+test('managed Pi rebuilds corrupt receipts and refuses future metadata', () => {
+ mkdirSync(dirname(paths().manifest), { recursive: true });
+ writeFileSync(paths().manifest, '{invalid');
+ const plan = planPiGlobalInstall(desired(), io(), { managed: true });
+ expect(plan.blocked).toBe(false);
+ applyPiGlobalPlan(plan, io());
+ expect(verifyPiGlobalInstall(desired(), io()).valid).toBe(true);
+ writeFileSync(paths().manifest, JSON.stringify({ schema: 'deck-pi-manifest-v2' }));
+ expect(planPiGlobalInstall(desired(), io(), { managed: true }).blocked).toBe(true);
+});
+
+// Protects user data even if untrusted receipt metadata tries to expand retirement authority.
+test('managed Pi never retires session data named by a forged manifest', () => {
+ install(desired());
+ const path = join(agentDir, 'sessions/history.json'); mkdirSync(dirname(path), { recursive: true });
+ writeFileSync(path, 'session data');
+ const manifest = readJson(paths().manifest); manifest.files['sessions/history.json'] = hashContent('session data');
+ writeFileSync(paths().manifest, JSON.stringify(manifest));
+ const plan = planPiGlobalInstall(desired(), io(), { managed: true }); applyPiGlobalPlan(plan, io());
+ expect(readFileSync(path, 'utf8')).toBe('session data');
+});
+
+// Protects retirement-before-receipt: a failed filesystem deletion cannot drop its ownership record.
+test('managed Pi verifies retirement effects before publishing receipts', () => {
+ install(desired());
+ const obsolete = join(agentDir, 'deck/package/agents/deck-obsolete.md'); writeFileSync(obsolete, 'retired');
+ const manifest = readJson(paths().manifest); manifest.files['deck/package/agents/deck-obsolete.md'] = hashContent('retired');
+ const prior = JSON.stringify(manifest); writeFileSync(paths().manifest, prior);
+ const fileIo = io(), broken = { ...fileIo, remove(path: string) { if (path !== obsolete) fileIo.remove(path); } };
+ const plan = planPiGlobalInstall(desired(), broken, { managed: true });
+ expect(() => applyPiGlobalPlan(plan, broken)).toThrow('retirement postimage');
+ expect(readFileSync(paths().manifest, 'utf8')).toBe(prior);
+ expect(readFileSync(obsolete, 'utf8')).toBe('retired');
+});
+
+// Protects concurrent edits to both published and not-yet-published transaction targets.
+test('failed apply preserves concurrent edits instead of restoring stale snapshots', () => {
+  install(desired());
+  const first = join(agentDir, desired().files[0]!.relPath);
+  const second = join(agentDir, desired().files[1]!.relPath);
+  const next = desired({ files: desired().files.map(file => ({ ...file, content: file.content + 'updated' })) });
+  const base = io();
+  let failed = false;
+  const failing: PiFileIO = { ...base, writeText(path, content, mode) {
+    if (path === second && !failed) {
+      failed = true;
+      base.writeText(first, 'external first'); base.writeText(second, 'external second');
+      throw new Error('injected publication failure');
+    }
+    base.writeText(path, content, mode);
+  } };
+  const plan = planPiGlobalInstall(next, failing);
+  expect(() => applyPiGlobalPlan(plan, failing)).toThrow(/rollback incomplete/);
+  expect(base.readText(first)).toBe('external first');
+  expect(base.readText(second)).toBe('external second');
+});
+
+// Untrusted crash evidence never authorizes rollback or disappears on an empty replan.
+test('pending Pi transaction refuses mutation and preserves its evidence even for a no-op plan', () => {
+  install(desired());
+  const pending = join(agentDir, 'deck/transaction.pending.json');
+  writeFileSync(pending, '{"schema":"forged","targets":[]}');
+  const before = snapshotTree(agentDir);
+  expect(() => applyPiGlobalPlan(planPiGlobalInstall(desired(), io()), io())).toThrow(/recovery required/);
+  expect(snapshotTree(agentDir)).toEqual(before);
+});
+
+// A process can disappear after an effect: evidence must already exist on disk, with no config secrets.
+test('publication starts only after a private hash-only pending transaction is durable', () => {
+  const base = io();
+  const pending = join(agentDir, 'deck/transaction.pending.json');
+  let observed = false;
+  const checked: PiFileIO = { ...base, writeText(path, content, mode) {
+    if (path.endsWith('package.json')) {
+      const record = base.readText(pending);
+      expect(record).toBeDefined();
+      expect(record).not.toContain('sensitive value');
+      expect(statSync(pending).mode & 0o777).toBe(0o600);
+      observed = true;
+    }
+    base.writeText(path, content, mode);
+  } };
+  writeFileSync(paths().settings, '{"personal":"sensitive value"}');
+  install(desired(), checked);
+  expect(observed).toBe(true);
+  expect(base.readText(pending)).toBeUndefined();
+});
+
+// Real process loss bypasses catch/finally; restart must retain uncertain effects and their journal.
+test('process exit during publication leaves durable evidence that a fresh process cannot replay', () => {
+  const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
+  const modulePath = join(import.meta.dir, 'pi-global-install.ts');
+  const first = join(agentDir, 'deck/package/first.txt');
+  const state = desired({ files: [{ relPath: 'deck/package/first.txt', content: 'canonical first' }, { relPath: 'deck/package/second.txt', content: 'canonical second' }] });
+  const script = `
+    import { applyPiGlobalPlan, createNodePiFileIO, planPiGlobalInstall } from ${JSON.stringify(modulePath)};
+    const base = createNodePiFileIO();
+    const state = ${JSON.stringify(state)};
+    const io = { ...base, writeText(path, content, mode) {
+      base.writeText(path, content, mode);
+      if (path === ${JSON.stringify(first)}) process.exit(77);
+    } };
+    applyPiGlobalPlan(planPiGlobalInstall(state, io), io);
+  `;
+  const child = spawnSync(process.execPath, ['--eval', script], { encoding: 'utf8', timeout: 10000 });
+  expect(child.status).toBe(77);
+  expect(io().readText(first)).toBe('canonical first');
+  const before = snapshotTree(agentDir);
+  expect(() => applyPiGlobalPlan(planPiGlobalInstall(state, io()), io())).toThrow('recovery required');
+  expect(snapshotTree(agentDir)).toEqual(before);
+  expect(existsSync(paths().manifest)).toBe(false);
 });

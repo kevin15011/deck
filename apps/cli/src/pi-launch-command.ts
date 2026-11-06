@@ -1,8 +1,4 @@
-import { accessSync, constants } from "node:fs";
-import { delimiter, join } from "node:path";
-import { buildPiTeamLaunchPlan, materializeTeamProfile, type PiTeamLaunchPlan } from "@deck/adapter-pi";
-import { validateDeckConfig } from "@deck/core/config/deck-config";
-import { buildCapabilityInstructionBundle, getEnabledCapabilityInstructionIds } from "@deck/core/teams/developer/instruction-bundles";
+import type { PiTeamLaunchPlan } from "@deck/adapter-pi";
 
 export type RunPiLaunchOptions = {
   teamId: string;
@@ -19,33 +15,7 @@ export type PiLaunchResult =
   | { status: "ready"; plan: PiTeamLaunchPlan; profileDir: string }
   | { status: "launched"; plan: PiTeamLaunchPlan };
 
+/** @deprecated Use the composed RunnerAdapter launch workflow with admission and installation leases. */
 export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunchResult> {
-  if (options.deckConfig === undefined) return { status: "error", message: "Pi launch requires a valid caller-resolved global Deck config." };
-  const { teamId, projectRoot, flags, dryRun = false } = options;
-  const piCommand = options.piCommand ?? "pi";
-  if (!(options.commandExists ?? defaultCommandExists)(piCommand)) {
-    return { status: "error", message: `Pi command not found: "${piCommand}". Install Pi first or check your PATH.` };
-  }
-  let capabilityInstructions: ReturnType<typeof buildCapabilityInstructionBundle> | undefined;
-  try {
-    const enabledIds = getEnabledCapabilityInstructionIds(validateDeckConfig(options.deckConfig), "pi");
-    if (enabledIds.length) capabilityInstructions = buildCapabilityInstructionBundle(enabledIds);
-  } catch {
-    // The caller owns config readiness; preserve profile materialization behavior.
-  }
-  materializeTeamProfile({ teamId, projectRoot, ...(capabilityInstructions ? { capabilityInstructions } : {}) });
-  const plan = buildPiTeamLaunchPlan({ teamId, projectRoot, flags, piCommand });
-  return dryRun ? { status: "ready", plan, profileDir: plan.profileDir } : { status: "launched", plan };
-}
-
-function defaultCommandExists(command: string): boolean {
-  const path = process.env.PATH ?? "";
-  return path.split(delimiter).some((dir) => {
-    try {
-      accessSync(join(dir, command), constants.X_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  });
+  return { status: "error", message: "Legacy Pi launch is disabled; use the RunnerAdapter launch workflow (deck pi developer)." };
 }

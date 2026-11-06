@@ -1,4 +1,7 @@
+import { inspectRecoveryJournal, recoveryHash } from '../../core/src/canonical-recovery-preflight';
+import { archiveRunnerJournal } from '../../core/src/runner-recovery-archive';
 import type { CapabilityInstructionBundle } from "@deck/core";
+import { DEVELOPER_TEAM_AGENTS } from "./developer-team-catalog";
 import { evaluateRoleAdmission } from "@deck/core";
 import { verifyPiInstallation } from "./installation-trust";
 import { withInstallationUse, withInstallationMutation, trackInstallationProcess, InstallationBusyError } from "../../core/src/installation-use";
@@ -23,7 +26,8 @@ import { assertNoContributionSymlink } from "@deck/core";
  */
 
 import { inspectPiEnvironment, type PiPreflightResult } from "./preflight";
-import { planPiProjectSkillExclusions, assertPiProjectSkillExclusionTargets } from "./project-skill-exclusions";
+import { piProjectRetirementPaths, planPiProjectRetirement } from "./project-retirement";
+import { planPiProjectSkillExclusions } from "./project-skill-exclusions";
 import { piAgentPaths, resolvePiAgentDir, type PiAgentDirResolution } from "./agent-dir";
 import { buildPiGlobalMaterialization, type PiGlobalMaterialization } from "./global-materialization";
 import { createPiTools } from "./pi-owned-tools";
@@ -290,7 +294,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   readonly packageInstructionIds = PACKAGE_INSTRUCTION_PACKAGE_IDS;
   readonly ui = {
     environmentLabels: { "pi-development": "Pi" },
-    dashboard: { defaultSelectedTeamIds: [] },
+    dashboard: { defaultSelectedTeamIds: [], extraSelectableCapabilities: [{ id: "context7", label: "Context7", description: "Use Context7 MCP for library documentation." }] },
     model: {
       providerSource: "Providers come from Pi settings and detected credentials.",
       missingChecks: ["~/.pi/agent/settings.json defaultProvider/defaultModel", "pi --list-models", "Provider env vars such as OPENCODE_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY"],
@@ -324,6 +328,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   #piVersionProbe: () => { exitCode: number; stdout: string; stderr?: string };
   #piCommand: string;
   #fileIO: PiFileIO;
+  #rollbackProofs = new Map<string, () => boolean>();
   #lastMaterialization: { materialization: PiGlobalMaterialization; enginePlan: PiGlobalPlan } | null = null;
   #piTools?: PiToolResolution;
   #webSearchCredential?: () => string | undefined;
@@ -353,6 +358,91 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   getSessionDriver() { return createPiSessionDriver({ command: this.#piCommand, baseEnv: this.#env }); }
   readonly stateSchema = 1;
   get mutationRoot() { return this.#readAgentDir(); }
+  async recoverPendingMutation(references: readonly import("@deck/core").RunnerMutationJournal[]): Promise<'preimage' | undefined> {
+    if (references.length !== 1 || references[0]!.kind !== 'pi-global-install' || references[0]!.id !== references[0]!.operationId) return undefined;
+    const id = references[0]!.id, prove = this.#rollbackProofs.get(id);
+    if (!prove || !prove()) return undefined;
+    this.#rollbackProofs.delete(id);
+    return 'preimage';
+  }
+  precheckPendingMutation(input: DeveloperTeamAdapterInstallInput): void {
+    if (resolve(input.projectRoot) !== resolve(this.#readAgentDir())) {
+      assertNoContributionSymlink(input.projectRoot);
+      if (!statSync(realpathSync(input.projectRoot)).isDirectory()) throw new Error('pi-project-scope-invalid');
+    }
+  }
+  async prepareCanonicalRecovery(input: DeveloperTeamAdapterInstallInput, references: readonly import("@deck/core").RunnerMutationJournal[]) {
+    const root = this.#readAgentDir(), pendingPath = join(root, 'deck/transaction.pending.json');
+    const originals = references.filter(j => !['canonical-recovery-v1', 'deck-scope-v1'].includes(j.kind));
+    if (originals.some(j => j.kind !== 'pi-global-install' || j.id !== j.operationId) || originals.length > 1) throw new Error('pi-recovery-reference-invalid');
+    const journal = inspectRecoveryJournal(pendingPath);
+    // Build from caller inputs, before archiving; neither paths nor desired bytes
+    // are taken from the journal. Repeat after archive to capture fresh preimages.
+    const candidate = this.buildDeveloperTeamInstallPlan(input);
+    if (candidate.blocked || !this.#lastMaterialization) throw new Error('pi-recovery-plan-blocked');
+    const { enginePlan, materialization } = this.#lastMaterialization;
+    const fixed = new Set([
+      ...materialization.desired.files.map(file => join(root, file.relPath)),
+      ...['settings.json', 'mcp.json', 'deck/manifest.json'].map(path => join(root, path)),
+      ...piProjectRetirementPaths().map(path => join(resolve(input.projectRoot), path)),
+      join(resolve(input.projectRoot), '.pi/settings.json'), join(resolve(input.projectRoot), '.pi/settings.json.deck-backup'),
+    ]);
+    if (journal) {
+      const raw = journal.value;
+      if (!originals.some(j => j.id === raw?.id) || raw?.schema !== 'deck-pi-transaction-v1' || raw.root !== root || !Array.isArray(raw.targets) || raw.targets.length > 20000) throw new Error('pi-recovery-journal-invalid');
+      const seen = new Set<string>();
+      for (const entry of raw.targets) {
+        // Timestamped legacy settings backups are forensic output, never input.
+        const local = typeof entry?.path === 'string' ? relative(root, entry.path) : '';
+        const generated = local.startsWith('deck/package/') || local.startsWith('deck/profiles/');
+        const backup = /^deck\/backups\/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\/settings\.json$/.test(local);
+        if (!entry || typeof entry.path !== 'string' || resolve(entry.path) !== entry.path || (!fixed.has(entry.path) && !generated && !backup) || seen.has(entry.path) || !recoveryHash(entry.before) || !recoveryHash(entry.after)) throw new Error('pi-recovery-target-untrusted');
+        assertNoContributionSymlink(entry.path); seen.add(entry.path);
+      }
+    }
+    let verifiedPlan = enginePlan, desired = materialization.desired;
+    return {
+      journalKinds: ['pi-global-install'], maximumAdapterJournals: 1,
+      archive: async () => {
+        journal?.unchanged();
+        for (const reference of originals) archiveRunnerJournal({ livePath: pendingPath, reference, bound: originals, journalKinds: ['pi-global-install'] });
+      },
+      reconcile: async () => {
+        const fresh = this.buildDeveloperTeamInstallPlan(input);
+        verifiedPlan = this.#lastMaterialization!.enginePlan; desired = this.#lastMaterialization!.materialization.desired;
+        return this.applyDeveloperTeamInstall({ projectRoot: input.projectRoot, environmentId: input.environmentId, plan: fresh });
+      },
+      verify: async () => verifyPiGlobalInstall(desired, this.#fileIO).valid &&
+        verifiedPlan.deletes.every(entry => this.#fileIO.readText(entry.path) === undefined) &&
+        verifiedPlan.writes.every(entry => this.#fileIO.readText(entry.path) === entry.content) &&
+        (await this.evaluateSessionAdmission()).verdict === 'admit',
+    };
+  }
+  readManagedContentDrift() {
+    const root = this.#readAgentDir(), manifest = readPiManifest(this.#fileIO, root);
+    if (!manifest) return true;
+    const required = ['deck/package/package.json', 'deck/package/role-policy.json',
+      ...DEVELOPER_TEAM_AGENTS.map(agent => `deck/package/agents/${agent.id}.md`),
+      ...['deck-tool-policy', 'deck-subagents', 'developer-team-execution'].flatMap(name =>
+        ['index.js', 'impl.js'].map(file => `deck/package/extensions/${name}/${file}`))];
+    if (required.some(path => !manifest.files[path])) return true;
+    try {
+      const servers = readPiMcpServers(this.#fileIO, root);
+      for (const [name, hash] of Object.entries(manifest.mcp.servers)) {
+        if (!["context7", "context-mode", "codebase-memory", "serena", "web-search"].includes(name)) continue;
+        if (servers[name] === undefined || hashJsonValue(servers[name]) !== hash) return true;
+      }
+      const settings = JSON.parse(this.#fileIO.readText(piAgentPaths(root).settings) ?? '{}');
+      if (!manifest.settings.packages.includes('deck/package') || !settings.packages?.includes('deck/package')) return true;
+      if (manifest.settings.packages.some(entry => !settings.packages?.includes(entry)) || manifest.settings.skillExclusions.some(entry => !settings.skills?.includes(entry))) return true;
+    } catch { return true; }
+    return Object.entries(manifest.files).some(([path, hash]) => {
+      if (path.includes('\\') || path.split('/').some(part => part === '..' || part === '.' || !part)) return true;
+      if (!path.startsWith('deck/package/') && !path.startsWith('deck/profiles/')) return false;
+      try { const content = this.#fileIO.readText(join(root, path)); return content === undefined || !matchesOwnedHash(path, hash, content); }
+      catch { return true; }
+    });
+  }
   evaluateSessionAdmission(input?: { roleId?: string; config?: NormalizedDeckConfig }) { return evaluateRoleAdmission(() => preparePiSessionRole(this.#readAgentDir(), input?.roleId ?? "deck-setup")); }
   async prepareSessionNativeRole(roleId: string, config?: NormalizedDeckConfig) {
     const findings: import("@deck/core/session/driver").RunnerPreparationFinding[] = [];
@@ -492,7 +582,10 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     const runnerScope = input.runnerId as "pi" | "opencode" | "all";
     const deckConfig = requireDeckConfig(input.deckConfig, "capability inventory");
     const webSearchProvider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
-    const webSearchMcp = inspectPiWebSearchMcpConfig(piAgentPaths(this.#readAgentDir()).mcp, webSearchProvider);
+    const webSearchMcp = inspectPiWebSearchMcpConfig(
+      piAgentPaths(this.#readAgentDir()).mcp, webSearchProvider,
+      readPiManifest(this.#fileIO, this.#readAgentDir())?.mcp.servers[webSearchProvider?.semanticServerId ?? "web-search"],
+    );
     const webSearchEvidence = {
       enabled: deckConfig.webSearch.enabled,
       runnerSupported: true,
@@ -567,7 +660,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
               explicitlySelected: state.explicitlySelectedCapabilities?.serena === true,
             }
           : undefined,
-        teams: {} as Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>,
+        teams: state.teams ?? {},
         runtime: { toolsReview: review },
         packageInstructions: {
           [runnerScope]: buildCapabilityInstructionBundle(
@@ -1154,11 +1247,14 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       rtkBinary: input.capabilityIds === undefined || input.capabilityIds.includes("rtk") ? this.#ownedRtkCommand() : null,
       installOptions,
     });
-    const enginePlan = planPiGlobalInstall(materialization.desired, this.#fileIO);
-    try { planPiProjectSkillExclusions(enginePlan, input.projectRoot, materialization.desired.files, this.#fileIO); }
+    const enginePlan = planPiGlobalInstall(materialization.desired, this.#fileIO, { managed: true });
+    try {
+      planPiProjectRetirement(enginePlan, input.projectRoot, this.#fileIO);
+      planPiProjectSkillExclusions(enginePlan, input.projectRoot, materialization.desired.files, this.#fileIO);
+    }
     catch {
       enginePlan.blocked = true;
-      enginePlan.diagnostics.push({ code: "PI_PROJECT_SKILL_SETTINGS_INVALID", severity: "error", message: "Pi project skill exclusions could not be planned safely; repair malformed or symlinked project settings before installation." });
+      enginePlan.diagnostics.push({ code: "PI_PROJECT_SKILL_SETTINGS_INVALID", severity: "error", message: "Pi project migration could not be planned safely; repair malformed or symlinked project targets before installation." });
     }
     this.#lastMaterialization = { materialization, enginePlan };
 
@@ -1188,10 +1284,13 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     if (!this.#lastMaterialization) throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
     if (input.plan?.blocked) throw new Error(`Pi global install is blocked: ${(input.plan.diagnostics ?? []).join("; ") || "unresolved prerequisites"}`);
     const { materialization, enginePlan } = this.#lastMaterialization;
-    assertPiProjectSkillExclusionTargets(enginePlan);
+    const recordRollback = (id: string, prove: () => boolean) => {
+      if (this.#rollbackProofs.size >= 16) this.#rollbackProofs.delete(this.#rollbackProofs.keys().next().value!);
+      this.#rollbackProofs.set(id, prove);
+    };
     const applied = enginePlan.writes.length === 0 && enginePlan.deletes.length === 0
-      ? applyPiGlobalPlan(enginePlan, this.#fileIO)
-      : await withInstallationMutation(this.#readAgentDir(), async () => applyPiGlobalPlan(enginePlan, this.#fileIO));
+      ? applyPiGlobalPlan(enginePlan, this.#fileIO, recordRollback)
+      : await withInstallationMutation(this.#readAgentDir(), async () => applyPiGlobalPlan(enginePlan, this.#fileIO, recordRollback));
     const changed = new Set(applied.changes.map((change) => change.relPath));
     const results = materialization.desired.files.map((file) => ({
       agentId: file.relPath,

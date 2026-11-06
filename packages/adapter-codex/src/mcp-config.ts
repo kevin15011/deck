@@ -207,24 +207,22 @@ export function isDeckManagedCodexMcpServer(source: string, serverId: CodexMcpSe
 
 function stripManagedServerBlocks(source: string, ids: ReadonlySet<string>): string {
   if (ids.size === 0) return source;
-  const lines = source.match(/[^\n]*\n|[^\n]+$/g) ?? [];
-  const output: string[] = [];
-  for (let index = 0; index < lines.length;) {
-    const marker = lines[index]!.trimEnd().match(/^# deck-codex-mcp:([a-z0-9-]+)$/);
-    if (!marker || !ids.has(marker[1]!)) { output.push(lines[index++]!); continue; }
-    const id = marker[1]!;
-    index += 1;
-    while (index < lines.length) {
-      const trimmed = lines[index]!.trimEnd();
-      // Stop at any Deck-owned marker (MCP or hook) so a neighbouring owned block keeps its ownership comment.
-      if (/^# deck-codex-(?:mcp|hook):/.test(trimmed)) break;
-      const section = trimmed.match(/^\[mcp_servers\.([^\].]+)(?:\.|\])/);
-      if (section && section[1] !== id) break;
-      if (trimmed.startsWith("[") && !section) break;
-      index += 1;
+  const ast = parseTOML(source, { tomlVersion: "1.0.0" });
+  const edits: Array<{ start: number; end: number }> = [];
+  for (const node of ast.body[0]?.body ?? []) {
+    if (node.type === "TOMLTable" && node.resolvedKey[0] === "mcp_servers" && ids.has(String(node.resolvedKey[1]))) {
+      let end = node.range[1];
+      if (source[end] === '\r') end++;
+      if (source[end] === '\n') end++;
+      if (source[end] === '\n') end++;
+      edits.push({ start: node.range[0], end });
     }
   }
-  return output.join("").replace(/\n{3,}/g, "\n\n");
+  for (const match of source.matchAll(/^# deck-codex-mcp:([a-z0-9-]+)\r?\n/gm)) {
+    if (ids.has(match[1]!)) edits.push({ start: match.index!, end: match.index! + match[0].length });
+  }
+  for (const edit of edits.sort((a, b) => b.start - a.start)) source = source.slice(0, edit.start) + source.slice(edit.end);
+  return source;
 }
 
 /** Repair only standard local tool launch fields explicitly selected for installation. Preserve user ownership and tool policy. */
@@ -302,10 +300,10 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
   } catch { return { status: "blocked", content: originalSource, collisions: [], diagnostics: ["Malformed TOML cannot be changed safely."] }; }
   const managed = managedServerIds(source);
   const desiredIds = new Set<string>(desired.map((server) => server.id));
-  const proven = new Set(options.ownedServerIds ?? []);
+  const proven = new Set((options.ownedServerIds ?? []).filter(id => ["context7", "codebase-memory", "context-mode", "serena", "web-search", "supermemory", "deck-memory"].includes(id)));
   const legacyShaped = new Set<string>();
   for (const id of managed) if (options.allowLegacyMigration !== false && !proven.has(id) && !options.recordedServerIds?.includes(id) && isDeckShapedMcpEntry(id, existing.get(id))) { proven.add(id); legacyShaped.add(id); }
-  const replaceManaged = new Set<string>([...managed].filter((id) => !desiredIds.has(id) && proven.has(id)));
+  const replaceManaged = new Set<string>([...new Set([...managed, ...proven])].filter((id) => !desiredIds.has(id) && proven.has(id)));
   const adoptedServerIds: string[] = [];
   const collisions: CodexMcpServerId[] = [];
   const missing: CodexMcpServer[] = [];
@@ -322,9 +320,9 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
           server.id === "codebase-memory" ? { command: server.command }
           : server.id === "context7" ? { url: "https://mcp.context7.com/mcp", env_http_headers: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } }
           : undefined));
-      if (managed.has(server.id) && (proven.has(server.id) || legacy)) {
+      if (proven.has(server.id) || managed.has(server.id) && legacy) {
         replaceManaged.add(server.id); missing.push(server);
-        if (legacy || legacyShaped.has(server.id)) adoptedServerIds.push(server.id);
+        if (proven.has(server.id) || legacy || legacyShaped.has(server.id)) adoptedServerIds.push(server.id);
       }
       else collisions.push(server.id);
     } else if (managed.has(server.id)) {

@@ -5,6 +5,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 const root = resolve(import.meta.dir, "..");
 const entries = [
   {
+    input: "packages/adapter-opencode/assets/opencode/plugins/model-variants.ts",
+    output: "packages/adapter-opencode/assets/opencode/plugins/model-variants.generated.js",
+  },
+  {
     input: "packages/adapter-opencode/assets/opencode/plugins/developer-team-execution.ts",
     output: "packages/adapter-opencode/assets/opencode/plugins/developer-team-execution.generated.js",
   },

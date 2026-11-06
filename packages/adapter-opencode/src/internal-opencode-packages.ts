@@ -8,6 +8,8 @@
  * does not appear in dashboard selections.
  */
 
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { OpenCodeConfig } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -54,4 +56,8 @@ export const INTERNAL_OPENCODE_PACKAGES: Record<InternalOpenCodePackageId, Inter
 export function detectMermaidPluginStatus(config: OpenCodeConfig): "ready" | "missing" {
   const plugins = config.plugin ?? [];
   return plugins.includes("opencode-mermaid-renderer") ? "ready" : "missing";
+}
+/** Local Deck code is delivered with the binary, never resolved from the npm registry. */
+export function internalOpenCodePluginSpecifiers(configDir: string): string[] {
+  return ["opencode-mermaid-renderer", pathToFileURL(join(configDir, "plugins/deck-model-variants.js")).href];
 }

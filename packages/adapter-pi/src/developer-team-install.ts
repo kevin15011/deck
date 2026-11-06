@@ -9,7 +9,6 @@ import {
   getEnabledPackageInstructionIds,
 } from "@deck/core/teams/developer/instruction-bundles";
 import { translatePiCapabilityInstructions } from "./instruction-translation";
-import { materializeTeamProfile } from "./pi-team-profile";
 import { buildTeamProfileDir } from "./pi-team-launch";
 
 // Inline verification for adapter — uses core directly at runtime (Task 7)
@@ -182,51 +181,12 @@ function buildStandaloneSkillFiles(
   return planned;
 }
 
-/**
- * Clean up nested SKILL.md/SKILL.md patterns in skills directory.
- * This handles cases where skills were incorrectly installed as ~/.pi/agent/skills/SKILL.md/SKILL.md
- * instead of the correct ~/.pi/skills/SKILL.md.
- * Returns list of removed directory paths.
- */
+/** @deprecated Ambiguous nested skill directories are preserved; only exact generated identities retire. */
 export function cleanupNestedSkillDirectories(
   skillsDir: string,
   options?: { readdirSync?: typeof import("node:fs").readdirSync; existsSync?: typeof import("node:fs").existsSync; rmdirSync?: typeof import("node:fs").rmdirSync },
 ): string[] {
-  const readdirSync = options?.readdirSync ?? require("node:fs").readdirSync;
-  const exists = options?.existsSync ?? existsSync;
-  const rmdirSync = options?.rmdirSync ?? require("node:fs").rmdirSync;
-
-  const removed: string[] = [];
-
-  // Check if skills directory exists
-  if (!exists(skillsDir)) {
-    return removed;
-  }
-
-  try {
-    const entries = readdirSync(skillsDir, { withFileTypes: true });
-    for (const entry of entries) {
-      // Check for double-nested SKILL.md/SKILL.md pattern (old broken structure)
-      // The incorrect structure was: .pi/skills/SKILL.md/SKILL.md (a dir literally named "SKILL.md")
-      // The correct structure is: .pi/skills/{skillId}/SKILL.md (a dir with skill ID name)
-      // Only remove if the directory itself is literally named "SKILL.md"
-      if (entry.isDirectory() && entry.name === "SKILL.md") {
-        const nestedPath = join(skillsDir, entry.name, "SKILL.md");
-        if (exists(nestedPath)) {
-          try {
-            rmdirSync(join(skillsDir, entry.name), { recursive: true });
-            removed.push(join(skillsDir, entry.name));
-          } catch {
-            // Continue even if deletion fails
-          }
-        }
-      }
-    }
-  } catch {
-    // Directory might not exist or be readable - ignore
-  }
-
-  return removed;
+  throw new Error("Legacy Pi directory cleanup is disabled; use PiRunnerAdapter exact-file retirement.");
 }
 
 export type FileInstallResult = {
@@ -473,172 +433,13 @@ function readFrontmatterValue(frontmatter: string, key: string): string | undefi
   return value && value.length > 0 ? value : undefined;
 }
 
-function assertPiCandidateFiles(
-  plan: DeveloperTeamInstallPlan,
-  exists: typeof existsSync,
-  readFile: typeof readFileSync,
-): void {
-  for (const planned of [...plan.agents, ...plan.skills, ...plan.standaloneSkills, ...plan.sddSkillFiles]) {
-    if (!exists(planned.absolutePath) || readFile(planned.absolutePath, "utf-8") !== planned.content) {
-      throw new Error(`Developer Team candidate verification failed for ${planned.absolutePath}.`);
-    }
-  }
-  const profileDir = buildTeamProfileDir(plan.projectRoot, "developer-team");
-  for (const requiredPath of [
-    join(profileDir, "system-prompt.md"),
-    join(profileDir, "extensions", "developer-team-execution.js"),
-  ]) {
-    if (!exists(requiredPath)) {
-      throw new Error(`Developer Team profile verification failed for ${requiredPath}.`);
-    }
-  }
-}
-
 export function applyDeveloperTeamInstall(
   plan: DeveloperTeamInstallPlan,
   options?: { writeFile?: typeof writeFileSync; exists?: typeof existsSync; mkdir?: typeof mkdirSync; readFile?: typeof readFileSync; unlink?: typeof unlinkSync; readdirSync?: typeof import("node:fs").readdirSync },
 ): DeveloperTeamApplyResult {
-  const writeFile = options?.writeFile ?? writeFileSync;
-  const exists = options?.exists ?? existsSync;
-  const mkdir = options?.mkdir ?? mkdirSync;
-  const readFile = options?.readFile ?? readFileSync;
-  const unlink = options?.unlink ?? unlinkSync;
-  const fileBackup = backupDeveloperTeamFiles(plan, { exists, readFile });
-
-  try {
-
-  if (!exists(plan.agentsDir)) {
-    mkdir(plan.agentsDir, { recursive: true });
-  }
-
-
-  if (!exists(plan.skillsDir)) {
-    mkdir(plan.skillsDir, { recursive: true });
-  }
-
-  for (const planned of plan.skills) {
-    const skillDir = join(planned.absolutePath, "..");
-    if (!exists(skillDir)) {
-      mkdir(skillDir, { recursive: true });
-    }
-  }
-
-  const agentResults: BundleApplyResult[] = plan.agents.map((planned) => {
-    if (exists(planned.absolutePath)) {
-      const existing = readFile(planned.absolutePath, "utf-8");
-      if (existing === planned.content) {
-        return { agentId: planned.agent.id, kind: "agent" as const, status: "unchanged" as const, absolutePath: planned.absolutePath };
-      }
-      writeFile(planned.absolutePath, planned.content, "utf-8");
-      return { agentId: planned.agent.id, kind: "agent" as const, status: "updated" as const, absolutePath: planned.absolutePath };
-    }
-
-    writeFile(planned.absolutePath, planned.content, "utf-8");
-    return { agentId: planned.agent.id, kind: "agent" as const, status: "created" as const, absolutePath: planned.absolutePath };
-  });
-
-  const skillResults: BundleApplyResult[] = plan.skills.map((planned) => {
-    if (exists(planned.absolutePath)) {
-      const existing = readFile(planned.absolutePath, "utf-8");
-      if (existing === planned.content) {
-        return { agentId: planned.agent.id, kind: "skill" as const, status: "unchanged" as const, absolutePath: planned.absolutePath };
-      }
-      writeFile(planned.absolutePath, planned.content, "utf-8");
-      return { agentId: planned.agent.id, kind: "skill" as const, status: "updated" as const, absolutePath: planned.absolutePath };
-    }
-
-    writeFile(planned.absolutePath, planned.content, "utf-8");
-    return { agentId: planned.agent.id, kind: "skill" as const, status: "created" as const, absolutePath: planned.absolutePath };
-  });
-
-  // Write standalone skills (verbatim, no generated frontmatter)
-  const standaloneSkillResults: BundleApplyResult[] = plan.standaloneSkills.map((planned) => {
-    const skillDir = join(planned.absolutePath, "..");
-    if (!exists(skillDir)) {
-      mkdir(skillDir, { recursive: true });
-    }
-
-    if (exists(planned.absolutePath)) {
-      const existing = readFile(planned.absolutePath, "utf-8");
-      if (existing === planned.content) {
-        return { agentId: planned.skillId, kind: "skill" as const, status: "unchanged" as const, absolutePath: planned.absolutePath };
-      }
-      writeFile(planned.absolutePath, planned.content, "utf-8");
-      return { agentId: planned.skillId, kind: "skill" as const, status: "updated" as const, absolutePath: planned.absolutePath };
-    }
-
-    writeFile(planned.absolutePath, planned.content, "utf-8");
-    return { agentId: planned.skillId, kind: "skill" as const, status: "created" as const, absolutePath: planned.absolutePath };
-  });
-
-  // Write standalone lifecycle skill files with idempotency.
-  const sddSkillResults: BundleApplyResult[] = plan.sddSkillFiles.map((planned) => {
-    // Ensure directory exists before writing
-    const skillDir = join(planned.absolutePath, "..");
-    if (!exists(skillDir)) {
-      mkdir(skillDir, { recursive: true });
-    }
-
-    if (exists(planned.absolutePath)) {
-      const existing = readFile(planned.absolutePath, "utf-8");
-      if (existing === planned.content) {
-        return { agentId: planned.skillId, kind: "skill" as const, status: "unchanged" as const, absolutePath: planned.absolutePath };
-      }
-      writeFile(planned.absolutePath, planned.content, "utf-8");
-      return { agentId: planned.skillId, kind: "skill" as const, status: "updated" as const, absolutePath: planned.absolutePath };
-    }
-
-    writeFile(planned.absolutePath, planned.content, "utf-8");
-    return { agentId: planned.skillId, kind: "skill" as const, status: "created" as const, absolutePath: planned.absolutePath };
-  });
-
-  const allResults = [...agentResults, ...skillResults, ...standaloneSkillResults, ...sddSkillResults];
-  const changedCount = allResults.filter((r) => r.status === "created" || r.status === "updated").length;
-  const unchangedCount = allResults.filter((r) => r.status === "unchanged").length;
-
-  // Defer legacy malformed-directory cleanup until every fallible candidate,
-  // profile, verification, and retirement step has succeeded.
-  let nestedSkillDirsRemoved: string[] = [];
-
-  // Materialize team profile (system-prompt.md) - required for orchestrator stub reference
-  const profileDir = buildTeamProfileDir(plan.projectRoot, "developer-team");
-  const systemPromptPath = join(profileDir, "system-prompt.md");
-
-  // Determine profile status and materialize if needed
-  let profileStatus: "created" | "updated" | "unchanged" = "unchanged";
-  const existingProfileContent = exists(systemPromptPath) ? readFile(systemPromptPath, "utf-8") : null;
-
-  materializeTeamProfile({
-    teamId: "developer-team",
-    projectRoot: plan.projectRoot,
-    mkdir,
-    writeFile,
-    readFile: (path, encoding) => readFileSync(path, encoding ?? "utf-8") as string,
-    exists,
-  });
-
-  if (!existingProfileContent) {
-    profileStatus = "created";
-  } else {
-    const newProfileContent = readFile(systemPromptPath, "utf-8");
-    profileStatus = existingProfileContent !== newProfileContent ? "updated" : "unchanged";
-  }
-
-  assertPiCandidateFiles(plan, exists, readFile);
-  nestedSkillDirsRemoved = cleanupNestedSkillDirectories(plan.skillsDir, options);
-
-  const fileResults: FileInstallResult[] = allResults.map((r) => ({
-    kind: r.kind,
-    agentId: r.agentId,
-    status: r.status,
-    absolutePath: r.absolutePath!,
-  }));
-
-  return { results: allResults, changedCount, unchangedCount, fileResults, nestedSkillDirsRemoved, profileDir, profileStatus };
-  } catch (error) {
-    rollbackDeveloperTeamFiles(fileBackup, { writeFile, unlink });
-    throw error;
-  }
+  // This compatibility entry point has no admission, installation lease or durable transaction.
+  // Rendering legacy plans remains available for migration/inspection; publication belongs to the adapter.
+  throw new Error("Legacy Pi installation is disabled; use PiRunnerAdapter.buildDeveloperTeamInstallPlan and applyDeveloperTeamInstall.");
 }
 
 // --- Verify ---
@@ -817,20 +618,7 @@ export function rollbackDeveloperTeamFiles(
   backup: BackupManifest,
   options?: { writeFile?: typeof writeFileSync; unlink?: typeof unlinkSync },
 ): void {
-  const writeFile = options?.writeFile ?? writeFileSync;
-  const unlink = options?.unlink ?? unlinkSync;
-
-  for (const entry of backup.entries) {
-    if (entry.previousContent === null) {
-      try {
-        unlink(entry.absolutePath);
-      } catch {
-        // File may already be gone (partial apply or external removal)
-      }
-    } else {
-      writeFile(entry.absolutePath, entry.previousContent, "utf-8");
-    }
-  }
+  throw new Error("Legacy Pi rollback is disabled; use PiRunnerAdapter rollbackDeveloperTeamFiles.");
 }
 
 // --- Content builders (consume core registry) ---

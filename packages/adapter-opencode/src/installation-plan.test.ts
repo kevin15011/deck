@@ -19,10 +19,8 @@ describe("buildOpenCodeInstallationPlan", () => {
         name: "RTK",
         module: "rtk-ai/rtk",
         required: false,
-        installKind: "shell-script-plus-mcp",
+        installKind: "deck-owned-native",
         capabilityId: "rtk",
-        shellInstallUrl: "https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh",
-        postInstallCommand: ["rtk", "init", "-g", "--opencode"],
       },
       {
         id: "codebase-memory",

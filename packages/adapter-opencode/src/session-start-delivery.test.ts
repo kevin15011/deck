@@ -1,6 +1,6 @@
-import { expect, test } from "bun:test";
+import { expect, test, spyOn } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOpenCodeDeveloperTeamExecutionPluginV1 } from "../assets/opencode/plugins/developer-team-execution";
@@ -9,7 +9,7 @@ import { createPiDeveloperTeamExecutionExtensionV1 } from "../../adapter-pi/asse
 // Protects immutable delivery: transforms must use lifecycle-cached evidence,
 // and a rejected replacement must never retain evidence from the prior lifecycle.
 test("OpenCode and Pi lifecycle consumers cache validated snapshots and reject tampering", async () => {
-  const root = mkdtempSync(join(tmpdir(), "deck-lifecycle-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "deck-lifecycle-")));
   try {
     const file = join(root, "context.json");
     const raw = JSON.stringify({ root, epoch: "epoch", generation: "generation", text: "prepared readiness" });
@@ -45,4 +45,26 @@ test("OpenCode and Pi lifecycle consumers cache validated snapshots and reject t
       expect(output.system).toEqual(["refreshed readiness"]);
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Protects startup diagnostics: rejected evidence stays absent and only fixed
+// reason/stage codes may reach stderr, including for path-bearing I/O errors.
+test("OpenCode startup diagnostics redact snapshot and filesystem details", async () => {
+  const root = mkdtempSync(join(tmpdir(), "deck-start-diagnostic-"));
+  const messages: string[] = [];
+  const stderr = spyOn(process.stderr, "write").mockImplementation((chunk: any) => { messages.push(String(chunk)); return true; });
+  try {
+    const file = join(root, "private-token-context.json");
+    const environment = { DECK_SESSION_START_CONTEXT: file, DECK_SESSION_START_DIGEST: "wrong" };
+    await createOpenCodeDeveloperTeamExecutionPluginV1({ environment })({ directory: root });
+    writeFileSync(file, '{"text":"private snapshot"}', { mode: 0o600 });
+    const plugin = await createOpenCodeDeveloperTeamExecutionPluginV1({ environment })({ directory: root });
+    const output = { system: [] as string[] };
+    await plugin["experimental.chat.system.transform"]({}, output);
+    expect(output.system).toEqual([]);
+    expect(messages).toEqual([
+      "deck-preparation: session-start-context-unverified stage=snapshot reason=unreadable\n",
+      "deck-preparation: session-start-context-unverified stage=snapshot reason=digest-mismatch\n",
+    ]);
+  } finally { stderr.mockRestore(); rmSync(root, { recursive: true, force: true }); }
 });

@@ -3,8 +3,8 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, realpathSy
 import { dirname, join } from 'node:path';
 import { getDefaultDeckConfig } from '@deck/core';
 import { createCodexRunnerAdapter } from './runner-adapter';
-// Oracle: install and preparation agree on preserved, customized executable hooks.
-test('install verification refuses a preserved foreign hook without issuing its receipt', async () => {
+// Oracle: established managed hook selectors regenerate canonically; admission refuses drift before repair.
+test('install verification agrees with admission after managed hook repair', async () => {
  const home = realpathSync(mkdtempSync('/tmp/deck-install-admission-'));
  try {
   const adapter = createCodexRunnerAdapter({ userHome: home, codexHome: join(home, '.codex'), journalRoot: join(home, 'journals'), tools: { homeDir:home, dataRoot:join(home,'deck'), resolveCommand:()=>undefined, nodeCommand:process.execPath, verifyNodeRuntime:()=>true } });
@@ -12,13 +12,15 @@ test('install verification refuses a preserved foreign hook without issuing its 
   const materialize = (plan: ReturnType<typeof adapter.buildDeveloperTeamInstallPlan>) => { for(const file of plan.files) {const path=join(home,file.path); mkdirSync(dirname(path),{recursive:true,mode:0o700});writeFileSync(path,file.content,{mode:0o644});} };
   materialize(adapter.buildDeveloperTeamInstallPlan(input));
   const path=join(home,'.codex/config.toml');
+  const canonical = readFileSync(path, 'utf8');
   writeFileSync(path,readFileSync(path,'utf8').replace('developer-team-execution.js','custom-command.js'));
+  expect((await adapter.evaluateSessionAdmission!({config:input.deckConfig})).verdict).toBe('blocked');
   const plan=adapter.buildDeveloperTeamInstallPlan(input);
   materialize(plan);
   const verified=await adapter.verifyDeveloperTeamInstall(plan);
-  expect(verified.valid).toBe(false);
-  expect(verified.admission?.verdict).toBe('blocked');
-  expect(verified.admission?.checks[0]?.id).toBe('hook-not-in-manifest:readiness');
+  expect(readFileSync(path, 'utf8')).toBe(canonical);
+  expect(verified.valid).toBe(true);
+  expect(verified.admission?.verdict).not.toBe('blocked');
   expect(await adapter.evaluateSessionAdmission!({config:input.deckConfig})).toEqual(verified.admission!);
  } finally {rmSync(home,{recursive:true,force:true});}
 });

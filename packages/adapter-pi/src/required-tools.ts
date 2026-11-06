@@ -70,7 +70,15 @@ export function reviewPiRequiredTools(options: ReviewPiRequiredToolsOptions): Pi
 
   const installedPackages = parsePiList(result.stdout);
   const ownedRtk = options.piTools ? options.piTools.rtk.command() !== undefined : commandExists("rtk");
-  const ownedCodebase = options.piTools ? options.piTools.codebase.command() !== undefined : commandExists("codebase-memory-mcp");
+  let ownedCodebase: boolean;
+  try {
+    ownedCodebase = options.piTools ? options.piTools.codebase.command() !== undefined : commandExists("codebase-memory-mcp");
+  } catch (error) {
+    // Setup must offer pinned repair for a damaged owned slot. Execution still uses
+    // the strict accessor; cancellation, authorization and unknown failures propagate.
+    if (!(error instanceof Error) || error.message !== "codebase-memory-integrity-failed") throw error;
+    ownedCodebase = false;
+  }
   if (ownedRtk) {
     installedPackages.push("rtk");
   }

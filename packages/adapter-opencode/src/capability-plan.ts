@@ -247,6 +247,19 @@ function addCapabilityActions(
       }
     }
 
+    if (capability.installKind === "deck-owned-native" && tool && entry.status === "missing") {
+      groups.automaticInstalls.push({
+        id: `capability.${capabilityId}.install`,
+        kind: "install-opencode-plugin",
+        title: `Install ${capability.label}`,
+        capabilityId,
+        toolId: tool.id,
+        source: tool.id,
+        status: "ready",
+      });
+      continue;
+    }
+
     if (capability.installKind === "npm-package" && tool && entry.status === "missing") {
       groups.automaticInstalls.push({
         id: `capability.${capabilityId}.install`,

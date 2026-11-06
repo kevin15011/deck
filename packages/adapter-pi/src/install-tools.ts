@@ -313,9 +313,6 @@ async function installOwnedTool(tool: InstallablePiTool, tools: PiOwnedToolInsta
   if (state === "unsupported" || !owned.supported()) {
     return { ...base, success: false, status: "blocked", message: `No pinned ${tool.name} release exists for this platform.` };
   }
-  if (state === "conflict" || state === "unusable") {
-    return { ...base, success: false, status: "blocked", message: `The Deck-owned ${tool.name} directory is ${state}; Deck will not overwrite it. Remove it manually to reinstall.` };
-  }
   try {
     await owned.install();
     return { ...base, success: true, status: "installed", message: `Installed pinned Deck-owned ${tool.name}.` };

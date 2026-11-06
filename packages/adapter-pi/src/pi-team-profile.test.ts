@@ -6,18 +6,27 @@ import { tmpdir } from "node:os";
 import { DEVELOPER_TEAM_LANGUAGE_POLICY } from "@deck/core/teams/developer/content-registry";
 import {
   buildTeamSystemPrompt,
-  materializeTeamProfile,
+  materializeTeamProfile as legacyMaterializeTeamProfile,
+  readPiExecutionExtensionSource,
   type MaterializeTeamProfileOptions,
 } from "./pi-team-profile";
 
-const compactPromptActivation = {
-  schema: "prompt-profile-activation-v1" as const,
-  status: "eligible" as const,
-  requestedProfile: "compact" as const,
-  effectiveProfile: "compact" as const,
-  reasonCodes: [] as const,
-  evidenceDigest: `sha256:${"a".repeat(64)}` as const,
-};
+import { applyPiGlobalPlan, createNodePiFileIO, planPiGlobalInstall } from "./pi-global-install";
+
+// Exercise profile content/idempotence through the current transaction, never the retired project writer.
+function materializeTeamProfile(options: MaterializeTeamProfileOptions): void {
+  const io = createNodePiFileIO();
+  if (options.writeFile) io.writeText = (path, content) => options.writeFile!(path, content, "utf-8");
+  const desired = {
+    agentDir: options.projectRoot,
+    files: [
+      { relPath: `deck/profiles/${options.teamId}/system-prompt.md`, content: buildTeamSystemPrompt(options.teamId, options).content },
+      { relPath: `deck/profiles/${options.teamId}/extensions/developer-team-execution.js`, content: readPiExecutionExtensionSource() },
+    ],
+    packageEntry: undefined, skillExclusions: [], mcpServers: {}, legacyDeckEvidence: false,
+  };
+  applyPiGlobalPlan(planPiGlobalInstall(desired, io), io);
+}
 
 function createTempDir(prefix = "deck-test-"): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -33,7 +42,7 @@ describe("buildTeamSystemPrompt", () => {
     const root = createTempDir("deck-pi-delegation-policy-");
     try {
       materializeTeamProfile({ teamId: "developer-team", projectRoot: root });
-      const content = readFileSync(join(root, ".deck/pi/profiles/developer-team/system-prompt.md"), "utf8");
+      const content = readFileSync(join(root, "deck/profiles/developer-team/system-prompt.md"), "utf8");
       expect(content).toBe(buildTeamSystemPrompt("developer-team").content);
       expect(countOccurrences(content, "## Pi background delegation and conversational availability")).toBe(1);
     } finally {
@@ -71,7 +80,7 @@ describe("materializeTeamProfile", () => {
         projectRoot,
       });
 
-      const profileDir = join(projectRoot, ".deck", "pi", "profiles", "developer-team");
+      const profileDir = join(projectRoot, "deck", "profiles", "developer-team");
       const systemPromptPath = join(profileDir, "system-prompt.md");
 
       const content = readFileSync(systemPromptPath, "utf-8");
@@ -97,7 +106,7 @@ describe("materializeTeamProfile", () => {
       materializeTeamProfile({ teamId: "developer-team", projectRoot });
 
       const content = readFileSync(
-        join(projectRoot, ".deck", "pi", "profiles", "developer-team", "system-prompt.md"),
+        join(projectRoot, "deck", "profiles", "developer-team", "system-prompt.md"),
         "utf-8",
       );
       expect(content).toContain("Developer Team");
@@ -106,24 +115,14 @@ describe("materializeTeamProfile", () => {
     }
   });
 
-  test("uses injected fs functions for testability", () => {
-    const projectRoot = "/fake";
-    const written: { path: string; content: string }[] = [];
-
-    materializeTeamProfile({
-      teamId: "developer-team",
-      projectRoot,
-      mkdir: () => { /* no-op */ },
-      writeFile: (path, content) => { written.push({ path, content }); },
-      readFile: () => { throw new Error("should not read"); },
-      exists: () => false, // file does not exist yet -> should write
-    });
-
-    expect(written).toHaveLength(2);
-    expect(written[0].path).toBe("/fake/.deck/pi/profiles/developer-team/system-prompt.md");
-    expect(written[0].content).toContain("Developer Team");
-    expect(written[1].path).toBe("/fake/.deck/pi/profiles/developer-team/extensions/developer-team-execution.js");
-    expect(written[1].content).toContain('"tool_call"');
+  test("retired profile writer refuses before injected filesystem effects", () => {
+    let writes = 0;
+    expect(() => legacyMaterializeTeamProfile({
+      teamId: "developer-team", projectRoot: "/fake",
+      mkdir: () => { writes++; }, writeFile: () => { writes++; },
+      exists: () => false,
+    })).toThrow(/PiRunnerAdapter/);
+    expect(writes).toBe(0);
   });
 
   test("does not write if content is unchanged", () => {
@@ -133,7 +132,7 @@ describe("materializeTeamProfile", () => {
       materializeTeamProfile({ teamId: "developer-team", projectRoot });
 
       const content = readFileSync(
-        join(projectRoot, ".deck", "pi", "profiles", "developer-team", "system-prompt.md"),
+        join(projectRoot, "deck", "profiles", "developer-team", "system-prompt.md"),
         "utf-8",
       );
 
@@ -173,7 +172,7 @@ describe("Developer Team language policy propagation to Pi team profile", () => 
     try {
       materializeTeamProfile({ teamId: "developer-team", projectRoot });
       const content = readFileSync(
-        join(projectRoot, ".deck", "pi", "profiles", "developer-team", "system-prompt.md"),
+        join(projectRoot, "deck", "profiles", "developer-team", "system-prompt.md"),
         "utf-8",
       );
       expect(content).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);

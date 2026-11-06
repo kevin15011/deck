@@ -53,6 +53,7 @@ function isDeckOwnedEntry(value: unknown, provider: WebSearchProviderDescriptorV
 export function inspectPiWebSearchMcpConfig(
   configPath: string,
   provider?: WebSearchProviderDescriptorV1,
+  ownedEntryHash?: string,
 ): PiWebSearchMcpState {
   if (!isWebSearchProviderDescriptor(provider)) return { configured: false, conflict: false };
   if (!existsSync(configPath)) return { configured: false, conflict: false };
@@ -62,7 +63,12 @@ export function inspectPiWebSearchMcpConfig(
     if (!isRecord(parsed.mcpServers)) return { configured: false, conflict: true };
     const entry = parsed.mcpServers[provider.semanticServerId];
     if (entry === undefined) return { configured: false, conflict: false };
-    return isExactEntry(entry, provider) || isDeckOwnedEntry(entry, provider) ? { configured: true, conflict: false } : { configured: false, conflict: true };
+    if (isExactEntry(entry, provider) || isDeckOwnedEntry(entry, provider)) return { configured: true, conflict: false };
+    // Setup may reconcile a recorded Deck slot through the backed-up managed
+    // transaction, including edited bytes. This is planning evidence only: the
+    // noncanonical entry stays unconfigured and gains no execution authority.
+    if (ownedEntryHash && /^[a-f0-9]{64}$/.test(ownedEntryHash)) return { configured: false, conflict: false };
+    return { configured: false, conflict: true };
   } catch {
     return { configured: false, conflict: true };
   }

@@ -128,6 +128,7 @@ describe("OpenCode production discovery context", () => {
         OPENCODE_CONFIG_DIR: "/fixture/alternate",
       },
     }).map((candidate) => candidate.path)).toEqual([
+      "/fixture/config/opencode/config.json",
       "/fixture/config/opencode/opencode.json",
       "/fixture/config/opencode/opencode.jsonc",
       "/workspace/project/overrides/custom.jsonc",
@@ -137,12 +138,16 @@ describe("OpenCode production discovery context", () => {
       "/workspace/project/opencode.jsonc",
       "/workspace/project/.opencode/opencode.json",
       "/workspace/project/.opencode/opencode.jsonc",
+      "/workspace/.opencode/opencode.json",
+      "/workspace/.opencode/opencode.jsonc",
+      "/home/fixture/.opencode/opencode.json",
+      "/home/fixture/.opencode/opencode.jsonc",
       "/fixture/alternate/opencode.json",
       "/fixture/alternate/opencode.jsonc",
     ]);
   });
 
-  test("honors project-disable and pure controls without evaluating config content", () => {
+  test("honors project-disable while pure mode retains native configuration", () => {
     const base = {
       projectRoot: "/workspace/project",
       workspaceRoot: "/workspace",
@@ -154,16 +159,19 @@ describe("OpenCode production discovery context", () => {
       ...base,
       env: { ...base.env, OPENCODE_DISABLE_PROJECT_CONFIG: "1" },
     }).map((candidate) => candidate.path)).toEqual([
+      "/home/fixture/.config/opencode/config.json",
       "/home/fixture/.config/opencode/opencode.json",
       "/home/fixture/.config/opencode/opencode.jsonc",
       "/workspace/project/custom.json",
+      "/home/fixture/.opencode/opencode.json",
+      "/home/fixture/.opencode/opencode.jsonc",
       "/fixture/alternate/opencode.json",
       "/fixture/alternate/opencode.jsonc",
     ]);
     expect(enumerateOpenCodeConfigCandidates({
       ...base,
       env: { ...base.env, OPENCODE_PURE: "1" },
-    })).toEqual([]);
+    })).toEqual(enumerateOpenCodeConfigCandidates(base));
   });
 
   test("parses comments and trailing commas through the shared JSONC parser", () => {

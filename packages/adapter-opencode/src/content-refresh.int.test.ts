@@ -1,10 +1,14 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, test, spyOn } from 'bun:test';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { contributionHash, getDefaultDeckConfig } from '@deck/core';
+import * as standaloneSkills from '../../core/src/skills/external';
 import { createOpenCodeRunnerAdapter } from './runner-adapter';
 
+// Keep vendor-resource materialization outside this roles/plugin refresh contract.
+const skills = spyOn(standaloneSkills, 'getStandaloneSkills').mockReturnValue([]);
+afterAll(() => skills.mockRestore());
 let home: string, root: string;
 const saved = { HOME: process.env.HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME };
 beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'deck-s4-')); root = join(home, 'opencode'); process.env.HOME = home; process.env.XDG_CONFIG_HOME = home; });

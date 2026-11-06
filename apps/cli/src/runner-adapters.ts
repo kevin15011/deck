@@ -1,3 +1,4 @@
+import { createProjectInstallRefresh } from "./legacy-project-instructions";
 import { currentBuildIdentity } from "./runtime/build-identity";
 import { contributionHash } from "@deck/core";
 import { guardRunnerAdapter } from "./runner-mutation-admission";
@@ -68,11 +69,7 @@ export function deckCodebaseGuardInvocation() {
 
 export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOptions = {}): AdapterRegistry {
   const registry = createAdapterRegistry();
-  const guard = (adapter: import("@deck/core").RunnerAdapter) => guardRunnerAdapter(adapter, undefined, async projectRoot => {
-    const { refreshSharedSkillCatalogView } = await import("../../../packages/core/src/skill-discovery/shared");
-    // Install authority is not Setup authority: refresh the advisory view without publishing.
-    await refreshSharedSkillCatalogView({ projectRoot, providers: registry.list().flatMap(a => a.skillDiscovery ? [a.skillDiscovery] : []) });
-  }, adapter.mutationRoot ? {path: join(getDeckStateDir(), "runner-fences", `${adapter.runnerId}-${contributionHash(resolve(adapter.mutationRoot)).slice(0,16)}.json`), self:currentBuildIdentity(),stateSchema:adapter.stateSchema ?? 1} : undefined);
+  const guard = (adapter: import("@deck/core").RunnerAdapter) => guardRunnerAdapter(adapter, undefined, createProjectInstallRefresh(registry, { stateRoot: getDeckStateDir() }), adapter.mutationRoot ? {path: join(getDeckStateDir(), "runner-fences", `${adapter.runnerId}-${contributionHash(resolve(adapter.mutationRoot)).slice(0,16)}.json`), self:currentBuildIdentity(),stateSchema:adapter.stateSchema ?? 1} : undefined);
   registry.register("pi", guard(createPiRunnerAdapter({
     codebaseGuardInvocation: deckCodebaseGuardInvocation,
 

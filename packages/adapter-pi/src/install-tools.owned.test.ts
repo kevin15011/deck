@@ -35,12 +35,12 @@ describe("installPiTools with Deck-owned tools", () => {
     expect(result).toMatchObject({ status: "reused", success: true });
   });
 
-  test("a conflicting or unusable owned RTK blocks instead of overwriting", async () => {
+  test("a conflicting or unusable owned RTK reacquires the pinned artifact", async () => {
     for (const state of ["conflict", "unusable"]) {
       const { tools, calls } = fakeTools({ rtk: { state: () => state } });
       const [result] = await installPiTools("pi", [rtk], () => {}, { piTools: tools });
-      expect(calls).toEqual([]);
-      expect(result).toMatchObject({ status: "blocked", success: false });
+      expect(calls).toEqual(["rtk.install"]);
+      expect(result).toMatchObject({ status: "installed", success: true });
     }
   });
 

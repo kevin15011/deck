@@ -60,3 +60,12 @@ describe("reviewPiRequiredTools", () => {
     expect(pathOnly.requiredTools.find((tool) => tool.name === "codebase-memory")?.installed).toBe(false);
   });
 });
+
+// Protects error authority: only the owned integrity sentinel becomes repairable absence.
+test('Setup review preserves authorization, cancellation and unexpected resolver failures', () => {
+  for (const error of [new DOMException('cancelled', 'AbortError'), Object.assign(new Error('denied'), { code: 'EACCES' }), new Error('unexpected')]) {
+    expect(() => reviewPiRequiredTools({ command: 'pi', runCommand: () => ({ exitCode: 0, stdout: 'No packages installed.' }),
+      piTools: { rtk: { command: () => undefined }, codebase: { command: () => { throw error; } } },
+    })).toThrow(error);
+  }
+});

@@ -1,4 +1,7 @@
-import { beginRunnerContributions, canonicalContributionJson, contributionHash, hasRunnerContributionProof } from "@deck/core";
+import { randomUUID } from "node:crypto";
+import { jsonRanges } from "../../core/src/jsonc-ranges";
+import { setField } from "./content-refresh";
+import { assertNoContributionSymlink, classifyManagedSlot, readRunnerContributions, type ContributionTarget, type ManagedArtifactPolicy, beginRunnerContributions, canonicalContributionJson, contributionHash, hasRunnerContributionProof } from "@deck/core";
 import { chmodSync, existsSync, readFileSync, statSync, writeFileSync, appendFileSync, renameSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -148,105 +151,73 @@ export function writeOpenCodeMcpConfig(
     return { ok: false, path: configPath, serverName, diagnostics };
   }
 
-  let config: Record<string, unknown> = {};
-  if (existsSync(configPath)) {
-    try {
-      const content = readFileSync(configPath, "utf-8");
-      config = JSON.parse(content) as Record<string, unknown>;
-    } catch (error) {
-      diagnostics.push(`Unable to parse existing opencode.json: ${error instanceof Error ? error.message : String(error)}`);
-      return { ok: false, path: configPath, serverName, diagnostics };
-    }
-  }
-
-  if (serverName === "codebase-memory" && (!isPlainRecord(config) || config.mcp !== undefined && !isPlainRecord(config.mcp))) {
-    return { ok: false, path: configPath, serverName, diagnostics: ["Codebase Memory MCP config is malformed; it was preserved."] };
-  }
-
-  const mcpSection = (config.mcp ?? {}) as Record<string, unknown>;
-
-  if (serverName === "codebase-memory" && mcpSection[serverName] !== undefined) {
-    const previous = mcpSection[serverName];
-    const oldCommand = isPlainRecord(previous) && Array.isArray(previous.command) ? previous.command : [];
-    const sameCommand = JSON.stringify(oldCommand) === JSON.stringify(options.command);
-    const legacyCommand = oldCommand.length === 1 && (oldCommand[0] === "codebase-memory-mcp" || oldCommand[0] === join(homeDir, ".local", "bin", "codebase-memory-mcp") || (options.codebasePreviousCommands ?? []).includes(oldCommand[0] as string));
-    const standard = isPlainRecord(previous) && previous.type === "local" && previous.enabled !== false
-      && Object.keys(previous).every(key => ["type", "command", "enabled"].includes(key));
-    if (!standard || !sameCommand && !legacyCommand) {
-      return { ok: false, path: configPath, serverName, diagnostics: ["Codebase Memory MCP entry is custom or ambiguous; it was preserved."] };
-    }
-  }
-
-  const serverEntry: Record<string, unknown> = {
-    type: options.type,
-    enabled: true,
-  };
-
-  if (options.type === "local" && options.command) {
-    serverEntry.command = options.command;
-  }
-
-  if (options.type === "remote" && options.url) {
-    serverEntry.url = options.url;
-    serverEntry.oauth = false;
-    if (options.headers) {
-      serverEntry.headers = options.headers;
-    }
-  }
-
-  mcpSection[serverName] = serverEntry;
-  config.mcp = mcpSection;
-
-  // Clean up legacy plugin entries if pluginsToRemove is specified
-  // This handles migration from opencode-plugin to MCP server
-  if (options.pluginsToRemove && options.pluginsToRemove.length > 0) {
-    const existingPlugins = Array.isArray(config.plugin) ? config.plugin : [];
-    const cleanedPlugins = existingPlugins.filter((p) => {
-      if (typeof p !== "string" || !options.pluginsToRemove!.includes(p)) return true;
-      const proven = hasRunnerContributionProof(join(dirname(configPath), "deck/manifest.json"), { path: configPath, selector: { kind: "json-array", keys: ["plugin"], identity: canonicalContributionJson(p) } });
-      if (!proven) diagnostics.push(`Preserved ambiguous plugin entry in ${configPath}; review it individually before removal.`);
-      return !proven;
-    });
-
-    if (cleanedPlugins.length > 0) {
-      config.plugin = cleanedPlugins;
-    } else if (existingPlugins.length > 0) {
-      // If plugin array becomes empty after cleanup, keep as empty array
-      // Don't delete the key to preserve explicit empty state
-      config.plugin = [];
-    }
-  }
-
-  const nextContent = JSON.stringify(config, null, 2);
-  if (existsSync(configPath)) {
-    try {
-      if (readFileSync(configPath, "utf-8") === nextContent) {
-        diagnostics.push(`MCP server '${serverName}' already configured in OpenCode at ${configPath}; no changes were written.`);
-        return { ok: true, path: configPath, serverName, status: "unchanged", diagnostics };
-      }
-    } catch (error) {
-      diagnostics.push(`Unable to re-read existing opencode.json before write: ${error instanceof Error ? error.message : String(error)}`);
-      return { ok: false, path: configPath, serverName, diagnostics };
-    }
-  }
-
+  const root = resolve(dirname(configPath)), manifestPath = join(root, "deck/manifest.json");
+  const fail = (code: string, message: string): WriteOpenCodeMcpConfigResult => ({ ok: false, path: configPath, serverName, code, diagnostics: [message] });
   try {
-    const root = dirname(configPath);
-    const accounting = beginRunnerContributions({ runnerId: "opencode", root, manifestPath: join(root, "deck/manifest.json"), deckVersion: "0.13.0",
-      targets: [{ path: configPath, selector: { kind: "json", keys: ["mcp", serverName] }, expectedHash: contributionHash(canonicalContributionJson(serverEntry)), sourceItemId: `mcp:${serverName}` }] });
-    const temporary = `${configPath}.deck-mcp-${process.pid}.tmp`;
+    assertNoContributionSymlink(configPath);
+    const before = existsSync(configPath) ? readFileSync(configPath, "utf8") : undefined;
+    const parsed = jsonRanges(before ?? "{}");
+    if (!parsed.properties || parsed.properties.has("mcp") && !parsed.properties.get("mcp")!.node.properties) return fail("mcp-config-conflict", "MCP configuration is malformed; preserved without changes.");
+    const previous = parsed.properties.get("mcp")?.node.properties?.get(serverName)?.node.value;
+    const entry: Record<string, unknown> = options.type === "local"
+      ? { type: "local", enabled: true, command: options.command }
+      : { type: "remote", enabled: true, url: options.url, oauth: false, ...(options.headers ? { headers: options.headers } : {}) };
+    const target: ContributionTarget = { path: resolve(configPath), selector: { kind: "json", keys: ["mcp", serverName] }, expectedHash: contributionHash(canonicalContributionJson(entry)), sourceItemId: `mcp:${serverName}` };
+    const legacy = (content: string | Uint8Array): boolean => {
+      const value = JSON.parse(String(content));
+      if (!isPlainRecord(value) || value.type !== "local" || value.enabled === false || Object.keys(value).some(key => !["type", "enabled", "command"].includes(key))) return false;
+      const command = value.command;
+      if (!Array.isArray(command) || !command.every(part => typeof part === "string")) return false;
+      if (serverName === "context7") return command.length === 3 && command[0] === "npx" && command[1] === "-y" && ["@upstash/context7-mcp", "@upstash/context7-mcp@4.1.1"].includes(command[2]);
+      if (serverName === "codebase-memory") return command.length === 1 && ["codebase-memory-mcp", join(homeDir, ".local/bin/codebase-memory-mcp"), ...(options.codebasePreviousCommands ?? [])].includes(command[0]);
+      return false;
+    };
+    const managed: ManagedArtifactPolicy = { stateRoot: join(root, "deck/recovery-state"), inventory: { runnerId: "opencode", root, generatedRoots: [], slots: [{ ...target, authority: "recognized", recognizeLegacy: legacy }] } };
+    const receipt = readRunnerContributions(manifestPath);
+    if (receipt && (receipt.runnerId !== "opencode" || resolve(receipt.root) !== root)) return fail("mcp-config-conflict", "MCP ownership identity differs; preserved without changes.");
+    if (classifyManagedSlot({ inventory: managed.inventory, target, content: previous === undefined ? undefined : canonicalContributionJson(previous), receipts: receipt?.contributions }) === "ambiguous") return fail("mcp-config-conflict", "MCP entry is custom or ambiguous; preserved without changes.");
+    let next = setField(before ?? "{}", ["mcp", serverName], entry);
+    // Remove only separately proven legacy plugin selectors, preserving every other JSONC byte.
+    const plugins = jsonRanges(next).properties?.get("plugin")?.node;
+    if (plugins?.elements && options.pluginsToRemove?.length) {
+      for (const element of [...plugins.elements].reverse()) {
+        if (typeof element.node.value !== "string" || !options.pluginsToRemove.includes(element.node.value)) continue;
+        if (!hasRunnerContributionProof(manifestPath, { path: configPath, selector: { kind: "json-array", keys: ["plugin"], identity: canonicalContributionJson(element.node.value) } })) continue;
+        // Reparse after each removal to maintain comma ranges.
+        const current = jsonRanges(next).properties!.get("plugin")!.node.elements!;
+        const item = current.find(item => item.node.value === element.node.value)!;
+        const index = current.indexOf(item), prior = current[index - 1];
+        const start = item.comma === undefined && prior?.comma !== undefined ? prior.comma : item.node.start;
+        const end = item.comma === undefined ? item.node.end : item.comma + 1;
+        next = next.slice(0, start) + next.slice(end);
+      }
+    }
+    const accounting = beginRunnerContributions({ runnerId: "opencode", root, manifestPath, deckVersion: "0.14.0", targets: [target], managed });
+    const temporary = `${configPath}.deck-mcp-${randomUUID()}.tmp`;
+    const current = () => { assertNoContributionSymlink(configPath); return existsSync(configPath) ? readFileSync(configPath, "utf8") : undefined; };
+    let published = false;
     try {
-      writeFileSync(temporary, nextContent, { encoding: "utf8", mode: 0o600, flag: "wx" });
-      require("node:fs").renameSync(temporary, configPath);
+      if (current() !== before) throw new Error("MCP configuration changed during preparation; preserved.");
+      if (next !== before) {
+        writeFileSync(temporary, next, { encoding: "utf8", mode: 0o600, flag: "wx" });
+        if (current() !== before) throw new Error("MCP configuration changed before publication; preserved.");
+        renameSync(temporary, configPath); published = true;
+      }
       accounting.commit();
-    } catch (error) { accounting.abandon(); throw error; } finally { if (existsSync(temporary)) require("node:fs").unlinkSync(temporary); }
-    diagnostics.push(`MCP server '${serverName}' configured in OpenCode at ${configPath}.`);
+    } catch (error) {
+      try {
+        if (published) {
+          if (current() !== next) throw new Error("MCP rollback conflict; preserved pending evidence.");
+          if (before === undefined) unlinkSync(configPath);
+          else { writeFileSync(temporary, before, { encoding: "utf8", mode: 0o600, flag: "wx" }); renameSync(temporary, configPath); }
+        }
+        accounting.abort();
+      } catch { accounting.abandon(); }
+      throw error;
+    } finally { if (existsSync(temporary)) unlinkSync(temporary); }
+    return { ok: true, path: configPath, serverName, status: next === before ? "unchanged" : "created", diagnostics: [] };
+  } catch { return fail("mcp-config-conflict", "MCP configuration could not be reconciled; inspect retained configuration and pending evidence."); }
 
-    return { ok: true, path: configPath, serverName, diagnostics };
-  } catch (error) {
-    diagnostics.push(`Failed to write opencode.json: ${error instanceof Error ? error.message : String(error)}`);
-    return { ok: false, path: configPath, serverName, diagnostics };
-  }
 }
 
 /**

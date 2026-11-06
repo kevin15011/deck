@@ -24,6 +24,7 @@ export async function install() {
     ...native.skills.filter(f => f.relativePath.includes('deck-quality/')).map(f => ({ path: f.relativePath, content: f.content, kind: 'skill' as const })),
     ...native.promptGenerationPlan.filter(f => f.absolutePath.endsWith('/deck-quality.md')).map(f => ({ path: relative(root, f.absolutePath), content: f.content, kind: 'prompt' as const })),
     { path: native.executionPlugin!.relativePath, content: native.executionPlugin!.content, kind: 'other' as const },
+    { path: native.modelVariantsPlugin!.relativePath, content: native.modelVariantsPlugin!.content, kind: 'other' as const },
   ];
   const prepare = () => planOpenCodeRefresh(root, desired, { 'deck-quality': native.agentEntries['deck-quality']! });
   applyOpenCodeRefresh(root, prepare());

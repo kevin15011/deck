@@ -1,6 +1,8 @@
-import { recordOwnedRunnerArtifactTree } from "@deck/core";
+import { installOwnedNpmTool, ownedNpmCommand } from './npm-tools';
+import { withInstallationMutation } from "../../core/src/installation-use";
+import { type NpmArtifactEffects, recordOwnedRunnerArtifactTree } from "@deck/core";
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   OWNED_CODEBASE_VERSION,
@@ -43,6 +45,7 @@ export type CodexToolOptions = {
   verifyContextMode?: (executable: string) => boolean;
   installContextMode?: () => Promise<boolean>;
   installContext7?: () => Promise<boolean>;
+  npmArtifactEffects?: NpmArtifactEffects;
   /** Absolute Node.js used by Deck-owned hook scripts; production resolves `node` and checks the version. */
   nodeCommand?: string;
   verifyNodeRuntime?: (executable: string) => boolean;
@@ -150,30 +153,22 @@ export function createCodexTools(options: CodexToolOptions = {}) {
   };
   // Match Claude's executable verification and reuse its per-user npm installation when present.
   const context7Command = (): string | undefined => {
-    const candidates = [pathCandidate("context7-mcp"), join(dataRoot, "claude", "tools", "node_modules", ".bin", "context7-mcp"), join(toolRoot, "node_modules", ".bin", "context7-mcp")];
-    for (const candidate of candidates) {
-      const executable = executableFile(candidate);
-      if (executable) return executable;
-    }
-    return undefined;
+    // Explicit resolver is a privileged host/test seam. Production requires the complete
+    // integrity-acquired tree; executable presence and a package version are insufficient.
+    if (options.resolveCommand) return executableFile(options.resolveCommand("context7-mcp"));
+    return ownedNpmCommand(toolRoot, "context7");
   };
   const installSharedTool = async (id: "context-mode" | "context7"): Promise<boolean> => {
     const override = id === "context7" ? options.installContext7 : options.installContextMode;
     if (override) return override();
-    const npm = Bun.which("npm");
-    if (!npm) return false;
-    await ensurePrivatePath(toolRoot, home);
-    const code = await new Promise<number>((done) => {
-      const child = spawn(npm, ["install", "--prefix", toolRoot, "--no-audit", "--no-fund", "--ignore-scripts", id === "context7" ? CODEX_CONTEXT7_PACKAGE : CODEX_CONTEXT_MODE_PACKAGE], {
-        cwd: home,
-        env: { HOME: home, PATH: process.env.PATH ?? "", USER: process.env.USER ?? "" },
-        stdio: "ignore",
+    if (id === "context-mode") return false; // retired; no mutable npm resolution fallback
+    return withInstallationMutation(options.codexHome ?? join(home, ".codex"), async () => {
+      await ensurePrivatePath(toolRoot, home);
+      await installOwnedNpmTool({ toolsRoot: toolRoot, id, effects: options.npmArtifactEffects,
+        publishReceipt: artifactRoot => { recordOwnedRunnerArtifactTree({ runnerId: "codex", root: options.codexHome ?? join(home, ".codex"), manifestPath: join(options.codexHome ?? join(home, ".codex"), "deck", "manifest.json"), artifactRoot, sourceItemId: `package:${id}` }); },
       });
-      const timer = setTimeout(() => { child.kill("SIGTERM"); done(1); }, 120_000);
-      child.once("error", () => { clearTimeout(timer); done(1); });
-      child.once("close", (status) => { clearTimeout(timer); done(status ?? 1); });
+      return ownedNpmCommand(toolRoot, id) !== undefined;
     });
-    return code === 0 && (id === "context7" ? context7Command() : contextModeCommand()) !== undefined;
   };
 
   return Object.freeze({

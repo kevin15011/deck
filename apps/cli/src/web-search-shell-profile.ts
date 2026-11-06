@@ -84,7 +84,7 @@ type TargetSnapshot = Readonly<{
 
 type OwnedBlock =
   | Readonly<{ kind: "absent" }>
-  | Readonly<{ kind: "present"; start: number; end: number }>
+  | Readonly<{ kind: "present"; start: number; end: number; spans?: readonly { start: number; end: number }[] }>
   | Readonly<{ kind: "duplicate" | "malformed" }>;
 
 export type ShellProfileRollbackResult = Readonly<{
@@ -227,7 +227,7 @@ export function readOwnedTavilyCredential(options: ShellProfileWriterOptions = {
     if (!sameSnapshot(initial.snapshot, snapshotFor(fstatSync(fd)))) return undefined;
     const content = Buffer.concat(pieces, total);
     const owned = locateOwnedBlock(content);
-    if (owned.kind !== "present") return undefined;
+    if (owned.kind !== "present" || (owned.spans?.length ?? 1) > 1) return undefined;
     const lines = content.subarray(owned.start, owned.end).toString("utf8").split(/\r?\n/u);
     if (lines.length !== 3 || lines[0] !== DECK_WEB_SEARCH_PROFILE_START || lines[2] !== DECK_WEB_SEARCH_PROFILE_END) return undefined;
     const prefix = "export TAVILY_API_KEY=";
@@ -341,15 +341,18 @@ function locateOwnedBlock(content: Buffer): OwnedBlock {
 
   if (starts.length === 0 && ends.length === 0) return { kind: "absent" };
   if (!markersAreLines) return { kind: "malformed" };
-  if (starts.length > 1 || ends.length > 1) return { kind: "duplicate" };
-  if (starts.length !== 1 || ends.length !== 1 || starts[0]! >= ends[0]!) return { kind: "malformed" };
-
-  const bodyStart = lineEndAfter(content, starts[0]! + startMarker.length);
-  const bodyEnd = startsAtLine(content, ends[0]!);
-  const body = content.subarray(bodyStart, bodyEnd).toString("utf8");
-  if (!/^export TAVILY_API_KEY=.+$/u.test(body) || /[\r\n]/u.test(body)) return { kind: "malformed" };
-
-  return { kind: "present", start: starts[0]!, end: ends[0]! + endMarker.length };
+  if (starts.length !== ends.length) return { kind: "malformed" };
+  const spans: { start: number; end: number }[] = [];
+  for (let index = 0; index < starts.length; index++) {
+    const start = starts[index]!, end = ends[index]!;
+    if (start >= end || index > 0 && start <= ends[index - 1]!) return { kind: "malformed" };
+    const bodyStart = lineEndAfter(content, start + startMarker.length);
+    const bodyEnd = startsAtLine(content, end);
+    const body = content.subarray(bodyStart, bodyEnd).toString("utf8");
+    if (!/^export TAVILY_API_KEY=.+$/u.test(body) || /[\r\n]/u.test(body)) return { kind: "malformed" };
+    spans.push({ start, end: end + endMarker.length });
+  }
+  return { kind: "present", ...spans[0]!, spans };
 }
 
 function materializeProfile(content: Buffer, owned: Extract<OwnedBlock, { kind: "absent" | "present" }>, credential: string): Buffer {
@@ -361,7 +364,13 @@ function materializeProfile(content: Buffer, owned: Extract<OwnedBlock, { kind: 
   ].join(newline), "utf8");
 
   if (owned.kind === "present") {
-    return Buffer.concat([content.subarray(0, owned.start), block, content.subarray(owned.end)]);
+    let next = content;
+    const spans = owned.spans ?? [owned];
+    for (let index = spans.length - 1; index >= 0; index--) {
+      const span = spans[index]!;
+      next = Buffer.concat([next.subarray(0, span.start), index === 0 ? block : Buffer.alloc(0), next.subarray(span.end)]);
+    }
+    return next;
   }
 
   if (content.length === 0) return Buffer.concat([block, Buffer.from(newline, "utf8")]);

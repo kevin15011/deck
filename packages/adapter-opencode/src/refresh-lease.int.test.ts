@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { realpathSync } from 'node:fs';
 import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -6,7 +8,7 @@ import { createOpenCodeRunnerAdapter } from './runner-adapter';
 
 // Protects independent invocations from refresh, through the adapter's real preparation path.
 test('another invocation defers refresh, warns, and leaves installed content unchanged', async () => {
-  const home = mkdtempSync('/tmp/deck-s4-lease-'), root = join(home, 'opencode');
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'deck-s4-lease-'))), root = join(home, 'opencode');
   const saved = { HOME: process.env.HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME };
   process.env.HOME = home; process.env.XDG_CONFIG_HOME = home;
   let release!: () => void;

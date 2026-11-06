@@ -35,6 +35,7 @@ export type MergeOptions = {
   agentEntries: Record<string, AgentEntry>;
   agentKeysToRemove?: readonly string[];
   pluginsToAdd?: string[];
+  pluginReplacements?: Record<string, string>;
   readFile?: (path: string, encoding: "utf-8") => string;
   writeFile?: (path: string, content: string) => void;
   renameFile?: (from: string, to: string) => void;
@@ -117,6 +118,8 @@ export function mergeConfig(
 ): OpenCodeConfig {
   // Deep clone to avoid mutation
   const merged: OpenCodeConfig = JSON.parse(JSON.stringify(existing));
+  // Avoid a first-native-load config write after generation capture.
+  if (!Object.hasOwn(merged, "$schema")) merged.$schema = "https://opencode.ai/config.json";
 
   // Ensure agent object exists
   if (merged.agent === undefined || merged.agent === null) {
@@ -233,6 +236,8 @@ export function mergeAndWrite(options: MergeOptions): MergeResult {
 
   // 1. Read existing config
   const existing = readConfig(configPath, readFile);
+  const originalContent = Object.keys(existing).length > 0 ? JSON.stringify(existing, null, 2) : null;
+  if (existing.plugin && options.pluginReplacements) existing.plugin = existing.plugin.map(plugin => Object.hasOwn(options.pluginReplacements!, plugin) ? options.pluginReplacements![plugin]! : plugin);
 
   // Detect whether config is new or existing
   const isNew = !exists(configPath);
@@ -245,7 +250,7 @@ export function mergeAndWrite(options: MergeOptions): MergeResult {
 
   // 4. Check if content actually changed
   const newContent = JSON.stringify(merged, null, 2);
-  const existingContent = Object.keys(existing).length > 0 ? JSON.stringify(existing, null, 2) : null;
+  const existingContent = originalContent;
   const contentChanged = existingContent !== newContent;
 
   // 5. Atomic write (only if content changed)

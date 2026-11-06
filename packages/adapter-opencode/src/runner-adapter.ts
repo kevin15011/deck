@@ -9,6 +9,7 @@ import { backupOpenCodeInstall, rollbackOpenCodeInstall, type OpenCodeInstallRol
 import { inspectOpenCodeNativeSearch } from "./native-search";
 import { contributionHash, selectSearchRoute, readRunnerContributions } from "@deck/core";
 import { parseJsonc } from "./model-discovery-context";
+import { createOpenCodeRtkTools } from "./rtk-tools";
 import { createOpenCodeCodebaseTools } from "./codebase-tools";
 /**
  * OpenCode RunnerAdapter — TUI-facing facade for the OpenCode runner.
@@ -361,7 +362,12 @@ class OpenCodeRunnerAdapterImpl {
       try { const parsed = parseJsonc(evidence.read(join(root, name))) as any; if (parsed.mcp?.context7 !== undefined) entry = parsed.mcp.context7; } catch { /* Missing selection is not enablement. */ }
     }
     return {
-      rtk: evidence.observe(config.packageInstructions.opencode?.rtk === true, () => [evidence.read(join(root, "plugins/rtk.ts")), evidence.executable("rtk", this.#sessionDriver?.baseEnv?.PATH)]),
+      rtk: evidence.observe(config.packageInstructions.opencode?.rtk === true, () => {
+        const tools = createOpenCodeRtkTools({ environment: this.#sessionDriver?.baseEnv });
+        const command = tools.command();
+        if (!command) throw new Error("rtk-command-unverified");
+        return [evidence.read(join(root, "plugins/rtk.ts")), evidence.executable(command)];
+      }),
       context7: evidence.observe(!!entry && entry.enabled !== false, () => {
         if (entry.type === "remote") {
           const endpoint = new URL(entry.url);
@@ -377,6 +383,10 @@ class OpenCodeRunnerAdapterImpl {
   readonly stateSchema = 1;
   get mutationRoot() { return this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"); }
   evaluateSessionAdmission(input?: { roleId?: string; config?: NormalizedDeckConfig }) { return evaluateInstalledRoles(input?.roleId ? [input.roleId] : ADMISSION_ROLES.map(r=>r.id), roleId => prepareOpenCodeNativeRole(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), roleId)); }
+  readManagedContentDrift(config: NormalizedDeckConfig) {
+    const plan = this.buildDeveloperTeamInstallPlan({ projectRoot: this.mutationRoot, environmentId: "opencode-development", deckConfig: config });
+    return this.#planBindings.get(plan)!.refresh.drift;
+  }
   async prepareSessionNativeRole(roleId: string, config?: NormalizedDeckConfig) {
     const root = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
     const findings: import("@deck/core/session/driver").RunnerPreparationFinding[] = [];
@@ -1177,12 +1187,9 @@ class OpenCodeRunnerAdapterImpl {
           };
         }
         case "rtk": {
-          // RTK MCP config — uses the rtk source for MCP server
-          return writeOpenCodeMcpConfig({
-            serverName: "rtk",
-            type: "local",
-            command: ["rtk", "mcp", "start"],
-          });
+          const evidence = actionContext ? this.getEvidenceContext(actionContext) : undefined;
+          const tools = evidence?.rtkTools ?? createOpenCodeRtkTools({ homeDirectory: evidence?.homeDirectory, environment: evidence?.env });
+          return { ok: tools.ready(), diagnostics: tools.ready() ? [] : ["RTK verified executable and plugin are unavailable; run Review & Install."] };
         }
         default: {
           if (source) {
@@ -1223,7 +1230,8 @@ class OpenCodeRunnerAdapterImpl {
     } catch (error) {
       return { status: "blocked", code: "opencode-role-policy-unsafe", diagnostics: [{ code: "opencode-role-policy-unsafe", severity: "error", message: error instanceof Error ? error.message : "OpenCode effective role configuration could not be validated." }] };
     }
-    const search = await this.inspectNativeSearch({ projectRoot: input.projectRoot, modelId: input.modelId, environment });
+    const agentArgs = input.teamId === "developer-team" ? ["--agent", "deck-lead"] : [];
+    const search = await this.inspectNativeSearch({ projectRoot: input.projectRoot, modelId: input.modelId, flags: agentArgs, environment });
     const provider = this.resolveWebSearchProvider(input.deckConfig.webSearch.provider);
     const credential = provider ? (this.#webSearchCredential?.() ?? environment[provider.credentialEnvVar])?.trim() : undefined;
     let selection: ReturnType<typeof selectSearchRoute>;
@@ -1253,7 +1261,7 @@ class OpenCodeRunnerAdapterImpl {
       status: "ready",
       plan: {
         command: "opencode",
-        args: [input.projectRoot, ...(input.modelId ? ["--model", input.modelId] : [])],
+        args: [input.projectRoot, ...agentArgs, ...(input.modelId ? ["--model", input.modelId] : [])],
         cwd: input.projectRoot,
         stdio: "inherit",
         stdin: "inherit",
@@ -1354,14 +1362,14 @@ class OpenCodeRunnerAdapterImpl {
       { path: "opencode.json", absolutePath: configPath, content: JSON.stringify(mergedConfig, null, 2), kind: "other" },
       ...nativePlan.skills.map((skill) => ({ path: skill.relativePath, absolutePath: skill.absolutePath, content: skill.content, kind: "skill" as const, skillId: skill.agent.skillId, packagePath: "SKILL.md" })),
       ...nativePlan.standaloneSkills.map((skill) => ({ path: skill.relativePath, absolutePath: skill.absolutePath, content: skill.content, kind: "standalone-skill" as const, skillId: skill.skillId, packagePath: skill.packagePath })),
-      ...(nativePlan.executionPlugin ? [{ path: nativePlan.executionPlugin.relativePath, absolutePath: nativePlan.executionPlugin.absolutePath, content: nativePlan.executionPlugin.content, kind: "other" as const }] : []),
+      ...[nativePlan.executionPlugin, nativePlan.modelVariantsPlugin].filter((file): file is NonNullable<typeof file> => !!file).map(file => ({ path: file.relativePath, absolutePath: file.absolutePath, content: file.content, kind: "other" as const })),
       ...nativePlan.promptGenerationPlan.map((file) => ({ path: relative(configDir, file.absolutePath), absolutePath: file.absolutePath, content: file.content, kind: "prompt" as const })),
       ...nativePlan.commandGenerationPlan.map((file) => ({ path: relative(configDir, file.absolutePath), absolutePath: file.absolutePath, content: file.content, kind: "command" as const })),
     ];
     const desired = plannedFiles.map(({ absolutePath: _, ...file }) => file);
     const refresh = planOpenCodeRefresh(configDir, desired, nativePlan.agentEntries);
     const mutationPreview = refresh.writes.map(file => ({ action: file.before === undefined ? "create" as const : "update" as const, path: file.path, preimage: file.before === undefined ? "absent" : contributionHash(file.before), postimage: contributionHash(file.after), ownership: "opencode-receipt" }));
-    const plan: RunnerDeveloperTeamInstallPlan = { files: refresh.files, mutationPreview, automaticRefresh: true, diagnostics: refresh.findings.map(f => f.message), diagnosticEntries: refresh.findings.map(f => ({ code: f.code, severity: "warning", message: f.message })) };
+    const plan: RunnerDeveloperTeamInstallPlan = { files: refresh.files, mutationPreview, automaticRefresh: true, diagnostics: refresh.findings.map(f => f.message), diagnosticEntries: refresh.findings.map(f => ({ code: f.code, severity: f.kind === "B" ? "error" : "warning", message: f.message })) };
     this.#planBindings.set(plan, {
       nativePlan, refresh,
       validation: {
@@ -1534,7 +1542,7 @@ class OpenCodeRunnerAdapterImpl {
     const binding = this.#planBindings.get(plan as RunnerDeveloperTeamInstallPlan);
     if (!binding) throw new Error("The supplied developer-team plan was not built by this adapter instance.");
     const root = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
-    const state = backupOpenCodeInstall(root, (plan as RunnerDeveloperTeamInstallPlan).files, []);
+    const state = backupOpenCodeInstall(root, (plan as RunnerDeveloperTeamInstallPlan).files, [], binding.refresh.targets);
     this.#rollbackStates.set(plan as object, state); this.#issuedRollbacks.add(state);
     return { payload: state, diagnostics: [] };
   }
@@ -1552,7 +1560,7 @@ class OpenCodeRunnerAdapterImpl {
   async verifyDeveloperTeamInstall(plan: unknown): Promise<import("@deck/core").RunnerVerifyResult> {
     const binding = this.#planBindings.get(plan as RunnerDeveloperTeamInstallPlan);
     if (!binding) throw new Error("The supplied developer-team plan was not built by this adapter instance.");
-    const diagnostics: string[] = [];
+    const diagnostics: string[] = binding.refresh.findings.filter(f => f.kind === "B").map(f => f.message);
     for (const file of binding.refresh.writes) {
       if (!existsSync(file.path) || readFileSync(file.path, "utf8") !== file.after) diagnostics.push(`OpenCode content changed after refresh: ${file.path}`);
     }

@@ -57,3 +57,69 @@ test('interactive selection preserves an existing inline authority rule when it 
     if (launch.status === 'ready') expect(JSON.parse(launch.plan.envOverlay!.OPENCODE_CONFIG_CONTENT!.value)).toEqual(JSON.parse(content));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// Protects Developer Team entry: native startup must select Lead even when the
+// user's OpenCode default is Build or another primary agent. The launch must
+// leave shared defaults intact and retain an explicitly selected model.
+test('Developer Team interactive launch selects Lead without changing native defaults', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'deck-opencode-lead-'));
+  try {
+    const configPath = join(root, 'opencode.json');
+    const before = JSON.stringify({ default_agent: 'build' });
+    writeFileSync(configPath, before);
+    const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: root, sessionDriver: { baseEnv: {} } });
+    const input = { projectRoot: root, mode: 'interactive' as const, teamId: 'developer-team', modelId: 'fixture/model', deckConfig: getDefaultDeckConfig() };
+    const launch = await adapter.buildLaunchPlan!(input);
+    expect(launch.status).toBe('ready');
+    if (launch.status !== 'ready') throw new Error('launch');
+    expect(launch.plan.args).toEqual([root, '--agent', 'deck-lead', '--model', 'fixture/model']);
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
+    const other = await adapter.buildLaunchPlan!({ ...input, teamId: 'custom-team' });
+    expect(other.status).toBe('ready');
+    if (other.status === 'ready') expect(other.plan.args).not.toContain('--agent');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Protects search admission against disagreement between the native default and
+// the launched agent, without changing foreign configuration or model precedence.
+for (const leadNative of [true, false]) {
+  test(`interactive search follows selected agent (Lead native=${leadNative})`, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'deck-opencode-selected-search-'));
+    try {
+      const native = 'opencode/big-pickle', fallback = 'anthropic/claude-sonnet';
+      const before = JSON.stringify({ default_agent: 'build', agent: {
+        build: { model: leadNative ? fallback : native },
+        'deck-lead': { model: leadNative ? native : fallback },
+      }, mcp: { personal: { type: 'local', command: ['personal-tool'] } } });
+      writeFileSync(join(root, 'opencode.json'), before);
+      const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: root, sessionDriver: { baseEnv: {} }, webSearchProviderResolver: () => TAVILY_PROVIDER_DESCRIPTOR });
+      const deckConfig = getDefaultDeckConfig(); deckConfig.webSearch = { enabled: true, provider: 'tavily' };
+      const input = { projectRoot: root, mode: 'interactive' as const, teamId: 'developer-team', deckConfig };
+      expect((await adapter.buildLaunchPlan!(input)).status).toBe(leadNative ? 'ready' : 'blocked');
+      expect((await adapter.buildLaunchPlan!({ ...input, teamId: 'custom-team' })).status).toBe(leadNative ? 'blocked' : 'ready');
+      expect((await adapter.buildLaunchPlan!({ ...input, modelId: native })).status).toBe('ready');
+      const blocked = await adapter.buildLaunchPlan!({ ...input, modelId: fallback });
+      expect(blocked.status).toBe('blocked');
+      if (blocked.status === 'blocked') expect(blocked.code).toBe('web-search-fallback-unavailable');
+      expect(readFileSync(join(root, 'opencode.json'), 'utf8')).toBe(before);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+}
+
+// Protects first native startup: OpenCode adds its schema when absent. Canonical
+// installation must prevent that write from revoking the captured generation.
+test('canonical install keeps generation stable across first native schema initialization', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'deck-opencode-cold-generation-'));
+  try {
+    const configRoot = join(root, 'config');
+    const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: configRoot, skillDiscoveryHomeDir: root });
+    const input = { projectRoot: root, environmentId: 'opencode-development', deckConfig: getDefaultDeckConfig() };
+    const plan = adapter.buildDeveloperTeamInstallPlan(input);
+    await adapter.applyDeveloperTeamInstall({ ...input, plan });
+    const before = adapter.readPreparationGeneration!();
+    const path = join(configRoot, 'opencode.json');
+    const config = JSON.parse(readFileSync(path, 'utf8'));
+    if (!config.$schema) writeFileSync(path, JSON.stringify({ $schema: 'https://opencode.ai/config.json', ...config }));
+    expect(adapter.readPreparationGeneration!()).toBe(before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

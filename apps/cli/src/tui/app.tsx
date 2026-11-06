@@ -1,3 +1,4 @@
+import { RunnerWriteSkippedError } from "../runner-mutation-admission";
 import { runPiModelDiscovery } from "../../../../packages/adapter-pi/src/model-discovery-command";
 import { withIdleRunnerMutation, RunnerMutationDeferredError } from "@deck/session-host";
 import { RunnerMutationDeferredScreen, stopDaemonForInstall } from "./screens/runner-mutation-deferred";
@@ -258,6 +259,17 @@ export async function runSerenaAdapterAction(
 /** Only public adapter messages and known filesystem codes may cross the error boundary. */
 export function modelConfigurationFailureMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
+  if (error instanceof RunnerWriteSkippedError) {
+    const reasons: Record<string, string> = {
+      "runner-write-recovery-required": "An incomplete runner operation requires recovery. Existing recovery evidence was preserved; retrying installation cannot resolve missing recovery proof.",
+      "managed-by-newer-deck": "The runner is managed by a newer Deck version. Use that version or update Deck before retrying.",
+      "managed-by-newer-schema": "The runner uses a newer state schema. Update Deck before retrying.",
+      "runner-fence-unreadable": "Runner writer state could not be authenticated. Existing evidence was preserved; inspect recovery state before retrying.",
+      "runner-fence-changed": "Runner writer state changed after review. Review the installation again before retrying.",
+    };
+    return `Model configuration failed. ${Object.hasOwn(reasons, error.reason) ? reasons[error.reason] : "Runner write was not admitted; existing recovery evidence was preserved."}`;
+  }
+  if (message === "runner-history-capacity") return "Model configuration failed. Runner ownership history exceeds its supported capacity; existing ownership evidence was preserved. Update Deck before retrying; if this persists, report the capacity diagnostic.";
   const publicMessages = [
     "Claude runtime model selection changed or is unavailable; plugin was not modified.",
     "Claude Serena readiness is stale; plugin was not modified.",
@@ -273,6 +285,16 @@ export function modelConfigurationFailureMessage(error: unknown): string {
   if (message.startsWith("Runner changes deferred: daemon work is active")) return "Deck is busy: open sessions block runner changes, even between turns. Close sessions or stop the Deck daemon, then retry.";
   const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
   return `Model configuration failed. Apply error: ${typeof code === "string" && ["EACCES", "EPERM", "EEXIST", "ENOENT", "ENOSPC", "EROFS"].includes(code) ? code : "unknown"}.`;
+}
+
+/** Bounded recovery diagnostics never interpolate journal paths or arbitrary adapter text. */
+export function rollbackFailureMessage(error: unknown): string {
+  if (error instanceof RunnerWriteSkippedError) return `Rollback was not admitted. ${modelConfigurationFailureMessage(error).replace("Model configuration failed. ", "")}`;
+  const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+  const reason = code === "runner-rollback-conflict" ? "Current files conflict with the recorded transaction."
+    : typeof code === "string" && ["EACCES", "EPERM", "EEXIST", "ENOENT", "ENOSPC", "EROFS"].includes(code) ? `Filesystem error: ${code}.`
+    : "Recovery could not be verified.";
+  return `Rollback could not be completed. ${reason} Existing recovery evidence was preserved; review the runner state before retrying.`;
 }
 
 // Global log function — set by DeckApp via useEffect
@@ -514,7 +536,7 @@ export type DeckAppDependencies = {
 
 async function rollbackOrThrow(adapter: import("@deck/core").RunnerAdapter, backup: unknown): Promise<void> {
   const result = await adapter.rollbackDeveloperTeamFiles(backup);
-  if (result.status === "conflict") throw new Error(result.diagnostics.join("; ") || `Rollback conflicts: ${result.conflicts.join(", ")}`);
+  if (result.status === "conflict") throw Object.assign(new Error("Runner rollback conflicts with current files; recovery evidence was preserved."), { code: "runner-rollback-conflict" });
 }
 
 function getSupportedPackageInstructionMetadata(
@@ -1374,13 +1396,14 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
               postInstallFollowUps: verifyResult.postInstallFollowUps ?? [],
             };
           } catch (error) {
-            log(`[runDashboardInstall] apply failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
             const primary = verificationFailure ?? modelConfigurationFailureMessage(error);
+            log(`[runDashboardInstall] apply failed: ${primary}`);
+            if (error instanceof RunnerWriteSkippedError) throw new Error(`${primary} Installation was not applied.`);
             let recovery = "Changes rolled back.";
             try { await rollbackOrThrow(adapter, backup); }
             catch (rollbackError) {
-              log(`[runDashboardInstall] rollback failed: ${rollbackError instanceof Error ? rollbackError.stack ?? rollbackError.message : String(rollbackError)}`);
-              recovery = error instanceof Error && error.message.startsWith("Runner changes deferred") ? "Nothing was changed." : "Rollback could not be completed. Review the runner files before retrying.";
+              log(`[runDashboardInstall] rollback failed: ${rollbackFailureMessage(rollbackError)}`);
+              recovery = error instanceof Error && error.message.startsWith("Runner changes deferred") ? "Nothing was changed." : rollbackFailureMessage(rollbackError);
             }
             throw new Error(`${primary} ${recovery}`);
           }
@@ -2883,11 +2906,15 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       } catch (error) {
         if (failureMessage === "Model configuration failed.") failureMessage = modelConfigurationFailureMessage(error);
         setDeveloperTeamResults([]);
+        if (error instanceof RunnerWriteSkippedError) {
+          setModelConfigError(`${failureMessage} Installation was not applied. Your selections are preserved.`);
+          return false;
+        }
         try {
           await rollbackOrThrow(adapter, backup);
           setModelConfigError(`${failureMessage} Changes rolled back. Your selections are preserved; retry Finish.`);
-        } catch {
-          setModelConfigError(`${failureMessage} Rollback could not be completed. Review the runner files before retrying.`);
+        } catch (rollbackError) {
+          setModelConfigError(`${failureMessage} ${rollbackFailureMessage(rollbackError)}`);
         }
         return false;
       }

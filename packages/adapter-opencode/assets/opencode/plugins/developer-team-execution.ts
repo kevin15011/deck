@@ -574,6 +574,29 @@ function preparationResolution(value: unknown): {
   };
 }
 
+// Never interpolate exception text: native I/O and refresh failures can carry
+// snapshot paths, endpoint credentials or response contents.
+function readinessFailureDiagnostic(error: unknown): string {
+  const known = new Map([
+    ["session-start-context-untrusted", "stage=snapshot reason=untrusted"],
+    ["session-start-context-changed", "stage=snapshot reason=changed"],
+    ["session-start-context-digest-mismatch", "stage=snapshot reason=digest-mismatch"],
+    ["session-start-context-binding-mismatch", "stage=validation reason=binding-mismatch"],
+    ["session-start-endpoint-untrusted", "stage=refresh reason=endpoint-untrusted"],
+    ["session-start-refresh-unavailable", "stage=refresh reason=unavailable"],
+    ["session-start-refresh-too-large", "stage=refresh reason=too-large"],
+  ]);
+  if (error instanceof Error) {
+    const diagnostic = known.get(error.message);
+    if (diagnostic) return diagnostic;
+    if (error.name === "TimeoutError" || error.name === "AbortError") return "stage=refresh reason=timeout";
+    if (error instanceof SyntaxError) return "stage=validation reason=invalid-json";
+    const code = (error as NodeJS.ErrnoException).code;
+    if (["ENOENT", "EACCES", "EPERM", "ELOOP", "ENOTDIR", "EISDIR"].includes(code ?? "")) return "stage=snapshot reason=unreadable";
+  }
+  return "stage=load reason=unexpected";
+}
+
 export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDeveloperTeamExecutionPluginOptionsV1 = {}): (pluginInput?: OpenCodeNativePluginInputV1) => Promise<OpenCodeDeveloperTeamExecutionHooksV1> {
   const authorizationService = options.authorizationService ?? createInvocationAuthorizationServiceV1();
   const bridge = options.bridge ?? createOpenCodeDeveloperTeamExecutionBridgeV1({ authorizationService, delegate: async () => {} });
@@ -611,7 +634,7 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
       try {
         const current = await loadPreparedSessionStartContext(typeof pluginInput?.directory === "string" ? pluginInput.directory : process.cwd(), options.environment);
         if (revision === readinessRevision) readiness = current;
-      } catch { process.stderr.write("deck-preparation: session-start-context-unverified\n"); }
+      } catch (error) { process.stderr.write(`deck-preparation: session-start-context-unverified ${readinessFailureDiagnostic(error)}\n`); }
     };
     await refreshReadiness();
     skillDiscoveryHost ??= createDefaultSkillDiscoveryHostFromPluginInput(pluginInput);

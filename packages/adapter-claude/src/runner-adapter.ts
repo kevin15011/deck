@@ -1,4 +1,8 @@
-import { withInstallationUse, withInstallationMutation, trackInstallationProcess } from "../../core/src/installation-use";
+import { installOwnedNpmTool, ownedNpmCommand } from './npm-tools';
+import { precheckClaudeContributionRecovery } from './recovery-precheck';
+import { inspectRecoveryJournal, recoveryHash } from '../../core/src/canonical-recovery-preflight';
+import { archiveRunnerJournal } from '../../core/src/runner-recovery-archive';
+import { withInstallationUse, withInstallationMutation, trackInstallationProcess, InstallationBusyError } from "../../core/src/installation-use";
 import { admissionFailure, type RunnerAdmissionResult } from "@deck/core";
 import { createClaudeSkillDiscoveryProvider, type ClaudeSkillDiscoveryOptions } from "./skill-discovery-provider";
 import { PrerequisiteEvidence, pinnedHookExecutable } from "../../core/src/session/prerequisite-evidence";
@@ -8,8 +12,8 @@ import { SESSION_SKILLS_PLUGIN_NAME, ClaudeSkillsError, verifyClaudeSessionSkill
 import type { NativeSkillsDescriptor, RunnerPreparationFinding } from "@deck/core/session/driver";
 import { claudeProjectConfigTrusted } from './personal-mcp';
 import { inspectClaudeNativeSearch } from "./native-search";
-import { beginRunnerContributions, contributionId, readRunnerContributions, recordOwnedRunnerArtifactTree } from "@deck/core";
-import { isCompatibleCodebaseExecutable } from "@deck/core";
+import { recordRunnerMutationJournals, beginRunnerContributions, compareReleaseVersions, validReleaseVersion, backupManagedPreimages, assertNoContributionSymlink, inspectManagedDrift, contributionId, readRunnerContributions, recordOwnedRunnerArtifactTree } from "@deck/core";
+import { type NpmArtifactEffects, isCompatibleCodebaseExecutable } from "@deck/core";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { CLAUDE_ATTRIBUTION_SETTINGS_ARGS } from "./launch-settings";
 import { existsSync, lstatSync, mkdirSync, writeFileSync, readFileSync, readdirSync, realpathSync } from "node:fs";
@@ -22,7 +26,6 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { translateClaudeCapabilityInstructions } from "./instruction-translation";
 import { bootstrapSerena, getEnabledCapabilityInstructionIds, buildCapabilityInstructionBundle, createDefaultSerenaBootstrapEffects, createSerenaReadinessRevalidator, getAgentContent, getDeveloperTeamCatalog, resolveExistingSerenaReadiness, resolveSerenaOwnedRoot, resolveWebSearchReadiness, validateSerenaBootstrapResult, validateSerenaOperationAuthorization, validateSerenaReadinessEvidence, DEVELOPER_TEAM, resolveDefaultDeckDataRoot, type RunnerAdapter, type RunnerDeveloperTeamInstallPlan, type SerenaBootstrapEffects, type SerenaBootstrapRequest, type SerenaBootstrapResult, type SerenaExistingReadinessResult, type SerenaReadinessEvidence } from "../../core/src/index";
 import { claudeCapabilityFiles, verifyClaudeExecutable, verifyClaudeRtkHookRuntime, type ClaudeCapabilityOptions } from "./capabilities";
-import { spawn } from "node:child_process";
 import { inspectOwnedClaudeRtk, installOwnedClaudeRtk, pinnedClaudeRtkRelease, type RtkReleaseArtifact } from "./rtk-artifact";
 import { createClaudeSessionDriver, type ClaudeSessionDriverOptions } from "./session-driver/driver";
 import { inspectOwnedClaudeCodebase, installOwnedClaudeCodebase, pinnedClaudeCodebaseRelease, type CodebaseNativeRelease } from "./codebase-native-artifact";
@@ -36,6 +39,7 @@ export type ClaudeSessionMcpAdapter = RunnerAdapter & {
 
 type Options = ClaudeCapabilityOptions & {
   skillDiscovery?: Pick<ClaudeSkillDiscoveryOptions, "configDir" | "systemRoots" | "exposedRoots" | "inventory">;
+  npmArtifactEffects?: NpmArtifactEffects;
   homeDir?: string;
   dataRoot?: string;
   detectClaudeVersion?: () => { available: boolean; version?: string };
@@ -167,6 +171,26 @@ function inspect(root: string, files: ReturnType<typeof expectedFiles>, home: st
   } catch { return "conflict"; }
 }
 
+/** Only current generator leaves may be repaired. Unknown entries and unsafe paths stay closed. */
+function repairable(root: string, files: ReturnType<typeof expectedFiles>, home: string): boolean {
+  try {
+    assertTrustedAncestors(root, home);
+    const allowed = new Set(files.map(file => file.path));
+    const directories = new Set([root]);
+    for (const file of files) {
+      let directory = dirname(file.path);
+      while (directory !== root) { directories.add(directory); directory = dirname(directory); }
+    }
+    const walk = (path: string): boolean => {
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || (stat.mode & 0o077) !== 0 || (typeof process.getuid === "function" && stat.uid !== process.getuid())) return false;
+      if (stat.isDirectory()) return directories.has(path) && readdirSync(path).every(name => walk(join(path, name)));
+      return stat.isFile() && stat.size <= 1024 * 1024 && allowed.has(path);
+    };
+    return walk(root);
+  } catch { return false; }
+}
+
 async function ensurePrivatePath(path: string, home: string) {
   if (resolve(path) === resolve(home)) throw new Error("Claude Deck data root cannot be HOME.");
   assertTrustedAncestors(path, home); // before any mutation
@@ -271,19 +295,9 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       ? (existingCodebase() ?? (codebaseRelease && ownedCodebaseState() === "ready" ? join(ownedCodebaseRoot, "codebase-memory-mcp") : undefined)) // production never runs the npm self-downloading shim
     : options.resolveCommand
       ? options.resolveCommand(name)
-    : name === "tavily-mcp"
-      ? (() => {
-          try {
-            const packageRoot = join(toolRoot, "node_modules", "tavily-mcp");
-            assertTrustedAncestors(packageRoot, home);
-            const manifest = join(packageRoot, "package.json");
-            const stat = lstatSync(manifest);
-            if (!stat.isFile() || stat.size > 64 * 1024) return undefined;
-            const receipt = JSON.parse(readFileSync(manifest, "utf8")) as { version?: unknown };
-            return receipt.version === "0.2.22" && existsSync(join(toolRoot, "node_modules", ".bin", name)) ? join(toolRoot, "node_modules", ".bin", name) : undefined;
-          } catch { return undefined; }
-        })()
-      : Bun.which(name) ?? (existsSync(join(toolRoot, "node_modules", ".bin", name)) ? join(toolRoot, "node_modules", ".bin", name) : undefined) };
+    : name === "context7-mcp" || name === "tavily-mcp"
+      ? ownedNpmCommand(toolRoot, name === "context7-mcp" ? "context7" : "web-search")
+      : Bun.which(name) ?? undefined };
   const revalidateSerena = async (): Promise<boolean> => {
     if (!serenaEvidence) return false;
     try {
@@ -308,25 +322,18 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
   };
   const installSharedTool = async (id: "context-mode" | "context7" | "web-search"): Promise<boolean> => {
     if (options.installSharedTool) return options.installSharedTool(id);
-    const pkg = id === "context-mode" ? "context-mode@1.0.169" : id === "web-search" ? "tavily-mcp@0.2.22" : "@upstash/context7-mcp@4.1.1";
-    const npm = Bun.which("npm");
-    if (!npm) return false;
-    await ensurePrivatePath(toolRoot, home);
-    const result = await new Promise<number>((done) => {
-      const child = spawn(npm, ["install", "--prefix", toolRoot, "--no-audit", "--no-fund", "--ignore-scripts", pkg], {
-        cwd: home,
-        env: { HOME: home, PATH: process.env.PATH ?? "", USER: process.env.USER ?? "" },
-        stdio: "ignore",
+    if (id === "context-mode") return false;
+    return withInstallationMutation(parent, async () => {
+      await ensurePrivatePath(toolRoot, home);
+      await installOwnedNpmTool({ toolsRoot: toolRoot, id, effects: options.npmArtifactEffects,
+        publishReceipt: artifactRoot => { recordOwnedRunnerArtifactTree({ runnerId: "claude", root: parent, manifestPath: join(parent, "manifest.json"), artifactRoot, sourceItemId: `package:${id}` }); },
       });
-      const timeout = setTimeout(() => { child.kill("SIGTERM"); done(1); }, 120_000);
-      child.once("error", () => { clearTimeout(timeout); done(1); });
-      child.once("close", (code) => { clearTimeout(timeout); done(code ?? 1); });
+      return ownedNpmCommand(toolRoot, id) !== undefined;
     });
-    if (result !== 0) return false;
-    try { verifyClaudeExecutable(id === "context7" ? "context7-mcp" : id === "web-search" ? "tavily-mcp" : "context-mode", toolEffects); return true; }
-    catch { return false; }
   };
   const metadataPath = join(parent, "model-assignments.json");
+  // In-process rollback evidence only: a restarted writer never infers proof from journal claims.
+  const rollbackProofs = new Map<string, () => boolean>();
   let modelSnapshot: Extract<RunnerModelInventoryResult, { state: "ready" }> | undefined;
   let modelSnapshotRoot: string | undefined;
   let modelDiscoveryGeneration = 0;
@@ -384,14 +391,18 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
     const files = expectedFiles(location, assignments, capabilities, toolEffects, providerId, efforts);
     return { location, files, plugin: versionedName, contentHash, state: inspect(location, files, home) };
   };
-  const writeActive = async (selection: Selection) => {
-    const { assignments, capabilities, providerId, contentHash, efforts } = selection;
-    const next = claudeModelMetadata(assignments, capabilities, providerId, contentHash, efforts);
-    const current = readSelection();
-    if (JSON.stringify(current) === JSON.stringify(selection) && existsSync(metadataPath)) return;
+  const selectionBytes = (selection: Selection, previous?: string) => {
+    const extras = previous === undefined ? {} : Object.fromEntries(Object.entries(JSON.parse(previous)).filter(([key]) =>
+      !["schema", "assignments", "capabilities", "efforts", "providerId", "plugin", "contentHash"].includes(key)));
+    return JSON.stringify({ ...extras, ...JSON.parse(claudeModelMetadata(selection.assignments, selection.capabilities, selection.providerId, selection.contentHash, selection.efforts)) }, null, 2) + "\n";
+  };
+  const writeActive = async (next: string, expectedPrevious: string | undefined) => {
+    readSelection(); // Validate existing selection before any rewrite.
     let previous: string | undefined;
     try { previous = readFileSync(metadataPath, "utf8"); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    if (previous !== expectedPrevious) throw new Error("Claude model metadata changed during installation.");
+    if (previous === next) return;
     const temporary = join(parent, `.model-assignments-${randomUUID()}.tmp`);
     try {
       await writeFile(temporary, next, { flag: "wx", mode: 0o600 });
@@ -424,7 +435,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       const providerId = capabilities.includes("web-search") ? input.deckConfig.webSearch.enabled ? input.deckConfig.webSearch.provider : undefined : undefined;
       const desired = materialization(assignments, capabilities, providerId, current, efforts);
       const { files: canonical, state, plugin, contentHash } = desired;
-      const blocked = state === "conflict" && !ownedPartialPublication(desired.location, canonical) || input.environmentId !== ENVIRONMENT || (fallbackRequired && (providerId !== "tavily" || !(options.webSearchCredential?.() ?? process.env.TAVILY_API_KEY)?.trim())) || (input.capabilityInstructions?.instructions ?? []).some((fragment) => fragment.packageId && fragment.packageId !== "code-economy" && !capabilities.includes(fragment.packageId as ClaudeCapabilityId));
+      const blocked = state === "conflict" && !repairable(desired.location, canonical, home) || input.environmentId !== ENVIRONMENT || (fallbackRequired && (providerId !== "tavily" || !(options.webSearchCredential?.() ?? process.env.TAVILY_API_KEY)?.trim())) || (input.capabilityInstructions?.instructions ?? []).some((fragment) => fragment.packageId && fragment.packageId !== "code-economy" && !capabilities.includes(fragment.packageId as ClaudeCapabilityId));
       const changed = JSON.stringify(current.assignments) !== JSON.stringify(assignments) || JSON.stringify(current.capabilities) !== JSON.stringify(capabilities) || current.providerId !== providerId || current.plugin !== plugin;
       return {
         files: canonical.map((file) => ({ ...file })),
@@ -462,8 +473,74 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
     }),
     inspectNativeSearch: async (input) => inspectClaudeNativeSearch({ ...input, environment: input.environment ?? options.sessionDriver?.baseEnv, flags: input.flags ?? options.sessionDriver?.extraArgs }, home),
     mutationRoot: parent, stateSchema: 1,
+    async recoverPendingMutation(references) {
+      if (references.length !== 1 || references[0]!.kind !== "claude-contributions" || references[0]!.operationId !== references[0]!.id) return undefined;
+      const id = references[0]!.id, prove = rollbackProofs.get(id);
+      if (!prove || !prove()) return undefined;
+      rollbackProofs.delete(id);
+      return "preimage";
+    },
+    precheckPendingMutation(input) {
+      const candidate = plan(input) as RunnerDeveloperTeamInstallPlan & { modelAssignments: Record<string, string>; thinkingAssignments: Record<string, string>; capabilityIds: string[]; providerId?: string; pluginName: string; contentHash?: string };
+      if (!existsSync(join(parent, 'manifest.json.pending'))) return;
+      if (candidate.blocked) throw new Error('claude-legacy-recovery-plan-blocked');
+      const current = existsSync(metadataPath) ? readFileSync(metadataPath, 'utf8') : undefined;
+      const selection = { assignments: candidate.modelAssignments, capabilities: candidate.capabilityIds, ...(candidate.providerId ? { providerId: candidate.providerId } : {}), plugin: candidate.pluginName, ...(candidate.contentHash ? { contentHash: candidate.contentHash } : {}), ...(Object.keys(candidate.thinkingAssignments).length ? { efforts: candidate.thinkingAssignments } : {}) };
+      precheckClaudeContributionRecovery(parent, '0.14.0', [...candidate.files, { path: metadataPath, content: selectionBytes(selection as Selection, current) }]);
+    },
+    async prepareCanonicalRecovery(input, references, self) {
+      const originals = references.filter(j => !['canonical-recovery-v1', 'deck-scope-v1'].includes(j.kind));
+      if (originals.length > 1 || originals.some(j => j.kind !== 'claude-contributions' || j.id !== j.operationId)) throw new Error('claude-recovery-reference-invalid');
+      const pendingPath = join(parent, 'manifest.json.pending');
+      const journal = inspectRecoveryJournal(pendingPath);
+      const candidate = plan(input);
+      if (candidate.blocked) throw new Error('claude-recovery-plan-blocked');
+      const targets = new Map(candidate.files.map(file => [file.path, hash(file.content)]));
+      targets.set(metadataPath, 'selection');
+      const generationLeaves = new Set(candidate.files.map(file => relative(join(parent, (candidate as RunnerDeveloperTeamInstallPlan & { pluginName: string }).pluginName), file.path)));
+      let journalGeneration: string | undefined;
+      let manifest: ReturnType<typeof readRunnerContributions>;
+      try { manifest = readRunnerContributions(join(parent, 'manifest.json')); }
+      catch { throw new Error('claude-recovery-required: manifest-unproven'); }
+      if (manifest && (manifest.runnerId !== 'claude' || manifest.root !== parent || !validReleaseVersion(manifest.deckVersion) || compareReleaseVersions(manifest.deckVersion, self.semver) > 0)) throw new Error('claude-recovery-manifest-incompatible');
+      if (journal) {
+        const raw = journal.value;
+        if (!originals.some(j => j.id === raw?.operationId) || raw?.runnerId !== 'claude' || raw.root !== parent || raw.manifestPath !== join(parent, 'manifest.json') || raw.scope !== 'global' || raw.managed !== true || !validReleaseVersion(raw.deckVersion) || compareReleaseVersions(raw.deckVersion, self.semver) > 0 || !Array.isArray(raw.targets) || raw.targets.length !== targets.size) throw new Error('claude-recovery-journal-invalid');
+        const seen = new Set<string>();
+        for (const entry of raw.targets) {
+          const target = entry?.target;
+          const local = typeof target?.path === 'string' ? relative(parent, target.path) : '';
+          const parts = local.split(sep), generation = parts.shift();
+          const generated = !!generation && /^developer-team-v(?:1(?:-[a-f0-9]{16})?|2-[a-f0-9]{16})$/.test(generation) && generationLeaves.has(parts.join(sep));
+          if (generated) {
+            if (journalGeneration && journalGeneration !== generation) throw new Error('claude-recovery-generation-mixed');
+            journalGeneration = generation;
+          }
+          if (!target || typeof target.path !== 'string' || resolve(target.path) !== target.path || (!targets.has(target.path) && !generated) || target.selector?.kind !== 'file' || Object.keys(target.selector).length !== 1 || entry.id !== contributionId(target) || seen.has(entry.id) || !recoveryHash(entry.preimage) || !recoveryHash(entry.postimage)) throw new Error('claude-recovery-target-untrusted');
+          assertNoContributionSymlink(target.path); seen.add(entry.id);
+        }
+      }
+      return {
+        journalKinds: ['claude-contributions'], maximumAdapterJournals: 1,
+        archive: async () => {
+          journal?.unchanged();
+          for (const reference of originals) archiveRunnerJournal({ livePath: pendingPath, reference, bound: originals, journalKinds: ['claude-contributions'] });
+        },
+        reconcile: async () => adapter.applyDeveloperTeamInstall({ projectRoot: input.projectRoot, environmentId: input.environmentId, plan: plan(input) }),
+        verify: async () => (await adapter.verifyDeveloperTeamInstall(candidate)).valid && (await adapter.evaluateSessionAdmission!()).verdict === 'admit',
+      };
+    },
     withNativeInstallationUse: effect => withInstallationUse(parent,effect),
     trackNativeInstallationProcess: pid => trackInstallationProcess(parent,pid),
+    readManagedContentDrift() {
+      try {
+        const selected = active();
+        const manifest = readRunnerContributions(join(parent, "manifest.json"));
+        if (!manifest || manifest.runnerId !== "claude" || manifest.root !== parent) return true;
+        const targets = [...selected.expected.map(file => ({ path: file.path, selector: { kind: "file" as const } })), { path: metadataPath, selector: { kind: "file" as const } }];
+        return inspectManagedDrift({ inventory: { runnerId: "claude", root: parent, generatedRoots: [selected.location], slots: [{ path: metadataPath, selector: { kind: "file" as const }, authority: 'generated' }] }, targets, receipts: manifest.contributions }).drift;
+      } catch { return true; }
+    },
     evaluateSessionAdmission() {
       try {
         const selected = active();
@@ -474,6 +551,19 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
     async prepareSessionNativeSkills(config) {
       const findings: RunnerPreparationFinding[] = [];
       try {
+        if (config && existsSync(metadataPath)) {
+          const current = readSelection();
+          const candidate = plan({ projectRoot: home, environmentId: ENVIRONMENT, deckConfig: config, capabilityIds: ["claude-team-files", ...current.capabilities] });
+          if (!candidate.blocked && (candidate.mutationPreview?.length || adapter.readManagedContentDrift?.(config))) {
+            try {
+              await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: ENVIRONMENT, plan: candidate });
+              findings.push({ kind: "H", code: "claude-managed-content-reconciled", item: "team-plugin", message: "Regenerated Deck plugin files and verified their receipts." });
+            } catch (error) {
+              if (!(error instanceof InstallationBusyError)) throw error;
+              findings.push({ kind: "W", code: "claude-refresh-deferred", item: "team-plugin", message: "Installed generation remains in use; prepared a separate verified generation." });
+            }
+          }
+        }
         const selection = readSelection();
         const sourceText = readFileSync(metadataPath, "utf8");
         if (Object.keys(JSON.parse(sourceText)).some(key => !["schema", "assignments", "capabilities", "efforts", "providerId", "plugin", "contentHash"].includes(key)))
@@ -576,7 +666,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       // Standalone launches retain canonical isolation and verified plugin content.
       if (input.mode !== "interactive" || input.modelId || input.reasoningLevel || input.runnerNative) return { status: "unsupported", code: "claude-team-route-unverified", diagnostics: diagnostic("claude-team-route-unverified", "Only interactive Claude plugin-file sessions are supported; native overrides and exec/resume are unverified.") };
       let prepared: NativeSkillsDescriptor;
-      try { prepared = await adapter.prepareSessionNativeSkills(input.deckConfig); }
+      try { prepared = await this.prepareSessionNativeSkills(input.deckConfig); }
       catch (error) { return { status: "blocked", code: "claude-session-skills-unverified", diagnostics: diagnostic("claude-session-skills-unverified", error instanceof Error ? error.message : "Check private Claude paths, then prepare again.") }; }
       const snapshot = JSON.parse(readFileSync(prepared.selectionPath, "utf8"));
       const selected = { ...snapshot, capabilities: snapshot.capabilities ?? [], assignments: snapshot.assignments ?? {}, location: prepared.root };
@@ -627,7 +717,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
         const materialized = executableReady && selected?.capabilities.includes(id) === true && inspect(selected.location, selected.expected, home) === "ready";
         let rtkHookReady = true;
         if (id === "rtk") { try { verifyClaudeRtkHookRuntime(toolEffects); } catch { rtkHookReady = false; } }
-        const installable = id === "context7" || id === "web-search" || id === "rtk" && rtkHookReady && Boolean(rtkRelease) && ownedRtkState() !== "conflict" && ownedRtkState() !== "unusable" || id === "codebase-memory" && (Boolean(existingCodebase()) || Boolean(codebaseRelease) && ownedCodebaseState() !== "conflict" && ownedCodebaseState() !== "unusable");
+        const installable = id === "context7" || id === "web-search" || id === "rtk" && rtkHookReady && Boolean(rtkRelease) || id === "codebase-memory" && (Boolean(existingCodebase()) || Boolean(codebaseRelease));
         return { capabilityId: id, label: id, description: `${id} uses the Deck-owned global Claude plugin; readiness requires the selected tool executable and verified native config.`, section: "runner-capabilities", requirementLevel: "optional" as const, installKind: "runner-native" as const, source: "deck-owned-plugin-dir", supportStatus: executableReady || installable ? "runner-specific" as const : "blocked" as const, isInstalled: materialized, isBlocked: !executableReady && !installable, diagnostics: executableReady ? [] : [installable ? `${id} must be installed through the reviewed Deck tool action.` : `${id} executable or provider bootstrap is unavailable.`] };
       });
       const provider = options.webSearchProviderResolver?.(input.deckConfig.webSearch.provider);
@@ -669,9 +759,9 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
             return true;
           }
           if (id !== "context-mode" && id !== "context7" && id !== "codebase-memory" && id !== "web-search" && id !== "rtk") return false;
-          if (id === "rtk" && (!rtkRelease || ownedRtkState() === "conflict" || ownedRtkState() === "unusable")) rejectSelection("RTK pinned release is unavailable or conflicts with owned content. Retry after correcting this selection.");
+          if (id === "rtk" && !rtkRelease) rejectSelection("RTK pinned release is unavailable or conflicts with owned content. Retry after correcting this selection.");
           if (id === "rtk") verifyClaudeRtkHookRuntime(toolEffects);
-          if (id === "codebase-memory" && !existingCodebase() && (!codebaseRelease || ownedCodebaseState() === "conflict" || ownedCodebaseState() === "unusable")) rejectSelection("Codebase Memory pinned native release is unavailable or conflicts with owned content. Retry after correcting this selection.");
+          if (id === "codebase-memory" && !existingCodebase() && !codebaseRelease) rejectSelection("Codebase Memory pinned native release is unavailable or conflicts with owned content. Retry after correcting this selection.");
           try { verifyClaudeExecutable(id === "context7" ? "context7-mcp" : id === "codebase-memory" ? "codebase-memory-mcp" : id === "web-search" ? "tavily-mcp" : id === "rtk" ? "rtk" : "context-mode", toolEffects); return false; }
           catch { return true; }
         });
@@ -686,7 +776,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
         blockedReasons.push(cause ? `${selectionFailure} Cause: ${cause}` : selectionFailure);
       }
       const stateAtReview = selected ? selected.installableMissing?.length ? "absent" : inspect(selected.location, selected.expected, home) : "conflict";
-      if (selected && stateAtReview === "conflict") blockedReasons.push("The global Claude team plugin files or their parent directories conflict with the reviewed content or private ownership requirements. Review the Deck-owned plugin path before retrying.");
+      if (selected && stateAtReview === "conflict" && !repairable(selected.location, selected.expected, home)) blockedReasons.push("The global Claude team plugin files or their parent directories conflict with the reviewed content or private ownership requirements. Review the Deck-owned plugin path before retrying.");
       const blocked = blockedReasons.length > 0;
       const pendingInstalls = selected?.installableMissing ?? [];
       const installs = [
@@ -741,7 +831,9 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       if (!await installSharedTool(id)) return { actionId: action.id, status: "failed", message: `${id} installation failed or executable was not verified.`, diagnostics: [] };
       try {
         verifyClaudeExecutable(command, toolEffects);
-        recordOwnedRunnerArtifactTree({ runnerId: "claude", root: parent, manifestPath: join(parent, "manifest.json"), artifactRoot: join(toolRoot, "node_modules"), sourceItemId: `package:${id}` });
+        // Production npm publication includes receipt accounting inside its mutation
+        // lease and rollback boundary. Only the privileged host override needs it here.
+        if (options.installSharedTool) recordOwnedRunnerArtifactTree({ runnerId: "claude", root: parent, manifestPath: join(parent, "manifest.json"), artifactRoot: join(toolRoot, "node_modules"), sourceItemId: `package:${id}` });
         return { actionId: action.id, status: "executed", message: `${id} was installed and verified.`, diagnostics: [] };
       }
       catch { return { actionId: action.id, status: "failed", message: `${id} executable was not verified after installation.`, diagnostics: [] }; }
@@ -855,13 +947,56 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
         } catch { return false; }
       };
       const resumePublication = existing === "conflict" && (existsSync(pendingPath) && safePartial(selectedRoot) || ownedPartialPublication(selectedRoot, canonical));
-      if (existing === "conflict" && !resumePublication) throw new Error("Claude plugin destination already exists with unknown content.");
+      const repairPublication = existing === "conflict" && repairable(selectedRoot, canonical, home);
+      if (existing === "conflict" && !resumePublication && !repairPublication) throw new Error("Claude plugin destination contains unsafe or unknown paths.");
+      const legacySelection = { assignments, capabilities, ...(providerId ? { providerId } : {}), plugin: desired.pluginName!, ...(desired.contentHash ? { contentHash: desired.contentHash } : {}), ...(Object.keys(efforts).length ? { efforts } : {}) };
+      precheckClaudeContributionRecovery(parent, '0.14.0', [...canonical, { path: metadataPath, content: selectionBytes(legacySelection, existsSync(metadataPath) ? readFileSync(metadataPath, 'utf8') : undefined) }]);
       await ensurePrivatePath(parent, home);
+      const preimages = new Map(canonical.map(file => [file.path, existsSync(file.path) ? readFileSync(file.path, "utf8") : undefined]));
       const contributionManifestPath = join(parent, "manifest.json");
-      const accounting = beginRunnerContributions({ runnerId: "claude", root: parent, manifestPath: contributionManifestPath,
-        deckVersion: "0.13.0", dedicatedRoots: [parent], beforeMetadataWrite: input.beforeMetadataWrite, targets: [...canonical.map(file => ({ path: file.path, selector: { kind: "file" as const }, expectedHash: hash(file.content) })), { path: metadataPath, selector: { kind: "file" as const }, expectedHash: hash(claudeModelMetadata(assignments, capabilities, providerId, desired.contentHash, efforts)) }] });
+      assertNoContributionSymlink(contributionManifestPath);
+      const manifestBefore = existsSync(contributionManifestPath) ? readFileSync(contributionManifestPath, "utf8") : undefined;
+      if (manifestBefore !== undefined) {
+        let declared: { deckVersion?: string } | undefined;
+        try { declared = JSON.parse(manifestBefore); } catch { /* Handled below as ordinary corrupt metadata. */ }
+        if (typeof declared?.deckVersion === 'string' && compareReleaseVersions(declared.deckVersion, '0.14.0') > 0) throw new Error('managed-by-newer-deck');
+      }
+      const nextSelection = { assignments, capabilities, ...(providerId ? { providerId } : {}), plugin: desired.pluginName!, ...(desired.contentHash ? { contentHash: desired.contentHash } : {}), ...(Object.keys(efforts).length ? { efforts } : {}) };
+      const selectionBefore = existsSync(metadataPath) ? readFileSync(metadataPath, "utf8") : undefined;
+      const nextSelectionBytes = selectionBytes(nextSelection, selectionBefore);
+      const replaced: { path: string; before: string | undefined; after: string }[] = [];
+      let accounting: ReturnType<typeof beginRunnerContributions> | undefined;
+      const operationId = randomUUID();
       try {
-      if (existing === "absent" || resumePublication) {
+      recordRunnerMutationJournals([{ operationId, id: 'global', kind: 'deck-scope-v1' }, { operationId, id: operationId, kind: "claude-contributions" }]);
+      try { readRunnerContributions(contributionManifestPath); }
+      catch (error) {
+        let newer = false;
+        try {
+          const raw = JSON.parse(manifestBefore!);
+          const version = typeof raw.schema === 'string' ? /^deck-runner-contributions-v(\d+)$/.exec(raw.schema) : undefined;
+          newer = !!version && Number(version[1]) > 1 || typeof raw.deckVersion === 'string' && compareReleaseVersions(raw.deckVersion, '0.14.0') > 0;
+        } catch { /* Invalid ordinary receipt metadata is recoverable only through regeneration. */ }
+        if (newer || existsSync(pendingPath)) throw error;
+        backupManagedPreimages({ stateRoot: join(parent, 'backups'), runnerId: 'claude', root: parent,
+          entries: [{ target: { path: contributionManifestPath, selector: { kind: 'file' } }, content: manifestBefore }] });
+        const empty = JSON.stringify({ schema: 'deck-runner-contributions-v1', runnerId: 'claude', root: parent, deckVersion: '0.14.0', contributions: [] });
+        const temporary = join(parent, `.manifest-repair-${randomUUID()}.tmp`);
+        try {
+          await writeFile(temporary, empty, { flag: 'wx', mode: 0o600 });
+          assertNoContributionSymlink(contributionManifestPath);
+          if (readFileSync(contributionManifestPath, 'utf8') !== manifestBefore) throw new Error('Claude ownership metadata changed during repair.');
+          const account = input.beforeMetadataWrite?.(contributionManifestPath, hash(empty));
+          await rename(temporary, contributionManifestPath);
+          replaced.push({ path: contributionManifestPath, before: manifestBefore, after: empty });
+          account?.();
+        } finally { await rm(temporary, { force: true }); }
+      }
+      accounting = beginRunnerContributions({ operationId, runnerId: "claude", root: parent, manifestPath: contributionManifestPath,
+        deckVersion: "0.14.0", dedicatedRoots: [parent],
+        managed: { stateRoot: join(parent, "backups"), inventory: { runnerId: "claude", root: parent, generatedRoots: [selectedRoot],
+          slots: [{ path: metadataPath, selector: { kind: "file" as const }, authority: "generated" as const }] } }, beforeMetadataWrite: input.beforeMetadataWrite, targets: [...canonical.map(file => ({ path: file.path, selector: { kind: "file" as const }, expectedHash: hash(file.content) })), { path: metadataPath, selector: { kind: "file" as const }, expectedHash: hash(nextSelectionBytes) }] });
+      if (existing === "absent" || resumePublication || repairPublication) {
         const staging = await mkdtemp(join(parent, ".deck-claude-stage-"));
         try {
           for (const file of canonical) {
@@ -870,26 +1005,85 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
             await writeFile(local, file.content, { flag: "wx", mode: 0o600 });
           }
           if (inspect(staging, canonical.map((file) => ({ ...file, path: join(staging, relative(selectedRoot, file.path)) })), home) !== "ready") throw new Error("Claude plugin staging verification failed.");
-          if (!resumePublication && inspect(selectedRoot, canonical, home) !== "absent") throw new Error("Claude plugin destination appeared during staging.");
-          if (!resumePublication) await mkdir(selectedRoot, { mode: 0o700 }); // exclusive, never replace an unrelated plugin
+          if (!resumePublication && !repairPublication && inspect(selectedRoot, canonical, home) !== "absent") throw new Error("Claude plugin destination appeared during staging.");
+          if (!resumePublication && !repairPublication) await mkdir(selectedRoot, { mode: 0o700 }); // exclusive, never replace an unrelated plugin
           for (const file of canonical) {
             const local = join(selectedRoot, relative(selectedRoot, file.path));
             await mkdir(dirname(local), { recursive: true, mode: 0o700 });
-            if (resumePublication && existsSync(local)) {
+            if (repairPublication && existsSync(local)) {
+              assertTrustedAncestors(dirname(local), home);
+              const stat = lstatSync(local);
+              if (!stat.isFile() || (stat.mode & 0o077) !== 0) throw new Error("Claude generated path changed during publication.");
+              const previous = preimages.get(local);
+              if (readFileSync(local, "utf8") !== previous) throw new Error("Claude generated preimage changed during publication.");
+              if (previous !== file.content) {
+                const temporary = join(dirname(local), `.deck-repair-${randomUUID()}.tmp`);
+                try {
+                  await writeFile(temporary, file.content, { flag: "wx", mode: 0o600 });
+                  if (readFileSync(local, "utf8") !== previous) throw new Error("Claude generated preimage changed during publication.");
+                  await rename(temporary, local);
+                  replaced.push({ path: local, before: previous, after: file.content });
+                } finally { await rm(temporary, { force: true }); }
+              }
+            } else if (resumePublication && existsSync(local)) {
               if (lstatSync(local).isSymbolicLink() || readFileSync(local, "utf8") !== file.content) throw new Error("Claude partial publication changed; preserved for review.");
-            } else await writeFile(local, file.content, { flag: "wx", mode: 0o600 });
+            } else {
+              await writeFile(local, file.content, { flag: "wx", mode: 0o600 });
+              replaced.push({ path: local, before: undefined, after: file.content });
+            }
           }
         } finally {
           if (await realpath(staging).catch(() => undefined) === staging) await rm(staging, { recursive: true, force: true });
         }
       }
       if (inspect(selectedRoot, canonical, home) !== "ready") throw new Error("Claude plugin publication is indeterminate; inspect global Deck plugin manually.");
-      const nextSelection = { assignments, capabilities, ...(providerId ? { providerId } : {}), plugin: desired.pluginName!, ...(desired.contentHash ? { contentHash: desired.contentHash } : {}), ...(Object.keys(efforts).length ? { efforts } : {}) };
-      await writeActive(nextSelection); // select only fully verified immutable content
+      await writeActive(nextSelectionBytes, selectionBefore);
+      if (selectionBefore !== nextSelectionBytes) replaced.push({ path: metadataPath, before: selectionBefore, after: nextSelectionBytes }); // select only fully verified immutable content
       if (JSON.stringify(readSelection()) !== JSON.stringify(nextSelection)) throw new Error("Claude plugin selection is indeterminate; inspect global Deck metadata manually.");
       const contributions = accounting.commit();
       return { contributions, contributionManifestPath, results: canonical.map((file) => ({ agentId: file.path, kind: file.kind, status: existing === "ready" ? "unchanged" : "created" })), changedCount: existing === "ready" ? 0 : canonical.length, unchangedCount: existing === "ready" ? canonical.length : 0 };
-      } catch (error) { accounting.abandon(); throw error; }
+      } catch (error) {
+        try {
+          // Only restore this invocation's effects while their exact postimages remain.
+          // An external edit or unsafe path preserves the journal and private backups.
+          for (const entry of replaced.reverse()) {
+            assertTrustedAncestors(dirname(entry.path), home);
+            assertNoContributionSymlink(entry.path);
+            const stat = lstatSync(entry.path);
+            if (!stat.isFile() || (stat.mode & 0o077) !== 0 || readFileSync(entry.path, "utf8") !== entry.after) throw new Error("Claude rollback conflict; changed output preserved.");
+            if (entry.before === undefined) await rm(entry.path);
+            else {
+              const temporary = join(dirname(entry.path), `.deck-rollback-${randomUUID()}.tmp`);
+              try {
+                await writeFile(temporary, entry.before, { flag: "wx", mode: 0o600 });
+                assertNoContributionSymlink(entry.path);
+                if (readFileSync(entry.path, "utf8") !== entry.after) throw new Error("Claude rollback conflict; changed output preserved.");
+                await rename(temporary, entry.path);
+              } finally { await rm(temporary, { force: true }); }
+            }
+          }
+          assertNoContributionSymlink(contributionManifestPath);
+          if (manifestBefore === undefined ? existsSync(contributionManifestPath) : readFileSync(contributionManifestPath, "utf8") !== manifestBefore) throw new Error("Claude rollback manifest changed; recovery evidence retained.");
+          accounting?.abort(); // Independently verifies every captured preimage before clearing evidence.
+          const captured = new Map([...preimages, [metadataPath, selectionBefore], [contributionManifestPath, manifestBefore]]);
+          const prove = () => {
+            try {
+              if (existsSync(pendingPath)) return false;
+              for (const [path, before] of captured) {
+                assertTrustedAncestors(dirname(path), home);
+                assertNoContributionSymlink(path);
+                if (before === undefined ? existsSync(path) : !existsSync(path) || readFileSync(path, "utf8") !== before) return false;
+              }
+              return true;
+            } catch { return false; }
+          };
+          if (prove()) {
+            if (rollbackProofs.size >= 16) rollbackProofs.delete(rollbackProofs.keys().next().value!);
+            rollbackProofs.set(operationId, prove);
+          }
+        } catch { accounting?.abandon(); }
+        throw error;
+      }
       });
     },
     getNextScreen() { return "complete"; },

@@ -54,7 +54,7 @@ export function loadVariantCache(options?: VariantCacheOptions): VariantCacheRes
   const exists = options?.exists ?? existsSync;
   const readFile = options?.readFile ?? readFileSync;
 
-  const cachePath = options?.cachePath ?? join(homedir(), ".cache", "deck", "opencode", "model-variants.json");
+  const cachePath = options?.cachePath ?? join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "deck", "opencode", "model-variants.json");
   const diagnostics: string[] = [];
 
   // Missing cache - return empty with diagnostic

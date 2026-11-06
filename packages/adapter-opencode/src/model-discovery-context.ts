@@ -62,14 +62,10 @@ export type EnumerateOpenCodeConfigCandidatesInput = {
 export function enumerateOpenCodeConfigCandidates(
   input: EnumerateOpenCodeConfigCandidatesInput,
 ): readonly OpenCodeConfigCandidate[] {
-  if (input.env.OPENCODE_PURE) return [];
-
   const candidates: OpenCodeConfigCandidate[] = [];
-  const seen = new Set<string>();
+  // A path may load more than once at distinct native precedence positions.
   const add = (path: string, source: OpenCodeConfigCandidate["source"]): void => {
     const normalizedPath = normalize(path);
-    if (seen.has(normalizedPath)) return;
-    seen.add(normalizedPath);
     candidates.push({ path: normalizedPath, directory: dirname(normalizedPath), source });
   };
   const addPair = (root: string, source: OpenCodeConfigCandidate["source"]): void => {
@@ -77,7 +73,9 @@ export function enumerateOpenCodeConfigCandidates(
     add(join(root, "opencode.jsonc"), source);
   };
 
-  addPair(join(input.env.XDG_CONFIG_HOME ?? input.xdgConfigHome ?? join(input.homeDir, ".config"), "opencode"), "global");
+  const globalRoot = join(input.env.XDG_CONFIG_HOME ?? input.xdgConfigHome ?? join(input.homeDir, ".config"), "opencode");
+  add(join(globalRoot, "config.json"), "global");
+  addPair(globalRoot, "global");
 
   if (input.env.OPENCODE_CONFIG) {
     add(
@@ -94,13 +92,13 @@ export function enumerateOpenCodeConfigCandidates(
       projectDirectories.push(cursor);
       if (cursor === input.workspaceRoot || dirname(cursor) === cursor) break;
     }
-    for (const directory of projectDirectories.reverse()) addPair(directory, "project");
+    for (const directory of [...projectDirectories].reverse()) addPair(directory, "project");
+    // Native directory loading runs from the working directory toward the worktree,
+    // after ordinary project files. An ancestor .opencode can override a child.
+    for (const directory of projectDirectories) addPair(join(directory, ".opencode"), "project-opencode");
   }
 
-  if (!["true","1"].includes(input.env.OPENCODE_DISABLE_PROJECT_CONFIG?.toLowerCase() ?? "")) {
-    addPair(join(input.projectRoot, ".opencode"), "project-opencode");
-  }
-
+  if (input.homeDir) addPair(join(input.homeDir, ".opencode"), "global");
   if (input.env.OPENCODE_CONFIG_DIR) addPair(input.env.OPENCODE_CONFIG_DIR, "config-dir");
 
   return candidates;
@@ -356,7 +354,7 @@ export async function collectOpenCodeDiscoveryContext(input: CollectOpenCodeDisc
       return undefined;
     }
   }));
-  const virtualConfig = input.env.OPENCODE_PURE || input.env.OPENCODE_CONFIG_CONTENT === undefined
+  const virtualConfig = input.env.OPENCODE_CONFIG_CONTENT === undefined
     ? undefined
     : projectInlineConfig(input.env.OPENCODE_CONFIG_CONTENT);
   if (virtualConfig) configCandidates.push({ logicalPath: "virtual:OPENCODE_CONFIG_CONTENT", realPath: null, exists: true, kind: "file", size: input.env.OPENCODE_CONFIG_CONTENT!.length, mtimeMs: null, ctimeMs: null, mode: null, dev: null, ino: null, safeDigest: createHash("sha256").update(JSON.stringify(virtualConfig.value)).digest("hex"), digestDisposition: "sanitized" });

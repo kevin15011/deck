@@ -193,3 +193,18 @@ describe("Pi Runner dashboard input mapping", () => {
     });
   });
 });
+
+// Protects normal Packages navigation: runtime packages must be selectable before review.
+test.each(["pi", "codex"] as const)("%s Packages can select Context7 through the displayed row", runnerId => {
+  const adapter = getAdapter(runnerId);
+  const resolver: CapabilityResolver = { getSupportedPackageInstructionIds: () => adapter.packageInstructionIds ?? [] };
+  let state = createDefaultPiRunnerDashboardState({ runnerScope: runnerId, runnerUi: adapter.ui, screen: "packages-detail", selectedCapabilities: { context7: false } });
+  const ids = getToggleablePackageInstructionIds(state, resolver);
+  expect(ids).toContain("context7");
+  state = { ...state, cursor: ids.indexOf("context7") };
+  const action = getPiRunnerDashboardToggleAction(state, resolver);
+  expect(action).toEqual({ type: "toggle-capability", capabilityId: "context7" });
+  state = reduce(state, action!);
+  expect(state.selectedCapabilities.context7).toBe(true);
+  expect(state.packageInstructions).not.toHaveProperty("context7");
+});

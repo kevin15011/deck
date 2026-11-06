@@ -1,6 +1,6 @@
 
 import { recordRunnerMutationJournals, assertNoContributionSymlink, REMEDIATION_MESSAGES } from "@deck/core";
-import { appendRunnerHistory, readRunnerHistory, runnerHistoryPath, readContribution, contributionHash } from "@deck/core";
+import { appendRunnerHistory, readRunnerHistory, runnerHistoryPath, readContribution, contributionHash, contributionId } from "@deck/core";
 import { evaluateRoleAdmission, evaluateInstalledRoles, DEVELOPER_TEAM_AGENTS as ADMISSION_ROLES } from "@deck/core";
 import { } from "./mcp-config";
 import { withCodexInstallationUse, withCodexInstallationMutation, trackCodexInstallationProcess, CodexInstallationBusyError } from "./installation-use";
@@ -79,7 +79,7 @@ function requireDeckConfig(config: NormalizedDeckConfig | undefined, context: st
 }
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 
-import { CODEX_MANIFEST_PATH, buildCodexDeveloperTeamInstallPlan, codexManagedPaths } from "./developer-team-install";
+import { CODEX_MANIFEST_PATH, buildCodexDeveloperTeamInstallPlan, codexCanonicalFilePaths, codexManagedPaths } from "./developer-team-install";
 import { CODEX_CAPABILITY_CATALOG, CODEX_RUNNER_CAPABILITY_CONTRIBUTION } from "./capability-catalog";
 import { inspectCodexOwnedHookIds, mergeCodexOwnedHooks, mergeCodexProjectConfig } from "./codex-config";
 import {
@@ -616,7 +616,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   readonly packageInstructionIds = PACKAGE_INSTRUCTION_PACKAGE_IDS;
   readonly ui = {
     environmentLabels: { "codex-development": "Codex" },
-    dashboard: { defaultSelectedTeamIds: ["developer-team"], executionClass: "static-compatible" },
+    dashboard: { defaultSelectedTeamIds: ["developer-team"], executionClass: "static-compatible", extraSelectableCapabilities: [{ id: "context7", label: "Context7", description: "Use Context7 MCP for library documentation." }] },
     model: {
       providerSource: "Providers, models, and reasoning levels come from `codex debug models` for the active account.",
       missingChecks: ["Supported Codex CLI version", "Authenticated Codex model catalog"],
@@ -720,6 +720,33 @@ class CodexRunnerAdapter implements RunnerAdapter {
   readPreparationGeneration() { return readCodexRootGeneration(this.#roots.codexHome); }
   readonly stateSchema = 1;
   get mutationRoot() { return this.#roots.codexHome; }
+  readManagedContentDrift() {
+    try {
+      const manifestPath = join(this.#roots.codexHome, 'deck', 'manifest.json');
+      assertNoContributionSymlink(manifestPath);
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      if (manifest.version !== 1 || manifest.runnerId !== 'codex' || manifest.root !== this.#roots.codexHome) return true;
+      const configPath = join(this.#roots.codexHome, 'config.toml');
+      for (const entry of manifest.contributions ?? []) {
+        if (entry.path !== configPath) continue;
+        const selector = entry.selector;
+        const known = selector?.kind === 'text' && ['readiness', 'rtk'].some(id => selector.start === `# deck-codex-hook:${id}:start` && selector.end === `# deck-codex-hook:${id}:end`)
+          || selector?.kind === 'toml-key' && selector.table === 'features' && selector.key === 'multi_agent'
+          || selector?.kind === 'toml' && CODEX_MCP_SERVER_IDS.some(id => selector.header === `mcp_servers.${id}`);
+        if (!known) continue;
+        if (entry.id !== contributionId(entry)) return true;
+        const content = readContribution(entry);
+        if (content === undefined || contributionHash(content) !== entry.hash) return true;
+      }
+      return codexCanonicalFilePaths().some(path => {
+        const absolute = join(this.#roots.codexHome, path.slice('.codex/'.length));
+        // Optional support files are inspected only when recorded or present.
+        if (!manifest.files?.[path] && !existsSync(absolute)) return path.startsWith('.codex/agents/');
+        assertNoContributionSymlink(absolute);
+        return contributionHash(readFileSync(absolute)) !== manifest.files?.[path];
+      });
+    } catch { return true; }
+  }
   async evaluateSessionAdmission(input?: { roleId?: string; config?: NormalizedDeckConfig }) {
     const result = await evaluateInstalledRoles(input?.roleId ? [input.roleId] : ADMISSION_ROLES.map(r=>r.id), roleId => prepareCodexNativeRole(this.#roots.codexHome, roleId));
     if (input?.config) for (const [id, capability] of Object.entries(this.readPreparationCapabilities(input.config))) if (capability.enabled && capability.prerequisites === "missing") {
@@ -745,7 +772,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
           refreshed = false;
           findings.push({ kind: "W", code: "codex-refresh-deferred", item: "codex-installation", message: error.message });
         }
-        if (refreshed && plan.files.length) findings.push({ kind: "H", code: "codex-content-refreshed", item: "codex-installation", message: "Refreshed owned Codex content; customized files remain intact." });
+        if (refreshed && plan.files.length) findings.push({ kind: "H", code: "codex-content-refreshed", item: "codex-installation", message: "Refreshed canonical Codex content." });
       }
       const role = prepareCodexNativeRole(root, roleId);
       const admission = await this.evaluateSessionAdmission({roleId,config});
@@ -1024,7 +1051,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       return {
         ...base("codebase-memory", "Codebase Memory"),
         isInstalled: codebaseCommand !== undefined && pinned && indexReady,
-        isBlocked: codebaseEnabled && (tools.codebase.state() === "conflict" || tools.codebase.state() === "unusable" && codebaseCommand === undefined),
+        isBlocked: codebaseEnabled && !tools.codebase.supported(),
         diagnostics: [
           ...(codebaseCommand === undefined ? ["codebase-memory: no verified executable (install through Review & Install)"] : []),
           ...(configured && codebaseCommand !== undefined && !pinned ? ["codebase-memory: MCP command is not pinned to the verified executable"] : []),
@@ -1036,7 +1063,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const rtk = {
       ...base("rtk", "RTK"),
       isInstalled: rtkState === "ready" && nodeReady && hookIds.has("rtk"),
-      isBlocked: rtkState === "conflict" || rtkState === "unusable",
+      isBlocked: !tools.rtk.supported(),
       diagnostics: [
         ...(rtkState !== "ready" ? [`rtk: Deck-owned pinned binary ${rtkState} (install through Review & Install)`] : []),
         ...(!nodeReady ? ["rtk: a Node.js 18+ runtime is required for the PreToolUse hook bridge"] : []),
@@ -1228,11 +1255,11 @@ class CodexRunnerAdapter implements RunnerAdapter {
       case "rtk":
         return tools.rtk.state() === "ready" || !tools.rtk.supported()
           ? undefined
-          : { id: "codex.tool.rtk.install", kind: "install-codex-rtk", title: "Install and verify the pinned RTK release in Deck-owned shared tools", capabilityId, status: tools.rtk.state() === "conflict" || tools.rtk.state() === "unusable" ? "blocked" : "ready", required: true };
+          : { id: "codex.tool.rtk.install", kind: "install-codex-rtk", title: "Install and verify the pinned RTK release in Deck-owned shared tools", capabilityId, status: tools.rtk.supported() ? "ready" : "blocked", required: true };
       case "codebase-memory":
         return tools.codebase.command() !== undefined || !tools.codebase.supported()
           ? undefined
-          : { id: "codex.tool.codebase-memory.install", kind: "install-codex-codebase", title: "Install and verify the pinned Codebase Memory native release in Deck-owned shared tools", capabilityId, status: tools.codebase.state() === "conflict" || tools.codebase.state() === "unusable" ? "blocked" : "ready", required: true };
+          : { id: "codex.tool.codebase-memory.install", kind: "install-codex-codebase", title: "Install and verify the pinned Codebase Memory native release in Deck-owned shared tools", capabilityId, status: tools.codebase.supported() ? "ready" : "blocked", required: true };
       case "context7":
         return tools.context7.command() !== undefined
           ? undefined
@@ -1443,6 +1470,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const rtkBinary = tools.rtk.command();
     const rtkRequested = mcpCapabilityIds.includes("rtk") || (materializationScope === "full" && inspectCodexOwnedHookIds(existingCodexConfig).includes("rtk") && input.capabilityIds === undefined);
     let native = buildCodexDeveloperTeamInstallPlan({
+      managed: true,
       ownershipHistory: readRunnerHistory(this.#historyPath()),
       projectRoot: roots.userHome,
       codexHome: roots.codexHome,
@@ -1592,6 +1620,38 @@ class CodexRunnerAdapter implements RunnerAdapter {
   }
   withNativeInstallationUse<T>(effect: () => Promise<T>): Promise<T> {
     return withCodexInstallationUse(this.#roots.codexHome, effect);
+  }
+  /** Explicit current-scope recovery only; legacy journals never supply targets or desired bytes.
+   * The CLI must archive/adopt the old fence before invoking these callbacks. */
+  prepareExplicitCanonicalRecovery(input: DeveloperTeamAdapterInstallInput) {
+    const plan = this.buildDeveloperTeamInstallPlan(input);
+    const native = this.#nativePlans.get(plan)!;
+    if (plan.blocked) throw new Error("codex-recovery-plan-blocked");
+    const parts = this.#splitPlan(native);
+    const effects = this.#fileEffects ?? createNodeCodexFileEffects({ journalRoot: this.#journalRoot });
+    return {
+      targets: structuredClone(plan.mutationPreview ?? []),
+      journalRoot: this.#journalRoot,
+      journalKinds: ["native", "native-skills"], maximumAdapterJournals: 2,
+      archive: async () => {}, // The explicit CLI adoption archives the active historical journal pool first.
+      reconcile: () => this.applyDeveloperTeamInstall({ projectRoot: input.projectRoot, environmentId: input.environmentId, plan }),
+      verify: async () => {
+        for (const part of parts) {
+          for (const expected of part.plan.expectedFiles) {
+            const path = resolve(part.plan.projectRoot, expected.relativePath);
+            assertNoContributionSymlink(path);
+            const current = await effects.inspect(path);
+            if (!current || current.kind !== "file" || sha256(current.content) !== expected.hash || (current.mode ?? 0o644) !== expected.mode) return false;
+          }
+          for (const mutation of part.plan.mutations.filter(m => m.operation === "delete")) {
+            const path = resolve(part.plan.projectRoot, mutation.relativePath);
+            assertNoContributionSymlink(path);
+            if (await effects.inspect(path) !== null) return false;
+          }
+        }
+        return (await this.evaluateSessionAdmission()).verdict === "admit";
+      },
+    };
   }
   async recoverPendingMutation(references: readonly import("@deck/core").RunnerMutationJournal[]): Promise<"preimage" | "postimage" | undefined> {
     return withCodexInstallationMutation(this.#roots.codexHome, async () => {
@@ -1822,7 +1882,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   async verifyDeveloperTeamInstall(plan: unknown): Promise<import("@deck/core").RunnerVerifyResult> {
     const native = this.#nativePlans.get(plan as object);
     if (!native) return { valid: false, diagnostics: ["Unknown Codex installation plan."] };
-    const problems: string[] = [];
+    const problems: string[] = native.diagnostics.filter(diagnostic => diagnostic.code === "shared-skill-conflict").map(diagnostic => diagnostic.message);
     const serenaReadiness = this.#serenaReadinessByPlan.get(plan as object);
     for (const expected of native.expectedFiles) {
       const path = mapVirtualPath(this.#roots, expected.relativePath).absolute;
@@ -1907,6 +1967,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
   getSelectableTools(): unknown[] { return []; }
 }
 
-export function createCodexRunnerAdapter(options: CodexRunnerAdapterOptions = {}): RunnerAdapter {
+export function createCodexRunnerAdapter(options: CodexRunnerAdapterOptions = {}): RunnerAdapter & Pick<CodexRunnerAdapter, "prepareExplicitCanonicalRecovery"> {
   return new CodexRunnerAdapter(options);
 }

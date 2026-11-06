@@ -60,8 +60,9 @@ import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference,
 import { buildCommandGenerationPlan, applyCommandGeneration } from "./command-generation";
 import { mergeAndWrite } from "./config-merge";
 import { resolveModelConfig, DEFAULT_OPENCODE_MODELS } from "./model-config";
-import { detectMermaidPluginStatus, INTERNAL_OPENCODE_PACKAGE_IDS } from "./internal-opencode-packages";
+import { detectMermaidPluginStatus, internalOpenCodePluginSpecifiers } from "./internal-opencode-packages";
 import type { AgentEntry, OpenCodeConfig } from "./types";
+import modelVariantsPluginAssetPath from "../assets/opencode/plugins/model-variants.generated.js" with { type: "file" };
 import executionPluginAssetPath from "../assets/opencode/plugins/developer-team-execution.generated.js" with { type: "file" };
 
 // ---------------------------------------------------------------------------
@@ -104,6 +105,7 @@ export type OpenCodeDeveloperTeamInstallPlan = {
   skills: OpenCodePlannedSkillFile[];
   standaloneSkills: OpenCodePlannedStandaloneSkillFile[];
   executionPlugin?: OpenCodePlannedExecutionPluginFile;
+  modelVariantsPlugin?: OpenCodePlannedExecutionPluginFile;
   /** Agent entries for opencode.json config merge */
   agentEntries: Record<string, AgentEntry>;
   promptGenerationPlan: ReturnType<typeof buildPromptGenerationPlan>;
@@ -426,6 +428,11 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     skills,
     standaloneSkills,
     executionPlugin,
+    modelVariantsPlugin: {
+      relativePath: "plugins/deck-model-variants.js",
+      absolutePath: join(configDir, "plugins/deck-model-variants.js"),
+      content: readFileSync(typeof modelVariantsPluginAssetPath === "string" ? modelVariantsPluginAssetPath : new URL("../assets/opencode/plugins/model-variants.generated.js", import.meta.url), "utf-8"),
+    },
     agentEntries,
     promptGenerationPlan,
     commandGenerationPlan,
@@ -446,7 +453,7 @@ function assertOpenCodeCandidateFiles(
     ...plan.skills,
     ...plan.standaloneSkills,
     ...plan.promptGenerationPlan,
-    ...(plan.executionPlugin ? [plan.executionPlugin] : []),
+    ...[plan.executionPlugin, plan.modelVariantsPlugin].filter((file): file is OpenCodePlannedExecutionPluginFile => !!file),
   ];
   for (const planned of expected) {
     if (!exists(planned.absolutePath) || readFile(planned.absolutePath, "utf-8") !== planned.content) {
@@ -487,7 +494,7 @@ export function applyOpenCodeDeveloperTeamInstall(
 
   // 1. Config merge (agents + mermaid plugin)
   if (!exists(configDir)) mkdir(configDir, { recursive: true });
-  const mermaidPlugins = INTERNAL_OPENCODE_PACKAGE_IDS.filter(() => plan.mermaidPluginStatus === "missing");
+  const mermaidPlugins = internalOpenCodePluginSpecifiers(configDir);
 
   let configMergeResult: OpenCodeDeveloperTeamApplyResult["configMergeResult"];
   try {
@@ -496,6 +503,7 @@ export function applyOpenCodeDeveloperTeamInstall(
       agentEntries: plan.agentEntries,
 
       pluginsToAdd: mermaidPlugins,
+      pluginReplacements: { "deck-model-variants": mermaidPlugins[1]! },
       readFile,
       writeFile,
       renameFile: (from, to) => require("node:fs").renameSync(from, to),
@@ -553,13 +561,13 @@ export function applyOpenCodeDeveloperTeamInstall(
     }
   }
 
-  if (plan.executionPlugin) {
-    const dir = dirname(plan.executionPlugin.absolutePath);
+  for (const plugin of [plan.executionPlugin, plan.modelVariantsPlugin].filter((file): file is OpenCodePlannedExecutionPluginFile => !!file)) {
+    const dir = dirname(plugin.absolutePath);
     mkdir(dir, { recursive: true });
-    const existingContent = exists(plan.executionPlugin.absolutePath) ? readFile(plan.executionPlugin.absolutePath, "utf-8") : null;
-    const status = existingContent === null ? "created" as const : existingContent === plan.executionPlugin.content ? "unchanged" as const : "updated" as const;
-    if (status !== "unchanged") writeFile(plan.executionPlugin.absolutePath, plan.executionPlugin.content, "utf-8");
-    results.push({ agentId: "developer-team-execution", kind: "plugin", status, absolutePath: plan.executionPlugin.absolutePath });
+    const existingContent = exists(plugin.absolutePath) ? readFile(plugin.absolutePath, "utf-8") : null;
+    const status = existingContent === null ? "created" as const : existingContent === plugin.content ? "unchanged" as const : "updated" as const;
+    if (status !== "unchanged") writeFile(plugin.absolutePath, plugin.content, "utf-8");
+    results.push({ agentId: "developer-team-execution", kind: "plugin", status, absolutePath: plugin.absolutePath });
   }
 
   // 5. Write prompt files with idempotency
@@ -709,11 +717,10 @@ export function verifyOpenCodeDeveloperTeamInstall(
     return { agentId: planned.skillId, valid: issues.length === 0, issues };
   });
 
-  const pluginResults: OpenCodeBundleVerifyResult[] = plan.executionPlugin ? (() => {
-    if (!exists(plan.executionPlugin.absolutePath)) return [{ agentId: "developer-team-execution", valid: false, issues: ["File does not exist."] }];
-    const content = readFile(plan.executionPlugin.absolutePath, "utf-8");
-    return [{ agentId: "developer-team-execution", valid: content === plan.executionPlugin.content, issues: content === plan.executionPlugin.content ? [] : ["Content mismatch for developer-team execution plugin."] }];
-  })() : [];
+  const pluginResults: OpenCodeBundleVerifyResult[] = [plan.executionPlugin, plan.modelVariantsPlugin].filter((file): file is OpenCodePlannedExecutionPluginFile => !!file).map(plugin => {
+    const valid = exists(plugin.absolutePath) && readFile(plugin.absolutePath, "utf-8") === plugin.content;
+    return { agentId: plugin.relativePath, valid, issues: valid ? [] : ["Managed plugin is missing or changed."] };
+  });
 
   const promptResults: OpenCodeBundleVerifyResult[] = plan.promptGenerationPlan.map((planned) => {
     if (!exists(planned.absolutePath)) return { agentId: planned.agent.id, valid: false, issues: ["Prompt file does not exist."] };
@@ -877,10 +884,10 @@ export function backupDeveloperTeamFiles(
       }
       return { absolutePath: planned.absolutePath, previousContent: null };
     }),
-    ...(plan.executionPlugin ? [{
-      absolutePath: plan.executionPlugin.absolutePath,
-      previousContent: exists(plan.executionPlugin.absolutePath) ? readFile(plan.executionPlugin.absolutePath, "utf-8") : null,
-    }] : []),
+    ...[plan.executionPlugin, plan.modelVariantsPlugin].filter((file): file is OpenCodePlannedExecutionPluginFile => !!file).map(plugin => ({
+      absolutePath: plugin.absolutePath,
+      previousContent: exists(plugin.absolutePath) ? readFile(plugin.absolutePath, "utf-8") : null,
+    })),
     ...plan.promptGenerationPlan.map((planned) => ({
       absolutePath: planned.absolutePath,
       previousContent: exists(planned.absolutePath) ? readFile(planned.absolutePath, "utf-8") : null,

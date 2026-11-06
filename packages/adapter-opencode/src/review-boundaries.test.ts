@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { prepareOpenCodeNativeRole } from './native-role';
 import { relative } from 'node:path';
@@ -15,12 +15,13 @@ const template = buildOpenCodeDeveloperTeamInstallPlan(templateHome, { configDir
 template.executionPlugin!.content = 'export default async () => ({});';
 const nativeTemplate = JSON.stringify(template);
 function fixture() {
-  const home = mkdtempSync('/tmp/deck-s4-review-'), root = join(home, 'opencode');
+  const home = realpathSync(mkdtempSync('/tmp/deck-s4-review-')), root = join(home, 'opencode');
   const native: ReturnType<typeof buildOpenCodeDeveloperTeamInstallPlan> = JSON.parse(nativeTemplate.split(templateHome).join(home));
   const files = [
     { path: 'opencode.json', content: '{}', kind: 'other' as const },
     ...native.promptGenerationPlan.map(f => ({ path: relative(root, f.absolutePath), content: f.content, kind: 'prompt' as const })),
     { path: native.executionPlugin!.relativePath, content: native.executionPlugin!.content, kind: 'other' as const },
+    { path: native.modelVariantsPlugin!.relativePath, content: native.modelVariantsPlugin!.content, kind: 'other' as const },
   ];
   applyOpenCodeRefresh(root, planOpenCodeRefresh(root, files, native.agentEntries));
   return { home, root, native, files };
@@ -61,9 +62,10 @@ test('refresh retains nested JSONC comments when an owned object changes', () =>
     const agents = structuredClone(native.agentEntries);
     (agents['deck-lead'] as any).permission.extra = 'deny';
     const plan = planOpenCodeRefresh(root, files, agents);
-    expect(plan.findings.some(f => f.kind === 'W' && f.item === 'agent.deck-lead.permission')).toBe(true);
+    expect(plan.writes.length).toBeGreaterThan(0);
     applyOpenCodeRefresh(root, plan);
     expect(readFileSync(path, 'utf8')).toContain('// retain this explanation');
+    expect(JSON.parse(readFileSync(path, 'utf8').replace('// retain this explanation', '')).agent['deck-lead'].permission.extra).toBe('deny');
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

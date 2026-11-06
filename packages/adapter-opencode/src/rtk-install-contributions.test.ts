@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { contributionHash, readRunnerContributions } from "@deck/core";
 import { installOpenCodeTools } from "./install-tools";
-import { OPENCODE_INSTALLABLE_TOOLS } from "./installation-plan";
+import type { InstallableOpenCodeTool } from "./installation-plan";
 
 // These fixtures model the default HOME layout, independent of CI/user overrides.
 const environmentKeys = ["OPENCODE_CONFIG_DIR", "XDG_CONFIG_HOME", "RTK_INSTALL_DIR"] as const;
@@ -21,7 +21,9 @@ afterEach(() => {
   });
 });
 
-const tool = OPENCODE_INSTALLABLE_TOOLS.find(tool => tool.id === "rtk")!;
+// Explicit legacy writer fixture; the production catalog uses verified native acquisition.
+const tool: InstallableOpenCodeTool = { id: "rtk", name: "RTK", module: "fixture:rtk", required: false,
+  installKind: "shell-script", shellInstallUrl: "https://example.test/install.sh", postInstallCommand: ["rtk", "init", "-g", "--opencode"] };
 const script = `mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/rtk" <<'RTK'
 #!/bin/sh

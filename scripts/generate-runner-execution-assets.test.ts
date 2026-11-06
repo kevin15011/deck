@@ -38,6 +38,7 @@ function workflow(version: string): string {
 }
 
 const fixtureEntries = [
+  ["opencode-model-variants", "packages/adapter-opencode/assets/opencode/plugins/model-variants"],
   ["opencode", "packages/adapter-opencode/assets/opencode/plugins/developer-team-execution"],
   ["pi", "packages/adapter-pi/assets/pi/extensions/developer-team-execution"],
   ["codex", "packages/adapter-codex/assets/codex/hooks/developer-team-execution"],
@@ -96,7 +97,7 @@ describe("generate-runner-execution-assets canonical Bun guard", () => {
     try {
       const results = generateRunnerExecutionAssets({ root });
 
-      expect(results.map((result) => result.bunPath)).toEqual([process.execPath, process.execPath, process.execPath]);
+      expect(results.map((result) => result.bunPath)).toEqual(fixtureEntries.map(() => process.execPath));
     } finally {
       process.env.PATH = previousPath;
     }

@@ -16,8 +16,11 @@ export function configPaths(input: NativeSearchInspectionInput, root: string): s
   const admitted = input.projectConfigTrusted !== false && !openCodeProjectConfigDisabled(env);
   const effectiveEnv = admitted ? env : { ...env, OPENCODE_DISABLE_PROJECT_CONFIG: 'true' };
   const candidates = enumerateOpenCodeConfigCandidates({ projectRoot: input.projectRoot, workspaceRoot, homeDir: env.HOME ?? '', env: effectiveEnv });
-  if (env.OPENCODE_PURE) return [];
-  return [...new Set([join(root, 'opencode.json'), join(root, 'opencode.jsonc'), ...candidates.filter(candidate => candidate.source !== 'global').map(candidate => candidate.path)])];
+  const paths = candidates.map(candidate => candidate.path);
+  // Preserve native precedence when the installed root is an explicit config dir;
+  // retain the injected-root fallback used by isolated adapter compositions.
+  const installed = [join(root, 'config.json'), join(root, 'opencode.json'), join(root, 'opencode.jsonc')];
+  return [...installed.filter(path => !paths.includes(path)), ...paths];
 }
 function inspectOpenCodeFacts(input: NativeSearchInspectionInput, configRoot: string): NativeSearchEvidence {
   const env = input.environment ?? process.env;
@@ -26,7 +29,7 @@ function inspectOpenCodeFacts(input: NativeSearchInspectionInput, configRoot: st
     let config: Record<string, any> = {};
     const merge = (path: string) => { if (existsSync(path)) { const next = object(parseJsonc(readFileSync(path, 'utf8'))); config = { ...config, ...next, tools: { ...config.tools, ...next.tools }, permission: permissions(config.permission, next.permission) }; } };
     for (const path of configPaths(input, configRoot)) merge(path);
-    if (!env.OPENCODE_PURE && env.OPENCODE_CONFIG_CONTENT) { const overlay = object(parseJsonc(env.OPENCODE_CONFIG_CONTENT)); config = { ...config, ...overlay, tools: { ...config.tools, ...overlay.tools }, permission: permissions(config.permission, overlay.permission) }; }
+    if (env.OPENCODE_CONFIG_CONTENT) { const overlay = object(parseJsonc(env.OPENCODE_CONFIG_CONTENT)); config = { ...config, ...overlay, tools: { ...config.tools, ...overlay.tools }, permission: permissions(config.permission, overlay.permission) }; }
     if (env.OPENCODE_PERMISSION) config.permission = permissions(config.permission, parseJsonc(env.OPENCODE_PERMISSION));
     let model = input.modelId; let agentId = config.default_agent ?? "build";
     const flags = input.flags ?? [];
@@ -66,7 +69,7 @@ export function readOpenCodeSearchFallbackOwnership(input: NativeSearchInspectio
       if (Object.hasOwn(object(config.mcp), 'web-search')) selected = { path, entry: config.mcp['web-search'] };
     };
     for (const path of configPaths(input, configRoot)) inspect(path);
-    if (!env.OPENCODE_PURE && env.OPENCODE_CONFIG_CONTENT) {
+    if (env.OPENCODE_CONFIG_CONTENT) {
       const config = object(parseJsonc(env.OPENCODE_CONFIG_CONTENT));
       if (Object.hasOwn(object(config.mcp), 'web-search')) selected = { entry: config.mcp['web-search'] };
     }

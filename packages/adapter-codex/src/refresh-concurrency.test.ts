@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { realpathSync } from 'node:fs';
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
@@ -10,7 +12,7 @@ import { verifyCodexNativeRole } from "./native-role";
 // Protects upgrade recovery, idempotence, customization preservation and read-only admission.
 // Oracle: resilient-verification slice 3; all mutable roots and tool effects are isolated.
 test("native process lease defers adapter refresh and a crashed owner does not prevent recovery", async () => {
-  const home = mkdtempSync('/tmp/deck-codex-refresh-');
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'deck-codex-refresh-')));
   const codexHome = join(home, '.codex');
   const previous = process.env.CODEX_HOME;
   process.env.CODEX_HOME = codexHome;

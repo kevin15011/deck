@@ -17,7 +17,7 @@ export function nativeRoleFailureDetail(error:unknown):string|undefined {
 }
 const hookId=(entry:{selector:unknown})=>String((entry.selector as {start?:string}).start??"").replace(/^# deck-codex-hook:|:start$/g,"");
 const hash=(text:string)=>createHash("sha256").update(text).digest("hex");
-function read(path:string):string {
+function read(path:string,maxBytes=1024*1024):string {
   for(let parent=dirname(path);;parent=dirname(parent)) {
     const stat=lstatSync(parent);
     if(!stat.isDirectory() || (stat.mode & 0o022)!==0 && !(stat.uid===0 && (stat.mode & 0o1000)!==0) || typeof process.getuid==='function' && stat.uid!==process.getuid() && stat.uid!==0) throw new Error(`unsafe-parent-directory`);
@@ -26,7 +26,7 @@ function read(path:string):string {
   const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
   try {
     const before=fstatSync(fd);
-    if(!before.isFile() || before.size>1024*1024 || before.mode & 0o022 || typeof process.getuid==='function' && before.uid!==process.getuid()) throw new Error(`unsafe-file`);
+    if(!before.isFile() || before.size>maxBytes || before.mode & 0o022 || typeof process.getuid==='function' && before.uid!==process.getuid()) throw new Error(`unsafe-file`);
     const text=readFileSync(fd,"utf8"), after=fstatSync(fd), current=lstatSync(path);
     if(before.ino!==current.ino || before.dev!==current.dev || before.mtimeMs!==after.mtimeMs || before.ctimeMs!==after.ctimeMs || Buffer.byteLength(text)!==before.size) throw new Error(`file-changed-while-reading`);
     return text;
@@ -39,7 +39,7 @@ export function prepareCodexNativeRole(root:string,roleId:string):NativeRoleDesc
     root=resolve(root);
     const files:Record<string,string>={};
     const preparation: RunnerPreparationFinding[] = [];
-    const capture=(path:string)=>{const text=read(join(root,path));files[path]=hash(text);return text;};
+    const capture=(path:string)=>{const text=read(join(root,path),path === "deck/manifest.json" ? 16*1024*1024 : undefined);files[path]=hash(text);return text;};
     const manifest=JSON.parse(capture("deck/manifest.json"));
     if(manifest.version!==1 || !manifest.files) throw new Error(`manifest-invalid`);
     if (manifest.nativeRoleGeneration !== codexRoleGeneration()) preparation.push({ kind: "W", code: "codex-refresh-deferred", item: "generation", message: "Using the installed generation with current sandbox and hook trust checks; refresh is deferred until idle." });

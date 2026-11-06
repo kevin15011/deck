@@ -1,8 +1,17 @@
-import { expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as childProcess from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync, lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { cleanupRoots, planRunnerCleanup } from './runner-cleanup-command';
+
+let processTable: ReturnType<typeof spyOn> | undefined;
+afterEach(() => { processTable?.mockRestore(); processTable = undefined; });
+function unusedDarwinProcesses() {
+  // The retirement oracle needs an unused native generation, independent of
+  // actual Claude sessions on the developer's machine. Only ps is substituted.
+  if (process.platform === 'darwin') processTable = spyOn(childProcess, 'execFileSync').mockReturnValue(`${process.getuid!()} ${process.pid} bun test\n`);
+}
 
 test('legacy native Pi package selections require exact review and preserve shared siblings', async () => {
   const { runRunnerCleanupUpdate } = await import('./runner-cleanup-command');
@@ -92,17 +101,33 @@ test('unreadable activation intent defers optional Codebase Memory removal', () 
   expect(plan.diagnostics.join(' ')).toContain('Codebase Memory');
 });
 test('an unused Claude generation can retire its entries after replacement selection', () => {
+  unusedDarwinProcesses();
   const home = mkdtempSync(join(tmpdir(), 'deck-cleanup-generation-'));
   const roots = { home, data: join(home, 'data/deck'), codex: join(home, 'codex'), opencode: join(home, 'opencode'), pi: join(home, 'pi') };
   const generation = join(roots.data, 'claude/developer-team-v2-abcdef'); mkdirSync(generation, { recursive: true });
   writeFileSync(join(generation, '.mcp.json'), '{"mcpServers":{"serena":{"command":"retired"}}}');
   const plan = planRunnerCleanup(roots, ['claude']).plans[0]!;
   expect(plan.entries[0]?.ownership).toBe('dedicated-location');
-  expect(plan.entries[0]?.action).toBe(process.platform === 'linux' ? 'remove' : 'preserve');
-  if (process.platform === 'linux') {
+  const supported = process.platform === 'linux' || process.platform === 'darwin';
+  expect(plan.entries[0]?.action).toBe(supported ? 'remove' : 'preserve');
+  if (supported) {
     applyPackageRetirement(plan, []);
     expect(JSON.parse(readFileSync(join(generation, '.mcp.json'), 'utf8'))).toEqual({ mcpServers: {} });
   }
+});
+
+test('Darwin cleanup rechecks native plugin references after planning', () => {
+  if (process.platform !== 'darwin') return;
+  unusedDarwinProcesses();
+  const home = mkdtempSync(join(tmpdir(), 'deck-cleanup-native-reference-')), roots = cleanupRoots({ HOME: home });
+  const generation = join(roots.data, 'claude/developer-team-v2-aabb'), binding = join(generation, '.mcp.json');
+  mkdirSync(generation, { recursive: true });
+  const before = '{"mcpServers":{"serena":{"command":"retired"}}}'; writeFileSync(binding, before);
+  const plan = planRunnerCleanup(roots, ['claude']).plans[0]!;
+  expect(plan.entries[0]?.action).toBe('remove');
+  processTable!.mockReturnValue(`${process.getuid!()} ${process.pid} bun test\n${process.getuid!()} 987 claude --plugin-dir relative-alias\n`);
+  expect(() => applyPackageRetirement(plan, [])).toThrow('Native process 987');
+  expect(readFileSync(binding, 'utf8')).toBe(before);
 });
 
 test('effective roots separate runner overrides from canonical Deck activation', () => {
@@ -167,6 +192,7 @@ test('plan includes recorded retired files at arbitrary paths and legacy plugin-
 });
 
 test('selected Claude generations require replacement and old plans recheck launch references', () => {
+  unusedDarwinProcesses();
   const home = mkdtempSync(join(tmpdir(), 'deck-cleanup-active-generation-'));
   const roots = cleanupRoots({ HOME: home });
   const parent = join(roots.data, 'claude'), generation = join(parent, 'developer-team-v2-abcdef');
@@ -176,7 +202,7 @@ test('selected Claude generations require replacement and old plans recheck laun
   writeFileSync(selectionPath, JSON.stringify({ plugin: 'developer-team-v2-abcdef' }));
   expect(planRunnerCleanup(roots, ['claude']).plans[0]!.entries[0]?.reason).toContain('replacement');
   writeFileSync(selectionPath, JSON.stringify({ plugin: 'developer-team-v2-fedcba' }));
-  if (process.platform !== 'linux') return;
+  if (process.platform !== 'linux' && process.platform !== 'darwin') return;
   const plan = planRunnerCleanup(roots, ['claude']).plans[0]!;
   const release = acquireRunnerGenerationReference({ root: generation, selectionPath, selectionHash: contributionHash(readFileSync(selectionPath)) });
   try { expect(() => applyPackageRetirement(plan, [])).toThrow('reference'); }
@@ -283,6 +309,7 @@ test('opaque shell and code arguments stay hidden in console, JSON and output ar
 });
 
 test('Claude opt-out keeps the native Codebase executable until old plugin bindings are retired', async () => {
+  unusedDarwinProcesses();
   const { runRunnerCleanupUpdate } = await import('./runner-cleanup-command');
   const home=mkdtempSync(join(tmpdir(),'deck-cleanup-claude-codebase-')),roots=cleanupRoots({HOME:home});
   const root=join(roots.data,'claude'),generation=join(root,'developer-team-v2-aabb');

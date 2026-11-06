@@ -34,9 +34,10 @@ export function planPiProjectSkillExclusions(plan: PiGlobalPlan, projectRoot: st
     if (parent === dir || existsSync(join(dir, ".git"))) break;
     dir = parent;
   }
+  const retired = new Set(plan.deletes.map(entry => entry.path));
   const exclusions = roots.flatMap(root => installed.flatMap(({ id, name }) => {
     const path = join(root, id, "SKILL.md");
-    return skillName(io.readText(path)) === name ? [`-${path}`] : [];
+    return !retired.has(path) && skillName(io.readText(path)) === name ? [`-${path}`] : [];
   }));
   if (!exclusions.length) return;
   const path = join(resolve(projectRoot), ".pi/settings.json");

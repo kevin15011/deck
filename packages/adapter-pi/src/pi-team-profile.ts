@@ -1,10 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { getTeamSessionInstructions } from "@deck/core/teams/developer/content-registry";
 import { translatePiCapabilityInstructions } from "./instruction-translation";
 import { composeCapabilityInstructions, type CapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY } from "@deck/core/config/deck-config";
-import { buildTeamProfileDir } from "./pi-team-launch";
 import { getTeamsForEnvironment } from "./team-catalog";
 import executionExtensionAssetPath from "../assets/pi/extensions/developer-team-execution.generated.js" with { type: "file" };
 
@@ -119,35 +117,7 @@ Yielding the turn is not abandoning the task: use native completion admission an
 
 // --- Profile Materializer ---
 
-/**
- * Materializes the team profile directory and system prompt file on disk.
- *
- * This is called before launching Pi to ensure the profile artifacts exist.
- * The function is idempotent — it won't overwrite unchanged files.
- *
- */
+/** @deprecated Project profile publication is suppressed; use the admitted global PiRunnerAdapter transaction. */
 export function materializeTeamProfile(options: MaterializeTeamProfileOptions): void {
-  const { teamId, projectRoot } = options;
-
-  const mkdir = options.mkdir ?? mkdirSync;
-  const writeFile = options.writeFile ?? writeFileSync;
-  const readFile = options.readFile ?? readFileSync;
-  const exists = options.exists ?? existsSync;
-
-  const profileDir = buildTeamProfileDir(projectRoot, teamId);
-  const { content } = buildTeamSystemPrompt(teamId, options);
-  const systemPromptPath = join(profileDir, "system-prompt.md");
-  const extensionDir = join(profileDir, "extensions");
-  const extensionPath = join(extensionDir, "developer-team-execution.js");
-
-  // Ensure directory exists
-  if (!exists(profileDir)) {
-    mkdir(profileDir, { recursive: true });
-  }
-
-  if (!exists(systemPromptPath) || readFile(systemPromptPath, "utf-8") !== content) writeFile(systemPromptPath, content, "utf-8");
-  if (!exists(extensionDir)) mkdir(extensionDir, { recursive: true });
-  const extensionContent = readFileSync(typeof executionExtensionAssetPath === "string" ? executionExtensionAssetPath : new URL("../assets/pi/extensions/developer-team-execution.generated.js", import.meta.url), "utf-8");
-  if (!exists(extensionPath) || readFile(extensionPath, "utf-8") !== extensionContent) writeFile(extensionPath, extensionContent, "utf-8");
-
+  throw new Error("Legacy Pi profile publication is disabled; use PiRunnerAdapter installation.");
 }

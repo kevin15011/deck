@@ -1,3 +1,4 @@
+import { createOpenCodeRtkTools, type OpenCodeRtkTools } from "./rtk-tools";
 import { isCompatibleCodebaseExecutable } from "@deck/core";
 import { createOpenCodeCodebaseTools, type OpenCodeCodebaseTools } from "./codebase-tools";
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -64,6 +65,7 @@ export type OpenCodeEvidenceStat = {
 };
 
 export type OpenCodeEvidenceContext = {
+  rtkTools?: OpenCodeRtkTools;
   codebaseTools?: OpenCodeCodebaseTools;
   verifyCodebaseExecutable?: (path: string) => boolean;
   projectRoot: string;
@@ -150,6 +152,14 @@ export function resolveOpenCodeInstalledEvidence(
   toolId: InstallableOpenCodeToolId,
   context: OpenCodeEvidenceContext,
 ): OpenCodeInstalledEvidence {
+  if (toolId === "rtk") {
+    try {
+      const tools = context.rtkTools ?? createOpenCodeRtkTools({ homeDirectory: context.homeDirectory, environment: context.env });
+      return tools.ready() ? { toolId, state: "usable", source: "canonical-target", reasonCodes: ["canonical-target-usable"] }
+        : { toolId, state: "absent", source: "absent", reasonCodes: ["no-evidence"] };
+    } catch { return { toolId, state: "indeterminate", source: "absent", reasonCodes: ["no-evidence"] }; }
+  }
+
   const snapshot = readConfigSnapshot(context);
   const tool = TOOL_BY_ID.get(toolId);
   const configured = assessConfiguredEvidence(toolId, tool, snapshot, context);
@@ -284,7 +294,6 @@ export function createOpenCodeEvidenceContext(options: ReviewOpenCodeToolsOption
 
 function readConfigSnapshot(context: OpenCodeEvidenceContext): ConfigSnapshot {
   const result: ConfigSnapshot = { mcp: {}, commandDirectories: {}, declarations: [], hasConfig: false, issueReasons: [] };
-  if (context.env.OPENCODE_PURE) return result;
 
   const candidates = enumerateOpenCodeConfigCandidates({
     projectRoot: context.projectRoot,

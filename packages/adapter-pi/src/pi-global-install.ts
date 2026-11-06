@@ -1,5 +1,8 @@
-import { assertNoContributionSymlink, contributionId, type RunnerContribution, type ContributionTarget } from "@deck/core";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { assertPiProjectSkillExclusionTargets } from './project-skill-exclusions';
+import { jsonRanges, type JsonNode } from "../../core/src/jsonc-ranges";
+import { ensureDurableDir, runnerProjectScope, recordRunnerMutationJournals, compareReleaseVersions, backupManagedPreimages, assertNoContributionSymlink, contributionId, type RunnerContribution, type ContributionTarget } from "@deck/core";
+import { closeSync, fsyncSync, openSync, chmodSync, existsSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, posix, sep } from "node:path";
 
 import { piAgentPaths } from "./agent-dir";
@@ -19,9 +22,10 @@ import {
 /**
  * Transactional, manifest-owned global materialization under the Pi agent directory.
  *
- * Deck only replaces or removes what its manifest proves it wrote (content hashes), preserves every user value
- * in `settings.json` / `mcp.json`, blocks on foreign or user-modified Deck-owned state before any mutation, and
- * rolls everything back if any write fails.
+ * Legacy callers retain hash-based ownership. Managed callers regenerate the dedicated package/profile roots
+ * and exact generated settings selectors; generic MCP entries require bounded prior recognition.
+ * Shared JSON edits preserve unrelated bytes. Private preimages precede effects; verified postimages precede
+ * receipts, and the existing transaction restores its snapshots if an effect fails.
  */
 
 export type PiFileIO = {
@@ -30,6 +34,8 @@ export type PiFileIO = {
   readText(path: string): string | undefined;
   /** Atomically writes (creating parent directories). `mode` applies to newly created files. */
   writeText(path: string, content: string, mode?: number): void;
+  /** Permission metadata, when supported by the backing filesystem. */
+  readMode?(path: string): number | undefined;
   remove(path: string): void;
   /** Removes a directory only when empty; never throws. */
   removeDirIfEmpty(path: string): void;
@@ -47,32 +53,40 @@ export function createNodePiFileIO(): PiFileIO {
         throw error;
       }
     },
+    readMode: (path) => {
+      assertNoContributionSymlink(path);
+      try { return statSync(path).mode & 0o7777; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+    },
     writeText: (path, content, mode) => {
-      mkdirSync(dirname(path), { recursive: true });
-      const temporary = `${path}.deck-${process.pid}.tmp`;
+      assertNoContributionSymlink(path);
+      ensureDurableDir(dirname(path), 0o777 & ~process.umask());
+      const temporary = `${path}.deck-${randomUUID()}.tmp`;
       const existed = existsSync(path);
       try {
-        writeFileSync(temporary, content, { encoding: "utf-8", ...(mode !== undefined && !existed ? { mode } : {}) });
-        if (existed) {
-          try { chmodSync(temporary, readModeOrDefault(path)); } catch { /* keep default mode */ }
-        }
+        writeFileSync(temporary, content, { flag: 'wx', encoding: "utf-8", mode: 0o600 });
+        if (existed) chmodSync(temporary, statSync(path).mode & 0o7777);
+        else chmodSync(temporary, mode ?? (0o666 & ~process.umask()));
+        const descriptor = openSync(temporary, 'r');
+        try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
+        assertNoContributionSymlink(path);
         renameSync(temporary, path);
+        const directory = openSync(dirname(path), 'r');
+        try { fsyncSync(directory); } finally { closeSync(directory); }
       } catch (error) {
         try { rmSync(temporary, { force: true }); } catch { /* best effort */ }
         throw error;
       }
     },
-    remove: (path) => { rmSync(path, { force: true }); },
+    remove: (path) => {
+      assertNoContributionSymlink(path);
+      if (!existsSync(path)) return;
+      rmSync(path, { force: true });
+      const directory = openSync(dirname(path), 'r');
+      try { fsyncSync(directory); } finally { closeSync(directory); }
+    },
     removeDirIfEmpty: (path) => { try { rmdirSync(path); } catch { /* not empty or absent */ } },
   };
-}
-
-function readModeOrDefault(path: string): number {
-  try {
-    return require("node:fs").statSync(path).mode & 0o777;
-  } catch {
-    return 0o644;
-  }
 }
 
 export type PiDesiredFile = { relPath: string; content: string; mode?: number };
@@ -113,6 +127,9 @@ type PlannedDelete = { path: string; expectedPre: string };
 
 export type PiGlobalPlan = {
   agentDir: string;
+  projectRetirement?: { root: string; entries: readonly { path: string; content: string }[] };
+  managedFiles?: readonly PiDesiredFile[];
+  managedPreimages?: readonly { target: ContributionTarget; content: string }[];
   blocked: boolean;
   diagnostics: PiPlanDiagnostic[];
   conflicts: PiPlanConflict[];
@@ -126,7 +143,7 @@ export type PiGlobalPlan = {
   deletes: PlannedDelete[];
 };
 
-export type PlanOptions = { now?: () => Date };
+export type PlanOptions = { now?: () => Date; managed?: boolean };
 
 const CONFLICTING_PACKAGES = ["pi-subagents", "pi-mcp-adapter"] as const;
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
@@ -177,6 +194,59 @@ function serializeJson(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+/** Apply JSON changes at value/element boundaries; unchanged siblings retain their original bytes. */
+function preserveJson(source: string | undefined, value: Record<string, unknown>): string {
+  if (source === undefined) return serializeJson(value);
+  const patch = (text: string, path: string[], next: unknown): string => {
+    const locate = (): JsonNode => path.reduce((node, key) => node.properties!.get(key)!.node, jsonRanges(text));
+    const node = locate();
+    if (canonicalJson(node.value) === canonicalJson(next)) return text;
+    if (node.properties && isRecord(next)) {
+      for (const key of [...node.properties.keys()].filter(key => !(key in next))) {
+        const parent = path.reduce((part, key) => part.properties!.get(key)!.node, jsonRanges(text));
+        const entry = parent.properties!.get(key)!;
+        const start = entry.comma === undefined && entry.previousComma !== undefined ? entry.previousComma : entry.start;
+        text = text.slice(0, start) + text.slice(entry.comma === undefined ? entry.node.end : entry.comma + 1);
+      }
+      for (const [key, item] of Object.entries(next)) {
+        const parent = path.reduce((part, key) => part.properties!.get(key)!.node, jsonRanges(text));
+        if (parent.properties!.has(key)) text = patch(text, [...path, key], item);
+        else {
+          const at = parent.end - 1;
+          text = text.slice(0, at) + `${parent.properties!.size ? ',' : ''}${JSON.stringify(key)}:${JSON.stringify(item)}` + text.slice(at);
+        }
+      }
+      return text;
+    }
+    if (node.elements && Array.isArray(next)) {
+      const remaining = new Map<string, number>();
+      for (const item of next) { const key = canonicalJson(item); remaining.set(key, (remaining.get(key) ?? 0) + 1); }
+      const keep = node.elements.map(entry => {
+        const key = canonicalJson(entry.node.value), count = remaining.get(key) ?? 0;
+        if (count) remaining.set(key, count - 1);
+        return count > 0;
+      });
+      // Remove only obsolete/duplicate values; unchanged foreign elements keep formatting.
+      for (let index = node.elements.length - 1; index >= 0; index--) {
+        const array = path.reduce((part, key) => part.properties!.get(key)!.node, jsonRanges(text));
+        const entry = array.elements![index]!;
+        if (keep[index]) continue;
+        const start = entry.comma === undefined && entry.previousComma !== undefined ? entry.previousComma : entry.node.start;
+        text = text.slice(0, start) + text.slice(entry.comma === undefined ? entry.node.end : entry.comma + 1);
+      }
+      const array = path.reduce((part, key) => part.properties!.get(key)!.node, jsonRanges(text));
+      const present = new Set(array.elements!.map(entry => canonicalJson(entry.node.value)));
+      const missing = next.filter(item => !present.has(canonicalJson(item)));
+      if (missing.length) text = text.slice(0, array.end - 1) + `${array.elements!.length ? ',' : ''}${missing.map(item => JSON.stringify(item)).join(',')}` + text.slice(array.end - 1);
+      const result = path.reduce((part, key) => part.properties!.get(key)!.node, jsonRanges(text));
+      if (canonicalJson(result.value) === canonicalJson(next)) return text;
+      throw new Error('Pi shared array order changed outside the planned entries');
+    }
+    return text.slice(0, node.start) + JSON.stringify(next) + text.slice(node.end);
+  };
+  return patch(source, [], value);
+}
+
 export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO, options: PlanOptions = {}): PiGlobalPlan {
   const { agentDir } = desired;
   const paths = piAgentPaths(agentDir);
@@ -192,6 +262,8 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
     writes: [],
     deletes: [],
   };
+  const generated = (relPath: string) => isSafeRelPath(relPath) && (relPath.startsWith('deck/package/') || relPath.startsWith('deck/profiles/'));
+  if (options.managed) { plan.managedFiles = desired.files.filter(file => generated(file.relPath)); plan.managedPreimages = []; }
   const block = (diagnostic: PiPlanDiagnostic) => {
     plan.diagnostics.push(diagnostic);
     plan.blocked = true;
@@ -227,11 +299,20 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
   }
   if (manifestRead !== undefined) {
     const parsed = parsePiManifest(manifestRead);
-    if (!parsed.ok) {
-      block({ code: "PI_MANIFEST_CORRUPT", severity: "error", message: `${parsed.reason} Review and remove ${paths.manifest}, then retry.` });
-      return plan;
-    }
-    manifest = parsed.manifest;
+    let newer = false;
+    try {
+      const raw = JSON.parse(manifestRead);
+      const version = typeof raw.schema === 'string' ? /^deck-pi-manifest-v(\d+)$/.exec(raw.schema) : undefined;
+      newer = !!version && Number(version[1]) > 1 || typeof raw.deckVersion === 'string' && compareReleaseVersions(raw.deckVersion, '0.14.0') > 0;
+    } catch { /* Ordinary invalid metadata is not target authority. */ }
+    if (!parsed.ok || newer) {
+      if (!options.managed || newer || io.exists(`${paths.manifest}.pending`)) {
+        block({ code: "PI_MANIFEST_CORRUPT", severity: "error", message: 'Pi ownership metadata is invalid, newer, or pending recovery; no effects are allowed.' });
+        return plan;
+      }
+      (plan.managedPreimages as { target: ContributionTarget; content: string }[]).push({ target: { path: paths.manifest, selector: { kind: "file" } }, content: manifestRead });
+      plan.diagnostics.push({ code: 'PI_MANIFEST_REBUILT', severity: 'warning', message: 'Corrupt ownership metadata will be privately retained and rebuilt from canonical generated output.' });
+    } else manifest = parsed.manifest;
   }
 
   // --- files -------------------------------------------------------------------------------------------
@@ -252,19 +333,19 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
     }
     const diskHash = hashContent(disk);
     if (diskHash === postimage || file.relPath.endsWith(".json") && fileOwnershipHash(file.relPath,disk) === fileOwnershipHash(file.relPath,file.content)) {
-      if (!matchesOwnedHash(file.relPath, manifest.files[file.relPath], disk) && !matchesOwnedHash(file.relPath, manifest.files[file.relPath], file.content)) {
+      if (!(options.managed && generated(file.relPath)) && !matchesOwnedHash(file.relPath, manifest.files[file.relPath], disk) && !matchesOwnedHash(file.relPath, manifest.files[file.relPath], file.content)) {
         delete nextFiles[file.relPath];
         plan.diagnostics.push({code:"PI_FILE_UNRECEIPTED",severity:"warning",message:`Preserved unreceipted Pi file ${absolute}; it remains user-owned.`});
       }
       continue;
     }
     const owned = manifest.files[file.relPath];
-    if (owned === undefined) {
+    if (owned === undefined && !(options.managed && generated(file.relPath))) {
       delete nextFiles[file.relPath];
       conflict({ relPath: file.relPath, reason: "foreign", message: `A file Deck does not own already exists at ${absolute}; Deck will not overwrite it.` }, "PI_FILE_FOREIGN");
       continue;
     }
-    if (!matchesOwnedHash(file.relPath, owned, disk)) {
+    if (!(options.managed && generated(file.relPath)) && !matchesOwnedHash(file.relPath, owned, disk)) {
       delete nextFiles[file.relPath];
       conflict({ relPath: file.relPath, reason: "modified", message: `${absolute} was modified after Deck wrote it; Deck will not overwrite it. Restore or remove the file to continue.` }, "PI_FILE_MODIFIED");
       continue;
@@ -273,16 +354,18 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
   }
   for (const [relPath, owned] of Object.entries(manifest.files)) {
     if (desiredPaths.has(relPath)) continue;
+    if (options.managed && !generated(relPath)) continue; // Receipts never expand the generated retirement roots.
     if (!isSafeRelPath(relPath)) continue;
     const absolute = resolveInside(agentDir, relPath);
     let disk: string | undefined;
     try { disk = io.readText(absolute); } catch { disk = undefined; }
     if (disk === undefined) continue;
     const diskHash = hashContent(disk);
-    if (!matchesOwnedHash(relPath, owned, disk)) {
+    if (!(options.managed && generated(relPath)) && !matchesOwnedHash(relPath, owned, disk)) {
       plan.kept.push({ relPath, reason: "modified by the user; no longer managed by Deck" });
       continue;
     }
+    if (options.managed && generated(relPath)) { (plan.managedPreimages as { target: ContributionTarget; content: string }[]).push({ target: { path: absolute, selector: { kind: "file" } }, content: disk }); }
     addChange({ kind: "file", action: "delete", relPath, path: absolute, preimage: diskHash, postimage: "absent" }, undefined, { path: absolute, expectedPre: diskHash });
   }
 
@@ -306,10 +389,15 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
       // Deck-reserved package entry
       const deckEntries = packages.map((entry, index) => ({ entry, index })).filter(({ entry }) => normalizePackageSource(entry) === deckPath);
       const foreignDeckEntry = deckEntries.find(({ entry }) => typeof entry !== "string");
-      if (foreignDeckEntry && desired.packageEntry !== undefined) {
+      if (foreignDeckEntry && desired.packageEntry !== undefined && !options.managed) {
         block({ code: "PI_SETTINGS_FOREIGN_DECK_PACKAGE", severity: "error", message: `${paths.settings} already contains a customized entry for ${deckPath}; Deck will not replace it. Remove it or use the plain string form.` });
       } else {
-        const stringEntries = deckEntries.filter(({ entry }) => typeof entry === "string");
+        if (options.managed) {
+          for (const { entry } of deckEntries.filter(({ entry }) => typeof entry !== 'string'))
+            (plan.managedPreimages as { target: ContributionTarget; content: string }[]).push({ target: { path: paths.settings, selector: { kind: 'json-array', keys: ['packages'], identity: canonicalJson(entry) } }, content: canonicalJson(entry) });
+          packages = packages.filter(entry => normalizePackageSource(entry) !== deckPath || typeof entry === "string");
+        }
+        const stringEntries = packages.map((entry, index) => ({ entry, index })).filter(({ entry }) => normalizePackageSource(entry) === deckPath).filter(({ entry }) => typeof entry === "string");
         if (desired.packageEntry !== undefined) {
           if (stringEntries.length === 0) packages.push(desired.packageEntry);
           else if (stringEntries.length > 1) {
@@ -346,7 +434,7 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
         const changed = canonicalJson(currentPackages ?? []) !== canonicalJson(packages) || (currentPackages === undefined && packages.length > 0);
         if (changed) {
           const nextSettings = { ...settings, packages };
-          nextSettingsText = serializeJson(nextSettings);
+          nextSettingsText = preserveJson(settingsRead.file.text, nextSettings);
         }
       }
     }
@@ -375,7 +463,7 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
       if (canonicalJson(currentSkills ?? []) !== canonicalJson(skills)) {
         const base = nextSettingsText === undefined ? settingsRead.file.value : (JSON.parse(nextSettingsText) as Record<string, unknown>);
         const { skills: _drop, ...rest } = base;
-        nextSettingsText = serializeJson(skills.length > 0 ? { ...rest, skills } : rest);
+        nextSettingsText = preserveJson(nextSettingsText ?? settingsRead.file.text, skills.length > 0 ? { ...rest, skills } : rest);
       }
     }
   }
@@ -405,11 +493,11 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
         }
         const currentHash = hashJsonValue(current);
         if (currentHash === postimage) {
-          if (!manifest.mcp.servers[name]) delete nextMcpOwned[name];
+          if (!manifest.mcp.servers[name] && !options.managed) delete nextMcpOwned[name];
           continue;
         }
         const owned = manifest.mcp.servers[name];
-        if (owned !== undefined && owned === currentHash) {
+        if (owned !== undefined && /^[a-f0-9]{64}$/.test(owned) && (owned === currentHash || options.managed) && ["context7", "context-mode", "codebase-memory", "serena", "web-search"].includes(name)) {
           servers[name] = entry;
           mutated = true;
 
@@ -424,7 +512,7 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
         if (name in desired.mcpServers) continue;
         const current = servers[name];
         if (current === undefined) continue;
-        if (hashJsonValue(current) === owned) {
+        if (hashJsonValue(current) === owned || options.managed && /^[a-f0-9]{64}$/.test(owned) && ["context7", "context-mode", "codebase-memory", "serena", "web-search"].includes(name)) {
           delete servers[name];
           mutated = true;
         } else {
@@ -432,11 +520,18 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
         }
       }
       if (mutated && !plan.blocked) {
-        nextMcpText = serializeJson({ ...config, mcpServers: servers });
+        nextMcpText = preserveJson(mcpRead.file.text, { ...config, mcpServers: servers });
       }
     }
   }
 
+  if (options.managed && mcpRead.ok) {
+    for (const name of Object.keys(manifest.mcp.servers).filter(name => ["context7", "context-mode", "codebase-memory", "serena", "web-search"].includes(name))) {
+      const previous = (mcpRead.file.value.mcpServers as Record<string, unknown> | undefined)?.[name];
+      if (previous !== undefined && canonicalJson(previous) !== canonicalJson(desired.mcpServers[name]))
+        (plan.managedPreimages as { target: ContributionTarget; content: string }[]).push({ target: { path: paths.mcp, selector: { kind: "json", keys: ["mcpServers", name] } }, content: canonicalJson(previous) });
+    }
+  }
   if (plan.blocked) {
     // No mutation is planned for a blocked plan; keep only the evidence.
     plan.changes = [];
@@ -514,48 +609,160 @@ function missingAncestorDirs(io: PiFileIO, targets: readonly string[]): string[]
   return created;
 }
 
-export type PiApplyResult = { changedCount: number; changes: readonly PiPlannedChange[] };
+export type PiApplyResult = { changedCount: number; changes: readonly PiPlannedChange[]; backupPath?: string };
 
-export function applyPiGlobalPlan(plan: PiGlobalPlan, io: PiFileIO): PiApplyResult {
-  if (plan.blocked) {
-    const reasons = plan.diagnostics.filter((diagnostic) => diagnostic.severity === "error").map((diagnostic) => diagnostic.message);
-    throw new Error(`Pi global install is blocked: ${reasons.join("; ") || "unresolved conflicts"}`);
-  }
-  if (plan.writes.length === 0 && plan.deletes.length === 0) return { changedCount: 0, changes: [] };
-
+export function applyPiGlobalPlan(plan: PiGlobalPlan, io: PiFileIO, onRollbackProven?: (operationId: string, prove: () => boolean) => void): PiApplyResult {
+  const pendingPath = join(plan.agentDir, 'deck', 'transaction.pending.json');
   // Verify preimages immediately before mutating (the plan may be stale).
   const touched = [...plan.writes.map((write) => ({ path: write.path, expected: write.expectedPre })), ...plan.deletes.map((del) => ({ path: del.path, expected: del.expectedPre }))];
   const snapshots = new Map<string, string | null>();
-  for (const { path, expected } of touched) {
-    const current = io.readText(path);
-    const currentHash = current === undefined ? "absent" : hashContent(current);
-    if (currentHash !== expected) throw new Error(`Pi global install plan is stale: ${path} changed after it was planned.`);
-    snapshots.set(path, current ?? null);
-  }
-
-  const createdDirs = missingAncestorDirs(io, touched.map((entry) => entry.path));
-
-  const done: string[] = [];
+  const modes = new Map<string, number | undefined>();
+  const operationId = randomUUID();
+  let backupPath: string | undefined;
+  let createdDirs: string[] = [];
+  // Register the live operation before abortable preflight. A closure can prove that
+  // no installation effect was attempted; persisted journal absence alone cannot.
+  recordRunnerMutationJournals([
+    { operationId, id: plan.projectRetirement && plan.projectRetirement.root !== plan.agentDir ? runnerProjectScope(plan.projectRetirement.root) : 'global', kind: 'deck-scope-v1' },
+    { operationId, id: operationId, kind: "pi-global-install" },
+  ]);
   try {
-    for (const write of plan.writes) {
+    // Existing crash evidence never authorizes a no-effect proof or disappears on a no-op.
+    if (io.readText(pendingPath) !== undefined) throw new Error('Pi transaction recovery required; pending evidence was preserved.');
+    if (plan.blocked) {
+      const reasons = plan.diagnostics.filter((diagnostic) => diagnostic.severity === "error").map((diagnostic) => diagnostic.message);
+      throw new Error(`Pi global install is blocked: ${reasons.join("; ") || "unresolved conflicts"}`);
+    }
+    assertPiProjectSkillExclusionTargets(plan);
+    if (plan.writes.length === 0 && plan.deletes.length === 0) return { changedCount: 0, changes: [] };
+    for (const { path, expected } of touched) {
+      const current = io.readText(path);
+      const currentHash = current === undefined ? "absent" : hashContent(current);
+      if (currentHash !== expected) throw new Error(`Pi global install plan is stale: ${path} changed after it was planned.`);
+      snapshots.set(path, current ?? null);
+      modes.set(path, io.readMode?.(path));
+    }
+
+    backupPath = plan.managedFiles ? backupManagedPreimages({ stateRoot: join(plan.agentDir, 'deck', 'backups'), runnerId: 'pi', root: plan.agentDir,
+      entries: [...(plan.managedPreimages ?? []), ...plan.managedFiles.flatMap(file => {
+        const path = resolveInside(plan.agentDir, file.relPath), previous = snapshots.get(path);
+        return previous !== undefined && previous !== null && hashContent(previous) !== hashContent(file.content)
+          ? [{ target: { path, selector: { kind: 'file' as const } }, content: previous }] : [];
+      })] }) : undefined;
+    if (plan.projectRetirement?.entries.length) backupManagedPreimages({
+      stateRoot: join(plan.agentDir, 'deck', 'backups'), runnerId: 'pi', root: plan.projectRetirement.root,
+      entries: plan.projectRetirement.entries.map(entry => ({ target: { path: entry.path, selector: { kind: 'file' as const } }, content: entry.content })),
+    });
+    createdDirs = missingAncestorDirs(io, [...touched.map(entry => entry.path), pendingPath]);
+  } catch (error) {
+    const prove = () => { try { return io.readText(pendingPath) === undefined; } catch { return false; } };
+    if (prove()) onRollbackProven?.(operationId, prove);
+    throw error;
+  }
+  // Persist only hashes/identity, never shared configuration contents or credentials.
+  // In-process snapshots remain the independent authority for synchronous rollback.
+  const pendingText = JSON.stringify({ schema: 'deck-pi-transaction-v1', id: operationId, root: plan.agentDir,
+    targets: [
+      ...plan.writes.map(write => ({ path: write.path, before: write.expectedPre, after: hashContent(write.content) })),
+      ...plan.deletes.map(del => ({ path: del.path, before: del.expectedPre, after: 'absent' })),
+    ],
+  }) + '\n';
+  const clearPending = () => {
+    if (io.readText(pendingPath) !== pendingText) throw new Error('Pi pending transaction changed; evidence preserved.');
+    io.remove(pendingPath);
+    if (io.readText(pendingPath) !== undefined) throw new Error('Pi pending transaction removal failed.');
+  };
+  const assertPreimage = (path: string, expected: string) => {
+    const text = io.readText(path);
+    if ((text === undefined ? 'absent' : hashContent(text)) !== expected || modes.has(path) && io.readMode?.(path) !== modes.get(path)) throw new Error(`Pi target changed before publication: ${path}`);
+  };
+
+  const verifyManaged = () => {
+    for (const file of plan.managedFiles ?? []) {
+      const content = io.readText(resolveInside(plan.agentDir, file.relPath));
+      if (content === undefined || fileOwnershipHash(file.relPath, content) !== fileOwnershipHash(file.relPath, file.content)) throw new Error('Pi managed postimage mismatch');
+    }
+  };
+  const done: string[] = [];
+  const publishedModes = new Map<string, number | undefined>();
+  const retire = () => {
+    for (const del of plan.deletes) {
+      if (done.includes(del.path)) continue;
+      assertPreimage(del.path, del.expectedPre);
+      io.remove(del.path); done.push(del.path);
+      if (io.readText(del.path) !== undefined) throw new Error('Pi retirement postimage mismatch');
+    }
+  };
+  try {
+    assertPreimage(pendingPath, "absent");
+    io.writeText(pendingPath, pendingText, 0o600);
+    if (io.readText(pendingPath) !== pendingText) throw new Error("Pi pending transaction publication failed");
+    const manifestPath = piAgentPaths(plan.agentDir).manifest;
+    const publicationOrder = [...plan.writes].sort((left, right) => Number(left.path === manifestPath) - Number(right.path === manifestPath));
+    for (const write of publicationOrder) {
+      if (write.path === manifestPath) {
+        retire();
+        verifyManaged();
+        for (const shared of plan.writes.filter(item => item.path !== manifestPath)) {
+          if (io.readText(shared.path) !== shared.content) throw new Error('Pi shared postimage mismatch');
+        }
+      }
+      assertPreimage(write.path, write.expectedPre);
+      publishedModes.set(write.path, io.readMode ? modes.get(write.path) ?? write.mode ?? (0o666 & ~process.umask()) : undefined);
       io.writeText(write.path, write.content, write.mode);
       done.push(write.path);
     }
-    for (const del of plan.deletes) {
-      io.remove(del.path);
-      done.push(del.path);
-    }
+    retire();
+    verifyManaged();
+    for (const write of plan.writes) if (io.readText(write.path) !== write.content) throw new Error('Pi transaction postimage mismatch');
+    clearPending();
   } catch (error) {
     const failures: string[] = [];
-    for (const path of [...done].reverse().concat(touched.map((entry) => entry.path).filter((path) => !done.includes(path)))) {
+    const expectedPostimages = new Map([
+      ...plan.writes.map(write => [write.path, hashContent(write.content)] as const),
+      ...plan.deletes.map(del => [del.path, "absent"] as const),
+    ]);
+    // Include attempted-but-throwing effects: an IO adapter may throw after publication.
+    // Untouched targets are inspected too, but never restored over another writer's bytes.
+    for (const path of [...done].reverse().concat(touched.map(entry => entry.path).filter(path => !done.includes(path)))) {
       try {
         const previous = snapshots.get(path);
         if (previous === undefined) continue;
+        const current = io.readText(path);
+        const currentHash = current === undefined ? "absent" : hashContent(current);
+        const previousHash = previous === null ? "absent" : hashContent(previous);
+        const previousMode = modes.get(path);
+        const currentMode = io.readMode?.(path);
+        if (currentHash === previousHash) {
+          if (currentMode !== previousMode) throw new Error("rollback preimage permissions changed");
+          continue;
+        }
+        // Existing files retain their mode during atomic replacement. Do not undo
+        // another writer's chmod, even if the bytes still match our postimage.
+        if (current !== undefined && currentMode !== publishedModes.get(path)) throw new Error("rollback postimage permissions changed");
+        if (currentHash !== expectedPostimages.get(path)) throw new Error("rollback postimage changed");
         if (previous === null) io.remove(path);
-        else io.writeText(path, previous);
+        else io.writeText(path, previous, previousMode);
+        if (io.readText(path) !== (previous ?? undefined) || io.readMode?.(path) !== previousMode) throw new Error("rollback preimage verification failed");
       } catch (restoreError) {
         failures.push(`${path}: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`);
       }
+    }
+    if (failures.length === 0) {
+      try {
+        // A failed journal publication may have left no record; only clear our exact record.
+        if (io.readText(pendingPath) !== undefined) clearPending();
+      } catch (cleanupError) {
+        failures.push(cleanupError instanceof Error ? cleanupError.message : String(cleanupError));
+      }
+    }
+    if (failures.length === 0 && onRollbackProven) {
+      const prove = () => {
+        try {
+          return io.readText(pendingPath) === undefined && [...snapshots].every(([path, previous]) => io.readText(path) === (previous ?? undefined) && io.readMode?.(path) === modes.get(path));
+        } catch { return false; }
+      };
+      if (prove()) onRollbackProven(operationId, prove);
     }
     for (const directory of [...createdDirs].sort((left, right) => right.length - left.length)) io.removeDirIfEmpty(directory);
     const message = error instanceof Error ? error.message : String(error);
@@ -570,7 +777,7 @@ export function applyPiGlobalPlan(plan: PiGlobalPlan, io: PiFileIO): PiApplyResu
       directory = dirname(directory);
     }
   }
-  return { changedCount: plan.changes.length, changes: plan.changes };
+  return { changedCount: plan.changes.length, changes: plan.changes, backupPath };
 }
 
 export type PiVerifyResult = { valid: boolean; diagnostics: string[] };
@@ -626,15 +833,15 @@ export function resolvePiRelative(agentDir: string, relPath: string): string {
 
 export type PiSnapshot = {
   agentDir: string;
-  entries: { path: string; previous: string | null; /** sha256 of the content the apply wrote, or "absent" if it deleted the path */ applied: string }[];
+  entries: { path: string; previous: string | null; mode?: number; /** sha256 of the content the apply wrote, or "absent" if it deleted the path */ applied: string }[];
   createdDirs: string[];
 };
 
 /** Captures everything a plan will touch so the adapter's backup/rollback hooks can restore it exactly. */
 export function snapshotPiPlanTargets(plan: PiGlobalPlan, io: PiFileIO): PiSnapshot {
   const entries: PiSnapshot["entries"] = [
-    ...plan.writes.map((write) => ({ path: write.path, previous: io.readText(write.path) ?? null, applied: hashContent(write.content) })),
-    ...plan.deletes.map((del) => ({ path: del.path, previous: io.readText(del.path) ?? null, applied: "absent" })),
+    ...plan.writes.map((write) => ({ path: write.path, previous: io.readText(write.path) ?? null, mode: io.readMode?.(write.path), applied: hashContent(write.content) })),
+    ...plan.deletes.map((del) => ({ path: del.path, previous: io.readText(del.path) ?? null, mode: io.readMode?.(del.path), applied: "absent" })),
   ];
   return { agentDir: plan.agentDir, entries, createdDirs: missingAncestorDirs(io, entries.map((entry) => entry.path)) };
 }
@@ -651,13 +858,21 @@ export function restorePiSnapshot(snapshot: PiSnapshot, io: PiFileIO): PiRestore
     const current = io.readText(entry.path);
     const currentHash = current === undefined ? "absent" : hashContent(current);
     const previousHash = entry.previous === null ? "absent" : hashContent(entry.previous);
-    if (currentHash === previousHash) continue;
+    if (currentHash === previousHash) {
+      if (io.readMode?.(entry.path) !== entry.mode) conflicts.push(entry.path);
+      continue;
+    }
+    if (current !== undefined && entry.previous !== null && io.readMode?.(entry.path) !== entry.mode) {
+      conflicts.push(entry.path);
+      continue;
+    }
     if (currentHash !== entry.applied) {
       conflicts.push(entry.path);
       continue;
     }
     if (entry.previous === null) io.remove(entry.path);
-    else io.writeText(entry.path, entry.previous);
+    else io.writeText(entry.path, entry.previous, entry.mode);
+    if (io.readText(entry.path) !== (entry.previous ?? undefined) || io.readMode?.(entry.path) !== entry.mode) conflicts.push(entry.path);
   }
   if (conflicts.length === 0) {
     for (const directory of [...snapshot.createdDirs].sort((left, right) => right.length - left.length)) io.removeDirIfEmpty(directory);

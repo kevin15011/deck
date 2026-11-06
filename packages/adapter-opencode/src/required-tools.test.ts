@@ -239,13 +239,13 @@ describe("reviewOpenCodeTools", () => {
     })).reasonCodes).toContain("PATH-non-executable");
   });
 
-  test("treats pure mode as executable-only evidence", () => {
+  test("retains configured evidence in pure mode", () => {
     const context = contextFor({
       env: { OPENCODE_PURE: "1" },
       files: { "/project/opencode.json": '{"mcp":{"codebase-memory":{"command":["/missing/codebase-memory-mcp"]}}}' },
       executableFiles: [],
     });
 
-    expect(resolveOpenCodeInstalledEvidence("codebase-memory", context).state).toBe("absent");
+    expect(resolveOpenCodeInstalledEvidence("codebase-memory", context).state).toBe("broken");
   });
 });

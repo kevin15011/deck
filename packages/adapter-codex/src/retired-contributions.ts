@@ -1,11 +1,11 @@
-import { contributionHash, selectContributionContent, type RunnerContribution } from "@deck/core";
+import { contributionHash, validContributionHash, selectContributionContent, type RunnerContribution } from "@deck/core";
 import { mergeCodexOwnedHooks, RETIRED_CODEX_HOOK_IDS } from "./codex-config";
 import { codexMcpReceiptCoversServer, mergeCodexMcpServers } from "./mcp-config";
 
 // Version-1 installation decommissioning only. Remove after the legacy installation migration window.
 export const RETIRED_CODEX_MCP_IDS = ["supermemory", "deck-memory"] as const;
 /** Pure removal plan; caller applies it under its existing native lease, journal and preimage guard. */
-export function decommissionRetiredContributions(source: string, receipts: readonly RunnerContribution[]): { content: string; diagnostics: string[]; removedContributionIds?: string[] } {
+export function decommissionRetiredContributions(source: string, receipts: readonly RunnerContribution[], options: { managed?: boolean } = {}): { content: string; diagnostics: string[]; removedContributionIds?: string[] } {
   try {
     const diagnostics: string[] = [], hooks: string[] = [], servers: string[] = [];
     for (const id of RETIRED_CODEX_HOOK_IDS) {
@@ -13,7 +13,7 @@ export function decommissionRetiredContributions(source: string, receipts: reado
       const content = selectContributionContent(source, selector);
       if (content === undefined) continue;
       const prior = receipts.find(r => r.selector.kind === "text" && r.selector.start === selector.start);
-      if (prior?.hash === contributionHash(content)) hooks.push(id);
+      if (options.managed || prior?.hash === contributionHash(content)) hooks.push(id);
       else diagnostics.push(`Preserved retired hook '${id}': ownership receipt is absent or edited. Review its configuration before removing it.`);
     }
     for (const id of RETIRED_CODEX_MCP_IDS) {
@@ -21,7 +21,7 @@ export function decommissionRetiredContributions(source: string, receipts: reado
       const content = selectContributionContent(source, selector);
       if (content === undefined) continue;
       const prior = receipts.find(r => r.selector.kind === "toml" && r.selector.header === selector.header);
-      if (prior?.hash === contributionHash(content) && codexMcpReceiptCoversServer(source, content, id)) servers.push(id);
+      if (prior && validContributionHash(prior.hash) && options.managed || prior?.hash === contributionHash(content) && codexMcpReceiptCoversServer(source, content, id)) servers.push(id);
       else diagnostics.push(`Preserved retired MCP '${id}': ownership receipt is absent or edited. Review its configuration before removing it.`);
     }
     const hookPlan = mergeCodexOwnedHooks(source, [], { removeOnly: hooks });

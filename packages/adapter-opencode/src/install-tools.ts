@@ -1,3 +1,4 @@
+import { createOpenCodeRtkTools, type OpenCodeRtkTools } from "./rtk-tools";
 import { createOpenCodeCodebaseTools, type OpenCodeCodebaseTools } from "./codebase-tools";
 import { spawn as nodeSpawn } from "node:child_process";
 import { accessSync, constants, existsSync } from "node:fs";
@@ -106,6 +107,7 @@ export type SerenaBootstrapRunner = (
 ) => Promise<SerenaBootstrapResult>;
 
 export type InstallOpenCodeToolsOptions = {
+  rtkTools?: OpenCodeRtkTools;
   codebaseTools?: OpenCodeCodebaseTools;
   commandExists?: (command: string) => boolean;
   evidenceContext?: OpenCodeEvidenceContext;
@@ -225,12 +227,27 @@ async function executeTool(
   context: OpenCodeEvidenceContext | undefined,
   options: InstallOpenCodeToolsOptions,
 ): Promise<OpenCodeToolInstallResultExact> {
+  if (tool.id === "rtk" && tool.installKind === "deck-owned-native") {
+    let invoked = false;
+    try {
+      const tools = options.rtkTools ?? context?.rtkTools ?? createOpenCodeRtkTools({ homeDirectory: options.homeDirectory ?? context?.homeDirectory, environment: context?.env });
+      if (tools.ready()) return createInstallResult(tool, "already-present", false, "RTK pinned executable and plugin are already verified.");
+      if (tools.state() === "unsupported") return evidenceFailure(tool, "evidence", "rtk-native-unsupported");
+      options.signal?.throwIfAborted();
+      invoked = true;
+      await tools.install(options.signal);
+      return tools.ready() ? createInstallResult(tool, "executed", true, "RTK pinned executable and plugin installed and verified.")
+        : evidenceFailure(tool, "post-install", "rtk-native-verification-failed", true);
+    } catch {
+      return failureFromText(tool, invoked ? "install" : "evidence", "rtk-native-install-failed", undefined, "", "Pinned RTK installation could not be completed safely.", invoked, context);
+    }
+  }
   if (tool.id === "codebase-memory") {
     let invoked = false;
     try {
       const tools = options.codebaseTools ?? context?.codebaseTools ?? createOpenCodeCodebaseTools({ homeDirectory: options.homeDirectory ?? context?.homeDirectory, environment: context?.env });
       if (tools.command()) return createInstallResult(tool, "already-present", false, "Codebase Memory reviewed native executable is already present.");
-      if (tools.state() !== "absent") return evidenceFailure(tool, "evidence", "codebase-native-conflict");
+      if (tools.state() === "unsupported") return evidenceFailure(tool, "evidence", "codebase-native-unsupported");
       if (options.signal?.aborted) return createInstallResult(tool, "skipped", false, "Codebase Memory installation cancelled.");
       invoked = true;
       await tools.install(options.signal);

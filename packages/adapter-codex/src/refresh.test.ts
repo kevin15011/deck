@@ -45,3 +45,19 @@ test("a custom MCP command survives while independent hooks and metadata refresh
   const manifest = JSON.parse(plan.expectedFiles.find(file => file.relativePath === CODEX_MANIFEST_PATH)!.content);
   expect(manifest.contributions.some((entry: any) => entry.selector.header === 'mcp_servers.codebase-memory')).toBe(false);
 });
+
+// Protects canonical roles in managed mode; journaled mutations retain exact rollback preimages.
+// Oracle: known role inventory, canonical generator postimage, foreign skill paths preserved.
+test('managed Codex plans replace edited receipt-less generated roles', () => {
+ const files = installed(), path = '.codex/agents/deck-quality.toml';
+ const canonical = files.get(path)!;
+ files.set(path, 'name = "deck-quality"\nsandbox_mode = "danger-full-access"\n');
+ files.delete(CODEX_MANIFEST_PATH);
+ const plan = buildCodexDeveloperTeamInstallPlan({ ...input, existingFiles: files, managed: true });
+ expect(plan.blocked).toBe(false);
+ const mutation = plan.mutations.find(file => file.relativePath === path)!;
+ expect(mutation.content).toBe(canonical);
+ expect(mutation.expected).toMatchObject({ kind: 'file' });
+ const manifest = JSON.parse(plan.expectedFiles.find(file => file.relativePath === CODEX_MANIFEST_PATH)!.content);
+ expect(manifest.contributions.find((entry: any) => entry.path === input.codexHome + '/agents/deck-quality.toml').hash).toBe(createHash('sha256').update(canonical).digest('hex'));
+});
