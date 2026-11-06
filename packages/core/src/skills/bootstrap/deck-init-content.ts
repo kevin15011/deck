@@ -29,7 +29,7 @@ Run only as the existing \`deck-init\` subagent after one exact host delegation.
 - Use only the exact host-bound, process-local, one-use authority for this session, invocation, canonical root digest, active runner, delegation, component, action, and target set.
 - Inspect every independent component in order. An initialized OpenSpec component or a failed optional component never suppresses later independent components.
 - Run an effect at most once per preparation invocation and follow every effect with a read-only postcondition. Attempted work is not success.
-- Preserve prior-valid bytes on malformed state, failed postconditions, ownership ambiguity, compare-and-swap conflict, or unavailable operation. Never improvise a write fallback.
+- Preserve user-owned bytes on malformed state, failed postconditions, ownership ambiguity, compare-and-swap conflict, or unavailable operation. Never improvise a write fallback.
 - Use existing OpenSpec/index behavior, Skill Registry lifecycle/services/writer, and active-runner-exposed project-local capability tools only.
 - Do not install, download, upgrade, invoke a package manager, use network setup, write user-global configuration, invoke TUI actions, mutate Git state, or write centralized SDD state/events.
 
@@ -44,7 +44,7 @@ Run only as the existing \`deck-init\` subagent after one exact host delegation.
 | applicable postcondition verified | \`ready\`, \`changed\`, or \`unchanged\` | no degradation |
 | enabled but absent or unusable tool/executable/runner surface | \`unavailable\` | \`partial\`; continue; next action is Deck's existing TUI installation/configuration flow |
 | not enabled, not applicable, has no project initializer, or is dependency-blocked | \`skipped\` | no degradation |
-| authority, containment, malformed-state, tracked/shareable ownership, compare-and-swap, or postcondition safety proof fails | \`blocked\` | \`blocked\`; do not continue to SDD triage |
+| authority, containment, user-owned malformed-state, shareable ownership, compare-and-swap, or postcondition safety proof fails | \`blocked\` | \`blocked\`; do not continue to SDD triage |
 
 Skill Registry lifecycle selection uses the cached bounded context and existing services:
 
@@ -82,7 +82,7 @@ Add only discovered or user-supplied entries under \`testing.commands\`: \`focus
 
 ### 3. Skill Registry
 
-Consume the cached \`SkillDiscoveryContextV1\` and use only the active-runner-bound existing \`deck skill-registry validate|discover|refresh\` command/service contracts. Re-evaluate the complete current source set immediately before write. Reuse the existing migration/regeneration selection and \`SkillRegistryWriterV1\` as sole writer with its exact target tuple, safe ignore coverage, one-use writer authority, compare-and-swap, atomic replacement, complete-before-persist validation, and prior-valid bytes preservation. Never scan sources or implement a second writer. Ready registries remain untouched; non-ready write failure stays fail-open and preserves the prior registry when no protected conflict exists.
+Consume the cached \`SkillDiscoveryContextV1\` and use only the active-runner-bound existing \`deck skill-registry validate|discover|refresh\` command/service contracts. Re-evaluate the complete current source set immediately before write. Reuse \`SkillRegistryWriterV1\` as sole writer with its exact target tuple, one-use authority, compare-and-swap, private backup, atomic replacement and rollback. Authorized regeneration replaces edited, invalid, legacy, truncated or tracked registry files; preserve newer schemas and reject unsafe paths. Never implement a second writer. Ready registries remain untouched; failed writes preserve the prior registry.
 
 ### 4. Codebase index
 

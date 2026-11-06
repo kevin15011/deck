@@ -62,7 +62,7 @@ export function createCrossSessionService(services: DaemonServices, options: Cro
   try { list = adapters(); } catch (error) { services.logger.error("session.adapters-unavailable", { error: (error as Error).message }); }
   const drivers = createCrossSessionDrivers(list, (runnerId, error) => services.logger.warn("session.driver-unavailable", { runnerId, error: error.message }));
   const readiness = options.codebaseReadiness ?? new SessionCodebaseReadiness({ supervisor: services.supervisor, environment: options.environment });
-  const projectPreparation = new ProjectPreparationService({ registryProviders: () => list.flatMap(adapter => adapter.skillDiscovery ? [adapter.skillDiscovery] : []) });
+  const projectPreparation = new ProjectPreparationService({ stateRoot: services.paths.root, registryProviders: () => list.flatMap(adapter => adapter.skillDiscovery ? [adapter.skillDiscovery] : []) });
   return new SessionManager({
     projectPreparation,
     preparationScope: input => {

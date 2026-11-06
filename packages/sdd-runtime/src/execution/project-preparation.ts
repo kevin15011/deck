@@ -7,7 +7,7 @@ import { parsePreparationRequest, type PreparationDelegation, type PreparationIn
 import type { SkillDiscoverySourceProviderV1 } from "@deck/core";
 import { createCoreGenericProjectSources, discoverSkills } from "../../../core/src/skill-discovery/discovery";
 import { canonicalizeSkillRegistry, computeSkillRegistrySourceScopeHash, parseSkillRegistryDocument } from "../../../core/src/skill-discovery/registry";
-import { createSkillRegistryWriteAuthority, createSkillRegistryWriter, POSIX_ATOMIC_REPLACE_PORT_V1 } from "../../../core/src/skill-discovery/persistence";
+import { createSkillRegistryWriteAuthority, createSkillRegistryWriter, declaresNewerSkillRegistrySchema, POSIX_ATOMIC_REPLACE_PORT_V1 } from "../../../core/src/skill-discovery/persistence";
 import { SKILL_DISCOVERY_V1_BOUNDS } from "../../../core/src/skill-discovery/contracts";
 import { migrateRetiredTestingPolicy } from "./retired-testing-policy";
 
@@ -147,7 +147,8 @@ function evaluateProjectReadiness(input: PreparationScope, readEvidence: typeof 
     const source = readEvidence(scope.projectRoot, REGISTRY, SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes, deadline);
     const parsed = parseSkillRegistryDocument(source);
     if (Date.now() > deadline) throw new Error("read-budget-exceeded");
-    if (!parsed.ok || !parsed.frontmatter) project("skill-registry", "degraded", "registry-invalid", source, "report-only");
+    if (declaresNewerSkillRegistrySchema(Buffer.from(source))) project("skill-registry", "degraded", "managed-by-newer-schema", source, "report-only");
+    else if (!parsed.ok || !parsed.frontmatter) project("skill-registry", "degraded", "registry-invalid", source, "report-only");
     else if (parsed.frontmatter.completeness !== "complete") project("skill-registry", "degraded", "registry-truncated", source, "report-only");
     else project("skill-registry", "indeterminate", "runner-exposure-unverified", source);
   }
@@ -165,7 +166,7 @@ export { readinessBlock as formatReadinessBlockV1 } from "@deck/core/session/rea
 
 /** The host supplies authenticated invocation and durable intent records, never model role strings. */
 export class ProjectPreparationService implements PreparationPort {
-  constructor(private readonly options: { indexBindings?: () => readonly IndexInitializerBinding[]; onProjectRead?: (path: string) => void; registryProviders?: () => readonly SkillDiscoverySourceProviderV1[]; registryProvider?: (runnerId: string) => SkillDiscoverySourceProviderV1 | undefined } = {}) {}
+  constructor(private readonly options: { stateRoot?: string; indexBindings?: () => readonly IndexInitializerBinding[]; onProjectRead?: (path: string) => void; registryProviders?: () => readonly SkillDiscoverySourceProviderV1[]; registryProvider?: (runnerId: string) => SkillDiscoverySourceProviderV1 | undefined } = {}) {}
   private readonly registryEvidence = new Map<string, { digest: string; runnerId?: string; partial?: boolean; stale: boolean }>();
   private registryScope(scope: PreparationScope) { return JSON.stringify(canonicalScope(preparationAuthorityScope(scope))); }
   /** Adapter-owned launch preparation, outside the synchronous project preflight.
@@ -351,15 +352,9 @@ export class ProjectPreparationService implements PreparationPort {
         let candidate: ReturnType<typeof canonicalizeSkillRegistry>;
         if (this.options.registryProviders) {
           if (!scope.members.some(m => m.runnerId === invocation.runnerId)) throw new Error("preparation-executor-unavailable");
-          // Unknown or user-edited bytes are preserved. Discovery still provides an ephemeral view.
-          if (expectedDigest !== "missing") {
-            const stored = parseSkillRegistryDocument(read(scope.projectRoot, REGISTRY, SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes));
-            if (!stored.ok || stored.frontmatter?.schema_version !== 2) throw new Error("preparation-registry-preserved");
-          }
           candidate = await discoverSharedSkillCatalog({ projectRoot: scope.projectRoot, providers: this.options.registryProviders() });
           live();
         } else {
-          if (expectedDigest !== "missing" && parseSkillRegistryDocument(read(scope.projectRoot, REGISTRY, SKILL_DISCOVERY_V1_BOUNDS.maxFileBytes)).frontmatter?.schema_version === 2) throw new Error("preparation-registry-preserved");
           const provider = this.options.registryProvider?.(invocation.runnerId);
           if (!scope.members.some(m => m.runnerId === invocation.runnerId) || !provider || provider.runnerId !== invocation.runnerId) throw new Error("preparation-executor-unavailable");
           const sourceSet = await provider.listSources({ projectRoot: scope.projectRoot });
@@ -382,7 +377,7 @@ export class ProjectPreparationService implements PreparationPort {
         live();
         let reserved = false;
         try {
-          const writer = createSkillRegistryWriter({ projectRoot: scope.projectRoot,
+          const writer = createSkillRegistryWriter({ projectRoot: scope.projectRoot, stateRoot: this.options.stateRoot,
             failpoint: stage => { if (!stage.startsWith("after_replace") && stage !== "before_directory_sync" && stage !== "after_directory_sync") live(); },
             atomicReplace: {
               replace: async (temporary, target) => {

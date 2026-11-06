@@ -233,9 +233,6 @@ async function runRefresh(
     return refreshFailure(snapshots.error, possibleTargets, [], "Registry persistence prerequisites were unavailable.");
   }
 
-  if (snapshots.registry.exists && (!snapshots.registry.text || parseSkillRegistryDocument(snapshots.registry.text).frontmatter?.schema_version !== 2)) {
-    return refreshFailure("registry_preserved", possibleTargets, [], "Unknown or edited registry bytes were preserved; use direct discovery.");
-  }
   const allowedTargets: SkillRegistryWriteTargetsV1 = snapshots.ignore.coversRegistry
     ? [REGISTRY_PATH]
     : [GITIGNORE_PATH, REGISTRY_PATH];
@@ -392,7 +389,7 @@ async function readRegularFile(
       try {
         text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       } catch {
-        return { error: "gitignore_unavailable" };
+        if (relativePath === GITIGNORE_PATH) return { error: "gitignore_unavailable" };
       }
     }
     return {

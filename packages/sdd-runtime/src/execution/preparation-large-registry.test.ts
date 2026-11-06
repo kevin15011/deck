@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectPreparationService } from "./project-preparation";
-import { fixture, cleanupPreparationFixtures } from "./preparation-test-fixture";
+import { fixture, cleanupPreparationFixtures, createPreparationService } from "./preparation-test-fixture";
 afterEach(cleanupPreparationFixtures);
 
 // protects: writer-supported large registries verify and reconcile without repeating effects.
@@ -17,7 +17,7 @@ test('large registry repair verifies, replays, and reconciles uncertain restart'
     writeFileSync(join(dir, 'SKILL.md'), `---\nname: skill-${i}\ndescription: ${'🧪'.repeat(500)}\n---\n`);
   }
   let discoveries = 0;
-  const service = new ProjectPreparationService({ registryProvider: runnerId => ({ schema: 'skill-discovery-source-provider-v1', runnerId,
+  const service = createPreparationService(f.scope.projectRoot, { registryProvider: runnerId => ({ schema: 'skill-discovery-source-provider-v1', runnerId,
     resolveLocator: async () => ({ status: 'missing' }),
     listSources: async () => { discoveries++; return { outcome: 'complete', sources: [], diagnostics: [] }; },
   }) });
@@ -30,7 +30,7 @@ test('large registry repair verifies, replays, and reconciles uncertain restart'
   const { parseSkillRegistryDocument } = await import('../../../core/src/skill-discovery/registry');
   expect(parseSkillRegistryDocument(bytes.toString()).frontmatter?.completeness).toBe('complete');
   expect((await service.repair(request, invocation)).status).toBe('reconciled');
-  const restarted = new ProjectPreparationService();
+  const restarted = createPreparationService(f.scope.projectRoot);
   expect(restarted.reconcile(f.scope, f.records.filter(r => r.state === 'intent'))).toMatchObject([{ component: 'skill-registry', state: 'reconciled' }]);
   expect(discoveries).toBe(1);
   expect(readFileSync(target).equals(bytes)).toBe(true);

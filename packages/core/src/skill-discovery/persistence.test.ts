@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { acquireRegistryLease } from "./registry-lease";
 
 import { canonicalizeSkillRegistry } from "./registry";
 import {
   computeSkillRegistryPersistenceDigest,
   createSkillRegistryWriteAuthority,
-  createSkillRegistryWriter,
+  createSkillRegistryWriter as createWriter,
   type AtomicReplacePortV1,
   type SkillRegistryWriteAuthorityMintInputV1,
   type SkillRegistryWriteFailpointV1,
@@ -37,6 +38,138 @@ describe("authorized skill registry persistence", () => {
       const target = CREATED_PROJECT_ROOTS.pop();
       if (target) await fs.rm(target, { force: true, recursive: true }).catch(() => undefined);
     }
+  });
+
+  test("serializes processes across state roots and releases after rollback", async () => {
+    const root = await createProject({ ignore: "*.log\n", registry: "old bytes" });
+    const candidate = registryDocument("race");
+    const fixture = path.join(root, "input.json");
+    await fs.writeFile(fixture, JSON.stringify({ root, candidate, module: path.join(import.meta.dir, "persistence.ts") }));
+    const program = `
+      const {root,candidate,module} = JSON.parse(await Bun.file(process.argv[1]).text());
+      const {createSkillRegistryWriter,createSkillRegistryWriteAuthority,computeSkillRegistryPersistenceDigest: hash} = await import(module);
+      const targets = [".gitignore", ".atl/skill-registry.md"], digest = "sha256:" + "a".repeat(64);
+      const plan = {schema:"skill-registry-write-plan-v1",action:"regeneration",active_runner_id:"opencode",project_root_digest:digest,allowed_targets:targets,expected_registry_digest:hash("old bytes"),expected_gitignore_digest:hash("*.log\\n"),candidate_document:candidate,candidate_digest:hash(candidate)};
+      const auth = createSkillRegistryWriteAuthority({projectRoot:root,projectRootDigest:digest,action:"regeneration",activeRunnerId:"opencode",allowedTargets:targets});
+      const first = process.argv[2] === "hold";
+      const writer = createSkillRegistryWriter({projectRoot:root,stateRoot:process.argv[3],registryLockRoot:root+"/locks",isTracked:async()=>{if(first){console.log("held"); for await (const _ of process.stdin) break;} return false;},failpoint: stage=>{if(first && stage === "after_replace") throw Error("injected");}});
+      console.log(JSON.stringify(await writer.commit(plan,auth)));
+    `;
+    const stateA = path.join(root, "state-a"), stateB = path.join(root, "state-b");
+    const env = { ...process.env, HOME: root, XDG_STATE_HOME: path.join(root, "xdg") };
+    const first = Bun.spawn([process.execPath, "-e", program, fixture, "hold", stateA], { env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+    const reader = first.stdout.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain("held");
+    const second = Bun.spawn([process.execPath, "-e", program, fixture, "try", stateB], { env, stdout: "pipe", stderr: "pipe" });
+    const secondOutput = await new Response(second.stdout).text();
+    expect(await second.exited).toBe(0);
+    expect(JSON.parse(secondOutput).reason_code).toBe("registry_busy");
+    expect(await readRegistry(root)).toBe("old bytes");
+    expect(await fs.readFile(path.join(root, ".gitignore"), "utf8")).toBe("*.log\n");
+    await expect(fs.stat(stateB)).rejects.toThrow();
+    first.stdin.write("continue\n"); first.stdin.end();
+    const remaining = await reader.read();
+    expect(JSON.parse(new TextDecoder().decode(remaining.value)).outcome).toBe("rejected");
+    expect(await first.exited).toBe(0);
+    expect(await readRegistry(root)).toBe("old bytes");
+    // The failed transaction may have installed the narrow ignore rule; retry uses its current digest.
+    const ignore = await fs.readFile(path.join(root, ".gitignore"), "utf8");
+    const result = await createSkillRegistryWriter({ projectRoot: root, stateRoot: stateB, isTracked: () => false }).commit(
+      writePlan(root, candidate, { allowed_targets: [".gitignore", ".atl/skill-registry.md"], expected_registry_digest: computeSkillRegistryPersistenceDigest("old bytes"), expected_gitignore_digest: computeSkillRegistryPersistenceDigest(ignore) }),
+      authority(root, { allowedTargets: [".gitignore", ".atl/skill-registry.md"] }),
+    );
+    expect(result.outcome).toBe("committed");
+  });
+
+  test("holds the lease through rollback", async () => {
+    // Protects restoration from a competing writer; oracle: contention during replacement and restored bytes.
+    const root = await createProject({ ignore: "/.atl/\n", registry: "old bytes" });
+    const candidate = registryDocument("rollback-held");
+    let sawBusy = false;
+    const result = await createSkillRegistryWriter({ projectRoot: root, isTracked: () => false,
+      failpoint: async stage => {
+        if (stage !== "after_replace") return;
+        const contender = await acquireRegistryLease(root, { lockRoot: path.join(root, "locks"), waitMs: 0 });
+        sawBusy = !contender.ok && contender.reason === "busy";
+        if (contender.ok) contender.lease.release();
+        throw new Error("force rollback");
+      },
+    }).commit(writePlan(root, candidate, { expected_registry_digest: computeSkillRegistryPersistenceDigest("old bytes") }), authority(root));
+    expect(sawBusy).toBe(true);
+    expect(result.outcome).toBe("rejected");
+    expect(await readRegistry(root)).toBe("old bytes");
+    const retry = await acquireRegistryLease(root, { lockRoot: path.join(root, "locks"), waitMs: 0 });
+    expect(retry.ok).toBe(true);
+    if (retry.ok) retry.lease.release();
+  });
+
+  for (const rollback of [false, true]) test(`reports lease cleanup failure after ${rollback ? "rollback" : "commit"}`, async () => {
+    // Protects transaction outcome when release reports failure; oracle: bytes and retry.
+    const root = await createProject({ ignore: "/.atl/\n", registry: "old bytes" });
+    const candidate = registryDocument("cleanup");
+    const result = await createSkillRegistryWriter({ projectRoot: root, isTracked: () => false,
+      acquireLease: async (project, deps) => {
+        const acquired = await acquireRegistryLease(project, deps);
+        if (!acquired.ok) return acquired;
+        return { ok: true, lease: { held: acquired.lease.held, release() { acquired.lease.release(); throw new Error("injected EIO"); } } };
+      },
+      failpoint: stage => { if (rollback && stage === "after_replace") throw new Error("injected EIO"); },
+    }).commit(writePlan(root, candidate, { expected_registry_digest: computeSkillRegistryPersistenceDigest("old bytes") }), authority(root));
+    expect(result.outcome).toBe(rollback ? "rejected" : "committed");
+    expect(result.diagnostics.some(d => d.code === "registry_cleanup_failed")).toBe(true);
+    expect(await readRegistry(root)).toBe(rollback ? "old bytes" : candidate);
+    const retry = await acquireRegistryLease(await fs.realpath(root), { lockRoot: path.join(root, "locks"), waitMs: 0 });
+    expect(retry.ok).toBe(true);
+    if (retry.ok) retry.lease.release();
+  });
+
+  for (const rejectedWrite of [false, true]) test(`reports retained cleanup files after ${rejectedWrite ? "rejection" : "commit"}`, async () => {
+    // Protects actual transaction outcome and cleanup reporting; oracle: file bytes and a fresh lease.
+    const root = await createProject({ ignore: "/.atl/\n", registry: "old bytes" });
+    const candidate = registryDocument("cleanup-files");
+    const attempted: string[] = [];
+    const result = await createSkillRegistryWriter({ projectRoot: root, stateRoot: path.join(root, "state"), isTracked: () => false,
+      failpoint: stage => {
+        if (rejectedWrite && stage === "before_replace") throw new Error("reject");
+        if (stage === "before_temp_cleanup" || stage === "before_backup_cleanup") { attempted.push(stage); throw new Error("injected EIO"); }
+      },
+    }).commit(writePlan(root, candidate, { expected_registry_digest: computeSkillRegistryPersistenceDigest("old bytes") }), authority(root));
+    expect(result.outcome).toBe(rejectedWrite ? "rejected" : "committed");
+    expect(result.diagnostics.some(d => d.code === "registry_cleanup_failed")).toBe(true);
+    expect(await readRegistry(root)).toBe(rejectedWrite ? "old bytes" : candidate);
+    const files = await fs.readdir(path.join(root, ".atl"));
+    const backup = files.find(file => file.includes(".backup-"));
+    expect(backup).toBeDefined();
+    expect(await fs.readFile(path.join(root, ".atl", backup!), "utf8")).toBe("old bytes");
+    expect(attempted).toContain("before_backup_cleanup");
+    if (rejectedWrite) {
+      const temporary = files.find(file => file.endsWith(".tmp") && !file.includes(".backup-"));
+      expect(temporary).toBeDefined();
+      expect(await fs.readFile(path.join(root, ".atl", temporary!), "utf8")).toBe(candidate);
+      expect(attempted).toContain("before_temp_cleanup");
+    }
+    const release = await acquireRegistryLease(await fs.realpath(root), { lockRoot: path.join(root, "locks"), waitMs: 0 });
+    expect(release.ok).toBe(true);
+    if (release.ok) release.lease.release();
+  });
+
+  test("reports retained backup after rollback", async () => {
+    // Protects rollback outcome and cleanup diagnostics; oracle: restored bytes and released lease.
+    const root = await createProject({ ignore: "/.atl/\n", registry: "old bytes" });
+    const candidate = registryDocument("cleanup-rollback");
+    const result = await createSkillRegistryWriter({ projectRoot: root, stateRoot: path.join(root, "state"), isTracked: () => false,
+      atomicReplace: { async replace(from, to) { if (path.basename(from).includes(".backup-")) await fs.copyFile(from, to); else await fs.rename(from, to); }, async syncDirectory() {} },
+      failpoint: stage => { if (stage === "after_replace" || stage === "before_backup_cleanup") throw new Error("injected EIO"); },
+    }).commit(writePlan(root, candidate, { expected_registry_digest: computeSkillRegistryPersistenceDigest("old bytes") }), authority(root));
+    expect(result.outcome).toBe("rejected");
+    expect(result.diagnostics.some(d => d.code === "registry_cleanup_failed")).toBe(true);
+    expect(await readRegistry(root)).toBe("old bytes");
+    const backup = (await fs.readdir(path.join(root, ".atl"))).find(file => file.includes(".backup-"));
+    expect(backup).toBeDefined();
+    expect(await fs.readFile(path.join(root, ".atl", backup!), "utf8")).toBe("old bytes");
+    const release = await acquireRegistryLease(await fs.realpath(root), { lockRoot: path.join(root, "locks"), waitMs: 0 });
+    expect(release.ok).toBe(true);
+    if (release.ok) release.lease.release();
   });
 
   test("atomically commits a complete candidate without editing covered ignore rules", async () => {
@@ -99,7 +232,7 @@ describe("authorized skill registry persistence", () => {
     await expect(fs.stat(path.join(projectRoot, ".atl", "skill-registry.md"))).rejects.toThrow();
   });
 
-  test("warns and refuses replacement of a tracked registry without Git remediation", async () => {
+  test("regenerates a tracked registry and reports its tracking status", async () => {
     const projectRoot = await createProject({
       ignore: "/.atl/\n",
       registry: registryDocument("old"),
@@ -115,9 +248,51 @@ describe("authorized skill registry persistence", () => {
       authority(projectRoot),
     );
 
+    expect(result.outcome).toBe("committed");
+    expect(result.diagnostics.some(d => d.code === "deck-generated-file-tracked")).toBe(true);
+    expect(await readRegistry(projectRoot)).toBe(registryDocument("new"));
+  });
+
+  test("backs up invalid bytes privately before replacing them", async () => {
+    const projectRoot = await createProject({ ignore: "/.atl/\n", registry: "broken registry" });
+    const stateRoot = path.join(projectRoot, "private-state");
+    const candidate = registryDocument("new");
+    const result = await createSkillRegistryWriter({ projectRoot, stateRoot, isTracked: () => false }).commit(
+      writePlan(projectRoot, candidate, { expected_registry_digest: computeSkillRegistryPersistenceDigest("broken registry") }), authority(projectRoot),
+    );
+    expect(result.outcome).toBe("committed");
+    const [directory] = await fs.readdir(path.join(stateRoot, "replaced"));
+    const [file] = await fs.readdir(path.join(stateRoot, "replaced", directory!));
+    const backup = path.join(stateRoot, "replaced", directory!, file!);
+    expect((await fs.stat(backup)).mode & 0o077).toBe(0);
+    expect(Buffer.from(JSON.parse(await fs.readFile(backup, "utf8")).entries[0].content, "base64").toString()).toBe("broken registry");
+    expect(await readRegistry(projectRoot)).toBe(candidate);
+  });
+
+  test("leaves registry and ignore bytes unchanged if private backup fails", async () => {
+    const projectRoot = await createProject({ ignore: "*.log\n", registry: "edited" });
+    const stateRoot = path.join(projectRoot, "not-a-directory");
+    await fs.writeFile(stateRoot, "occupied");
+    const candidate = registryDocument("new");
+    const result = await createSkillRegistryWriter({ projectRoot, stateRoot, isTracked: () => false }).commit(
+      writePlan(projectRoot, candidate, { allowed_targets: [".gitignore", ".atl/skill-registry.md"], expected_registry_digest: computeSkillRegistryPersistenceDigest("edited"), expected_gitignore_digest: computeSkillRegistryPersistenceDigest("*.log\n") }),
+      authority(projectRoot, { allowedTargets: [".gitignore", ".atl/skill-registry.md"] }),
+    );
     expect(result.outcome).toBe("rejected");
-    expect(result.reason_code).toBe("tracked_registry");
-    expect(await readRegistry(projectRoot)).toBe(oldDocument);
+    expect(await readRegistry(projectRoot)).toBe("edited");
+    expect(await fs.readFile(path.join(projectRoot, ".gitignore"), "utf8")).toBe("*.log\n");
+  });
+
+  test("preserves a registry declaring a newer schema", async () => {
+    const newer = "---\nschema: skill-registry-v3\nschema_version: 3\n---\nfuture\n";
+    const projectRoot = await createProject({ ignore: "/.atl/\n", registry: newer });
+    const result = await createSkillRegistryWriter({ projectRoot, isTracked: () => false }).commit(
+      writePlan(projectRoot, registryDocument("new"), { expected_registry_digest: computeSkillRegistryPersistenceDigest(newer) }),
+      authority(projectRoot),
+    );
+    expect(result.outcome).toBe("rejected");
+    expect(result.reason_code).toBe("managed-by-newer-schema");
+    expect(await readRegistry(projectRoot)).toBe(newer);
   });
 
   test("rejects invalid or partial candidates and preserves the last valid bytes", async () => {
@@ -457,7 +632,7 @@ function registryDocument(name: string): string {
 }
 
 async function createProject(input: { ignore?: string; registry?: string }): Promise<string> {
-  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "deck-registry-persistence-"));
+  const projectRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "deck-registry-persistence-")));
   CREATED_PROJECT_ROOTS.push(projectRoot);
   if (input.ignore !== undefined) await fs.writeFile(path.join(projectRoot, ".gitignore"), input.ignore);
   if (input.registry !== undefined) {
@@ -465,6 +640,14 @@ async function createProject(input: { ignore?: string; registry?: string }): Pro
     await fs.writeFile(path.join(projectRoot, ".atl", "skill-registry.md"), input.registry);
   }
   return projectRoot;
+}
+
+function createSkillRegistryWriter(options: Parameters<typeof createWriter>[0]): ReturnType<typeof createWriter> {
+  const root = options.projectRoot;
+  if (!CREATED_PROJECT_ROOTS.includes(root)) throw new Error("writer requires a private project fixture");
+  const stateRoot = options.stateRoot ?? path.join(root, "private-state");
+  if (!stateRoot.startsWith(`${root}${path.sep}`)) throw new Error("writer requires a private state root");
+  return createWriter({ ...options, stateRoot, registryLockRoot: path.join(root, "locks") });
 }
 
 async function readRegistry(projectRoot: string): Promise<string> {

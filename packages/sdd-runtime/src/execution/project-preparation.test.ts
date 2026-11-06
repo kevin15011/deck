@@ -16,7 +16,7 @@ import { migrateRetiredTestingPolicy } from "./retired-testing-policy";
 import { formatReadinessBlockV1, ProjectPreparationService, type IndexInitializerBinding } from "./project-preparation";
 
 
-import { fixture, cleanupPreparationFixtures } from "./preparation-test-fixture";
+import { fixture, cleanupPreparationFixtures, createPreparationService } from "./preparation-test-fixture";
 
 afterEach(cleanupPreparationFixtures);
 
@@ -42,7 +42,7 @@ test("mixed enablement checks one shared index and only its enabled runner; all 
 
 test("session component reads survive roster changes and refresh only changed files", () => {
   const f = fixture(), reads: string[] = [];
-  const service = new ProjectPreparationService({ onProjectRead: path => reads.push(path) });
+  const service = createPreparationService(f.scope.projectRoot, { onProjectRead: path => reads.push(path) });
   service.status(f.scope);
   expect(reads).toEqual(["openspec/config.yaml", ".atl/skill-registry.md"]);
   reads.length = 0;
@@ -90,7 +90,7 @@ test("persisted intent after an uncertain write reconciles without another effec
   const invocation = { ...f.invocation, record: (r: PreparationEffectRecord) => { if (r.state === "completed" && crash) { crash = false; throw new Error("ledger-unavailable"); } f.records.push(r); } };
   await expect(f.service.repair(f.request, invocation)).rejects.toThrow("ledger-unavailable");
   expect(f.service.status(f.scope).observations.find(o => o.component === "retired-testing-policy")?.status).toBe("indeterminate");
-  const restarted = new ProjectPreparationService();
+  const restarted = createPreparationService(f.scope.projectRoot);
   expect(restarted.reconcile(f.scope, f.records)).toMatchObject([{ state: "reconciled" }]);
   expect(restarted.status(f.scope).observations.find(o => o.component === "retired-testing-policy")?.status).toBe("ready");
   expect((await f.service.repair(f.request, invocation)).status).toBe("reconciled");
@@ -99,7 +99,7 @@ test("persisted intent after an uncertain write reconciles without another effec
 
 test("an intent with no proven postimage stays indeterminate after restart", () => {
   const f = fixture();
-  const restarted = new ProjectPreparationService();
+  const restarted = createPreparationService(f.scope.projectRoot);
   expect(restarted.reconcile(f.scope, [{ effectId: "e", delegationId: "d", component: "retired-testing-policy", before: "b", after: "unknown", state: "intent" }])).toEqual([]);
   expect(restarted.status(f.scope).observations.find(o => o.component === "retired-testing-policy")?.status).toBe("indeterminate");
 });
@@ -109,7 +109,7 @@ test.each([false, true])("disabled Setup uses an enabled initializer binding; la
   const binding: IndexInitializerBinding = { projectRoot: f.scope.projectRoot, bindingId: "quality", backendId: "fixture", generation: "g1", inputDigest: "a".repeat(64), expectedPostDigest: "b".repeat(64), status: "needs-index", validUntil: Date.now() + 60000,
     initializeProjectSync: root => { expect(root).toBe(f.scope.projectRoot); calls++; binding.inputDigest = binding.expectedPostDigest; binding.status = "ready"; },
   };
-  const service = new ProjectPreparationService({ indexBindings: () => { observations++; return [binding]; } });
+  const service = createPreparationService(f.scope.projectRoot, { indexBindings: () => { observations++; return [binding]; } });
   const snapshot = service.status(currentScope), request = { snapshotId: snapshot.snapshotId, components: ["codebase-memory-index"] };
   const delegation = service.delegate(request, currentScope, { taskId: "setup", attempt: 1 });
   const invocation = { ...f.invocation, delegation, current: () => currentScope, record: (record: PreparationEffectRecord) => {

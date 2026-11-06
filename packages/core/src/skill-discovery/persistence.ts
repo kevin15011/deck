@@ -2,7 +2,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { homedir } from "node:os";
 import { promisify } from "node:util";
+import { parseDocument } from "yaml";
+import { backupManagedPreimages } from "../managed-artifacts";
+import { acquireRegistryLease } from "./registry-lease";
 
 import type { RunnerId } from "../runner-adapter";
 import {
@@ -45,7 +49,9 @@ export type SkillRegistryWriteFailpointV1 =
   | "before_replace"
   | "after_replace"
   | "before_directory_sync"
-  | "after_directory_sync";
+  | "after_directory_sync"
+  | "before_temp_cleanup"
+  | "before_backup_cleanup";
 
 /** Replace-without-delete and directory durability operations used by the writer. */
 export interface AtomicReplacePortV1 {
@@ -65,6 +71,9 @@ export interface SkillRegistryWriteAuthorityMintInputV1 {
 
 export interface SkillRegistryWriterOptionsV1 {
   readonly projectRoot: string;
+  readonly stateRoot?: string;
+  readonly registryLockRoot?: string;
+  readonly acquireLease?: typeof acquireRegistryLease;
   readonly atomicReplace?: AtomicReplacePortV1;
   readonly isTracked?: (registryPath: string) => Promise<boolean> | boolean;
   readonly failpoint?: (
@@ -84,6 +93,9 @@ interface AuthorityStateV1 {
 
 interface WriterStateV1 {
   readonly projectRoot: string;
+  readonly stateRoot: string;
+  readonly registryLockRoot?: string;
+  readonly acquireLease: typeof acquireRegistryLease;
   readonly atomicReplace: AtomicReplacePortV1;
   readonly isTracked: (registryPath: string) => Promise<boolean> | boolean;
   readonly failpoint?: (
@@ -167,6 +179,9 @@ export function createSkillRegistryWriter(
   const projectRoot = requireAbsolutePath(options?.projectRoot, "project root");
   const state: WriterStateV1 = {
     projectRoot,
+    stateRoot: options.stateRoot ?? path.join(path.isAbsolute(process.env.XDG_STATE_HOME ?? "") ? process.env.XDG_STATE_HOME! : path.join(homedir(), ".local", "state"), "deck"),
+    registryLockRoot: options.registryLockRoot,
+    acquireLease: options.acquireLease ?? acquireRegistryLease,
     atomicReplace: options.atomicReplace ?? POSIX_ATOMIC_REPLACE_PORT_V1,
     isTracked: options.isTracked ?? ((registryPath) => isTrackedByGit(projectRoot, registryPath)),
     failpoint: options.failpoint,
@@ -196,6 +211,18 @@ export const POSIX_ATOMIC_REPLACE_PORT_V1: AtomicReplacePortV1 = Object.freeze({
   },
 });
 
+export function declaresNewerSkillRegistrySchema(bytes: Uint8Array): boolean {
+  const source = Buffer.from(bytes).toString("utf8");
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(source);
+  if (!match) return false;
+  const document = parseDocument(match[1], { uniqueKeys: true });
+  if (document.errors.length) return false;
+  const value: unknown = document.toJS();
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const version = (value as Record<string, unknown>).schema_version;
+  return typeof version === "number" && Number.isSafeInteger(version) && version > 2;
+}
+
 async function commitWrite(
   state: WriterStateV1,
   plan: SkillRegistryWritePlanV1,
@@ -213,8 +240,18 @@ async function commitWrite(
   let registryDirectory: string;
   let tempPath: string | undefined;
   let ignoreChanged = false;
+  let cleanupFailed = false;
+  const cleanup = async (filePath: string | undefined) => {
+    if (!filePath) return;
+    try {
+      await hit(state, path.basename(filePath).includes(".backup-") ? "before_backup_cleanup" : "before_temp_cleanup");
+      await removeOwnedFile(filePath);
+    } catch { cleanupFailed = true; }
+  };
   let replacement: ReplacementStateV1 | undefined;
+  let lease: import("./registry-lease").RegistryLease | undefined;
 
+  const result = await (async (): Promise<Awaited<ReturnType<SkillRegistryWriterV1["commit"]>>> => {
   try {
     await hit(state, "before_candidate_validation");
     const candidateResult = validateCandidate(plan, authorityState);
@@ -223,6 +260,9 @@ async function commitWrite(
     await hit(state, "after_candidate_validation");
 
     root = await resolveProjectRoot(state.projectRoot, authorityState.projectRoot);
+    const acquired = await state.acquireLease(root, { lockRoot: state.registryLockRoot });
+    if (!acquired.ok) return rejected(acquired.reason === "busy" ? "registry_busy" : acquired.reason === "lock_root_unsafe" ? "registry_lock_unsafe" : "registry_lock_unavailable", acquired.code ? [acquired.code] : []);
+    lease = acquired.lease;
     registryPath = containedPath(root, REGISTRY_TARGET);
     registryDirectory = path.dirname(registryPath);
     await assertContainedTarget(root, registryPath);
@@ -235,8 +275,17 @@ async function commitWrite(
     );
     if (expectedRegistryError) return rejected(expectedRegistryError);
 
-    if (await state.isTracked(registryPath)) {
-      return rejected("tracked_registry");
+    if (existingRegistry.bytes && declaresNewerSkillRegistrySchema(existingRegistry.bytes)) {
+      return rejected("managed-by-newer-schema");
+    }
+
+    const tracked = await state.isTracked(registryPath);
+    const diagnostics = tracked ? [{ code: "deck-generated-file-tracked", message: "Generated registry is tracked; consider untracking it." }] : [];
+
+    if (existingRegistry.bytes && !existingRegistry.bytes.equals(Buffer.from(candidate.document))) {
+      backupManagedPreimages({ stateRoot: state.stateRoot, runnerId: "registry", root, entries: [{ target: { path: registryPath, selector: { kind: "file" } }, content: existingRegistry.bytes }] });
+      await assertContainedTarget(root, registryPath);
+      if ((await readRegularFile(registryPath, "registry")).digest !== existingRegistry.digest) return rejected("stale_registry");
     }
 
     const ignorePath = containedPath(root, GITIGNORE_TARGET);
@@ -269,6 +318,7 @@ async function commitWrite(
         currentIgnore.snapshot.source,
         currentIgnore.snapshot.bytes,
         state.atomicReplace,
+        cleanup,
       );
       ignoreChanged = true;
       await hit(state, "after_ignore_update");
@@ -289,12 +339,12 @@ async function commitWrite(
         outcome: "unchanged",
         registry_digest: candidate.digest,
         gitignore_changed: ignoreChanged,
-        diagnostics: [],
+        diagnostics,
       };
     }
 
     await hit(state, "before_temp_write");
-    tempPath = await writePrivateTemporaryFile(registryDirectory, candidate.document);
+    tempPath = await writePrivateTemporaryFile(registryDirectory, candidate.document, "registry", cleanup);
     await hit(state, "after_temp_write");
 
     await hit(state, "before_fsync");
@@ -326,9 +376,13 @@ async function commitWrite(
       latestRegistry,
       candidate.digest,
       "registry",
+      cleanup,
     );
 
     await hit(state, "before_replace");
+    await assertContainedTarget(root, registryPath);
+    if ((await readRegularFile(registryPath, "registry")).digest !== latestRegistry.digest) return rejected("stale_registry");
+    if (!lease.held()) throw new PersistenceError("registry_lock_lost");
     try {
       await state.atomicReplace.replace(tempPath, registryPath);
     } catch {
@@ -346,13 +400,13 @@ async function commitWrite(
     }
     await hit(state, "after_directory_sync");
 
-    await removeOwnedFile(replacement.backupPath);
+    await cleanup(replacement.backupPath);
     replacement = undefined;
     return {
       outcome: "committed",
       registry_digest: candidate.digest,
       gitignore_changed: ignoreChanged,
-      diagnostics: [],
+      diagnostics,
     };
   } catch (error) {
     // A port is allowed to throw after replacing. Detect the candidate bytes
@@ -365,8 +419,8 @@ async function commitWrite(
       try {
         await restorePriorRegistry(replacement, state.atomicReplace);
       } catch (restoreError) {
-        await removeOwnedFile(tempPath);
-        await removeOwnedFile(replacement.backupPath);
+        await cleanup(tempPath);
+        await cleanup(replacement.backupPath);
         return rejected("recovery_required", [
           ...(error instanceof PersistenceError ? error.relatedReasons : []),
           primaryReason,
@@ -374,13 +428,15 @@ async function commitWrite(
         ]);
       }
     }
-    await removeOwnedFile(tempPath);
-    await removeOwnedFile(replacement?.backupPath);
+    await cleanup(tempPath);
+    await cleanup(replacement?.backupPath);
     return rejected(primaryReason, error instanceof PersistenceError ? error.relatedReasons : []);
-  } finally {
-    await removeOwnedFile(tempPath);
-    await removeOwnedFile(replacement?.backupPath);
   }
+  })().catch(() => rejected("recovery_required", ["persistence_failed"]));
+  await cleanup(tempPath);
+  await cleanup(replacement?.backupPath);
+  try { lease?.release(); } catch { cleanupFailed = true; }
+  return cleanupFailed ? { ...result, diagnostics: [...result.diagnostics, { code: "registry_cleanup_failed", message: "Registry transaction cleanup failed; the lease may remain busy." }] } : result;
 }
 
 function validatePlan(
@@ -460,6 +516,8 @@ function containedPath(root: string, relativePath: string): string {
 async function assertContainedTarget(root: string, targetPath: string): Promise<void> {
   if (!isWithinRoot(root, targetPath)) throw new PersistenceError("path_containment");
   const parent = path.dirname(targetPath);
+  const parentEntry = await lstatOrMissing(parent);
+  if (parentEntry?.isSymbolicLink()) throw new PersistenceError("path_containment");
   const existingParent = await existingRealPath(parent);
   if (existingParent && !isWithinRoot(root, existingParent)) {
     throw new PersistenceError("path_containment");
@@ -535,6 +593,7 @@ async function appendNarrowIgnoreRule(
   source: string,
   oldBytes: Buffer,
   atomicReplace: AtomicReplacePortV1,
+  cleanup: (filePath: string | undefined) => Promise<void>,
 ): Promise<void> {
   const suffix = source.length === 0 || source.endsWith("\n") || source.endsWith("\r") ? "" : "\n";
   const candidateSource = `${source}${suffix}${NARROW_IGNORE_RULE}\n`;
@@ -548,11 +607,12 @@ async function appendNarrowIgnoreRule(
     },
     computeSkillRegistryPersistenceDigest(candidateSource),
     "gitignore",
+    cleanup,
   );
   let tempPath: string | undefined;
 
   try {
-    tempPath = await writePrivateTemporaryFile(path.dirname(ignorePath), candidateSource, "gitignore");
+    tempPath = await writePrivateTemporaryFile(path.dirname(ignorePath), candidateSource, "gitignore", cleanup);
     await fsyncFile(tempPath);
     try {
       await atomicReplace.replace(tempPath, ignorePath);
@@ -568,7 +628,7 @@ async function appendNarrowIgnoreRule(
       throw new PersistenceError("gitignore_directory_sync_failed");
     }
 
-    await removeOwnedFile(replacement.backupPath);
+    await cleanup(replacement.backupPath);
   } catch (error) {
     if (!replacement.replaced) {
       replacement.replaced = await targetDiffersFromDigest(
@@ -589,8 +649,8 @@ async function appendNarrowIgnoreRule(
     }
     throw error;
   } finally {
-    await removeOwnedFile(tempPath);
-    await removeOwnedFile(replacement.backupPath);
+    await cleanup(tempPath);
+    await cleanup(replacement.backupPath);
   }
 }
 
@@ -620,7 +680,8 @@ function ignorePatternMatchesRegistry(pattern: string): boolean {
 async function writePrivateTemporaryFile(
   directoryPath: string,
   source: string,
-  targetLabel: ReplacementTargetLabelV1 = "registry",
+  targetLabel: ReplacementTargetLabelV1,
+  cleanup: (filePath: string | undefined) => Promise<void>,
 ): Promise<string> {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const nonce = randomBytes(16).toString("hex");
@@ -635,7 +696,7 @@ async function writePrivateTemporaryFile(
       }
       return tempPath;
     } catch (error) {
-      await removeOwnedFile(tempPath);
+      await cleanup(tempPath);
       if (isAlreadyExistsError(error)) continue;
       throw new PersistenceError("temp_write_failed");
     }
@@ -684,6 +745,7 @@ async function prepareReplacement(
   existingTarget: FileSnapshotV1,
   candidateDigest: SkillDiscoveryDigestV1,
   targetLabel: ReplacementTargetLabelV1,
+  cleanup: (filePath: string | undefined) => Promise<void>,
 ): Promise<ReplacementStateV1> {
   let backupPath: string | undefined;
   if (existingTarget.bytes !== undefined) {
@@ -698,7 +760,7 @@ async function prepareReplacement(
         await handle.close();
       }
     } catch {
-      await removeOwnedFile(backupPath);
+      await cleanup(backupPath);
       throw new PersistenceError("backup_failed");
     }
   }
@@ -757,7 +819,7 @@ async function targetDiffersFromDigest(
 
 async function removeOwnedFile(filePath: string | undefined): Promise<void> {
   if (!filePath || !path.basename(filePath).match(/^(?:\.skill-registry\.md|\.gitignore)\.(?:backup-)?[a-f0-9]+\.tmp$/)) return;
-  await fs.rm(filePath, { force: true }).catch(() => undefined);
+  await fs.rm(filePath, { force: true });
 }
 
 function compareExpectedDigest(

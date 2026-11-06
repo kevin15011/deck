@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { createDeclaredSkillProvider } from "../../../core/src/skill-discovery/declared-provider";
 import { parseSkillRegistryDocument } from "../../../core/src/skill-discovery/registry";
 import { ProjectPreparationService } from "./project-preparation";
-import { fixture, cleanupPreparationFixtures } from "./preparation-test-fixture";
+import { fixture, cleanupPreparationFixtures, createPreparationService } from "./preparation-test-fixture";
 afterEach(cleanupPreparationFixtures);
 test.each(["claude", "codex", "opencode", "pi"])("%s Setup writes the shared partial catalog and reconciles once", async runnerId => {
   const f = fixture(), root = f.scope.projectRoot;
   writeFileSync(join(root, ".gitignore"), "/.atl/skill-registry.md\n");
   const scope = { ...f.scope, members: [...f.scope.members, { memberId: "executor", runnerId, bindingId: "executor", capabilities: {} }] };
   const providers = ["claude", "codex", "opencode", "pi"].map(id => createDeclaredSkillProvider(id, { roots: () => [] }));
-  const service = new ProjectPreparationService({ registryProviders: () => providers });
+  const service = createPreparationService(f.scope.projectRoot, { registryProviders: () => providers });
   const request = { snapshotId: service.status(scope).snapshotId, components: ["skill-registry"] };
   const invocation = { ...f.invocation, runnerId, current: () => scope, delegation: service.delegate(request, scope, { taskId: "setup-task", attempt: 1 }) };
   expect((await service.repair(request, invocation)).status).toBe("changed");
@@ -27,14 +27,14 @@ test.each(["claude", "codex", "opencode", "pi"])("%s Setup writes the shared par
   expect(service.status(scope).observations.find(o => o.component === "skill-registry")?.reason).toBe("registry-partial");
   expect(f.records.filter(r => r.state === "intent")).toHaveLength(1);
 });
-test("shared repair preserves unknown registry bytes", async () => {
+test("authorized shared repair regenerates edited registry bytes", async () => {
   const f = fixture(), root = f.scope.projectRoot;
   mkdirSync(join(root, ".atl")); writeFileSync(join(root, ".atl/skill-registry.md"), "User-maintained catalog\n");
   writeFileSync(join(root, ".gitignore"), "/.atl/skill-registry.md\n");
-  const service = new ProjectPreparationService({ registryProviders: () => [] });
+  const service = createPreparationService(f.scope.projectRoot, { registryProviders: () => [] });
   const request = { snapshotId: service.status(f.scope).snapshotId, components: ["skill-registry"] };
   const invocation = { ...f.invocation, delegation: service.delegate(request, f.scope, { taskId: "setup-task", attempt: 1 }) };
-  await expect(service.repair(request, invocation)).rejects.toThrow("preparation-registry-preserved");
-  expect(readFileSync(join(root, ".atl/skill-registry.md"), "utf8")).toBe("User-maintained catalog\n");
-  expect(f.records).toEqual([]);
+  expect((await service.repair(request, invocation)).status).toBe("changed");
+  expect(parseSkillRegistryDocument(readFileSync(join(root, ".atl/skill-registry.md"), "utf8")).ok).toBe(true);
+  expect(f.records.some(record => record.state === "completed")).toBe(true);
 });

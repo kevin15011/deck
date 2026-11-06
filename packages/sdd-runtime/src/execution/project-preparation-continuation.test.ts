@@ -1,7 +1,7 @@
 // Protects shared component caching, targeted invalidation, and exact authenticated repair authority.
 import { afterEach, expect, test } from "bun:test";
 
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 
 import { tmpdir } from "node:os";
 
@@ -16,7 +16,7 @@ import { migrateRetiredTestingPolicy } from "./retired-testing-policy";
 import { formatReadinessBlockV1, ProjectPreparationService, type IndexInitializerBinding } from "./project-preparation";
 
 
-import { fixture, cleanupPreparationFixtures } from "./preparation-test-fixture";
+import { fixture, cleanupPreparationFixtures, createPreparationService } from "./preparation-test-fixture";
 
 afterEach(cleanupPreparationFixtures);
 
@@ -41,7 +41,7 @@ test.each([false, true])("registry generation/refresh uses the current Setup run
   writeFileSync(join(f.scope.projectRoot, '.gitignore'), '/.atl/skill-registry.md\n');
   const { SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA } = await import('../../../core/src/skill-discovery/contracts');
   let discoveries = 0;
-  const service = new ProjectPreparationService({ registryProvider: runnerId => ({ schema: SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA, runnerId,
+  const service = createPreparationService(f.scope.projectRoot, { registryProvider: runnerId => ({ schema: SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA, runnerId,
     resolveLocator: async () => ({ status: 'missing' }),
     listSources: async () => { discoveries++; return { outcome: 'complete', sources: [], diagnostics: [] }; },
   }) });
@@ -64,7 +64,7 @@ test.each([false, true].flatMap(existing => ['cancel', 'role', 'runner', 'source
   writeFileSync(join(root, '.gitignore'), fault === 'ignore' ? '# personal rules\n' : '/.atl/skill-registry.md\n');
   const { SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA } = await import('../../../core/src/skill-discovery/contracts');
   let active = true, currentScope = f.scope;
-  const service = new ProjectPreparationService({ registryProvider: runnerId => ({ schema: SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA, runnerId: fault === 'runner' ? 'pi' : runnerId,
+  const service = createPreparationService(f.scope.projectRoot, { registryProvider: runnerId => ({ schema: SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA, runnerId: fault === 'runner' ? 'pi' : runnerId,
     resolveLocator: async () => ({ status: 'missing' }),
     listSources: async () => {
       if (fault === 'cancel') active = false;
@@ -85,7 +85,7 @@ test.each([false, true].flatMap(existing => ['cancel', 'role', 'runner', 'source
   if (fault === 'source' || fault === 'late-source') expect(readFileSync(target, 'utf8')).toBe('concurrent editor');
   else if (fault === 'ledger') {
     const bytes = readFileSync(target, 'utf8');
-    const restarted = new ProjectPreparationService();
+    const restarted = createPreparationService(f.scope.projectRoot);
     expect(restarted.reconcile(f.scope, f.records)).toMatchObject([{ component: 'skill-registry', state: 'reconciled' }]);
     expect((await service.repair(request, { ...invocation, record: record => f.records.push(record) })).status).toBe('reconciled');
     expect(readFileSync(target, 'utf8')).toBe(bytes);
@@ -109,7 +109,7 @@ test('readiness requires explicit OpenSpec initialization', () => {
 test('complete registries require source evidence; truncated registries can be refreshed', async () => {
   const f = fixture(), root = f.scope.projectRoot, target = join(root, '.atl/skill-registry.md');
   writeFileSync(join(root, '.gitignore'), '/.atl/skill-registry.md\n');
-  const service = new ProjectPreparationService({ registryProvider: runnerId => ({ schema: 'skill-discovery-source-provider-v1', runnerId,
+  const service = createPreparationService(root, { registryProvider: runnerId => ({ schema: 'skill-discovery-source-provider-v1', runnerId,
     resolveLocator: async () => ({ status: 'missing' }), listSources: async () => ({ outcome: 'complete', sources: [], diagnostics: [] }),
   }) });
   const request = { snapshotId: service.status(f.scope).snapshotId, components: ['skill-registry'] };
@@ -125,6 +125,15 @@ test('complete registries require source evidence; truncated registries can be r
   const refresh = { ...request, snapshotId: snapshot.snapshotId };
   expect((await service.repair(refresh, { ...f.invocation, delegation: service.delegate(refresh, f.scope, { taskId: 'setup-task', attempt: 2 }) })).status).toBe('changed');
   expect(parseSkillRegistryDocument(readFileSync(target, 'utf8')).frontmatter?.completeness).toBe('complete');
+  writeFileSync(target, 'invalid registry');
+  const invalid = service.status(f.scope);
+  expect(invalid.observations.find(o => o.component === 'skill-registry')).toMatchObject({ reason: 'registry-invalid', repair: 'project' });
+  const invalidRequest = { ...request, snapshotId: invalid.snapshotId };
+  expect((await service.repair(invalidRequest, { ...f.invocation, delegation: service.delegate(invalidRequest, f.scope, { taskId: 'setup-task', attempt: 3 }) })).status).toBe('changed');
+  const backups = join(root, 'private-state', 'replaced');
+  expect(readdirSync(backups).length).toBeGreaterThan(0);
+  writeFileSync(target, '---\nschema_version: 3\n---\nfuture\n');
+  expect(service.status(f.scope).observations.find(o => o.component === 'skill-registry')).toMatchObject({ reason: 'managed-by-newer-schema', repair: 'report-only' });
 });
 
 
@@ -140,7 +149,7 @@ test.each(['missing', 'merge'])('OpenSpec %s repair is additive and reconciles u
   const bytes = readFileSync(f.file, 'utf8');
   expect(parse(bytes)).toMatchObject({ schema: 'spec-driven', initialized: true });
   if (shape === 'merge') expect(parse(bytes)).toMatchObject({ context: 'custom', testing: { commands: { test: 'custom-test' } } });
-  expect(new ProjectPreparationService().reconcile(f.scope, f.records)).toMatchObject([{ component: 'openspec', state: 'reconciled' }]);
+  expect(createPreparationService(f.scope.projectRoot).reconcile(f.scope, f.records)).toMatchObject([{ component: 'openspec', state: 'reconciled' }]);
   expect((await f.service.repair(request, invocation)).status).toBe('reconciled');
   expect(readFileSync(f.file, 'utf8')).toBe(bytes);
   expect(f.records.filter(r => r.state === 'intent')).toHaveLength(1);
@@ -159,7 +168,7 @@ test('OpenSpec merge rejects unknown shapes and preserves concurrent edits', asy
   const delegation = f.service.delegate(request, f.scope, { taskId: 'setup-task', attempt: 1 });
   await expect(f.service.repair(request, { ...f.invocation, delegation, record: r => { f.records.push(r); if (r.state === 'intent') writeFileSync(f.file, '# concurrent\n'); } })).rejects.toThrow('source-changed');
   expect(readFileSync(f.file, 'utf8')).toBe('# concurrent\n');
-  expect(new ProjectPreparationService().reconcile(f.scope, f.records)).toEqual([]);
+  expect(createPreparationService(f.scope.projectRoot).reconcile(f.scope, f.records)).toEqual([]);
 });
 
 
@@ -168,7 +177,7 @@ test('OpenSpec merge rejects unknown shapes and preserves concurrent edits', asy
 test('stale registry refresh requires its own source runner and preserves replay/restart', async () => {
   const f = fixture(), root = f.scope.projectRoot, target = join(root, '.atl/skill-registry.md');
   writeFileSync(join(root, '.gitignore'), '/.atl/skill-registry.md\n');
-  const service = new ProjectPreparationService({ registryProvider: runnerId => ({ schema: 'skill-discovery-source-provider-v1', runnerId,
+  const service = createPreparationService(f.scope.projectRoot, { registryProvider: runnerId => ({ schema: 'skill-discovery-source-provider-v1', runnerId,
     resolveLocator: async () => ({ status: 'missing' }), listSources: async () => ({ outcome: 'complete', sources: [], diagnostics: [] }),
   }) });
   const initial = { snapshotId: service.status(f.scope).snapshotId, components: ['skill-registry'] };
@@ -190,7 +199,7 @@ test('stale registry refresh requires its own source runner and preserves replay
   const after = readFileSync(target, 'utf8');
   expect(after).not.toBe(before);
   expect((await service.repair(request, invocation)).status).toBe('reconciled');
-  const restarted = new ProjectPreparationService();
+  const restarted = createPreparationService(f.scope.projectRoot);
   expect(restarted.reconcile(f.scope, f.records.filter(r => r.state === 'intent').slice(-1))).toMatchObject([{ state: 'reconciled' }]);
   expect(readFileSync(target, 'utf8')).toBe(after);
   writeFileSync(target, before);

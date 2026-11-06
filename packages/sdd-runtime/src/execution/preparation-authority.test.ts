@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PreparationScope } from "@deck/core/session/preparation";
 import { ProjectPreparationService } from "./project-preparation";
-import { fixture, cleanupPreparationFixtures } from "./preparation-test-fixture";
+import { fixture, cleanupPreparationFixtures, createPreparationService } from "./preparation-test-fixture";
 afterEach(cleanupPreparationFixtures);
 
 test.each(['observations', 'enabled', 'route', 'inputDigest', 'roster', 'epoch', 'policyDigest'] as const)('registry delegation after Setup runtime evidence: %s', async change => {
@@ -13,7 +13,7 @@ test.each(['observations', 'enabled', 'route', 'inputDigest', 'roster', 'epoch',
   const scope: PreparationScope = { ...f.scope, members: f.scope.members.map(member => ({ ...member,
     capabilities: { 'codebase-memory': { enabled: true, route: 'managed', inputDigest: 'generation-1', availability: 'unverified', prerequisites: 'missing' } },
   })) };
-  const service = new ProjectPreparationService({ registryProvider: runnerId => ({ schema: 'skill-discovery-source-provider-v1', runnerId,
+  const service = createPreparationService(f.scope.projectRoot, { registryProvider: runnerId => ({ schema: 'skill-discovery-source-provider-v1', runnerId,
     resolveLocator: async () => ({ status: 'missing' }), listSources: async () => ({ outcome: 'complete', sources: [], diagnostics: [] }),
   }) });
   const request = { snapshotId: service.status(scope).snapshotId, components: ['skill-registry'] };
@@ -50,7 +50,7 @@ test.each(['invocation-revoked', 'request-snapshot-mismatch', 'snapshot-unavaila
   const invocation = { ...f.invocation, delegation: { ...f.invocation.delegation }, rejected: (value: string) => { reasons.push(value); } };
   if (reason === 'invocation-revoked') f.revoke();
   else if (reason === 'request-snapshot-mismatch') request = { ...request, snapshotId: 'different' };
-  else if (reason === 'snapshot-unavailable') service = new ProjectPreparationService();
+  else if (reason === 'snapshot-unavailable') service = createPreparationService(f.scope.projectRoot);
   else if (reason === 'delegation-expired') invocation.delegation.expiresAt = 0;
   else if (reason === 'role-mismatch') invocation.roleId = 'deck-lead';
   else if (reason === 'generation-missing') invocation.generation = '';

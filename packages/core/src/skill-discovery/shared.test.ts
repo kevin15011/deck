@@ -1,6 +1,6 @@
 // Protects shared visibility, stable identity, truthful partial coverage and inert provenance.
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDeclaredSkillProvider } from "./declared-provider";
@@ -9,7 +9,7 @@ import { parseSkillRegistryDocument } from "./registry";
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })));
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "shared-skills-")); roots.push(root);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "shared-skills-"))); roots.push(root);
   const skill = join(root, "skills/example"); mkdirSync(skill, { recursive: true });
   writeFileSync(join(skill, "SKILL.md"), "---\nname: example\ndescription: Review typed interfaces\n---\nbody\n");
   const providers = ["claude", "codex", "opencode", "pi"].map(runnerId => createDeclaredSkillProvider(runnerId, {
@@ -76,7 +76,7 @@ test("shared publication binds candidate bytes as well as the executor", async (
     expected_registry_digest: "missing" as const, candidate_document: catalog.document, candidate_digest: hash(catalog.document) };
   const mint = (candidateDigest?: `sha256:${string}`) => createSkillRegistryWriteAuthority({ projectRoot: root, projectRootDigest: hash(root),
     activeRunnerId: "pi", action: "initial_generation", allowedTargets: plan.allowed_targets, candidateDigest });
-  const writer = createSkillRegistryWriter({ projectRoot: root, isTracked: () => false });
+  const writer = createSkillRegistryWriter({ projectRoot: root, stateRoot: join(root, "state"), registryLockRoot: join(root, "locks"), isTracked: () => false });
   expect((await writer.commit(plan, mint())).reason_code).toBe("candidate_authority_required");
   expect((await writer.commit(plan, mint(hash("different candidate")))).reason_code).toBe("candidate_digest_mismatch");
   expect((await writer.commit(plan, mint(plan.candidate_digest))).outcome).toBe("committed");
