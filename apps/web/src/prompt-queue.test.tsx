@@ -61,7 +61,7 @@ test('image-only acceptance and pre-admission failure replay retain compact prev
  expect(html).toContain('Image message');expect(html).toContain('View image 1: clipboard.png');expect(html).toContain('Runner unavailable');
 });
 test('empty restart pause is hidden while queued and failed input keep resume visible',()=>{
- for(const pauseReason of ['daemon-stopped','web-restart-forced:restart']) {
+ for(const pauseReason of ['daemon-stopped','web-restart-forced:restart','session-released']) {
   const render=(items:any[]=[],failed:any[]=[])=>renderToStaticMarkup(<PromptQueue items={items} failed={failed} paused pauseReason={pauseReason} connected busy={false} onCancel={()=>{}} onResume={()=>{}}/>);
   expect(render()).toBe('');
   expect(render([{promptId:'q',text:'Waiting'}])).toContain('Resume queue');
