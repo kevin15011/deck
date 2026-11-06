@@ -16,7 +16,7 @@ export async function discoverSessionModels(adapters: readonly RunnerAdapter[], 
       if (result.state !== "ready") return unavailable("model-discovery-unavailable");
       const models = Object.values(result.inventory.modelsByProvider).flat()
         .filter(model => model.visibility !== "hidden" && !(adapter.runnerId === "claude" && model.id === "inherit"))
-        .map(model => ({modelId:model.id,label:model.displayName,thinkingLevels:adapter.getThinkingLevels(model.id)}));
+        .map(model => ({modelId:model.id,label:adapter.runnerId === "opencode" ? `${model.providerId ?? model.id.split("/")[0]} · ${model.displayName}` : model.displayName,thinkingLevels:adapter.getThinkingLevels(model.id)}));
       return {...base,available:models.length > 0,...(models.length ? {} : {reasonCode:"models-unavailable"}),models};
     } catch { return unavailable("model-discovery-failed"); }
   }));

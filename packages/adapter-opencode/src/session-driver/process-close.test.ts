@@ -18,7 +18,7 @@ test('natural close waits for owned process termination and coalesces repeated c
     if(path==='/mcp')return Response.json({});
     if(path==='/agent')return Response.json([{name:'build',permission:[]}]);
     if(path==='/session')return Response.json({id:'native'});
-    if(path==='/session/native/message'){message=JSON.parse(init.body);return Response.json({info:{id:'answer',sessionID:'native'},parts:[{type:'text',text:'violet'}]});}
+    if(path==='/session/native/message'){message=JSON.parse(init.body);return Response.json({info:{id:'answer',role:'assistant',parentID:message.messageID,sessionID:'native'},parts:[{type:'text',sessionID:'native',messageID:'answer',text:'violet'}]});}
     if(path==='/event')return new Response(new ReadableStream({start(c){stopStream=()=>{try{c.close();}catch{}};c.enqueue(new TextEncoder().encode('data: {"type":"server.connected","properties":{}}\n\n'));init.signal.addEventListener('abort',()=>{try{c.close();}catch{}},{once:true});}}));
     return Response.json([]);
   }) as any;

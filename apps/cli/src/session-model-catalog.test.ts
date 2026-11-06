@@ -11,7 +11,7 @@ test("keeps degraded Claude and OpenCode selectable when native model discovery 
     getModelInventory:async()=>({state:"ready",inventory:{modelsByProvider:{native:[{id:`${runnerId}/native-model`,displayName:"Native model"}]}}}),
   })) as unknown as RunnerAdapter[];
   const result=await discoverSessionModels(adapters,degradedLookup,"/project");
-  expect(result.runners).toEqual(adapters.map(adapter=>({runnerId:adapter.runnerId,label:adapter.runnerId,available:true,models:[{modelId:`${adapter.runnerId}/native-model`,label:"Native model",thinkingLevels:["high"]}]})));
+  expect(result.runners).toEqual(adapters.map(adapter=>({runnerId:adapter.runnerId,label:adapter.runnerId,available:true,models:[{modelId:`${adapter.runnerId}/native-model`,label:adapter.runnerId === "opencode" ? "opencode · Native model" : "Native model",thinkingLevels:["high"]}]})));
 });
 test("does not discover models for blocked runners or expose raw probe reasons",async()=>{
   const blockedLookup={get:()=>({probe:async()=>({status:"blocked",reasonCode:"secret-token"})})} as unknown as DriverLookup;

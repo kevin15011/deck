@@ -19,7 +19,7 @@ import { DriverStartupCleanupError } from '@deck/core/session/failure';
 export const OPENCODE_TESTED_VERSIONS = { min: "1.18.31", maxTested: "1.18.31" } as const;
 export type OpenCodeSessionDriverOptions = OpenCodeLaunchOptions & {
   requireNativeRole?: boolean;
-  readinessMs?: number; escalationMs?: number; killGraceMs?: number;
+  dependencyPreparationMs?: number; readinessMs?: number; escalationMs?: number; killGraceMs?: number;
   exec?: (command: string, args: readonly string[], options: { cwd: string; timeoutMs: number }) => Promise<{ code: number | null; stdout: string }>;
 };
 const nativeExec: NonNullable<OpenCodeSessionDriverOptions["exec"]> = (cmd, args, opts) => new Promise((resolve, reject) => {
@@ -32,7 +32,10 @@ function matchesPermission(pattern: string, value: string): boolean {
   return new RegExp(`^${escaped}$`).test(value);
 }
 
-type Turn = { confirmInvocation?: (info: Record<string, unknown>) => void; settle: (outcome: TurnOutcome) => void; interrupted: boolean; contextCompacted?: boolean; forced?: boolean; timer?: ReturnType<typeof setTimeout>; controller: AbortController };
+type PendingMessageEvent = { messageId: string; raw: unknown; bytes: number };
+const MAX_PENDING_MESSAGE_EVENTS = 256;
+const MAX_PENDING_MESSAGE_BYTES = 1024 * 1024;
+type Turn = { messageId?: string; assistantIds: Set<string>; rejectedIds: Set<string>; pending: PendingMessageEvent[]; pendingBytes: number; confirmInvocation?: (info: Record<string, unknown>) => void; settle: (outcome: TurnOutcome) => void; interrupted: boolean; contextCompacted?: boolean; forced?: boolean; timer?: ReturnType<typeof setTimeout>; controller: AbortController };
 
 class OpenCodeTask {
   private base = "";
@@ -64,6 +67,7 @@ class OpenCodeTask {
   private finish(outcome: TurnOutcome) {
     const turn = this.current; if (!turn) return;
     this.lastOutcome = outcome;
+    turn.pending = []; turn.pendingBytes = 0;
     this.current = undefined; if (turn.timer) clearTimeout(turn.timer); turn.controller.abort(); turn.settle(outcome);
   }
 
@@ -130,11 +134,24 @@ class OpenCodeTask {
     const startupFailure = new Promise<never>((_resolve, reject) => {
       startupSignal.addEventListener("abort", () => reject(startupSignal.reason ?? new Error("OpenCode startup aborted")), { once: true });
     });
-    const timeout = setTimeout(() => startup.abort(new Error("OpenCode readiness timed out")), this.options.readinessMs ?? 10_000);
+    let timeout = setTimeout(() => startup.abort(new Error("OpenCode readiness timed out")), this.options.readinessMs ?? 10_000);
     const setup = async () => {
       const [url] = await Promise.all([endpoint, this.child.ready]);
       startupSignal.throwIfAborted();
       this.base = url;
+      // Native initialization owns SDK/plugin dependency acquisition. It is a
+      // separate bounded phase: no session, prompt or admission is issued yet.
+      // Run it in this leased server with the exact launch environment, so no
+      // detached cache warmer or stale success marker can substitute for it.
+      clearTimeout(timeout);
+      timeout = setTimeout(() => startup.abort(new Error("OpenCode dependency preparation timed out")), this.options.dependencyPreparationMs ?? 60_000);
+      this.emit({ kind: "diagnostic", data: { code: "opencode-dependencies-preparing" } });
+      const preparedAgents = await this.request("/agent", undefined, startupSignal);
+      if (!Array.isArray(preparedAgents)) throw new Error("opencode-dependency-preparation-failed");
+      startupSignal.throwIfAborted();
+      this.emit({ kind: "diagnostic", data: { code: "opencode-dependencies-prepared" } });
+      clearTimeout(timeout);
+      timeout = setTimeout(() => startup.abort(new Error("OpenCode readiness timed out")), this.options.readinessMs ?? 10_000);
       void this.loadContextLimits();
       const config = await this.request("/config", undefined, startupSignal);
       if (!record(config) || !record(config.mcp)) throw new Error("opencode-native-config-unavailable");
@@ -281,16 +298,54 @@ class OpenCodeTask {
     } finally { await releaseReader(); }
   }
 
+  private correlateAssistant(turn: Turn, messageId: string) {
+    turn.assistantIds.add(messageId);
+    if (turn.assistantIds.size > 1024) turn.assistantIds.delete(turn.assistantIds.values().next().value!);
+    const pending = turn.pending.filter(event => event.messageId === messageId);
+    turn.pending = turn.pending.filter(event => event.messageId !== messageId);
+    turn.pendingBytes -= pending.reduce((sum, event) => sum + event.bytes, 0);
+    // Remove before replay: repeated identity updates must never replay twice.
+    for (const event of pending) this.event(event.raw);
+  }
+
   private event(raw: unknown) {
     if (this.closed || this.serverDead) return;
     raw = redactImagePayload(raw);
     const p = record(raw) && record(raw.properties) ? raw.properties : {};
     const sid = p.sessionID ?? (record(p.part) ? p.part.sessionID : undefined) ?? (record(p.info) ? p.info.sessionID : undefined);
     if (sid && sid !== this.nativeId) return;
-    if (record(raw) && raw.type === "message.updated" && record(p.info) && sid === this.nativeId) this.current?.confirmInvocation?.(p.info);
-    // SSE assistant updates carry a parent id but this request does not yet
-    // know its native user-message id. Use the existing correlated HTTP result
-    // below instead of assigning a late same-session update to a new request.
+    if (record(raw) && typeof raw.type === "string" && raw.type.startsWith("message.")) {
+      const turn = this.current;
+      if (!turn || turn.interrupted || sid !== this.nativeId || (record(p.info) && p.info.sessionID !== this.nativeId) || (record(p.part) && p.part.sessionID !== this.nativeId)) return;
+      if (raw.type === "message.updated" && record(p.info)) {
+        turn.confirmInvocation?.(p.info);
+        if (this.current !== turn || typeof p.info.id !== "string") return;
+        if (p.info.role !== "assistant" || p.info.parentID !== turn.messageId) {
+          turn.rejectedIds.add(p.info.id);
+          if (turn.rejectedIds.size > 1024) turn.rejectedIds.delete(turn.rejectedIds.values().next().value!);
+          turn.pending = turn.pending.filter(event => event.messageId !== p.info.id);
+          turn.pendingBytes = turn.pending.reduce((sum, event) => sum + event.bytes, 0);
+          return;
+        }
+        if (turn.rejectedIds.has(p.info.id)) return;
+        this.correlateAssistant(turn, p.info.id);
+      } else {
+        const messageId = record(p.part) ? p.part.messageID : p.messageID;
+        if (!turn.assistantIds.has(messageId)) {
+          if ((raw.type !== 'message.part.updated' && raw.type !== 'message.part.delta') || typeof messageId !== 'string' || messageId === turn.messageId || turn.rejectedIds.has(messageId)) return;
+          // Retain only current-session parts, with both count and byte bounds.
+          // Overflow evicts oldest events; missing classifications fail closed.
+          const bytes = Buffer.byteLength(JSON.stringify(raw), 'utf8');
+          if (bytes > MAX_PENDING_MESSAGE_BYTES) return;
+          while (turn.pending.length >= MAX_PENDING_MESSAGE_EVENTS || turn.pendingBytes + bytes > MAX_PENDING_MESSAGE_BYTES) turn.pendingBytes -= turn.pending.shift()!.bytes;
+          turn.pending.push({ messageId, raw, bytes }); turn.pendingBytes += bytes;
+          return;
+        }
+      }
+    }
+
+    // Stream only assistants parented to this POST. Usage remains owned by the
+    // correlated HTTP response so late updates cannot pollute a newer turn.
     for (const event of this.mapper.map(raw)) if (event.kind !== 'usage') this.emit(event);
     if (!record(raw)) return;
     if (raw.type === 'session.compacted' && sid === this.nativeId) {
@@ -299,13 +354,16 @@ class OpenCodeTask {
     }
     if (raw.type === "permission.asked") this.permission(p);
     if (raw.type === "question.asked") this.question(p);
-    if (raw.type === "session.error") {
+    if (raw.type === "session.status" && sid === this.nativeId && this.current && record(p.status) && p.status.type === "retry") {
+      this.emit({ kind: "diagnostic", data: { code: "opencode-provider-retry", ...(Number.isSafeInteger(p.status.attempt) && p.status.attempt > 0 ? { attempt: p.status.attempt } : {}) } });
+    }
+    if (raw.type === "session.error" && sid === this.nativeId) {
       const aborted = this.current?.interrupted && record(p.error) && p.error.name === "MessageAbortedError";
       // This event has only session identity, no request/turn identity. Preserve its terminal
       // behavior without assigning an uncorrelated provider cause to a newer request.
       this.finish(aborted ? { status: "interrupted" } : { status: "failed", error: "OpenCode session error", failure: { category: "unknown", origin: "unknown", certainty: "inferred" } });
     }
-    if ((raw.type === "session.idle" || (raw.type === "session.status" && record(p.status) && p.status.type === "idle")) && this.current?.interrupted) this.finish({ status: "interrupted" });
+    if ((raw.type === "session.idle" || (raw.type === "session.status" && record(p.status) && p.status.type === "idle")) && sid === this.nativeId && this.current?.interrupted) this.finish({ status: "interrupted" });
   }
 
   private permission(raw: unknown) {
@@ -396,13 +454,14 @@ Patterns: ${raw.always.join("\n")}`,
     const split = this.input.assignment.modelId.replace(/^opencode\/(.+\/.+)$/, "$1").indexOf("/");
     const modelId = this.input.assignment.modelId.replace(/^opencode\/(.+\/.+)$/, "$1");
     if (split <= 0) return Promise.resolve({ status: "failed", error: "OpenCode model must be provider/model" });
-    const done = new Promise<TurnOutcome>(settle => { this.current = { settle, interrupted: false, controller: new AbortController() }; });
+    const done = new Promise<TurnOutcome>(settle => { this.current = { settle, interrupted: false, assistantIds: new Set(), rejectedIds: new Set(), pending: [], pendingBytes: 0, controller: new AbortController() }; });
     const turn = this.current!;
     if (this.io.claimInput?.() === false) { this.finish({ status: "interrupted" }); return done; }
     const role = this.input.nativeRoleDescriptor;
     // OpenCode 1.18.31 accepts caller message IDs and echoes the selected agent
     // in message.updated. Keep native timestamp ordering and bind one exact POST.
     const messageId = `msg_${BigInt.asUintN(48, BigInt(Date.now()) * 4096n).toString(16).padStart(12,"0")}${randomUUID().replaceAll("-", "").slice(0,14)}`;
+    turn.messageId = messageId;
     if (role) {
       let revoked = false, observed = false;
       const current = () => {
@@ -424,12 +483,14 @@ Patterns: ${raw.always.join("\n")}`,
     }
     this.emit({ kind: "turn.started", data: { nativeSessionId: this.nativeId, nativeThreadId: this.nativeId, model: this.input.assignment.modelId } });
     void this.request(`/session/${encodeURIComponent(this.nativeId)}/message`, {
-      ...(role ? { messageID: messageId } : {}), system: [this.input.rolePrompt, this.input.localContext].filter(Boolean).join("\n\n"), ...(this.input.nativeRoleDescriptor ? { agent: this.input.nativeRoleDescriptor.roleRef } : {}), model: { providerID: modelId.slice(0, split), modelID: modelId.slice(split + 1) },
+      messageID: messageId, system: [this.input.rolePrompt, this.input.localContext].filter(Boolean).join("\n\n"), ...(this.input.nativeRoleDescriptor ? { agent: this.input.nativeRoleDescriptor.roleRef } : {}), model: { providerID: modelId.slice(0, split), modelID: modelId.slice(split + 1) },
       ...(this.input.assignment.thinking && this.input.assignment.thinking !== "off" ? { variant: this.input.assignment.thinking } : {}), parts: [...(prompt || !nativeImages.length ? [{ type: "text", text: prompt }] : []), ...nativeImages.map(image => ({ type: "file", mime: image.mimeType, filename: image.name, url: `data:${image.mimeType};base64,${image.data}` }))],
     }, AbortSignal.any([turn.controller.signal, this.lifetime.signal])).then(result => {
       if (this.current !== turn || this.serverDead) return;
       if (turn.interrupted && record(result) && record(result.info) && record(result.info.error) && result.info.error.name === "MessageAbortedError") return this.finish({ status: "interrupted" });
-      if (!record(result) || !record(result.info) || result.info.error) return this.finish({ status: "failed", error: "OpenCode message failed", failure: classifyOpenCodeFailure(record(result) && record(result.info) ? result.info.error : undefined) });
+      if (!record(result) || !record(result.info) || result.info.role !== "assistant" || result.info.sessionID !== this.nativeId || result.info.parentID !== messageId || typeof result.info.id !== "string") return this.finish({ status: "failed", error: "OpenCode message response was not correlated", failure: classifyOpenCodeFailure(undefined) });
+      if (result.info.error) return this.finish({ status: "failed", error: "OpenCode message failed", failure: classifyOpenCodeFailure(result.info.error) });
+      if (!turn.interrupted && !turn.rejectedIds.has(result.info.id)) this.correlateAssistant(turn, result.info.id);
       if (result.info.sessionID === this.nativeId && !turn.interrupted) {
         for (const event of this.mapper.map({ type: 'message.updated', properties: { info: result.info } })) {
           if (event.kind === 'usage') {
@@ -441,7 +502,7 @@ Patterns: ${raw.always.join("\n")}`,
         }
       }
       if(!turn.interrupted && result.info.sessionID===this.nativeId)for(const event of correlatedOpenCodeEdits(result,this.nativeId))this.emit(event);
-      for (const part of Array.isArray(result.parts) ? result.parts : []) if (record(part) && part.type === "text" && typeof part.text === "string") this.emit({ kind: "message.completed", data: { text: part.text, messageId: result.info.id }, raw: part });
+      for (const part of Array.isArray(result.parts) ? result.parts : []) if (record(part) && part.sessionID === this.nativeId && part.messageID === result.info.id && part.type === "text" && typeof part.text === "string") this.emit({ kind: "message.completed", data: { text: part.text, messageId: result.info.id }, raw: part });
       this.finish({ status: turn.interrupted ? "interrupted" : "completed" });
     }, error => { if (this.current === turn && !turn.interrupted && !this.serverDead) this.finish({ status: "failed", error: redactText((error as Error).message, 400) }); });
     return done;
@@ -450,6 +511,7 @@ Patterns: ${raw.always.join("\n")}`,
   async interrupt(): Promise<void> {
     const turn = this.current; if (!turn || turn.interrupted || this.serverDead) return;
     turn.interrupted = true;
+    turn.pending = []; turn.pendingBytes = 0;
     turn.timer = setTimeout(() => {
       if (this.current !== turn) return;
       turn.forced = true;

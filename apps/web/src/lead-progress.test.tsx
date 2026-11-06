@@ -228,3 +228,13 @@ test('explicit task admission reopens compaction evidence after a settled turn w
  current.apply(compaction(3));
  expect(leadProgress(current.values(), { sessionId: 's' })?.phase).toBe('compacting');
 });
+
+// Protects retry visibility without treating provider retry as assistant output or terminal success.
+test('OpenCode retry is visible until real response or terminal evidence replaces it',()=>{
+ const retry={...event(2,'diagnostic',{code:'opencode-provider-retry',attempt:1}),source:{taskId:'lead',runnerId:'opencode'}};
+ const events=[event(1,'turn.started'),retry];
+ expect(leadProgress(events,{sessionId:'s'})).toMatchObject({phase:'waiting',label:expect.stringContaining('retrying')});
+ expect(leadProgress([...events,event(3,'message.delta',{text:'Reply'})],{sessionId:'s'})).toMatchObject({phase:'responding'});
+ for(const status of ['completed','failed','interrupted'])expect(leadProgress([...events,event(3,'turn.completed',{status}),{...retry,seq:4}],{sessionId:'s'})).toBeUndefined();
+ expect(leadProgress([event(1,'turn.started'),{...retry,source:{taskId:'child',runnerId:'opencode'}}],{sessionId:'s'})).toMatchObject({label:'Waiting for Lead…'});
+});

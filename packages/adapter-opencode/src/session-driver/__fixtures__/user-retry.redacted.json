@@ -1,0 +1,45 @@
+[
+  {
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "native",
+      "info": {
+        "id": "captured-user",
+        "role": "user",
+        "sessionID": "native"
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "native",
+      "part": {
+        "id": "captured-part",
+        "messageID": "captured-user",
+        "sessionID": "native",
+        "type": "text",
+        "text": "Hola"
+      }
+    }
+  },
+  {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "native",
+      "status": {
+        "type": "busy"
+      }
+    }
+  },
+  {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "native",
+      "status": {
+        "type": "retry",
+        "attempt": 1
+      }
+    }
+  }
+]

@@ -48,6 +48,10 @@ export function leadProgress(events: SessionEvent[], { sessionId, pending, conne
             continue;
         }
         if (ended) continue;
+        if (event.kind === 'diagnostic' && event.data.code === 'opencode-provider-retry' && event.source.runnerId === 'opencode') {
+            progress = { phase: 'waiting', label: 'Provider request failed; OpenCode is retrying…' };
+            continue;
+        }
         if (event.kind === 'diagnostic' && event.data.code === 'context.compaction') {
             const { state } = event.data;
             const key = compactionIdentity(event);
