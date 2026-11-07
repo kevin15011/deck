@@ -9,6 +9,35 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-07
+
+### Added
+
+- Host-local dictation with the multilingual Whisper large-v3-turbo Q5_0 model, explicit verified downloads, language selection and on-demand processing through a compatible host-installed whisper-cli. Transcriptions enter the editable draft; sending remains explicit.
+- Dedicated responsive Settings with Appearance, Notifications, Dictation and App sections, keyboard navigation and browser Back support.
+- Review branch comparison from the remote default merge base to HEAD, bounded pagination, per-file counts and independent branch identity.
+- Shared skill discovery with ranked, deduplicated candidates and relevance filtering; managed artifact recovery and pinned tool repair.
+- Runner self-refresh with ownership reconciliation, trust checks and installation admission for Claude, Codex, OpenCode and Pi.
+
+### Changed
+
+- Retire conversational memory and Supermemory integrations. Existing managed content is reconciled conservatively with recovery evidence; unknown user content is preserved.
+- Refine mobile navigation, themes, motion, role assignment controls and compact Review controls.
+- Enforce a four-minute fast-suite deadline; slow files emit diagnostics without automatic retries.
+
+### Fixed
+
+- Recover suspended mobile chat connections and preserve chat following across mobile menus.
+- Refresh the prompt inbox after session lifecycle changes and pause queued prompts after deterministic startup failures.
+- Preserve Claude MCP metadata and subscription transport, tolerate runner-generated plugin editor artifacts, and correlate OpenCode turns while bounding dependency preparation.
+- Serialize authorized skill-registry regeneration with private backups and preserve cleanup evidence for delegated tasks.
+
+### Compatibility and limits
+
+- Dictation supports Turbo Q5 only. Saved Small or Turbo Q8 selections become unselected without downloading replacements or automatically deleting old weights.
+- Microphone capture requires a secure browser context. Audio is bounded by five minutes, 16 million raw samples and a 10 MiB upload limit. Reaching the capture limit retains audio for explicit transcription or cancellation.
+- The compatible whisper.cpp CLI must be installed separately. No inference process remains resident while idle. Physical iOS/Safari capture and a cross-platform speech-quality benchmark remain unqualified.
+
 ## [0.14.0] - 2026-10-26
 
 ### Added
