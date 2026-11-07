@@ -1,3 +1,6 @@
+import {DictationService} from './dictation/service';
+import {DictationError} from './dictation/wav';
+import {isDictationModelId,DICTATION_LIMITS} from '@deck/core/session/dictation';
 import { quotaEventForWeb, type QuotaStore } from "./quota";
 /** Loopback browser transport with authenticated device actions and a CLI-injected lifecycle capability. */
 import type {WebRestart} from "./web-restart";
@@ -55,6 +58,8 @@ export type WebServiceOptions = {
   push?: Pick<WebPushOptions, "send">;
   restart?:WebRestart;
   quota?:QuotaStore;
+  dictation?:DictationService;
+  dictationAdmit?:()=>boolean;
   maxReplayEvents?: number;
   maxQueuedBytes?: number;
 };
@@ -62,7 +67,7 @@ const COOKIE = "deck_device";
 const PUSH_COOKIE_MAX_AGE = 180 * 24 * 60 * 60;
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
 const equal = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-const HEADERS = { "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store", "Permissions-Policy": "camera=(), microphone=(), geolocation=()" };
+const HEADERS = { "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store", "Permissions-Policy": "camera=(), microphone=(self), geolocation=()" };
 const safeId = (v: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(v) && !v.includes("..");
 export class WebService {
   private server?: Server<SocketData>;
@@ -93,6 +98,7 @@ export class WebService {
   private readonly now: () => number;
   private error?: string;
   private uploadsInFlight = 0;
+  get dictationUploading(){return this.uploadsInFlight>0;}
   private histories = new Map<EventLog, {history:ChatHistory;unsubscribe:()=>void}>();
   private history(log:EventLog) {
     let entry=this.histories.get(log);
@@ -130,7 +136,7 @@ export class WebService {
   enable(persist = true) {
     if (!this.server) {
       try {
-        this.server = Bun.serve<SocketData>({ hostname: "127.0.0.1", port: this.options.config.port, maxRequestBodySize: IMAGE_ATTACHMENT_LIMITS.maxFileBytes + 1024 * 1024, fetch: (r, s) => this.fetch(r, s), websocket: { maxPayloadLength: 1024, backpressureLimit: this.options.maxQueuedBytes ?? 1024 * 1024, closeOnBackpressureLimit: false, open: ws => this.open(ws), message: ws => ws.close(1008, "Read-only stream"), close: ws => { ws.data.unsubscribe?.(); this.sockets.delete(ws); } } });
+        this.server = Bun.serve<SocketData>({ hostname: "127.0.0.1", port: this.options.config.port, maxRequestBodySize: Math.max(DICTATION_LIMITS.maxBytes, IMAGE_ATTACHMENT_LIMITS.maxFileBytes + 1024 * 1024), fetch: (r, s) => this.fetch(r, s), websocket: { maxPayloadLength: 1024, backpressureLimit: this.options.maxQueuedBytes ?? 1024 * 1024, closeOnBackpressureLimit: false, open: ws => this.open(ws), message: ws => ws.close(1008, "Read-only stream"), close: ws => { ws.data.unsubscribe?.(); this.sockets.delete(ws); } } });
         this.error = undefined;
         try {
           this.replies=new LeadReplies(this.options.paths.webDir,this.now);
@@ -309,16 +315,16 @@ export class WebService {
     if (!origin || !origins.includes(origin) || new URL(origin).host !== host)
       return false;
   } return true; }
-  private async boundedBody(r: Request, max: number): Promise<Uint8Array> {
+  private async boundedBody(r: Request, max: number, timeoutMs=30_000): Promise<Uint8Array> {
     const length = r.headers.get("content-length");
     if (length !== null && (!/^\d+$/.test(length) || Number(length) > max)) throw new Error("body-too-large");
     const reader = r.body?.getReader(); if (!reader) return new Uint8Array();
     const body = new Uint8Array(length === null ? max : Number(length)); let size=0, aborted=false;
     const abort=()=>{aborted=true;void reader.cancel().catch(()=>{});};
     r.signal.addEventListener("abort",abort,{once:true});
-    const timeout=setTimeout(abort,30_000);
+    const timeout=setTimeout(abort,timeoutMs);
     if(r.signal.aborted) abort();
-    try { for (;;) { const result=await reader.read(); if(aborted) throw new Error("upload-aborted"); if(result.done) break; size+=result.value.length; if(size>max) { void reader.cancel().catch(()=>{}); throw new Error("body-too-large"); } body.set(result.value,size-result.value.length); } }
+    try { for (;;) { const result=await reader.read(); if(aborted) throw new Error("upload-aborted"); if(result.done) break; size+=result.value.length; if(size>max||size>body.length) { void reader.cancel().catch(()=>{}); throw new Error("body-too-large"); } body.set(result.value,size-result.value.length); } }
     finally { clearTimeout(timeout);r.signal.removeEventListener("abort",abort);reader.releaseLock(); }
     return body.subarray(0,size);
   }
@@ -365,6 +371,46 @@ export class WebService {
         const device = this.device(r, s);
         if (!device)
           return this.response({ ok: false, code: 'device-required' }, 401);
+        if(path==='/api/dictation'||path.startsWith('/api/dictation/')) {
+          const dictation=this.options.dictation;
+          if(!dictation)return this.response({ok:false,code:'dictation-unavailable'},503);
+          const authorized=()=>this.device(r,s)?.id===device.id;
+          const admitted=()=>!this.options.dictationAdmit||this.options.dictationAdmit();
+          try {
+            if(path==='/api/dictation'&&r.method==='GET'){
+              const summary=await dictation.summary();if(!authorized())return this.response({ok:false,code:'device-required'},401);
+              return this.response({ok:true,...summary});
+            }
+            if(!admitted())return this.response({ok:false,code:'daemon-stopping'},503);
+            if(path==='/api/dictation/transcriptions'&&r.method==='POST'){
+              if(!/^audio\/wav(?:\s*;|$)/i.test(r.headers.get('content-type')??''))return this.response({ok:false,code:'dictation-audio-format'},415);
+              if(this.uploadsInFlight>=1)return this.response({ok:false,code:'dictation-busy'},429);
+              this.uploadsInFlight++;
+              try {
+                let bytes:Uint8Array;try{bytes=await this.boundedBody(r,DICTATION_LIMITS.maxBytes,90_000);}catch(error){return this.response({ok:false,code:(error as Error).message==='upload-aborted'?'dictation-cancelled':'dictation-audio-too-large'},(error as Error).message==='upload-aborted'?408:413);}
+                if(!authorized())return this.response({ok:false,code:'device-required'},401);
+                if(!admitted())return this.response({ok:false,code:'daemon-stopping'},503);
+                const controller=new AbortController(),abort=()=>controller.abort();r.signal.addEventListener('abort',abort,{once:true});if(r.signal.aborted)abort();
+                const authTimer=setInterval(()=>{if(!authorized())controller.abort();},100);
+                try{const result=await dictation.transcribe(bytes,controller.signal);if(!authorized())return this.response({ok:false,code:'device-required'},401);return this.response(result);}
+                finally{clearInterval(authTimer);r.signal.removeEventListener('abort',abort);}
+              }finally{this.uploadsInFlight--;}
+            }
+            if(path==='/api/dictation/settings'&&r.method==='PUT'){
+              if(!/^application\/json(?:\s*;|$)/i.test(r.headers.get('content-type')??''))return this.response({ok:false,code:'dictation-settings-invalid'},415);
+              let body:Record<string,unknown>;try{body=JSON.parse(new TextDecoder().decode(await this.boundedBody(r,4096)));}catch{return this.response({ok:false,code:'dictation-settings-invalid'},400);}
+              if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(k=>!['selected','language'].includes(k)))return this.response({ok:false,code:'dictation-settings-invalid'},400);
+              if(!authorized())return this.response({ok:false,code:'device-required'},401);if(!admitted())return this.response({ok:false,code:'daemon-stopping'},503);
+              await dictation.settings(body.selected,body.language,()=>authorized()&&admitted());return this.response({ok:true});
+            }
+            const model=/^\/api\/dictation\/models\/([^/]+)(\/download)?$/.exec(path);
+            if(model&&isDictationModelId(model[1])){
+              if(model[2]&&r.method==='POST'){await dictation.download(model[1],()=>authorized()&&admitted());return this.response({ok:true},202);}
+              if(r.method==='DELETE'){if(model[2])await dictation.cancelDownload(model[1],()=>authorized()&&admitted());else await dictation.delete(model[1],()=>authorized()&&admitted());return this.response({ok:true});}
+            }
+            return this.response({ok:false,code:'dictation-route-unknown'},404);
+          } catch(error){return this.response({ok:false,code:error instanceof DictationError?error.code:'dictation-failed'},error instanceof DictationError?error.status:500);}
+        }
         if (path === '/api/quota' && r.method === 'GET') return this.options.quota ? this.response({ ok: true, ...this.options.quota.read() }) : this.response({ok:false,code:'quota-unavailable'},503);
         const quotaRefresh = /^\/api\/quota\/(claude|codex)\/refresh$/.exec(path);
         if (quotaRefresh && r.method === 'POST') {

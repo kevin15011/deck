@@ -1,3 +1,4 @@
+import {DictationService} from './dictation/service';
 import type { BuildIdentity } from "@deck/core";
 import { QuotaStore, type QuotaRefresh } from "./quota";
 import { runnerMutationActive, acquireRunnerMutationMarker, releaseRunnerMutationMarker } from "./runner-mutation";
@@ -108,6 +109,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
   let web: WebService | undefined;
   let quota: QuotaStore | undefined;
   let unsubscribeQuota: (() => void) | undefined;
+  let dictation:DictationService|undefined;
   try {
     const recovery = options.recoverOnStart === false ? { sessions: [], errors: [] } : recoverAllSessions({ paths, probe });
     for (const e of recovery.errors) logger.warn("recovery.session-failed", { sessionId: e.sessionId, error: e.error });
@@ -134,6 +136,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     // Older CLI compositions construct the manager with only the approval broker.
     const questionBroker = svc.questionBroker ?? defaultQuestionBroker;
     services.questionBroker = questionBroker;
+    dictation=options.web?new DictationService(paths.dictationDir):undefined;
     let draining = false;
     let admitted = 0;
     // Fence admission synchronously with restart acceptance. All transports share the same gate,
@@ -173,7 +176,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     const startedAt = clock.now();
     const nonce = lock.nonce;
     let stopRequested: ((reason: StopReason) => Promise<void>) | undefined;
-    const isBusy = () => runnerMutationActive(paths, probe) || admitted > 0 || quota?.refreshing === true || svc.hasRunningWork() || broker.pending().length > 0 || questionBroker.pending().length > 0;
+    const isBusy = () => dictation?.active() === true || web?.dictationUploading === true || runnerMutationActive(paths, probe) || admitted > 0 || quota?.refreshing === true || svc.hasRunningWork() || broker.pending().length > 0 || questionBroker.pending().length > 0;
     const bridge = new BridgeService({
       credentials, broker, questionBroker,
       status: (grant) => svc.taskStatus?.(grant) ?? { sessionId: grant.sessionId, taskId: grant.taskId, memberId: grant.memberId },
@@ -181,11 +184,11 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     });
 
     const restart=new WebRestart({paths,current:{...(options.restart?.identity??{version:options.version,channel:options.restartChannel??"stable",digest:"0".repeat(64)}),pid,nonce},launcher:options.restart?.launcher??{inspect:async()=>{throw Error("restart-unavailable");},prepare:async()=>{throw Error("restart-unavailable");}},
-      snapshot:()=>{const work=svc.restartSnapshot?.(),approvals=broker.pending(),questions=questionBroker.pending();return{fingerprint:createHash('sha256').update(JSON.stringify([work?.fingerprint??svc.hasRunningWork(),approvals,questions,admitted,draining,web?.status().port])).digest('hex'),tasks:work?.tasks??Number(svc.hasRunningWork()),approvals:approvals.length,questions:questions.length,busy:isBusy()||draining};},
+      snapshot:()=>{const work=svc.restartSnapshot?.(),approvals=broker.pending(),questions=questionBroker.pending();return{fingerprint:createHash('sha256').update(JSON.stringify([work?.fingerprint??svc.hasRunningWork(),approvals,questions,admitted,dictation?.active(),web?.dictationUploading,draining,web?.status().port])).digest('hex'),tasks:work?.tasks??Number(svc.hasRunningWork()),approvals:approvals.length,questions:questions.length,busy:isBusy()||draining};},
       webPort:()=>web?.status().port,
       drain:value=>{if(value&&draining)throw Error('restart-in-progress');draining=value;},stop:reason=>{void stopRequested?.(reason);},
     });
-    if(options.web){web=new WebService({paths,service:guardedService,...options.web,restart,quota});if(options.web.autoStart!==false)try{web.start();}catch{logger.warn('web.listen-failed');}}
+    if(options.web){web=new WebService({paths,service:guardedService,...options.web,restart,quota,dictation,dictationAdmit:()=>!draining&&!runnerMutationActive(paths,probe)});if(options.web.autoStart!==false)try{web.start();}catch{logger.warn('web.listen-failed');}}
 
     server = new ControlServer({
       socketPath: paths.socket.path,
@@ -231,6 +234,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
         logger.info("daemon.stopping", { reason, clients: activeServer.clientCount + (web?.clientCount ?? 0), webListening: web?.listening === true });
         idle.stop();
         unsubscribeQuota?.(); quota?.close();
+        await dictation?.close();
         broker.dispose(reason.startsWith("web-restart-forced:")?reason:"shutdown");
         questionBroker.dispose(reason.startsWith("web-restart-forced:")?reason:"shutdown");
         // Let the manager abort readiness, drain native handles and release shared backend
@@ -261,6 +265,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     };
   } catch (error) {
     unsubscribeQuota?.(); quota?.close();
+        await dictation?.close();
     try { await web?.close(); } catch { /* best effort */ }
     try { await server?.close(); } catch { /* best effort */ }
     try { await service?.close?.(); } catch { /* best effort */ }

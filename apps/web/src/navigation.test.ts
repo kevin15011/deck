@@ -143,3 +143,11 @@ test('queued overlay navigation is discarded when Back reaches a foreign entry',
 test('legacy OpenSpec routes migrate to Review without losing session',()=>{
  expect(parseRoute({project:'p',session:'s',tab:'openspec'})).toEqual({project:'p',session:'s',tab:'git'});
 });
+
+// Protects section identity, bounded route parsing and Back to the originating session.
+test('settings sections participate in history and reject unrelated keys',()=>{
+ const f=fixture();f.navigation.navigate({project:'p',session:'s',tab:'chat'});f.navigation.navigate({project:'p',session:'s',tab:'chat',overlay:{kind:'settings'}});
+ f.navigation.navigate({project:'p',session:'s',tab:'chat',overlay:{kind:'settings',section:'dictation'}});
+ expect(f.navigation.current.route.overlay).toEqual({kind:'settings',section:'dictation'});f.back();expect(f.navigation.current.route.overlay).toEqual({kind:'settings'});f.back();expect(f.navigation.current.route.overlay).toBeUndefined();
+ for(const overlay of [{kind:'settings',section:'unknown'},{kind:'drawer',section:'dictation'},{kind:'settings',decisionId:'one'}])expect(parseRoute({project:'p',tab:'chat',overlay})).toBeUndefined();
+});

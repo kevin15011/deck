@@ -16,6 +16,7 @@ export type StatePaths = {
   daemonInfoFile: string;
   sessionsDir: string;
   webDir: string;
+  dictationDir: string;
   devicesFile: string;
   logsDir: string;
   socket: SocketLocation;
@@ -64,6 +65,7 @@ export function resolveStatePaths(options: ResolveStatePathsOptions = {}): State
     daemonInfoFile: join(daemonDir, "daemon.json"),
     sessionsDir: join(root, "sessions"),
     webDir: join(root, "web"),
+    dictationDir: join(root, "dictation"),
     devicesFile: join(root, "web", "devices.json"),
     logsDir: join(root, "logs"),
     socket,

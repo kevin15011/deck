@@ -15,6 +15,7 @@
     "./session/start-context": "./src/session/start-context.ts",
     "./session/readiness-parity": "./src/session/readiness-parity.ts",
     "./session/preparation": "./src/session/preparation.ts",
+    "./session/dictation": "./src/session/dictation.ts",
     "./session/quota": "./src/session/quota.ts",
     "./session/daemon-restart": "./src/session/daemon-restart.ts",
     "./session/lead-replies": "./src/session/lead-replies.ts",
