@@ -10,12 +10,12 @@ import type { CommandOutcome } from './protocol';
 const MAX_PATCH = 256 * 1024, MAX_CATALOG = 1024 * 1024, MAX_FILES = 500;
 const messages = {
  'git-invalid': 'Invalid Git file selection.', 'git-unavailable': 'Git changes are unavailable. Open a session at a Git worktree root.',
- 'git-limit': 'Git read exceeded the viewer limits: 500 changed files, 1 MiB catalog, 256 KiB diff, 5 seconds per command; bounded metadata/worktree reads, 100,000 entries or 10 seconds.',
+ 'git-limit': 'Git read exceeded a viewer limit. Retry with a smaller comparison.',
  'git-unsupported': 'This repository uses unsupported filesystem entries or Git metadata indirection.',
  'git-stale': 'This change is no longer available. Refresh the file list.', 'git-busy': 'Another Git view request is running. Try again.',
 };
-class GitError extends Error { constructor(readonly code: keyof typeof messages) { super(messages[code]); } }
-const failure = (error: unknown): CommandOutcome => { const code = error instanceof GitError ? error.code : 'git-unavailable'; return {ok:false,code,message:messages[code]}; };
+class GitError extends Error { constructor(readonly code: keyof typeof messages, detail?:string) { super(detail??messages[code]); } }
+const failure = (error: unknown): CommandOutcome => { const code = error instanceof GitError ? error.code : 'git-unavailable'; return {ok:false,code,message:error instanceof GitError?error.message:messages[code]}; };
 const active = new Set<string>();
 // Each private view owns the descriptors passed to its Git children. Paths in
 // objects/ refer only to these inherited regular-file handles, never live paths.
@@ -27,12 +27,12 @@ export function git(root: string, args: string[], maxBuffer = MAX_CATALOG, diff 
    cwd:root, env:{...env,GIT_OPTIONAL_LOCKS:'0',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_NO_LAZY_FETCH:'1',GIT_ATTR_NOSYSTEM:'1',LC_ALL:'C'},
    stdio:['pipe','pipe','pipe',...(['config','rev-parse','ls-files','check-ignore'].includes(args[0]!)?[]:objectHandles.get(root)??[])],
   });
-  let size=0, limited=false; const chunks:Buffer[]=[];
-  const timer=setTimeout(()=>{limited=true;child.kill('SIGKILL');},5000);
-  child.stdout!.on('data',(chunk:Buffer)=>{size+=chunk.length;if(size>maxBuffer){limited=true;child.kill('SIGKILL');}else chunks.push(chunk);});
+  let size=0, limited=''; const chunks:Buffer[]=[];
+  const timer=setTimeout(()=>{limited=`Git ${args[0]} exceeded the 5 second command deadline. Retry or narrow the comparison.`;child.kill('SIGKILL');},5000);
+  child.stdout!.on('data',(chunk:Buffer)=>{size+=chunk.length;if(size>maxBuffer){limited=`Git ${args[0]} output exceeded ${maxBuffer} bytes. Narrow the comparison outside Review.`;child.kill('SIGKILL');}else chunks.push(chunk);});
   child.stderr!.on('data',()=>{});
   child.once('error',()=>{clearTimeout(timer);reject(new GitError('git-unavailable'));});
-  child.once('close',code=>{clearTimeout(timer);if(limited)reject(new GitError('git-limit'));else if(code!==0 && !(diff && code===1))reject(new GitError('git-unavailable'));else resolve(Buffer.concat(chunks).toString('utf8'));});
+  child.once('close',code=>{clearTimeout(timer);if(limited)reject(new GitError('git-limit',limited));else if(code!==0 && !(diff && code===1))reject(new GitError('git-unavailable'));else resolve(Buffer.concat(chunks).toString('utf8'));});
   child.stdin!.on('error',()=>{});
   if(typeof input==='object') {
    // Stream only the captured extent, from the already authorized descriptor.
@@ -50,27 +50,28 @@ function livePath(path:string) {
  // These are OS-owned Darwin aliases, not arbitrary user symlinks.
  return process.platform==='darwin'?resolve(path).replace(/^\/(tmp|var|etc)(?=\/|$)/,'/private/$1'):resolve(path);
 }
-async function repository(projectRoot: string, selected?:string): Promise<View> {
+async function repository(projectRoot: string, selected?:string, committed=false, identity=false): Promise<View> {
  const root=realpathSync(mkdtempSync(join(tmpdir(),'deck-git-view-')));
  const handles:number[]=[];objectHandles.set(root,handles);
  const unavailable=new Map<string,string>(),large=new Map<string,{binary:boolean,status?:string}>();
  const dispose=()=>{objectHandles.delete(root);for(const fd of handles)closeSync(fd);rmSync(root,{recursive:true,force:true});};
  const budget:CopyBudget={bytes:64*1024*1024,entries:100_000,deadline:Date.now()+10_000};
  let comparisonBytes=64*1024*1024;
+ let stage='repository metadata';
  const tick=()=>{if(--budget.entries<0 || Date.now()>budget.deadline)throw new TreeLimitError('Repository read limit exceeded');};
  const trees:SafeTree[]=[];
  const own=(tree:SafeTree)=>{trees.push(tree);return tree;};
  function readMetadata(entry:{fd:number,size:number},limit=MAX_CATALOG):string {
   try {
-   if(entry.size>limit)throw new TreeLimitError('Metadata limit');
+   if(entry.size>limit)throw new TreeLimitError(`Metadata file exceeds ${limit} bytes`);
    const buffer=Buffer.alloc(entry.size);let offset=0;
    while(offset<buffer.length){const count=readSync(entry.fd,buffer,offset,buffer.length-offset,offset);if(!count)throw Error('Metadata changed');offset+=count;}
    return buffer.toString('utf8');
   }finally{closeSync(entry.fd);}
  }
- function text(tree:SafeTree,name:string):string {
+ function text(tree:SafeTree,name:string,limit=MAX_CATALOG):string {
   const entry=tree.entry(name);if(entry.kind!=='file') {if(entry.kind==='directory')entry.tree.close();throw Error('Invalid metadata');}
-  return readMetadata(entry);
+  return readMetadata(entry,limit);
  }
  function copy(tree:SafeTree,name:string,target:string) {
   const entry=tree.entry(name);if(entry.kind!=='file'){if(entry.kind==='directory')entry.tree.close();throw Error('Invalid metadata');}
@@ -127,7 +128,6 @@ async function repository(projectRoot: string, selected?:string): Promise<View> 
  }
  try {
   const source=own(SafeTree.root(livePath(projectRoot)));
-  if(!source.names().includes('.git'))throw new GitError('git-unavailable');
   const gitEntry=source.entry('.git');let metadata:SafeTree,metadataPath:string;
   if(gitEntry.kind==='directory'){metadata=own(gitEntry.tree);metadataPath=join(livePath(projectRoot),'.git');}
   else if(gitEntry.kind==='file') {
@@ -135,16 +135,24 @@ async function repository(projectRoot: string, selected?:string): Promise<View> 
    if(!pointer.startsWith('gitdir: '))throw Error('Invalid gitdir');
    metadataPath=livePath(resolve(projectRoot,pointer.slice(8)));metadata=own(SafeTree.root(metadataPath));
   }else throw Error('Invalid gitdir');
+  const gitdir=join(root,'.git');mkdirSync(gitdir,{mode:0o700});
+  if(identity){
+   writeFileSync(join(gitdir,'HEAD'),text(metadata,'HEAD',4096));mkdirSync(join(gitdir,'refs'));mkdirSync(join(gitdir,'objects'));
+   return {root,unavailable,large,dispose};
+  }
   let common=metadata,commonPath=metadataPath;
   if(metadata.names().includes('commondir')) {
    commonPath=livePath(resolve(metadataPath,text(metadata,'commondir').trim()));common=own(SafeTree.root(commonPath));
   }
-  const gitdir=join(root,'.git');mkdirSync(gitdir,{mode:0o700});
   const commonNames=common.names(),metaNames=metadata.names();
-  for(const name of ['HEAD','index',...metaNames.filter(name=>name.startsWith('sharedindex.'))])if(metaNames.includes(name))copy(metadata,name,join(gitdir,name));
+  stage=committed?'commit metadata':'working index metadata';
+  for(const name of ['HEAD',...(!committed?['index',...metaNames.filter(name=>name.startsWith('sharedindex.'))]:[])])if(metaNames.includes(name))copy(metadata,name,join(gitdir,name));
   for(const name of ['packed-refs','shallow'])if(commonNames.includes(name))copy(common,name,join(gitdir,name));
+  stage='reference metadata';
   if(commonNames.includes('refs')){const refs=common.directory('refs');try{copyRefs(refs,join(gitdir,'refs'));}finally{refs.close();}}else mkdirSync(join(gitdir,'refs'));
+  stage='object store';
   const store=common.directory('objects');try{objects(store,join(commonPath,'objects'),join(gitdir,'objects'));}finally{store.close();}
+  stage='repository configuration';
   const allowed=new Set(['core.repositoryformatversion','core.filemode','core.ignorecase','core.precomposeunicode','core.autocrlf','core.eol','core.safecrlf','core.symlinks','extensions.objectformat']);
   writeFileSync(join(gitdir,'config'),'');
   let worktreeConfig=false, filemode=true;
@@ -160,12 +168,14 @@ async function repository(projectRoot: string, selected?:string): Promise<View> 
     if(allowed.has(key))await git(root,['config','--file',join(gitdir,'config'),'--',key,value]);
    }
   }
-  if(commonNames.includes('info')) {
+  if(!committed && commonNames.includes('info')) {
    const info=common.directory('info');try {mkdirSync(join(gitdir,'info'));
     for(const name of info.names().filter(name=>['exclude','attributes'].includes(name)))copy(info,name,join(gitdir,'info',name));
    }finally{info.close();}
   }
   if((await git(root,['rev-parse','--show-toplevel'])).trim()!==root)throw Error('Not a worktree');
+  if(committed)return {root,unavailable,large,dispose};
+  stage='working index catalog';
   const indexed=(await git(root,['ls-files','--stage','-z'])).split('\0').filter(Boolean);
   const tracked=new Set<string>(),gitlinks=new Set<string>(),parents=new Set<string>();
   for(const record of indexed) {
@@ -230,9 +240,10 @@ async function repository(projectRoot: string, selected?:string): Promise<View> 
     else {try{mkdirSync(target,{mode:0o700});if(!gitlinks.has(path)) { if(entry.tree.names().includes('.git') && !parents.has(path)) unavailable.set(path,'Nested repository content is not inspected by this viewer.'); else await copyWorktree(entry.tree,path); }}finally{entry.tree.close();}}
    }
   }
-  await copyWorktree(source);
+  stage='working tree';
+  if(!committed)await copyWorktree(source);
   return {root,unavailable,large,dispose};
- }catch(error){dispose();if(error instanceof TreeLimitError)throw new GitError('git-limit');if(error instanceof GitError)throw error;throw new GitError('git-unsupported');}
+ }catch(error){dispose();if(error instanceof TreeLimitError){const reason=budget.bytes<0?'64 MiB copy budget exhausted':budget.entries<0?'100,000 entry traversal budget exhausted':Date.now()>budget.deadline?'10 second snapshot deadline exceeded':error.message.replace('Repository directory limit exceeded','Directory exceeds 100,000 entries');throw new GitError('git-limit',`Git ${stage} snapshot: ${reason}. Retry after reducing repository metadata or working tree size.`);};if(error instanceof GitError)throw error;throw new GitError('git-unsupported');}
  finally{for(const tree of trees.reverse())tree.close();}
 }
 function validPath(path: unknown): path is string {
@@ -257,7 +268,7 @@ async function catalog(view: View, selected?:string): Promise<GitCatalog> {
    if(xy[0]!==' ') files.push({path,section:'staged',status:xy[0]!,...(previousPath?{previousPath}:{})});
    if(xy[1]!==' ') files.push({path,section:'unstaged',status:xy[1]!,...(previousPath && /[RC]/.test(xy[1]!)?{previousPath}:{})});
   }
-  if(files.length>MAX_FILES) throw new GitError('git-limit');
+  if(files.length>MAX_FILES) throw new GitError('git-limit','Working changes exceed 500 entries. Commit or narrow working changes outside Review. Branch Diff remains available.');
  }
  // Without executable conversion, equality for filter-managed working files
  // is unknown. Retain them explicitly instead of claiming a clean worktree.
@@ -274,12 +285,12 @@ async function catalog(view: View, selected?:string): Promise<GitCatalog> {
    else if(fileState(root,path)!=='missing')files.push({path,section:'unstaged',status:'?',unavailableReason:reason});
   }
  }
- if(files.length>MAX_FILES)throw new GitError('git-limit');
+ if(files.length>MAX_FILES)throw new GitError('git-limit','Working changes exceed 500 entries. Commit or narrow working changes outside Review. Branch Diff remains available.');
  for(const record of indexed.filter(record=>record.startsWith('160000 ') && (!selected || record.slice(record.indexOf('\t')+1)===selected))) {
   const path=record.slice(record.indexOf('\t')+1);
   if(!files.some(file=>file.path===path && file.section==='unstaged'))files.push({path,section:'unstaged',status:'?',unavailableReason:'Submodule working-tree state is not inspected by this viewer.'});
  }
- if(files.length>MAX_FILES)throw new GitError('git-limit');
+ if(files.length>MAX_FILES)throw new GitError('git-limit','Working changes exceed 500 entries. Commit or narrow working changes outside Review. Branch Diff remains available.');
  for(const [path,reason] of view.unavailable) {
   const file=files.find(file=>file.path===path && file.section!=='staged');
   if(file)file.unavailableReason=reason;else files.push({path,section:trackedPath(indexed,path)?'unstaged':'untracked',status:'?',unavailableReason:reason});
@@ -290,7 +301,7 @@ async function catalog(view: View, selected?:string): Promise<GitCatalog> {
   if(info.status && info.status!==' ' && !files.some(file=>file.path===path && file.section==='unstaged'))
    files.push({path,section:'unstaged',status:info.status,...(view.unavailable.has(path)?{unavailableReason:view.unavailable.get(path)}:{})});
  }
- if(files.length>MAX_FILES)throw new GitError('git-limit');
+ if(files.length>MAX_FILES)throw new GitError('git-limit','Working changes exceed 500 entries. Commit or narrow working changes outside Review. Branch Diff remains available.');
  const warnings=indexed.some(record=>record.startsWith('160000 '))?['Submodule working-tree contents are not inspected. Staged gitlink changes are listed.']:[];
  return {files,...(warnings.length?{warnings}:{})};
 }
@@ -307,17 +318,21 @@ function fileState(root: string, path: string): 'regular'|'special'|'missing'|'l
  }
  return 'regular';
 }
-async function bounded(projectRoot: string, action: (view: View) => Promise<GitCatalog|GitDocument|GitContent>, selected?:string): Promise<CommandOutcome> {
+async function bounded(projectRoot: string, action: (view: View) => Promise<GitCatalog|GitDocument|GitContent>, selected?:string, committed=false, identity=false): Promise<CommandOutcome> {
  const key=resolve(projectRoot);
  if(active.has(key) || active.size>=4) return failure(new GitError('git-busy'));
  active.add(key);
  let view:Awaited<ReturnType<typeof repository>>|undefined;
- try { view=await repository(projectRoot,selected);return {ok:true,data:await action(view)}; } catch(error) {return failure(error);} finally {try{view?.dispose();}finally{active.delete(key);}}
+ try { view=await repository(projectRoot,selected,committed,identity);return {ok:true,data:await action(view)}; } catch(error) {return failure(error);} finally {try{view?.dispose();}finally{active.delete(key);}}
 }
-export function listGitChanges(projectRoot: string): Promise<CommandOutcome> { return bounded(projectRoot,catalog); }
-export function readGitDiff(projectRoot: string, section: unknown, path: unknown): Promise<CommandOutcome> { return readSelected(projectRoot,section,path,false); }
-export function readGitContent(projectRoot: string, section: unknown, path: unknown): Promise<CommandOutcome> { return readSelected(projectRoot,section,path,true); }
-function readSelected(projectRoot: string, section: unknown, path: unknown, content: boolean): Promise<CommandOutcome> {
+export function listGitChanges(projectRoot: string, comparison?:unknown, cursor?:unknown): Promise<CommandOutcome> {
+ if(comparison!==undefined && comparison!=='branch' && comparison!=='identity' || cursor!==undefined && (comparison!=='branch'||!validCursor(cursor)))return Promise.resolve(failure(new GitError('git-invalid')));
+ return bounded(projectRoot,async view=>comparison==='identity'?{files:[],currentBranch:await currentBranch(view.root)}:comparison==='branch'?branchCatalog(view,undefined,cursor as string|undefined):{...await catalog(view),currentBranch:await currentBranch(view.root)},undefined,comparison==='branch',comparison==='identity');
+}
+export function readGitDiff(projectRoot: string, section: unknown, path: unknown, revision?:unknown): Promise<CommandOutcome> { return readSelected(projectRoot,section,path,false,revision); }
+export function readGitContent(projectRoot: string, section: unknown, path: unknown, revision?:unknown): Promise<CommandOutcome> { return readSelected(projectRoot,section,path,true,revision); }
+function readSelected(projectRoot: string, section: unknown, path: unknown, content: boolean, revision?:unknown): Promise<CommandOutcome> {
+ if(section==='branch')return readBranch(projectRoot,path,content,revision);
  if(!['staged','unstaged','untracked'].includes(String(section)) || !validPath(path)) return Promise.resolve(failure(new GitError('git-invalid')));
  return bounded(projectRoot,async view => {
   const {root}=view;
@@ -350,7 +365,7 @@ function readSelected(projectRoot: string, section: unknown, path: unknown, cont
      if(!Number.isSafeInteger(size)||size<0||size>MAX_PATCH)return document('limited','Document exceeds the 256 KiB viewer limit.');
      text=await git(root,['cat-file','blob',oid],MAX_PATCH);
     }
-   } catch(error) {if(error instanceof GitError && error.code==='git-limit')return document('limited',messages['git-limit']);throw error;}
+   } catch(error) {if(error instanceof GitError && error.code==='git-limit')return document('limited',error.message);throw error;}
    if(text.includes('\0'))return document('binary','Binary file content is not rendered.');
    return {file,kind:'text',content:text,version};
   }
@@ -358,9 +373,85 @@ function readSelected(projectRoot: string, section: unknown, path: unknown, cont
   let patch: string;
   try {
    patch=await git(root,section==='untracked' ? [...args,'--no-index','--','/dev/null',file.path] : [...args,...(section==='staged'?['--cached']:[]),'--',...(file.previousPath?[file.previousPath]:[]),file.path],MAX_PATCH,section==='untracked');
-  } catch(error) { if(error instanceof GitError && error.code==='git-limit') return document('limited',messages['git-limit']); throw error; }
+  } catch(error) { if(error instanceof GitError && error.code==='git-limit') return document('limited',error.message); throw error; }
   if(Buffer.byteLength(patch)>MAX_PATCH || patch.split('\n').length>6000) return document('limited','Diff exceeds the 256 KiB / 6,000 line viewer limit.');
   if(patch.split('\n').some(line=>line==='GIT binary patch' || /^Binary files .* differ$/.test(line))) return document('binary','Binary file changed. Content is not rendered.');
   return {file,kind:'text',patch,...(!patch?{message:'No textual changes remain. Refresh the file list; metadata-only changes may have no hunks.'}:{})};
  },path);
+}
+
+async function currentBranch(root:string):Promise<string|undefined> {
+ try{return (await git(root,['symbolic-ref','--quiet','--short','HEAD'])).trim()||undefined;}
+ catch{return undefined;}
+}
+const committedDiff=['diff','--no-ext-diff','--no-textconv','--no-color','--no-relative','--find-renames','--ignore-submodules=all'];
+const BRANCH_PAGE=200;
+function validCursor(cursor:unknown):cursor is string {return typeof cursor==='string' && /^([0-9a-f]{40}|[0-9a-f]{64}):([0-9a-f]{40}|[0-9a-f]{64}):[1-9][0-9]{0,5}$/.test(cursor);}
+async function branchCatalog(view:View, selected?:string, cursor?:string):Promise<GitCatalog> {
+ const root=view.root, branch=await currentBranch(root);
+ const unavailable=(message:string):GitCatalog=>{if(cursor)throw new GitError('git-stale');return {files:[],currentBranch:branch,warnings:[message]};};
+ // Only symbolic remote HEADs captured in the safe metadata snapshot are candidates.
+ const refs=(await git(root,['for-each-ref','--format=%(refname)%09%(symref)','refs/remotes/'])).trim().split('\n').map(line=>line.split('\t'));
+ const defaults=refs.filter(([name,target])=>name?.endsWith('/HEAD')&&target?.startsWith('refs/remotes/')&&!target.endsWith('/HEAD'));
+ const chosen=defaults.find(([name])=>name==='refs/remotes/origin/HEAD')??(defaults.length===1?defaults[0]:undefined);
+ if(!chosen)return unavailable('Remote default branch is unavailable or ambiguous. Set its remote HEAD outside Review, then refresh. No fetch is performed.');
+ const ref=chosen[1]!;
+ let head:string,base:string;
+ try{head=(await git(root,['rev-parse','--verify','HEAD^{commit}'])).trim();}
+ catch(error){if(error instanceof GitError&&error.code==='git-limit')throw error;return unavailable('HEAD has no available commit. Commit outside Review, then refresh.');}
+ try{base=(await git(root,['merge-base',ref,head])).trim();}
+ catch(error){if(error instanceof GitError&&error.code==='git-limit')throw error;return unavailable('No merge base is available with the local remote default branch. Refresh local remote references outside Review.');}
+ if(!/^[0-9a-f]{40,64}$/.test(head)||!/^[0-9a-f]{40,64}$/.test(base))throw new GitError('git-unavailable');
+ const comparison={baseRef:ref.slice('refs/remotes/'.length),headRef:branch??`HEAD (detached ${head.slice(0,8)})`,base,head,revision:`${base}:${head}`};
+ if(cursor && cursor.slice(0,cursor.lastIndexOf(':'))!==comparison.revision)throw new GitError('git-stale');
+ const entries=(await git(root,[...committedDiff,'--name-status','-z',base,head,'--'])).split('\0');
+ const files:GitFile[]=[];
+ for(let at=0;at<entries.length&&entries[at];){
+  const status=entries[at++]!,old=entries[at++]!,rename=/^[RC]/.test(status),path=rename?entries[at++]!:old;
+  if(!validPath(path)||!validPath(old))throw new GitError('git-invalid');
+  if(!selected||path===selected)files.push({path,section:'branch',status,...(rename?{previousPath:old}:{})});
+
+ }
+ const offset=cursor?Number(cursor.slice(cursor.lastIndexOf(':')+1)):0;
+ if(offset>=files.length && cursor)throw new GitError('git-stale');
+ const page=files.slice(offset,offset+BRANCH_PAGE);
+ const nextCursor=offset+page.length<files.length?`${comparison.revision}:${offset+page.length}`:undefined;
+ // Counts are bounded to the visible page. A failed count never removes the file tree.
+ let stats:string[];
+ try{stats=page.length?(await git(root,[...committedDiff,'--numstat','-z',base,head,'--',...page.flatMap(file=>file.previousPath?[file.previousPath,file.path]:[file.path])])).split('\0'):[];}
+ catch(error){if(!(error instanceof GitError)||error.code!=='git-limit')throw error;return {files:page,currentBranch:branch,comparison,totalFiles:files.length,nextCursor,warnings:[`${error.message} Line counts for this page are unavailable; select a file to inspect it.`]};}
+ const byPath=new Map(page.map(file=>[file.path,file]));
+ for(let at=0;at<stats.length&&stats[at];){
+  const record=stats[at++]!,match=/^(\d+|-)\t(\d+|-)\t([\s\S]*)$/.exec(record);if(!match)throw new GitError('git-unavailable');
+  let path=match[3]!;if(!path){at++;path=stats[at++]!;}
+  const file=byPath.get(path);if(!file)continue;
+  if(match[1]==='-'||match[2]==='-')file.binary=true;
+  else{file.additions=Number(match[1]);file.deletions=Number(match[2]);}
+ }
+ return {files:page,currentBranch:branch,comparison,totalFiles:files.length,nextCursor};
+}
+function readBranch(projectRoot:string,path:unknown,content:boolean,revision:unknown):Promise<CommandOutcome> {
+ if(!validPath(path)||typeof revision!=='string'||!/^([0-9a-f]{40}|[0-9a-f]{64}):([0-9a-f]{40}|[0-9a-f]{64})$/.test(revision))return Promise.resolve(failure(new GitError('git-invalid')));
+ return bounded(projectRoot,async view=>{
+  const catalog=await branchCatalog(view,path),comparison=catalog.comparison;
+  if(!comparison||comparison.revision!==revision)throw new GitError('git-stale');
+  const file=catalog.files.find(file=>file.path===path);if(!file)throw new GitError('git-stale');
+  const document=(kind:GitDocument['kind'],message:string):GitDocument|GitContent=>content?{file,kind,content:'',message}:{file,kind,patch:'',message};
+  if(file.binary)return document('binary','Binary file changed. Content is not rendered.');
+  try{
+   if(content){
+    const deleted=file.status==='D',ref=deleted?comparison.base:comparison.head;
+    const record=await git(view.root,['ls-tree','-z',ref,'--',path]);
+    const match=/^(100644|100755) blob ([0-9a-f]{40,64})\t/.exec(record);
+    if(!match)return document('unavailable','Only regular file documents can be previewed.');
+    const size=Number((await git(view.root,['cat-file','-s',match[2]!])).trim());
+    if(!Number.isSafeInteger(size)||size<0||size>MAX_PATCH)return document('limited','Document exceeds the 256 KiB viewer limit.');
+    const text=await git(view.root,['cat-file','blob',match[2]!],MAX_PATCH);
+    return text.includes('\0')?document('binary','Binary content is not rendered.'):{file,kind:'text',content:text,version:deleted?'base':'HEAD'};
+   }
+   const patch=await git(view.root,[...committedDiff,'--unified=3','--output-indicator-new=+','--output-indicator-old=-','--output-indicator-context= ',comparison.base,comparison.head,'--',...(file.previousPath?[file.previousPath]:[]),path],MAX_PATCH);
+   if(patch.split('\n').length>6000)return document('limited','Diff exceeds the 6,000 line viewer limit.');
+   return {file,kind:'text',patch};
+  }catch(error){if(error instanceof GitError&&error.code==='git-limit')return document('limited',error.message);throw error;}
+ },undefined,true);
 }

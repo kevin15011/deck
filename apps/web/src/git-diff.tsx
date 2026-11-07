@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { GitCatalog, GitDocument, GitContent, GitFile } from '../../../packages/core/src/session/git-diff';
+import {useContentMotion} from './motion';
 import { ProjectFiles } from './project-files';
 import { Markdown } from './markdown';
 import { NavigationIcon } from './project-navigation';
@@ -56,7 +57,7 @@ export function DiffContent({patch,mode}:{patch:string;mode:'inline'|'split'}) {
  return <><details className="diff-headers"><summary>File metadata</summary><pre>{metadata}</pre></details><table className={`diff-table diff-${mode}`} aria-label={mode==='split'?'Side-by-side diff':'Inline diff'}><thead><tr>{mode==='split'?<><th colSpan={2}>Old</th><th colSpan={2}>New</th></>:<><th>Old</th><th>New</th><th>Change</th></>}</tr></thead><tbody>{mode==='split'?split:rows.map((row,i)=><tr key={i}>{row.kind==='hunk'||row.kind==='note'?<td colSpan={3} className={`diff-${row.kind}`}>{row.text}</td>:<><td className="diff-number">{row.old}</td><td className="diff-number">{row.next}</td><td className={`diff-code ${row.kind}`}><span className="diff-sign" aria-hidden="true">{row.kind==='add'?'+':row.kind==='remove'?'-':' '}</span>{row.text}</td></>}</tr>)}</tbody></table></>;
 }
 const fileKey=(file:GitFile)=>`${file.section}:${file.path}`;
-const sectionNames={staged:'Staged · HEAD → index',unstaged:'Unstaged · index → worktree',untracked:'Untracked · new files'};
+const sectionNames={staged:'Staged · HEAD → index',unstaged:'Unstaged · index → worktree',untracked:'Untracked · new files',branch:'Branch · merge base → HEAD'};
 type FileNode = { name: string; path: string; children: Map<string, FileNode>; file?: GitFile };
 export function gitStatus(file: GitFile) {
  if(file.status==='U' || ['AA','DD','AU','UA','DU','UD','UU'].includes(file.status)) return {kind:'conflict',label:'Conflict'};
@@ -127,7 +128,7 @@ export function GitFileNavigator({files,selected,onSelect,onPreview,visible=true
   if(item.top<top||item.bottom>bottom)pane.scrollTop+=item.top-top-(bottom-top-item.height)/2;
  },[visible,selected,files,collapsed]);
 
- const groups=useMemo(()=>(['staged','unstaged','untracked'] as const).map(section=>({section,files:files.filter(file=>file.section===section)})),[files]);
+ const groups=useMemo(()=>(['branch','staged','unstaged','untracked'] as const).map(section=>({section,files:files.filter(file=>file.section===section)})),[files]);
  const folderStatuses=useMemo(()=>new Map<string,ReturnType<typeof gitStatus>>(groups.flatMap(group=>[...folderGitStatuses(group.files)].map(([path,status])=>[`${group.section}:${path}`,status] as const))),[groups]);
  function disclosure(key:string,label:React.ReactNode,children:React.ReactNode,className?:string) {
   const open=!collapsed.has(key),folderStatus=className==='git-folder'?folderStatuses.get(key):undefined;
@@ -139,35 +140,44 @@ export function GitFileNavigator({files,selected,onSelect,onPreview,visible=true
    return <li key={node.path}>{file&&(()=>{const status=gitStatus(file);const label=`${section}: ${file.path} · ${status.label}${file.previousPath?` from ${file.previousPath}`:''}${file.unavailableReason?` · ${file.unavailableReason}`:''}`;
     return <div className="git-file-row"><button type="button" className={`git-file git-status-${status.kind}`} data-file-key={fileKey(file)} ref={selected===fileKey(file)?selectedRow:undefined} aria-current={selected===fileKey(file)?'true':undefined} aria-label={label} title={label} onClick={()=>onSelect(file)}>
      {file.path.endsWith('/')?<NavigationIcon kind="folder"/>:<svg className="navigation-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" aria-hidden="true"><path d="M4 2h5l3 3v9H4Z M9 2v4h3"/></svg>}
-     <span className="git-file-name">{node.name}{file.path.endsWith('/')?'/':''}{file.previousPath&&<small>← {file.previousPath}</small>}</span><span className="git-file-badge" aria-hidden="true">{file.unavailableReason?'!':file.status}</span>
+     <span className="git-file-name">{node.name}{file.path.endsWith('/')?'/':''}{file.previousPath&&<small>← {file.previousPath}</small>}</span>{file.section==='branch'&&<span className="git-line-counts" aria-label={file.binary?'Binary file':file.additions===undefined?'Line counts unavailable':`${file.additions} added, ${file.deletions} deleted`}>{file.binary?'Binary':file.additions===undefined?'—':<><span>+{file.additions}</span><span>−{file.deletions??0}</span></>}</span>}<span className="git-file-badge" aria-hidden="true">{file.unavailableReason?'!':file.status}</span>
     </button>{/\.md$/i.test(file.path)&&onPreview&&<MarkdownPreviewButton file={file} onClick={()=>onPreview(file)}/>}</div>;})()}{node.children.size>0&&disclosure(`${section}:${node.path}`,<><NavigationIcon kind="folder"/><span className="git-folder-name" title={node.path}>{node.name}{file?'/':''}</span></>,nodes(node,section),'git-folder')}</li>;
   })}</ul>;
  }
- return <nav ref={tree} className="git-file-tree" aria-label="Changed files">{groups.map(group=>group.files.length?disclosure(group.section,<><span>{group.section==='staged'?'Staged':group.section==='unstaged'?'Unstaged':'Untracked'}</span><span className="git-file-count">{group.files.length}</span></>,nodes(fileHierarchy(group.files),group.section),'git-file-group'):null)}{!files.length&&<p className="empty-note">No changed files</p>}</nav>;
+ return <nav ref={tree} className="git-file-tree" aria-label="Changed files">{groups.map(group=>group.files.length?disclosure(group.section,<><span>{group.section==='branch'?'Committed changes':group.section==='staged'?'Staged':group.section==='unstaged'?'Unstaged':'Untracked'}</span><span className="git-file-count">{group.files.length}</span></>,nodes(fileHierarchy(group.files),group.section),'git-file-group'):null)}{!files.length&&<p className="empty-note">No changed files</p>}</nav>;
 }
 export function MarkdownPreviewButton({file,onClick}:{file:GitFile;onClick:()=>void}) {
  return <button type="button" className="quiet git-preview-button" aria-label={`Preview Markdown: ${file.section}: ${file.path}`} title="Preview Markdown" onClick={onClick}><svg className="navigation-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" aria-hidden="true" focusable="false"><path d="M1 3h14v10H1Z M3 10V6l2 2 2-2v4 M11 5v6m-2-2 2 2 2-2"/></svg></button>;
 }
 export function GitDocumentHeader({file,preview,onPreview}:{file:GitFile;preview:boolean;onPreview:()=>void}) {
- return <div className="git-document-header"><div className="git-document-path" title={file.path}>{file.path}<span className={`git-status-${gitStatus(file).kind}`}>{gitStatus(file).label}</span></div>{!preview&&/\.md$/i.test(file.path)&&<MarkdownPreviewButton file={file} onClick={onPreview}/>}</div>;
+ return /\.md$/i.test(file.path)?<DocumentModeButton preview={preview} onClick={onPreview}/>:null;
 }
-function GitChanges({api,sessionId,visible,narrow}:{api:Api;sessionId:string;visible:boolean;narrow:boolean}) {
+export function DocumentModeButton({preview,onClick}:{preview:boolean;onClick:()=>void}) {
+ const label=preview?'Show text':'Preview Markdown';
+ return <button type="button" className="quiet document-mode-toggle" aria-label={label} title={label} onClick={onClick}><svg className="navigation-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" aria-hidden="true">{preview?<path d="m5 4-4 4 4 4m6-8 4 4-4 4M9 2 7 14"/>:<path d="M1 3h14v10H1Z M3 10V6l2 2 2-2v4 M11 5v6m-2-2 2 2 2-2"/>}</svg></button>;
+}
+export type ReviewToolbar=(controls:React.ReactNode)=>React.ReactNode;
+function GitChanges({api,sessionId,visible,narrow,branch=false,toolbar}:{api:Api;sessionId:string;visible:boolean;narrow:boolean;branch?:boolean;toolbar:ReviewToolbar}) {
  const [catalog,setCatalog]=useState<GitCatalog>(),[selected,setSelected]=useState(''),[document,setDocument]=useState<GitDocument>();
  const [error,setError]=useState(''),[loading,setLoading]=useState(false),[refresh,setRefresh]=useState(0);
  const [preview,setPreview]=useState(false),[content,setContent]=useState<GitContent>();
  const [navigatorOpen,setNavigatorOpen]=useState(false);
+ const [paging,setPaging]=useState(false),[pageError,setPageError]=useState('');
+ const pageRequest=useRef<AbortController|undefined>(undefined);
+ useEffect(()=>{setPaging(false);return()=>{pageRequest.current?.abort();};},[visible,sessionId,refresh]);
  const navigatorToggle=useRef<HTMLButtonElement>(null);
  const [mode,setMode]=useState<'inline'|'split'>(()=>narrow?'inline':'split');
  const viewport=useRef<HTMLDivElement>(null),positions=useRef(new Map<string,{top:number;left:number}>());
  const loaded=useRef(-1),request=useRef(0);
+ useContentMotion(viewport,`${selected}:${preview}:${mode}:${document?.patch}:${content?.content}`,visible);
  const effectiveMode=narrow?'inline':mode,positionKey=`${selected}:${preview?'preview':'diff'}`;
  const shown=useRef(positionKey);
  function remember() { const el=viewport.current; if(el)positions.current.set(shown.current,{top:el.scrollTop,left:el.scrollLeft}); }
  useLayoutEffect(()=>{ if(!visible)return; shown.current=positionKey; const saved=positions.current.get(positionKey); if(viewport.current){viewport.current.scrollTop=saved?.top??0;viewport.current.scrollLeft=saved?.left??0;} },[positionKey,effectiveMode,document,content,visible]);
  useEffect(()=>{
   if(!visible||!sessionId||loaded.current===refresh)return;
-  const controller=new AbortController(); const id=++request.current; setLoading(true);setError('');
-  requestGit(api,`/api/sessions/${encodeURIComponent(sessionId)}/git`,controller.signal).then(reply=>{
+  const controller=new AbortController(); const id=++request.current; setLoading(true);setError('');setPageError('');setPaging(false);
+  requestGit(api,`/api/sessions/${encodeURIComponent(sessionId)}/git${branch?'?comparison=branch':''}`,controller.signal).then(reply=>{
    if(id!==request.current||controller.signal.aborted)return;
    setCatalog(reply.data); loaded.current=refresh;
    setSelected(previous=>reply.data.files.some((file:GitFile)=>fileKey(file)===previous)?previous:reply.data.files[0]?fileKey(reply.data.files[0]):'');
@@ -179,28 +189,42 @@ function GitChanges({api,sessionId,visible,narrow}:{api:Api;sessionId:string;vis
   const file=catalog.files.find(file=>fileKey(file)===selected);if(!file)return;
   const controller=new AbortController(); setLoading(true);setError('');
   setContent(undefined);
-  requestGit(api,`/api/sessions/${encodeURIComponent(sessionId)}/git/${preview?'content':'diff'}?${new URLSearchParams({section:file.section,path:file.path})}`,controller.signal).then(reply=>{
+  requestGit(api,`/api/sessions/${encodeURIComponent(sessionId)}/git/${preview?'content':'diff'}?${new URLSearchParams({section:file.section,path:file.path,...(branch&&catalog.comparison?{revision:catalog.comparison.revision}:{})})}`,controller.signal).then(reply=>{
    if(!controller.signal.aborted){if(preview)setContent(reply.data);else setDocument(reply.data);}
   }).catch(err=>{if(!controller.signal.aborted)setError(err.message);}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
   return()=>controller.abort();
  },[visible,selected,catalog,refresh,sessionId,api,preview]);
+ async function loadMore() {
+  if(!catalog?.nextCursor||paging)return;
+  const previous=catalog,controller=new AbortController();pageRequest.current?.abort();pageRequest.current=controller;
+  setPaging(true);setPageError('');
+  try{
+   const reply=await requestGit(api,`/api/sessions/${encodeURIComponent(sessionId)}/git?${new URLSearchParams({comparison:'branch',cursor:previous.nextCursor!})}`,controller.signal);
+   if(controller.signal.aborted)return;
+   const next:GitCatalog=reply.data,comparison=previous.comparison;
+   if(!comparison||!next.comparison||(['revision','base','head','baseRef','headRef'] as const).some(key=>next.comparison![key]!==comparison[key])||next.totalFiles!==previous.totalFiles||!next.files.length)
+    throw Error('Branch comparison changed or is unavailable.');
+   setCatalog(current=>current===previous?{...next,files:[...previous.files,...next.files],warnings:[...new Set([...(previous.warnings??[]),...(next.warnings??[])])]}:current);
+  }catch(cause){if(!controller.signal.aborted)setPageError(`${(cause as Error).message} Use Refresh to reload the branch comparison.`);}
+  finally{if(!controller.signal.aborted)setPaging(false);}
+ }
  const file=catalog?.files.find(file=>fileKey(file)===selected);
  function select(next:GitFile,render:boolean) {remember();setSelected(fileKey(next));setPreview(render);if(narrow){setNavigatorOpen(false);navigatorToggle.current?.focus();}}
- const currentContent=content&&fileKey(content.file)===selected?content:undefined;
- const current=document && fileKey(document.file)===selected ? document : undefined;
+ const currentContent=loaded.current===refresh&&content&&fileKey(content.file)===selected?content:undefined;
+ const current=loaded.current===refresh&&document && fileKey(document.file)===selected ? document : undefined;
  return <section className="git-view" aria-label="Git changes" aria-busy={loading}>
-  <div className="git-toolbar"><strong>Changes</strong><button type="button" className="quiet" onClick={()=>{remember();setRefresh(value=>value+1);}} disabled={loading||!sessionId}>Refresh</button><div role="group" aria-label="Diff rendering">{(['inline','split'] as const).map(value=><button type="button" key={value} className="quiet" aria-pressed={effectiveMode===value} disabled={narrow&&value==='split'} onClick={()=>{remember();setMode(value);}}>{value==='inline'?'Inline':'Side-by-side'}</button>)}</div></div>
+  <div className="git-toolbar">{toolbar(<><button type="button" className="quiet review-refresh" aria-label="Refresh" title="Refresh" onClick={()=>{remember();setDocument(undefined);setContent(undefined);setRefresh(value=>value+1);}} disabled={loading||!sessionId}><NavigationIcon kind="refresh"/></button><div role="group" aria-label="Diff rendering">{(['inline','split'] as const).map(value=><button type="button" key={value} className="quiet" aria-pressed={effectiveMode===value} hidden={narrow&&value==='split'} disabled={narrow&&value==='split'} onClick={()=>{remember();setMode(value);}}>{value==='inline'?'Inline':'Side-by-side'}</button>)}</div></>)}</div>
   {!sessionId?<p className="empty-note">Choose a session to view Git changes.</p>:<>
-  <div className="git-status" role="status">{loading?'Loading Git changes…':error||(!catalog?'Open or refresh to load changes.':!catalog.files.length?(catalog.warnings?.length?'No supported working changes.':'No working changes.'):`${catalog.files.length} files · ${file?sectionNames[file.section]:''}`)}</div>
+  {branch&&catalog?.comparison&&<div className="git-comparison" title={`Merge base ${catalog.comparison.base} → ${catalog.comparison.head}`}><span>{catalog.comparison.baseRef} (merge base) → {catalog.comparison.headRef}</span><span className="git-line-counts" aria-label="Line counts for loaded files">{catalog.nextCursor&&<small>Loaded files</small>}{catalog.files.some(file=>!file.binary&&file.additions===undefined)?<span>Counts unavailable</span>:<><span>+{catalog.files.reduce((n,f)=>n+(f.additions??0),0)}</span><span>−{catalog.files.reduce((n,f)=>n+(f.deletions??0),0)}</span></>}</span></div>}
+  <div className="git-status" role="status">{loading?'Loading Git changes…':error||(!catalog?'Open or refresh to load changes.':!catalog.files.length?(catalog.warnings?.length?'No supported working changes.':branch?'No committed branch changes.':'No working changes.'):`${catalog.files.length}${catalog.totalFiles!==undefined?` of ${catalog.totalFiles}`:""} files · ${file?sectionNames[file.section]:''}`)}</div>
   {catalog?.warnings?.map(warning=><p key={warning} className="empty-note">{warning}</p>)}
   <div className={`git-browser${narrow?' git-browser-narrow':''}`}>
    <aside className="git-navigator">
-    {narrow&&<button ref={navigatorToggle} type="button" className="git-navigator-toggle quiet" aria-expanded={navigatorOpen} aria-controls="git-file-navigation" onClick={()=>setNavigatorOpen(value=>!value)}><NavigationIcon kind="chevron" expanded={navigatorOpen}/><span>Changed files · {catalog?.files.length??0}</span><span className="git-selected-name">{file?.path}</span></button>}
-    <div id="git-file-navigation" hidden={narrow&&!navigatorOpen}><GitFileNavigator visible={visible&&(!narrow||navigatorOpen)} files={catalog?.files??[]} selected={selected} onSelect={next=>select(next,false)} onPreview={next=>select(next,true)}/></div>
+    {narrow&&<button ref={navigatorToggle} type="button" className="git-navigator-toggle quiet" aria-expanded={navigatorOpen} aria-controls={branch?"branch-file-navigation":"git-file-navigation"} onClick={()=>setNavigatorOpen(value=>!value)}><NavigationIcon kind="chevron" expanded={navigatorOpen}/><span>Changed files · {catalog?.files.length??0}</span><span className="git-selected-name">{file?.path}</span></button>}
+    <div id={branch?"branch-file-navigation":"git-file-navigation"} hidden={narrow&&!navigatorOpen}><GitFileNavigator visible={visible&&(!narrow||navigatorOpen)} files={catalog?.files??[]} selected={selected} onSelect={next=>select(next,false)} onPreview={next=>select(next,true)}/>{catalog?.nextCursor&&<button type="button" className="quiet" disabled={paging||loading} onClick={loadMore}>{paging?'Loading more files…':'Load more changed files'}</button>}{pageError&&<p role="alert" className="empty-note">{pageError}</p>}</div>
    </aside>
-   <div className="git-document">
-    {file&&<GitDocumentHeader file={file} preview={preview} onPreview={()=>{remember();setPreview(true);requestAnimationFrame(()=>viewport.current?.focus({preventScroll:true}));}}/>}
-  {preview&&<div className="git-preview-toolbar"><strong>Markdown preview</strong><span>{currentContent?.version==='HEAD'?'HEAD · before deletion':currentContent?.version==='index'?(file?.status==='D'?'Index · before deletion':'Index · staged version'):currentContent?.version==='working'?'Working version':''}</span><button type="button" className="quiet" onClick={()=>{remember();setPreview(false);requestAnimationFrame(()=>viewport.current?.focus({preventScroll:true}));}}>Return to diff</button></div>}
+   <div className={`git-document${file&&/\.md$/i.test(file.path)?' has-document-toggle':''}`}>
+    {file&&<GitDocumentHeader file={file} preview={preview} onPreview={()=>{remember();setPreview(value=>!value);requestAnimationFrame(()=>viewport.current?.focus({preventScroll:true}));}}/>}
   <div ref={viewport} className="diff-viewport" aria-label={preview?"Markdown preview":"File diff"} tabIndex={0} onScroll={remember}>
    {error?<p className="empty-note">Content unavailable. Use Refresh to try again.</p>:preview?(currentContent?<>{currentContent.message&&<p className="empty-note">{currentContent.message}</p>}{currentContent.kind==='text'&&<article className="document-reading"><Markdown text={currentContent.content}/></article>}</>:<p className="empty-note">Loading document…</p>):current?<>{current.message&&<p className="empty-note">{current.message}</p>}{current.kind==='text'&&<DiffContent patch={current.patch} mode={effectiveMode}/>}</>:selected?<p className="empty-note">{loading?'Loading selected file…':'Select or refresh a file to read its diff.'}</p>:null}
   </div></div></div></>}
@@ -208,6 +232,15 @@ function GitChanges({api,sessionId,visible,narrow}:{api:Api;sessionId:string;vis
 }
 
 export function GitDiff(props:{api:Api;sessionId:string;visible:boolean;narrow:boolean}) {
- const [view,setView]=useState<'files'|'changes'>('files');
- return <div className="review-view"><div className="git-toolbar" role="group" aria-label="Review mode"><strong>Review</strong>{(['files','changes'] as const).map(mode=><button key={mode} className="quiet" aria-pressed={view===mode} onClick={()=>setView(mode)}>{mode==='files'?'Files':'Changes'}</button>)}</div><div className="review-panel" hidden={view!=='files'}><ProjectFiles {...props} visible={props.visible&&view==='files'}/></div><div className="review-panel" hidden={view!=='changes'}><GitChanges {...props} visible={props.visible&&view==='changes'}/></div></div>;
+ const [view,setView]=useState<'files'|'changes'|'diff'>('files');
+ const root=useRef<HTMLDivElement>(null);useContentMotion(root,view,props.visible);
+ const focusSource=useRef<HTMLSelectElement|null>(null);
+ useLayoutEffect(()=>{
+  const source=focusSource.current;focusSource.current=null;
+  // Hiding the old toolbar can move focus to body; never override unrelated focus.
+  if(source&&(document.activeElement===source||document.activeElement===document.body))
+   root.current?.querySelector<HTMLSelectElement>('.review-panel:not([hidden]) select[aria-label="Review mode"]')?.focus({preventScroll:true});
+ },[view]);
+ const toolbar:ReviewToolbar=controls=><><strong>Review</strong><label className="review-selector"><NavigationIcon kind={view==='files'?'folder':view==='diff'?'both-layout':'workspace-layout'}/><select aria-label="Review mode" value={view} onChange={event=>{focusSource.current=document.activeElement===event.currentTarget?event.currentTarget:null;setView(event.target.value as typeof view);}}><option value="files">Files</option><option value="changes">Changes</option><option value="diff">Diff</option></select></label>{controls}</>;
+ return <div ref={root} className="review-view"><div className="review-panel" hidden={view!=='files'}><ProjectFiles {...props} toolbar={toolbar} visible={props.visible&&view==='files'}/></div><div className="review-panel" hidden={view!=='changes'}><GitChanges {...props} toolbar={toolbar} visible={props.visible&&view==='changes'}/></div><div className="review-panel" hidden={view!=='diff'}><GitChanges {...props} branch toolbar={toolbar} visible={props.visible&&view==='diff'}/></div></div>;
 }

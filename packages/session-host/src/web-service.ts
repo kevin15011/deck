@@ -528,10 +528,10 @@ export class WebService {
         }
         const git = /^\/api\/sessions\/([^/]+)\/git(\/diff|\/content)?$/.exec(path);
         if (git && r.method === 'GET') {
-          if (!safeId(git[1]!) || [...url.searchParams.keys()].some(key => !['section','path'].includes(key))
-            || (git[2] ? url.searchParams.getAll('section').length !== 1 || url.searchParams.getAll('path').length !== 1 : url.searchParams.size !== 0))
+          if (!safeId(git[1]!) || [...url.searchParams.keys()].some(key => !['section','path','comparison','revision','cursor'].includes(key))
+            || (git[2] ? url.searchParams.getAll('section').length !== 1 || url.searchParams.getAll('path').length !== 1 || url.searchParams.has('comparison') || url.searchParams.has('cursor') || url.searchParams.getAll('revision').length > 1 : [...url.searchParams.keys()].some(key=>!['comparison','cursor'].includes(key)) || url.searchParams.getAll('comparison').length>1 || url.searchParams.getAll('cursor').length>1 || url.searchParams.has('cursor') && url.searchParams.get('comparison')!=='branch') || (url.searchParams.has('comparison') && !['branch','identity'].includes(url.searchParams.get('comparison')!)))
             return this.response({ok:false,code:'git-invalid'},400);
-          const outcome = await this.options.service.query?.(git[2] === '/content' ? 'git.content' : git[2] ? 'git.read' : 'git.list', {sessionId:git[1], ...(git[2]?{section:url.searchParams.get('section'),path:url.searchParams.get('path')}:{})}) ?? {ok:false as const,code:'git-unavailable'};
+          const outcome = await this.options.service.query?.(git[2] === '/content' ? 'git.content' : git[2] ? 'git.read' : 'git.list', {sessionId:git[1], ...(git[2]?{section:url.searchParams.get('section'),path:url.searchParams.get('path'),revision:url.searchParams.get('revision')??undefined}:{comparison:url.searchParams.get('comparison')??undefined,cursor:url.searchParams.get('cursor')??undefined})}) ?? {ok:false as const,code:'git-unavailable'};
           return this.response(outcome, outcome.ok ? 200 : outcome.code === 'session-unknown' ? 404 : outcome.code === 'git-limit' ? 413 : outcome.code === 'git-stale' ? 409 : outcome.code === 'git-busy' ? 429 : outcome.code === 'git-unavailable' ? 503 : 400);
         }
         const artifacts = /^\/api\/sessions\/([^/]+)\/openspec(\/artifact)?$/.exec(path);

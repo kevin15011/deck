@@ -1396,7 +1396,7 @@ select:focus-visible, .question-panel textarea:focus-visible {
 .app-header { background: var(--surface); }
 .session-identity { display: flex; gap: .625rem; }
 .session-identity > .agent-avatar { flex: none; }
-.session-identity-text { min-width: 0; display: grid; gap: .2rem; }
+.session-identity-text { min-width: 0; display: grid; gap: .2rem; flex: 1; }
 .connection { flex-basis: auto; color: var(--ink); }
 .connection-label { width: auto; }
 .session-controls-panel { top: 60px; border-radius: var(--surface-radius); box-shadow: var(--floating-shadow); }
@@ -1632,3 +1632,35 @@ select:focus-visible, .question-panel textarea:focus-visible {
   .assignment-row h3 { margin: 0; }
   .assignment-row .error { grid-column: 1; }
 }
+
+/* Review shares one compact control row across its persistent modes. */
+.review-selector { display:flex; align-items:center; gap:.25rem; min-width:0; }
+.review-selector select { font:inherit; color:var(--ink); background:var(--surface); border:1px solid var(--border); border-radius:4px; padding:.25rem; }
+.git-toolbar > strong { margin-right:0; }
+.git-toolbar .review-refresh { margin-left:auto; order:2; display:grid; place-items:center; }
+.review-ignored { margin-left:auto; font-size:.75rem; }
+.git-comparison { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:0 .75rem .5rem; font-size:.75rem; color:var(--muted); overflow-wrap:anywhere; }
+.git-line-counts { display:inline-flex; gap:.35rem; flex:none; font-size:.7rem; font-variant-numeric:tabular-nums; }
+.git-line-counts > :first-child { color:var(--success,#79c991); }
+.git-line-counts > :last-child { color:var(--danger,#f28b89); }
+.git-document { position:relative; }
+.document-mode-toggle { position:absolute; top:.5rem; right:.75rem; z-index:2; display:grid; place-items:center; padding:.4rem; background:var(--surface); border:1px solid var(--border); }
+.has-document-toggle .diff-viewport { margin-top:2.75rem; }
+.sidebar-brand { display:flex; align-items:center; justify-content:space-between; flex:none; }
+.sidebar-brand .brand { min-width:0; flex:1; }
+.sidebar-collapsed .sidebar-brand { flex-direction:column; }
+.sidebar-collapsed .sidebar-brand .brand { padding-bottom:.25rem; }
+.app-header > .content-modes { margin-left:auto; flex:none; }
+.app-header .content-modes button[aria-pressed=true] { background:var(--border); }
+.session-title-line { display:grid; grid-template-columns:minmax(0,max-content) minmax(0,max-content); align-items:baseline; gap:.5rem; min-width:0; }
+.session-title-line h1 { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.session-branch { display:inline-flex; align-items:center; gap:.25rem; color:var(--muted); font-size:.7rem; font-weight:400; min-width:0; }
+.session-branch svg { width:.75rem; height:.75rem; flex:none; }
+.session-branch > span { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+@media(max-width:1000px) { .git-comparison { padding-inline:.5rem; } .session-title-line { gap:.35rem; } }
+
+.review-view .git-toolbar { flex-wrap:nowrap; }
+.review-view .git-toolbar [role=group] { display:flex; min-width:0; }
+.review-view .git-toolbar [role=group] button { white-space:nowrap; }
+
+.review-view .git-toolbar button[hidden] { display:none; }

@@ -4,7 +4,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {FileContent} from './project-files';
 import {GitDiff,folderGitStatuses} from './git-diff';
 test('Review defaults to Files and retains an explicit Changes mode',()=>{
- const html=renderToStaticMarkup(<GitDiff api={async()=>({}) as any} sessionId="s" visible={true} narrow={false}/>);expect(html).toContain('aria-pressed="true">Files');expect(html).toContain('aria-pressed="false">Changes');expect(html).toContain('Show ignored');
+ const html=renderToStaticMarkup(<GitDiff api={async()=>({}) as any} sessionId="s" visible={true} narrow={false}/>);expect(html).toContain('<option value="files" selected="">');expect(html).toContain('<option value="changes">');expect(html).toContain('<option value="diff">');expect(html).toContain('Show ignored');
 });
 test('text and Markdown stay inert; raster media uses only supplied bytes',()=>{
  const document={kind:'text' as const,path:'a.md',size:50,content:'<script>alert(1)</script>\n![remote](https://evil.example/image)'};

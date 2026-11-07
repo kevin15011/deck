@@ -2,8 +2,9 @@ import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import type {ProjectContent,ProjectListing} from '../../../packages/core/src/session/project-files';
 import type {GitFile} from '../../../packages/core/src/session/git-diff';
 import type {Api} from './workspace';
-import {requestGit,gitStatus,folderGitStatuses,MarkdownPreviewButton} from './git-diff';
+import {requestGit,gitStatus,folderGitStatuses,MarkdownPreviewButton,DocumentModeButton,type ReviewToolbar} from './git-diff';
 import {NavigationIcon} from './project-navigation';
+import {useContentMotion} from './motion';
 import {Markdown} from './markdown';
 function RasterImage({document}:{document:Extract<ProjectContent,{kind:'image'}>}){
  const [failed,setFailed]=useState(false);
@@ -15,7 +16,7 @@ export function FileContent({document,markdown}:{document:ProjectContent;markdow
  if(document.kind==='text')return markdown?<article className="document-reading"><Markdown text={document.content}/></article>:<pre className="project-text">{document.content}</pre>;
  return <p className="empty-note">{document.message}</p>;
 }
-export function ProjectFiles({api,sessionId,visible,narrow}:{api:Api;sessionId:string;visible:boolean;narrow:boolean}){
+export function ProjectFiles({api,sessionId,visible,narrow,toolbar}:{api:Api;sessionId:string;visible:boolean;narrow:boolean;toolbar:ReviewToolbar}){
  const [directories,setDirectories]=useState<Record<string,ProjectListing>>({}),[expanded,setExpanded]=useState(()=>new Set(['']));
  const [selected,setSelected]=useState(''),[content,setContent]=useState<ProjectContent>(),[markdown,setMarkdown]=useState(false);
  const [showIgnored,setShowIgnored]=useState(false),[refresh,setRefresh]=useState(0),[error,setError]=useState(''),[listingErrors,setListingErrors]=useState<Record<string,string>>({});
@@ -28,6 +29,7 @@ export function ProjectFiles({api,sessionId,visible,narrow}:{api:Api;sessionId:s
  const navigator=useRef<HTMLElement>(null),row=useRef<HTMLButtonElement>(null),viewport=useRef<HTMLDivElement>(null),toggle=useRef<HTMLButtonElement>(null);
  const positions=useRef(new Map<string,number>()),wasVisible=useRef(false),reveal=useRef(false);
  const key=`${selected}:${markdown}`,shown=useRef(key),base=`/api/sessions/${encodeURIComponent(sessionId)}`;
+ useContentMotion(viewport,`${selected}:${markdown}:${content?.path}`,visible);
  const treeVisible=visible&&(!narrow||open);
  function remember(){if(viewport.current)positions.current.set(shown.current,viewport.current.scrollTop);}
  useLayoutEffect(()=>{if(!visible)return;shown.current=key;if(viewport.current)viewport.current.scrollTop=positions.current.get(key)??0;},[key,content,visible]);
@@ -129,12 +131,11 @@ export function ProjectFiles({api,sessionId,visible,narrow}:{api:Api;sessionId:s
   })}</ul>{!listing.entries.length&&<p className="empty-note">{listing.nextCursor?'No visible files on this page. Continue to load more.':'Empty folder'}</p>}{listing.nextCursor&&<button className="quiet" aria-label={`Load more in ${path||'project root'}`} disabled={!!pages[path]||!!failure} onClick={()=>{reveal.current=false;setRevealRun(undefined);setPages(previous=>({...previous,[path]:listing.nextCursor!}));}}>{pages[path]?'Loading…':'Load more files'}</button>}</>;
  }
  return <section className="git-view" aria-label="Project files" aria-busy={busy}>
-  <div className="git-toolbar"><strong>Files</strong><label><input type="checkbox" checked={showIgnored} onChange={event=>setShowIgnored(event.target.checked)}/> Show ignored</label><button className="quiet" onClick={()=>{remember();setRefresh(v=>v+1);}} disabled={!sessionId}>Refresh</button></div>
+  <div className="git-toolbar">{toolbar(<><button className="quiet review-refresh" aria-label="Refresh" title="Refresh" onClick={()=>{remember();setRefresh(v=>v+1);}} disabled={!sessionId}><NavigationIcon kind="refresh"/></button><label className="review-ignored"><input type="checkbox" checked={showIgnored} onChange={event=>setShowIgnored(event.target.checked)}/> Show ignored</label></>)}</div>
   {gitMessage&&<p className="empty-note" role="status">{gitMessage}</p>}
   {!sessionId?<p className="empty-note">Choose a session to browse project files.</p>:<div className={`git-browser${narrow?' git-browser-narrow':''}`}>
    <aside ref={navigator} className="git-navigator">{narrow&&<button ref={toggle} className="git-navigator-toggle quiet" aria-expanded={open} aria-controls="project-file-navigation" onClick={()=>setOpen(value=>!value)}><NavigationIcon kind="chevron" expanded={open}/><span>Files</span><span className="git-selected-name">{selected}</span></button>}<nav id="project-file-navigation" className="git-file-tree" aria-label="Project files" hidden={narrow&&!open}>{revealMessage&&<p className="empty-note" role="status">{revealMessage}</p>}{tree('')}</nav></aside>
-   <div className="git-document">{selected&&<div className="git-document-header"><div className="git-document-path" title={selected}>{selected}<span>Working file</span></div>{/\.md$/i.test(selected)&&!markdown&&<MarkdownPreviewButton file={{path:selected,section:'unstaged',status:''}} onClick={()=>{remember();setMarkdown(true);viewport.current?.focus({preventScroll:true});}}/>}</div>}
-   {markdown&&<div className="git-preview-toolbar"><strong>Markdown preview</strong><button className="quiet" onClick={()=>{remember();setMarkdown(false);viewport.current?.focus({preventScroll:true});}}>Return to text</button></div>}
+   <div className={`git-document${selected&&/\.md$/i.test(selected)?' has-document-toggle':''}`}>{selected&&/\.md$/i.test(selected)&&<DocumentModeButton preview={markdown} onClick={()=>{remember();setMarkdown(value=>!value);}}/>}
    <div ref={viewport} className="diff-viewport" tabIndex={0} aria-label={markdown?'Markdown preview':'File content'} onScroll={remember}>{error?<p className="empty-note" role="alert">{error}</p>:content&&content.path===selected?<FileContent document={content} markdown={markdown}/>:<p className="empty-note">{busy?'Loading file…':'Select a file to read or preview.'}</p>}</div></div>
   </div>}
  </section>;

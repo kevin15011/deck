@@ -551,13 +551,13 @@ export class SessionManager implements SessionService {
       case "git.list":
       case "git.read":
       case "git.content": {
-        const input = args as { sessionId?: unknown; section?: unknown; path?: unknown; showIgnored?: unknown; cursor?: unknown } | null;
+        const input = args as { sessionId?: unknown; section?: unknown; path?: unknown; comparison?: unknown; revision?: unknown; showIgnored?: unknown; cursor?: unknown } | null;
         if (!input || typeof input.sessionId !== 'string') return fail('git-invalid');
         const live = this.load(input.sessionId);
         if (!live) return fail('session-unknown');
         const root = live.ledger.session.projectRoot ?? live.meta.projectRoot;
         if(name === 'project.files' || name === 'project.content')return browseProject(root,{operation:name==='project.files'?'list':'read',path:input.path as string,showIgnored:input.showIgnored as boolean,...(input.cursor!==undefined?{cursor:input.cursor as string}:{})});
-        return name === 'git.list' ? listGitChanges(root) : (name === 'git.content' ? readGitContent : readGitDiff)(root, input.section, input.path);
+        return name === 'git.list' ? listGitChanges(root,input.comparison,input.cursor) : (name === 'git.content' ? readGitContent : readGitDiff)(root, input.section, input.path,input.revision);
       }
       case "openspec.list":
       case "openspec.read": {

@@ -21,8 +21,8 @@ export async function runGitReaderProcess(): Promise<void> {
  const result:CommandOutcome=await (request.browse
   ? (await import('./project-files-reader')).browseProject(request.projectRoot,request.browse)
   : request.selection
-  ? (request.selection.content ? reader.readGitContent : reader.readGitDiff)(request.projectRoot,request.selection.section,request.selection.path)
-  : reader.listGitChanges(request.projectRoot));
+  ? (request.selection.content ? reader.readGitContent : reader.readGitDiff)(request.projectRoot,request.selection.section,request.selection.path,request.selection.revision)
+  : reader.listGitChanges(request.projectRoot,request.comparison,request.cursor));
  const output=JSON.stringify({version:1,token,result});
  if(Buffer.byteLength(output)>(request.browse?MAX_FILE_RESPONSE:MAX_RESPONSE))throw Error('Response limit');
  await new Promise<void>((resolve,reject)=>process.stdout.write(output,error=>error?reject(error):resolve()));

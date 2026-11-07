@@ -90,7 +90,7 @@ for (const [terminalStatus, childStatus] of [['D', 'A'], ['A', 'D']] as const) {
   for (const path of ['guide.md', 'GUIDE.MD', 'code.ts']) {
    for (const preview of [false, true]) {
     const html=renderToStaticMarkup(<GitDocumentHeader file={{path,section:'staged',status:'M'}} preview={preview} onPreview={()=>{}}/>);
-    expect(html.includes('aria-label="Preview Markdown: staged:')).toBe(/\.md$/i.test(path)&&!preview);
+    expect(html.includes(`aria-label="${preview?'Show text':'Preview Markdown'}"`)).toBe(/\.md$/i.test(path));
     if (/\.md$/i.test(path)&&!preview) {expect(html).toContain('<svg');expect(html).toContain('aria-hidden="true"');}
    }
   }
