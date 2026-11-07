@@ -318,6 +318,9 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
   // --- files -------------------------------------------------------------------------------------------
   const desiredPaths = new Set(desired.files.map((file) => file.relPath));
   const nextFiles: Record<string, string> = {};
+  // Receipt hashes belong to this plan's observations, not a second disk read.
+  // Nothing survives the call; apply still checks live preimages and paths.
+  const fileReceiptHashes = new Map<string, string>();
   for (const file of desired.files) {
     const absolute = resolveInside(agentDir, file.relPath);
     const postimage = hashContent(file.content);
@@ -328,11 +331,13 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
       continue;
     }
     if (disk === undefined) {
+      fileReceiptHashes.set(file.relPath, postimage);
       addChange({ kind: "file", action: "create", relPath: file.relPath, path: absolute, preimage: "absent", postimage }, { path: absolute, content: file.content, mode: file.mode, expectedPre: "absent" });
       continue;
     }
     const diskHash = hashContent(disk);
     if (diskHash === postimage || file.relPath.endsWith(".json") && fileOwnershipHash(file.relPath,disk) === fileOwnershipHash(file.relPath,file.content)) {
+      fileReceiptHashes.set(file.relPath, diskHash);
       if (!(options.managed && generated(file.relPath)) && !matchesOwnedHash(file.relPath, manifest.files[file.relPath], disk) && !matchesOwnedHash(file.relPath, manifest.files[file.relPath], file.content)) {
         delete nextFiles[file.relPath];
         plan.diagnostics.push({code:"PI_FILE_UNRECEIPTED",severity:"warning",message:`Preserved unreceipted Pi file ${absolute}; it remains user-owned.`});
@@ -350,6 +355,7 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
       conflict({ relPath: file.relPath, reason: "modified", message: `${absolute} was modified after Deck wrote it; Deck will not overwrite it. Restore or remove the file to continue.` }, "PI_FILE_MODIFIED");
       continue;
     }
+    fileReceiptHashes.set(file.relPath, postimage);
     addChange({ kind: "file", action: "update", relPath: file.relPath, path: absolute, preimage: diskHash, postimage }, { path: absolute, content: file.content, mode: file.mode, expectedPre: diskHash });
   }
   for (const [relPath, owned] of Object.entries(manifest.files)) {
@@ -562,8 +568,8 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
   const receipt = (target: ContributionTarget, hash: string, encoding: RunnerContribution["encoding"]) => contributions.push({ ...target, id: contributionId(target), hash, encoding, ownership: "prior-record", scope: "global" });
   for (const [relPath] of Object.entries(nextFiles)) {
     const path = resolveInside(agentDir, relPath);
-    const content = plan.writes.find(write => write.path === path)?.content ?? io.readText(path);
-    if (content !== undefined) receipt({ path, selector: { kind: "file" } }, hashContent(content), "bytes");
+    const hash = fileReceiptHashes.get(relPath);
+    if (hash !== undefined) receipt({ path, selector: { kind: "file" } }, hash, "bytes");
   }
   for (const [name, hash] of Object.entries(nextMcpOwned)) receipt({ path: paths.mcp, selector: { kind: "json", keys: ["mcpServers", name] } }, hash, "canonical-json-v1");
   if (desired.packageEntry) receipt({ path: paths.settings, selector: { kind: "json-array", keys: ["packages"], identity: canonicalJson(desired.packageEntry) } }, hashJsonValue(desired.packageEntry), "canonical-json-v1");

@@ -645,3 +645,52 @@ test('process exit during publication leaves durable evidence that a fresh proce
   expect(snapshotTree(agentDir)).toEqual(before);
   expect(existsSync(paths().manifest)).toBe(false);
 });
+
+// Protects receipt ownership against a writer racing plan construction. Receipts
+// describe the observed preimage, never bytes changed after that observation.
+test('plan receipts retain observed bytes and a later plan reads fresh preimages', () => {
+  const state = desired();
+  install(state);
+  const file = state.files[1]!, path = join(agentDir, file.relPath);
+  const backing = io();
+  let changed = false;
+  const racing: PiFileIO = { ...backing, readText(target) {
+    if (target === paths().settings && !changed) {
+      changed = true;
+      writeFileSync(path, 'foreign concurrent edit\n');
+    }
+    return backing.readText(target);
+  } };
+  const plan = planPiGlobalInstall(state, racing, { managed: true });
+  const manifestWrite = plan.writes.find(write => write.path === paths().manifest);
+  const manifest = parsePiManifest(manifestWrite?.content ?? readFileSync(paths().manifest, 'utf8'));
+  expect(manifest.ok).toBe(true);
+  if (!manifest.ok) throw Error('Invalid planned manifest');
+  expect(manifest.manifest.contributions?.find(entry => entry.path === path)?.hash).toBe(hashContent(file.content));
+  const fresh = planPiGlobalInstall(state, backing, { managed: true });
+  expect(fresh.writes.find(write => write.path === path)?.expectedPre).toBe(hashContent('foreign concurrent edit\n'));
+  applyPiGlobalPlan(fresh, backing);
+  expect(readFileSync(path, 'utf8')).toBe(file.content);
+});
+
+// Protects semantic JSON ownership and live path validation after planning.
+test('receipt reuse preserves JSON bytes and rejects a later symlink replacement', () => {
+  const state = desired();
+  install(state);
+  const file = state.files[0]!, path = join(agentDir, file.relPath);
+  const formatted = '{ "name" : "deck-pi" }\n';
+  writeFileSync(path, formatted);
+  applyPiGlobalPlan(planPiGlobalInstall(state, io(), { managed: true }), io());
+  expect(readFileSync(path, 'utf8')).toBe(formatted);
+  const manifest = parsePiManifest(readFileSync(paths().manifest, 'utf8'));
+  expect(manifest.ok && manifest.manifest.contributions?.find(entry => entry.path === path)?.hash).toBe(hashContent(formatted));
+  const changed = desired({ files: state.files.map((entry, i) => i === 1 ? { ...entry, content: 'updated role\n' } : entry) });
+  const plan = planPiGlobalInstall(changed, io(), { managed: true });
+  const foreign = join(root, 'foreign');
+  writeFileSync(foreign, formatted);
+  rmSync(path);
+  nodeFs.symlinkSync(foreign, path);
+  expect(() => applyPiGlobalPlan(plan, io())).toThrow();
+  expect(readFileSync(foreign, 'utf8')).toBe(formatted);
+  expect(planPiGlobalInstall(changed, io(), { managed: true }).blocked).toBe(true);
+});
