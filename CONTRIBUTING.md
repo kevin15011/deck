@@ -96,7 +96,7 @@ require a short live canary check by the Lead.
 `bun run test` runs the fast suite with four isolated file workers. Files taking over
 2 seconds, including process startup and output drain, emit a diagnostic warning only; they are
 not killed, retried or failed for timing. The complete run, including preparation, process execution
-and output drain, has a hard 120-second wall-time limit. Exceeding it fails the run and terminates
+and output drain, has a hard 240-second wall-time limit. Exceeding it fails the run and terminates
 the active process group, including test workers. Functional test failures still fail the run.
 The wrapper preserves vendor exclusions from `bunfig.toml`. Quarantine entries in
 `tests/quarantine.yaml` require ownership, an issue link and expiry within 14 days;

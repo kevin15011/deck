@@ -1,4 +1,4 @@
-# Fast-suite exclusions only; budgets remain 2s per file and 90s per run.
+# Fast-suite exclusions only; 2s per-file diagnostic warning and 240s hard run limit.
 # Each entry requires path, owner, reason, link, created and expires (within 14 days).
 # Protected-risk tests also require a reference to explicit user approval.
 entries: []

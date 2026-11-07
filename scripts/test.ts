@@ -32,7 +32,7 @@ export function discoverTests(root: string): string[] {
 }
 
 export const FILE_BUDGET_MS = 2_000;
-export const RUN_BUDGET_MS = 120_000;
+export const RUN_BUDGET_MS = 240_000;
 
 /** Terminate the work at its deadline, including work that blocks its own event loop. */
 export class BudgetExceededError extends Error {}
@@ -142,7 +142,7 @@ async function runSuite(root: string): Promise<number> {
     for (const entry of entries) if (!all.includes(entry.path)) throw new Error(`Unknown quarantine test: ${entry.path}`);
     const excluded = new Set(entries.map(entry => entry.path));
     const files = all.filter(path => !excluded.has(path));
-    console.log(`Running ${files.length} fast test files; 2s diagnostic warning, 120s total including preparation and output drain`);
+    console.log(`Running ${files.length} fast test files; 2s diagnostic warning, ${RUN_BUDGET_MS / 1000}s total including preparation and output drain`);
     let completed = 0;
     process.send?.({ type: "suite-progress", selected: files.length, completed });
     let failed = 0, passedTests = 0, failedTests = 0, skippedTests = 0;

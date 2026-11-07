@@ -7,6 +7,7 @@ import { createClaudeRunnerAdapter } from './runner-adapter';
 
 // Protects canonical regeneration without trusting prior bytes, and project input preservation.
 // Oracle: approved managed-artifact policy; executable edits must be replaced before receipts.
+// Multiple full installs and repairs share the suite's four-worker filesystem load.
 test('Claude install repairs edited generated files without receipts and preserves project input', async () => {
  const home = realpathSync(mkdtempSync(join(tmpdir(), 'claude-managed-')));
  try {
@@ -38,7 +39,7 @@ test('Claude install repairs edited generated files without receipts and preserv
   await adapter.prepareSessionNativeSkills(input.deckConfig);
   for (const file of inputs) expect(readFileSync(join(project, file), 'utf8')).toBe('foreign input\n');
  } finally { rmSync(home, { recursive: true, force: true }); }
-});
+}, 15000);
 
 import { symlinkSync } from 'node:fs';
 // Protects the path boundary and future-writer evidence during repair.

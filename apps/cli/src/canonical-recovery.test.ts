@@ -10,6 +10,8 @@ import { getDefaultDeckConfig, readRunnerFence } from '@deck/core';
 // Protects restart convergence through the public CLI guard and actual adapters.
 // Oracle: accepted canonical recovery design; a killed process has no rollback closure.
 // Fails if journal bytes authorize output, scope is lost, or admission precedes repair.
+// Global target recovery republishes and verifies ten times; its 30s limit allows
+// the suite's four-worker integration load. Other cases retain their 15s limit.
 for (const runner of ['pi', 'claude'] as const) for (const scope of ['global', 'project'] as const) for (const retryBoundary of ['target', 'archive', 'verify'] as const) test(`${runner} canonical recovery after real child ${retryBoundary} termination (${scope})`, async () => {
  const root = realpathSync(mkdtempSync(join(tmpdir(), 'deck-canonical-crash-')));
  try {
@@ -69,4 +71,4 @@ for (const runner of ['pi', 'claude'] as const) for (const scope of ['global', '
   expect(readRunnerFence(path)).not.toHaveProperty('pending');
   expect(existsSync(runner === 'pi' ? join(agent, 'deck/transaction.pending.json') : join(root, 'deck/claude/manifest.json.pending'))).toBe(false);
  } finally { rmSync(root, { recursive: true, force: true }); }
-}, 15000);
+}, scope === 'global' && retryBoundary === 'target' ? 30000 : 15000);

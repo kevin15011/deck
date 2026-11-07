@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { withBudget, validateQuarantine } from "./test";
+import { withBudget, validateQuarantine, RUN_BUDGET_MS } from "./test";
 
 describe("quarantine metadata", () => {
   const entry = { path: "apps/web/src/a.test.ts", owner: "team", reason: "intermittent", link: "https://example.com/issue/1", created: "2026-10-20", expires: "2026-10-30" };
@@ -15,7 +15,7 @@ describe("quarantine metadata", () => {
 });
 
 // Oracle: a deadline must terminate work and identify the offending file/run.
-for (const [label, budget] of [["Test run", 120000]] as const) {
+for (const [label, budget] of [["Test run", RUN_BUDGET_MS]] as const) {
   test(`${label} deadline kills pending work and fails`, async () => {
     let expire!: () => void;
     let killed = false, cleared = false;
