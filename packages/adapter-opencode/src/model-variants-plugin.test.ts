@@ -1,12 +1,13 @@
+import { tmpdir } from 'node:os';
 import { test, expect } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, realpathSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import plugin from '../assets/opencode/plugins/model-variants';
 
 // Protects native plugin loading and nonblocking discovery: provider initialization may wait for plugins.
 // Oracle: OpenCode's plugin factory returns hooks, SDK provider.list returns {data:{all:[...]}}.
 test('variant plugin returns hooks before discovery resolves, writes SDK model maps, and cancels on dispose', async () => {
- const root=mkdtempSync('/private/tmp/deck-variants-plugin-'), previous=process.env.XDG_CACHE_HOME;
+ const root=realpathSync(mkdtempSync(join(tmpdir(),'deck-variants-plugin-'))), previous=process.env.XDG_CACHE_HOME;
  process.env.XDG_CACHE_HOME=root;
  try {
   let complete!: (value: any)=>void;

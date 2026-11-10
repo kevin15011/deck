@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { needsManualFixture, probePublishedManualEpoch, historicalMigrationPreimages, publishManualNativeConfiguration } from './retirement-manual-fixture';
 
 // Protects the mapping to actual published behavior. Oracle: immutable inventory
@@ -12,15 +11,19 @@ test('all four pre-adapter rows preserve original source and manual installer ou
   const inventory = await Bun.file(join(import.meta.dir, 'fixtures/retirement-releases.json')).json();
   const rows=inventory.rows.filter((row:any)=>needsManualFixture(row.version,row.runner));
   expect(rows).toHaveLength(4);
+  // Captured git-show bytes from both pinned commits; probePublishedManualEpoch
+  // verifies the independent publication hashes before executing either installer.
+  // No network or historical objects are required in shallow/source-only checkouts.
+  const published = await Bun.file(join(import.meta.dir, 'fixtures/retirement-manual-source.json')).json();
   const root=mkdtempSync(join(tmpdir(),'deck-manual-probe-'));
   try {
     for(const row of rows){
+      expect(published.commits).toContain(row.commit);
       const source=join(root,`${row.version}-${row.runner}`);
       const paths=['packages/core/src/index.ts',...['installation-plan.ts','install-tools.ts'].map(name=>`packages/adapter-${row.runner}/src/${name}`)];
       for(const path of paths){
-        const result=spawnSync('git',['show',`${row.commit}:${path}`],{cwd:join(import.meta.dir,'..')});
-        expect(result.status).toBe(0);
-        mkdirSync(dirname(join(source,path)),{recursive:true});writeFileSync(join(source,path),result.stdout);
+        expect(typeof published.files[path]).toBe('string');
+        mkdirSync(dirname(join(source,path)),{recursive:true});writeFileSync(join(source,path),published.files[path]);
       }
       const evidence=await probePublishedManualEpoch(source,row.runner);
       expect(evidence.commands).toBe(0);

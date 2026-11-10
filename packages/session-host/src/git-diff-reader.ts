@@ -25,7 +25,8 @@ export function git(root: string, args: string[], maxBuffer = MAX_CATALOG, diff 
  return new Promise((resolve, reject) => {
   const child=spawn('git', ['--no-pager', ...(args[0]==='check-ignore'?[]:['--literal-pathspecs']), '-c', 'core.fsmonitor=false', '-c', 'core.attributesFile=/dev/null', '-c', 'core.excludesFile=/dev/null', '-c', 'core.untrackedCache=false', '-c', 'diff.submodule=short', '-c', 'diff.suppressBlankEmpty=false', ...args], {
    cwd:root, env:{...env,GIT_OPTIONAL_LOCKS:'0',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_NO_LAZY_FETCH:'1',GIT_ATTR_NOSYSTEM:'1',LC_ALL:'C'},
-   stdio:['pipe','pipe','pipe',...(['config','rev-parse','ls-files','check-ignore'].includes(args[0]!)?[]:objectHandles.get(root)??[])],
+   // rev-parse --verify dereferences objects, including Linux descriptor-backed snapshots.
+   stdio:['pipe','pipe','pipe',...(['config','ls-files','check-ignore'].includes(args[0]!)?[]:objectHandles.get(root)??[])],
   });
   let size=0, limited=''; const chunks:Buffer[]=[];
   const timer=setTimeout(()=>{limited=`Git ${args[0]} exceeded the 5 second command deadline. Retry or narrow the comparison.`;child.kill('SIGKILL');},5000);
