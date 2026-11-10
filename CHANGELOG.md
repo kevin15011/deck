@@ -9,7 +9,7 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
-## [0.15.0] - 2026-11-07
+## [0.15.0] - Unreleased
 
 ### Added
 
@@ -23,12 +23,14 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 - Retire conversational memory and Supermemory integrations. Existing managed content is reconciled conservatively with recovery evidence; unknown user content is preserved.
 - Refine mobile navigation, themes, motion, role assignment controls and compact Review controls.
+- Show dictation recording in a compact floating capsule with an elapsed timer and accessible stop control.
 - Enforce a four-minute fast-suite deadline; slow files emit diagnostics without automatic retries.
 
 ### Fixed
 
 - Recover suspended mobile chat connections and preserve chat following across mobile menus.
 - Refresh the prompt inbox after session lifecycle changes and pause queued prompts after deterministic startup failures.
+- Recover acknowledged queue lifecycle pauses across daemon startup, release and reconnect; reconcile late runner refusals without replaying delivered prompts.
 - Preserve Claude MCP metadata and subscription transport, tolerate runner-generated plugin editor artifacts, and correlate OpenCode turns while bounding dependency preparation.
 - Serialize authorized skill-registry regeneration with private backups and preserve cleanup evidence for delegated tasks.
 
