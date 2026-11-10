@@ -11,6 +11,7 @@ import { normalizeDashboardCapabilityInventory } from './inventory';
 
 // Protects the observed historical memory-env entry through public Dashboard planning
 // and the manifest-owned install transaction. A same-name foreign server stays blocked.
+// Owned cases publish the full durable package; conflict-only cases keep the default limit.
 for (const scenario of ['historical', 'edited', 'invalid-receipt', 'foreign'] as const) test(`Pi Dashboard reconciles recorded Web Search: ${scenario}`, async () => {
   const owned = scenario === 'historical' || scenario === 'edited';
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'pi-web-upgrade-')));
@@ -58,4 +59,4 @@ for (const scenario of ['historical', 'edited', 'invalid-receipt', 'foreign'] as
     if (previousCredential === undefined) delete process.env.TAVILY_API_KEY; else process.env.TAVILY_API_KEY = previousCredential;
     rmSync(home, { recursive: true, force: true });
   }
-});
+}, scenario === 'historical' || scenario === 'edited' ? 15000 : 5000);

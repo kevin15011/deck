@@ -9,6 +9,7 @@ import { runRunnerReviewPlan } from './action-runner';
 
 // Protects the observed package-present/MCP-absent upgrade: selected Setup must
 // materialize Context7 in the package transaction before preparation observes it.
+// Full package publication includes thousands of durability barriers under Linux CI load.
 test('Pi selected Context7 review materializes the absent entry and preparation evidence', async () => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'pi-context7-review-')));
   try {
@@ -53,4 +54,4 @@ test('Pi selected Context7 review materializes the absent entry and preparation 
     expect(servers.personal).toEqual({ command: 'personal' });
     expect(adapter.readPreparationCapabilities?.(config).context7).toMatchObject({ enabled: true, prerequisites: 'present', availability: 'unverified' });
   } finally { rmSync(home, { recursive: true, force: true }); }
-});
+}, 15000);

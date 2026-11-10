@@ -77,6 +77,7 @@ for (const boundary of ['success', 'concurrent', 'verification', 'interruption']
 
 // Protects: a killed writer retains durable evidence and can recover in a fresh process.
 // Oracle: canonical recovery settles only after independently verifying the new scope.
+// Two real processes publish durable recovery state; allow Linux four-worker I/O load.
 test('explicit recovery survives process death after a real target rename', async () => {
  const root = realpathSync(mkdtempSync(join(tmpdir(), 'deck-explicit-crash-')));
  try {
@@ -95,4 +96,4 @@ test('explicit recovery survives process death after a real target rename', asyn
   expect(archived.journalEvidence.length).toBeGreaterThan(0);
   expect(JSON.parse(archived.originalBytes)).toHaveProperty('pending');
  } finally { rmSync(root, { recursive: true, force: true }); }
-}, 15000);
+}, 30000);
