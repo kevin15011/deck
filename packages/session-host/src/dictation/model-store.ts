@@ -23,11 +23,11 @@ export class ModelStore {
  private artifact(id:DictationModelId){const m=this.catalog.find(m=>m.id===id);if(!m)throw new DictationError('dictation-model-invalid',400);return m;}
  path(id:DictationModelId){return join(this.modelsDir,this.artifact(id).file);}
  private identity(path:string){assertPrivateFile(path);const s=lstatSync(path);return JSON.stringify([s.dev,s.ino,s.size,s.mtimeMs,s.ctimeMs]);}
- /** Rehash on startup and identity changes. Size alone is never trusted. */
+ /** Explicit integrity decisions always hash: unchanged metadata does not prove unchanged bytes. */
  async verify(id:DictationModelId):Promise<boolean>{
   const m=this.artifact(id),path=this.path(id),state=this.states.get(id)!;
   try{
-   const identity=this.identity(path);if(this.identities.get(id)===identity)return true;
+   const identity=this.identity(path);
    if(lstatSync(path).size!==m.bytes)throw Error('size');state.state='verifying';
    const fd=openSync(path,constants.O_RDONLY|(constants.O_NOFOLLOW??0));const hash=createHash('sha256'),buffer=Buffer.alloc(1024*1024);let total=0;
    try{for(;;){const count=readSync(fd,buffer);if(!count)break;total+=count;if(total>m.bytes)throw Error('size');hash.update(buffer.subarray(0,count));await new Promise<void>(resolve=>setImmediate(resolve));}}
@@ -36,7 +36,11 @@ export class ModelStore {
    this.identities.set(id,identity);state.state='installed';return true;
   }catch(error){this.identities.delete(id);state.state=(error as NodeJS.ErrnoException).code==='ENOENT'?'absent':'corrupt';return false;}
  }
- async refresh(){for(const m of this.catalog)if(this.states.get(m.id)?.state==='installed')await this.verify(m.id);}
+ /** Status polling observes the last verified identity; selection and use call verify again. */
+ async refresh(){for(const m of this.catalog)if(this.states.get(m.id)?.state==='installed'){
+  try{if(this.identities.get(m.id)===this.identity(this.path(m.id)))continue;}catch{/* verify records absent/unsafe paths below */}
+  await this.verify(m.id);
+ }}
  async reconcile(){for(const m of this.catalog)if(!this.job||this.job.id!==m.id)await this.verify(m.id);}
  summary(){return this.catalog.map(m=>({...this.states.get(m.id)!}));}
  active(){return !!this.job;}
