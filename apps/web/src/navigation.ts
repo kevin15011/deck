@@ -45,7 +45,8 @@ export class DeckHistory{
  private secondaryOpening?:string;
  private secondaryNavigation?:{route:DeckRoute;mode:'push'|'replace'};
  generation=0;
- capture?:()=>ChatAnchor|undefined;
+ /** null means geometry is unavailable; undefined means following the tail. */
+ capture?:()=>ChatAnchor|undefined|null;
  private journal:Journal;
  private storage=true;
  private closingKey?:string;
@@ -72,10 +73,11 @@ export class DeckHistory{
   const raw=object(this.adapter.state)?parseEntry(this.adapter.state.deck):undefined;
   if(!raw||raw.owner!==this.journal.owner||routeURL(raw.route,this.adapter.url)!==this.adapter.url)return;
   const record=this.record(raw.key);if(!record||!equivalent(record.entry,raw))return;
-  return{...raw,route:{...raw.route,...(record.entry.route.anchor?{anchor:record.entry.route.anchor}:{})}};
+  return{...raw,route:{...raw.route,anchor:record.entry.route.anchor}};
  }
  private persist(){try{this.adapter.save(JSON.stringify(this.journal));}catch{this.storage=false;}}
- private remember(entry:DeckEntry,from?:RecordEntry['from']){const old=this.record(entry.key);if(old)old.entry=entry;else this.journal.records.push({entry,...(from?{from}:{})});this.journal.records=this.journal.records.slice(-50);this.persist();}
+ // Updates are observations: session restoration uses visit recency, not entry creation order.
+ private remember(entry:DeckEntry,from?:RecordEntry['from']){const old=this.record(entry.key);this.journal.records=this.journal.records.filter(r=>r.entry.key!==entry.key);this.journal.records.push({entry,...(old?.from?{from:old.from}:from?{from}:{})});this.journal.records=this.journal.records.slice(-50);this.persist();}
  private write(entry:DeckEntry,mode:'push'|'replace',from?:RecordEntry['from']){
   const marker=mode==='replace'&&entry.key===this.current?.key?this.secondaryMarker(entry):undefined;
   const state={deck:entry,...(marker?{deckSecondary:marker}:{})};
@@ -125,7 +127,7 @@ export class DeckHistory{
   this.notify(false);
  }
  subscribe(fn:()=>void){this.listeners.add(fn);if(!this.secondaryClosing&&this.dismissedSecondary())this.backSecondary(true);return()=>{this.listeners.delete(fn);};}
- anchor(anchor:ChatAnchor|undefined){if(!anchor)return;const clean=parseAnchor(anchor);if(!clean||!this.current.route.session)return;
+ anchor(anchor:ChatAnchor|undefined|null){if(anchor===null||!this.current.route.session)return;const clean=anchor===undefined?undefined:parseAnchor(anchor);if(anchor!==undefined&&!clean)return;
   const entry={...this.current,route:{...this.current.route,anchor:clean}};const actual=this.readOwned();
   if(actual?.key===this.current.key)this.write(entry,'replace');else this.remember(entry);
  }
@@ -140,10 +142,10 @@ export class DeckHistory{
   if(transient&&mode==='replace'){this.secondaryNavigation={route:clean,mode};this.closeSecondary(true);return;}
   if(this.secondary&&!transient)this.closeSecondary(true);
   const exactRequest=!!clean.reply&&!route.anchor&&!route.overlay;
-  const previousSession=this.current.route.session,previousReply=this.current.route.reply;
-  this.anchor(this.capture?.());
-  if(!exactRequest&&clean.session&&clean.session===previousSession&&clean.reply===previousReply&&this.current.route.anchor)clean.anchor=this.current.route.anchor;
-  if(!exactRequest&&clean.session&&!clean.anchor&&clean.session!==previousSession){const prior=[...this.journal.records].reverse().find(r=>r.entry.route.session===clean.session&&r.entry.route.anchor);if(prior)clean.anchor=prior.entry.route.anchor;}
+  const previousSession=this.current.route.session,previousReply=this.current.route.reply,previousAnchor=this.current.route.anchor;
+  if(this.capture)this.anchor(this.capture());
+  if(!exactRequest&&clean.session&&clean.session===previousSession&&clean.reply===previousReply&&(!route.anchor||route.anchor===previousAnchor))clean.anchor=this.current.route.anchor;
+  if(!exactRequest&&clean.session&&!clean.anchor&&clean.session!==previousSession){const prior=[...this.journal.records].reverse().find(r=>r.entry.route.session===clean.session);if(prior)clean.anchor=prior.entry.route.anchor;}
   if(sameRoute(clean,this.current.route)){if(this.secondary)this.closeSecondary(true);if(exactRequest){this.write({...this.current,route:{...clean,anchor:undefined}},'replace');this.notify();}else if(clean.anchor)this.anchor(clean.anchor);return;}
   const previous=this.current,owned=this.readOwned();
   if(transient){this.secondary=undefined;this.secondaryClosing=false;}
@@ -176,7 +178,7 @@ export class DeckHistory{
   const overlayRequest=this.overlayNavigation;this.overlayNavigation=undefined;
   // The DOM still shows the departing view at this point. Keep its last anchor in
   // the bounded journal; never rewrite the newly active browser entry with it.
-  const saved=this.capture?.();if(saved&&this.current.route.session){const clean=parseAnchor(saved);if(clean)this.remember({...this.current,route:{...this.current.route,anchor:clean}});}
+  if(this.capture)this.anchor(this.capture());
   const next=this.readOwned();this.current=next??this.fresh(this.fallbackRoute());
   if(!next)this.write(this.current,'replace');this.notify();
   if(overlayRequest&&overlayRequest.base===next?.key)this.navigate(overlayRequest.route,overlayRequest.mode);

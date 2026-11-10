@@ -58,7 +58,7 @@ export function useViewMotion(ref: RefObject<HTMLElement | null>, key: unknown) 
                     continue;
                 }
                 panel.removeAttribute('aria-hidden');
-                if (wasVisible === false) for (const [node, position] of scrollPositions.current) if (panel.contains(node)) node.scrollTo(position.left, position.top);
+                if (wasVisible === false) for (const [node, position] of scrollPositions.current) if (panel.contains(node) && !node.hasAttribute('data-scroll-owned')) node.scrollTo(position.left, position.top);
                 // A reversal continues from live opacity/translation rather than resetting its start.
                 if (!panel.style.opacity) gsap.set(panel, {opacity:.45, x:8});
                 gsap.to(panel, {opacity:1, x:0, duration:.36, ease:'power3.out', overwrite:true, clearProps:'opacity,transform,left,top,width,height'});

@@ -127,6 +127,7 @@ export function App() {
     const drawerOpen=narrow&&route.overlay?.kind==='drawer';
     const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('activity'), [mobileTab, setMobileTab] = useState<WorkspaceTab>('chat'), [unseen, setUnseen] = useState(false);
     const following = useRef(true), restored = useRef('');
+    const chatGeometry=useRef({height:0,viewport:0});
     const drafts = useRef(new DraftStore());
     useEffect(() => { const media = window.matchMedia('(max-width: 1000px)'); const update = () => setNarrow(media.matches); media.addEventListener('change', update); return () => media.removeEventListener('change', update); }, []);
     useDrawerMotion(drawer, drawerOpen);
@@ -313,11 +314,13 @@ export function App() {
         }});
     historyRows.current=history.messages;
     nav.capture=()=>{
-      const element=conversation.current;if(following.current||!selectedSession.current||!element?.clientHeight||routeReady!==nav.current.key)return;
+      const element=conversation.current;
+      if(!selectedSession.current||selectedSession.current!==nav.current.route.session||hydratedSession!==selectedSession.current||!element?.clientHeight||routeReady!==nav.current.key||restoreTarget||element.closest('[hidden]'))return null;
+      if(following.current||!history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<80)return;
       const top=element.getBoundingClientRect().top;
       const row=[...element.querySelectorAll<HTMLElement>('[data-history-id]')].find(row=>row.getBoundingClientRect().bottom>top);
       const message=row?historyRows.current.find(item=>item.historyId===Number(row.dataset.historyId)):undefined;
-      return row&&message?{id:message.historyId,seq:message.seq,offset:row.getBoundingClientRect().top-top}:undefined;
+      return row&&message?{id:message.historyId,seq:message.seq,offset:row.getBoundingClientRect().top-top}:null;
     };
     const messages=useMemo(()=>projectPromptDelivery(history.messages.flatMap(event=>conversationEvents([...(event.request?[event.request]:[]),event]).map(row=>({...row,historyId:event.historyId}))),view.events),[history.messages,view.events]);
     // Hidden panes have no usable anchor geometry. Resume only after route
@@ -434,7 +437,8 @@ export function App() {
     useEffect(()=>{
       const viewport=conversation.current;if(!viewport)return;
       let timer:ReturnType<typeof setTimeout>|undefined;
-      const save=()=>{clearTimeout(timer);timer=undefined;nav.anchor(nav.capture?.());};
+      const key=nav.current.key,generation=nav.generation;
+      const save=()=>{clearTimeout(timer);timer=undefined;if(nav.current.key===key&&nav.generation===generation)nav.anchor(nav.capture?.());};
       const scroll=()=>{if(!timer)timer=setTimeout(save,250);};
       viewport.addEventListener('scroll',scroll,{passive:true});viewport.addEventListener('scrollend',save);
       return()=>{clearTimeout(timer);viewport.removeEventListener('scroll',scroll);viewport.removeEventListener('scrollend',save);};
@@ -450,7 +454,12 @@ export function App() {
         const element=conversation.current;if(!element)return;
         const distance=element.scrollHeight-element.scrollTop-element.clientHeight;
         // Wheel/touch/key intent arrives before scrolling, including tiny gestures at the tail.
-        if(distance<80&&!history.after){following.current=true;anchor.current=undefined;historyGesture.current=false;setUnseen(false);return;}
+        if(distance<80&&!history.after){
+            // Suspend tail following before the native scroll event. A resize in
+            // this frame must not undo an upward wheel, touch or keyboard gesture.
+            const leaving=direction==='older'&&element.scrollHeight-element.clientHeight>=80;
+            following.current=!leaving;anchor.current=undefined;historyGesture.current=leaving;setUnseen(false);return;
+        }
         historyGesture.current=true;
         if(distance>=80){following.current=false;captureAnchor();}
         if(direction==='older'&&distance>=80&&element.scrollTop<200){historyGesture.current=false;void history.older();}
@@ -472,7 +481,8 @@ export function App() {
             following.current = true; setUnseen(false);
             restored.current = selected;
         } else if (following.current) element.scrollTop = element.scrollHeight;
-        else if(!history.loading) setUnseen(true);
+        else if(!history.loading) {restoreAnchor();setUnseen(true);}
+        chatGeometry.current={height:element.scrollHeight,viewport:element.clientHeight};
     }, [messages, selected, narrow, mobileTab, contentMode, hydratedSession, connection, progress?.label, pendingPrompts]);
     useLayoutEffect(() => {
         const element = conversation.current;
@@ -785,10 +795,13 @@ export function App() {
         {error && !sessionOpening && <p className="error app-error" role="alert">{error}</p>}
 
         {narrow && <div className="view-nav">{workspaceTabs}</div>}
-        <div className="panes">{!narrow && contentMode==='both' && <div className="pane-divider" role="separator" tabIndex={0} aria-label="Resize conversation and workspace" aria-orientation="vertical" aria-controls="panel-chat" aria-valuemin={25} aria-valuemax={75} aria-valuenow={Math.round(split)} onKeyDown={event=>{const value=event.key==='Home'?25:event.key==='End'?75:event.key==='ArrowLeft'?split-2:event.key==='ArrowRight'?split+2:undefined;if(value!==undefined){event.preventDefault();setSplit(Math.max(25,Math.min(75,value)));}}} onPointerDown={event=>{if(event.button!==0)return;event.currentTarget.setPointerCapture(event.pointerId);event.preventDefault();}} onPointerMove={event=>{if(!event.currentTarget.hasPointerCapture(event.pointerId))return;const bounds=event.currentTarget.parentElement!.getBoundingClientRect();if(bounds.width)setSplit(Math.max(25,Math.min(75,(event.clientX-bounds.left)/bounds.width*100)));}} onPointerUp={event=>{if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);}}/>}{narrow&&mobileTab!=='chat'&&!sessionOpening&&hydratedSession===targetSession&&approvals.length>0&&<div className="mobile-approval-overlay"><Approvals key={`mobile-approvals:${selected}`} events={approvals} busy={busy||connection!=='Connected'||!routeInteractive} onRespond={body=>mutate(body,selected)}/></div>}<main id="panel-chat" className="chat-pane" hidden={narrow ? mobileTab !== 'chat' : contentMode === 'workspace'} aria-labelledby="tab-chat"><section id="conversation" ref={conversation} tabIndex={-1} className="conversation" aria-label="Conversation" onWheelCapture={event=>navigateHistory(event.deltaY<0?'older':'newer')} onKeyDownCapture={event=>{if(['ArrowUp','PageUp','Home'].includes(event.key))navigateHistory('older');if(['ArrowDown','PageDown','End'].includes(event.key))navigateHistory('newer');}} onTouchStartCapture={event=>{touchY.current=event.touches[0]?.clientY;}} onTouchMoveCapture={event=>{const next=event.touches[0]?.clientY;if(next!==undefined&&touchY.current!==undefined)navigateHistory(next>touchY.current?'older':'newer');touchY.current=next;}} onScroll={event => {
+        <div className="panes">{!narrow && contentMode==='both' && <div className="pane-divider" role="separator" tabIndex={0} aria-label="Resize conversation and workspace" aria-orientation="vertical" aria-controls="panel-chat" aria-valuemin={25} aria-valuemax={75} aria-valuenow={Math.round(split)} onKeyDown={event=>{const value=event.key==='Home'?25:event.key==='End'?75:event.key==='ArrowLeft'?split-2:event.key==='ArrowRight'?split+2:undefined;if(value!==undefined){event.preventDefault();setSplit(Math.max(25,Math.min(75,value)));}}} onPointerDown={event=>{if(event.button!==0)return;event.currentTarget.setPointerCapture(event.pointerId);event.preventDefault();}} onPointerMove={event=>{if(!event.currentTarget.hasPointerCapture(event.pointerId))return;const bounds=event.currentTarget.parentElement!.getBoundingClientRect();if(bounds.width)setSplit(Math.max(25,Math.min(75,(event.clientX-bounds.left)/bounds.width*100)));}} onPointerUp={event=>{if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);}}/>}{narrow&&mobileTab!=='chat'&&!sessionOpening&&hydratedSession===targetSession&&approvals.length>0&&<div className="mobile-approval-overlay"><Approvals key={`mobile-approvals:${selected}`} events={approvals} busy={busy||connection!=='Connected'||!routeInteractive} onRespond={body=>mutate(body,selected)}/></div>}<main id="panel-chat" className="chat-pane" hidden={narrow ? mobileTab !== 'chat' : contentMode === 'workspace'} aria-labelledby="tab-chat"><section id="conversation" data-scroll-owned ref={conversation} tabIndex={-1} className="conversation" aria-label="Conversation" onWheelCapture={event=>navigateHistory(event.deltaY<0?'older':'newer')} onKeyDownCapture={event=>{if(['ArrowUp','PageUp','Home'].includes(event.key))navigateHistory('older');if(['ArrowDown','PageDown','End'].includes(event.key))navigateHistory('newer');}} onTouchStartCapture={event=>{touchY.current=event.touches[0]?.clientY;}} onTouchMoveCapture={event=>{const next=event.touches[0]?.clientY;if(next!==undefined&&touchY.current!==undefined)navigateHistory(next>touchY.current?'older':'newer');touchY.current=next;}} onScroll={event => {
             const element=event.currentTarget;
-            if(history.loading)return;
-            following.current=!history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<80;
+            if(history.loading||sessionOpening||routeReady!==nav.current.key||selectedSession.current!==selected||!element.clientHeight||element.closest('[hidden]'))return;
+            const reflow=chatGeometry.current.height!==element.scrollHeight||chatGeometry.current.viewport!==element.clientHeight;
+            if(following.current&&reflow&&!history.after)element.scrollTop=element.scrollHeight;
+            else following.current=!history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<80;
+            chatGeometry.current={height:element.scrollHeight,viewport:element.clientHeight};
             if(following.current){anchor.current=undefined;setUnseen(false);}else {captureAnchor();setUnseen(true);}
             if(historyGesture.current){if(element.scrollTop<200){historyGesture.current=false;void history.older();}else if(history.after&&element.scrollHeight-element.scrollTop-element.clientHeight<200){historyGesture.current=false;void history.newer();}}
         }}>

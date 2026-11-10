@@ -151,3 +151,40 @@ test('settings sections participate in history and reject unrelated keys',()=>{
  expect(f.navigation.current.route.overlay).toEqual({kind:'settings',section:'dictation'});f.back();expect(f.navigation.current.route.overlay).toEqual({kind:'settings'});f.back();expect(f.navigation.current.route.overlay).toBeUndefined();
  for(const overlay of [{kind:'settings',section:'unknown'},{kind:'drawer',section:'dictation'},{kind:'settings',decisionId:'one'}])expect(parseRoute({project:'p',tab:'chat',overlay})).toBeUndefined();
 });
+
+test('reaching the tail clears an old reading anchor across session selection and reload',()=>{
+ const f=fixture();f.navigation.anchor({id:2,seq:8,offset:-30});
+ f.navigation.capture=()=>undefined;
+ f.navigation.navigate({project:'p',session:'other',tab:'chat'});
+ f.navigation.navigate({project:'p',session:'s',tab:'chat'});
+ expect(f.navigation.current.route.anchor).toBeUndefined();
+ const reloaded=new DeckHistory(f.adapter);reloaded.navigate({project:'p',session:'other',tab:'chat'});reloaded.navigate({project:'p',session:'s',tab:'chat'});
+ expect(reloaded.current.route.anchor).toBeUndefined();
+});
+
+test('hidden or hydrating geometry preserves reading state and a copied tab route cannot revive a cleared anchor',()=>{
+ const f=fixture(),saved={id:3,seq:9,offset:-42};f.navigation.anchor(saved);
+ f.navigation.capture=()=>null;
+ f.navigation.navigate({...f.navigation.current.route,tab:'activity'});
+ expect(f.navigation.current.route.anchor).toEqual(saved);
+ f.navigation.capture=()=>undefined;
+ f.navigation.navigate({...f.navigation.current.route,tab:'chat'});
+ expect(f.navigation.current.route.anchor).toBeUndefined();
+});
+
+test('latest visited session state wins over later-created entries after Back',()=>{
+ const f=fixture();f.navigation.anchor({id:3,seq:9,offset:-42});
+ f.navigation.navigate({...f.navigation.current.route,tab:'activity'});
+ f.navigation.navigate({project:'p',session:'other',tab:'chat'});
+ f.back();f.back();f.navigation.anchor(undefined);
+ f.navigation.navigate({project:'p',session:'other',tab:'chat'});
+ f.navigation.navigate({project:'p',session:'s',tab:'chat'});
+ expect(f.navigation.current.route.anchor).toBeUndefined();
+});
+
+test('Back uses a cleared journal anchor even when the departed browser entry still has its old anchor',()=>{
+ const f=fixture();f.navigation.anchor({id:3,seq:9,offset:-42});
+ f.navigation.navigate({project:'p',session:'other',tab:'chat'});f.back();
+ f.navigation.capture=()=>undefined;f.forward();f.back();
+ expect(f.navigation.current.route.anchor).toBeUndefined();
+});
