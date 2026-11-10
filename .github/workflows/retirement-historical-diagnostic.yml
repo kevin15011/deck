@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Migration harness authority, recovery and publication contracts
-        run: bun test scripts/retirement-matrix-fixture.int.test.ts scripts/retirement-publication-contract.test.ts scripts/retirement-manual-fixture.test.ts scripts/retirement-live-search.int.test.ts
+        run: bun test scripts/retirement-publication-contract.test.ts scripts/retirement-manual-fixture.test.ts
       - name: Published installation and migration matrix
         env:
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}

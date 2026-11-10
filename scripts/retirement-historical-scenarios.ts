@@ -1,7 +1,7 @@
 /** Adversarial perturbations of an actual historical install, before its normal migration. */
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyPackageRetirement, planPackageRetirement, beginRunnerContributions, recoverRunnerContributionTransaction } from '../packages/core/src';
+import { applyPackageRetirement, planPackageRetirement, beginRunnerContributions, recoverRunnerContributionTransaction, contributionHash } from '../packages/core/src';
 import { planRunnerCleanup, type CleanupRoots } from '../apps/cli/src/runner-cleanup-command';
 import { assertFixtureHome } from './retirement-matrix-fixture';
 
@@ -104,15 +104,18 @@ export function migratedRecoveryScenario(home: string, runner: string, path: str
   assertFixtureHome(home, path);
   const before = readFileSync(path), manifestPath = join(home, 'scenario-recovery/manifest.json');
   const target = { path, selector: { kind: 'file' as const } };
+  // Authority comes from this fixture's captured file, never the pending journal.
+  const authority = { runnerId: runner, root: home, targets: [target],
+    rollbackPreimages: [{ target, hash: contributionHash(before) }] };
   const begin = () => beginRunnerContributions({ runnerId: runner, root: home, manifestPath, deckVersion: 'fixture', targets: [target] });
   begin().abandon();
   writeFileSync(path, 'SYNTHETIC concurrent user edit');
   let rejected = false;
-  try { recoverRunnerContributionTransaction(manifestPath); } catch { rejected = true; }
+  try { recoverRunnerContributionTransaction(manifestPath, authority); } catch { rejected = true; }
   if (!rejected || readFileSync(path, 'utf8') !== 'SYNTHETIC concurrent user edit') throw Error('recovery discarded concurrent edit');
   writeFileSync(path, before);
-  if (recoverRunnerContributionTransaction(manifestPath) !== 'rolled-back') throw Error('restored historical preimage did not recover');
+  if (recoverRunnerContributionTransaction(manifestPath, authority) !== 'rolled-back') throw Error('restored historical preimage did not recover');
   begin().abandon();
-  if (recoverRunnerContributionTransaction(manifestPath) !== 'rolled-back') throw Error('recovery retry failed');
+  if (recoverRunnerContributionTransaction(manifestPath, authority) !== 'rolled-back') throw Error('recovery retry failed');
   return { scenario: 'interrupted-accounting-conflict-restore-retry', status: 'verified', provenance: 'real migrated file; synthetic interruption and concurrent edit' };
 }
