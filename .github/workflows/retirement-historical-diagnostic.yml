@@ -1,4 +1,4 @@
-# Published migration evidence: manual diagnostics and stable release qualification.
+# Optional published migration diagnostic; not an automatic release prerequisite.
 name: Historical retirement diagnostic
 on:
   workflow_dispatch:

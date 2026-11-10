@@ -72,17 +72,10 @@ jobs:
           name: retirement-fresh-contracts
           path: ${{ runner.temp }}/retirement-fresh
 
-  published-migration:
-    name: Published runner migration and admission
-    needs: metadata
-    if: needs.metadata.outputs.is_release == 'true'
-    uses: ./.github/workflows/retirement-historical-diagnostic.yml
-    secrets: inherit
-
   release-verification:
     name: Release verification gates
-    needs: [metadata, fresh-retirement, published-migration]
-    if: ${{ always() && !cancelled() && needs.metadata.result == 'success' && needs.fresh-retirement.result == 'success' && (needs.published-migration.result == 'success' || needs.published-migration.result == 'skipped' && needs.metadata.outputs.is_release != 'true') }}
+    needs: [metadata, fresh-retirement]
+    if: ${{ !cancelled() && needs.metadata.result == 'success' && needs.fresh-retirement.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -112,6 +105,8 @@ jobs:
   build:
     name: Build (${{ matrix.target }})
     needs: [metadata, release-verification]
+    # Evaluate direct gate results explicitly for both main and stable tags.
+    if: ${{ !cancelled() && needs.metadata.result == 'success' && needs.release-verification.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -181,7 +176,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: github.event_name == 'push' && needs.metadata.outputs.is_release == 'true'
+    if: ${{ !cancelled() && needs.metadata.result == 'success' && needs.build.result == 'success' && github.event_name == 'push' && needs.metadata.outputs.is_release == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -256,7 +251,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.metadata.outputs.is_release == 'false'
+    if: ${{ !cancelled() && needs.metadata.result == 'success' && needs.build.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.metadata.outputs.is_release == 'false' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

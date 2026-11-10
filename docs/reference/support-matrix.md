@@ -112,10 +112,10 @@ its presence does not authorize overwriting preserved user content. Builds preda
 writer fences do not observe this contract and cannot be fenced retroactively.
 
 The published migration inventory is pinned in
-`scripts/fixtures/retirement-releases.json`. Stable release qualification requires
-that inventory's base and selected-capability evidence, including candidate session
-admission, through the historical migration workflow. Unsupported rows remain
-explicit. This is an exact tested inventory, not a rolling promise for arbitrary
+`scripts/fixtures/retirement-releases.json`. The optional historical migration
+workflow records that inventory's base and selected-capability evidence, including
+candidate session admission. It is not an automatic release prerequisite.
+Unsupported rows and incomplete diagnostic evidence remain explicit. This is an exact tested inventory, not a rolling promise for arbitrary
 previous or future native runner versions. Live authenticated compatibility requires
 separate canary evidence for the exact Deck build, platform and native version.
 

@@ -61,8 +61,8 @@ describe("release workflow platform contract", () => {
   test("SSH candidate pushes trigger qualification without either publishing job", () => {
     const push=workflow.on.push as {branches:string[]};
     expect(push.branches).toContain('fix/session-pending-issues');
-    expect(workflow.jobs.artifacts?.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.metadata.outputs.is_release == 'false'");
-    expect(workflow.jobs.release?.if).toBe("github.event_name == 'push' && needs.metadata.outputs.is_release == 'true'");
+    expect(workflow.jobs.artifacts?.if).toContain("github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.metadata.outputs.is_release == 'false'");
+    expect(workflow.jobs.release?.if).toContain("github.event_name == 'push' && needs.metadata.outputs.is_release == 'true'");
     const metadata=workflow.jobs.metadata?.steps?.find(step=>step.name==='Extract version from tag')?.run;
     expect(metadata).toContain('if [[ "$GITHUB_REF" == refs/tags/v* ]]');
     expect(metadata).toContain('echo "is_release=false" >> $GITHUB_OUTPUT');
@@ -78,6 +78,17 @@ describe("release workflow platform contract", () => {
 
   test("runs release hard gates before archive build", () => {
     expect(workflow.jobs.build?.needs).toEqual(["metadata", "release-verification"]);
+    expect(workflow.jobs["release-verification"]?.needs).toEqual(["metadata", "fresh-retirement"]);
+    expect(workflow.jobs).not.toHaveProperty('published-migration');
+    for (const [job, gates] of Object.entries({
+      'release-verification': ['metadata', 'fresh-retirement'],
+      build: ['metadata', 'release-verification'],
+      release: ['metadata', 'build'],
+      artifacts: ['metadata', 'build'],
+    })) {
+      expect(workflow.jobs[job]?.if).toContain('!cancelled()');
+      for (const gate of gates) expect(workflow.jobs[job]?.if).toContain(`needs.${gate}.result == 'success'`);
+    }
     const steps = workflow.jobs["release-verification"]?.steps ?? [];
     const freshness=steps.findIndex(step=>step.name==='Generated asset freshness');
     expect(freshness).toBeGreaterThanOrEqual(0);

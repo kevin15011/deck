@@ -17,6 +17,12 @@ bun run build:dry-run
 bunx tsc --noEmit
 ```
 
+The release workflow requires fresh runner retirement contracts, generated asset
+freshness, the canonical fast suite, typechecking, and the four-platform native
+artifact matrix. Historical migration remains available through the optional
+`Historical retirement diagnostic` workflow and is not an automatic release
+prerequisite. Its live-search credentials are not required by the release path.
+
 The release workflow owns the four-platform artifact matrix. A local all-target `bun run build` requires macOS because Darwin signing fails closed; Linux maintainers use the host-only dry run above and rely on the matrix for signed Darwin artifacts.
 
 For compiled-runtime changes, also exercise a copied executable from a temporary directory and HOME with the Deck checkout unavailable. On macOS, a `sandbox-exec` profile can deny checkout reads for the executable and all descendants; verify the denial with a read control before running the copied [compiled session/web smoke](../../scripts/session-web-smoke.ts). Copy test fixtures and the test harness runtime outside the checkout too. Record the tested artifact and platform, and distinguish required installed runner/plugin/MCP dependencies from forbidden source-repository coupling. Changing only the working directory does not prove checkout independence.

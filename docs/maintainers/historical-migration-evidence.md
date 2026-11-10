@@ -1,5 +1,9 @@
 # Historical manual-tool fixtures
 
+The historical migration workflow is an optional manual diagnostic, not an
+automatic release prerequisite. Its completeness checks qualify diagnostic
+evidence only; a failed or incomplete diagnostic does not block a release.
+
 The published matrix retains every release/runner row. The selected phase for
 0.0.1 and 0.0.2 on Pi and OpenCode uses `manual-external-tool-fixture-v1`.
 Those published catalogs have no Serena entry and classify Codebase Memory as
@@ -34,13 +38,13 @@ manual tool entries. The reviewed migration preimage is this validated postimage
 Before migration, the harness checks exact tool, requirements and configuration
 preimages. Migration uses the normal candidate cleanup/sync/admission path.
 External executables must survive unchanged without acquiring Deck ownership.
-Publication requires both capability-specific artifact checks and candidate
+Complete diagnostic evidence requires both capability-specific artifact checks and candidate
 admission, in addition to the existing complete base/selected inventory, search,
 RTK, preservation/recovery and source verification gates. Missing or fabricated
 manual evidence cannot waive a row. Commands must match the exact executable and
 arguments: Serena requires `start-mcp-server`; Codebase Memory takes no arguments.
 Extra or swapped argv entries, altered historical success/manual outcomes and a
-UV digest differing from the acquisition pin all block publication.
+UV digest differing from the acquisition pin all fail diagnostic qualification.
 
 Run the existing `Historical retirement diagnostic` workflow for Linux x64 with
 Bun 1.4.0. Its selected invocation is:
