@@ -9,7 +9,9 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
-## [0.15.0] - Unreleased
+## [0.15.1] - Unreleased
+
+Carries the intended 0.15.0 product changes below and the release CI policy correction. The existing v0.15.0 tag is retained; its stable publication was blocked.
 
 ### Added
 
@@ -28,6 +30,7 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ### Fixed
 
+- Keep historical migration validation as an optional manual diagnostic rather than an automatic release prerequisite. Retain fresh retirement contracts, generated freshness, the fast suite, types, native artifact qualification, checksums and publication validation.
 - Recover suspended mobile chat connections and preserve chat following across mobile menus.
 - Refresh the prompt inbox after session lifecycle changes and pause queued prompts after deterministic startup failures.
 - Recover acknowledged queue lifecycle pauses across daemon startup, release and reconnect; reconcile late runner refusals without replaying delivered prompts.
@@ -39,6 +42,10 @@ All notable release changes to Deck are recorded here. Current release procedure
 - Dictation supports Turbo Q5 only. Saved Small or Turbo Q8 selections become unselected without downloading replacements or automatically deleting old weights.
 - Microphone capture requires a secure browser context. Audio is bounded by five minutes, 16 million raw samples and a 10 MiB upload limit. Reaching the capture limit retains audio for explicit transcription or cancellation.
 - The compatible whisper.cpp CLI must be installed separately. No inference process remains resident while idle. Physical iOS/Safari capture and a cross-platform speech-quality benchmark remain unqualified.
+
+## [0.15.0] - Tagged; stable publication blocked
+
+The v0.15.0 tag points to `013af4e53da00e5082b0a3b724e4b2ef09207e52`. Its stable publication was blocked by the historical migration gate. This tag remains unchanged; 0.15.1 carries the intended product changes and the CI policy correction.
 
 ## [0.14.0] - 2026-10-26
 
