@@ -1623,9 +1623,10 @@ class CodexRunnerAdapter implements RunnerAdapter {
   }
   /** Explicit current-scope recovery only; legacy journals never supply targets or desired bytes.
    * The CLI must archive/adopt the old fence before invoking these callbacks. */
-  prepareExplicitCanonicalRecovery(input: DeveloperTeamAdapterInstallInput) {
-    const plan = this.buildDeveloperTeamInstallPlan(input);
-    const native = this.#nativePlans.get(plan)!;
+  prepareExplicitCanonicalRecovery(input: DeveloperTeamAdapterInstallInput, plan = this.buildDeveloperTeamInstallPlan(input)) {
+    const native = this.#nativePlans.get(plan);
+    const operation = this.#planOperations.get(plan);
+    if (!native || operation?.state !== "planned") throw new Error("codex-recovery-reviewed-plan-required");
     if (plan.blocked) throw new Error("codex-recovery-plan-blocked");
     const parts = this.#splitPlan(native);
     const effects = this.#fileEffects ?? createNodeCodexFileEffects({ journalRoot: this.#journalRoot });
@@ -1633,6 +1634,25 @@ class CodexRunnerAdapter implements RunnerAdapter {
       targets: structuredClone(plan.mutationPreview ?? []),
       journalRoot: this.#journalRoot,
       journalKinds: ["native", "native-skills"], maximumAdapterJournals: 2,
+      validate: async () => {
+        for (const part of parts) {
+          const mutations = new Map(part.plan.mutations.map(mutation => [mutation.relativePath, mutation]));
+          for (const mutation of part.plan.mutations) {
+            const path = resolve(part.plan.projectRoot, mutation.relativePath);
+            assertNoContributionSymlink(path);
+            const current = await effects.inspect(path);
+            const expected = mutation.expected;
+            if (expected.kind === "absent" ? current !== null : !current || current.kind !== "file" || sha256(current.content) !== expected.hash || (current.mode ?? 0o644) !== expected.mode) throw new Error("codex-recovery-plan-stale");
+          }
+          for (const expected of part.plan.expectedFiles) {
+            if (mutations.has(expected.relativePath)) continue;
+            const path = resolve(part.plan.projectRoot, expected.relativePath);
+            assertNoContributionSymlink(path);
+            const current = await effects.inspect(path);
+            if (!current || current.kind !== "file" || sha256(current.content) !== expected.hash || (current.mode ?? 0o644) !== expected.mode) throw new Error("codex-recovery-plan-stale");
+          }
+        }
+      },
       archive: async () => {}, // The explicit CLI adoption archives the active historical journal pool first.
       reconcile: () => this.applyDeveloperTeamInstall({ projectRoot: input.projectRoot, environmentId: input.environmentId, plan }),
       verify: async () => {
@@ -1684,14 +1704,19 @@ class CodexRunnerAdapter implements RunnerAdapter {
   async applyDeveloperTeamInstall(input: DeveloperTeamApplyInput): Promise<DeveloperTeamApplyResult> {
     return withCodexInstallationMutation(this.#roots.codexHome, () => this.#applyDeveloperTeamInstall(input));
   }
-  async #applyDeveloperTeamInstall(input: DeveloperTeamApplyInput): Promise<DeveloperTeamApplyResult> {
-    const native = this.#nativePlans.get(input.plan as object);
-    const operation = this.#planOperations.get(input.plan as object);
+  precheckDeveloperTeamInstall(plan: RunnerDeveloperTeamInstallPlan): void {
+    const native = this.#nativePlans.get(plan);
+    const operation = this.#planOperations.get(plan);
     if (!native || !operation) throw new Error("Codex apply requires the exact reviewed immutable plan.");
     if (operation.state !== "planned") throw new Error(`Codex operation ${operation.receipt.operationId} is already ${operation.state}.`);
-    // Fail closed at the mutation boundary: a blocked plan (for example one that would erase a configured model
-    // assignment without catalog confirmation) is never written, even when a caller skips its own blocked check.
     if (native.blocked) throw new Error("Codex installation plan is blocked and was not applied.");
+  }
+  async #applyDeveloperTeamInstall(input: DeveloperTeamApplyInput): Promise<DeveloperTeamApplyResult> {
+    // Refuse invalid/consumed/blocked plans before the caller publishes a fence,
+    // and repeat at the native mutation boundary for unguarded callers.
+    this.precheckDeveloperTeamInstall(input.plan);
+    const native = this.#nativePlans.get(input.plan)!;
+    const operation = this.#planOperations.get(input.plan)!;
     const contributionManifestPath = join(this.#roots.codexHome, "deck", "manifest.json");
     operation.state = "applying";
     const serenaReadiness = this.#serenaReadinessByPlan.get(input.plan as object);

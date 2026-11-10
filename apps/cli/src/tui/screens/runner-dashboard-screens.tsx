@@ -272,6 +272,15 @@ function ReviewPlanScreen({ state, canRunPlan, runBlockDiagnostics = [] }: { sta
       {state.runnerUi?.dashboard?.managedLaunchSupported === false
         ? <Text dimColor>{state.runnerUi.dashboard.launchHint ?? "Full Deck-managed launch is not verified for this runner. Installation here provides native content only; protected execution remains unsupported."}</Text>
         : <Text dimColor>After review/install, launch through the CLI-managed session: deck {state.runnerScope} developer. Direct runner launches remain static-compatible.</Text>}
+      {state.plan?.recoveryPreview && (
+        <Box marginTop={1} flexDirection="column">
+          <Text bold>Recover incomplete Codex installation</Text>
+          <Text>Preserve historical evidence: {displayReviewedPath(state.plan.recoveryPreview.archivePath)}</Text>
+          {state.plan.recoveryPreview.targets.map((target, index) => (
+            <Text key={index}>{target.action}: {displayReviewedPath(target.path)} ({target.count} files)</Text>
+          ))}
+        </Box>
+      )}
       {state.plan?.diagnostics && state.plan.diagnostics.length > 0 && (
         <Box marginTop={1} flexDirection="column">
           <Text bold>Plan diagnostics:</Text>
@@ -339,6 +348,11 @@ function dashboardActionCause(result: RunnerActionRunResult): string | undefined
     if (bounded !== next) break;
   }
   return cause || undefined;
+}
+
+/** These paths identify explicitly reviewed local effects, not arbitrary diagnostics. */
+function displayReviewedPath(path: string): string {
+  return stripVTControlCharacters(path).replace(/[\u0000-\u001f\u007f-\u009f\p{Cf}]/gu, '');
 }
 
 function sanitizeDashboardText(value: unknown): string {

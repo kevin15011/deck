@@ -172,6 +172,8 @@ export type DeveloperTeamInstallPlanInput = {
 };
 
 export type RunnerDeveloperTeamInstallPlan = {
+  /** Evidence archive for an explicit new operation; requires confirmation even without file drift. */
+  recovery?: { archivePath: string };
   /** Safe reconciliation of a previously installed generation; never authorizes first installation. */
   automaticRefresh?: boolean;
   files: readonly DeveloperTeamInstallFile[];
@@ -199,6 +201,8 @@ export type DeveloperTeamInstallFile = {
 };
 
 export type DeveloperTeamApplyInput = {
+  /** Cancel before starting a reviewed recovery mutation. */
+  signal?: AbortSignal;
   projectRoot: string;
   plan: RunnerDeveloperTeamInstallPlan;
   environmentId: RunnerEnvironmentId;

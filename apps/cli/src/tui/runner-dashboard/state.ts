@@ -189,6 +189,7 @@ export type RunnerPlanDiagnostic = {
 };
 
 export type RunnerReviewPlan = {
+  recoveryPreview?: import("@deck/core").ReviewPlan["recoveryPreview"];
   groups: {
     automaticInstalls: RunnerAction[];
     manualSteps: RunnerAction[];

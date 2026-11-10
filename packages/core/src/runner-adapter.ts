@@ -511,6 +511,11 @@ export type DashboardState = {
 // ---------------------------------------------------------------------------
 
 export type ReviewPlan = {
+  /** Explicitly reviewed local effects; paths are intentionally visible to the installer user. */
+  recoveryPreview?: {
+    archivePath: string;
+    targets: readonly {action: string; path: string; count: number}[];
+  };
   groups: {
     automaticInstalls: readonly RunnerAction[];
     manualSteps: readonly RunnerAction[];
@@ -580,6 +585,9 @@ export type ModelCatalogContext = {
 export type DeveloperTeamMaterializationScope = "full" | "content-only";
 
 export type DeveloperTeamAdapterInstallInput = {
+  /** Only confirmed installation flows may supersede unproven pending state.
+   * Ordinary launch, refresh, model edits and upgrade sync must not opt in. */
+  recoverIncompleteOperation?: true;
   projectRoot: string;
   environmentId: RunnerEnvironmentId;
   /** Full plans may change runner runtime configuration; content-only plans only refresh Deck-owned content. */
@@ -825,6 +833,8 @@ export interface RunnerAdapter {
   recoverPendingMutation?(journals: readonly import("./runner-writer-fence").RunnerMutationJournal[]): Promise<"preimage" | "postimage" | undefined>;
   /** Read-only legacy journal qualification before opening a new CLI fence. */
   precheckPendingMutation?(input: DeveloperTeamAdapterInstallInput): void;
+  /** Read-only validation of the exact plan before publishing a pending fence. */
+  precheckDeveloperTeamInstall?(plan: RunnerDeveloperTeamInstallPlan): void;
   /** Read-only assessment; callbacks execute only under canonical fence recovery. */
   prepareCanonicalRecovery?(input: DeveloperTeamAdapterInstallInput, journals: readonly import("./runner-writer-fence").RunnerMutationJournal[], self: import("./runner-writer-fence").BuildIdentity): Promise<{
     journalKinds: readonly string[];

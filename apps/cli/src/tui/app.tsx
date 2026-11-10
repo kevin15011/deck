@@ -1,4 +1,4 @@
-import { RunnerWriteSkippedError } from "../runner-mutation-admission";
+import { RunnerWriteSkippedError, prepareReviewedRunnerRecovery, applyReviewedRunnerRecovery } from "../runner-mutation-admission";
 import { runPiModelDiscovery } from "../../../../packages/adapter-pi/src/model-discovery-command";
 import { withIdleRunnerMutation, RunnerMutationDeferredError } from "@deck/session-host";
 import { RunnerMutationDeferredScreen, stopDaemonForInstall } from "./screens/runner-mutation-deferred";
@@ -261,7 +261,7 @@ export function modelConfigurationFailureMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   if (error instanceof RunnerWriteSkippedError) {
     const reasons: Record<string, string> = {
-      "runner-write-recovery-required": "An incomplete runner operation requires recovery. Existing recovery evidence was preserved; retrying installation cannot resolve missing recovery proof.",
+      "runner-write-recovery-required": "An incomplete runner operation requires recovery. Existing evidence was preserved. Select Codex Developer Team and use Review & Install to review and confirm recovery.",
       "managed-by-newer-deck": "The runner is managed by a newer Deck version. Use that version or update Deck before retrying.",
       "managed-by-newer-schema": "The runner uses a newer state schema. Update Deck before retrying.",
       "runner-fence-unreadable": "Runner writer state could not be authenticated. Existing evidence was preserved; inspect recovery state before retrying.",
@@ -899,7 +899,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           normalizedInventory.inventory,
         );
         log(`dashboardPlanBuilder: SUCCESS. planSteps=${Array.isArray(plan) ? plan.length : "not-array"}`);
-        return plan as RunnerReviewPlan;
+        return prepareReviewedRunnerRecovery(adapter, plan as RunnerReviewPlan, {
+          projectRoot: localResolvedProjectRoot ?? process.cwd(),
+          environmentId: dashboardEnvironmentId,
+          deckConfig: requiredConfigStore.readRequired(),
+          capabilityIds: Object.entries(state.selectedCapabilities).filter(([, selected]) => selected).map(([id]) => id),
+        }, state.teams["developer-team"]?.selected === true);
       } catch {
         log("dashboardPlanBuilder: FAILED to build review plan");
         return createRunnerReviewPlanFailure();
@@ -1140,6 +1145,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         );
       };
       const results = await withIdleRunnerMutation(() => runRunnerReviewPlan(dashboardState.plan!, {
+        beforeActions: () => applyReviewedRunnerRecovery(dashboardState.plan!, controller.signal),
         projectRoot: projectRoot,
         configStore: requiredConfigStore,
         runnerCommand: dashboardState.runtime.runnerCommand,

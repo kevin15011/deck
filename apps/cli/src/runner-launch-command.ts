@@ -293,6 +293,7 @@ async function runRunnerLaunchReserved(input: RunRunnerLaunchInput): Promise<Run
       xdgConfigHome: input.processEffects?.inheritedEnv?.XDG_CONFIG_HOME }));
   const baseLaunch = { ...input.launch, deckConfig } as RunnerLaunchInput;
   const installInput = {
+    ...(input.installOnly ? { recoverIncompleteOperation: true as const } : {}),
     projectRoot: baseLaunch.projectRoot,
     environmentId: input.adapter.environmentIds[0]!,
     localOnly: input.localOnly,
@@ -337,7 +338,7 @@ async function runRunnerLaunchReserved(input: RunRunnerLaunchInput): Promise<Run
   }
   if (input.dryRun) return { status: "dry-run", diagnostics: [preview] };
 
-  if (safeMutations.length > 0 && !input.yes && !(plan.automaticRefresh && !input.installOnly)) {
+  if ((safeMutations.length > 0 || plan.recovery) && !input.yes && !(plan.automaticRefresh && !input.installOnly)) {
     if (!input.interactive || !input.confirm) return { status: "blocked", message: "Mutation requires --yes in non-interactive mode." };
     const confirmationQuestion = input.installOnly
       ? "Apply these changes? [y/N]"

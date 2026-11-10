@@ -8,12 +8,13 @@ import { withInstallationMutation } from '../../../packages/core/src/installatio
 import type { createCodexRunnerAdapter } from '../../../packages/adapter-codex/src/runner-adapter';
 import type { RunnerFenceOptions, RunnerMutationAdmission } from './runner-mutation-admission';
 
-/** Explicit recovery preview, deliberately absent from automatic launch/Setup paths.
+/** Explicit recovery preview, deliberately absent from automatic launch/refresh paths.
  * apply() requires a separate adoption decision by its caller. It never proves or
  * rolls back the unknown old operation; it preserves it and starts a NEW epoch. */
-export async function previewExplicitCodexRecovery(
+export function previewExplicitCodexRecovery(
  adapter: ReturnType<typeof createCodexRunnerAdapter>, input: DeveloperTeamAdapterInstallInput,
  fence: RunnerFenceOptions, admission: RunnerMutationAdmission,
+ plan?: Parameters<ReturnType<typeof createCodexRunnerAdapter>['prepareExplicitCanonicalRecovery']>[1],
 ) {
  fence = structuredClone(fence);
  if (!validBuildIdentity(fence.self) || !Number.isSafeInteger(fence.stateSchema) || fence.stateSchema < 1) throw new Error('runner-recovery-writer-invalid');
@@ -26,7 +27,7 @@ export async function previewExplicitCodexRecovery(
  if (!Number.isSafeInteger(before.pending.epoch + 1)) throw new Error('runner-recovery-epoch-exhausted');
  const originalBytes = readFileSync(fence.path, 'utf8');
  if (JSON.stringify(JSON.parse(originalBytes)) !== JSON.stringify(before)) throw new Error('runner-fence-changed');
- const recovery = adapter.prepareExplicitCanonicalRecovery(structuredClone(input));
+ const recovery = adapter.prepareExplicitCanonicalRecovery(structuredClone(input), plan);
  const snapshotJournals = () => {
   assertPrivateStatePath(join(recovery.journalRoot, 'inventory'));
   let names: string[];
@@ -53,14 +54,17 @@ export async function previewExplicitCodexRecovery(
  const archivePath = join(dirname(fence.path), 'recovery-archive', `unproven-${digest}-${revision}.json`);
  let used = false;
  return { archivePath, targets, journalPaths: journalEvidence.map(entry => join(recovery.journalRoot, entry.name)), originalDigest: digest,
-  async apply() {
+  async apply(signal?: AbortSignal) {
    if (used) throw new Error('codex-explicit-recovery-preview-consumed');
    used = true;
    return admission(() => withInstallationMutation(adapter.mutationRoot!, async () => {
     const unchanged = () => {
      if (JSON.stringify(readRunnerFence(fence.path)) !== JSON.stringify(before) || readFileSync(fence.path, 'utf8') !== originalBytes) throw new Error('runner-fence-changed');
     };
+    signal?.throwIfAborted();
     unchanged();
+    await recovery.validate();
+    signal?.throwIfAborted();
     assertPrivateStatePath(archivePath);
     ensureDurableDir(dirname(archivePath), 0o700);
     const evidence = { schema: 1, journalEvidence, disposition: 'superseded-unproven', originalBytes, originalDigest: digest, mutationRoot: adapter.mutationRoot, scope: 'global', targets };
@@ -78,9 +82,10 @@ export async function previewExplicitCodexRecovery(
     syncDirectory(dirname(archivePath));
     unchanged();
     if (JSON.stringify(snapshotJournals()) !== JSON.stringify(journalEvidence)) throw new Error('codex-recovery-journals-changed');
+    signal?.throwIfAborted();
     const id = randomUUID();
-    // Epoch 5 is retained as unproven evidence, never declared committed. Epoch 6
-    // is a separate explicit operation with the caller's current global scope.
+    // Retain the old epoch as unproven evidence. The next epoch is a separate
+    // explicit operation with the caller's current global scope.
     const adopted = { ...before, epoch: before.pending!.epoch, pending: {
      epoch: before.pending!.epoch + 1, writer: fence.self, stateSchema: fence.stateSchema,
      journals: [{ kind: 'canonical-recovery-v1', id, operationId: id }, { kind: 'deck-scope-v1', id: 'global', operationId: id }],
@@ -92,7 +97,11 @@ export async function previewExplicitCodexRecovery(
     if (JSON.stringify(snapshotJournals()) !== JSON.stringify(journalEvidence)) throw new Error('codex-recovery-journals-changed');
     for (const entry of journalEvidence) unlinkSync(join(recovery.journalRoot, entry.name));
     if (journalEvidence.length) syncDirectory(recovery.journalRoot);
-    await withRunnerFenceRecovery({ ...fence, mutationRoot: adapter.mutationRoot!, expected: adopted, context: { intent: 'explicit' }, ...recovery });
+    let result: Awaited<ReturnType<typeof recovery.reconcile>> | undefined;
+    await withRunnerFenceRecovery({ ...fence, mutationRoot: adapter.mutationRoot!, expected: adopted, context: { intent: 'explicit' }, ...recovery,
+     reconcile: async () => { result = await recovery.reconcile(); },
+    });
+    return result!;
    }));
   },
  };

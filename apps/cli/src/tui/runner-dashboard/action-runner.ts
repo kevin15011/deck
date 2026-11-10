@@ -170,6 +170,8 @@ export type McpConfigWriterFn = (options: {
  * Adapters inject their runtime-specific implementations.
  */
 export type RunnerActionRunnerDependencies = {
+  /** Executes retained reviewed prerequisites after freshness and cancellation checks. */
+  beforeActions?: () => Promise<void>;
   projectRoot?: string;
   runnerCommand?: string;
   dashboardState?: RunnerDashboardState;
@@ -210,7 +212,8 @@ function getReviewedPlanExecutionBlocker(
   dependencies: RunnerActionRunnerDependencies,
 ): string | undefined {
   const state = dependencies.dashboardState;
-  if (!state || state.plan !== plan) return undefined;
+  if (!state) return undefined;
+  if (state.plan && state.plan !== plan) return "Review & Install is blocked because the reviewed plan changed.";
   if (!plan.ready) return "Review & Install requires a ready reviewed plan.";
   if (state.planGeneratedForRevision !== undefined && state.planGeneratedForRevision !== state.planRevision) {
     return "Review & Install is blocked because the reviewed plan is stale.";
@@ -838,6 +841,16 @@ export async function runRunnerReviewPlan(
     };
     dependencies.onActionResult?.(blockedResult);
     return [blockedResult];
+  }
+
+  if (dependencies.signal?.aborted) return [];
+  try { await dependencies.beforeActions?.(); }
+  catch (error) {
+    const result: RunnerActionRunResult = { actionId: 'review-plan.recovery', status: 'failed',
+      message: 'Recovery did not complete; review the installation again before retrying.',
+      diagnostics: [redact(error instanceof Error ? error.message : String(error))] };
+    dependencies.onActionResult?.(result);
+    return [result];
   }
 
   const results: RunnerActionRunResult[] = [];
