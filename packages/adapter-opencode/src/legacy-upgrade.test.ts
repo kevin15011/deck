@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { getDefaultDeckConfig, buildCapabilityInstructionBundle, type DashboardState } from '@deck/core';
-import { getStandaloneSkills } from '@deck/core/skills/external';
 import { TAVILY_PROVIDER_DESCRIPTOR } from '@deck/provider-tavily';
 import { OPENCODE_RUNNER_CAPABILITY_IDS } from './capability-catalog';
 import { createOpenCodeRunnerAdapter } from './runner-adapter';
@@ -18,7 +17,12 @@ const preimages: Record<string, string> = { ...originals, ...Object.fromEntries(
 // Protects upgrades from known pre-receipt releases. The independent oracle is the
 // historical renderer/source recorded in legacy-content.ts, not discovered local names.
 // Altered bytes and content transplanted into another shared name must remain foreign.
-test('public team install upgrades exact legacy bundles and preserves near matches', async () => {
+type LegacyAdapter = ReturnType<typeof createOpenCodeRunnerAdapter>;
+async function withLegacyInstall(run: (fixture: {
+  adapter: LegacyAdapter;
+  build: () => ReturnType<LegacyAdapter['buildDeveloperTeamInstallPlan']>;
+  ids: string[]; root: string; home: string;
+}) => Promise<void>) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'opencode-legacy-upgrade-'))), root = join(home, 'opencode');
   const saved = { HOME: process.env.HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME };
   try {
@@ -36,6 +40,16 @@ test('public team install upgrades exact legacy bundles and preserves near match
       writeFileSync(path, preimages[`skills/${id}/SKILL.md`]!);
       writeFileSync(join(dirname(path), 'personal.txt'), 'retain extra file');
     }
+    await run({ adapter, build, ids, root, home });
+  } finally {
+    for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+// Refusal and upgrade are independent historical cases, each with a fresh home.
+test('public team install preserves edited and transplanted legacy near matches', async () => {
+  await withLegacyInstall(async ({ build, ids, root }) => {
     const edited = join(root, 'skills', ids[0]!, 'SKILL.md'), original = readFileSync(edited, 'utf8');
     writeFileSync(edited, original + '\nuser edit');
     const denied = build();
@@ -44,7 +58,11 @@ test('public team install upgrades exact legacy bundles and preserves near match
     expect(readFileSync(edited, 'utf8')).toBe(original + '\nuser edit');
     writeFileSync(edited, preimages['skills/ci-cd-and-automation/SKILL.md']);
     expect(build().diagnosticEntries?.some(entry => entry.code === 'opencode-shared-skill-conflict')).toBe(true);
-    writeFileSync(edited, original);
+  });
+});
+
+test('public team install upgrades exact legacy bundles and remains idempotent', async () => {
+  await withLegacyInstall(async ({ adapter, build, ids, root, home }) => {
     const plan = build();
     expect(plan.diagnosticEntries?.filter(entry => entry.severity === 'error') ?? []).toHaveLength(0);
     await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: 'opencode-development', plan });
@@ -53,10 +71,7 @@ test('public team install upgrades exact legacy bundles and preserves near match
       expect(readFileSync(join(root, 'skills', id, 'personal.txt'), 'utf8')).toBe('retain extra file');
     }
     expect(build().mutationPreview).toHaveLength(0);
-  } finally {
-    for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
-    rmSync(home, { recursive: true, force: true });
-  }
+  });
 });
 
 // Protects historical optional-package combinations, beyond the observed all-enabled
