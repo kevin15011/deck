@@ -1,3 +1,4 @@
+import { mcpReadinessTiming, startupTiming } from "@deck/core/session/startup-timing";
 import { verifyCodexNativeRole } from "../native-role";
 import { isCodexReadOnlyTask, codexReadOnlyTools } from "./launch";
 import {codexRequestInput} from "@deck/core/session/request-input";
@@ -21,6 +22,8 @@ export const CODEX_TESTED_VERSIONS = { min: "0.162.1", maxTested: "0.162.1" } as
 type ProbeExec = (command: string, args: readonly string[], options: { cwd?: string; timeoutMs: number }) => Promise<{ code: number | null; stdout: string }>;
 export type CodexSessionDriverOptions = CodexLaunchOptions & {
   requireNativeRole?: boolean;
+  /** Internal experiment control; full inventory remains safe on every version. */
+  mcpStatusDetail?: "full";
   exec?: ProbeExec; escalationMs?: number; killGraceMs?: number; rpcTimeoutMs?: number;
 };
 const defaultExec: ProbeExec = (command, args, options) => new Promise((resolve) => {
@@ -62,6 +65,7 @@ function startupErrorCode(error: unknown): string {
 }
 
 class CodexTask {
+  private readonly startup;
   private readonly nativeInput: DriverTaskInput;
   private child?: SupervisedChild;
   private spawning?: Promise<SupervisedChild>;
@@ -83,6 +87,7 @@ class CodexTask {
   private rejectId!: (error: Error) => void;
   readonly nativeSessionId = new Promise<string>((resolve, reject) => { this.resolveId = resolve; this.rejectId = reject; });
   constructor(private readonly input: DriverTaskInput, private readonly io: DriverHostIo, private readonly options: CodexSessionDriverOptions) {
+    this.startup = startupTiming(event => this.emit(event), { runner: "codex", scope: "adapter", boundary: "codex-turn-start-reply", resume: !!input.resume, version: input.runnerVersion });
     const aliases = Object.fromEntries(input.mcp.servers.map((id) => [id, nativeCodexMcpId(input.taskId, id)]));
     this.nativeInput = { ...input, suppressedMcpServers: [...new Set([...(input.suppressedMcpServers ?? []), ...input.mcp.servers])], mcp: { ...input.mcp, servers: input.mcp.servers.map((id) => aliases[id]!) }, mcpServerSpecs: Object.fromEntries(input.mcp.servers.map((id) => [aliases[id]!, input.mcpServerSpecs[id]!])) };
     this.emit({ kind: "diagnostic", data: { code: "codex-mcp-aliases", aliases } });
@@ -162,7 +167,9 @@ class CodexTask {
     try {
       if (this.input.nativeRoleDescriptor) verifyCodexNativeRole(this.input.nativeRoleDescriptor);
       if (this.input.assignment.runnerId !== "codex" || !(this.input.assignment.modelId.trim() || this.input.nativeRoleDescriptor?.model)) throw new Error("codex-invalid-assignment");
+      this.startup.step("inventory-process");
       const inventory = await this.connect();
+      this.startup.step("inventory-config");
       const inventoryConfig = object(await inventory.call("config/read", { cwd: this.input.cwd, includeLayers: false }));
       const config = object(inventoryConfig.config);
       verifyCodexConfig(config, this.nativeInput);
@@ -176,10 +183,14 @@ class CodexTask {
         // Installed role hooks require exact native hash attestation.
         // Only managed hook-hash attestation needs a second process. Personal MCPs,
         // skills and plugins use this process's fresh native configuration directly.
+        this.startup.step("inventory-hooks");
         const inheritedHooks = await this.readHooks(inventory);
         admittedRoleHooks = inheritedHooks.filter(hook => isAdmittedCodexRoleHook(hook, this.input));
+        this.startup.step("inventory-stop");
         await this.stopChild();
+        this.startup.step("runtime-process");
         rpc = await this.connect(inheritedHooks);
+        this.startup.step("runtime-config");
         runtimeConfig = object(object(await rpc.call("config/read", { cwd: this.input.cwd, includeLayers: false })).config);
       }
       verifyCodexConfig(runtimeConfig, this.nativeInput);
@@ -187,12 +198,14 @@ class CodexTask {
       if (nativeDeclarations.length) this.emit({kind:"diagnostic",data:{code:"personal-mcp.sources",servers:nativeDeclarations}});
       if (this.input.nativeRoleDescriptor) {
         verifyCodexNativeRole(this.input.nativeRoleDescriptor);
+        this.startup.step("runtime-hooks");
         const activeHooks = await this.readHooks(rpc);
         for (const expected of this.input.nativeRoleDescriptor.hooks) {
           if (!activeHooks.some(hook => isAdmittedCodexRoleHook(hook, this.input) && hook.eventName === expected.event && hook.command === expected.command && hook.enabled !== false && hook.trustStatus === "trusted" && admittedRoleHooks.some(prior => prior.key === hook.key && prior.currentHash === hook.currentHash))) throw new Error("codex-hook-isolation-violation");
         }
       }
       const role = this.input.nativeRoleDescriptor;
+      this.startup.step(this.input.resume ? "thread-resume" : "thread-start");
       const thread = object(object(await rpc.call(this.input.resume ? "thread/resume" : "thread/start", {
         ...nativeModel(this.input.assignment.modelId || role?.model || ""), cwd: this.input.cwd,
         developerInstructions: [role?.instructions, this.input.rolePrompt, this.input.localContext].filter(Boolean).join("\n\n"),
@@ -204,8 +217,9 @@ class CodexTask {
       })).thread);
       if (typeof thread.id !== "string" || !thread.id || this.input.resume && thread.id !== this.input.resume.nativeSessionId) throw new Error("codex-native-session-id-mismatch");
       this.threadId = thread.id;this.steeringHistoryVerified=thread.historyMode === "legacy";
+      this.startup.step("mcp-wait");
       await this.verifyRuntimeMcp(rpc, Date.now() + (this.options.rpcTimeoutMs ?? 30_000));
-    } catch (error) { await this.fail(startupErrorCode(error)); throw error; }
+    } catch (error) { this.startup.finish(this.startupInterrupted || this.closed ? "cancelled" : "failed"); await this.fail(startupErrorCode(error)); throw error; }
   }
   private async readHooks(rpc: CodexRpc): Promise<CodexHookMetadata[]> {
     const response = object(await rpc.call("hooks/list", { cwds: [this.input.cwd] }));
@@ -229,12 +243,20 @@ class CodexTask {
     }
   }
   private async verifyRuntimeMcp(rpc: CodexRpc, deadline: number): Promise<void> {
+    const timing = mcpReadinessTiming(event => this.emit(event), "codex");
+    let outcome: "completed" | "failed" | "cancelled" = "failed";
+    try {
     for (;;) {
+      timing.poll();
       const names: string[] = [], seen = new Set<string>();
       const personal: string[] = [];
       const unavailable: string[] = [];
       const active: string[] = [];
-      let page = object(await rpc.call("mcpServerStatus/list", { threadId: this.threadId, detail: "full" }));
+      // Only 0.166.0 has a verified reduced-detail contract: all-server tools,
+      // auth, errors and runtime status remain; unused resources/templates skip
+      // independent discovery. Unknown/older versions retain the original shape.
+      const detail = this.input.runnerVersion === "0.166.0" && this.options.mcpStatusDetail !== "full" ? "toolsAndAuthOnly" : "full";
+      let page = object(await timing.request(() => rpc.call("mcpServerStatus/list", { threadId: this.threadId, detail })));
       let starting = false;
       for (;;) {
         if (!Array.isArray(page.data)) throw new Error("codex-mcp-status-invalid");
@@ -261,17 +283,19 @@ class CodexTask {
         if (!cursor) break;
         if (seen.has(cursor) || seen.size > 100) throw new Error("codex-mcp-status-pagination-cycle");
         seen.add(cursor);
-        page = object(await rpc.call("mcpServerStatus/list", { threadId: this.threadId, detail: "full", cursor }));
+        page = object(await timing.request(() => rpc.call("mcpServerStatus/list", { threadId: this.threadId, detail, cursor })));
       }
       if (this.nativeInput.mcp.servers.some(id => (!isCodexReadOnlyTask(this.input) || codexReadOnlyTools(this.nativeInput, id)) && !names.includes(id))) throw new Error("codex-runtime-mcp-isolation-violation");
       if (!starting) {
+        outcome = "completed";
         if (personal.length) this.emit({ kind: "diagnostic", data: { code: "personal-mcp.runtime", active, unavailable } });
         return;
       }
       if (Date.now() >= deadline) throw new Error("codex-mcp-server-not-connected");
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await timing.sleep(() => new Promise((resolve) => setTimeout(resolve, 50)));
       if (this.closed) throw new Error("codex-task-closed");
     }
+    } finally { timing.finish(this.startupInterrupted ? "cancelled" : outcome); }
   }
   private onMessage(message: RpcMessage): void {
     message = redactImagePayload(message);
@@ -465,14 +489,15 @@ class CodexTask {
     if (this.turn) throw new Error("codex-turn-already-running");
     let nativeImages: ReturnType<typeof prepareImages>;
     try { nativeImages = prepareImages(images); }
-    catch { return { status: "failed", error: "image-input-invalid" }; }
+    catch { this.startup.finish("failed"); return { status: "failed", error: "image-input-invalid" }; }
     let resolve!: (outcome: TurnOutcome) => void;
     const done = new Promise<TurnOutcome>((r) => { resolve = r; });
     const state: Turn = { resolve, interrupted: false }; this.turn = state;
     void (async () => {
       try {
         if (this.input.nativeRoleDescriptor) verifyCodexNativeRole(this.input.nativeRoleDescriptor);
-        if (this.startupInterrupted || this.io.claimInput?.() === false) { this.finish({ status: "interrupted" }); return; }
+        if (this.startupInterrupted || this.io.claimInput?.() === false) { this.startup.finish("cancelled"); this.finish({ status: "interrupted" }); return; }
+        this.startup.step("turn-send");
         const result = object(await this.rpc!.call("turn/start", { threadId: this.threadId, ...(this.input.nativeRoleDescriptor ? nativeModel(this.input.assignment.modelId || this.input.nativeRoleDescriptor.model || "") : {}), input: [...(prompt || !nativeImages.length ? [{ type: "text", text: prompt }] : []), ...nativeImages], ...((this.input.assignment.thinking || this.input.nativeRoleDescriptor?.effort) ? { effort: this.input.assignment.thinking || this.input.nativeRoleDescriptor?.effort } : {}) }));
         if (typeof object(result.turn).id !== "string") throw new Error("codex-turn-id-missing");
         state.id = object(result.turn).id as string;state.confirmedId=state.id;
@@ -486,10 +511,11 @@ class CodexTask {
           };
           if (!current() || this.io.validatedLaunch?.({ roleId: role.roleId, generation: role.generation, nativeSessionId: this.threadId!, launchId: randomUUID(), current }) === false) throw new Error("codex-launch-binding-revoked");
         }
+        this.startup.finish("completed");
         this.emit({kind:"diagnostic",data:{code:"input.delivered",evidence:"codex-turn-start-reply"}});
         if(this.input.steeringVersion)this.emit({kind:"diagnostic",data:{code:"codex-steering-ready"}});
         if (state.interrupted && this.turn === state) this.deliverInterrupt(state);
-      } catch { await this.fail("codex-turn-start-failed"); }
+      } catch { this.startup.finish(this.startupInterrupted || this.closed ? "cancelled" : "failed"); await this.fail("codex-turn-start-failed"); }
     })();
     return done;
   }

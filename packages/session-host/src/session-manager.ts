@@ -1,3 +1,4 @@
+import { startupTiming } from "@deck/core/session/startup-timing";
 import { publishablePreparationCode } from "@deck/core";
 import { activationAssessment, activationReason } from './preparation-observability';
 import { readLocalContext, renderLocalContext, localContextWatermark, type LocalContextPage } from "./local-session-context";
@@ -178,6 +179,7 @@ type SessionMeta = {
 };
 
 type Turn = {
+  queuedAt?: number;
   activation?: ReturnType<typeof activationAssessment>;
   setupDelegated?: { snapshotId: string; taskId: string; attempt: number };
   preparationDelegation?: PreparationDelegation;
@@ -815,6 +817,7 @@ export class SessionManager implements SessionService {
         ...(preparationDelegation ? { snapshotId: preparationDelegation.snapshotId, delegationId: preparationDelegation.id } : {}),
       });
     }
+    nextTurn.queuedAt = this.clock.now();
     live.queue.push(nextTurn);
     this.schedule(live);
     return ok({ taskId });
@@ -1869,6 +1872,7 @@ export class SessionManager implements SessionService {
     const turn = this.newTurn(taskId, LEAD_MEMBER_ID, assignment, attempt, command.text, nativeSessionId, resume);
     turn.promptId = queuedPrompt?.promptId;
     turn.noticeSnapshot = [...live.notices.values()];
+    turn.queuedAt = this.clock.now();
     live.queue.push(turn);
     this.schedule(live);
     return ok({ taskId, attempt });
@@ -1940,13 +1944,20 @@ export class SessionManager implements SessionService {
     let resolver: ChildMcpResolver | undefined;
     const preparationStartedAt = this.clock.now();
     const preparationAttempt = turn.attempt;
+    const timingMetadata = { runner: assignment.runnerId, scope: "host" as const, boundary: "driver-start-call" as const, resume: !!resume, version: undefined as string | undefined };
+    const timing = startupTiming(event => this.driverEvent(live, turn, assignment.runnerId, { ...event, data: { ...event.data, attempt: preparationAttempt } }), timingMetadata, () => this.clock.now());
+    const queueWaitMs = turn.queuedAt === undefined ? undefined : Math.max(0, preparationStartedAt - turn.queuedAt);
+    turn.queuedAt = undefined;
+    timing.step("probe");
+    let nativeStartedAt: number | undefined, firstOutput = false;
     let preparationPhase: "checking-runner" | "preparing-tools" | "starting-runner" | "turn-started" | undefined;
     let phaseStartedAt = preparationStartedAt;
     const preparation = (phase: NonNullable<typeof preparationPhase>) => {
       if (preparationPhase === "turn-started" || phase === preparationPhase || turn.attempt !== preparationAttempt || live.turns.get(turn.taskId) !== turn || turn.controller.signal.aborted || turn.kind || this.closing || live.stopping || live.broken) return;
       const now = this.clock.now();
       this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: {
-        code: "turn.preparation", phase, attempt: preparationAttempt,
+        code: "turn.preparation", phase, attempt: preparationAttempt, continuity: resume ? "resume" : "new",
+        ...(!preparationPhase && queueWaitMs !== undefined ? { queueWaitMs } : {}),
         elapsedMs: Math.max(0, now - preparationStartedAt),
         ...(preparationPhase ? { previousPhase: preparationPhase, previousPhaseDurationMs: Math.max(0, now - phaseStartedAt) } : {}),
       } });
@@ -1958,10 +1969,12 @@ export class SessionManager implements SessionService {
       preparation("checking-runner");
       turn.nativeEnded=false;
       const probe = await driver.probe({ cwd: live.meta.projectRoot });
+      timingMetadata.version = probe.version;
       const steeringVersion=probe.status!=='ready'?undefined:assignment.runnerId==='claude'&&probe.version==='2.1.296'&&probe.capabilities.includes(CLAUDE_STEERING_CAPABILITY)?'2.1.296' as const:assignment.runnerId==='codex'&&probe.version==='0.162.1'&&probe.capabilities.includes(CODEX_STEERING_CAPABILITY)&&(!assignment.modelId.includes('/')||assignment.modelId.startsWith('openai-codex/'))?'0.162.1' as const:undefined;
       turn.steeringAllowed=turn.memberId===LEAD_MEMBER_ID && steeringVersion!==undefined;
       if (probe.status === "blocked") throw new Error(probe.reasonCode ?? "driver-blocked");
       if (probe.status === "degraded") this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: { code: probe.reasonCode ?? "driver-degraded" } });
+      timing.step("credentials");
       const taskDir = live.paths.taskDir(turn.taskId);
       ensurePrivateDir(live.paths.tasksDir);
       ensurePrivateDir(taskDir);
@@ -1969,6 +1982,7 @@ export class SessionManager implements SessionService {
       this.options.credentials.revokeTask(live.sessionId, turn.taskId);
       if (turn.controller.signal.aborted) throw new Error("turn-cancelled");
       preparation("preparing-tools");
+      timing.step("resolver");
       if (typeof this.options.childMcp === "function") {
         const startedAt = this.clock.now();
         const durations = new Map<ChildMcpPreparationStep, number>();
@@ -1999,6 +2013,7 @@ export class SessionManager implements SessionService {
       } else resolver = this.options.childMcp;
       if (turn.controller.signal.aborted) throw new Error("turn-cancelled");
       for (const code of resolver?.searchDiagnostics ?? []) this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: { code } });
+      timing.step("availability");
       const capabilityAvailability = reviewedCapabilityAvailability(resolver, assignment.runnerId);
       const personalMcpAvailability = validatePersonalMcpAvailability(resolver?.personalMcpAvailability);
       this.publishMcpAvailability(live, turn.memberId, assignment.runnerId, personalMcpAvailability);
@@ -2012,6 +2027,7 @@ export class SessionManager implements SessionService {
       }
       const child = this.childMcp(assignment.runnerId, credentialFile, resolver, turn.memberId === LEAD_MEMBER_ID ? "lead" : "member");
       const roleId = live.ledger.task(turn.taskId)?.assignedRoleId ?? this.options.assignedRoleId?.(turn.memberId);
+      timing.step("native-role");
       const nativeRoleDescriptor = roleId ? await resolver?.prepareNativeRole?.(roleId) : undefined;
       if (nativeRoleDescriptor && (nativeRoleDescriptor.runnerId !== assignment.runnerId || nativeRoleDescriptor.roleId !== roleId)) throw new Error("native-role-binding-mismatch");
       if (resolver?.nativeSkills?.preparation?.length) this.driverEvent(live, turn, assignment.runnerId, {
@@ -2024,6 +2040,7 @@ export class SessionManager implements SessionService {
           throw new Error("preparation-launch-binding-unavailable: Lead must review fresh readiness and explicitly redelegate this repair after restoring the authenticated Setup role binding.");
         child.mcp.sessionTools.push("deck_prepare_project");
       }
+      timing.step("runtime-evidence");
       const runtimeCodebase = capabilityAvailability.find(item => item.capabilityId === "codebase-memory");
       const baseline = this.projectPreparationScope(live);
       const binding = JSON.stringify(this.effectiveMembers(live.meta, live.ledger)[turn.memberId]) === JSON.stringify(assignment) ? turn.memberId : `${turn.memberId}:${turn.taskId}`;
@@ -2055,25 +2072,32 @@ export class SessionManager implements SessionService {
           this.append(live, { kind: "diagnostic", data: { code: "preparation.runtime-evidence", evidence, inputs: member.capabilities } });
         }
       }
+      timing.step("reconciliation");
       const readinessScope = this.projectPreparationScope(live);
       if (readinessScope && this.options.projectPreparation) {
         const records = [...live.log.readAfter(0)].filter(event => event.kind === "diagnostic" && event.data.code === "preparation.effect").map(event => event.data.record as PreparationEffectRecord);
         for (const record of this.options.projectPreparation.reconcile(readinessScope, records)) this.append(live, { kind: "diagnostic", data: { code: "preparation.effect", record } });
         this.flush(live);
       }
+      timing.step("registry-evidence");
       if (readinessScope) await this.options.projectPreparation?.prepareRegistryEvidence?.(readinessScope, assignment.runnerId);
+      timing.step("context-and-input");
       const readinessSnapshot = readinessScope && this.options.projectPreparation?.status(readinessScope);
       if (turn.memberId === LEAD_MEMBER_ID) {
         turn.activation = activationAssessment(readinessSnapshot);
         this.activationEvent(live, turn, 'assessment', turn.activation);
       }
       const sessionStartContext = (assignment.runnerId === "claude" || (assignment.runnerId === "codex" || assignment.runnerId === "opencode" || assignment.runnerId === "pi") && nativeRoleDescriptor) && readinessSnapshot && this.options.sessionStartContext ? { text: this.options.sessionStartContext(readinessSnapshot, assignment.runnerId, { roleId: roleId ?? "", taskText: turn.prompt }), snapshotId: readinessSnapshot.snapshotId, epoch: this.preparationEpoch } : undefined;
+      timing.step("credential-issue");
       this.options.credentials.issue({ attempt: turn.attempt, epoch: this.preparationEpoch, sessionId: live.sessionId, taskId: turn.taskId, memberId: turn.memberId, runnerId: assignment.runnerId, allowedTools: child.mcp.sessionTools }, credentialFile);
+      timing.step("context-and-input");
       for (const id of child.skipped) this.driverEvent(live, turn, assignment.runnerId, { kind: "diagnostic", data: { code: "child-mcp-server-unresolved", server: id } });
       const approvals = this.approvalMode(live.meta, live.ledger).approvalMode === "relay" ? "relay" : "runner-default";
       const projectTrust = this.projectStore().projectTrust(live.meta.projectId ?? projectIdentity(live.meta.projectRoot));
       turn.projectTrustRevision = projectTrust.revision;
+      timing.step("delegated-diff");
       const preparedDiff=turn.memberId!==LEAD_MEMBER_ID?await this.prepareDelegatedDiff(live,turn):undefined;
+      timing.step("context-and-input");
       // Deliver the authenticated request separately from fresh readiness evidence.
       // Setup's launch may produce a different snapshot; it must not replace the
       // exact request selected by Lead. The host still validates every repair call.
@@ -2088,6 +2112,7 @@ export class SessionManager implements SessionService {
         ...(nativeRole ? { nativeRole } : {}), ...(sessionStartContext ? { sessionStartContext } : {}),
         ...(assignment.runnerId === "opencode" ? {projectConfigTrusted:projectTrust.trusted} : {}),
         ...(turn.steeringAllowed?{steeringVersion,inputOrigin:turn.promptId?'user' as const:'host' as const}:{}),
+        runnerVersion: probe.version,
         taskId: turn.taskId, memberId: turn.memberId, cwd: live.meta.projectRoot, assignment,
         rolePrompt: [ !sessionStartContext ? repairInstructions : "", turn.memberId === LEAD_MEMBER_ID && !resume && live.ledger.session.handoff ? `Prior Deck conversation context (advisory, reseeded from ${live.ledger.session.handoff.sourceSessionId} at sequence ${live.ledger.session.handoff.sourceSeq}):\n${live.ledger.session.handoff.text}` : "", this.options.rolePrompt?.(turn.memberId, { changeId: live.ledger.session.changeId, projectRoot: live.meta.projectRoot, runnerId: assignment.runnerId, capabilityAvailability, memberCapabilities: readinessSnapshot?.scope.members, delegableMembers: Object.keys(this.effectiveMembers(live.meta, live.ledger)).filter(id => id !== LEAD_MEMBER_ID), ...(turn.memberId === LEAD_MEMBER_ID ? { tasks: this.taskRoster(live) } : {}) }) ?? defaultRolePrompt(live.ledger.session.changeId), capabilityAvailability.length ? capabilityAvailability[0]!.status === "ready" ? "Codebase Memory is ready for this execution. The exposed graph tools are available; prior unavailable notices no longer apply." : CODEBASE_DISCOVERY_FALLBACK : "", live.ledger.session.changeId ? `Bound OpenSpec path: ${join(live.meta.projectRoot, "openspec", "changes", live.ledger.session.changeId)}. Keep this binding immutable.` : ""].filter(Boolean).join("\n"),
         prompt, ...(resume ? { resume } : {}), ...(!resume && nativeSessionId ? { nativeSessionId } : {}),
@@ -2133,6 +2158,15 @@ export class SessionManager implements SessionService {
           if(turn.attempt!==launchedAttempt || live.turns.get(turn.taskId)!==turn || turn.nativeEnded)return;
           if (event.kind === 'diagnostic' && event.data.code === 'input.delivered' || !event.data.internal && event.data.role !== 'user' && event.data.role !== 'system' && ['message.delta','message.completed','reasoning.delta','tool.started','usage'].includes(event.kind))
             this.inputDelivered(live, turn, event.kind === 'diagnostic' ? String(event.data.evidence ?? 'native-receipt') : event.kind);
+          if (!firstOutput && !event.data.internal && event.data.role !== 'user' && event.data.role !== 'system' && ['message.delta', 'message.completed', 'reasoning.delta', 'tool.started'].includes(event.kind)) {
+            firstOutput = true;
+            this.driverEvent(live, turn, assignment.runnerId, { kind: 'diagnostic', data: {
+              code: 'turn.first-output-timing', attempt: preparationAttempt, continuity: resume ? 'resume' : 'new',
+              elapsedMs: Math.max(0, this.clock.now() - preparationStartedAt),
+              ...(nativeStartedAt === undefined ? {} : { sinceDriverStartMs: Math.max(0, this.clock.now() - nativeStartedAt) }),
+              evidence: event.kind,
+            } });
+          }
           if (!this.driverEvent(live, turn, assignment.runnerId, event)) return;
           if (event.kind === 'diagnostic' && event.data.code === 'input.delivered' || !event.data.internal && event.data.role !== 'user' && event.data.role !== 'system' && ['message.delta','message.completed','tool.started','usage'].includes(event.kind))
             this.localContextDelivered(live, turn, event.kind);
@@ -2181,6 +2215,7 @@ export class SessionManager implements SessionService {
         input.prompt=prompt;delete input.resume;delete input.nativeSessionId;
         if(resume)input.resume=resume;else if(nativeSessionId)input.nativeSessionId=nativeSessionId;
       }
+      timingMetadata.resume = !!input.resume;
       // Use the final launch selection, including reseeding. Fresh contexts get a
       // recent page; native resumes get only events beyond their confirmed receipt.
       turn.localContextPage = readLocalContext(live.log, { after: localContextWatermark(live.log, turn.taskId, assignment.runnerId, input.resume?.nativeSessionId) }, live.ledger);
@@ -2188,12 +2223,15 @@ export class SessionManager implements SessionService {
       input.localContext = renderLocalContext(turn.localContextPage);
       turn.launched=true;
       if(turn.memberId===LEAD_MEMBER_ID){this.append(live,{kind:'task.state',source:{taskId:turn.taskId},data:{taskId:turn.taskId,state:'running',attempt:turn.attempt,launched:true}});this.flush(live);}
+      timing.step("launch-validation");
       resolver?.validateLaunch?.();
       if (turn.memberId === LEAD_MEMBER_ID) this.activationEvent(live, turn, 'handoff', {
         boundary: 'driver-input', status: input.sessionStartContext ? 'supplied' : 'unavailable',
         continuity: input.resume ? 'native' : turn.reseeded ? 'reseeded' : 'fresh',
         ...(input.sessionStartContext ? { bytes: Buffer.byteLength(input.sessionStartContext.text), digest: digest(input.sessionStartContext.text) } : {}),
       });
+      timing.finish("completed");
+      nativeStartedAt = this.clock.now();
       const handle = await driver.startTask(input, io);
       turn.handle = handle;this.publishSteering(live);this.pumpSteering(live);
       if (turn.kind) void handle.interrupt().catch(() => {});
@@ -2211,6 +2249,7 @@ export class SessionManager implements SessionService {
       turn.nativeEnded=true;this.publishSteering(live);
       if(live.steering?.turn===turn)await live.steering.barrier;
     } catch (error) {
+      timing.finish(turn.controller.signal.aborted ? "cancelled" : "failed");
       if (error instanceof DriverStartupCleanupError) {
         // No task handle was returned. Keep the adapter's failed drain barrier
         // so startup cannot release its lease as though there were no process.
@@ -2309,7 +2348,7 @@ export class SessionManager implements SessionService {
   private driverEvent(live: Live, turn: Turn, runnerId: string, event: DriverEvent): boolean {
     // An old driver's callbacks can outlive its attempt. Admission closes once,
     // including before any synchronous consumer can reenter from a terminal append.
-    if (live.turns.get(turn.taskId) !== turn || turn.nativeEnded || (turn.kind || turn.controller.signal.aborted) && !(event.kind==='diagnostic' && event.data.code==='turn.preparation-detail')) return false;
+    if (live.turns.get(turn.taskId) !== turn || turn.nativeEnded || (turn.kind || turn.controller.signal.aborted) && !(event.kind==='diagnostic' && ['turn.preparation-detail', 'turn.startup-timing'].includes(String(event.data.code)))) return false;
     if(event.data.nativeThreadId && turn.nativeSessionId && event.data.nativeThreadId!==turn.nativeSessionId)return false;
     if (runnerId === "opencode" && event.kind === "diagnostic" && ["personal-mcp.sources","personal-mcp.runtime"].includes(String(event.data.code))
       && turn.projectTrustRevision !== this.projectStore().projectTrust(live.meta.projectId ?? projectIdentity(live.meta.projectRoot)).revision) return false;

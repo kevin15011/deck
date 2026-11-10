@@ -27,6 +27,7 @@
     "./session/approval": "./src/session/approval.ts",
     "./session/question": "./src/session/question.ts",
     "./session/steering": "./src/session/steering.ts",
+    "./session/startup-timing": "./src/session/startup-timing.ts",
     "./session/driver": "./src/session/driver.ts",
     "./session/failure": "./src/session/failure.ts",
     "./session/schema": "./src/session/schema.ts",

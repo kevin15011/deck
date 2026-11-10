@@ -1,3 +1,4 @@
+import { mcpReadinessTiming, startupTiming } from "@deck/core/session/startup-timing";
 import { acquireInstallationUse } from "../../../core/src/installation-use";
 import { verifyOpenCodeNativeRole } from "../native-role";
 import { ROLE_TOOL_POLICY, readOnlyMcpTools, isReadOnlyRole } from "@deck/core/session/role-tool-policy";
@@ -38,6 +39,7 @@ const MAX_PENDING_MESSAGE_BYTES = 1024 * 1024;
 type Turn = { messageId?: string; assistantIds: Set<string>; rejectedIds: Set<string>; pending: PendingMessageEvent[]; pendingBytes: number; confirmInvocation?: (info: Record<string, unknown>) => void; settle: (outcome: TurnOutcome) => void; interrupted: boolean; contextCompacted?: boolean; forced?: boolean; timer?: ReturnType<typeof setTimeout>; controller: AbortController };
 
 class OpenCodeTask {
+  private readonly startup;
   private base = "";
   private nativeId = "";
   private child!: SupervisedChild;
@@ -60,7 +62,9 @@ class OpenCodeTask {
   // exact provider/model tuple; no cross-server or growing global cache.
   private readonly contextLimits = new Map<string, number>();
   private readonly mapper = new OpenCodeEventMapper();
-  constructor(private readonly input: DriverTaskInput, private readonly io: DriverHostIo, private readonly options: OpenCodeSessionDriverOptions) {}
+  constructor(private readonly input: DriverTaskInput, private readonly io: DriverHostIo, private readonly options: OpenCodeSessionDriverOptions) {
+    this.startup = startupTiming(event => this.emit(event), { runner: "opencode", scope: "adapter", boundary: "opencode-prompt-dispatched", resume: !!input.resume, version: input.runnerVersion });
+  }
 
   private emit(event: Parameters<DriverHostIo["emit"]>[0]) { try { this.io.emit(event); } catch { /* A consumer cannot own the server lifetime. */ } }
   private terminate(): Promise<void> { return this.termination ??= this.child.terminateGroup(this.options.killGraceMs ?? 2000); }
@@ -99,6 +103,12 @@ class OpenCodeTask {
   }
 
   async initialize(): Promise<void> {
+    try { await this.initializeNative(); }
+    catch (error) { this.startup.finish("failed"); throw error; }
+  }
+
+  private async initializeNative(): Promise<void> {
+    this.startup.step("launch-build");
     const launch = buildOpenCodeLaunch(this.input, this.io, this.options);
     this.authorization = `Basic ${Buffer.from(`opencode:${launch.env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`;
     const root = this.input.nativeRoleDescriptor?.source.root;
@@ -106,6 +116,7 @@ class OpenCodeTask {
     try {
       if (root) verifyOpenCodeNativeRole(this.input.nativeRoleDescriptor!);
       // The gated shell cannot load plugins before its birth-identity lease is published.
+      this.startup.step("process-spawn");
       this.child = await this.io.spawn(root ? "/bin/sh" : launch.command, root
         ? ["-c", 'IFS= read -r grant && [ "$grant" = launch ] || exit 125; exec "$@"', 'deck-opencode-gate', launch.command, ...launch.args]
         : launch.args, { cwd: this.input.cwd, env: launch.env });
@@ -116,6 +127,7 @@ class OpenCodeTask {
         this.child.writeStdin("launch\n");
       }
     } catch (error) {
+      this.startup.finish("failed");
       if (this.child) await this.child.terminateGroup(this.options.killGraceMs ?? 2000);
       this.installationUse?.release(); throw error;
     }
@@ -135,6 +147,7 @@ class OpenCodeTask {
       startupSignal.addEventListener("abort", () => reject(startupSignal.reason ?? new Error("OpenCode startup aborted")), { once: true });
     });
     let timeout = setTimeout(() => startup.abort(new Error("OpenCode readiness timed out")), this.options.readinessMs ?? 10_000);
+    this.startup.step("endpoint-ready");
     const setup = async () => {
       const [url] = await Promise.all([endpoint, this.child.ready]);
       startupSignal.throwIfAborted();
@@ -146,6 +159,7 @@ class OpenCodeTask {
       clearTimeout(timeout);
       timeout = setTimeout(() => startup.abort(new Error("OpenCode dependency preparation timed out")), this.options.dependencyPreparationMs ?? 60_000);
       this.emit({ kind: "diagnostic", data: { code: "opencode-dependencies-preparing" } });
+      this.startup.step("dependencies");
       const preparedAgents = await this.request("/agent", undefined, startupSignal);
       if (!Array.isArray(preparedAgents)) throw new Error("opencode-dependency-preparation-failed");
       startupSignal.throwIfAborted();
@@ -153,6 +167,7 @@ class OpenCodeTask {
       clearTimeout(timeout);
       timeout = setTimeout(() => startup.abort(new Error("OpenCode readiness timed out")), this.options.readinessMs ?? 10_000);
       void this.loadContextLimits();
+      this.startup.step("config-attestation");
       const config = await this.request("/config", undefined, startupSignal);
       if (!record(config) || !record(config.mcp)) throw new Error("opencode-native-config-unavailable");
       const conflicts = conflictingOpenCodeMcp(config, launch, this.input.suppressedMcpServers);
@@ -162,14 +177,26 @@ class OpenCodeTask {
       }
       const nativeDeclarations = Object.entries(config.mcp).filter(([id]) => !launch.expectedMcpServers.includes(id) && !(this.input.suppressedMcpServers ?? []).includes(id)).map(([id, value]) => ({id,source:"native",status:record(value) && value.enabled === false ? "unavailable" : "configured",...(record(value) && value.enabled === false ? {reason:"disabled"} : {})}));
       if (nativeDeclarations.length) this.emit({kind:"diagnostic",data:{code:"personal-mcp.sources",servers:nativeDeclarations}});
-      const actual = await this.request("/mcp", undefined, startupSignal);
-      if (!record(actual) || launch.expectedMcpServers.some(id => !record(actual[id]) || actual[id].status !== "connected")) throw new Error("opencode-managed-mcp-unavailable");
+      this.startup.step("mcp-wait");
+      const mcpTiming = mcpReadinessTiming(event => this.emit(event), "opencode");
+      let actual: Record<string, any>;
+      let mcpOutcome: "completed" | "failed" = "failed";
+      try {
+        mcpTiming.poll();
+        const response = await mcpTiming.request(() => this.request("/mcp", undefined, startupSignal));
+        if (!record(response) || launch.expectedMcpServers.some(id => !record(response[id]) || response[id].status !== "connected")) throw new Error("opencode-managed-mcp-unavailable");
+        actual = response;
+        mcpOutcome = "completed";
+      // No caller cancellation handle exists until initialization completes.
+      // Lifetime abort here also covers transport failure and native process exit.
+      } finally { mcpTiming.finish(mcpOutcome); }
       const personal = Object.keys(actual).filter(id => !launch.expectedMcpServers.includes(id) && !(this.input.suppressedMcpServers ?? []).includes(id) && config.mcp[id]?.enabled !== false);
       this.emit({ kind: "diagnostic", data: { code: "personal-mcp.runtime", active: personal.filter(id => record(actual[id]) && actual[id].status === "connected"), unavailable: personal.filter(id => !record(actual[id]) || actual[id].status !== "connected") } });
       const pendingProject = openCodeProjectConfigDisabled(launch.env) ? pendingOpenCodeProjectSources(this.input.cwd,this.input.projectConfigTrusted ? "disabled" : "project-untrusted") : [];
       if (pendingProject.length) this.emit({ kind: "diagnostic", data: { code: "personal-mcp.sources", servers: pendingProject } });
       if (launch.expectedPlugins.length && (!Array.isArray(config.plugin) || launch.expectedPlugins.some(plugin => !config.plugin.includes(plugin)))) throw new Error("opencode-plugin-isolation-violation");
       if (launch.expectedGlobalSkillPaths.some(path => !Array.isArray(config.skills?.paths) || !config.skills.paths.includes(path))) throw new Error("opencode-global-skills-unavailable");
+      this.startup.step("agent-policy");
       const agents = await this.request("/agent", undefined, startupSignal);
       const nativeAgent = Array.isArray(agents) ? agents.find(agent => record(agent) && agent.name === (this.input.nativeRoleDescriptor?.roleRef ?? config.default_agent ?? "build")) : undefined;
       if (!record(nativeAgent) || !Array.isArray(nativeAgent.permission)) throw new Error("opencode-native-permission-policy-unavailable");
@@ -200,6 +227,7 @@ class OpenCodeTask {
       if (this.input.disableNativeDelegation) permission.push({permission:"task",pattern:"*",action:"deny"});
       if (!this.input.disableNativeDelegation) this.emit({ kind: "diagnostic", data: { code: "native-delegation-not-disabled" } });
       const resumePath = this.input.resume ? `/session/${encodeURIComponent(this.input.resume.nativeSessionId)}` : undefined;
+      this.startup.step(resumePath ? "session-resume" : "session-start");
       const session = resumePath ? await this.request(resumePath, undefined, startupSignal).catch((error: unknown) => {
         // Scope this classification to the resume lookup, never an MCP/SSE/auth failure.
         if (error instanceof Error && error.message === `OpenCode HTTP 404 for ${resumePath}`) Object.assign(error, { reasonCode: "native-session-not-found" });
@@ -208,9 +236,11 @@ class OpenCodeTask {
       if (!record(session) || typeof session.id !== "string" || !session.id || (this.input.resume && session.id !== this.input.resume.nativeSessionId)) throw new Error("opencode-native-session-unavailable");
       if (resumePath) await this.request(resumePath, { permission }, startupSignal, "PATCH");
       this.nativeId = session.id;
+      this.startup.step("event-subscribe");
       const response = await fetch(this.base + "/event", { headers: { authorization: this.authorization }, signal: startupSignal });
       if (!response.ok || !response.body) throw new Error("OpenCode SSE unavailable");
       this.stream = this.readStream(response.body);
+      this.startup.step("pending-interactions");
       const pending = await this.request("/permission", undefined, startupSignal);
       for (const permission of Array.isArray(pending) ? pending : []) this.permission(permission);
       const questions = await this.request("/question", undefined, startupSignal);
@@ -218,6 +248,7 @@ class OpenCodeTask {
     };
     try { await Promise.race([setup(), startupFailure]);
     } catch (error) {
+      this.startup.finish("failed");
       try { await this.close(); }
       catch { throw new DriverStartupCleanupError(() => this.close(), this.transportFailure?.failure); }
       throw error;
@@ -442,21 +473,21 @@ Patterns: ${raw.always.join("\n")}`,
   }
 
   send(prompt: string, images?: readonly DriverImageInput[]): Promise<TurnOutcome> {
-    if (this.closed || this.serverDead) return Promise.resolve({ status: "failed", error: "OpenCode task is closed" });
+    if (this.closed || this.serverDead) { this.startup.finish("failed"); return Promise.resolve({ status: "failed", error: "OpenCode task is closed" }); }
     if (this.current) return Promise.reject(new Error("An OpenCode turn is already running"));
     if (this.input.nativeRoleDescriptor) {
       try { verifyOpenCodeNativeRole(this.input.nativeRoleDescriptor); }
-      catch { return Promise.resolve({status:"failed",error:"The installed OpenCode team changed. Reinstall its team from Review & Install, then retry the session."}); }
+      catch { this.startup.finish("failed"); return Promise.resolve({status:"failed",error:"The installed OpenCode team changed. Reinstall its team from Review & Install, then retry the session."}); }
     }
     let nativeImages: ReturnType<typeof prepareImages>;
     try { nativeImages = prepareImages(images); }
-    catch { return Promise.resolve({ status: "failed", error: "image-input-invalid" }); }
+    catch { this.startup.finish("failed"); return Promise.resolve({ status: "failed", error: "image-input-invalid" }); }
     const split = this.input.assignment.modelId.replace(/^opencode\/(.+\/.+)$/, "$1").indexOf("/");
     const modelId = this.input.assignment.modelId.replace(/^opencode\/(.+\/.+)$/, "$1");
-    if (split <= 0) return Promise.resolve({ status: "failed", error: "OpenCode model must be provider/model" });
+    if (split <= 0) { this.startup.finish("failed"); return Promise.resolve({ status: "failed", error: "OpenCode model must be provider/model" }); }
     const done = new Promise<TurnOutcome>(settle => { this.current = { settle, interrupted: false, assistantIds: new Set(), rejectedIds: new Set(), pending: [], pendingBytes: 0, controller: new AbortController() }; });
     const turn = this.current!;
-    if (this.io.claimInput?.() === false) { this.finish({ status: "interrupted" }); return done; }
+    if (this.io.claimInput?.() === false) { this.startup.finish("cancelled"); this.finish({ status: "interrupted" }); return done; }
     const role = this.input.nativeRoleDescriptor;
     // OpenCode 1.18.31 accepts caller message IDs and echoes the selected agent
     // in message.updated. Keep native timestamp ordering and bind one exact POST.
@@ -482,6 +513,8 @@ Patterns: ${raw.always.join("\n")}`,
       };
     }
     this.emit({ kind: "turn.started", data: { nativeSessionId: this.nativeId, nativeThreadId: this.nativeId, model: this.input.assignment.modelId } });
+    this.startup.step("turn-send");
+    // Dispatch only: this blocking HTTP response includes generation, not an admission receipt.
     void this.request(`/session/${encodeURIComponent(this.nativeId)}/message`, {
       messageID: messageId, system: [this.input.rolePrompt, this.input.localContext].filter(Boolean).join("\n\n"), ...(this.input.nativeRoleDescriptor ? { agent: this.input.nativeRoleDescriptor.roleRef } : {}), model: { providerID: modelId.slice(0, split), modelID: modelId.slice(split + 1) },
       ...(this.input.assignment.thinking && this.input.assignment.thinking !== "off" ? { variant: this.input.assignment.thinking } : {}), parts: [...(prompt || !nativeImages.length ? [{ type: "text", text: prompt }] : []), ...nativeImages.map(image => ({ type: "file", mime: image.mimeType, filename: image.name, url: `data:${image.mimeType};base64,${image.data}` }))],
@@ -505,6 +538,7 @@ Patterns: ${raw.always.join("\n")}`,
       for (const part of Array.isArray(result.parts) ? result.parts : []) if (record(part) && part.sessionID === this.nativeId && part.messageID === result.info.id && part.type === "text" && typeof part.text === "string") this.emit({ kind: "message.completed", data: { text: part.text, messageId: result.info.id }, raw: part });
       this.finish({ status: turn.interrupted ? "interrupted" : "completed" });
     }, error => { if (this.current === turn && !turn.interrupted && !this.serverDead) this.finish({ status: "failed", error: redactText((error as Error).message, 400) }); });
+    this.startup.finish("completed");
     return done;
   }
 

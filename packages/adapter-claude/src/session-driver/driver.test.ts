@@ -215,10 +215,11 @@ describe("createClaudeSessionDriver.startTask", () => {
     child.lines(withSession("turn-success.jsonl"));
     child.exit();
     expect(await handle.done).toEqual({ status: "completed" });
-    expect(h.events.map((e) => e.kind)).toEqual(["turn.started", "message.completed", "diagnostic", "usage", "rate-limit", "usage", "diagnostic"]);
-    expect(h.events[2]!.data).toMatchObject({code:"request.observed",nativeThreadId:SID,nativeRequestId:h.events[1]!.data.messageId});
-    expect(h.events[3]!.data.requestUsage).toMatchObject({requestId:h.events[2]!.data.nativeRequestId});
-    expect(h.events[1]!.data.text).toBe("pong");
+    const observed = h.events.filter(e => e.data.code !== "turn.startup-timing");
+    expect(observed.map((e) => e.kind)).toEqual(["turn.started", "message.completed", "diagnostic", "usage", "rate-limit", "usage", "diagnostic"]);
+    expect(observed[2]!.data).toMatchObject({code:"request.observed",nativeThreadId:SID,nativeRequestId:observed[1]!.data.messageId});
+    expect(observed[3]!.data.requestUsage).toMatchObject({requestId:observed[2]!.data.nativeRequestId});
+    expect(observed[1]!.data.text).toBe("pong");
   });
 
   test("handles output split across chunks and a final unterminated line", async () => {
@@ -550,4 +551,20 @@ test('Claude interrupt during spawn never writes the initial prompt',async()=>{
   const task=await driver.startTask(input(),{...h.io,spawn:async(...args)=>{const child=await h.io.spawn(...args);await held.promise;return child;}});
   const child=await h.nextChild();await task.interrupt();held.resolve();await Promise.resolve();await Promise.resolve();expect(child.stdin).toEqual([]);
   child.exit({ok:false,code:null,signal:'SIGINT'});await task.done;await task.close();
+});
+
+// Protects real Claude init/failure boundaries without treating stdin dispatch
+// as native admission, or persisting launch configuration in timing metadata.
+for (const mode of ['new', 'resume', 'failed', 'cancelled'] as const) test(`Claude startup timing: ${mode}`, async () => {
+  const { h, driver } = make();
+  if (mode === 'cancelled') h.io.claimInput = () => false;
+  const task = await driver.startTask(input({ runnerVersion: '2.1.296', prompt: 'TIMING_SECRET', ...(mode === 'resume' ? { resume: { nativeSessionId: SID } } : {}) }), h.io);
+  const child = await h.nextChild();
+  if (mode === 'new' || mode === 'resume') child.lines(withSession('turn-success.jsonl'));
+  child.exit(mode === 'failed' ? { ok: false, code: 1 } : {});
+  await task.done; await task.close();
+  const summaries = h.events.filter(e => e.data.code === 'turn.startup-timing');
+  expect(summaries).toHaveLength(1);
+  expect(summaries[0]!.data).toMatchObject({ runner: 'claude', version: '2.1.296', continuity: mode === 'resume' ? 'resume' : 'new', outcome: mode === 'failed' ? 'failed' : mode === 'cancelled' ? 'cancelled' : 'completed' });
+  expect(JSON.stringify(summaries)).not.toContain('SECRET');
 });

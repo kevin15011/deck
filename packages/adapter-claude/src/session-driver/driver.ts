@@ -1,3 +1,4 @@
+import { startupTiming } from "@deck/core/session/startup-timing";
 import { PersonalMcpPreparationError } from "@deck/core/session/personal-mcp";
 import { runnerTransportFailure } from '@deck/core/session/failure';
 /**
@@ -63,6 +64,7 @@ function compareVersions(a: string, b: string): number {
 
 type PendingSteering = {input:SteeringInput;promise:Promise<SteeringOutcome>;resolve:(result:SteeringOutcome)=>void;settled:boolean};
 type TurnState = {
+  startup?: ReturnType<typeof startupTiming>;
   assistantUuid?: string;
   executionId: string;
   guarded: boolean;
@@ -113,12 +115,14 @@ class ClaudeTask {
     if (this.current) throw new Error("A Claude turn is already running");
     let userMessage: string;
     const executionId=randomUUID(),guarded=this.input.steeringVersion==='2.1.296'&&!images?.length;
-    try { userMessage = encodeUserMessage(prompt, prepareImages(images),guarded?{uuid:executionId,session_id:this.nativeId,origin:{kind:this.input.inputOrigin==='user'?'human':'coordinator'}}:undefined); }
-    catch { return { status: "failed", error: "image-input-invalid" }; }
     const resume = this.input.resume !== undefined || !this.firstTurnPending;
-    this.firstTurnPending = false;
     const emit = (event: DriverEvent) => { try { this.io.emit(event.kind === 'turn.started' ? { ...event, data: { ...event.data, nativeThreadId: this.nativeId, nativeTurnId: executionId } } : event); } catch { /* a sink failure must not break the turn */ } };
 
+    const timing = startupTiming(emit, { runner: "claude", scope: "adapter", boundary: "claude-validated-init", resume, version: this.input.runnerVersion });
+    timing.step("launch-build");
+    try { userMessage = encodeUserMessage(prompt, prepareImages(images),guarded?{uuid:executionId,session_id:this.nativeId,origin:{kind:this.input.inputOrigin==='user'?'human':'coordinator'}}:undefined); }
+    catch { timing.finish("failed"); return { status: "failed", error: "image-input-invalid" }; }
+    this.firstTurnPending = false;
     let launch: ClaudeTurnLaunch;
     try {
       launch = buildClaudeTurnLaunch(
@@ -130,18 +134,21 @@ class ClaudeTask {
       const code = error instanceof ClaudeLaunchError ? error.code : error instanceof PersonalMcpPreparationError ? error.reasonCode : "claude-launch-failed";
       if (error instanceof PersonalMcpPreparationError) emit({ kind: "diagnostic", data: { code: "personal-mcp.runtime", conflicting: error.availability.map(item => item.id) } });
       emit({ kind: "diagnostic", data: { code } });
+      timing.finish("failed");
       return { status: "failed", error: `${code}: ${(error as Error).message}` };
     }
     if (launch.nativeMcpAvailability.length) emit({kind:"diagnostic",data:{code:"personal-mcp.sources",servers:launch.nativeMcpAvailability}});
     for (const d of launch.diagnostics) emit({ kind: "diagnostic", data: { ...d } });
 
     this.historyPath=claudeTranscriptPath(this.input.cwd,this.nativeId,launch.env);
-    const state: TurnState = {executionId,guarded,originalObserved:false,historyVerified:false,originalText:prompt,stdinEnded:false,historyReads:0,steering:new Map(), interruptRequested: false, interruptDelivered: false, forced: false, closing: false, finished: false, stderr: "" };
+    const state: TurnState = {startup: timing,executionId,guarded,originalObserved:false,historyVerified:false,originalText:prompt,stdinEnded:false,historyReads:0,steering:new Map(), interruptRequested: false, interruptDelivered: false, forced: false, closing: false, finished: false, stderr: "" };
     this.current = state;
     let child: SupervisedChild;
     try {
+      timing.step("process-spawn");
       child = await this.io.spawn(launch.command, launch.args, { cwd: this.input.cwd, env: launch.env });
     } catch (error) {
+      timing.finish("failed");
       this.current = undefined;
       return { status: "failed", error: `Unable to start claude: ${redactText((error as Error).message, 300)}` };
     }
@@ -163,11 +170,13 @@ class ClaudeTask {
       }
     });
     child.onStderr((chunk) => { state.stderr = (state.stderr + chunk).slice(-STDERR_TAIL); });
+    timing.step("stdin-write");
     if (state.interruptRequested || this.io.claimInput?.() === false) {
+      timing.finish("cancelled");
       state.interruptRequested = true;
       this.deliverInterrupt(state);
       this.endStdin(state);
-    } else child.writeStdin(userMessage);
+    } else { child.writeStdin(userMessage); timing.step("native-init"); }
     // Claude -p kills async Stop hooks at EOF/teardown. Keep this one-turn input
     // stream owned until the original plugin records this exact assistant UUID.
     if(!guarded)this.endStdin(state);
@@ -185,6 +194,7 @@ class ClaudeTask {
     if (state.fatal !== 'claude-line-too-long') this.refreshSteering(state,true);
     if (state.escalation !== undefined) this.options.clock.clearTimeout(state.escalation);
     this.current = undefined;
+    timing.finish(state.interruptRequested ? "cancelled" : "failed");
     return this.outcome(state, exit);
   }
 
@@ -217,7 +227,7 @@ class ClaudeTask {
       this.endStdin(state);
       if(state.guarded){emit({kind:'diagnostic',data:{code:'claude-steering-ended'}});this.refreshSteering(state);}
     }
-    if (out.init) { state.init = out.init; this.checkInit(out.init, state, launch, emit); }
+    if (out.init) { state.init = out.init; this.checkInit(out.init, state, launch, emit); state.startup?.finish(state.interruptRequested ? "cancelled" : state.fatal ? "failed" : "completed"); }
     if(state.guarded&&message.type==='user'&&message.session_id===this.nativeId){
       const content=message.message as {role?:unknown;content?:unknown}|undefined;
       if(message.uuid===state.executionId&&content?.role==='user'&&content.content===state.originalText)state.originalObserved=true;

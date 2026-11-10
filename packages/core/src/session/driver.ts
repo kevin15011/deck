@@ -47,6 +47,8 @@ export type DriverTaskInput = {
   nativeRole?: { roleId: string; roleRef: string; generation: string };
   /** Immutable host-owned SessionStart data; never a grant of repair authority. */
   sessionStartContext?: { text: string; epoch: string; snapshotId: string };
+  /** Host probe version, observational only; never substitutes for runtime attestation. */
+  runnerVersion?: string;
   steeringVersion?: "0.162.1" | "2.1.296";
   /** Provenance of the original host-composed input, distinct from later genuine steering. */
   inputOrigin?: "user" | "host";
