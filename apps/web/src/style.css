@@ -1681,3 +1681,18 @@ select:focus-visible, .question-panel textarea:focus-visible {
 .composer-actions .dictation-status span{position:static;width:auto;height:auto;margin:0;padding:0;overflow:visible;clip-path:none;white-space:normal;}
 .composer-actions .dictation-status button{width:auto;height:auto;min-height:36px;flex-shrink:0;padding:4px 8px;font-size:12px;line-height:1.4;}
 .composer-actions .dictation-status .dictation-meter{width:28px;height:4px;flex-shrink:0;overflow:hidden;}.composer-actions .dictation-status .dictation-meter>span{display:block;width:100%;height:100%;}
+
+/* Reserve space so the floating recorder never covers queue or turn controls. */
+.composer-wrap:has(.dictation-recording){padding-top:62px;}
+.composer-actions .dictation-control>button[hidden]{display:none;}
+.composer-actions .dictation-status.dictation-recording{left:auto;right:0;width:max-content;max-width:100%;justify-content:flex-start;gap:10px;padding:4px 6px 4px 14px;border-radius:999px;box-shadow:0 4px 12px #0003;}
+.composer-actions .dictation-recording .dictation-recording-dot{width:6px;height:6px;flex:none;border-radius:50%;background:var(--error);}
+.composer-actions .dictation-recording .dictation-recording-label{font-size:11px;color:var(--muted);}
+.composer-actions .dictation-recording .dictation-time{font-variant-numeric:tabular-nums;white-space:nowrap;}
+.composer-actions .dictation-recording .dictation-meter{width:20px;height:10px;border-radius:2px;}
+.composer-actions .dictation-recording .dictation-meter>span{background:var(--error);}
+.composer-actions .dictation-recording button{min-width:44px;min-height:44px;border-radius:50%;}
+.composer-actions .dictation-recording .dictation-stop{display:grid;place-items:center;width:44px;height:44px;padding:0;color:var(--error);background:var(--error-bg);border:1px solid var(--error-border);}
+.composer-actions .dictation-recording .dictation-stop:hover{background:var(--error-border);}
+.composer-actions .dictation-recording button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+@media(max-width:400px){.composer-actions .dictation-status.dictation-recording{gap:8px;padding-left:12px;}.composer-actions .dictation-recording .dictation-recording-label{display:none;}}
