@@ -112,6 +112,8 @@ export function recoverSession(options: RecoverSessionOptions): RecoveryReport {
     if ((!prompt.handoff && !(prompt.gated && prompt.state === "queued")) || !prompt.taskId) continue;
     const recovered = drafts.find(draft => draft.kind === 'task.state' && draft.data?.taskId === prompt.taskId);
     const attempt = ledger.task(prompt.taskId)?.attempts.find(a=>a.attempt===prompt.attempt);
+    // Already settled delivered input needs no new terminal event or restart pause.
+    if (attempt && prompt.state === attempt.state && TERMINAL_TASK_STATES.includes(attempt.state) && prompt.endedSeq !== undefined) continue;
     if (recovered || attempt && (TERMINAL_TASK_STATES.includes(attempt.state) || attempt.state === 'ownership-unsettled'))
       {
         drafts.push(...promptEndDrafts(prompt, String(recovered?.data?.state ?? attempt!.state), 'daemon-restart'));

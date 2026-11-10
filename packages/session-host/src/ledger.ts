@@ -23,10 +23,12 @@ import type { CrossTeamAssignments } from "@deck/core/session/assignments";
 import type { EventLog, EventDraft } from "./event-log";
 import { writePrivateFile } from "./paths";
 
-// Older snapshots lack full-source overlay checks; rebuild them from durable events.
-export const LEDGER_SNAPSHOT_VERSION = 17 as const;
+// Rebuild older snapshots to recover prompt terminal ordering and preserved pause intent.
+export const LEDGER_SNAPSHOT_VERSION = 19 as const;
 const RESULT_LIMIT = 8192;
 const isRestartPause = (reason?: string): boolean => reason === "daemon-stopped" || reason === "daemon-restart" || reason?.startsWith("web-restart-forced:") === true;
+
+const isLifecyclePause = (reason?: string): boolean => isRestartPause(reason) || reason === "session-released";
 
 export const TASK_STATES = ["created", "queued", "running", "completed", "failed", "cancelled", "interrupted", "ownership-unsettled"] as const;
 export type TaskState = (typeof TASK_STATES)[number];
@@ -70,6 +72,8 @@ export type UserPrompt = {
   /** Latest execution dispatch, with taskId/attempt tracking a possible native reseed. */
   dispatchedSeq?: number;
   handoff?: {state:"pending"|"sending"|"delivered"|"unknown";seq:number;evidence?:string};
+  /** Sequence of the latest terminal transition; acknowledgement must come after it. */
+  endedSeq?: number;
   requeuedSeq?: number;
   gated?: boolean;
   delivery?: "current-turn";
@@ -121,9 +125,17 @@ export class Ledger {
 
   /** Return a durable repair event; replay itself never invents queue transitions. */
   restartQueueRepair(reason: string): EventDraft | undefined {
-    if (!this.promptQueue.paused || !isRestartPause(this.promptQueue.reason)) return;
+    if (this.session.released || this.session.stopRequested || this.session.state === "ended") return;
+    if (!this.promptQueue.paused || !isLifecyclePause(this.promptQueue.reason)) return;
     const resumed = this.promptQueue.lastResumeSeq ?? 0;
-    if (this.prompts().some(prompt => prompt.state === "queued" || ["failed", "interrupted", "ownership-unsettled", "dispatched", "steering", "unknown"].includes(prompt.state) || prompt.state === "cancelled" && isRestartPause(prompt.reason) && prompt.seq > resumed)) return;
+    if (this.prompts().some(prompt => {
+      if (["queued", "ownership-unsettled", "dispatched", "accepted", "steering", "unknown"].includes(prompt.state)) return true;
+      if (prompt.handoff && prompt.handoff.state !== "delivered") return true;
+      if (["failed", "interrupted"].includes(prompt.state) || prompt.state === "cancelled" && isRestartPause(prompt.reason)) {
+        return prompt.endedSeq === undefined || prompt.endedSeq >= resumed;
+      }
+      return false;
+    })) return;
     if (this.tasks().some(task => {
       const attempt = task.attempts.at(-1);
       return attempt && (["created", "queued", "running", "ownership-unsettled"].includes(attempt.state) || task.memberId === "lead" && ["failed", "interrupted"].includes(attempt.state) && (attempt.endedSeq ?? attempt.startedSeq) > resumed);
@@ -260,7 +272,7 @@ export class Ledger {
           fence.queueFallback=d.queueFallback===true && fence.state==="pending";
           fence.state="not-accepted";fence.reason=String(d.reason??"native-refused");
           prompt.state=fence.queueFallback?"queued":"failed";
-          if(fence.queueFallback)delete prompt.delivery;else prompt.reason="native-refused-after-barrier";
+          if(fence.queueFallback)delete prompt.delivery;else {prompt.reason="native-refused-after-barrier";prompt.endedSeq=event.seq;}
           break;
         }
         if(d.state!=="accepted"){fence.state="unknown";fence.reason=String(d.reason??"unconfirmed");prompt.state="unknown";break;}
@@ -270,6 +282,7 @@ export class Ledger {
         prompt.firstAdmissionSeq ??= fence.seq;prompt.dispatchedSeq=fence.seq;
         const ended=task?.attempts.find(a=>a.attempt===fence.attempt);
         prompt.state=ended && TERMINAL_TASK_STATES.includes(ended.state)?ended.state as UserPrompt["state"]:"accepted";
+        if (ended && TERMINAL_TASK_STATES.includes(ended.state)) prompt.endedSeq = ended.endedSeq;
         if(fence.eligible && (!this.state.continuityBlock || this.state.continuityBlock.startedSeq<fence.seq))this.state.continuityBlock={promptId:prompt.promptId,taskId:fence.taskId,attempt:fence.attempt,startedSeq:fence.seq};
         if(prompt.decisionTarget)this.onDecisionReply({...prompt.decisionTarget,promptId:prompt.promptId,taskId:fence.taskId,attempt:fence.attempt,admittedSeq:fence.seq,questionRevision:fence.targetQuestionRevision,stale:fence.stale});
         break;
@@ -307,17 +320,24 @@ export class Ledger {
         if (d.taskId !== undefined && (prompt.taskId !== d.taskId || prompt.attempt !== d.attempt)) break;
         prompt.state = "queued"; prompt.requeuedSeq = event.seq; prompt.reason = str(d.reason);
         delete prompt.taskId; delete prompt.attempt; delete prompt.dispatchedSeq; delete prompt.handoff;
-        this.state.promptQueue = {paused:true,reason:prompt.reason,lastResumeSeq:this.state.promptQueue?.lastResumeSeq};
+        if (!this.promptQueue.paused || !isLifecyclePause(prompt.reason) || isLifecyclePause(this.promptQueue.reason)) {
+          this.state.promptQueue = {paused:true,reason:prompt.reason,lastResumeSeq:this.state.promptQueue?.lastResumeSeq};
+        }
         break;
       }
       case "prompt.state": {
         const prompt = this.state.prompts?.[String(d.promptId)];
         if (prompt && ["completed", "failed", "interrupted", "cancelled", "ownership-unsettled"].includes(d.state as string)) {
+          // Repeated settlement of the same execution must not revoke Resume.
+          // A new dispatch or a different outcome still records its own ordering.
+          if (prompt.state !== d.state || prompt.endedSeq === undefined) prompt.endedSeq = event.seq;
           prompt.state = d.state as UserPrompt["state"]; if (str(d.reason)) prompt.reason = str(d.reason); delete prompt.text;
         }
         break;
       }
       case "prompt.queue": {
+        // Automatic lifecycle events cannot erase an existing protective/user pause.
+        if (d.paused === true && isLifecyclePause(str(d.reason)) && this.promptQueue.paused && !isLifecyclePause(this.promptQueue.reason)) break;
         const resumed = this.state.promptQueue?.paused && d.paused === false;
         this.state.promptQueue = { paused: d.paused === true, ...(str(d.reason) ? { reason: str(d.reason) } : {}), ...(resumed ? { lastResumeSeq: event.seq } : this.state.promptQueue?.lastResumeSeq ? { lastResumeSeq: this.state.promptQueue.lastResumeSeq } : {}) };
         if (str(d.commandId)) this.onCommandAccepted({ ...event, data: { commandId: d.commandId, type: "prompt.resume", outcome: { ok: true } } });
@@ -356,7 +376,7 @@ export class Ledger {
         this.state.session.releaseEpoch=epoch; this.state.session.released=true;
         this.state.session.releasePending=d.phase!=="released";
         if(str(d.reasonCode)) { this.state.session.releaseFailure=String(d.reasonCode); this.state.session.releaseFailureSeq=event.seq; } else { delete this.state.session.releaseFailure; delete this.state.session.releaseFailureSeq; }
-        this.state.promptQueue={paused:true,reason:"session-released",...(this.state.promptQueue?.lastResumeSeq ? {lastResumeSeq:this.state.promptQueue.lastResumeSeq} : {})};
+        if (!this.promptQueue.paused) this.state.promptQueue={...this.promptQueue,paused:true,reason:"session-released"};
         if(str(d.commandId) && d.outcome) this.onLifecycle(event,"session.release","");
         break;
       }
@@ -364,7 +384,8 @@ export class Ledger {
         if(Number(d.epoch)!==(this.state.session.releaseEpoch??0)) break;
         this.state.session.state="idle"; this.state.session.stopRequested=false;
         this.state.session.released=d.prepared!==true; this.state.session.releasePending=false;
-        if(d.prepared===true && !isRestartPause(this.promptQueue.reason) && !Object.values(this.state.prompts??{}).some(prompt=>prompt.state==="queued")) this.state.promptQueue={paused:false}; delete this.state.session.releaseFailure; delete this.state.session.releaseFailureSeq;
+        // Successful preparation appends a guarded durable repair after reopening.
+        delete this.state.session.releaseFailure; delete this.state.session.releaseFailureSeq;
         break;
       }
       case "session.renamed": {
@@ -525,6 +546,7 @@ export class Ledger {
       if (wanted === "failed" && d.reason === "native-session-not-found") continue;
       if (TERMINAL_TASK_STATES.includes(wanted) || wanted === "ownership-unsettled") {
         prompt.state = wanted as UserPrompt["state"];
+        if (TERMINAL_TASK_STATES.includes(wanted)) prompt.endedSeq = event.seq;
         if (["failed", "interrupted", "ownership-unsettled"].includes(wanted) && !(wanted === "interrupted" && (this.state.promptQueue?.lastResumeSeq ?? 0) > (prompt.dispatchedSeq ?? 0))) this.state.promptQueue = { paused: true, reason: wanted, lastResumeSeq: this.state.promptQueue?.lastResumeSeq };
       }
     }

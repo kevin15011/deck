@@ -60,7 +60,7 @@ try{
  await page.goto(host.status().url!);await page.bringToFront();
  const nav=page.getByRole('navigation',{name:'Sessions',exact:true}),chat=page.getByRole('region',{name:'Conversation',exact:true}),queue=page.getByRole('region',{name:'Queued messages',exact:true});
  const select=async(name:string)=>{await nav.getByRole('button',{name,exact:true}).click();await wait(async()=>await page.locator('.app-header h1').innerText()===name,'selected conversation');};
- const send=async(text:string)=>{const input=page.getByLabel('Message the lead');await input.fill(text);await input.press('Enter');await wait(async()=>await input.inputValue()==='','draft cleared on durable acceptance');};
+ const send=async(text:string)=>{const input=page.getByLabel('Message the lead');await input.fill(text);await page.getByRole('button',{name:'Send prompt',exact:true}).click();await wait(async()=>await input.inputValue()==='','draft cleared on durable acceptance');};
  const items=()=>queue.locator('li[data-prompt-id]');
  await select('Queued conversation');await page.locator('.composer-gate').getByRole('button',{name:'Prepare session',exact:true}).click();
  await send('Current work');await wait(()=>claude.turns.length===1,'first native admission');
@@ -95,6 +95,19 @@ try{
  await page.getByRole('button',{name:'Interrupt',exact:true}).click();await queue.getByText('Queue paused',{exact:true}).waitFor();await wait(()=>claude.turns[2]!.finished,'active native interrupted');
  const countBeforePausedSend=claude.turns.length;await send('Sixth stays paused');await wait(async()=>await items().count()===2,'append while paused');
  await Bun.sleep(80);assert.equal(claude.turns.length,countBeforePausedSend);assert.equal(await queue.getByRole('button',{name:'Resume queue',exact:true}).count(),1);
+ // Removing all waiting messages must hide the panel without changing the host pause.
+ for (const viewport of [{width:1440,height:1000},{width:390,height:844}]) {
+  await page.setViewportSize(viewport);await page.emulateMedia({reducedMotion:viewport.width===390?'reduce':'no-preference'});
+  while(await items().count()) await queue.getByRole('button',{name:'Remove queued message 1',exact:true}).click();
+  await wait(async()=>await queue.count()===0,'empty paused queue hidden');
+  let snapshot:any=await manager.query('prompts.list',{sessionId:first});assert.equal(snapshot.ok,true);assert.equal(snapshot.data.paused,true);assert.equal(claude.turns.length,countBeforePausedSend);
+  await send('Paused transition');await queue.getByText('Paused transition',{exact:true}).waitFor();
+  snapshot=await manager.query('prompts.list',{sessionId:first});assert.equal(snapshot.data.paused,true);assert.equal(claude.turns.length,countBeforePausedSend);
+  const remove=queue.getByRole('button',{name:'Remove queued message 1',exact:true});await remove.focus();await page.keyboard.press('Enter');await wait(async()=>await queue.count()===0,'keyboard removal hides queue');
+ }
+ await page.emulateMedia({reducedMotion:'no-preference'});await page.setViewportSize({width:1440,height:1000});
+ await send('Fifth survives navigation');await send('Sixth stays paused');await wait(async()=>await items().count()===2,'restore paused fixture messages');
+ assert.equal(claude.turns.length,countBeforePausedSend);checks.push('paused-empty-populated-transitions-desktop-mobile-reduced-motion-keyboard-no-auto-resume');
  await page.screenshot({path:'/tmp/deck-prompt-queue-desktop-dark.png',fullPage:true});await bounds(page);
  await queue.getByRole('button',{name:'Resume queue',exact:true}).click();await wait(()=>claude.turns.length===4,'resume starts first waiting');assert.equal(claude.turns[3]!.input.prompt,'Fifth survives navigation');
  claude.turns[3]!.finish();await wait(()=>claude.turns.length===5,'remaining FIFO after resume');assert.equal(claude.turns[4]!.input.prompt,'Sixth stays paused');
@@ -109,12 +122,12 @@ try{
  await page.reload();await select('Queued conversation');await queue.getByText('Seventh accepted but cannot start',{exact:true}).waitFor();await queue.getByText('Could not start',{exact:true}).waitFor();
  checks.push('failure-pauses-and-never-dispatched-accepted-text-survives-reload');
 
- await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Switch to light theme',exact:true}).click();await queue.getByRole('button',{name:'Resume queue',exact:true}).tap();await wait(async()=>await queue.getByRole('button',{name:'Resume queue',exact:true}).count()===0,'empty resume does not retry failed message');assert.equal(claude.turns.length,5);
- await send('Mobile active message');await wait(()=>claude.turns.length===6,'mobile native admission');await send('Mobile queued message');await queue.getByText('Mobile queued message',{exact:true}).waitFor();await bounds(page);await page.screenshot({path:'/tmp/deck-prompt-queue-mobile-390-light.png',fullPage:true});
- await page.setViewportSize({width:320,height:740});await page.getByRole('button',{name:'Switch to dark theme',exact:true}).tap();await bounds(page);await page.screenshot({path:'/tmp/deck-prompt-queue-mobile-320-dark.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});await queue.getByRole('button',{name:'Resume queue',exact:true}).tap();await wait(async()=>await queue.getByRole('button',{name:'Resume queue',exact:true}).count()===0,'empty resume does not retry failed message');assert.equal(claude.turns.length,5);
+ await send('Mobile active message');await wait(()=>claude.turns.length===6,'mobile native admission');await send('Mobile queued message');await queue.getByText('Mobile queued message',{exact:true}).waitFor();await bounds(page);await page.screenshot({path:'/tmp/deck-prompt-queue-mobile-390.png',fullPage:true});
+ await page.setViewportSize({width:320,height:740});await bounds(page);await page.screenshot({path:'/tmp/deck-prompt-queue-mobile-320.png',fullPage:true});
  await queue.getByRole('button',{name:'Remove queued message 1',exact:true}).tap();await wait(async()=>await items().count()===0,'touch cancellation');
- await send('Cancelled when session closes');await page.getByRole('button',{name:'Close session',exact:true}).tap();await page.locator('.composer-gate').getByRole('button',{name:'Prepare session',exact:true}).waitFor();assert.equal(await items().count(),1);assert.equal(await queue.getByRole('button',{name:'Resume queue',exact:true}).isDisabled(),true);
+ await send('Cancelled when session closes');await page.getByRole('button',{name:/^Session:/}).tap();await page.getByRole('button',{name:'Close session',exact:true}).tap();await page.locator('.composer-gate').getByRole('button',{name:'Prepare session',exact:true}).waitFor();assert.equal(await items().count(),1);assert.equal(await queue.getByRole('button',{name:'Resume queue',exact:true}).isDisabled(),true);
  checks.push('mobile390-320-touch-cancel-and-close-pauses-waiting');
- console.log(JSON.stringify({passed:checks,screenshots:['/tmp/deck-prompt-queue-desktop-dark.png','/tmp/deck-prompt-queue-mobile-390-light.png','/tmp/deck-prompt-queue-mobile-320-dark.png']}));
+ console.log(JSON.stringify({passed:checks,screenshots:['/tmp/deck-prompt-queue-desktop-dark.png','/tmp/deck-prompt-queue-mobile-390.png','/tmp/deck-prompt-queue-mobile-320.png']}));
 }catch(cause){console.error('PROMPT_QUEUE_FAILURE',await page.locator('body').innerText());await page.screenshot({path:'/tmp/deck-prompt-queue-failure.png',fullPage:true});throw cause;}
 finally{await browser.close();await host.close();await manager.close();rmSync(root,{recursive:true,force:true});}

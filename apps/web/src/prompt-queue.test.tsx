@@ -60,13 +60,16 @@ test('image-only acceptance and pre-admission failure replay retain compact prev
  const html=renderToStaticMarkup(<PromptQueue items={[]} failed={failed} paused connected busy={false} onCancel={()=>{}} onResume={()=>{}}/>);
  expect(html).toContain('Image message');expect(html).toContain('View image 1: clipboard.png');expect(html).toContain('Runner unavailable');
 });
-test('empty restart pause is hidden while queued and failed input keep resume visible',()=>{
- for(const pauseReason of ['daemon-stopped','web-restart-forced:restart','session-released']) {
+test('empty pauses are hidden while actionable queue states remain visible',()=>{
+ for(const pauseReason of ['daemon-stopped','web-restart-forced:restart','session-released','daemon-restart','interrupted','failed','unknown',undefined]) {
   const render=(items:any[]=[],failed:any[]=[])=>renderToStaticMarkup(<PromptQueue items={items} failed={failed} paused pauseReason={pauseReason} connected busy={false} onCancel={()=>{}} onResume={()=>{}}/>);
   expect(render()).toBe('');
   expect(render([{promptId:'q',text:'Waiting'}])).toContain('Resume queue');
   expect(render([],[{promptId:'f',text:'Failed',reason:'failed'}])).toContain('Resume queue');
  }
+ const props={items:[],paused:true,connected:true,busy:false,onCancel:()=>{},onResume:()=>{}};
+ expect(renderToStaticMarkup(<PromptQueue {...props} sending/>)).toContain('Adding message');
+ expect(renderToStaticMarkup(<PromptQueue {...props} error="Unable to add"/>)).toContain('Unable to add');
 });
 test('a later started message supersedes an earlier start failure',()=>{
  const failedFirst=[event(1,'prompt.queued',{promptId:'old',text:'Stale',position:1}),event(2,'prompt.state',{promptId:'old',state:'failed',reason:'Codex session Serena readiness is stale.'})];

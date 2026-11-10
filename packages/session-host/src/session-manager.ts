@@ -1705,6 +1705,10 @@ export class SessionManager implements SessionService {
     const targetQuestionRevision = command.decisionTarget ? live.ledger.questionVersion(command.decisionTarget.decisionId, command.decisionTarget.revision) : undefined;
     const queued = this.waitingPrompts(live);
     if (queued.length >= MAX_PENDING_PROMPTS || queued.reduce((bytes, prompt) => bytes + Buffer.byteLength(prompt.text ?? "", "utf8"), 0) + Buffer.byteLength(command.text, "utf8") > MAX_PENDING_PROMPT_BYTES) return fail("prompt-queue-full");
+    // Repair only an empty, safe lifecycle pause before admitting new work. Once the
+    // prompt is queued it must remain protected by the existing-work barrier.
+    const repair = live.ledger.restartQueueRepair("restart-admission");
+    if (repair) { this.append(live, repair); this.flush(live); }
     const requested=command.delivery && !attachments.length && !queued.length ? this.steeringTarget(live) : undefined;
     const requestedSteering=requested ? {taskId:requested.turn.taskId,attempt:requested.turn.attempt,...requested.target} : undefined;
     const outcome = { ok: true as const, data: { promptId: command.commandId, state: "queued", position: queued.length + 1 } };
