@@ -1,7 +1,0 @@
-{
-  "reason": "Current validator accepts archive.completed, not archive.archived; phase/status remain archive/archived. Only the just-authored event name is corrected. No earlier event is changed.",
-  "originalEventsSha256": "ac38aa51be4956a47ecfe77569c390dfc35e8ffa374e0654d9078e321b5c99bf",
-  "incorrectEvent": "archive.archived",
-  "correctEvent": "archive.completed",
-  "validatorSource": "packages/core/src/spec-registry/validator.ts:42-49,90-100"
-}

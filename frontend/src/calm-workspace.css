@@ -1,0 +1,73 @@
+/* Slice 2: the approved conversation-first composition, using existing palette tokens.
+   Row actions reveal immediately; GSAP continues to own animated panels and controls. */
+@media(min-width:1001px){
+ .workbench:not(.sidebar-collapsed){grid-template-columns:224px minmax(0,1fr)}
+ .workbench>.sidebar{padding-inline:10px}
+}
+.project-navigation .project-group{margin-block:4px 16px;border-radius:0}
+.project-navigation .project-group>.project-row{background:transparent;border-radius:0}
+.project-navigation .project-row,.project-navigation .session-row{min-height:38px;height:auto;flex-shrink:0}
+.project-navigation .project-toggle.quiet{padding-left:2px;min-height:38px}
+.project-navigation .project-group .project-sessions{padding-left:18px}
+.project-navigation .project-sessions::before{display:none}
+.project-navigation .session-row .session{min-height:38px;padding-inline:8px;border-radius:var(--control-radius)}
+.project-navigation .session-row:has(.session.selected){background:var(--tint);border-radius:var(--control-radius);box-shadow:inset 2px 0 var(--accent)}
+.project-navigation .project-name strong{font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.project-navigation .project-toggle.quiet{display:grid;grid-template-columns:14px minmax(0,1fr);column-gap:4px;row-gap:0}
+.project-navigation .project-toggle>.navigation-icon{grid-row:1 / 3}
+.project-navigation .project-toggle>.project-indicators{grid-column:2;font-size:10px;line-height:12px;min-height:12px;gap:6px}
+.project-navigation .project-indicators svg{width:12px;height:12px}
+.project-navigation .project-new.quiet,.project-navigation .project-more.quiet{min-height:36px;width:28px;flex-basis:28px}
+@media(hover:hover) and (pointer:fine){
+ .project-navigation .project-row>.project-new,.project-navigation :is(.project-row,.session-row)>.project-actions{opacity:0;pointer-events:none}
+ .project-navigation :is(.project-row,.session-row):is(:hover,:focus-within)>.project-actions,
+ .project-navigation .project-row:is(:hover,:focus-within)>.project-new{opacity:1;pointer-events:auto}
+}
+/* Touch controls retain a full hit area and remain visible without a hover gesture. */
+@media(any-hover:none),(pointer:coarse){
+ .project-navigation .project-row,.project-navigation .session-row{min-height:44px;height:auto}
+ .project-navigation .project-toggle.quiet,.project-navigation .session-row .session,.project-navigation .project-new.quiet,.project-navigation .project-more.quiet{min-height:44px}
+ .project-navigation .project-new.quiet,.project-navigation .project-more.quiet{width:36px;flex-basis:36px}
+ .project-navigation .project-row>.project-new,.project-navigation :is(.project-row,.session-row)>.project-actions{opacity:1;pointer-events:auto}
+}
+.app-header{border-bottom-color:transparent;min-height:64px;height:auto;flex-basis:auto;padding:12px 24px}
+.app-header .session-identity>img{display:none}
+.session-identity-text{min-width:0}
+.session-subtitle{display:flex;align-items:center;gap:12px;min-width:0;color:var(--muted);font-size:12px;margin-top:2px}
+.session-project{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0}
+.session-subtitle{flex-wrap:wrap;gap:2px 12px}
+.session-subtitle .lead-identity{font-size:11px;white-space:normal;flex-wrap:wrap}
+.workbench{--chat-column-limit:100%}
+.workbench[data-chat-width="compact"]{--chat-column-limit:760px}
+.slice-panes .conversation,.history-view .conversation{padding:28px 24px 24px;scrollbar-gutter:stable both-edges}
+.conversation>*{width:100%;max-width:min(100%,var(--chat-column-width,var(--chat-column-limit)));margin-inline:auto}
+/* Keep the scroll region keyboard-reachable without outlining the entire pane. */
+.conversation:focus{outline:none}
+.conversation:focus-visible{box-shadow:inset 3px 0 var(--focus)}
+.conversation>.history-content{padding:0}
+.conversation .message{margin-bottom:28px;line-height:1.75}
+.conversation .message.user{margin-left:auto;width:fit-content;border:0;background:var(--tint);padding:14px 18px;border-radius:var(--surface-radius);max-width:100%}
+.conversation .message-meta{margin-bottom:10px;font-size:11px;flex-wrap:wrap;gap:6px 10px}
+.conversation .message-meta>span{font-size:10px;color:var(--muted)}
+.conversation .message-meta strong{font-size:12px}
+.conversation .markdown>p{margin-block:10px}
+.slice-panes .composer-dock{padding-inline:24px;scrollbar-gutter:stable both-edges}
+.slice-panes .composer-dock>*{width:100%;max-width:min(100%,var(--chat-column-width,var(--chat-column-limit)));margin-inline:auto}
+.slice-panes .composer-wrap{padding:8px 0 0}
+.slice-panes .conversation-float-stack{inset-inline:0;width:var(--composer-column-width,calc(100% - 2 * var(--composer-inset)));margin-inline:auto}
+.slice-panes .composer{border-color:var(--border);box-shadow:none;border-radius:var(--surface-radius)}
+@media(max-width:1000px){
+ .app-header{padding:8px 16px}
+ .slice-panes .conversation,.history-view .conversation{padding:20px 16px}
+ .conversation>.history-content{padding:0}
+ .slice-panes .composer-dock{padding-inline:16px}
+}
+@media(max-width:600px){
+ .app-header{row-gap:2px}
+ .session-subtitle{font-size:11px;gap:8px}
+ .app-header .inspector-actions{margin-left:0}
+ .conversation .message.user{padding:12px 14px}
+}
+
+/* Keep focused async controls reachable while their current change settles. */
+.simple-project-settings button[aria-disabled="true"] { opacity: .5; cursor: default; }

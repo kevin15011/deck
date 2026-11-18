@@ -1,0 +1,5 @@
+# Actual Windows qualification and local installation decision
+
+Lead163 read121 handoff/matrix and Windows/cleanup/host exit records. Exact accepted binary authenticated two distinct origins in headed Windows Edge with temporary profile; bare B403 named correct state, consumed capability replay403, A remained200. Hosts exited0 and no temporary browser process remained. This qualifies real Windows manual private-link delivery, not installed user's default opener/profile. S1-Q07 remains bounded open for that observation.
+
+Accepted immutable120ee01bfe6 for standing-authorized local installation after Lead identity/protected reexecution, Quality95 and bounded121 evidence. Continued same installer task with frozen binary SHA769d46f77843a7c89dcc9176cb74ba70aac593d697544b7e00af248ada97f159, preserving state/rollback and checking actual installed/running identity and authenticated assets. Shared dist is stale and must not be used. No full parity/universal compliance claim;121 matrix retains source-dependent missing-reference and unsupported attribution/wrapper limits.

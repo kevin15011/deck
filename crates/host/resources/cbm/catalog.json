@@ -1,0 +1,100 @@
+{
+  "0.12.0": {
+    "url": "https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.12.0/codebase-memory-mcp-linux-amd64-portable.tar.gz",
+    "verified_at": "2026-11-11T10:54:45.668250+00:00",
+    "archive_size": 48910978,
+    "archive_sha256": "7024e585132760f383e3e25237e2b2ac6f5185f7e466f8dc66a085bb25f8d0be",
+    "members": [
+      {
+        "name": "codebase-memory-mcp",
+        "size": 330637504,
+        "type": "file"
+      },
+      {
+        "name": "LICENSE",
+        "size": 1107,
+        "type": "file"
+      },
+      {
+        "name": "install.sh",
+        "size": 13654,
+        "type": "file"
+      },
+      {
+        "name": "THIRD_PARTY_NOTICES.md",
+        "size": 690430,
+        "type": "file"
+      }
+    ],
+    "extracted": [
+      {
+        "member": "codebase-memory-mcp",
+        "file": "executable",
+        "size": 330637504,
+        "sha256": "36bc515ee72b90a209c12518696d886b83e64f66aa7366079cf705f233838bad"
+      },
+      {
+        "member": "LICENSE",
+        "file": "notice-1-LICENSE",
+        "size": 1107,
+        "sha256": "1f58f9911dc5e3bcb96de28bb28e7b6bb7eb323952d29569c5d7214a152146bb"
+      },
+      {
+        "member": "THIRD_PARTY_NOTICES.md",
+        "file": "notice-2-THIRD_PARTY_NOTICES.md",
+        "size": 690430,
+        "sha256": "85ba0e25610a3d1a71df75c46425141644b416f290de5c8d985ae5d2d02092e4"
+      }
+    ],
+    "executed": false
+  },
+  "0.12.1": {
+    "url": "https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.12.1/codebase-memory-mcp-linux-amd64-portable.tar.gz",
+    "verified_at": "2026-11-11T10:54:51.926496+00:00",
+    "archive_size": 48920994,
+    "archive_sha256": "8c3d0341064301e78ecc84cf7348d4e2c6562a0f57448243ea560aaa34de36c1",
+    "members": [
+      {
+        "name": "codebase-memory-mcp",
+        "size": 330641600,
+        "type": "file"
+      },
+      {
+        "name": "LICENSE",
+        "size": 1107,
+        "type": "file"
+      },
+      {
+        "name": "install.sh",
+        "size": 13654,
+        "type": "file"
+      },
+      {
+        "name": "THIRD_PARTY_NOTICES.md",
+        "size": 690430,
+        "type": "file"
+      }
+    ],
+    "extracted": [
+      {
+        "member": "codebase-memory-mcp",
+        "file": "executable",
+        "size": 330641600,
+        "sha256": "77745491f0a9c346d6da23eed4d92b5feaa31a27a883c9faa4fa9f47c8183705"
+      },
+      {
+        "member": "LICENSE",
+        "file": "notice-1-LICENSE",
+        "size": 1107,
+        "sha256": "1f58f9911dc5e3bcb96de28bb28e7b6bb7eb323952d29569c5d7214a152146bb"
+      },
+      {
+        "member": "THIRD_PARTY_NOTICES.md",
+        "file": "notice-2-THIRD_PARTY_NOTICES.md",
+        "size": 690430,
+        "sha256": "85ba0e25610a3d1a71df75c46425141644b416f290de5c8d985ae5d2d02092e4"
+      }
+    ],
+    "executed": false
+  }
+}

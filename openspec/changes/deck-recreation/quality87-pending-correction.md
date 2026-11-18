@@ -1,0 +1,5 @@
+
+
+### Quality87: legacy admission retry regression (open)
+
+Review607865/607866 conditionally accepts SliceA2602123e but requires Q87-01. Lead independently inspected frozen server.clear_active/pump_queue and session_scheduler connected-only filtering. Legacy worker publishes finish_run before removing active child key; a new legacy Codex delegation admitted in that window defers, then clear_active invokes only connected member admission, leaving it Accepted indefinitely. Restore exclusive legacy retry after worker removal, preserve uncertain settlement fence, and add deterministic barrier RED/GREEN proving next admission starts exactly once. Runtime114 is running; preserve its work and deliver this finding to SAME owner at next continuation, before candidate acceptance/install. No runtime reproduction claimed by reviewer/Lead yet. Reviewer independently passed two exact cancellation regressions; previous Lead five scheduler tests remain valid for their bounded scope. No installation acceptance.

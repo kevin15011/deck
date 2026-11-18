@@ -1,0 +1,12 @@
+.session-indicators,.project-indicators{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:12px;line-height:16px;font-variant-numeric:tabular-nums;color:var(--muted)}
+.session-indicators>span,.project-indicators>span{display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+.session-indicators svg,.project-indicators svg{width:15px;height:15px;flex:none}
+.indicator-attention,.indicator-error{color:var(--ink)}
+.session-indicators[data-stale],.project-indicators[data-stale]{opacity:.7}
+.agent-indicator{display:inline-flex;position:relative;align-items:center;justify-content:center;flex:0 0 16px;width:16px;height:16px;color:var(--muted);vertical-align:middle}
+.agent-indicator>svg{width:16px;height:16px;display:block;flex:none}
+.agent-indicator .unread-dot{position:absolute;width:7px;height:7px;right:-2px;top:-2px;color:var(--accent);background:var(--surface);}
+.agent-indicator--error{color:var(--error)}
+.agent-indicator--approval{color:var(--warning)}
+.agent-indicator--question { color:var(--warning); }
+.agent-indicator--completed{color:var(--muted)}

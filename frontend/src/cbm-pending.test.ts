@@ -1,0 +1,11 @@
+import {HttpError,API} from './api';
+import {test,expect} from 'bun:test';
+import {retainGraph,discoverGraph,forgetGraph,pendingKey,graphNotApplied,type GraphPending} from './cbm-pending';
+class Memory implements Storage {m=new Map<string,string>();get length(){return this.m.size;}clear(){this.m.clear();}key(i:number){return [...this.m.keys()][i]??null;}getItem(k:string){return this.m.get(k)??null;}setItem(k:string,v:string){this.m.set(k,v);}removeItem(k:string){this.m.delete(k);}}
+const a:GraphPending={host:'host',project:'/project',id:'operation-a',plan:'plan-a',allow:true};
+// Oracle S5C-DELIVERY: one tab's resolution cannot erase another tab's unknown outcome.
+test('independent operation identities survive concurrent tabs and exact reconciliation',()=>{const s=new Memory(),b={...a,id:'operation-b',plan:'plan-b'};retainGraph(s,a);retainGraph(s,b);forgetGraph(s,b);expect(discoverGraph(s,a.host,a.project).entries).toEqual([a]);expect(()=>retainGraph(s,{...a,allow:false})).toThrow();expect(()=>forgetGraph(s,{...a,plan:'foreign'})).toThrow();expect(s.getItem(pendingKey(a))).not.toBeNull();});
+test('unreadable saved uncertainty is retained and blocks new operations',()=>{const s=new Memory();s.setItem(pendingKey(a),'malformed');const found=discoverGraph(s,a.host,a.project);expect(found.issues.length).toBe(1);expect(s.getItem(pendingKey(a))).toBe('malformed');});
+
+test('only exact nonapplication proof discharges the matching saved response',()=>{const proof={api:API,code:'cbm_not_applied',operation_id:a.id,plan:a.plan,allow:a.allow};expect(graphNotApplied(new HttpError(409,'rejected',proof),a)).toBe(true);for(const invalid of [{...proof,operation_id:'foreign'},{...proof,plan:'foreign'},{...proof,allow:false},{...proof,api:API-1}])expect(graphNotApplied(new HttpError(409,'rejected',invalid),a)).toBe(false);expect(graphNotApplied(new Error('lost acknowledgment'),a)).toBe(false);});
+test('another project retains its pending identity without blocking this project',()=>{const s=new Memory(),b={...a,project:'/other',id:'operation-b',plan:'plan-b'};retainGraph(s,a);retainGraph(s,b);expect(discoverGraph(s,a.host,a.project)).toEqual({entries:[a],issues:[]});expect(discoverGraph(s,a.host,b.project)).toEqual({entries:[b],issues:[]});});

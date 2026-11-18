@@ -1,1 +1,0 @@
-{"ok":true,"bun":"1.3.12","checks":["source/minified dynamic parity","exact recall arguments","8 credential/header rejection cases before transport","token/body isolation","exact multibyte acknowledgment hash and allowlisted keys","two-session turn/generation correlation","messages-transform no-op","Pi role mapping and caller-data nonmutation"],"networkCalls":0}

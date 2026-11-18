@@ -1,0 +1,32 @@
+/* Reference density and the original SVG selection plane; scoped to navigation. */
+.project-navigation .project-toolbar{min-height:32px}
+.project-navigation .navigation-add{color:var(--muted);font-size:11px;gap:4px}
+.project-navigation .navigation-add .navigation-icon{width:14px;height:14px}
+.project-navigation .project-tree{margin:4px 0}
+.project-navigation .project-group{margin-bottom:8px}
+.project-navigation .project-row{height:34px}
+.project-navigation .project-toggle.quiet{display:flex;gap:4px;padding:2px 2px 2px 17px;min-height:34px}
+.project-navigation .project-name{flex:1}
+.project-navigation .project-name strong{font-size:13px;font-weight:600}
+.project-navigation .project-group .project-sessions{padding-left:41px}
+.project-navigation .session-row{height:32px}
+.project-navigation .session-row .session{display:flex;gap:4px;min-height:32px;padding:2px;width:auto;border:0;background:transparent}
+.project-navigation .session-label{flex:1;min-width:0}
+.project-navigation .session-label strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;line-height:18px;font-weight:400}
+.project-navigation .project-new.quiet,.project-navigation .project-more.quiet{width:24px;flex:0 0 24px;min-height:32px;padding:4px;color:var(--muted)}
+.project-navigation .project-actions{flex:none}
+.project-navigation .session-indicators{flex:none;margin-left:2px}
+.project-navigation .agent-indicator{width:14px;height:14px}
+.project-navigation .agent-indicator svg{width:12px;height:12px}
+.project-navigation .project-indicators{flex:none;max-width:80px}
+.project-navigation .project-sessions>.moving-active-indicator{display:none}
+.sidebar-dialog{max-width:min(440px,calc(100vw - 32px))}
+.sidebar-dialog form{display:grid;gap:16px}
+.sidebar-dialog h2{margin:0;font-size:16px}
+.sidebar-dialog label{display:grid;gap:8px}
+.sidebar-dialog input{width:100%}
+.sidebar-dialog .dialog-actions{display:flex;justify-content:flex-end;gap:8px}
+.sidebar-dialog .error{overflow-wrap:anywhere}
+@media(max-width:1000px){.project-navigation .project-row,.project-navigation .session-row{height:40px}.project-navigation .project-toggle.quiet,.project-navigation .session-row .session,.project-navigation .project-new.quiet,.project-navigation .project-more.quiet{min-height:40px}.project-navigation .project-new.quiet,.project-navigation .project-more.quiet{width:32px;flex-basis:32px}}
+
+.project-navigation .project-sessions::before{left:14px}

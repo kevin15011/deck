@@ -1,0 +1,161 @@
+{
+  "created_at": "2026-11-11T09:36:07.935730+00:00",
+  "versions": {
+    "0.50.0": {
+      "tag": "v0.50.0",
+      "platform": "x86_64-unknown-linux-musl",
+      "variant": "regular",
+      "archive": {
+        "url": "https://github.com/rtk-ai/rtk/releases/download/v0.50.0/rtk-x86_64-unknown-linux-musl.tar.gz",
+        "bytes": 4857739,
+        "sha256": "bc2b8902b0d9c796c82ef45f16ae2307e17757afeca5ee156235a3dc7bda5f89",
+        "original_fetched_at": null,
+        "identity_reverified_at": "2026-11-11T09:36:07.935730+00:00",
+        "members": [
+          {
+            "name": "rtk",
+            "size": 11040640,
+            "type": "0"
+          }
+        ]
+      },
+      "binary": {
+        "bytes": 11040640,
+        "sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517"
+      },
+      "notices": [
+        {
+          "version": "0.50.0",
+          "tag": "v0.50.0",
+          "member": "LICENSE",
+          "url": "https://raw.githubusercontent.com/rtk-ai/rtk/v0.50.0/LICENSE",
+          "fetched_at": "2026-11-11T09:35:42.377293+00:00",
+          "status": "ok",
+          "bytes": 10767,
+          "sha256": "4044ade9c21d8b084d3d16a03375cf3b7e166b946a327bb37a3fbbdb53287cfd",
+          "file": "0.50.0/tag-LICENSE",
+          "origin": "exact-tag source"
+        }
+      ],
+      "source_probes": [
+        {
+          "version": "0.50.0",
+          "tag": "v0.50.0",
+          "member": "LICENSE-ENGINE",
+          "url": "https://raw.githubusercontent.com/rtk-ai/rtk/v0.50.0/LICENSE-ENGINE",
+          "fetched_at": "2026-11-11T09:35:42.703323+00:00",
+          "status": "http_404"
+        },
+        {
+          "version": "0.50.0",
+          "tag": "v0.50.0",
+          "member": "NOTICE",
+          "url": "https://raw.githubusercontent.com/rtk-ai/rtk/v0.50.0/NOTICE",
+          "fetched_at": "2026-11-11T09:35:42.994493+00:00",
+          "status": "http_404"
+        }
+      ]
+    },
+    "1.2.0": {
+      "tag": "v1.2.0",
+      "platform": "x86_64-unknown-linux-musl",
+      "variant": "regular",
+      "archive": {
+        "url": "https://github.com/rtk-ai/rtk/releases/download/v1.2.0/rtk-x86_64-unknown-linux-musl.tar.gz",
+        "bytes": 7111018,
+        "sha256": "70fee7b4a548c43dde94c77e2335550981b0bc2fb013691d8c8109b5bd0eda37",
+        "original_fetched_at": null,
+        "identity_reverified_at": "2026-11-11T09:36:07.935730+00:00",
+        "members": [
+          {
+            "name": "rtk",
+            "size": 16364216,
+            "type": "0"
+          },
+          {
+            "name": "LICENSE",
+            "size": 10756,
+            "type": "0"
+          },
+          {
+            "name": "LICENSE-ENGINE",
+            "size": 4273,
+            "type": "0"
+          }
+        ]
+      },
+      "binary": {
+        "bytes": 16364216,
+        "sha256": "8a64af588cabed12eca467d407e3d63c05b3a9b7afc308c2dda75489f7270dfb"
+      },
+      "notices": [
+        {
+          "version": "1.2.0",
+          "tag": "v1.2.0",
+          "member": "LICENSE",
+          "url": "https://raw.githubusercontent.com/rtk-ai/rtk/v1.2.0/LICENSE",
+          "fetched_at": "2026-11-11T09:35:43.288720+00:00",
+          "status": "ok",
+          "bytes": 10756,
+          "sha256": "33f694a31d9f9df3e292a9413a3cdb0113fa72698e2c719f657ff6b53165dcc4",
+          "file": "1.2.0/tag-LICENSE",
+          "origin": "exact-tag source"
+        },
+        {
+          "version": "1.2.0",
+          "tag": "v1.2.0",
+          "member": "LICENSE",
+          "url": "https://github.com/rtk-ai/rtk/releases/download/v1.2.0/rtk-x86_64-unknown-linux-musl.tar.gz",
+          "fetched_at": null,
+          "status": "ok",
+          "bytes": 10756,
+          "sha256": "33f694a31d9f9df3e292a9413a3cdb0113fa72698e2c719f657ff6b53165dcc4",
+          "file": "1.2.0/archive-LICENSE",
+          "origin": "verified release archive",
+          "acquisition_time_note": "Original acquisition timestamp not recorded; archive identity reverified 2026-11-11T09:36:07.935730+00:00"
+        },
+        {
+          "version": "1.2.0",
+          "tag": "v1.2.0",
+          "member": "LICENSE-ENGINE",
+          "url": "https://github.com/rtk-ai/rtk/releases/download/v1.2.0/rtk-x86_64-unknown-linux-musl.tar.gz",
+          "fetched_at": null,
+          "status": "ok",
+          "bytes": 4273,
+          "sha256": "4e3d24d5ae066274a03b82b400b31ad057628c40911cd08aa5a19ff31787dc98",
+          "file": "1.2.0/archive-LICENSE-ENGINE",
+          "origin": "verified release archive",
+          "acquisition_time_note": "Original acquisition timestamp not recorded; archive identity reverified 2026-11-11T09:36:07.935730+00:00"
+        }
+      ],
+      "source_probes": [
+        {
+          "version": "1.2.0",
+          "tag": "v1.2.0",
+          "member": "LICENSE-ENGINE",
+          "url": "https://raw.githubusercontent.com/rtk-ai/rtk/v1.2.0/LICENSE-ENGINE",
+          "fetched_at": "2026-11-11T09:35:43.609576+00:00",
+          "status": "http_404"
+        },
+        {
+          "version": "1.2.0",
+          "tag": "v1.2.0",
+          "member": "NOTICE",
+          "url": "https://raw.githubusercontent.com/rtk-ai/rtk/v1.2.0/NOTICE",
+          "fetched_at": "2026-11-11T09:35:43.907175+00:00",
+          "status": "http_404"
+        }
+      ]
+    }
+  },
+  "inspection": {
+    "apache_notice": "Both Apache license texts refer conditionally to a NOTICE text file; root NOTICE exact-tag probes returned 404. This does not establish absence of notices elsewhere or third-party notice completeness.",
+    "engine_notice": "The shipped LICENSE-ENGINE states the license must be conspicuously displayed on copies of the licensed work.",
+    "tag_archive_match": "1.2.0 LICENSE exact-tag bytes match archive bytes; LICENSE-ENGINE exists in the verified release archive but the root exact-tag source URL returned 404.",
+    "limitations": [
+      "Original archive acquisition timestamps were not recorded.",
+      "Exact-tag probes and archive inspection are bounded; no whole-source or third-party dependency notice audit was performed.",
+      "No legal eligibility conclusion or production integration is asserted."
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+[package]
+name = "deck2"
+version.workspace = true
+edition.workspace = true
+[dependencies]
+deck2-shared.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+rusqlite = { version = "0.38", features = ["bundled", "backup", "fallible_uint"] }
+clap = { version = "4", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+fs2 = "0.4"
+libc = "0.2"
+include_dir = "0.7"
+mime_guess = "2"
+sha2 = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+flate2 = "1"
+tar = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+tempfile = "3"
+toml = { version = "1.2.1", default-features = false, features = ["parse", "serde"] }
+web-push = { version = "0.11", default-features = false }
+base64 = "0.22"
+p256 = { version = "0.13", features = ["ecdsa"] }
+openssl = { version = "0.10", features = ["vendored"] }
+semver = "1"
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

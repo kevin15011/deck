@@ -1,0 +1,288 @@
+{
+  "version": "0.166.0",
+  "platform": "x86_64-unknown-linux-musl",
+  "release": "https://github.com/openai/codex/releases/tag/rust-v0.166.0",
+  "published_at": "2026-10-29T19:47:53Z",
+  "retrieved_at": "2026-11-11T12:26:24.405575+00:00",
+  "provider": "GitHub REST release metadata and exact asset",
+  "url": "https://github.com/openai/codex/releases/download/rust-v0.166.0/codex-package-x86_64-unknown-linux-musl.tar.gz",
+  "archive_bytes": 199694962,
+  "archive_sha256": "1d44b28bc4ac9937d7d3532264baa68a507ce364956a0d4ebb856f331cdee254",
+  "members": {
+    "bin": {
+      "bytes": 0,
+      "sha256": null,
+      "directory": true
+    },
+    "bin/codex": {
+      "bytes": 319346888,
+      "sha256": "b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8",
+      "directory": false
+    },
+    "bin/codex-code-mode-host": {
+      "bytes": 77997328,
+      "sha256": "657f4e902726e05867c937b583049d5997e057f8cd0ab40450633c9c9ef8d630",
+      "directory": false
+    },
+    "bin/codex-exec-server": {
+      "bytes": 84922184,
+      "sha256": "79e4b41b564bc3190146389ecc95d6c05ba2a20d6503e025e5fcafb47db05849",
+      "directory": false
+    },
+    "codex-package.json": {
+      "bytes": 246,
+      "sha256": "ffdfc731eed492fa436a304cff8792ea3a96233a45ec9a561f6f56eaca911446",
+      "directory": false
+    },
+    "codex-path": {
+      "bytes": 0,
+      "sha256": null,
+      "directory": true
+    },
+    "codex-path/rg": {
+      "bytes": 5408904,
+      "sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "directory": false
+    },
+    "codex-resources": {
+      "bytes": 0,
+      "sha256": null,
+      "directory": true
+    },
+    "codex-resources/bwrap": {
+      "bytes": 529776,
+      "sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+      "directory": false
+    },
+    "codex-resources/voice": {
+      "bytes": 0,
+      "sha256": null,
+      "directory": true
+    },
+    "codex-resources/voice/NOTICE.md": {
+      "bytes": 2403,
+      "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48",
+      "directory": false
+    },
+    "codex-resources/voice/bin": {
+      "bytes": 0,
+      "sha256": null,
+      "directory": true
+    },
+    "codex-resources/voice/bin/codex-voice-host": {
+      "bytes": 40487952,
+      "sha256": "b6195e3e1c37674da54b4e0bef9c0d84322e373e32d8460703f879fab97b601e",
+      "directory": false
+    },
+    "codex-resources/voice/lib": {
+      "bytes": 0,
+      "sha256": null,
+      "directory": true
+    },
+    "codex-resources/voice/lib/gstreamer-1.0": {
+      "bytes": 0,
+      "sha256": null,
+      "directory": true
+    },
+    "codex-resources/voice/lib/gstreamer-1.0/libgstapp.so": {
+      "bytes": 6488,
+      "sha256": "e6c32f19d1e8e06a9767a2f6c91a601375c5a6efc519bb56b7102f5f7c383977",
+      "directory": false
+    },
+    "codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so": {
+      "bytes": 41040,
+      "sha256": "fb89a8f45bc732097c1d3d9443a63cc732d821eae0c7e7877e552ce657addbcb",
+      "directory": false
+    },
+    "codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so": {
+      "bytes": 35264,
+      "sha256": "7b2a73ad4e5c98fc2c9d3b31f9f56de7c1fdd90cd1696b9e0d485bde082e15b9",
+      "directory": false
+    },
+    "codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so": {
+      "bytes": 479848,
+      "sha256": "ccc76f19fffa06140c8b5ee523a84e0ef7c07289c852997ed1e43c8f8455dc78",
+      "directory": false
+    },
+    "codex-resources/voice/lib/gstreamer-1.0/libgstopus.so": {
+      "bytes": 73464,
+      "sha256": "0f0ff64686d77036224de9b70b874e576266523a67c3f040d4163eaf5faebff5",
+      "directory": false
+    },
+    "codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so": {
+      "bytes": 757800,
+      "sha256": "7bf839b65871050776681de94a2798321449c9567010189f92798d0735b9e229",
+      "directory": false
+    },
+    "codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so": {
+      "bytes": 564072,
+      "sha256": "23ad729c8d629a8c6734248d6737c8f38f22e47b9579a98478a035537249f446",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libffi.so.8": {
+      "bytes": 63096,
+      "sha256": "bdec19c4e46b8fbf1c3e0b39f7b3fad933b77b43e2c37631157c97950fd2b174",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgio-2.0.so.0": {
+      "bytes": 2338512,
+      "sha256": "e67ab46a96ede0b8104e471d334f847ba581dd9a7c4e24f4190fcf1f2112cbb1",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libglib-2.0.so.0": {
+      "bytes": 1521616,
+      "sha256": "2177b7338114a509730e8f92185b972a3491815ae463c76f6fcb75fd7590ba05",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgmodule-2.0.so.0": {
+      "bytes": 15720,
+      "sha256": "1158809de3e776981b850a78ad110baadbefa2dab1bd7c44cf6709073e7c5408",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgobject-2.0.so.0": {
+      "bytes": 454720,
+      "sha256": "a6976679abfecc3dd0553035424d7d4eddb53174ce916fda408a436204ab81d7",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgstallocators-1.0.so.0": {
+      "bytes": 30416,
+      "sha256": "9b85e20611e0986f5a9143b76d6acc59e6b63705ec137040ee8b466eab2975e4",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgstapp-1.0.so.0": {
+      "bytes": 106144,
+      "sha256": "30f94ed01741ba050326355d7cd791edad4c72d3aada91cc6083f22981acaac2",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgstaudio-1.0.so.0": {
+      "bytes": 636544,
+      "sha256": "9159265f12feb43ad5f52d548c525a15fdff81bc4d6ed1ec2eda5c4e9ae15e9b",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgstbase-1.0.so.0": {
+      "bytes": 573072,
+      "sha256": "efa118dfc05298ccc5d7de9f0d6b40ae85a98c1cb1989c847014d9e458498227",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgstnet-1.0.so.0": {
+      "bytes": 74192,
+      "sha256": "fbb8a6840cddab66da3d306ecd4274d3ee57e2db207bdef8632be1941ecfef87",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgstpbutils-1.0.so.0": {
+      "bytes": 321880,
+      "sha256": "d964814517a83d6852a9169e84399edfee509d6fd6620ffa4beb9c50c68db67d",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgstreamer-1.0.so.0": {
+      "bytes": 1582088,
+      "sha256": "9115c7aebbd1d70cf67d97e996d18b103188d05207bad7d6bd2c5c22c22f861e",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgstrtp-1.0.so.0": {
+      "bytes": 211744,
+      "sha256": "36d5ccf35d0b6ffc346511ff6795bec15e452e9f26892264aeca662b5126c11a",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgsttag-1.0.so.0": {
+      "bytes": 273976,
+      "sha256": "459140a25b33bf7583b3bb287d60ce2cf006871b3e36166a7d38184a18d49e95",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libgstvideo-1.0.so.0": {
+      "bytes": 1004720,
+      "sha256": "86f89267e25f04248d31bffd1334132730972f6573a9f86dd22d9cdc40fac91b",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libintl.so.8": {
+      "bytes": 6304,
+      "sha256": "3745518bbcd678e70f7560496596c8adc8b9215d23839c5eb2d0dea0bce3975a",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libopus.so.0": {
+      "bytes": 565744,
+      "sha256": "f06da69ca0542b923a32f441da62a4fae8a603be7c4ee922c69282508b2960e0",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libpcre2-8.so.0": {
+      "bytes": 442424,
+      "sha256": "e39519b242f40686734ed8d0218f68cac24f0e956ec64c8c1b49b9da5cc9788b",
+      "directory": false
+    },
+    "codex-resources/voice/lib/libz.so.1": {
+      "bytes": 109296,
+      "sha256": "6c5d765f42d9368cc4bdbd11f725c1bcf6b14b78322033d3c94f787fc6261f5e",
+      "directory": false
+    },
+    "codex-resources/voice/licenses": {
+      "bytes": 0,
+      "sha256": null,
+      "directory": true
+    },
+    "codex-resources/voice/licenses/LGPL-2.1.txt": {
+      "bytes": 26431,
+      "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+      "directory": false
+    },
+    "codex-resources/voice/licenses/Opus.txt": {
+      "bytes": 1945,
+      "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+      "directory": false
+    },
+    "codex-resources/voice/licenses/PCRE2.md": {
+      "bytes": 4011,
+      "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
+      "directory": false
+    },
+    "codex-resources/voice/licenses/libffi.txt": {
+      "bytes": 1132,
+      "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
+      "directory": false
+    },
+    "codex-resources/voice/licenses/proxy-libintl.txt": {
+      "bytes": 25292,
+      "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+      "directory": false
+    },
+    "codex-resources/voice/licenses/sljit.txt": {
+      "bytes": 1444,
+      "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
+      "directory": false
+    },
+    "codex-resources/voice/licenses/zlib.txt": {
+      "bytes": 1002,
+      "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+      "directory": false
+    },
+    "codex-resources/voice/manifest.json": {
+      "bytes": 4768,
+      "sha256": "ee25e29a025721ddaeb5a43bb2eaa8fd2ed37d4ff9890d33bbe4cf859564d1f1",
+      "directory": false
+    },
+    "codex-resources/voice/runtime.json": {
+      "bytes": 13941,
+      "sha256": "edadcca85c1bd8924d73fd825987fe0bf3f14a44d3cf8c7a64719ecb5ab0fd79",
+      "directory": false
+    },
+    "codex-resources/voice/sources.json": {
+      "bytes": 4911,
+      "sha256": "e2f6b124f6277e7c3c4f5c7cc8830c66190f671ad65e972bb2cc9507dbfcb937",
+      "directory": false
+    }
+  },
+  "notices": [
+    {
+      "file": "LICENSE",
+      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.166.0/LICENSE",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+      "bytes": 10926
+    },
+    {
+      "file": "NOTICE",
+      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.166.0/NOTICE",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+      "bytes": 242
+    }
+  ],
+  "qualification": "deck2-codex-0.166.0-s7a-v1"
+}

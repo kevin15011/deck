@@ -1,0 +1,314 @@
+/* S1 adaptations to the copied Deck presentation; no runtime/session imports. */
+.app-body {--pane-split:50%}
+.slice-menu {display:none}
+.slice-theme {font-size:.7rem;color:var(--muted);display:grid;gap:.5rem}
+.slice-theme select {background:var(--surface);color:var(--ink);border:1px solid var(--border);padding:.5rem}
+.slice-foot {font-size:.65rem;color:var(--muted);margin-top:1rem}
+.slice-prompt {white-space:pre-wrap;overflow-wrap:anywhere}
+.receipt-body {overflow:hidden;font-size:.75rem;line-height:1.7;overflow-wrap:anywhere}
+.receipt-details>button {padding:.5rem 0;font-size:.75rem}
+.composer-dock>.pending {margin:.5rem 1.5rem}
+.slice-panes .activity-content {height:100%;overflow:auto}
+.slice-panes .activity-view {height:100%}
+.app-header .session-identity {display:flex;align-items:center;gap:.75rem;flex:1}
+.slice-readonly {white-space:nowrap}
+.app-error button {font-size:.75rem;padding:.375rem .5rem}
+@media (min-width:1001px){.view-nav .workspace-tabs button:first-of-type {display:none}}
+@media (max-width:1000px){
+ .slice-menu {display:block}
+ .slice-panes {display:flex}
+ .slice-panes>.chat-pane,.slice-panes>.workspace-pane {width:100%;flex:1}
+ .slice-panes:not(.activity-selected)>.workspace-pane,.slice-panes.activity-selected>.chat-pane {display:none}
+ .view-nav {display:block}
+ .view-nav .chat-label {display:none}
+ .view-nav .workspace-tabs {border-left:0}
+ .slice-readonly {display:none}
+ .session-drawer .project-navigation {flex:1}
+}
+@media (max-width:1000px){.slice-panes .conversation {padding:1.5rem}.slice-panes .session-identity-text {min-width:0}}
+@media (max-width:500px){.slice-panes .conversation {padding:1.25rem 1rem}.app-header .session-identity {gap:.5rem}.app-header .session-identity>svg {width:24px;flex-shrink:0}}
+/* GSAP owns the transitions on the controls and panels used by this slice. */
+.workbench button,.workbench textarea,.workbench select {transition:none}
+.slice-panes .conversation {padding-bottom:180px}
+.slice-panes .composer textarea {max-height:180px;overflow-y:auto}
+.composer-mode {display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;font-size:.75rem;color:var(--muted)}
+.composer-mode label {display:flex;align-items:center;gap:.4rem}
+.composer-mode select,.review select,.review input {color:var(--ink);background:var(--surface);border:1px solid var(--border);padding:.4rem;max-width:100%}
+.review {border-top:1px solid var(--border);margin-top:1rem;padding-top:1rem;min-width:0}
+.review>header {display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+.review-path {font-size:.75rem;overflow-wrap:anywhere;color:var(--muted)}
+.review-diff {overflow:auto;max-height:24rem;font-size:.75rem;background:var(--surface);padding:.75rem;border:1px solid var(--border)}
+.review-diff pre {margin:0;white-space:pre;tab-size:2}
+.review-views,.review-actions {display:flex;gap:.5rem;margin:.75rem 0}
+.review-views [aria-pressed=true] {color:var(--ink);text-decoration:underline;text-underline-offset:.3em}
+.review-actions button,.review form>button {background:var(--surface);color:var(--ink);border:1px solid var(--border);padding:.6rem .9rem}
+.review-question {display:grid;gap:.6rem;margin:.8rem 0;font-size:.85rem}
+
+.review-actions[hidden] {display:none}
+/* Persisted conversations share the existing Deck navigation and surfaces. */
+.project-sessions{position:relative;isolation:isolate}
+.project-sessions>.session{position:relative;z-index:1;width:100%;text-align:left;background:transparent;border:0}
+.project-sessions>.moving-active-indicator{position:absolute;inset:0 auto auto 0;z-index:0;background:var(--tint);border-radius:var(--radius-md,8px);pointer-events:none}
+.session-actions{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.queue-controls{border-block:1px solid var(--border);padding-block:12px;margin-block:12px;font-size:12px;color:var(--muted)}
+.queue-controls ul{padding:0;list-style:none;margin-bottom:0}
+.queue-controls li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding-block:8px;overflow-wrap:anywhere}
+.composer-wrap>label.activity-meta{display:block;margin-block:8px}
+
+/* Task evidence uses the same activity grid and typography as execution receipts. */
+.specialist-tasks{padding:0 1.5rem;min-width:0}
+.specialist-tasks>h3{font-size:.85rem;margin:1.25rem 0 .5rem}
+.specialist-tasks .task-attempt{border-top:1px solid var(--border);margin-top:.75rem;padding-top:.75rem;font-size:.8rem;line-height:1.6;overflow-wrap:anywhere}
+.specialist-tasks .task-attempt h4{font-size:.8rem;margin:.25rem 0 .5rem}
+.specialist-tasks .empty-note{padding:.5rem 0 1rem}
+
+.configuration-pane { grid-column:1/-1; min-width:0; overflow:auto; padding:28px 32px; }
+.configuration-content { max-width:960px; margin:0 auto; }
+.configuration-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+.configuration-heading h2 { margin:0 0 8px; }
+.configuration-heading .eyebrow { color:var(--muted); font-size:12px; margin:0 0 8px; }
+.configuration-scope { position:relative; isolation:isolate; display:flex; gap:8px; margin:24px 0; width:fit-content; }
+.configuration-scope button { position:relative; z-index:1; }
+.configuration-content section { padding:20px 0; border-bottom:1px solid var(--border); }
+.configuration-content .workspace-panel { display:block; overflow:visible; }
+.configuration-content p,.configuration-content code { overflow-wrap:anywhere; }
+.configuration-content select { max-width:100%; }
+.configuration-definition { padding:14px 0; }
+.configuration-definition > p { margin:0 0 6px; font-weight:600; }
+.recorded-content pre, .configuration-review pre { white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.7 var(--font-mono,monospace); padding:18px; background:var(--surface); border:1px solid var(--border); border-radius:8px; max-height:480px; overflow:auto; }
+.configuration-review { padding:20px; border:1px solid var(--accent); border-radius:10px; }
+.configuration-review button { margin:6px 12px 6px 0; }
+.configuration-nav { margin:12px 16px; text-align:left; }
+@media(max-width:1000px) { .configuration-pane { padding:20px 16px; } .configuration-heading { flex-wrap:wrap; } .configuration-scope { width:100%; } }
+
+.configuration-scope>.moving-active-indicator {position:absolute;inset:0 auto auto 0;z-index:0;background:var(--tint);border-radius:var(--control-radius);pointer-events:none;}
+@media(max-width:1000px){.configuration-pane{width:100%;flex:1;}}
+.configuration-content .activity-meta {font-size:13px;line-height:1.6;}
+.configuration-content h3 {font-size:17px;line-height:1.4;}
+.configuration-content .configuration-limits {border-bottom:0;}
+.change-section{border-top:1px solid var(--border);padding-top:16px;margin-top:16px;min-width:0;overflow-wrap:anywhere;font-size:13px}
+.change-section h3{font-size:14px;margin:0 0 12px}
+.change-section h4{font-size:13px;margin:0 0 8px}
+.change-section form{display:grid;gap:12px;padding-block:12px}
+.change-section form label{display:grid;gap:6px;color:var(--muted)}
+.change-section textarea{width:100%;min-height:54px;resize:vertical;color:var(--ink);background:var(--surface);border:1px solid var(--border);padding:8px;border-radius:6px;font:inherit}
+.change-section pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;font-size:11px}
+.change-section .task{display:block;padding:12px 0;border-top:1px solid var(--border)}
+
+.cbm-source {display:grid;gap:6px;margin:12px 0;color:var(--muted);}
+.cbm-source textarea {display:block;box-sizing:border-box;width:100%;min-width:0;min-height:80px;resize:vertical;padding:10px;color:var(--ink);background:var(--input);border:1px solid var(--border);border-radius:var(--control-radius);font:inherit;}
+
+/* Original Deck appearance surfaces share the same palette and bundled font tokens. */
+.app-header[hidden],.view-nav[hidden]{display:none}
+.slice-panes>.settings-view{grid-column:1/-1;min-height:0;scrollbar-gutter:auto}
+.slice-panes.settings-selected{grid-template-columns:minmax(0,1fr)}
+.slice-panes .settings-view[hidden],.pane-divider[hidden],.settings-panel[hidden]{display:none}
+.theme-picker-option[aria-pressed=true]{background:var(--tint);color:var(--ink)}
+/* Reserve the composer's real height, including mode/trust controls and wrapped text. */
+.slice-panes>.chat-pane{display:flex;flex-direction:column;min-height:0}
+.slice-panes>.chat-pane[hidden]{display:none}
+.slice-panes .conversation{flex:1;min-height:0;padding-bottom:24px}
+.slice-panes .composer-dock{position:relative;flex:none;max-height:60%;overflow:auto;padding-bottom:max(16px,env(safe-area-inset-bottom))}
+.slice-panes .composer-dock::before{display:none}
+.slice-panes .composer-wrap{padding-top:8px}
+/* Keep the original floating dictation status clear of session controls. */
+.slice-panes .composer-wrap:has(.dictation-status){padding-top:62px}
+.slice-panes .composer-wrap>.activity-meta{margin-block:8px;font-size:11px;line-height:1.5}
+.slice-panes .composer textarea{min-height:64px}
+@media(max-width:1000px){.slice-panes>.settings-view{width:100%;flex:1}.slice-panes .composer-dock{max-height:65%}.slice-panes .settings-fonts label{min-height:36px}.slice-panes .settings-row button{min-height:44px}}
+
+.configuration-nav,.project-group>button,.project-group .new-conversation,.slice-panes .session-actions button{font-size:12px;min-height:36px}
+.project-group>button,.project-group .new-conversation{padding:8px 12px;text-align:left}
+
+.image-references img{object-fit:cover}.image-preview-viewport .image-full{display:block;object-fit:contain;align-self:center;margin:auto;max-height:none;height:auto}.image-drafts{margin:.5rem 0}.image-draft button:focus-visible{outline:2px solid var(--accent)}
+.session-configuration>div{max-height:min(42vh,24rem);overflow-y:auto;padding:.5rem 0}
+.session-configuration label{display:block;margin:.5rem 0}
+
+/* Layout controls keep all session children mounted; only their visibility changes. */
+.sidebar-contents{display:flex;flex-direction:column;min-height:0;flex:1}
+.sidebar-contents[hidden],.chat-label[hidden]{display:none}
+.sidebar-brand{display:flex;align-items:center;justify-content:space-between}
+.sidebar-brand .brand{min-width:0}
+.sidebar-collapsed .sidebar-brand{flex-direction:column}
+.sidebar-collapsed .sidebar-brand .brand{padding:0}
+.theme-reveal-wave{position:fixed;inset:0;pointer-events:none;view-transition-name:deck-theme-wave;z-index:2147483647}
+@media(min-width:1001px){.content-workspace .view-nav .workspace-tabs{grid-column:1/-1;border-left:0}.sidebar-toggle{min-height:36px}.content-chat .slice-panes>.workspace-pane[hidden],.content-workspace .slice-panes>.chat-pane[hidden]{display:none}}
+
+/* Deck1 shell composition; current supported workspace content stays mounted. */
+.shell-workspace{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}
+.shell-workspace[hidden]{display:none}
+.shell-workspace>.workspace-tabs{flex:none;border-left:0;border-bottom:1px solid var(--border)}
+.workspace-stack{flex:1;min-height:0;position:relative;overflow:hidden}
+.workspace-stack>.workspace-panel{height:100%;min-height:0;overflow:auto}
+.workspace-stack>.workspace-panel[hidden]{display:none}
+.shell-workspace .git-pane{padding:0}
+.sidebar>.deck-menu{flex:none}
+.navigation-rail{flex:1}
+.agent-avatar{flex:none;object-fit:contain;image-rendering:pixelated;border:1px solid var(--border)}
+.project-group>button,.project-group .new-conversation{display:flex;align-items:center;gap:6px}
+@media(min-width:1001px){.shell-workspace .chat-tab{display:none}.sidebar-brand{flex-direction:row}.sidebar-collapsed .sidebar-brand{flex-direction:column}.app-header .content-modes{order:5}.slice-readonly{font-size:11px}}
+@media(max-width:1000px){.slice-panes>.shell-workspace{display:flex}.slice-panes>.shell-workspace[hidden]{display:none}.workspace-stack>.workspace-panel{width:100%}}
+
+.history-view>.chat-pane{flex:1;overflow:hidden}
+.history-view>.chat-pane>.activity-meta,.history-view>.chat-pane>.error{margin:.75rem 1.5rem}
+
+@media(max-width:1000px){
+ .task-heading--recorded,.task-card--compact .task-heading--recorded{grid-template-columns:auto minmax(0,1fr) auto}
+ .task-heading--recorded>.status-chip{grid-column:2/-1;justify-self:start}
+}
+
+/* Keep assignment identity readable alongside the conversation on narrow screens. */
+.app-header .lead-identity { display: flex; }
+.lead-identity .lead-reasoning { font-size: inherit; flex-shrink: 0; }
+
+/* Keep the project tree compact and show the original parent-child guide. */
+.project-group .project-sessions { position: relative; padding-left: 22px; }
+.project-group .project-sessions::before { content: ''; position: absolute; left: 14px; top: 0; bottom: 0; width: 1px; background: var(--border); }
+.project-group .session { min-height: 32px; }
+.project-group .project-name small, .project-group .session-label small { display: none; }
+.project-new.quiet { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 32px; padding: 4px; }
+.project-new .navigation-icon { width: 14px; height: 14px; }
+
+/* Work first: role and task, then provenance; controls share the quiet metadata scale. */
+.task-card {position:relative;isolation:isolate}
+.task-card--compact {margin:0 1rem .65rem;padding:.85rem;background:var(--card)}
+.task-card .task-heading,.task-card--compact .task-heading,.task-card--compact .task-heading--recorded {display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:.35rem .6rem}
+.task-heading .agent-avatar {grid-column:1;grid-row:1;border-radius:4px}
+.task-heading .task-identity {grid-column:2;grid-row:1}
+.task-heading h3 {font-size:.85rem;margin:0}
+.task-heading .agent-indicator {grid-column:3;grid-row:1;margin:0}
+.task-heading .open-detail {grid-column:4;grid-row:1;min-height:28px;padding:.2rem .35rem;font-size:.7rem;color:var(--muted);border:0;background:transparent;gap:.3rem}
+.task-heading .open-detail:hover {color:var(--ink);background:var(--tint)}
+.task-heading .open-detail .navigation-icon {width:13px;height:13px}
+.task-assignment {grid-column:1/-1;margin:.35rem 0 .15rem;font-size:.8rem;line-height:1.5;overflow-wrap:anywhere;white-space:pre-wrap}
+.task-card--compact .task-assignment {display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.task-metadata {grid-column:1/-1;display:flex;flex-wrap:wrap;gap:.15rem .65rem;font-size:.65rem;color:var(--muted);line-height:1.6}
+.task-metadata .runner {margin:0;font-size:inherit;overflow-wrap:anywhere}
+.task-heading>.context-window {grid-column:1/-1;margin-top:.25rem;min-height:28px;padding:.15rem .35rem;font-size:.65rem;background:transparent;max-width:100%}
+.task-progress {font-size:.75rem;color:var(--muted);line-height:1.5;margin:.55rem 0 0;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.task-card--compact .task-result--preview {max-height:6em;line-height:1.5;margin-top:.65rem;padding-top:.65rem;font-size:.8rem;mask-image:none;-webkit-mask-image:none;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
+.task-card[data-activity=working],.task-card[data-activity=waiting] {border-color:var(--accent-border)}
+.task-card[data-activity=approval],.task-card[data-activity=question] {border-color:var(--warning);box-shadow:inset 0 0 0 1px var(--warning-border)}
+.task-card[data-activity=error] {border-color:var(--error-border)}
+.task-active-trace {position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:-1;overflow:visible;color:var(--action)}
+.task-active-trace rect {width:calc(100% - 2px);height:calc(100% - 2px);fill:none;stroke:currentColor;stroke-width:1;stroke-dasharray:18 82;vector-effect:non-scaling-stroke}
+.task-card[data-activity=waiting] .task-active-trace {color:var(--muted)}
+@media(prefers-reduced-motion:reduce){.task-active-trace{visibility:hidden}.task-card[data-activity=working]{border-color:var(--action)}}
+/* Permission action and scope stay above controls. Receipts remain inspectable. */
+.review {margin-top:.85rem;padding-top:.75rem}
+.review>header {font-size:.8rem}
+.review--pending {border-left:2px solid var(--warning);padding-left:.85rem}
+.review-state {font-size:.65rem;color:var(--muted);white-space:nowrap;font-weight:400}
+.review--pending .review-state {color:var(--warning)}
+.permission-action {margin:.65rem 0;display:grid;gap:.55rem;min-width:0}
+.permission-action>div {min-width:0}
+.permission-action dt {font-size:.65rem;color:var(--muted);margin-bottom:.2rem}
+.permission-action dd {margin:0;min-width:0}
+.permission-action pre,.permission-fallback {font-family:inherit;font-size:.8rem;line-height:1.5;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;max-height:16rem;overflow:auto}
+.permission-action>div:first-child pre {font-family:ui-monospace,SFMono-Regular,monospace;font-size:.75rem;background:var(--surface);border:1px solid var(--border);padding:.5rem .65rem}
+.review-scope {color:var(--muted);font-size:.7rem;line-height:1.5;margin:.65rem 0}
+.review-actions {flex-wrap:wrap;gap:.4rem;margin:.65rem 0 .35rem}
+.review .review-actions button {min-height:32px;font-size:.75rem;padding:.35rem .6rem;border-radius:4px;line-height:1.4;font-weight:500}
+.review .review-actions button:hover:not(:disabled) {background:var(--tint);border-color:var(--quiet)}
+.review .review-actions button:focus-visible,.review-summary:focus-visible {outline:2px solid var(--focus);outline-offset:2px}
+.review-summary.quiet {display:flex;align-items:center;gap:.5rem;width:100%;min-width:0;min-height:32px;padding:.2rem 0;text-align:left;background:transparent;border:0;color:var(--muted);font-size:.75rem}
+.review-summary>svg {flex:none;width:14px;height:14px}
+.review-summary>span:first-of-type {flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:.15rem .6rem}
+.review-summary strong {font-weight:500;color:var(--ink)}
+.review-excerpt {overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:100%;font-size:.7rem;font-weight:400}
+.review--settled .review-body {padding-left:1.4rem}
+.review-body>.receipt-details {margin-top:.15rem}
+.review-body>.receipt-details>button {font-size:.65rem;padding:.25rem 0;min-height:28px}
+.review-body .receipt-body pre {white-space:pre-wrap;overflow-wrap:anywhere}
+.review-body>.activity-meta {font-size:.7rem;line-height:1.5}
+
+.task-card>div>button.quiet,.detail-card>button.quiet {font-size:.7rem;min-height:28px;padding:.25rem .4rem}
+.task-heading>.context-window {font-weight:400;border-color:transparent;padding-left:0}
+
+.permission-scope-choice {min-width:0;margin:.65rem 0}
+.permission-scope-choice label {display:grid;gap:.35rem;font-size:.7rem;color:var(--muted)}
+.permission-scope-choice select {width:100%;min-width:0;min-height:32px;padding:.35rem .6rem;font-size:.75rem;color:var(--ink);background:var(--surface);border:1px solid var(--border)}
+.permission-scope-choice .review-scope {overflow-wrap:anywhere}
+/* The inspector floats over the conversation and never consumes its width. */
+.slice-panes {position:relative}
+.slice-panes>.chat-pane {width:100%;flex:1;grid-column:1/-1}
+.slice-panes>.inspector {position:absolute;z-index:20;right:0;top:0;bottom:0;width:min(440px,100%);height:100%;background:var(--canvas);border-left:1px solid var(--border);box-shadow:0 0 24px var(--backdrop);display:flex}
+.slice-panes>.inspector[hidden] {display:none}
+.inspector-heading {display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;border-bottom:1px solid var(--border)}
+.inspector-actions {display:flex;align-items:center;gap:.2rem}
+.inspector-actions button {display:flex;align-items:center;gap:.2rem}
+.inspector-actions small {color:var(--muted)}
+.inline-agent-button {display:flex;align-items:center;gap:.4rem;text-align:left;font-size:.8rem;color:var(--muted)}
+.inline-agent-button strong {color:var(--ink)}
+.provider-mark {width:18px;height:18px;flex:none}
+.inline-agent-detail {padding:.25rem 1.5rem;font-size:.8rem;overflow-wrap:anywhere}
+.inline-agent-detail pre {white-space:pre-wrap}
+@media(max-width:1000px){.slice-panes.activity-selected>.chat-pane {display:flex}.slice-panes:not(.activity-selected)>.inspector {display:flex}.slice-panes>.inspector {position:fixed;top:0;bottom:0;right:0;height:100dvh;width:min(440px,100vw)}}
+/* Slice 1: single conversation track, with an independent overlay. */
+.app-body.content-both .slice-panes {grid-template-columns:minmax(0,1fr)}
+.inspector {color:var(--ink)}
+.inspector .workspace-stack {isolation:isolate}
+.inspector .workspace-tabs button[aria-selected=true]::after {display:none}
+.inspector .workspace-tabs>.moving-active-indicator {position:absolute;inset:0 auto auto 0;z-index:0;background:var(--tint);border-radius:var(--control-radius);pointer-events:none}
+.inspector .workspace-tabs {position:relative;isolation:isolate}
+.inspector .workspace-tabs button {z-index:1}
+.inspector-heading button {font-size:22px;min-width:36px;min-height:36px}
+.inspector-actions {flex:none}
+.inspector-actions button {min-height:36px;min-width:36px;justify-content:center;font-size:16px}
+.inspector-actions button[aria-expanded=true] {background:var(--tint);color:var(--ink)}
+.inspector-actions small {font-size:10px;font-variant-numeric:tabular-nums}
+.inline-agents {margin-block:16px;min-width:0}
+.inline-agent-button {width:100%;min-height:40px;gap:8px;flex-wrap:wrap;padding:6px 0}
+.inline-agent-button strong {font-weight:500}
+.inline-agent-status {flex:1;min-width:0}
+.inline-agent-elapsed {font-size:11px;font-variant-numeric:tabular-nums}
+.provider-icon {display:inline-flex;flex:none;color:var(--muted)}
+.inline-agent-detail {padding:0 0 12px 26px;color:var(--muted);line-height:1.6}
+.inline-agent-detail>p {margin-block:8px}
+.inline-agent-technical {font-size:11px;min-height:32px;padding:4px 0}
+.inline-agent-detail pre {font-size:11px;max-height:240px;overflow:auto}
+.inline-agent-button:focus-visible,.inspector button:focus-visible,.inspector-actions button:focus-visible {outline:2px solid var(--focus);outline-offset:2px}
+@media(max-width:1000px){
+ .slice-panes>.inspector {width:min(440px,100vw);max-height:100dvh}
+ .slice-panes>.inspector[hidden] {display:none}
+ .app-header .session-identity {min-width:0}
+ .app-header .session-identity-text {min-width:0}
+ .app-header .session-identity>img {display:none}
+ .inspector-actions {gap:0}
+ .inspector-actions button {min-width:32px;padding:4px}
+ .inline-agent-button {font-size:12px;gap:6px}
+}
+@media(max-width:600px){
+ /* Header additions get a second row rather than squeezing the session title. */
+ .app-header {display:grid;grid-template-columns:28px minmax(0,1fr) auto auto;height:auto;flex-basis:auto;row-gap:4px}
+ .app-header .slice-menu {grid-column:1;grid-row:1;padding:4px}
+ .app-header .session-identity {grid-column:2/-1;grid-row:1}
+ .app-header .inspector-actions {grid-column:2;grid-row:2;margin-left:auto}
+ .app-header .session-menu {grid-column:3;grid-row:2}
+ .app-header>.approval-mode-chip {grid-column:4;grid-row:2}
+}
+/* Round 1: a card with a quiet tab row, independent of conversation geometry. */
+.slice-panes>.inspector {inset:12px 12px 12px auto;height:auto;max-width:calc(100% - 24px);border:1px solid var(--border);border-radius:14px;box-shadow:0 8px 32px var(--backdrop);overflow:visible}
+.inspector>.workspace-tabs {padding-right:44px;border-radius:14px 14px 0 0;min-height:48px}
+.inspector>.workspace-stack {border-radius:0 0 14px 14px;overflow:hidden}
+.inspector-expand {position:absolute;right:8px;top:6px;z-index:3;width:34px;height:34px;display:grid;place-items:center;padding:6px}
+.inspector-resize {position:absolute;left:-6px;top:14px;bottom:14px;width:12px;cursor:ew-resize;touch-action:none;z-index:4}
+.inspector-resize:focus-visible {outline:2px solid var(--focus);border-radius:6px}
+.history-window-control {min-height:36px;margin-block:8px;font-size:12px;color:var(--muted)}
+@media(max-width:1000px){.slice-panes>.inspector {position:absolute;inset:12px 12px 12px auto;height:auto;max-height:calc(100% - 24px);max-width:calc(100% - 24px)}}
+
+/* Decision 16: docked cards reserve real chat space; floating geometry is GSAP-owned. */
+.slice-panes>.inspector {right:auto;bottom:auto}
+.inspector-docked>.chat-pane {overflow:hidden}
+.slice-panes>.inspector[data-mode=docked] {border-radius:0;box-shadow:none;max-width:none}
+.inspector>.workspace-tabs {padding-right:82px;padding-left:32px}
+.inspector[data-mode=docked]>.workspace-tabs {padding-left:8px;border-radius:0}
+.inspector-dock,.inspector-move {position:absolute;top:6px;z-index:3;width:34px;height:34px;display:grid;place-items:center;padding:6px}
+.inspector-dock {right:44px}
+.inspector-move {left:2px;width:28px;cursor:grab;touch-action:none}
+.inspector .workspace-tabs {touch-action:none;cursor:grab}
+.inspector[data-mode=docked] .workspace-tabs {cursor:default}
+.inspector-size {position:absolute;right:0;bottom:0;width:20px;height:20px;z-index:4;cursor:nwse-resize;touch-action:none}
+.inspector-size::after {content:'';position:absolute;right:5px;bottom:5px;width:7px;height:7px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted)}
+.inspector-size:focus-visible,.inspector-move:focus-visible {outline:2px solid var(--focus);outline-offset:2px}
+@media(max-width:1000px){.inspector>.workspace-tabs {padding-left:0;padding-right:44px}.inspector .workspace-tabs {cursor:default;touch-action:auto}}

@@ -1,0 +1,131 @@
+{
+  "capturedAt": "2026-11-11T05:26:35.279Z",
+  "url": "http://127.0.0.1:7421/",
+  "title": "Deck workspace",
+  "browser": "156.0.8078.79",
+  "sourceHead": "abe6d5b85b92f05a406d299b9ed3ffd562fce6f7",
+  "runningBinarySha256": "a875c642a073db8ed95516f524ec83bd00bf718fff1558bf7d509112cdc9a341",
+  "scope": "Actual running Deck, no projected shell or fake API. Separate ephemeral browser contexts. Home, navigation and appearance settings only; no private conversation selected. No message submission or administrative controls used. Preferences are context-local; normal page initialization requests are recorded by method/path only.",
+  "limits": "Source HEAD is recorded separately and is not asserted to be the exact running build source. Reduced-motion still captures do not qualify animation behavior. Dynamic project/status content may change.",
+  "assets": {
+    "/app.css": "1da0386888e6d45727e9c54b7846e5b3458086ac045cc556615e447f54885a47",
+    "/app.js": "8feb28c446030d6a1149914a3d2c4a843339e2db6d78b03f254db60d4b427064"
+  },
+  "captures": [
+    {
+      "file": "desktop-dark-home.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "font": "system",
+      "state": "home",
+      "sha256": "d961c0ffe26c7ab92451a5ca8cd38a306156ea9756f20c5dc0a647021165ebaa"
+    },
+    {
+      "file": "desktop-dark-settings.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "font": "system",
+      "state": "settings",
+      "sha256": "4e6346988746fa5e4df71f6e679208db9d0d17b912f793a10a1ae86022ffa666"
+    },
+    {
+      "file": "desktop-light-home.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "light",
+      "font": "system",
+      "state": "home",
+      "sha256": "e5a7136c73e46cc1c071d4b22f6671baa8e4f273e098c108f69920a975f0e037"
+    },
+    {
+      "file": "desktop-light-settings.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "light",
+      "font": "system",
+      "state": "settings",
+      "sha256": "ea4385d6f00ceaed6b67dc34e56f2f625365855699b394218710e0b2e662d35c"
+    },
+    {
+      "file": "mobile-dark-home.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme": "dark",
+      "font": "system",
+      "state": "home",
+      "sha256": "59e78b575a1b6da0d40f062b9c41a7c4356c43f7fa75cb6078dacf095460635b"
+    },
+    {
+      "file": "mobile-dark-navigation.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme": "dark",
+      "font": "system",
+      "state": "navigation",
+      "sha256": "c56897ca674e38e860921cb066ea503fee043443f7b62f58ba71ca1ce23cef88"
+    },
+    {
+      "file": "mobile-dark-settings.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme": "dark",
+      "font": "system",
+      "state": "settings",
+      "sha256": "99768fbc331ce5fe34a975106bb699b497dba7da1f807c438cabffd4724a28a8"
+    },
+    {
+      "file": "mobile-light-home.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme": "light",
+      "font": "system",
+      "state": "home",
+      "sha256": "f24482b7ba2de4955ca370c5f7b93ceff3263638f55192cd5132e992a60f1259"
+    },
+    {
+      "file": "mobile-light-navigation.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme": "light",
+      "font": "system",
+      "state": "navigation",
+      "sha256": "39aca67337593c95cd34bc68287dcc8ccecd63c3fb003a3a782e831b57af2d19"
+    },
+    {
+      "file": "mobile-light-settings.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme": "light",
+      "font": "system",
+      "state": "settings",
+      "sha256": "01fc13aa382aca66c7e0a7e21e523a0c6f61684363e05de55b94af759f672d72"
+    }
+  ],
+  "errors": [],
+  "nonGetRequests": [
+    "POST /api/local-access",
+    "POST /api/push/presence"
+  ]
+}

@@ -1,0 +1,305 @@
+[
+  {
+    "name": "deck_decision_open",
+    "description": "Open a session-owned unresolved decision. Use a stable key per originating Lead attempt and durable commandId; sources are history, not permission. relatedTaskIds explicitly links delegated tasks to this dependency for future continuation without interrupting running work. A source reference alone never links or gates that task.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commandId",
+        "key",
+        "question",
+        "source"
+      ],
+      "properties": {
+        "commandId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "promptId"
+              ],
+              "properties": {
+                "promptId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "taskId",
+                "attempt"
+              ],
+              "properties": {
+                "taskId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              }
+            }
+          ]
+        },
+        "relatedTaskIds": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+          }
+        },
+        "openSpecRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "previousDecisionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        }
+      }
+    }
+  },
+  {
+    "name": "deck_decision_list",
+    "description": "Read unresolved decisions and bounded terminal history. Read-only; no acknowledgement or resolution.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    }
+  },
+  {
+    "name": "deck_decision_revise",
+    "description": "Revise a pending/deferred question or explicitly supersede with rationale and replacement or explicit scope reference; both require this turn's genuine user prompt newer than the question, recorded as scopePromptId. Existing related task dependencies persist; revising or superseding does not remove them.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commandId",
+        "decisionId",
+        "expectedRevision",
+        "note"
+      ],
+      "properties": {
+        "commandId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "decisionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "state": {
+          "const": "superseded"
+        },
+        "replacementDecisionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "scopePromptId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "question"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "state"
+                ]
+              },
+              {
+                "required": [
+                  "replacementDecisionId"
+                ]
+              },
+              {
+                "required": [
+                  "scopePromptId"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "state"
+          ],
+          "not": {
+            "required": [
+              "question"
+            ]
+          },
+          "oneOf": [
+            {
+              "required": [
+                "replacementDecisionId"
+              ],
+              "not": {
+                "required": [
+                  "scopePromptId"
+                ]
+              }
+            },
+            {
+              "required": [
+                "scopePromptId"
+              ],
+              "not": {
+                "required": [
+                  "replacementDecisionId"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "deck_decision_resolve",
+    "description": "Explicitly answer using this Lead turn's admitted genuine user prompt, newer than the question. Host checks structure; Lead checks meaning. An allow disposition authorizes only its exact action, deny/informational authorizes no dependent work.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commandId",
+        "decisionId",
+        "expectedRevision",
+        "promptId",
+        "note",
+        "disposition"
+      ],
+      "properties": {
+        "commandId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "decisionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "promptId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        },
+        "disposition": {
+          "enum": [
+            "allow",
+            "deny",
+            "informational"
+          ]
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u0008\\u000b-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "disposition": {
+                "const": "allow"
+              }
+            },
+            "required": [
+              "disposition"
+            ]
+          },
+          "then": {
+            "required": [
+              "action"
+            ]
+          }
+        }
+      ]
+    }
+  }
+]

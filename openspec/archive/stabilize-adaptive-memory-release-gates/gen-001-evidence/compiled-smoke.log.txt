@@ -1,9 +1,0 @@
-dry-run still compiles all release targets; only host target is executed. Local provider fixture is HTTP-only; TLS is covered by the runtime platform, not this offline smoke.
-compiled-supermemory-runtime ok
-compiled-deck-cli-version ok (extracted release archive, outside workspace, empty PATH)
-compiled-deck-runtime-operations ok (extracted release archive, mock endpoint, credential-free MCP materialization, authenticated loopback capture)
-compiled-codex-hook-command ok (extracted release archive, empty PATH, Deck-owned executable)
-compiled-deck-cli-doctor-readonly ok (extracted release archive, outside workspace, empty PATH)
-compile-only bun-linux-arm64 ok (not executable on bun-linux-x64)
-compile-only bun-darwin-x64 ok (not executable on bun-linux-x64)
-compile-only bun-darwin-arm64 ok (not executable on bun-linux-x64)
