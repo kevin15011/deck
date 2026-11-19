@@ -448,7 +448,7 @@ small, .muted, .empty-note { color: var(--muted); }
 .directory-state p { margin: 0 0 .375rem; }
 .directory-state button { padding: .375rem .5rem; }
 .assignment-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
-.assignment-fields label:last-child:nth-child(3) { grid-column: 1 / -1; }
+.assignment-fields label.assignment-reasoning { grid-column: 1 / -1; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; }
 .approvals:not(.pending) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .approval-heading strong { font-weight: 400; color: var(--muted); }
@@ -1632,15 +1632,23 @@ select:focus-visible, .question-panel textarea:focus-visible {
 }
 
 .assignments-dialog { width: min(800px, calc(100vw - 2rem)); }
-.assignment-rows { display: grid; gap: 1rem; }
-.assignment-row { display: grid; grid-template-columns: minmax(7rem, .7fr) minmax(0, 2fr) auto; gap: .75rem; align-items: start; }
-.assignment-row h3 { margin: .625rem 0 0; overflow-wrap: anywhere; }
-.assignment-row .assignment-fields { gap: .75rem; }
-.assignment-row .error { grid-column: 2 / -1; margin: 0; }
+.assignment-rows { display: grid; gap: .75rem; }
+.assignment-row { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: .5rem .75rem; align-items: start; }
+.assignment-row h3 { margin: 1.6rem 0 0; overflow-wrap: anywhere; }
+.assignment-row .assignment-fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) 8rem; gap: .5rem .75rem; }
+.assignment-row .assignment-fields .assignment-reasoning { grid-column: auto; }
+.assignment-row select { padding: .375rem .5rem; min-height: 2rem; }
+.assignment-row .assignment-fields .muted { grid-column: 1 / -1; }
+.assignment-feedback { grid-column: 2 / -1; margin: 0; }
+.assignment-feedback p { margin: 0 0 .375rem; }
+.assignment-feedback button + button { margin-inline-start: .5rem; }
 @media (max-width: 600px) {
   .assignment-row { grid-template-columns: minmax(0, 1fr); }
   .assignment-row h3 { margin: 0; }
-  .assignment-row .error { grid-column: 1; }
+  .assignment-feedback { grid-column: 1; }
+}
+@media (max-width: 420px) {
+  .assignment-row .assignment-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* Review shares one compact control row across its persistent modes. */
