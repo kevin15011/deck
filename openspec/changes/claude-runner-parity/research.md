@@ -14,7 +14,9 @@ Exercise two concurrent conversations on one project, incremental text/tool even
 
 Do not model SDK stream input as an exact active-turn steer without a protocol witness. Anthropic documents that input submitted during tool calls can be consumed after they finish, or can start a new turn if the current turn ends first. Test uncertain delivery and interruption with pending input. Keep explicit next-turn queueing in Rust.
 
-Decide supported authentication and packaging before promising subscription reuse. Anthropic documents approval requirements for third-party products offering claude.ai login or rate limits. Never transfer tokens from a CLI profile to implement product authentication.
+Product decision: subscription only, using the user's existing local Claude Code sign-in. Claude Code owns login and credential renewal. If the identity is unavailable, expired, or selects API billing, surface that state and direct the user to Claude Code. Do not request API keys, fall back to pay-as-you-go, or import tokens into Deck.
+
+T3 can select a local executable via pathToClaudeCodeExecutable. This source observation does not establish the billing source for a particular run or third-party approval. Before shipping, verify that the authentication mode and billing source can be distinguished without exposing secrets, including with a conflicting API environment. Anthropic documents prior approval requirements for third-party products offering claude.ai login or rate limits. SDK suitability for this subscription-only requirement remains open.
 
 ## Primary references
 
