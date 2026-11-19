@@ -1,7 +1,8 @@
 import {MessageCopy,MessageTime} from './message-copy';
 import type {Receipt} from './api';
 import {Markdown} from './markdown';
-import { useEffect, useRef, useState } from 'react';
+import {useLiveLeadText} from './chat-motion';
+import {useEffect, useLayoutEffect, useRef, useState} from 'react';
 type LeadReply={sessionId:string;replyId:string;messageSeq:number};
 type LeadReplyDisplay=LeadReply&{displayMessageSeq:number;commandId?:string;displayStart?:number};
 const validReplyId=(v:unknown):v is string=>typeof v==='string'&&/^reply-[1-9][0-9]*-[1-9][0-9]*$/.test(v)&&v.length<=48;
@@ -69,15 +70,20 @@ export function leadMessageText(text:string,start:number,nextStart?:number){
  return nextStart!==undefined&&slice.endsWith('\n\n')?slice.slice(0,-2):slice;
 }
 
-export function LeadReplyText({text,times,...props}:React.ComponentProps<typeof ReplySlice>&{times?:Receipt['message_times']}){
+export function LeadReplyText({text:source,times,live,attempt,revealOnMount,onGrowth,...props}:React.ComponentProps<typeof ReplySlice>&{
+ times?:Receipt['message_times'];live:boolean;attempt:Receipt['attempt'];revealOnMount:boolean;onGrowth:()=>void;
+}){
+ const text=useLiveLeadText(source,live,attempt,revealOnMount);
+ useLayoutEffect(()=>{if(live)onGrowth();},[text,live,onGrowth]);
  if(!times?.length)return <ReplySlice text={text} {...props}/>;
  return <>{times.map(({start,at_ms},index)=>{
-  const end=times[index+1]?.start??text.length;
+  if(index>0&&start>=text.length&&text.length<source.length)return null;
+  const end=times[index+1]?.start??source.length;
   const replyStart=props.reply?.displayStart;
   const reply=props.reply&&typeof replyStart==='number'&&replyStart>=start&&replyStart<end
     ?{...props.reply,displayStart:replyStart-start}:undefined;
   return <div className="lead-message-part" key={start}>
-   {index>0&&<div className="message-meta"><MessageTime timestamp={at_ms} label="Message received"/><MessageCopy text={leadMessageText(text,start,times[index+1]?.start)}/></div>}
+   {index>0&&<div className="message-meta"><MessageTime timestamp={at_ms} label="Message received"/><MessageCopy text={leadMessageText(source,start,times[index+1]?.start)}/></div>}
    <ReplySlice {...props} reply={reply} text={text.slice(start,end)}/>
   </div>;
  })}</>;

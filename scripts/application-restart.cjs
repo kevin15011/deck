@@ -26,28 +26,63 @@ async function main() {
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.getByRole('button',{name:'Application',exact:true}).click();
   const restart = page.getByRole('button',{name:'Restart Deck',exact:true});
+  const confirmation = page.getByRole('dialog',{name:'Restart Deck?'});
+  const confirm = confirmation.getByRole('button',{name:'Restart Deck',exact:true});
   const endpoint=new URL('/api/application/restart',url).href;
+  const restartRequests=[];
+  page.on('request',request=>{
+   if(request.url()===endpoint && request.method()==='POST')restartRequests.push(request.postDataJSON());
+  });
   const before=await (await page.request.get(endpoint)).json();
   assert.ok(before.available && !before.busy);
+  await restart.click();
+  await confirmation.waitFor({timeout:3000});
+  const cancel=confirmation.getByRole('button',{name:'Cancel'});
+  assert.ok(await cancel.evaluate(button=>document.activeElement===button));
+  await cancel.click();
+  await confirmation.waitFor({state:'hidden'});
+  assert.ok(await restart.evaluate(button=>document.activeElement===button));
+  assert.equal(restartRequests.length,0);
+  await restart.click();
+  await page.keyboard.press('Escape');
+  await confirmation.waitFor({state:'hidden'});
+  assert.equal(restartRequests.length,0);
   // Simulate an in-flight preparation in this fixture's private database.
   function preparing(value){
    execFileSync('python3',['-c',"import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute(\"INSERT OR REPLACE INTO meta(key,value) VALUES('ordinary_preparing',?)\",(sys.argv[2],)); c.commit()",path.join(state,'state.db'),value]);
   }
+  await restart.click();
   preparing('running');
-  await page.waitForFunction(()=>document.querySelector('.settings-panel button')?.disabled && document.querySelector('.settings-panel')?.textContent.includes('queued work'));
+  await confirmation.getByRole('status').getByText('Deck has running or queued work.',{exact:false}).waitFor();
+  assert.ok(await confirm.isDisabled());
+  await cancel.click();
+  assert.equal(restartRequests.length,0);
   const blocked=await page.request.post(endpoint,{headers:{Origin:new URL(url).origin},data:{api:7,generation:before.generation}});
   assert.equal(blocked.status(),409); assert.equal((await blocked.json()).code,'restart_busy');
   preparing('settled');
+  await restart.click();
+  const changedGeneration=route=>route.fulfill({json:{...before,generation:'changed-generation'}});
+  await page.route(endpoint,changedGeneration);
+  const generationWarning=confirmation.getByRole('status').getByText('Deck has changed.',{exact:false});
+  await generationWarning.waitFor();
+  assert.ok(await confirm.isDisabled());
+  await page.unroute(endpoint,changedGeneration);
+  await generationWarning.waitFor({state:'hidden'});
+  await cancel.click();
+  assert.equal(restartRequests.length,0);
   fs.copyFileSync(installed,installed+'.next');fs.renameSync(installed+'.next',installed);
   const updated=fs.statSync(installed).ino;
   assert.notEqual(fs.statSync('/proc/'+host.pid+'/exe').ino,updated);
-  await Promise.all([page.waitForEvent('load'), restart.click()]);
+  await restart.click();
+  assert.equal(restartRequests.length,0);
+  await Promise.all([page.waitForEvent('load'), confirm.evaluate(button=>{button.click();button.click();})]);
+  assert.deepEqual(restartRequests,[{api:7,generation:before.generation}]);
   assert.equal(fs.statSync('/proc/'+host.pid+'/exe').ino,updated);
   const after=await (await page.request.get(endpoint)).json();
   assert.ok(after.generation && after.generation!==before.generation);
   const stale=await page.request.post(endpoint,{headers:{Origin:new URL(url).origin},data:{api:7,generation:before.generation}});
   assert.equal(stale.status(),409);
-  console.log('Passed: busy restart refused, updated executable loaded, same browser authenticated, stale request refused.');
+  console.log('Passed: cancel and Escape sent no restart request, busy and changed generations blocked confirmation, and a single confirmed restart loaded the updated executable and preserved browser authentication.');
  } finally {
   await browser?.close();
   if(host.exitCode===null){host.kill('SIGINT');await new Promise(resolve=>host.once('exit',resolve));}

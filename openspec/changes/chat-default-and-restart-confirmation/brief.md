@@ -1,0 +1,7 @@
+Default to compact conversation width on missing, invalid or inaccessible storage. Persist width on user selection and preserve saved full or compact widths, including values automatically written by previous builds where preference provenance is unknowable. Preference tests reproduced the old fallback then passed. Apply Fast owns explicit Restart Deck confirmation and focused verification on an isolated host (4bfb0a05-25fc-40a4-98d9-c3975b39c934). Combined verification and packaging pending.
+
+Application settings delta: match Deck 1's user-initiated device web app installation, including native browser prompt, manual platform guidance and installed standalone state. Preserve the separate restart confirmation. Apply Fast owns the install slice (a5ee2f08-f05b-4537-9687-5f0ce6921778). Verify both controls together before publication.
+
+Restart confirmation adopted from attempt 1, event 32748. Disposable host browser verified Cancel/Escape without POST, focus restoration, stale and busy eligibility, single POST, reconnect and authentication. Combined release awaits the Install Deck candidate.
+
+Published the combined release after verifying both installed paths and embedded assets. Install Deck adopted at event 32982. Frontend suite: 110 passed. Full Rust coverage passed with the flaky runner-reselection test run separately after its parallel failure. The packaged restart browser scenario passed on a disposable host. Install verification used simulated native events and covered dismissal, rejection, platform fallback and installed state.

@@ -594,6 +594,14 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .image-placeholder { color: var(--muted); font-size: .85em; }
 .error { color: var(--error); background: var(--error-bg); border: 1px solid var(--error-border); padding: .75rem 1rem; font-size: .85rem; line-height: 1.6; overflow-wrap: anywhere; }
 .app-error { margin: .75rem 1.5rem; flex-shrink: 0; }
+.browser-device-offer {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.25rem;
+    flex: none; padding: .75rem 1.5rem; border-bottom: 1px solid var(--border);
+    background: var(--surface); font-size: .8rem;
+}
+.browser-device-offer > div:first-child { flex: 1 1 18rem; }
+.browser-device-offer p { margin: .25rem 0 0; color: var(--muted); line-height: 1.5; }
+.browser-device-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .openspec-content > .error { margin: .5rem 1.5rem; }
 .pair { max-width: 440px; margin: 15vh auto; padding: 2rem; }
 .pair h1 { font-size: 1.75rem; margin: 1rem 0; }
@@ -1770,4 +1778,25 @@ select:focus-visible, .question-panel textarea:focus-visible {
 .rtk-changes .settings-path { margin:0; font-size:12px; }
 @media(max-width:480px) {
   .rtk-changes li { grid-template-columns:minmax(0,1fr); gap:0; }
+}
+
+.composer-actions .composer-labeled {
+    width: auto;
+    padding-inline: .625rem;
+    font-size: .75rem;
+    white-space: nowrap;
+}
+.composer-live {
+    flex-wrap: wrap;
+}
+.composer-live textarea {
+    flex-basis: 100%;
+}
+.composer-live .composer-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.steering-status .quiet {
+    margin-inline-start: .5rem;
 }

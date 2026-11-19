@@ -13,9 +13,10 @@
 .project-navigation .session-row .session{min-height:38px;padding-inline:8px;border-radius:var(--control-radius)}
 .project-navigation .session-row:has(.session.selected){background:var(--tint);border-radius:var(--control-radius);box-shadow:inset 2px 0 var(--accent)}
 .project-navigation .project-name strong{font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.project-navigation .project-toggle.quiet{display:grid;grid-template-columns:14px minmax(0,1fr);column-gap:4px;row-gap:0}
-.project-navigation .project-toggle>.navigation-icon{grid-row:1 / 3}
+.project-navigation .project-toggle.quiet{display:grid;grid-template-columns:14px minmax(0,1fr);column-gap:4px;row-gap:0;align-content:center}
+.project-navigation .project-toggle>.navigation-icon{grid-row:1;align-self:center}
 .project-navigation .project-toggle>.project-indicators{grid-column:2;font-size:10px;line-height:12px;min-height:12px;gap:6px}
+.project-navigation .project-toggle>.project-indicators:empty{min-height:0}
 .project-navigation .project-indicators svg{width:12px;height:12px}
 .project-navigation .project-new.quiet,.project-navigation .project-more.quiet{min-height:36px;width:28px;flex-basis:28px}
 @media(hover:hover) and (pointer:fine){
@@ -45,12 +46,14 @@
 .conversation:focus{outline:none}
 .conversation:focus-visible{box-shadow:inset 3px 0 var(--focus)}
 .conversation>.history-content{padding:0}
-.conversation .message{margin-bottom:28px;line-height:1.75}
-.conversation .message.user{margin-left:auto;width:fit-content;border:0;background:var(--tint);padding:14px 18px;border-radius:var(--surface-radius);max-width:100%}
-.conversation .message-meta{margin-bottom:10px;font-size:11px;flex-wrap:wrap;gap:6px 10px}
-.conversation .message-meta>span{font-size:10px;color:var(--muted)}
-.conversation .message-meta strong{font-size:12px}
-.conversation .markdown>p{margin-block:10px}
+:is(.conversation,.chat-send-flight) .message{margin-bottom:28px;line-height:1.75}
+:is(.conversation,.chat-send-flight) .message.user{margin-left:auto;width:fit-content;border:0;background:var(--tint);padding:14px 18px;border-radius:var(--surface-radius);max-width:100%}
+:is(.conversation,.chat-send-flight) .message-meta{margin-bottom:10px;font-size:11px;flex-wrap:wrap;gap:6px 10px}
+:is(.conversation,.chat-send-flight) .message-meta>span{font-size:10px;color:var(--muted)}
+:is(.conversation,.chat-send-flight) .message-meta strong{font-size:12px}
+:is(.conversation,.chat-send-flight) .markdown>p{margin-block:10px}
+.chat-send-flight{position:fixed;inset:0;z-index:3;pointer-events:none}
+.chat-send-flight>.message.user{position:absolute;margin:0}
 .slice-panes .composer-dock{padding-inline:24px;scrollbar-gutter:stable both-edges}
 .slice-panes .composer-dock>*{width:100%;max-width:min(100%,var(--chat-column-width,var(--chat-column-limit)));margin-inline:auto}
 .slice-panes .composer-wrap{padding:8px 0 0}
@@ -66,7 +69,7 @@
  .app-header{row-gap:2px}
  .session-subtitle{font-size:11px;gap:8px}
  .app-header .inspector-actions{margin-left:0}
- .conversation .message.user{padding:12px 14px}
+ :is(.conversation,.chat-send-flight) .message.user{padding:12px 14px}
 }
 
 /* Keep focused async controls reachable while their current change settles. */

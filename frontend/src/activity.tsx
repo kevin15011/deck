@@ -87,8 +87,11 @@ export function ActivityTimeline({activity,receipts,session,connected,visible,on
    if(group)group.push(step);
    else groups.set(step.command,[step]);
   }
+  for(const receipt of receipts){
+   if(active(receipt)&&!groups.has(receipt.id))groups.set(receipt.id,[]);
+  }
   return groups;
- },[steps]);
+ },[steps,receipts]);
  const receiptsById=useMemo(()=>new Map(receipts.map(r=>[r.id,r])),[receipts]);
  function remember(node:HTMLDivElement){
   const {top}=node.getBoundingClientRect();
@@ -126,7 +129,7 @@ export function ActivityTimeline({activity,receipts,session,connected,visible,on
   if(up&&node.scrollTop<20&&activity.page?.older)move(true);
  }}>
  {activity.error&&<p role="alert">{activity.error}</p>}{activity.page?.older&&<button className="quiet history-window-control" disabled={pending} onClick={()=>move(true)}>Load older steps</button>}
- {!byTurn.size&&<p className="empty-note">Recorded tool activity appears here.</p>}
+ {!steps?.length&&<p className="empty-note">Recorded tool activity appears here.</p>}
  {[...byTurn].map(([id,group])=>{
   const r=receiptsById.get(id);
   return <section className="activity-turn" key={id} data-turn={id}>

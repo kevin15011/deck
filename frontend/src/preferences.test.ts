@@ -17,14 +17,13 @@ test('appearance values validate and optional storage failure stays usable',()=>
  savePreference('font','geist',storage);expect(readPreference('font',storage)).toBe('geist');expect(values.get('unrelated')).toBe('retained');
 });
 
-// Protects browser width validation: only the compact opt-in narrows the conversation.
-// Oracle: decision 15; fails if missing/corrupt preferences stop restoring full width.
 test('chat width defaults safely and persists independently',()=>{
- for(const value of [undefined,null,{},true,760,'','invalid','full'])expect(resolveChatWidth(value)).toBe('full');
+ for(const value of [undefined,null,{},true,760,'','invalid'])expect(resolveChatWidth(value)).toBe('compact');
+ expect(resolveChatWidth('full')).toBe('full');
  expect(resolveChatWidth('compact')).toBe('compact');
  const values=new Map<string,string>();const storage=()=>({getItem:(k:string)=>values.get(k)??null,setItem:(k:string,v:string)=>{values.set(k,v);}});
  savePreference('chat-width','compact',storage);expect(resolveChatWidth(readPreference('chat-width',storage))).toBe('compact');
  expect(readPreference('theme',storage)).toBe('');
- const broken=()=>{throw Error('Storage unavailable');};expect(resolveChatWidth(readPreference('chat-width',broken))).toBe('full');
+ const broken=()=>{throw Error('Storage unavailable');};expect(resolveChatWidth(readPreference('chat-width',broken))).toBe('compact');
  expect(()=>savePreference('chat-width','compact',broken)).not.toThrow();
 });

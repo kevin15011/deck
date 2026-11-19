@@ -5,15 +5,19 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'deck2-stop-')),project=path.joi
 const git=(...args)=>execFileSync('/usr/bin/git',args,{cwd:project,env:{PATH:'/usr/bin:/bin',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}});
 git('init','-q','-b','keyboard-unborn');
 let native=fs.readFileSync(path.join(repo,'crates/host/tests/fake_session_native.py'),'utf8').replace(" elif m=='turn/start':", " elif m=='turn/interrupt':\n  result(v,{})\n  out({'method':'turn/completed','params':{'threadId':p['threadId'],'turn':{'id':p['turnId'],'status':'interrupted'}}})\n elif m=='turn/start':").replace("  assert p['approvalPolicy']","  while (root/'prepare-gate').exists():time.sleep(.02)\n  assert p['approvalPolicy']").replace("  def tool(name,args):","  if 'Keyboard hold' in text:continue\n  def tool(name,args):");
+native=native.replace("  if 'Keyboard hold' in text:continue","  if 'Queue held Lead' in text:\n   while (root/'queue-release-gate').exists():time.sleep(.02)\n  if 'Keyboard hold' in text:continue");
 fs.writeFileSync(path.join(root,'codex'),native,{mode:0o700});
 const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,HOME:root,XDG_DATA_HOME:path.join(root,'data'),XDG_CONFIG_HOME:path.join(root,'config'),CODEX_HOME:path.join(root,'native')}});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let browser,page;
 const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[],passed:false,root,assets:process.env.DECK2_UI_ASSETS?Object.fromEntries(['app.js','app.css'].map(f=>[f,crypto.createHash('sha256').update(fs.readFileSync(path.join(process.env.DECK2_UI_ASSETS,f))).digest('hex')])):'embedded'};const start=performance.now();
+async function serveCandidateAssets(target){
+ if(process.env.DECK2_UI_ASSETS)for(const file of ['app.js','app.css'])await target.route('**/'+file,route=>route.fulfill({path:path.join(process.env.DECK2_UI_ASSETS,file),contentType:file.endsWith('.js')?'application/javascript':'text/css'}));
+}
 (async()=>{try{
  for(let i=0;i<200&&!fs.existsSync(path.join(root,'state/launcher.json'));i++)await wait(100);
  const launcher=JSON.parse(fs.readFileSync(path.join(root,'state/launcher.json'))),base='http://'+launcher.host,link=await(await fetch(base+'/launch',{method:'POST',body:launcher.admin})).json();
  browser=await chromium.launch({executablePath:process.env.DECK2_CHROMIUM||'/snap/bin/chromium',headless:true,args:['--no-sandbox']});const context=await browser.newContext({viewport:{width:1440,height:1000}});page=await context.newPage();page.setDefaultTimeout(10000);const errors=[];page.on('pageerror',e=>errors.push(e.stack||e.message));
- if(process.env.DECK2_UI_ASSETS)for(const file of ['app.js','app.css'])await page.route('**/'+file,route=>route.fulfill({path:path.join(process.env.DECK2_UI_ASSETS,file),contentType:file.endsWith('.js')?'application/javascript':'text/css'}));
+ await serveCandidateAssets(page);
  const waitForConnection=()=>page.waitForFunction(()=>document.querySelector('.sidebar .navigation-add')?.disabled===false);
  await page.goto(link.url);await waitForConnection();
  const ws=async()=>await(await page.request.get(base+'/api/workspace')).json();const until=async fn=>{for(let i=0;i<200;i++){const w=await ws();if(fn(w))return w;await wait(100);}throw Error('Workspace deadline');};
@@ -24,6 +28,75 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  const untilCheck=async fn=>{for(let i=0;i<60;i++){if(await fn())return;await wait(50);}throw Error('Stop did not cancel the intended claimed input');};
  const pair=async()=>{await page.keyboard.press('Escape');await wait(40);await page.keyboard.press('Escape');};
  const attach=async()=>{const chooser=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Attach images',exact:true}).click();await(await chooser).setFiles({name:'stop.png',mimeType:'image/png',buffer:fs.readFileSync(path.join(repo,'scripts/fixtures/s8c-synthetic.png'))});await page.waitForFunction(()=>document.querySelector('.image-draft small')?.textContent==='Ready');};
+ const checkQueue=async()=>{
+  const session=await create('Held Lead queue session');
+  const gate=name=>path.join(root,name);
+  fs.writeFileSync(gate('prepare-gate'),'');
+  fs.writeFileSync(gate('queue-release-gate'),'');
+  const requests=[];
+  const record=req=>{if(req.method()==='POST'&&req.url().startsWith(base+'/api/commands'))requests.push(req);};
+  page.on('request',record);
+  let touch;
+  try {
+   const queue=page.getByRole('button',{name:'Queue message',exact:true});
+   const post=()=>page.waitForResponse(r=>r.url()===base+'/api/commands'&&r.request().method()==='POST');
+   await prompt.fill('Queue held Lead');await prompt.press('Enter');
+   const held=(await until(w=>w.receipts.some(r=>r.session===session&&r.phase==='preparing'))).receipts.find(r=>r.session===session);
+   await page.getByRole('button',{name:'Stop Lead',exact:true}).waitFor();
+   await prompt.fill('Queue keyboard follow-up');
+   await prompt.press('Shift+Enter');
+   assert.equal(await prompt.inputValue(),'Queue keyboard follow-up\n');
+   assert.equal(await prompt.evaluate(node=>node.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true}))),true);
+   const keyboardPost=post();await prompt.press('Enter');const keyboard=await keyboardPost;
+   assert(keyboard.ok(),await keyboard.text());
+   const first=await keyboard.json();
+   assert.equal(first.phase,'queued');
+   assert.equal(first.session,session);
+   await page.getByRole('button',{name:'Stop Lead',exact:true}).waitFor();
+   fs.unlinkSync(gate('prepare-gate'));
+   await until(w=>w.receipts.find(r=>r.id===held.id)?.phase==='running');
+   await prompt.fill('Queue button follow-up');
+   const buttonPost=post();await queue.click();const button=await buttonPost;
+   assert(button.ok(),await button.text());
+   const second=await button.json();
+   assert.equal(second.phase,'queued');
+   assert.equal(second.session,session);
+   assert.notEqual(first.id,second.id);
+   await page.getByRole('button',{name:'Stop Lead',exact:true}).waitFor();
+   touch=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,storageState:await context.storageState()});
+   const mobile=await touch.newPage();
+   mobile.on('request',record);
+   await serveCandidateAssets(mobile);
+   await mobile.goto(base+'/?session='+encodeURIComponent(session));
+   await mobile.getByRole('button',{name:'Stop Lead',exact:true}).waitFor();
+   const mobilePrompt=mobile.locator('#prompt');
+   await mobilePrompt.fill('Queue touch follow-up');await mobilePrompt.press('Enter');
+   assert.equal(await mobilePrompt.inputValue(),'Queue touch follow-up\n');
+   const touchPost=mobile.waitForResponse(r=>r.url()===base+'/api/commands'&&r.request().method()==='POST');
+   await mobile.getByRole('button',{name:'Queue message',exact:true}).tap();
+   const touchResponse=await touchPost;
+   assert(touchResponse.ok(),await touchResponse.text());
+   const third=await touchResponse.json();
+   const before=(await ws()).receipts.filter(r=>r.session===session);
+   assert.deepEqual(before.map(r=>[r.id,r.phase]),[[held.id,'running'],[first.id,'queued'],[second.id,'queued'],[third.id,'queued']]);
+   assert(before.slice(1).every(r=>r.dispatch_ms===null));
+   assert.deepEqual(requests.map(r=>r.postDataJSON().prompt),['Queue held Lead','Queue keyboard follow-up\n','Queue button follow-up','Queue touch follow-up\n']);
+   assert(requests.every(r=>r.url()===base+'/api/commands'&&r.postDataJSON().queue===true));
+   fs.unlinkSync(gate('queue-release-gate'));
+   await until(w=>w.receipts.find(r=>r.id===third.id)?.phase==='completed');
+   const settled=(await ws()).receipts.filter(r=>r.session===session);
+   assert.deepEqual(settled.map(r=>[r.id,r.phase]),[[held.id,'completed'],[first.id,'completed'],[second.id,'completed'],[third.id,'completed']]);
+   const wire=fs.readFileSync(path.join(root,'wire'),'utf8').trim().split('\n').map(line=>JSON.parse(line));
+   const turns=wire.filter(row=>row.method==='turn/start').map(row=>row.params.input.map(item=>item.text||'').join('\n').split(/Current (?:user )?input: /).at(-1).trim()).filter(text=>text.startsWith('Queue '));
+   assert.deepEqual(turns,['Queue held Lead','Queue keyboard follow-up','Queue button follow-up','Queue touch follow-up']);
+   result.checks.push('Held Lead accepts one real queued receipt per Enter, click, and tap, and dispatches all in order after settling');
+  }finally{
+   await touch?.close();
+   page.off('request',record);
+   for(const name of ['prepare-gate','queue-release-gate'])fs.rmSync(gate(name),{force:true});
+  }
+ };
+ if(process.env.DECK2_QUEUE_ONLY){await checkQueue();assert.deepEqual(errors,[]);result.passed=true;return;}
  // Keep the real browser on a pre-dispatch projection while the synthetic native handshake advances.
  fs.writeFileSync(path.join(root,'prepare-gate'),'');await attach();await prompt.fill('Keyboard hold race input');await page.keyboard.press('Enter');
  let pinned=await until(w=>w.receipts.at(-1)?.phase==='preparing'&&w.receipts.at(-1).dispatch_ms===null),intended=pinned.receipts.at(-1);
@@ -34,12 +107,11 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  assert.equal(await stopButton.getAttribute('aria-label'),'Stop Lead');
  assert.equal(await page.locator('.composer-actions [aria-label="Cancel task"]').count(),0);
  assert.equal(await stopButton.getAttribute('type'),'button');
- await prompt.fill('Draft during preparation');await prompt.press('Enter');
+ await prompt.press('Enter');
  await prompt.evaluate(node=>node.form.requestSubmit());
- assert.equal(await prompt.inputValue(),'Draft during preparation');
+ assert.equal(await prompt.inputValue(),'');
  assert.equal((await ws()).receipts.length,pinned.receipts.length);
- result.checks.push('Preparing input owns the single red Stop control; Enter retains draft and sends nothing');
- await prompt.fill('');
+ result.checks.push('Preparing input owns the single red Stop control when the composer is empty; Enter and form submission do nothing');
  fs.unlinkSync(path.join(root,'prepare-gate'));await until(w=>w.receipts.find(r=>r.id===intended.id)?.phase==='running');
  // Same stale projection: double Escape must refuse claimed input, never turn into cancellation.
  await pair();await page.waitForFunction(()=>document.querySelector('.composer-interrupt-hint')?.textContent.includes('Recall could not be confirmed'));
@@ -50,20 +122,23 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  const queuedResponse=await page.request.post(base+'/api/commands',{headers:{Origin:base},data:{api:7,id:'unrelated-queued-input',session:pinned.sessions.find(s=>!s.contract).id,prompt:'unrelated queued text',mode:'read_only',queue:true,fresh:false}});assert.equal(queuedResponse.status(),200,await queuedResponse.text());const queued=await queuedResponse.json();
  await page.request.post(base+'/api/queue',{headers:{Origin:base},data:{api:7,paused:true}});
  await page.screenshot({path:path.join(out,'active-stop.png')});
- await prompt.fill('Latest draft');
  let cancelCount=0,releaseCancel,observedCancel;const cancelSeen=new Promise(r=>observedCancel=r),cancelGate=new Promise(r=>releaseCancel=r);
  await page.route('**/api/commands/'+intended.id+'/cancel',async route=>{cancelCount++;const response=await route.fetch();observedCancel();await cancelGate;await route.fulfill({response});});
  await stopButton.focus();
  await stopButton.evaluate(n=>{n.click();n.click();});await cancelSeen;
  const stoppingButton=page.getByRole('button',{name:'Stopping Lead',exact:true});assert(await stoppingButton.isDisabled());
  assert(await prompt.evaluate(node=>document.activeElement===node),'A focused Stop returns focus to the draft when disabled');
+ await prompt.fill('Latest draft');
+ const recoveryQueue=page.getByRole('button',{name:'Queue message',exact:true});
+ assert(await recoveryQueue.isDisabled(),'Possible unread recovery protects the draft while awaiting Stop acknowledgement');
  await prompt.press('Enter');assert.equal(await prompt.inputValue(),'Latest draft');assert.equal(cancelCount,1);
  await page.getByRole('button',{name:'Project conversation',exact:true}).press('Enter');
  await page.waitForFunction(()=>document.querySelector('.app-header h1')?.textContent==='Project conversation');
  assert.equal(await primary.getAttribute('type'),'submit');
  assert.equal(await prompt.inputValue(),'');
  await page.getByRole('button',{name:'Stop race session',exact:true}).press('Enter');
- await stoppingButton.waitFor();
+ await recoveryQueue.waitFor();
+ assert(await recoveryQueue.isDisabled());
  assert.equal(await prompt.inputValue(),'Latest draft');
  assert.equal(cancelCount,1);
  releaseCancel();await page.unroute('**/api/commands/'+intended.id+'/cancel');
@@ -140,12 +215,13 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  const permission=(await until(w=>w.receipts.at(-1)?.decisions.some(d=>d.state==='pending'))).receipts.at(-1);
  await page.getByRole('button',{name:'Stop Lead',exact:true}).waitFor();
  // Permission events open Activity asynchronously after the workspace reports the decision.
- await page.locator('button[aria-label="Open Activity"][aria-expanded="true"]').click();
- await page.locator('#session-inspector').waitFor({state:'hidden'});
+ await page.locator('#session-inspector').waitFor({state:'visible'});
  await prompt.fill('Draft during permission wait');
- await page.getByRole('button',{name:'Stop Lead',exact:true}).click();await until(w=>w.receipts.find(r=>r.id===permission.id)?.phase==='cancelled');
+ await page.getByRole('button',{name:'Queue message',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Cancel turn',exact:true}).click();await until(w=>w.receipts.find(r=>r.id===permission.id)?.phase==='cancelled');
+ await page.locator('button[aria-label="Open Activity"][aria-expanded="true"]').click();
  await page.waitForFunction(()=>!document.querySelector('.send.stop'));assert.equal(await prompt.inputValue(),'Draft during permission wait');
- result.checks.push('Real native permission wait remains cancellable through the single Stop action, retaining draft under reduced motion');
+ result.checks.push('Activity can cancel a native permission wait while the shared composer control offers Queue and retains the draft');
  await page.screenshot({path:path.join(out,'stop.png')});
  // An unconfirmed send should retry the admitted payload, preserving newer edits.
  let originalInput;
@@ -167,6 +243,7 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
 
  const touch=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,storageState:await context.storageState()});
  const mobile=await touch.newPage();
+ await serveCandidateAssets(mobile);
  await mobile.goto(base+'/?session='+encodeURIComponent(first));
  const mobilePrompt=mobile.locator('#prompt');
  await mobilePrompt.waitFor();
@@ -176,5 +253,6 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  assert.equal((await ws()).receipts.length,receiptCount);
  await touch.close();
  result.checks.push('Touch Enter inserts a newline and preserves the draft without sending');
+ await checkQueue();
  assert.deepEqual(errors,[]);result.passed=true;
 }finally{result.duration_ms=performance.now()-start;if(page&&!result.passed){await page.screenshot({path:path.join(out,'failure.png')}).catch(()=>{});fs.writeFileSync(path.join(out,'failure.txt'),await page.locator('body').innerText().catch(()=>''));}await browser?.close();host.kill('SIGTERM');await Promise.race([new Promise(r=>host.once('exit',r)),wait(3000)]);if(host.exitCode===null)host.kill('SIGKILL');result.hostExitCode=host.exitCode;result.hostSignal=host.signalCode;fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));}})().catch(e=>{console.error(e);process.exitCode=1;});

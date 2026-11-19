@@ -5,10 +5,13 @@ import {MessageCopy,MessageTime} from './message-copy';
 import {ProcessingProgress} from './processing-progress';
 import {Sidebar,type Navigation} from './sidebar';
 import {useDisplayedReplies,LeadReplyText,leadMessageText} from './lead-replies';
+import {useSentMessageMotion} from './chat-motion';
 import {usePushNotifications,usePushPresence,NotificationsDialog} from './push-notifications';
 import {useOriginalHistory,OriginalConversation,OriginalMessages} from './history';
+import {SessionLoading} from './session-loading';
 import {ApprovalChip} from './session-approvals';
 import {ComposerAction} from './composer-action';
+import {useLiveSteering} from './live-steering';
 import {admitCommand,acknowledgedDraft} from './command-admission';
 import {InputQueue} from './input-queue-view';
 import {cancelQueuedInput} from './input-queue';
@@ -17,7 +20,7 @@ import {DictationControl,type DraftStore} from './dictation/composer';
 import {Subagents} from './subagents';
 import {InlineSubagents} from './inline-subagents';
 import {Inspector} from './inspector';
-import {conversationTimeline} from './conversation-timeline';
+import {conversationTimeline,timelineRowCost} from './conversation-timeline';
 import {TranscriptWindow} from './transcript-window';
 import {StatusIndicator} from './status-indicator';
 import {ContextWindowIndicator,contextReading,leadContextReceipt} from './context-window';
@@ -32,6 +35,8 @@ import {SessionConfiguration} from './session-configuration';
 import {GitChanges,useGitCatalog} from './git-changes';
 import {useImageRemoval,useImages,ImagePicker,ImagePreview,imageURL,type Preview} from './images';
 import {Appearance} from './appearance';
+import {useInstallDeck} from './install-settings';
+import {BrowserDeviceOffer} from './browser-device';
 import {createThemeReveal} from './theme-reveal';
 import {PaneDivider} from './pane-divider';
 import {readPreference,savePreference,resolveTheme,resolveFont,resolveSplit,resolveContentMode,resolveChatWidth,type ContentMode} from './preferences';
@@ -57,13 +62,19 @@ import './themes.css';
 import './slice.css';
 import './calm-workspace.css';
 const quotaApi=(path:string,init?:RequestInit)=>request(init?.method??'GET',path,init?.body?JSON.parse(String(init.body)):undefined,init?.signal??undefined);
-function App({authError=''}:{authError?:string}){
+function App({authError='',offerRemember=false}:{authError?:string;offerRemember?:boolean}){
+ const installDeck=useInstallDeck();
  const [historyReady,setHistoryReady]=useState(false);
  const [sidebarMeta,setSidebarMeta]=useState<Navigation>({projects:{},sessions:{}});
  const [decisionSelection,setDecisionSelection]=useState<DecisionSelection>();
  const selectionRef=useRef<DecisionSelection|undefined>(undefined),submissionSelection=useRef<{id:string;selection:DecisionSelection|undefined}|undefined>(undefined);
  function selectDecision(value:DecisionSelection|undefined){selectionRef.current=value;setDecisionSelection(value);}
  const [w,setW]=useState<Workspace>(),[error,setError]=useState(authError),[connected,setConnected]=useState(false),[busy,setBusy]=useState(false);
+ const [openingSession,setOpeningSession]=useState<{id:string;name:string;error?:string}>();
+ const sessionSwitch=useRef<{id:string;frame:number} | undefined>(undefined);
+ const latestWorkspace=useRef(w);
+ useLayoutEffect(()=>{latestWorkspace.current=w;},[w]);
+ useLayoutEffect(()=>()=>{if(sessionSwitch.current)cancelAnimationFrame(sessionSwitch.current.frame);},[]);
  const notifications=usePushNotifications(quotaApi);
  const [notificationsOpen,setNotificationsOpen]=useState(false);
  const original=useOriginalHistory(connected,setError);
@@ -107,17 +118,86 @@ function App({authError=''}:{authError?:string}){
  const dictationDrafts=useMemo<DraftStore>(()=>{const owner=scope.current,id=selected;return {get:(session)=>session===id?(scope.current===owner?draftRef.current:load(owner+'.draft')):undefined,set:(session,text)=>{if(session!==id||scope.current!==owner||selectedRef.current!==id)return;save(owner+'.draft',text);draftRef.current=text;setDraft(text);}};},[selected,w?.host_id]);
  const scopedKeys=['draft','pending','pending-prompt','pending-mode','pending-fresh','pending-images','pending-target','mode','fresh'];
  const storageKey=(key:string)=>scopedKeys.includes(key)?(scope.current?scope.current+'.'+key:'unassigned-'+key):key;
- const read=(key:string)=>load(storageKey(key));
  const store=(key:string,value:string)=>{save(storageKey(key),value);};
+ function cancelSessionSwitch(){
+  if(sessionSwitch.current)cancelAnimationFrame(sessionSwitch.current.frame);
+  sessionSwitch.current=undefined;
+  setOpeningSession(undefined);
+ }
  function choose(next:Workspace,id:string,preserveHistory=false){
-  if(!next.sessions.some(s=>s.id===id)||sending.current)return false;
-  if(!preserveHistory){original.select(undefined);const url=new URL(location.href);if(url.searchParams.get('session')!==id)url.searchParams.delete('reply');url.searchParams.set('session',id);history.replaceState(null,'',url.pathname+url.search);}selectionEpoch.current++;scope.current=`host.${next.host_id}.project.${encodeURIComponent(next.sessions.find(s=>s.id===id)?.project?.root??next.project)}.session.${id}`;selectedRef.current=id;setSelected(id);setProjectContext(next.sessions.find(s=>s.id===id)?.project?.id??'');
-  images.restore(scope.current,id);setPreview(undefined);
-  setDraft(read('draft'));draftRef.current=read('draft');const retained=pendingCommands(localStorage,scope.current,id)[0];
+  const target=next.sessions.find(s=>s.id===id);
+  if(!target||sending.current)return false;
+
+  const owner=`host.${next.host_id}.project.${encodeURIComponent(target.project?.root??next.project)}.session.${id}`;
+  // Read the saved input before changing route ownership. A bad saved receipt
+  // must leave the previous conversation intact and available on cancellation.
+  const retained=pendingCommands(localStorage,owner,id)[0];
+  const draft=load(owner+'.draft'),mode=load(owner+'.mode'),fresh=load(owner+'.fresh');
+  save(`host.${next.host_id}.selected`,id);
+  if(!preserveHistory){
+   original.select(undefined);
+   const url=new URL(location.href);
+   if(url.searchParams.get('session')!==id)url.searchParams.delete('reply');
+   url.searchParams.set('session',id);
+   history.replaceState(null,'',url.pathname+url.search);
+  }
+  cancelSessionSwitch();
+  selectionEpoch.current++;
+  scope.current=owner;
+  selectedRef.current=id;setSelected(id);setProjectContext(target.project?.id??'');
+  images.restore(owner,id);setPreview(undefined);
+  setDraft(draft);draftRef.current=draft;
   pendingRef.current=retained?.id||'';setPending(pendingRef.current);
   selectDecision(retained?.target??undefined);submissionSelection.current=retained?{id:retained.id,selection:retained.target??undefined}:undefined;
-  if(next.sessions.find(s=>s.id===id)?.contract){setMode('session_v1');setFresh(false);}else setMode(read('mode')==='ordinary_read_only_v1'?'ordinary_read_only_v1':read('mode')==='ordinary_reviewed_v1'?'ordinary_reviewed_v1':read('mode')==='developer'?'developer':read('mode')==='team'?'team':read('mode')==='reviewed_edit'?'reviewed_edit':'read_only');if(!next.sessions.find(s=>s.id===id)?.contract)setFresh(read('fresh')==='true');
-  save(`host.${next.host_id}.selected`,id);following.current=true;return true;
+  if(target.contract){setMode('session_v1');setFresh(false);}
+  else{
+   setMode(mode==='ordinary_read_only_v1'||mode==='ordinary_reviewed_v1'||mode==='developer'||mode==='team'||mode==='reviewed_edit'?mode:'read_only');
+   setFresh(fresh==='true');
+  }
+  following.current=true;
+  return true;
+ }
+ function selectLiveSession(id:string){
+  const target=w?.sessions.find(s=>s.id===id);
+  setSettingsOpen(false);setNav(false);
+  if(!w||sending.current||sessionSwitch.current?.id===id)return;
+  if(!target){
+   if(openingSession?.id===id)setOpeningSession({...openingSession,error:'This conversation is no longer available.'});
+   return;
+  }
+  cancelSessionSwitch();
+  const epoch=++selectionEpoch.current;
+  if(selectedRef.current===id&&!original.selection)return;
+
+  const opening={id,name:target.title};
+  function open(next:Workspace|undefined){
+   if(selectionEpoch.current!==epoch||sending.current){cancelSessionSwitch();return;}
+   try{
+    if(!next||!choose(next,id))throw Error('This conversation is no longer available.');
+   }catch(e){
+    sessionSwitch.current=undefined;
+    setOpeningSession({...opening,error:e instanceof Error?e.message:String(e)});
+   }
+  }
+
+  const rowBudget=24,characterBudget=16_384;
+  let rows=0,characters=0;
+  for(const receipt of w.receipts){
+   if(receipt.session!==id||receipt.phase==='queued'||receipt.recalled_ms!==undefined)continue;
+   rows++;
+   characters+=receipt.prompt.length+receipt.text.length;
+   if(rows>=rowBudget||characters>=characterBudget)break;
+  }
+  if(rows<rowBudget&&characters<characterBudget){open(w);return;}
+
+  // Let the browser paint the requested route's loader before opening it.
+  setOpeningSession(opening);
+  const pending={id,frame:requestAnimationFrame(()=>{
+   pending.frame=requestAnimationFrame(()=>{
+    if(sessionSwitch.current===pending)open(latestWorkspace.current);
+   });
+  })};
+  sessionSwitch.current=pending;
  }
  useLayoutEffect(()=>{const node=transcript.current;if(!node)return;const media=matchMedia('(prefers-reduced-motion: reduce)');
   const settle=()=>{gsap.killTweensOf(node);gsap.set(node,{clearProps:'opacity'});};
@@ -138,7 +218,6 @@ function App({authError=''}:{authError?:string}){
   if(binding?.id===p.id&&selectionRef.current===binding.selection)selectDecision(undefined);
   clearPending(p);
  }
- useLayoutEffect(()=>{savePreference('chat-width',chatWidth);},[chatWidth]);
  useLayoutEffect(()=>{savePreference('theme',theme);},[theme]);
  useLayoutEffect(()=>{document.documentElement.dataset.font=font;savePreference('font',font);},[font]);
  useEffect(()=>{savePreference('sidebar-collapsed',String(collapsed));},[collapsed]);
@@ -202,7 +281,11 @@ function App({authError=''}:{authError?:string}){
  const delay=streaming&&!document.hidden?Math.max(100,300-(performance.now()-pollStarted)):500;
  if(!stopped&&!denied.current)timer=setTimeout(poll,delay);}
  void poll();return()=>{stopped=true;clearTimeout(timer);controller.abort();};},[retry]);
- useLayoutEffect(()=>{if(following.current&&transcript.current?.getClientRects().length)transcript.current.scrollTop=transcript.current.scrollHeight;},[w,tab,contentMode,settingsOpen]);
+ const followTranscript=useCallback(()=>{
+  const view=transcript.current;
+  if(following.current&&view?.getClientRects().length)view.scrollTop=view.scrollHeight;
+ },[]);
+ useLayoutEffect(followTranscript,[followTranscript,selected,w,tab,contentMode,settingsOpen]);
  useDrawerMotion(drawer,nav);
  useLayoutEffect(()=>{
  const dock=composerDock.current,column=composerWrap.current,pane=dock?.parentElement,viewport=transcript.current;
@@ -229,10 +312,19 @@ function App({authError=''}:{authError?:string}){
  const receipts=w?.receipts.filter(r=>r.session===selected)||[];
  const memberDecisions=useMemo(()=>w?.receipts.filter(r=>r.session===selected).flatMap(r=>r.decisions)??[],[w,selected]);
  const notificationSession=original.selection?.session||selected;
- const notificationVisible=connected&&!settingsOpen&&!nav&&!sessionDialog&&(!!original.selection||true);
+ const notificationVisible=connected&&!openingSession&&!settingsOpen&&!nav&&!sessionDialog&&(!!original.selection||true);
+ const liveChatVisible=notificationVisible&&!original.selection;
+ const transcriptSnapshot=useRef<{session:string;workspace:Workspace|undefined}|undefined>(undefined);
+ const priorTranscript=transcriptSnapshot.current;
+ const newLiveSnapshot=liveChatVisible&&priorTranscript?.session===selected&&priorTranscript.workspace!==w;
+ useLayoutEffect(()=>{
+  transcriptSnapshot.current=liveChatVisible?{session:selected,workspace:w}:undefined;
+ },[liveChatVisible,selected,w]);
+ const captureSendMotion=useSentMessageMotion(w?.receipts,selected,liveChatVisible,transcript,following);
  usePushPresence(quotaApi,connected,notificationSession,notificationVisible,!original.selection&&notificationSession===selected?Math.max(0,...receipts.flatMap(r=>r.decisions.filter(d=>d.state==='pending').map(d=>d.notificationSeq??0))):0);
  const displayReplies=useDisplayedReplies(quotaApi,notificationVisible&&!original.selection,selected,receipts.filter(r=>r.phase==='completed').map(r=>r.id),receipts.reduce((a,r)=>a+r.revision,0));
  const visibleReplyTarget=new URL(location.href).searchParams.get('reply')||'';
+ const replyCommand=displayReplies.visibleReplies.find(r=>r.replyId===visibleReplyTarget)?.commandId;
  useEffect(()=>{if(notificationVisible&&!original.selection&&displayReplies.visibleReplies.some(r=>r.replyId===visibleReplyTarget))transcript.current?.querySelector<HTMLElement>(`[data-reply-id="${visibleReplyTarget}"]`)?.scrollIntoView({block:'center'});},[notificationVisible,selected,displayReplies.visibleReplies,visibleReplyTarget]);
  const contextReceipt=leadContextReceipt(w?.sessions.find(s=>s.id===selected),receipts);
  const subagentErrors=w?subagentErrorCount(w,selected):0;
@@ -274,14 +366,21 @@ function App({authError=''}:{authError?:string}){
  const projectTrusted=selectedProject?w?.project_trust?.[selectedProject.id]??false:w?.trusted??false;
  const working=!!w&&(w.process_active||w.receipts.some(active)||w.tasks.some(t=>t.attempts.some(a=>active(a as unknown as Receipt)||a.phase==='uncertain')));
  const selectedWorking=receipts.some(active);
- const showSteeringNotice=!!(connected&&selectedWorking&&w?.steering_unavailable);
+ const liveTarget=mode==='session_v1'?receipts.find(r=>r.can_steer&&r.phase==='running'&&!r.cancel_requested&&r.thread&&r.turn):undefined;
+ const live=useLiveSteering(scope.current,receipts,(owner,text)=>{
+  if(load(owner+'.draft')!==text||(owner===scope.current&&draftRef.current!==text))return;
+  save(owner+'.draft','');
+  if(owner===scope.current){draftRef.current='';setDraft('');}
+ });
+ const showSteeringNotice=!!(connected&&selectedWorking&&!liveTarget&&w?.steering_unavailable);
  const steeringNotice=useRef<HTMLParagraphElement>(null);
  useDisclosureMotion(steeringNotice,showSteeringNotice);
  const stopTarget=receipts.find(active);
  const [stopRequest,setStopRequest]=useState<{id:string;session:string;pending:boolean}>();
- const stoppingHere=stopRequest?.session===selected;
+ const recalling=useRef<{session:string;restore:boolean}|undefined>(undefined),recalled=useRef(new Set<string>()),selectionEpoch=useRef(0);
+ const [recoveringDraft,setRecoveringDraft]=useState<string>();
+ const stoppingHere=stopRequest?.session===selected&&(!stopTarget||stopTarget.id===stopRequest.id);
  const stopping=stoppingHere||stopTarget?.phase==='cancelling';
- const stopMode=!!stopTarget||stoppingHere;
  useEffect(()=>{
   if(stopRequest&&!stopRequest.pending&&!w?.receipts.some(r=>r.id===stopRequest.id&&active(r)))setStopRequest(undefined);
  },[stopRequest,w?.receipts]);
@@ -292,16 +391,20 @@ function App({authError=''}:{authError?:string}){
  const imageDrafts=images.drafts[scope.current]||[];
  const attachmentIds=imageDrafts.flatMap(v=>v.attachment?[v.attachment.id]:[]);
  const incompleteImages=imageDrafts.some(v=>v.status!=='ready');
- const queuedSend=working||receipts.some(r=>r.phase==='queued');
- const composerLabel=stopMode?(stopping?'Stopping Lead':'Stop Lead'):pending?'Retry retained message':queuedSend?'Queue message':'Send question';
+ const stopMode=(!!stopTarget||stoppingHere)&&!pending&&!draft.trim()&&!imageDrafts.length;
+ const queuedSend=working||stoppingHere||receipts.some(r=>r.phase==='queued')||(mode!=='session_v1'&&!!w?.queue_paused);
+ const sendBlocked=blocked||busy||live.pending||recoveringDraft===selected||((mode==='reviewed_edit'||mode==='developer'||mode==='ordinary_reviewed_v1')&&!projectTrusted);
+ const showLiveActions=!!liveTarget&&!stopMode&&!pending;
+ const liveTargetBusy=liveTarget?.steering?.some(s=>s.state==='pending'||s.state==='dispatching');
+ const canSendNow=showLiveActions&&!sendBlocked&&!stopping&&!liveTargetBusy&&!selectionRef.current&&!imageDrafts.length&&!!draft.trim();
+ const composerLabel=stopMode?(stopping?'Stopping Lead':'Stop Lead'):pending?'Retry retained message':queuedSend?(showLiveActions?'Queue for next turn':'Queue message'):'Send question';
  const composerTitle=!connected?'Disconnected. Reconnect to '+(stopMode?'stop the Lead':'send')+'. Your draft is kept.'
   :stopMode?(stopping?'Waiting for the Lead turn to stop.':'Stop the current Lead turn. Your draft and queued messages are kept.')
   :blocked?'Lead is unavailable. Your draft is kept.'
   :pending?'Retry the exact retained message. Newer draft edits are kept.'
   :queuedSend?'Queue message after current work':'Send message';
  const composerDisabled=stopMode?(!connected||stopping||!stopTarget||!!stopRequest?.pending)
-  :blocked||busy||(!pending&&((!draft.trim()&&!imageDrafts.length)||incompleteImages))||((mode==='reviewed_edit'||mode==='developer'||mode==='ordinary_reviewed_v1')&&!projectTrusted);
- const recalling=useRef(false),recalled=useRef(new Set<string>()),selectionEpoch=useRef(0);
+  :sendBlocked||(!pending&&((!draft.trim()&&!imageDrafts.length)||incompleteImages));
  const [composerNotice,setComposerNotice]=useState<{session:string;text:string}>();
  const action=escapeInput(receipts.filter(r=>!recalled.current.has(r.id)));
  const escapeTarget=!blocked&&!busy&&!pending&&!settingsOpen&&!sessionDialog&&!preview&&!nav&&!inspectorOpen&&action&&!recalling.current
@@ -310,7 +413,10 @@ function App({authError=''}:{authError?:string}){
  const composerHelp=!connected?(stopMode?'Reconnect to stop the Lead · Your draft is kept':'Connect to send · Your draft is kept')
   :stopMode?(stopping?'Stopping the Lead · Your draft is kept':'Use Stop to interrupt the Lead · Your draft is kept')
   :busy?'Waiting for Deck to confirm receipt'
+  :recoveringDraft===selected?'Recovering unread input · Your draft is kept'
   :pending?'Retry retained input · New draft edits are kept'
+  :live.pending?'Checking live delivery · Your draft is kept'
+  :showLiveActions?'Enter queues for the next turn'
   :queuedSend?'Input will queue · Browser closure keeps native work running'
   :touchEnter?'Use Send to submit':'Enter to send · Shift + Enter for a new line';
  const keyboardStatus=actionHint?(action?.kind==='recall'?'Press Esc again to recall your unread message':'Press Esc again to interrupt'):composerNotice?.session===selected?composerNotice.text:'';
@@ -326,7 +432,10 @@ function App({authError=''}:{authError?:string}){
  async function recallOrInterrupt(target:NonNullable<ReturnType<typeof escapeInput>>,explicitStop=false){
   if(recalling.current||sending.current&&!explicitStop)return;
   const input=target.input,owner=scope.current,epoch=selectionEpoch.current;
-  recalling.current=true;let interrupted=false;
+  const restore=target.kind==='recall';
+  recalling.current={session:input.session,restore};
+  if(restore)setRecoveringDraft(input.session);
+  let interrupted=false;
   try{
    if(explicitStop||target.kind==='interrupt'){
     const stopped=await cancel(input.id);if(!stopped)return false;interrupted=true;
@@ -337,7 +446,7 @@ function App({authError=''}:{authError?:string}){
    if(restored){recalled.current.add(input.id);if(scope.current===owner&&selectionEpoch.current===epoch)requestAnimationFrame(()=>{if(scope.current!==owner||selectionEpoch.current!==epoch)return;const node=document.getElementById('prompt') as HTMLTextAreaElement|null;if(node&&!node.disabled&&!node.closest('[hidden],[inert]')){node.focus({preventScroll:true});node.setSelectionRange(node.value.length,node.value.length);}});}
    setComposerNotice({session:input.session,text:restored?'Unread message recalled. Your draft is kept.':'Recall could not be confirmed. Your draft is unchanged. Inspect the input receipt before retrying.'});
   }catch(e){setComposerNotice({session:input.session,text:(explicitStop?'Interruption requested. Input was not confirmed unread; your draft is kept. ':'Recall could not be confirmed. Your draft is kept. Inspect the input receipt before retrying. ')+String(e)});}
-  finally{recalling.current=false;}
+  finally{recalling.current=undefined;if(restore)setRecoveringDraft(undefined);}
   return interrupted;
  }
 
@@ -348,7 +457,7 @@ function App({authError=''}:{authError?:string}){
   const stopped=await recallOrInterrupt({kind:(stopTarget.phase==='accepted'||stopTarget.phase==='preparing')&&stopTarget.dispatch_ms===null?'recall':'interrupt',input:stopTarget},true);
   setStopRequest(stopped?{...request,pending:false}:undefined);
  }
- async function send(eventTime:number){if(stopMode||sending.current||recalling.current||busy||blocked)return;
+ async function send(eventTime:number){if(sending.current||sendBlocked||(recalling.current?.restore&&recalling.current.session===selectedRef.current))return;
  const now=performance.now(),submittedAt=eventTime>0&&eventTime<=now?eventTime:now,owner=scope.current;
  let deadline:ReturnType<typeof setTimeout>|undefined;
  let submission:PendingCommand|undefined;
@@ -363,6 +472,7 @@ function App({authError=''}:{authError?:string}){
   if(imageDrafts.length&&(mode!=='session_v1'&&mode!=='read_only'&&!mode.startsWith('ordinary_')))throw Error('Images are available in Codex read-only and configured developer sessions. Choose a supported mode or remove images.');
   const target=selectionRef.current?.sessionId===selectedRef.current?selectionRef.current:null;
   submission={id:crypto.randomUUID(),session:selectedRef.current,prompt:draftRef.current,mode,fresh,attachments:attachmentIds,target,queue:true};
+  captureSendMotion(submission.id,submission.session,composerInput.current?.form?.querySelector<HTMLElement>('button[type=submit]'));
   submissionSelection.current={id:submission.id,selection:selectionRef.current};
  }
  const p=submission,{id}=p;
@@ -406,7 +516,7 @@ function App({authError=''}:{authError?:string}){
  function changeTab(value:string){setTab(value);try{store('panel',value);}catch(e){setError(String(e));}}
  const tabs=<div ref={tabsRef} className="workspace-tabs" role="tablist" aria-label="Workspace views" onKeyDown={e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const buttons=Array.from(e.currentTarget.querySelectorAll('button')).filter(button=>button.getClientRects().length>0);const at=buttons.indexOf(e.target as HTMLButtonElement);const next=e.key==='Home'?0:e.key==='End'?buttons.length-1:(at+(e.key==='ArrowLeft'?-1:1)+buttons.length)%buttons.length;buttons[next]?.click();buttons[next]?.focus();}}}>{['activity','subagents','review'].map(t=><button key={t} className={t==='conversation'?'chat-tab':undefined} role="tab" id={'tab-'+t} aria-selected={tab===t} aria-label={t==='subagents'?'Subagents':undefined} aria-describedby={t==='subagents'?'subagents-status':undefined} aria-controls={'panel-'+t} tabIndex={tab===t?0:-1} onClick={()=>changeTab(t)}>{t==='conversation'?'Conversation':t==='review'?'Git':t==='subagents'?<><span className="subagents-tab-title">Subagents<span className="tab-working" aria-hidden="true">{activeSubagents>0&&<>{connected&&<StatusIndicator state="running"/>}<span className="tab-worker-count">{activeSubagents}</span></>}{subagentErrors>0&&<StatusIndicator state="failed"/>}{!connected&&<span className="tab-stale">stale</span>}</span></span><span id="subagents-status" className="sr-only" role="status">{connected?`${activeSubagents} active subagents`:`Stale: ${activeSubagents} last known active subagents`}{subagentErrors>0?`; ${subagentErrors} unresolved errors`:''}</span></>:'Activity'}</button>)}</div>;
  const settingsButton=<div className="deck-menu"><button type="button" className="quiet deck-menu-toggle" aria-label="Settings" aria-pressed={settingsOpen} onClick={()=>{drawer.current?.close();setNav(false);setSettingsOpen(true);}}><NavigationIcon kind="settings"/><span>Settings</span></button></div>;
- async function selectHistory(value:{project:string;session:string},leadRunner?:string){const epoch=++selectionEpoch.current;original.select(value);const url=new URL(location.href);if(url.searchParams.get('session')!==value.session)url.searchParams.delete('reply');url.searchParams.set('session',value.session);history.replaceState(null,'',url.pathname+url.search);setContinuationIssue('');setSettingsOpen(false);setNav(false);
+ async function selectHistory(value:{project:string;session:string},leadRunner?:string){cancelSessionSwitch();const epoch=++selectionEpoch.current;original.select(value);const url=new URL(location.href);if(url.searchParams.get('session')!==value.session)url.searchParams.delete('reply');url.searchParams.set('session',value.session);history.replaceState(null,'',url.pathname+url.search);setContinuationIssue('');setSettingsOpen(false);setNav(false);
   const summary=original.pages[value.project]?.sessions.find(s=>s.sessionId===value.session);
   if(original.adopted&&w&&original.projects.some(p=>p.projectId===value.project)&&(leadRunner??summary?.members.lead?.runnerId)==='codex'){
    try{await request('POST',`/api/history/sessions/${encodeURIComponent(value.session)}/activate`,{});const next=workspace(await request('GET','/api/workspace'));if(selectionEpoch.current!==epoch)return;setW(next);choose(next,value.session);}catch(e){if(selectionEpoch.current===epoch)setContinuationIssue(String(e));}
@@ -463,23 +573,24 @@ function App({authError=''}:{authError?:string}){
  },[original.selection?.session,selected]);
  const sessionSettings=<>{mode!=='session_v1'&&<SessionConfiguration key={selected} session={selected} connected={connected} blocked={busy||!!pending||working} onSelected={(m,newExecution)=>{if(pendingRef.current||selectedRef.current!==selected)return;setMode(m);store('mode',m);if(newExecution){setFresh(true);store('fresh','true');}}}/>}{mode!=='session_v1'&&<><div className="composer-mode"><label>Mode <select aria-label="Execution mode" value={mode} disabled={busy||!!pending} onChange={e=>{const mode=e.target.value as Mode;setMode(mode);if(mode==='team'||mode==='developer'||mode.startsWith('ordinary_')){setFresh(true);store('fresh','true');}try{store('mode',mode);}catch(err){setError(String(err));}}}><option value="read_only">Read-only</option><option value="reviewed_edit">Reviewed edits</option><option value="team">Team investigation</option><option value="developer">Developer change</option><option value="ordinary_read_only_v1">Developer session · read-only</option><option value="ordinary_reviewed_v1">Developer session · review each edit</option></select></label>{(mode==='reviewed_edit'||mode==='developer'||mode==='ordinary_reviewed_v1')&&<label><input type="checkbox" checked={projectTrusted} disabled={!connected||trustBusy} onChange={e=>void trust(e.target.checked)}/>Trust this project for reviewed editing</label>}{projectTrusted&&<button type="button" className="quiet" disabled={trustBusy} onClick={()=>void trust(false)}>Revoke edit trust</button>}</div>{mode==='team'&&<p className="activity-meta">{selectedTeamAvailability||'Codex Lead · admitted Investigator. Fresh execution required. Reports are evidence, not independent verification.'}</p>}{(mode==='reviewed_edit'||mode==='developer'||mode==='ordinary_reviewed_v1')&&<p className="activity-meta">Trust enables this mode. Every file change still requires Allow once.</p>}<label className="activity-meta"><input type="checkbox" checked={fresh} disabled={busy||!!pending||mode.startsWith('ordinary_')} onChange={e=>{setFresh(e.target.checked);store('fresh',String(e.target.checked));}}/>Start new execution without native context</label>{!fresh&&<p className="activity-meta">{conversation?.native?'Continue the saved native context.':'The first execution starts a new native context. Missing or released context requires an explicit new execution.'}</p>}
  </>}{mode==='session_v1'&&<section aria-label="Session controls"><button type="button" className="quiet" disabled={busy||!!pending} onClick={()=>openSessionDialog('assignments')}>Session assignments</button><button type="button" className="quiet" disabled={!connected} onClick={()=>void request('POST',`/api/sessions/${encodeURIComponent(selected)}/grants/revoke`,{}).catch(e=>setError(String(e)))}>Revoke session grants</button></section>}</>;
- const navigation=<Sidebar meta={sidebarMeta} setMeta={setSidebarMeta} w={w} history={original} selected={selected} connected={connected} busy={busy} collapsed={collapsed&&!narrow} onSelect={id=>{if(w)choose(w,id);setSettingsOpen(false);setNav(false);}} onHistory={value=>void selectHistory(value)} onNew={id=>void createConversation(id)} onChanged={sidebarChanged}/>;
+ const navigation=<Sidebar meta={sidebarMeta} setMeta={setSidebarMeta} w={w} history={original} selected={openingSession?.id??selected} connected={connected} busy={busy} collapsed={collapsed&&!narrow} onSelect={selectLiveSession} onHistory={value=>void selectHistory(value)} onNew={id=>void createConversation(id)} onChanged={sidebarChanged}/>;
  return <SecondaryInfoProvider scopeKey={scope.current} blocked={settingsOpen||nav||!!sessionDialog}><div ref={root} data-chat-width={chatWidth} className={'workbench'+(collapsed&&!narrow?' sidebar-collapsed':'')}><a className="skip" href="#conversation">Skip to conversation</a><nav className="sidebar" aria-label="Project navigation"><div className="sidebar-brand"><DeckBrand/><button className="quiet sidebar-toggle" type="button" aria-label={collapsed?'Expand sidebar':'Collapse sidebar'} aria-expanded={!collapsed} aria-controls="sidebar-contents" onClick={()=>setCollapsed(v=>!v)}><NavigationIcon kind="panel"/></button></div><div id="sidebar-contents" ref={sidebarContent} className="sidebar-contents" hidden={collapsed&&!narrow} inert={collapsed&&!narrow}>{navigation}</div>{collapsed&&!narrow&&<div className="project-navigation navigation-rail"><button type="button" className="quiet" aria-label="Show projects" title="Show projects" onClick={()=>setCollapsed(false)}><NavigationIcon kind="folder"/></button><button type="button" className="quiet" aria-label="New conversation" title="New conversation" disabled={!connected||busy} onClick={()=>void createConversation()}><NavigationIcon kind="plus"/></button></div>}{!collapsed&&!narrow&&connected&&<QuotaSection api={quotaApi}/>} {settingsButton}</nav><dialog ref={drawer} className="session-drawer" aria-label="Projects" onCancel={e=>{e.preventDefault();setNav(false);}}><div className="drawer-heading"><h2>Workspace</h2><button className="quiet" onClick={()=>setNav(false)} aria-label="Close project navigation">×</button></div>{navigation}{narrow&&nav&&connected&&<QuotaSection api={quotaApi}/>} {settingsButton}</dialog>
  {original.selection&&<OriginalConversation key={original.selection.session} name={original.pages[original.selection.project]?.sessions.find(s=>s.sessionId===original.selection?.session)?.title} selection={original.selection} continuationIssue={continuationIssue} navigationOpen={nav} onNavigation={()=>setNav(v=>!v)}/>}
- <div hidden={!!original.selection} className={'app-body'+(conversation?.original&&!historyReady?' session-opening':'')+' content-both'} style={{'--pane-split':split+'%'} as React.CSSProperties}><header className="app-header"><button ref={navButton} className="quiet slice-menu" aria-label="Toggle project navigation" aria-expanded={nav} onClick={()=>setNav(v=>!v)}><NavigationIcon kind="menu"/></button><div className="session-identity"><img className="agent-avatar" src="/avatars/lead.png" width="32" height="32" alt=""/><div className="session-identity-text"><div className="session-title-line"><h1>{conversation?.title||'Workspace'}</h1><SessionBranch session={selected}/></div><div className="session-subtitle"><span className="session-project" title={selectedProject?.root||w?.project}>{(selectedProject?.root||w?.project||'Project').split('/').filter(Boolean).at(-1)}</span><p className="lead-identity">Lead <strong>{(headerReceipt?headerReceipt.presentation?.recorded_runner:conversation?.contract?.members.lead?.runnerId)||'Runner unavailable'}</strong>{headerModel&&<span title={headerModel}>{headerModel}</span>}{headerEffort&&<small className="lead-reasoning" title="Reasoning effort">{headerEffort}</small>}</p></div></div></div><div className="inspector-actions" role="group" aria-label="Session inspector">{(['activity','subagents','review'] as const).map((item,i)=><button key={item} type="button" className="quiet" aria-label={`Open ${item==='review'?'Git':item==='activity'?'Activity':'Subagents'}`} title={item==='activity'?`${pendingApprovals.length} pending approvals`:item==='subagents'?`${activeSubagents} running subagents`:changedFiles===undefined?'Git count unavailable':`${changedFiles} changed Git files`} aria-expanded={inspectorOpen&&tab===item} aria-controls="session-inspector" onClick={e=>{inspectorTrigger.current=e.currentTarget;setTab(item);setInspectorOpen(!(inspectorOpen&&tab===item));}}><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">{i===0?<><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></>:i===1?<><circle cx="6" cy="5" r="2.5"/><path d="M1 14c0-5 10-5 10 0M11 3c4 0 4 5 0 5M12 10c2 0 3 2 3 4"/></>:<><circle cx="4" cy="3" r="1.75"/><circle cx="4" cy="13" r="1.75"/><circle cx="12" cy="3" r="1.75"/><path d="M4 4.75v6.5M12 4.75V6a4 4 0 0 1-4 4H4"/></>}</svg><small>{[pendingApprovals.length,activeSubagents,changedFiles??'—'][i]}</small></button>)}</div>{conversation&&!conversation.contract&&<button type="button" className="quiet" disabled={!connected||busy||!!pending} onClick={()=>openSessionDialog('transition')}>Start canonical session</button>}{mode==='session_v1'&&conversation&&<SessionMenu key={selected} session={conversation} connected={connected} blocked={busy||!!pending} working={selectedWorking} onAssignments={()=>openSessionDialog('assignments')} onChanged={async()=>{const next=workspace(await request('GET','/api/workspace'));setW(next);}}/>}{mode==='session_v1'&&<ApprovalChip mode={conversation?.contract?.approvals==='yolo'?'yolo':'relay'}/>}</header>
+ <div hidden={!!original.selection&&!openingSession} data-live-session-opening={openingSession?true:undefined} className={'app-body'+(conversation?.original&&!historyReady?' session-opening':'')+' content-both'} style={{'--pane-split':split+'%'} as React.CSSProperties}><header className="app-header"><button ref={navButton} className="quiet slice-menu" aria-label="Toggle project navigation" aria-expanded={nav} onClick={()=>setNav(v=>!v)}><NavigationIcon kind="menu"/></button><div className="session-identity"><img className="agent-avatar" src="/avatars/lead.png" width="32" height="32" alt=""/><div className="session-identity-text"><div className="session-title-line"><h1>{conversation?.title||'Workspace'}</h1><SessionBranch session={selected}/></div><div className="session-subtitle"><span className="session-project" title={selectedProject?.root||w?.project}>{(selectedProject?.root||w?.project||'Project').split('/').filter(Boolean).at(-1)}</span><p className="lead-identity">Lead <strong>{(headerReceipt?headerReceipt.presentation?.recorded_runner:conversation?.contract?.members.lead?.runnerId)||'Runner unavailable'}</strong>{headerModel&&<span title={headerModel}>{headerModel}</span>}{headerEffort&&<small className="lead-reasoning" title="Reasoning effort">{headerEffort}</small>}</p></div></div></div><div className="inspector-actions" role="group" aria-label="Session inspector">{(['activity','subagents','review'] as const).map((item,i)=><button key={item} type="button" className="quiet" aria-label={`Open ${item==='review'?'Git':item==='activity'?'Activity':'Subagents'}`} title={item==='activity'?`${pendingApprovals.length} pending approvals`:item==='subagents'?`${activeSubagents} running subagents`:changedFiles===undefined?'Git count unavailable':`${changedFiles} changed Git files`} aria-expanded={inspectorOpen&&tab===item} aria-controls="session-inspector" onClick={e=>{inspectorTrigger.current=e.currentTarget;setTab(item);setInspectorOpen(!(inspectorOpen&&tab===item));}}><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">{i===0?<><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></>:i===1?<><circle cx="6" cy="5" r="2.5"/><path d="M1 14c0-5 10-5 10 0M11 3c4 0 4 5 0 5M12 10c2 0 3 2 3 4"/></>:<><circle cx="4" cy="3" r="1.75"/><circle cx="4" cy="13" r="1.75"/><circle cx="12" cy="3" r="1.75"/><path d="M4 4.75v6.5M12 4.75V6a4 4 0 0 1-4 4H4"/></>}</svg><small>{[pendingApprovals.length,activeSubagents,changedFiles??'—'][i]}</small></button>)}</div>{conversation&&!conversation.contract&&<button type="button" className="quiet" disabled={!connected||busy||!!pending} onClick={()=>openSessionDialog('transition')}>Start canonical session</button>}{mode==='session_v1'&&conversation&&<SessionMenu key={selected} session={conversation} connected={connected} blocked={busy||!!pending} working={selectedWorking} onAssignments={()=>openSessionDialog('assignments')} onChanged={async()=>{const next=workspace(await request('GET','/api/workspace'));setW(next);}}/>}{mode==='session_v1'&&<ApprovalChip mode={conversation?.contract?.approvals==='yolo'?'yolo':'relay'}/>}</header>
+ {offerRemember&&connected&&<BrowserDeviceOffer/>}
  {workspaceNotice&&<p className="activity-meta" role="status">{workspaceNotice}</p>}
  {error&&<div className="error app-error alert" role="alert">{error}<div><button className="quiet" onClick={()=>{setError('');if(!denied.current){setRetry(v=>v+1);}}}>Dismiss</button><button className="quiet" onClick={()=>{denied.current=false;setRetry(v=>v+1);}}>Reconnect</button></div></div>}
  {conversation&&selectedAvailability&&<div className="error app-error" role="alert">{selectedAvailability}{previousFolder&&currentFolder&&<button type="button" className="quiet" disabled={!connected||busy} onClick={()=>void createConversation(currentFolder.id)}>Start a session in the current folder</button>}</div>}
  
- <div ref={content} className={'panes slice-panes '+(tab!=='conversation'?'activity-selected':'')}>
+ <div className="session-panes"><div ref={content} inert={!!openingSession} className={'panes slice-panes '+(tab!=='conversation'?'activity-selected':'')}>
  <main className="chat-pane" id="panel-conversation" aria-label="Conversation"><section ref={transcript} id="conversation" className="conversation" tabIndex={0} aria-label="Recorded messages" onScroll={e=>{const el=e.currentTarget;following.current=el.scrollHeight-el.scrollTop-el.clientHeight<80;}}>
  {conversation?.original&&<OriginalMessages key={selected} session={selected} name={conversation.title} onReady={setHistoryReady} windowLimit={60} onBrowse={()=>{following.current=false;}} tasks={w?.tasks.filter(t=>!!t.original)??[]} activity={memberActivity} connected={connected}/>}
  {w&&!conversation&&<div className="empty"><DeckBrand large/><h2>{w.projects?.length?'Create a conversation':'Add your first project'}</h2><p>{w.projects?.length?'Choose a project in the sidebar to start a conversation.':'Choose Add project in the sidebar and enter its directory.'}</p></div>}
  {conversation&&!receipts.length&&!conversation.original&&<div className="empty"><DeckBrand large/><h2>What are we working on?</h2><p>{mode==='session_v1'?'Send a message to start working with your team.':'Ask Codex to explain a file or trace how something works. Review proposed changes before allowing an edit, or ask a read-only question.'}</p></div>}
- <TranscriptWindow limit={conversation?.original?60:120} key={selected} rows={conversationTimeline(receipts,w?.tasks.filter(t=>!conversation?.original||!t.original)??[],selected)} viewport={transcript} onBrowse={()=>{following.current=false;}}>{row=>{if(row.task)return <InlineSubagents tasks={[row.task]} session={selected} activity={memberActivity} connected={connected}/>;const r=row.receipt;return <div className="exchange" id={"exchange-"+r.id} key={r.id}>{!r.continuation&&<article className="message user user-message"><div className="message-meta"><strong>You</strong><MessageTime timestamp={r.accepted_ms}/><MessageCopy text={r.prompt}/></div><div className="slice-prompt"><Markdown text={r.prompt}/></div><div className="image-references">{r.attachments.map((a,i)=><button key={a.id} type="button" className="quiet image-reference" aria-label={`View image ${i+1}`} onClick={()=>setPreview({src:imageURL(r.session,a.id),name:`Image ${i+1} · ${a.width} × ${a.height}`})}><img src={imageURL(r.session,a.id)} alt="" width="56" height="56" loading="lazy"/>Image {i+1}</button>)}</div></article>}<article className="message lead assistant-message"><div className="message-meta"><strong>Lead</strong><span>{r.presentation?.recorded_runner||'Runner unavailable'}{r.model?' · '+r.model:''}</span>{r.phase!=='completed'&&<span className="phase">{phase(r)}</span>}<MessageTime timestamp={r.message_times?.[0]?.at_ms??r.first_output_ms} label="Response started"/><MessageCopy text={leadMessageText(r.text,0,r.message_times?.[1]?.start)}/></div><div className="answer"><LeadReplyText times={r.message_times} text={r.text} fallback={r.phase==='queued'?'Waiting in the queue; definitely undispatched.':active(r)?'Awaiting native output…':'No native answer was recorded.'} reply={displayReplies.visibleReplies.find(p=>p.commandId===r.id)} visible={notificationVisible&&!original.selection} root={transcript} onDisplayed={displayReplies.displayed}/></div>{r.decisions.map(d=><Review conversation onResize={()=>{if(following.current&&transcript.current?.getClientRects().length)transcript.current.scrollTop=transcript.current.scrollHeight;}} storageScope={scope.current} key={d.id} d={d} onError={setError} connected={connected}/>)}{['failed','uncertain','cancelled','dispatching'].includes(r.phase)&&r.detail&&<p role="status" className="activity-meta">{r.detail}</p>}</article></div>;}}</TranscriptWindow></section><div className="conversation-feedback"><div className="conversation-float-stack"><ProcessingProgress rows={receipts} connected={connected} sending={busy} unconfirmed={!!pending&&!busy}><ContextWindowIndicator owner="Lead" resetKey={`${selected}:${conversation?.contract?.generation??''}:${conversation?.native?.thread??''}:${contextReceipt?.attempt??''}:${contextReceipt?receipts.indexOf(contextReceipt)+1:0}`} observation={contextReading(contextReceipt?.context,contextReceipt?.attempt,contextReceipt?.thread,contextReceipt?.turn)}/></ProcessingProgress></div></div><div ref={composerDock} className="composer-dock">{mode==='session_v1'&&<SessionDecisions session={selected} connected={connected} busy={busy||!!pending} revision={w?.receipts.map(r=>r.id+":"+r.revision).join(",")??''} selection={decisionSelection} onReply={selectDecision} onClear={()=>selectDecision(undefined)} onError={setError}/>}
+ <TranscriptWindow limit={conversation?.original?60:120} rowCost={timelineRowCost} focusKey={replyCommand?'receipt:'+replyCommand:undefined} key={selected} rows={conversationTimeline(receipts,w?.tasks.filter(t=>!conversation?.original||!t.original)??[],selected)} viewport={transcript} onBrowse={()=>{following.current=false;}}>{row=>{if(row.task)return <InlineSubagents tasks={[row.task]} session={selected} activity={memberActivity} connected={connected}/>;const r=row.receipt;return <div className="exchange" id={"exchange-"+r.id} key={r.id}>{!r.continuation&&<article className="message user user-message"><div className="message-meta"><strong>You</strong><MessageTime timestamp={r.accepted_ms}/><MessageCopy text={r.prompt}/></div><div className="slice-prompt"><Markdown text={r.prompt}/></div><div className="image-references">{r.attachments.map((a,i)=><button key={a.id} type="button" className="quiet image-reference" aria-label={`View image ${i+1}`} onClick={()=>setPreview({src:imageURL(r.session,a.id),name:`Image ${i+1} · ${a.width} × ${a.height}`})}><img src={imageURL(r.session,a.id)} alt="" width="56" height="56" loading="lazy"/>Image {i+1}</button>)}</div></article>}{r.steering?.filter(s=>s.state==='accepted').map(s=><article className="message user user-message" key={s.id}><div className="message-meta"><strong>You</strong><span>Sent live</span><MessageTime timestamp={s.admittedMs}/><MessageCopy text={s.text}/></div><div className="slice-prompt"><Markdown text={s.text}/></div></article>)}<article className="message lead assistant-message"><div className="message-meta"><strong>Lead</strong><span>{r.presentation?.recorded_runner||'Runner unavailable'}{r.model?' · '+r.model:''}</span>{r.phase!=='completed'&&<span className="phase">{phase(r)}</span>}<MessageTime timestamp={r.message_times?.[0]?.at_ms??r.first_output_ms} label="Response started"/><MessageCopy text={leadMessageText(r.text,0,r.message_times?.[1]?.start)}/></div><div className="answer"><LeadReplyText times={r.message_times} text={r.text} live={liveChatVisible&&active(r)} attempt={r.attempt} revealOnMount={newLiveSnapshot&&active(r)} onGrowth={followTranscript} fallback={r.phase==='queued'?'Waiting in the queue; definitely undispatched.':active(r)?'Awaiting native output…':'No native answer was recorded.'} reply={displayReplies.visibleReplies.find(p=>p.commandId===r.id)} visible={notificationVisible&&!original.selection} root={transcript} onDisplayed={displayReplies.displayed}/></div>{r.decisions.map(d=><Review conversation onResize={()=>{if(following.current&&transcript.current?.getClientRects().length)transcript.current.scrollTop=transcript.current.scrollHeight;}} storageScope={scope.current} key={d.id} d={d} onError={setError} connected={connected}/>)}{['failed','uncertain','cancelled','dispatching'].includes(r.phase)&&r.detail&&<p role="status" className="activity-meta">{r.detail}</p>}</article></div>;}}</TranscriptWindow></section><div className="conversation-feedback"><div className="conversation-float-stack"><ProcessingProgress rows={receipts} connected={connected} sending={busy} unconfirmed={!!pending&&!busy}><ContextWindowIndicator owner="Lead" resetKey={`${selected}:${conversation?.contract?.generation??''}:${conversation?.native?.thread??''}:${contextReceipt?.attempt??''}:${contextReceipt?receipts.indexOf(contextReceipt)+1:0}`} observation={contextReading(contextReceipt?.context,contextReceipt?.attempt,contextReceipt?.thread,contextReceipt?.turn)}/></ProcessingProgress></div></div><div ref={composerDock} className="composer-dock">{mode==='session_v1'&&<SessionDecisions session={selected} connected={connected} busy={busy||!!pending} revision={w?.receipts.map(r=>r.id+":"+r.revision).join(",")??''} selection={decisionSelection} onReply={selectDecision} onClear={()=>selectDecision(undefined)} onError={setError}/>}
  {legacy&&<p className="activity-meta">An unassigned draft from an earlier client is retained. <button type="button" className="quiet" disabled={!selected||busy} onClick={()=>{store('draft',legacy);setDraft(legacy);draftRef.current=legacy;setLegacy('');}}>Copy saved draft here</button></p>}
- <LiveActivity steps={activity.page?.live??[]} receipts={receipts} connected={connected}/><p id="steering-notice" className="steering-notice" ref={steeringNotice} hidden={!showSteeringNotice}>Live steering is unavailable. Your draft is kept until the current turn ends.</p><InputQueue key={scope.current} receipts={receipts} session={selected} connected={connected} paused={mode!=='session_v1'&&!!w?.queue_paused} onPause={mode==='session_v1'?undefined:paused=>void queueControl(paused)} onRefresh={()=>setRetry(v=>v+1)} onError={setError}/><div ref={composerWrap} className="composer-wrap" hidden={!conversation}><section className="image-drafts" aria-label="Attached images" hidden={!imageDrafts.length}><ul>{imageDrafts.map((v,i)=><li key={v.id} className="image-draft"><button type="button" className="quiet image-thumbnail" aria-label={`Preview attached image ${i+1}`} onClick={()=>setPreview({src:v.src||(v.attachment?imageURL(selected,v.attachment.id):''),name:v.name})}>{(v.src||v.attachment)&&<img src={v.src||imageURL(selected,v.attachment!.id)} alt="" width="56" height="56"/>}<span>{v.name}</span></button><button type="button" className="quiet image-remove" aria-label={`Remove attached image ${i+1}`} disabled={busy||!!pending} onClick={e=>{removeImageMotion(e.currentTarget.closest('li'));images.remove(scope.current,selected,v.id);document.getElementById('prompt')?.focus({preventScroll:true});}}>×</button><small role="status">{v.status==='ready'?'Ready':v.status==='uploading'?'Uploading…':'Upload failed'}</small>{v.error&&<p className="image-error" role="alert">{v.error}</p>}{v.status==='error'&&v.file&&<button type="button" className="quiet image-retry" onClick={()=>images.retry(scope.current,selected,v.id)}>Retry upload</button>}</li>)}</ul></section>
- <div ref={statusRef} role="status" hidden={!keyboardStatus} inert={!keyboardStatus} className="composer-interrupt-hint">{lastStatus.current}</div><form className="composer" onSubmit={e=>{e.preventDefault();void send(e.timeStamp);}}><label htmlFor="prompt" className="sr-only">{mode==='session_v1'?'Message your team':'Ask a read-only question'}</label><textarea ref={composerInput} onPaste={e=>{const files=Array.from(e.clipboardData.items).filter(v=>v.kind==='file'&&v.type.startsWith('image/')).map(v=>v.getAsFile()).filter((v):v is File=>!!v);if(files.length){if(!e.clipboardData.getData('text/plain'))e.preventDefault();if(pending||(mode!=='session_v1'&&mode!=='read_only'&&!mode.startsWith('ordinary_'))){setError('Resolve pending input and choose read-only or a configured developer session before attaching images.');return;}images.add(scope.current,selectedRef.current,files);}}} id="prompt" aria-describedby={showSteeringNotice?"composer-help steering-notice":"composer-help"} placeholder={mode==='session_v1'?'Message your team…':'Describe what you want to understand…'} maxLength={16384} value={draft} onChange={e=>{const value=e.target.value;setDraft(value);draftRef.current=value;try{store('draft',value);}catch(err){setError(String(err));}}} onKeyDown={e=>{if(composerEnterSubmits({key:e.key,shiftKey:e.shiftKey,isComposing:e.nativeEvent.isComposing||e.keyCode===229,defaultPrevented:e.defaultPrevented},touchEnter)){e.preventDefault();if(!e.repeat)void send(e.timeStamp);}}}/><div className="composer-actions"><ImagePicker owner={scope.current+'|'+selected} disabled={!connected||!selected||busy||!!pending||(mode!=='session_v1'&&mode!=='read_only'&&!mode.startsWith('ordinary_'))} onFiles={(files,owner)=>{const [source,session]=owner.split('|');if(source&&session)images.add(source,session,files);}}/><DictationControl sessionId={selected} drafts={dictationDrafts} navigationKey={Number(!!original.selection||settingsOpen||nav||!!sessionDialog||(narrow?tab!=='conversation':contentMode==='workspace'))} disabled={!!original.selection||!connected||!selected||busy||!!pending} onSettings={()=>{setSettingsOpen(true);setDictationSettings(true);}}/><span id="composer-help">{composerHelp}</span><ComposerAction stop={stopMode} stopping={stopping} disabled={composerDisabled} label={composerLabel} title={composerTitle} onStop={()=>void stopLead()}/></div></form></div>{pending&&!busy&&<p className="activity-meta pending">Delivery is unconfirmed. Deck is checking for the receipt. {stopMode?'You can retry after the Lead turn ends.':'You can retry the retained message.'} Newer draft edits are kept.</p>}</div></main>
+ <LiveActivity steps={activity.page?.live??[]} receipts={receipts} connected={connected}/><p id="steering-notice" className="steering-notice" ref={steeringNotice} hidden={!showSteeringNotice}>Live steering requires a running Codex Lead turn.</p><InputQueue key={scope.current} receipts={receipts} session={selected} connected={connected} paused={mode!=='session_v1'&&!!w?.queue_paused} onPause={mode==='session_v1'?undefined:paused=>void queueControl(paused)} onRefresh={()=>setRetry(v=>v+1)} onError={setError}/><div ref={composerWrap} className="composer-wrap" hidden={!conversation}><section className="image-drafts" aria-label="Attached images" hidden={!imageDrafts.length}><ul>{imageDrafts.map((v,i)=><li key={v.id} className="image-draft"><button type="button" className="quiet image-thumbnail" aria-label={`Preview attached image ${i+1}`} onClick={()=>setPreview({src:v.src||(v.attachment?imageURL(selected,v.attachment.id):''),name:v.name})}>{(v.src||v.attachment)&&<img src={v.src||imageURL(selected,v.attachment!.id)} alt="" width="56" height="56"/>}<span>{v.name}</span></button><button type="button" className="quiet image-remove" aria-label={`Remove attached image ${i+1}`} disabled={busy||!!pending} onClick={e=>{removeImageMotion(e.currentTarget.closest('li'));images.remove(scope.current,selected,v.id);document.getElementById('prompt')?.focus({preventScroll:true});}}>×</button><small role="status">{v.status==='ready'?'Ready':v.status==='uploading'?'Uploading…':'Upload failed'}</small>{v.error&&<p className="image-error" role="alert">{v.error}</p>}{v.status==='error'&&v.file&&<button type="button" className="quiet image-retry" onClick={()=>images.retry(scope.current,selected,v.id)}>Retry upload</button>}</li>)}</ul></section>
+ <div ref={statusRef} role="status" hidden={!keyboardStatus} inert={!keyboardStatus} className="composer-interrupt-hint">{lastStatus.current}</div>{(live.pending||live.notice)&&<p className="activity-meta steering-status" role="status">{live.notice??'Checking live delivery…'}{live.retry&&<button type="button" className="quiet" disabled={!connected} onClick={live.retry}>Retry live delivery</button>}</p>}<form className={showLiveActions?'composer composer-live':'composer'} onSubmit={e=>{e.preventDefault();void send(e.timeStamp);}}><label htmlFor="prompt" className="sr-only">{mode==='session_v1'?'Message your team':'Ask a read-only question'}</label><textarea ref={composerInput} onPaste={e=>{const files=Array.from(e.clipboardData.items).filter(v=>v.kind==='file'&&v.type.startsWith('image/')).map(v=>v.getAsFile()).filter((v):v is File=>!!v);if(files.length){if(!e.clipboardData.getData('text/plain'))e.preventDefault();if(pending||(mode!=='session_v1'&&mode!=='read_only'&&!mode.startsWith('ordinary_'))){setError('Resolve pending input and choose read-only or a configured developer session before attaching images.');return;}images.add(scope.current,selectedRef.current,files);}}} id="prompt" aria-describedby={showSteeringNotice?"composer-help steering-notice":"composer-help"} placeholder={mode==='session_v1'?'Message your team…':'Describe what you want to understand…'} maxLength={16384} value={draft} onChange={e=>{const value=e.target.value;setDraft(value);draftRef.current=value;try{store('draft',value);}catch(err){setError(String(err));}}} onKeyDown={e=>{if(composerEnterSubmits({key:e.key,shiftKey:e.shiftKey,isComposing:e.nativeEvent.isComposing||e.keyCode===229,defaultPrevented:e.defaultPrevented},touchEnter)){e.preventDefault();if(!e.repeat)void send(e.timeStamp);}}}/><div className="composer-actions"><ImagePicker owner={scope.current+'|'+selected} disabled={!connected||!selected||busy||!!pending||(mode!=='session_v1'&&mode!=='read_only'&&!mode.startsWith('ordinary_'))} onFiles={(files,owner)=>{const [source,session]=owner.split('|');if(source&&session)images.add(source,session,files);}}/><DictationControl sessionId={selected} drafts={dictationDrafts} navigationKey={Number(!!original.selection||settingsOpen||nav||!!sessionDialog||(narrow?tab!=='conversation':contentMode==='workspace'))} disabled={!!original.selection||!connected||!selected||busy||!!pending} onSettings={()=>{setSettingsOpen(true);setDictationSettings(true);}}/><span id="composer-help">{composerHelp}</span>{showLiveActions&&liveTarget&&<><ComposerAction stop stopping={stopping} disabled={!connected||stopping||!stopTarget} label={stopping?'Stopping Lead':'Stop Lead'} title="Stop the current Lead turn" onStop={()=>void stopLead()}/><button type="button" className="send composer-labeled" disabled={!canSendNow} title={imageDrafts.length?'Queue images for the next turn':selectionRef.current?'Queue the decision reply for the next turn':'Send to the current Lead turn'} onClick={()=>{if(canSendNow){following.current=true;live.send(liveTarget,draftRef.current);}}}>Send now</button></>}<ComposerAction showLabel={showLiveActions&&queuedSend} stop={stopMode} stopping={stopMode&&stopping} disabled={composerDisabled} label={composerLabel} title={composerTitle} onStop={()=>void stopLead()}/></div></form></div>{pending&&!busy&&<p className="activity-meta pending">Delivery is unconfirmed. Deck is checking for the receipt. You can retry the retained message. Newer draft edits are kept.</p>}</div></main>
  <Inspector key={selected} session={selected} open={inspectorOpen} narrow={narrow} returnFocus={inspectorTrigger}>{tabs}<div className="workspace-stack"> <section className="workspace-panel" hidden={tab!=='activity'} id="panel-activity" role="tabpanel" aria-labelledby="tab-activity"><div className="activity-view"><section className="activity-content" tabIndex={0}>{mode==='session_v1'&&<SessionDecisions session={selected} connected={connected} busy={busy||!!pending} revision={w?.receipts.map(r=>r.id+":"+r.revision).join(",")??''} onReply={selectDecision} onClear={()=>selectDecision(undefined)} onError={setError}/>}{mode!=='session_v1'&&<section aria-label="Session controls">{sessionSettings}</section>}<div className="session-actions"><button className="quiet" disabled={!connected||!conversation?.native||selectedWorking||!!pending} onClick={()=>void sessionAction('release')}>Release saved native context</button><button className="quiet" disabled={!connected||(w?.sessions.length||0)<=1||selectedWorking||!!pending} onClick={()=>void sessionAction('remove')}>Remove local conversation</button></div><ActivityTimeline visible={activityVisible} activity={activity} receipts={receipts} session={selected} connected={connected} onError={setError} onCancel={cancel}/></section></div></section>
  <section className="workspace-panel" hidden={tab!=='subagents'} id="panel-subagents" role="tabpanel" aria-labelledby="tab-subagents"><Subagents onRefresh={()=>setRetry(v=>v+1)} unassigned={!!conversation?.contract&&!Object.keys(conversation.contract.members).some(id=>id!=='lead')} onAssignments={()=>setSessionDialog('assignments')} key={scope.current} historySession={!!conversation?.original} tasks={w?.tasks??[]} decisions={memberDecisions} session={selected} visible={!settingsOpen&&!nav&&!sessionDialog&&tab==='subagents'&&inspectorOpen} connected={connected} onError={setError}/></section>
  <section className="workspace-panel git-pane" hidden={tab!=='review'} id="panel-review" role="tabpanel" aria-labelledby="tab-review">{w&&<GitChanges catalog={gitCatalog} key={w.host_id+selected} session={selected} storageScope={scope.current} narrow={narrow} visible={!settingsOpen&&tab==='review'&&inspectorOpen}/>}</section>
@@ -487,11 +598,12 @@ function App({authError=''}:{authError?:string}){
 
  
 
- </div></div> <Appearance resources={w?<AgentSettings w={w} connected={connected} projectId={w.sessions.find(s=>s.id===selected)?.project?.id}/>:null} onNotifications={()=>setNotificationsOpen(true)} dictation={dictationSettings} onDictation={setDictationSettings} open={settingsOpen} narrow={narrow} theme={theme} font={font} chatWidth={chatWidth} onChatWidth={value=>{
+ </div>{openingSession&&<SessionLoading name={openingSession.name} error={openingSession.error} onRetry={()=>selectLiveSession(openingSession.id)}/>}</div></div> <Appearance installDeck={installDeck} resources={w?<AgentSettings w={w} connected={connected} projectId={w.sessions.find(s=>s.id===selected)?.project?.id}/>:null} notifications={notifications} dictation={dictationSettings} onDictation={setDictationSettings} open={settingsOpen} narrow={narrow} theme={theme} font={font} chatWidth={chatWidth} onChatWidth={value=>{
   const node=root.current;if(!node||value===chatWidth)return;
   const column=node.querySelector<HTMLElement>('.app-body:not([hidden]) .conversation>.transcript-window, .history-view .conversation>.history-content');
   const current=column?.getBoundingClientRect().width;
   gsap.killTweensOf(node,'--chat-column-width');
+  savePreference('chat-width',value);
   setChatWidth(value);
   if(current!==undefined){
    // Start at the current visual width; the effect retargets after layout commits.
@@ -507,6 +619,6 @@ const safeSession=(id:unknown):id is string=>typeof id==='string'&&/^[A-Za-z0-9]
 const capability=location.hash.slice(1);history.replaceState(null,'',location.pathname+location.search);
 let authError='';
 if(capability){try{const r=await fetch(capability.startsWith('pair=')?'/pair':'/auth',{method:'POST',headers:{'Content-Type':capability.startsWith('pair=')?'application/json':'text/plain'},body:capability.startsWith('pair=')?JSON.stringify({token:capability.slice(5)}):capability});if(!r.ok){const problem:unknown=await r.json();if(typeof problem==='object'&&problem!==null&&'message' in problem&&typeof problem.message==='string')authError=problem.message;else throw new Error();}}catch{authError='Launch authentication could not reach this host. Your saved draft and unresolved identity are retained. In the terminal that started this host, use its Open/reopen command with the exact state directory; if stopped, restart that host first.';}}
-if(!capability){try{await fetch('/api/local-access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Browser'})});}catch{ /* Normal workspace admission reports unavailable access. */ }}
+if(!capability&&location.protocol==='https:'){try{await fetch('/api/local-access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Browser'})});}catch{ /* Normal workspace admission reports unavailable access. */ }}
 if('serviceWorker' in navigator&&window.isSecureContext)void navigator.serviceWorker.register('/service-worker.js',{scope:'/'}).catch(()=>{});
-createRoot(document.getElementById('app')!).render(<App authError={authError}/>);
+createRoot(document.getElementById('app')!).render(<App authError={authError} offerRemember={!!capability&&!authError}/>);

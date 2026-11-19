@@ -1,4 +1,4 @@
-import React,{useEffect,useState} from 'react';
+import React,{useEffect,useId,useLayoutEffect,useRef,useState} from 'react';
 import {API,hostRequest} from './api';
 
 interface RestartStatus { generation:string; available:boolean; busy:boolean }
@@ -7,7 +7,20 @@ const endpoint='/api/application/restart';
 export function ApplicationSettings(){
  const [status,setStatus]=useState<RestartStatus>();
  const [pending,setPending]=useState<string>();
+ const [confirmation,setConfirmation]=useState<string>();
  const [error,setError]=useState(''),[connectionError,setConnectionError]=useState('');
+ const dialog=useRef<HTMLDialogElement>(null);
+ const submitting=useRef(false);
+ const headingId=useId(),descriptionId=useId();
+ const unavailable=status?.busy?'Deck has running or queued work. Restart when it finishes.':status&&!status.available?'Restart is unavailable for this host.':!status?'Checking application status…':'';
+ const eligible=!!status?.available&&!status.busy&&!pending;
+ const changed=!!status&&status.generation!==confirmation;
+ const canConfirm=eligible&&confirmation!==undefined&&!changed;
+ useLayoutEffect(()=>{
+  const node=dialog.current;
+  if(confirmation!==undefined)node?.showModal();
+  else node?.close();
+ },[confirmation]);
  useEffect(()=>{
   let live=true;
   let timer:ReturnType<typeof setTimeout>;
@@ -27,14 +40,27 @@ export function ApplicationSettings(){
   return ()=>{live=false;controller.abort();clearTimeout(timer);};
  },[pending]);
  async function restart(){
-  if(!status||pending)return;
-  setError('');setPending(status.generation);
-  try{await hostRequest('POST',endpoint,{api:API,generation:status.generation});}
-  catch(e){setPending(undefined);setError((e as Error).message);}
+  if(!canConfirm||submitting.current)return;
+  submitting.current=true;
+  setConfirmation(undefined);
+  setError('');setPending(confirmation);
+  try{await hostRequest('POST',endpoint,{api:API,generation:confirmation});}
+  catch(e){submitting.current=false;setPending(undefined);setError((e as Error).message);}
  }
  return <div className="settings-card"><div className="settings-row"><div><h3>Restart Deck</h3>
   <p>Restart the daemon to load the installed version of Deck.</p>
-  <p role="status">{pending?'Restarting Deck. Waiting to reconnect…':status?.busy?'Deck has running or queued work. Restart when it finishes.':status&&!status.available?'Restart is unavailable for this host.':!status?'Checking application status…':''}</p>
+  <p role="status">{pending?'Restarting Deck. Waiting to reconnect…':unavailable}</p>
   {(error||connectionError)&&<p role="alert" className="error">{error||connectionError}</p>}
- </div><button type="button" className="quiet" disabled={!status?.available||status.busy||!!pending} onClick={()=>void restart()}>Restart Deck</button></div></div>;
+ </div><button type="button" className="quiet" disabled={!eligible} onClick={()=>setConfirmation(status?.generation)}>Restart Deck</button></div>
+  <dialog ref={dialog} className="workspace-dialog install-dialog" aria-labelledby={headingId} aria-describedby={descriptionId}
+   onCancel={event=>{event.preventDefault();event.stopPropagation();setConfirmation(undefined);}}>
+   <h3 id={headingId}>Restart Deck?</h3>
+   <p id={descriptionId}>Deck will briefly disconnect while it restarts and loads the installed version.</p>
+   <p role="status">{changed?'Deck has changed. Cancel and open a new confirmation.':connectionError||unavailable}</p>
+   <div className="dialog-actions">
+    <button type="button" onClick={()=>setConfirmation(undefined)}>Cancel</button>
+    <button type="button" disabled={!canConfirm} onClick={()=>void restart()}>Restart Deck</button>
+   </div>
+  </dialog>
+ </div>;
 }

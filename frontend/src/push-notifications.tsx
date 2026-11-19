@@ -1,5 +1,6 @@
 type PushDeliveryStatus = {eligible:number;sent:number;suppressed:number;failed:number;lastOutcome?:string;lastStatus?:number};
 import {gsap} from 'gsap';
+import { HttpError } from './api';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 type Api = (path: string, init?: RequestInit) => Promise<any>;
 // Shared with service-worker.js: this cache holds one opt-in boolean only.
@@ -43,6 +44,13 @@ function keyBytes(key: string) {
   const text = atob(key.replace(/-/g, '+').replace(/_/g, '/'));
   return Uint8Array.from(text, (c) => c.charCodeAt(0));
 }
+function usesPushKey(subscription: PushSubscription, publicKey: string): boolean {
+  const key = subscription.options.applicationServerKey;
+  return !!key && btoa(String.fromCharCode(...new Uint8Array(key)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '') === publicKey;
+}
 /** An unrecognized device must replace a surviving browser subscription, never claim it. */
 export async function reconcilePushSubscription(
   manager: PushManager,
@@ -51,14 +59,7 @@ export async function reconcilePushSubscription(
 ): Promise<PushSubscription> {
   const existing = await manager.getSubscription();
   if (existing) {
-    const key = existing.options.applicationServerKey;
-    const matches =
-      key &&
-      btoa(String.fromCharCode(...new Uint8Array(key)))
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '') === publicKey;
-    if (alreadyEnabled && matches) return existing;
+    if (alreadyEnabled && usesPushKey(existing, publicKey)) return existing;
     if (!(await existing.unsubscribe()))
       throw new Error('push-subscription-replacement-failed');
   }
@@ -67,12 +68,97 @@ export async function reconcilePushSubscription(
     applicationServerKey: keyBytes(publicKey),
   });
 }
+type PushStatus = { enabled: boolean; publicKey: string; delivery?: PushDeliveryStatus };
+type PushStep = 'permission' | 'status' | 'host' | 'registration' | 'enrollment' | 'worker' | 'subscription';
+
+function problemCode(error: unknown) {
+  const problem = error instanceof HttpError ? error.problem : undefined;
+  return typeof problem === 'object' && problem !== null && 'code' in problem
+    ? problem.code
+    : undefined;
+}
+
+function pushFailure(error: unknown, step: PushStep): string {
+  if (step === 'permission')
+    return 'Could not check notification permission. Check this site’s browser settings and try again.';
+  if (step === 'worker')
+    return 'Deck’s notification service worker could not start. Reload Deck and try again.';
+  if (step === 'subscription')
+    return 'The browser’s push service could not update the subscription. Check your browser and network settings, then try again.';
+  switch (problemCode(error)) {
+    case 'device-required':
+      if (step === 'enrollment')
+        return 'Device access ended. Reauthorize this browser through Deck before enabling notifications.';
+      return 'Deck needs device authorization for this browser. Select Enable notifications to try enrolling it.';
+    case 'device-revoked':
+      return 'Device access ended. Reauthorize this browser through Deck before enabling notifications.';
+    case 'session_required':
+      return 'Open Deck from the launcher or use an authorized pairing link, then refresh notification status.';
+    case 'request-forbidden':
+    case 'host_denied':
+    case 'origin_denied':
+    case 'fetch_site_denied':
+      return 'Deck rejected notification access from this address. Open Deck using the launcher or your authorized pairing address.';
+    case 'ownership':
+      return 'The current Deck host cannot enroll this browser. Open Deck from the host that owns this device identity.';
+    case 'device-store-unavailable':
+      return 'Deck’s browser-device storage is unavailable. Check the Deck host, then try again.';
+    case 'push-history-unavailable':
+      return 'Deck could not take ownership of its original history. Check the history adoption error on the Deck host, then restart Deck and retry.';
+    case 'push-unavailable':
+      return 'This Deck host is missing notification configuration. Check how Deck was started, then retry.';
+    case 'notification-storage-unavailable':
+      return 'Deck’s notification storage is unavailable. Check the Deck host, then try again.';
+    case 'push-provider-unsupported':
+      return 'Deck does not support this browser’s push provider. Try notifications in another supported browser.';
+    case 'push-subscription-invalid':
+    case 'push-subscription-expired':
+      return 'Deck rejected the browser’s subscription. Reload Deck and enable notifications again.';
+    case 'push-subscription-limit':
+      return 'This Deck host has reached its subscription limit. Disable notifications on an unused browser and try again.';
+    case 'push-subscription-owned':
+      return 'Deck rejected a subscription owned by another device. Use Disable notifications if offered, then enable notifications again.';
+  }
+  if (error instanceof HttpError) {
+    if (error.status === 401 || error.status === 403)
+      return 'Deck denied notification access. Reopen Deck with an authorized browser session and try again.';
+    if (step === 'status')
+      return `Deck could not check notification status (HTTP ${error.status}). Check the host and refresh status.`;
+    if (step === 'registration')
+      return `Deck could not register the browser’s subscription (HTTP ${error.status}). Check the host and try enabling notifications again.`;
+    return `Deck could not read or update notification settings (HTTP ${error.status}). Check the host and try again.`;
+  }
+  if (error instanceof Error && error.message.startsWith('Connection lost.'))
+    return 'Could not reach Deck to check or update notifications. Check your connection to Deck and try again.';
+  return 'Deck returned an invalid notification response. Reload Deck and try again.';
+}
+
+async function pushStatus(api: Api): Promise<PushStatus> {
+  const status = await api('/api/push');
+  if (typeof status?.enabled !== 'boolean' || typeof status.publicKey !== 'string' || !status.publicKey)
+    throw new Error('Invalid push status');
+  return status;
+}
+
 async function worker() {
-  await navigator.serviceWorker.register('/service-worker.js', {
-    scope: '/',
-    updateViaCache: 'none',
-  });
-  return navigator.serviceWorker.ready;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const start = async () => {
+      const registration = await navigator.serviceWorker.register('/service-worker.js', {
+        scope: '/',
+        updateViaCache: 'none',
+      });
+      return registration.active ? registration : navigator.serviceWorker.ready;
+    };
+    return await Promise.race([
+      start(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Notification worker timed out')), 8000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 /** Recheck after worker startup: navigation/blur may invalidate the original view. */
 export async function notifySessionViewed(
@@ -186,70 +272,116 @@ export function usePushNotifications(api: Api) {
       !hint && Notification.permission === 'denied',
     );
   const [approvalActions,setApprovalActions]=useState(false);
+  const [statusUnavailable, setStatusUnavailable] = useState(false);
+  const operation = useRef(false);
+  const refreshVersion = useRef(0);
   const refresh = async () => {
-    if (hint) return;
-    setApprovalActions(await readApprovalNotificationPreference());
+    if (hint || operation.current) return;
+    const version = ++refreshVersion.current;
+    const current = () => version === refreshVersion.current;
+    const permission = Notification.permission;
+    setDenied(permission === 'denied');
+    let step: PushStep = 'status';
     try {
-      const [status, registration] = await Promise.all([
-        api('/api/push'),
-        worker(),
-      ]);
+      const status = await pushStatus(api);
+      if (!current()) return;
       setDelivery(status.delivery);
-      const subscription = await registration.pushManager.getSubscription();
-      if (status.enabled && Notification.permission !== 'granted')
+      setRegistered(status.enabled);
+      let subscription: PushSubscription | null = null;
+      if (status.enabled && permission === 'granted') {
+        step = 'worker';
+        const registration = await worker();
+        step = 'subscription';
+        subscription = await registration.pushManager.getSubscription();
+      } else if (status.enabled) {
         await api('/api/push', { method: 'DELETE' });
-      setRegistered(status.enabled && Notification.permission === 'granted');
-      setEnabled(
-        status.enabled &&
-          !!subscription &&
-          Notification.permission === 'granted',
-      );
-      setDenied(Notification.permission === 'denied');
-      setMessage(
-        status.enabled && !subscription
-          ? 'Reconnect notifications for this browser.'
-          : '',
-      );
-    } catch {
-      setMessage(
-        'Notifications are unavailable. You can retry when Deck is connected.',
-      );
+      }
+      if (!current()) return;
+      setRegistered(status.enabled && permission === 'granted');
+      const connected = !!subscription && usesPushKey(subscription, status.publicKey);
+      setEnabled(connected);
+      setStatusUnavailable(false);
+      setMessage(status.enabled && permission === 'granted' && !connected
+        ? 'Reconnect notifications for this browser.'
+        : '');
+    } catch (error) {
+      if (!current()) return;
+      setEnabled(false);
+      setStatusUnavailable(true);
+      if (step === 'status') setDelivery(undefined);
+      setMessage(pushFailure(error, step));
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   };
   useEffect(() => {
+    let active = true;
+    void readApprovalNotificationPreference().then(value => {
+      if (active) setApprovalActions(value);
+    });
     void refresh();
     const focus = () => void refresh();
     window.addEventListener('focus', focus);
-    return () => window.removeEventListener('focus', focus);
+    return () => {
+      active = false;
+      refreshVersion.current++;
+      window.removeEventListener('focus', focus);
+    };
   }, [api]);
-  async function enable() {
-    // Permission is requested directly in the user's gesture, before any awaited setup.
-    const permission = Notification.requestPermission();
+  function beginChange() {
+    operation.current = true;
+    refreshVersion.current++;
     setBusy(true);
     setMessage('');
-    let subscription: PushSubscription | null = null;
+  }
+  function finishChange() {
+    operation.current = false;
+    setBusy(false);
+  }
+  async function enable() {
+    if (operation.current) return;
+    beginChange();
+    let step: PushStep = 'permission';
     try {
-      const result = await permission;
+      // Request permission in the click, before any awaited host or worker setup.
+      const result = Notification.permission === 'default'
+        ? await Notification.requestPermission()
+        : Notification.permission;
       setDenied(result === 'denied');
       if (result !== 'granted') {
-        setMessage(
-          result === 'denied'
-            ? 'Notifications are blocked. Allow them in this site’s browser settings, then retry.'
-            : 'Permission was not granted. You can enable notifications later.',
-        );
+        setMessage(result === 'denied'
+          ? 'Notifications are blocked. Allow them in this site’s browser settings, then retry.'
+          : 'Permission was not granted. You can enable notifications later.');
         return;
       }
-      const [status, registration] = await Promise.all([
-        api('/api/push'),
-        worker(),
-      ]);
-      subscription = await reconcilePushSubscription(
+      step = 'status';
+      let status: PushStatus;
+      try {
+        status = await pushStatus(api);
+      } catch (error) {
+        if (problemCode(error) !== 'device-required') throw error;
+        // Launcher authentication and browser-device authorization are separate.
+        step = 'enrollment';
+        await api('/api/browser-device', {
+          method: 'POST',
+          body: JSON.stringify({ remember: true }),
+        });
+        step = 'status';
+        status = await pushStatus(api);
+      }
+      setRegistered(status.enabled);
+      setStatusUnavailable(false);
+      step = 'worker';
+      const registration = await worker();
+      step = 'subscription';
+      const subscription = await reconcilePushSubscription(
         registration.pushManager,
         status.publicKey,
         status.enabled,
       );
+      step = 'registration';
+      // Keep the browser subscription if the request outcome is unknown. A retry
+      // reconciles it using the host's current registration state.
       await api('/api/push', {
         method: 'POST',
         body: JSON.stringify({ subscription: subscription.toJSON() }),
@@ -257,32 +389,33 @@ export function usePushNotifications(api: Api) {
       setRegistered(true);
       setEnabled(true);
       setMessage('Notifications are on for this browser.');
-    } catch {
-      await subscription?.unsubscribe().catch(() => {});
-      setEnabled(false);
-      setMessage(
-        'Could not enable notifications. Check your connection and browser settings, then retry.',
-      );
+    } catch (error) {
+      if (step === 'status') setStatusUnavailable(true);
+      setMessage(pushFailure(error, step));
     } finally {
-      setBusy(false);
+      finishChange();
     }
   }
   async function disable() {
-    setBusy(true);
-    setMessage('');
+    if (operation.current) return;
+    beginChange();
+    let step: PushStep = 'host';
     try {
       await api('/api/push', { method: 'DELETE' });
       setRegistered(false);
       setEnabled(false);
+      setStatusUnavailable(false);
+      setDelivery(undefined);
+      step = 'subscription';
       const registration = await navigator.serviceWorker.getRegistration('/');
-      await (await registration?.pushManager.getSubscription())?.unsubscribe();
+      const subscription = await registration?.pushManager.getSubscription();
+      if (subscription && !(await subscription.unsubscribe()))
+        throw new Error('Browser unsubscribe failed');
       setMessage('Notifications are off for this browser.');
-    } catch {
-      setMessage(
-        'Could not finish disabling notifications. Reconnect and retry.',
-      );
+    } catch (error) {
+      setMessage(pushFailure(error, step));
     } finally {
-      setBusy(false);
+      finishChange();
     }
   }
   async function changeApprovalActions(value: boolean) {
@@ -299,10 +432,16 @@ export function usePushNotifications(api: Api) {
     }
     finally { setBusy(false); }
   }
-  return {hint,enabled,registered,busy,loading,message,delivery,denied,enable,disable,refresh,approvalActions,changeApprovalActions};
+  const statusLabel = loading ? 'Checking this browser…'
+    : denied ? 'Blocked in browser settings'
+    : statusUnavailable ? 'Status unavailable'
+    : enabled ? 'On for this browser'
+    : registered ? 'Reconnect needed'
+    : 'Off for this browser';
+  return {hint,enabled,registered,busy,loading,message,delivery,denied,statusLabel,enable,disable,refresh,approvalActions,changeApprovalActions};
 }
 export function NotificationsDialog({settings,onClose}:{settings:ReturnType<typeof usePushNotifications>;onClose:()=>void}) {
-  const {hint,enabled,registered,busy,loading,message,delivery,denied,enable,disable,refresh,approvalActions,changeApprovalActions}=settings;
+  const {hint,enabled,registered,busy,loading,message,delivery,denied,statusLabel,enable,disable,refresh,approvalActions,changeApprovalActions}=settings;
   const dialog=useRef<HTMLDialogElement>(null);
   useLayoutEffect(()=>{const node=dialog.current!;const previous=document.activeElement as HTMLElement|null;node.showModal();const media=matchMedia('(prefers-reduced-motion: reduce)');if(!media.matches)gsap.fromTo(node,{opacity:.5,y:6},{opacity:1,y:0,duration:.18,ease:'power2.out',clearProps:'opacity,transform'});const settle=()=>{if(media.matches){gsap.killTweensOf(node);gsap.set(node,{clearProps:'opacity,transform'});}};media.addEventListener('change',settle);return()=>{media.removeEventListener('change',settle);gsap.killTweensOf(node);node.close();if(previous?.isConnected)previous.focus({preventScroll:true});};},[]);
   return <dialog ref={dialog} className="workspace-dialog notifications-dialog" aria-labelledby="notifications-title"
@@ -317,20 +456,14 @@ export function NotificationsDialog({settings,onClose}:{settings:ReturnType<type
         <p>
           Commands, paths, tool input and errors stay in Deck. Alerts use your
           browser’s push service, even when this tab is closed. Enabling keeps
-          this browser signed in for 180 days.
+          this browser authorized for Deck for up to 180 days.
         </p>
         {hint ? (
           <p role="status">{hint}</p>
         ) : (
           <>
             <p role="status">
-              {loading
-                ? 'Checking this browser…'
-                : enabled
-                  ? 'On for this browser'
-                  : denied
-                    ? 'Blocked in browser settings'
-                    : 'Off for this browser'}
+              {statusLabel}
             </p>
             <button
               type="button"
@@ -372,6 +505,7 @@ export function NotificationsDialog({settings,onClose}:{settings:ReturnType<type
             <button
               type="button"
               className="quiet"
+              disabled={busy}
               onClick={() => void refresh()}
             >
               Refresh delivery status

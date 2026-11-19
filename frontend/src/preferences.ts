@@ -57,4 +57,4 @@ export function resolveContentMode(value:unknown,legacyCollapsed:unknown=''):Con
 }
 
 export type ChatWidth='full'|'compact';
-export function resolveChatWidth(value:unknown):ChatWidth { return value==='compact'?'compact':'full'; }
+export function resolveChatWidth(value:unknown):ChatWidth { return value==='full'?'full':'compact'; }

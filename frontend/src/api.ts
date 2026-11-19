@@ -5,7 +5,12 @@ import {snapshot,type Snapshot} from './configuration-api';
 export const API = 7;
 export const phases = ['queued','accepted','preparing','dispatching','running','cancelling','completed','cancelled','failed','uncertain'] as const;
 export type Phase = typeof phases[number];
+export type SteeringCommand={id:string;session:string;threadId:string;expectedTurnId:string;text:string};
+const steeringStates=['pending','dispatching','accepted','rejected','uncertain'] as const;
+export type SteeringReceipt=SteeringCommand&{state:typeof steeringStates[number];admittedMs:number};
 export interface Receipt {
+ can_steer?:boolean;
+ steering?:SteeringReceipt[];
  presentation?:ReceiptPresentation;
  message_times?:{start:number;at_ms:number}[];
  context?:unknown;
@@ -28,6 +33,13 @@ export interface Session {project?:ProjectBinding;original?:{fingerprint:string;
 export interface Workspace {process_active?:boolean;session_availability?:Record<string,string|null>;project_availability?:Record<string,string|null>;project_team_availability?:Record<string,string|null>;initial_project?:string;projects?:ProjectBinding[];project_trust?:Record<string,boolean>;host_id:string;sessions:Session[];queue_paused:boolean;steering_unavailable:string;trusted:boolean; api:number; session:string; project:string; runner:string; availability:string|null; receipts:Receipt[];tasks:Task[];team_availability:string|null}
 const object=(v:unknown):v is Record<string,unknown>=>typeof v==='object' && v!==null && !Array.isArray(v);
 const integer=(v:unknown)=>typeof v==='number' && Number.isSafeInteger(v) && v>=0;
+export function isSteeringCommand(v:unknown):v is SteeringCommand {
+ return object(v)&&typeof v.id==='string'&&typeof v.session==='string'&&typeof v.threadId==='string'&&typeof v.expectedTurnId==='string'&&typeof v.text==='string';
+}
+export function steeringReceipt(v:unknown):SteeringReceipt {
+ if(!object(v)||!steeringStates.includes(v.state as SteeringReceipt['state'])||!integer(v.admittedMs)||!isSteeringCommand(v))throw Error('Invalid live delivery receipt');
+ return v as SteeringReceipt;
+}
 export function receipt(v:unknown):Receipt {
  if(!object(v) || typeof v.fresh!=='boolean' || !['id','session','prompt','text','detail','policy','runner','delivery'].every(k=>typeof v[k]==='string') || !phases.includes(v.phase as Phase)
  || !['model','thread','turn'].every(k=>v[k]===null || typeof v[k]==='string')
@@ -35,6 +47,8 @@ export function receipt(v:unknown):Receipt {
  || !['accepted_ms','revision','local_tool_calls'].every(k=>integer(v[k]))) throw new Error('Incompatible host receipt. Reload a compatible Deck client; draft retained.');
  if(v.message_times!==undefined&&(!Array.isArray(v.message_times)||v.message_times.some((m,i,list)=>!object(m)||!integer(m.start)||!integer(m.at_ms)||(m.start as number)>=(v.text as string).length||(i===0?m.start!==0:(m.start as number)<=list[i-1].start))))throw Error('Invalid message delivery times');
  if(v.cancel_requested!==undefined&&typeof v.cancel_requested!=='boolean')throw Error('Invalid cancellation state');
+ if(v.can_steer!==undefined&&typeof v.can_steer!=='boolean')throw Error('Invalid live steering capability');
+ if(v.steering!==undefined&&(!Array.isArray(v.steering)||v.steering.map(steeringReceipt).some(s=>s.session!==v.session||s.threadId!==v.thread||s.expectedTurnId!==v.turn)))throw Error('Live message belongs to a different turn');
  if(v.recalled_ms!==undefined&&(!integer(v.recalled_ms)||v.dispatch_ms!==null||v.cancel_requested!==true))throw Error('Invalid recalled input timestamp');
 
  if(v.requested_model!==undefined&&v.requested_model!==null&&typeof v.requested_model!=='string')throw new Error('Invalid requested model policy');

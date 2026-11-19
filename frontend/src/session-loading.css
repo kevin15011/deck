@@ -20,6 +20,9 @@
 .session-loading-status button { margin-top: 8px; }
 
 .history-opening-pane { position: relative; }
+.session-panes { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.session-panes > .panes[inert] { visibility: hidden; }
+.workbench:has(> [data-live-session-opening]) > .history-view { display: none; }
 
 .app-body.session-opening .session-loading{visibility:visible}
 .app-body.session-opening .panes{isolation:isolate}

@@ -1,0 +1,5 @@
+Allow the authenticated Lead to send a correction or addition to the exact running Codex member attempt. Display it in the member conversation with Lead authorship and return delivery status. A stale target must not start a continuation. Unknown delivery must not trigger automatic replay. Preserve the user's decision authority and existing queue and cancellation behavior.
+
+Implementation and focused verification assigned to 86b60535-d325-4691-a9c5-18929172a812. Acceptance includes isolated normal delivery, completion races, ownership, deduplication and history rendering. Integration pending.
+
+Integrated attempt 1 at event 37956. Lead checked the authenticated MCP action, receipt handling and conversation rendering. Release 265198dec493829d5e8d222275e768d9c42b544e467b7c81bbc9e6b55e55203d passed the production MCP-to-browser journey against isolated simulated Codex, including rejected delivery, unknown delivery, same-command retry and no delivery to a later attempt. The full locked Rust suite (542), Bun suite (110), typecheck and diff check passed. dist/deck2 and the installed command reference the verified executable. Live Codex was not exercised.
