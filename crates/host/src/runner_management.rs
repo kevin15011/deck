@@ -585,6 +585,54 @@ impl Store {
     }
 }
 
+// Only follow the user's PATH launcher and legacy selections from that same
+// standalone install. Explicit external binaries and catalog packages retain
+// their own ownership. New revisions leave all admitted snapshots intact.
+fn follows_launcher(binding: &RunnerBinding, launcher: &Path, target: &Path) -> bool {
+    if binding.ownership != "external_unknown" { return false; }
+    let saved = Path::new(&binding.path);
+    if saved == launcher || saved == target { return true; }
+    let release_root = |path: &Path| -> Option<PathBuf> {
+        if !path.ends_with("bin/codex") { return None; }
+        let releases = path.ancestors().nth(3)?;
+        releases.ends_with("standalone/releases").then(|| releases.to_path_buf())
+    };
+    release_root(saved).is_some_and(|root| Some(root) == release_root(target))
+}
+
+pub async fn follow_codex_launcher(app: &App, launcher: &Path, previous: &mut Option<crate::native::ExecutableIdentity>) -> Result<(), String> {
+    let identity = crate::native::executable_identity(launcher)?;
+    if previous.as_ref() == Some(&identity) { return Ok(()); }
+    crate::native::version(launcher).await?;
+    let target = launcher.canonicalize().map_err(|_| "Cannot resolve Codex launcher")?;
+    let source = target.clone();
+    let hash = tokio::task::spawn_blocking(move || {
+        let mut file = std::fs::File::open(source)?;
+        use sha2::Digest;
+        let mut hash = sha2::Sha256::new();
+        std::io::copy(&mut file, &mut hash)?;
+        Ok::<_, std::io::Error>(format!("{:x}", hash.finalize()))
+    }).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+    if identity != crate::native::executable_identity(launcher)? { return Err("Codex changed during discovery".into()); }
+    let store = app.store.lock().unwrap();
+    let mut roots = std::collections::BTreeSet::from([store.project.clone()]);
+    roots.extend(store.projects()?.into_iter().map(|p| p.root));
+    for root in roots {
+        let mut c = store.configuration_for(&root)?;
+        let Some(binding) = c.runner.as_mut() else { continue; };
+        if !follows_launcher(binding, launcher, &target) { continue; }
+        let path = launcher.to_str().ok_or("Codex path must be UTF-8")?;
+        if binding.path == path && binding.executable == hash { continue; }
+        binding.path = path.into();
+        binding.executable = hash.clone();
+        c.codex_executable = Some(hash.clone());
+        c.revision = store.next_configuration_revision()?;
+        store.save_configuration(&c)?;
+    }
+    *previous = Some(identity);
+    Ok(())
+}
+
 impl App {
     pub(crate) fn scope_lock(
         &self,
@@ -625,10 +673,9 @@ impl App {
             {
                 return Err("Admitted package path differs; no fallback".into());
             }
-            if digest(
-                &std::fs::read(&b.path)
-                    .map_err(|_| "Admitted executable unavailable; no fallback")?,
-            ) != b.executable
+            if crate::tasks::file_digest(Path::new(&b.path))
+                .map_err(|_| "Admitted executable unavailable; no fallback")?
+                != b.executable
             {
                 return Err("Admitted executable changed; no fallback".into());
             }
@@ -638,10 +685,8 @@ impl App {
         }
     }
     pub(crate) fn execution_digest(&self, id: &str) -> Result<String, String> {
-        Ok(digest(
-            &std::fs::read(self.execution_binary(id)?)
-                .map_err(|_| "Admitted executable unavailable")?,
-        ))
+        crate::tasks::file_digest(&self.execution_binary(id)?)
+            .map_err(|_| "Admitted executable unavailable".into())
     }
     pub fn selected_binary(&self) -> Result<PathBuf, String> {
         Ok(self
@@ -666,7 +711,7 @@ impl App {
         }
         let path = c.runner.map(|b| PathBuf::from(b.path)).unwrap_or_else(|| self.binary.clone());
         if path.is_file() { None } else {
-            Some("Codex is not installed at the selected path. Open Configuration → Runners.".into())
+            Some(format!("The configured Codex executable is missing: {}. Select a compatible executable in Configuration → Runners.", path.display()))
         }
     }
 }
@@ -898,6 +943,7 @@ mod tests {
 
 #[derive(Default)]
 pub struct Runtime {
+    daemon_restart: std::sync::Arc<tokio::sync::Mutex<()>>,
     observation: Option<Value>,
     observation_invalidated: bool,
     refresh_error: Option<String>,
@@ -934,6 +980,37 @@ async fn inspect(crate::server::ProjectState(app): crate::server::ProjectState<A
         )
     })())
 }
+async fn restart_codex_daemon(crate::server::ProjectState(app): crate::server::ProjectState<App>) -> Response {
+    if let Some(r) = crate::web_identity::effect_denied() { return r; }
+    let lock = app.runner_runtime.lock().unwrap().daemon_restart.clone();
+    let Ok(guard) = lock.try_lock_owned() else {
+        return response(Err("A Codex server restart is already in progress.".into()));
+    };
+    let binary = match app.selected_binary() {
+        Ok(path) => path,
+        Err(error) => return response(Err(error)),
+    };
+    // Keep ownership if the browser navigates away during the native operation.
+    let restart = tokio::spawn(async move {
+        let _guard = guard;
+        use std::process::Stdio;
+        let mut command = tokio::process::Command::new(binary);
+        command.args(["app-server", "daemon", "restart"])
+            .env_remove("CODEX_REMOTE")
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .kill_on_drop(true);
+        let status = tokio::time::timeout(Duration::from_secs(60), command.status()).await
+            .map_err(|_| "Codex did not confirm the restart within 60 seconds. Check the server before retrying.")?
+            .map_err(|e| format!("Could not start the selected Codex CLI: {e}"))?;
+        if !status.success() {
+            return Err(format!("Codex daemon restart failed ({status}). Check that the selected CLI supports app-server daemon restart."));
+        }
+        app.runner_runtime.lock().unwrap().observation_invalidated = true;
+        Ok(json!({"restarted": true}))
+    });
+    response(restart.await.unwrap_or_else(|_| Err("Codex server restart outcome unavailable.".into())))
+}
+
 async fn refresh(crate::server::ProjectState(app): crate::server::ProjectState<App>) -> Response {
     if let Some(r) = crate::web_identity::effect_denied() { return r; }
 
@@ -1121,9 +1198,9 @@ async fn observe_installation(binary: &Path, target: &str) -> Result<Value, Stri
     if version.is_empty() || version.len() > 160 || version.chars().any(char::is_control) {
         return Err("Invalid bounded version response".into());
     }
-    let supported = target == "codex" && version == "codex-cli 0.166.0";
+    let supported = target == "codex" && crate::native::codex_version(version).is_some();
     Ok(
-        json!({"target":target,"executable":binary,"version":version,"at_ms":now(),"authenticated":null,"models":[],"qualified":supported,"ready":false,"state":if supported {"readiness_check_required"} else if target=="codex" {"unsupported_version"} else {"version_observed"},"detail":if supported {"Supported version; inspect native readiness before explicit reselection"} else if target=="codex" {"This Deck build supports codex-cli 0.166.0. Observed version is not admitted; existing bindings are retained."} else {"Version observed; this does not qualify an execution role or prove an update completed."}}),
+        json!({"target":target,"executable":binary,"version":version,"at_ms":now(),"authenticated":null,"models":[],"qualified":supported,"ready":false,"state":if supported {"readiness_check_required"} else if target=="codex" {"unsupported_version"} else {"version_observed"},"detail":if supported {"Supported version; inspect native readiness before explicit reselection"} else if target=="codex" {"The executable did not identify itself as Codex CLI."} else {"Version observed; this does not qualify an execution role or prove an update completed."}}),
     )
 }
 async fn tool_handoff(binary: &Path, target: &str) -> Result<Value, String> {
@@ -1568,6 +1645,7 @@ pub fn routes() -> Router<App> {
     Router::new()
         .route("/api/runners", get(inspect))
         .route("/api/runners/refresh", post(refresh))
+        .route("/api/runners/codex/daemon/restart", post(restart_codex_daemon))
         .route("/api/runners/maintenance", post(maintenance))
         .route(
             "/api/runners/maintenance/inspect",

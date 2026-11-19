@@ -4,7 +4,7 @@ const out=path.resolve(process.env.DECK2_EVIDENCE_DIR||'target/s4-verification')
 for(const name of ['sessions.rs','decisions.rs'])fs.copyFileSync(path.join('crates/host/src',name),path.join(project,name));
 fs.writeFileSync(path.join(project,'outside.txt'),'OWNED OUTSIDE SCOPE SENTINEL');fs.symlinkSync('outside.txt',path.join(project,'link.rs'));
 const binary=path.resolve(process.argv[2]||'target/debug/deck2'),log=fs.openSync(path.join(root,'host.log'),'w');
-const host=spawn(binary,['serve','--project',project,'--state-dir',state,'--codex','/home/kevin15011/.local/bin/codex','--opencode','/home/kevin15011/.opencode/bin/opencode','--investigator-model','minimax-coding-plan/MiniMax-M2.7','--no-open'],{stdio:['ignore',log,log]});
+const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',state,'--codex','/home/kevin15011/.local/bin/codex','--opencode','/home/kevin15011/.opencode/bin/opencode','--investigator-model','minimax-coding-plan/MiniMax-M2.7','--no-open'],{stdio:['ignore',log,log]});
 const delay=ms=>new Promise(r=>setTimeout(r,ms));let browser,page;
 const result={root,binary,checks:[]};
 async function w(){return await page.evaluate(async()=>await(await fetch('/api/workspace')).json());}

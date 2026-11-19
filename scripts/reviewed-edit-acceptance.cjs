@@ -5,7 +5,7 @@ const repo=path.resolve(__dirname,'..'),root=fs.mkdtempSync(path.join(os.tmpdir(
 const project=path.join(root,'project'),state=path.join(root,'state');fs.mkdirSync(project);
 const file=path.join(project,'example.txt');fs.writeFileSync(file,'before\n');
 const evidence=process.env.DECK2_EVIDENCE_DIR||path.join(repo,'target/s2-verification');fs.mkdirSync(evidence,{recursive:true});
-const start=Date.now(),host=spawn(path.join(repo,'dist/deck2'),['serve','--project',project,'--state-dir',state,'--codex','/home/kevin15011/.local/bin/codex','--no-open']);
+const start=Date.now(),host=spawn(path.join(repo,'dist/deck2'),['serve','--foreground','--project',project,'--state-dir',state,'--codex','/home/kevin15011/.local/bin/codex','--no-open']);
 let browser;const wait=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{try{
  for(let i=0;i<100&&!fs.existsSync(path.join(state,'launcher.json'));i++)await wait(100);

@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
 const binary=path.resolve(process.argv[2]),out=path.resolve(process.argv[3]),root=fs.mkdtempSync('/tmp/deck2-startup-'),project=path.join(root,'project'),state=path.join(root,'state');fs.mkdirSync(project);
 fs.copyFileSync('crates/host/tests/fake_session_native.py',path.join(root,'codex'));fs.chmodSync(path.join(root,'codex'),0o700);fs.writeFileSync(path.join(root,'startup-fixture'),'');fs.writeFileSync(path.join(root,'paginated-mcp'),'');fs.writeFileSync(path.join(root,'slow-full-mcp'),'');
-const host=spawn(binary,['serve','--project',project,'--state-dir',state,'--codex',path.join(root,'codex'),'--no-open'],{env:{...process.env,HOME:root,CODEX_HOME:path.join(root,'native'),XDG_CONFIG_HOME:path.join(root,'config'),XDG_DATA_HOME:path.join(root,'data')},stdio:'ignore'});
+const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',state,'--codex',path.join(root,'codex'),'--no-open'],{env:{...process.env,HOME:root,CODEX_HOME:path.join(root,'native'),XDG_CONFIG_HOME:path.join(root,'config'),XDG_DATA_HOME:path.join(root,'data')},stdio:'ignore'});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));const result={passed:false,binary_sha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),fixture_sha256:crypto.createHash('sha256').update(fs.readFileSync(path.join(root,'codex'))).digest('hex'),root,turns:[],browser:[]};let browser;
 (async()=>{try{
  for(let i=0;i<400&&!fs.existsSync(path.join(state,'launcher.json'));i++){assert.equal(host.exitCode,null);await wait(25);}

@@ -9,7 +9,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'deck2-capability-live-')),f=fix
 // included in review artifacts. Native owns authentication in this temporary home.
 fs.copyFileSync(path.join(authFixture,'auth.json'),path.join(f.native,'auth.json'));fs.chmodSync(path.join(f.native,'auth.json'),0o600);
 fs.writeFileSync(path.join(root,'codex'),fs.readFileSync(path.join(__dirname,'session-capability-native-proxy.py'),'utf8').replace("os.environ['DECK2_REAL_CODEX']",JSON.stringify(native)));fs.chmodSync(path.join(root,'codex'),0o700);
-const host=spawn(binary,['serve','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,CODEX_HOME:f.native,HOME:root,XDG_CONFIG_HOME:path.join(root,'config'),XDG_CACHE_HOME:path.join(root,'cache-home'),XDG_DATA_HOME:path.join(root,'data')}}),wait=ms=>new Promise(r=>setTimeout(r,ms));let browser;
+const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,CODEX_HOME:f.native,HOME:root,XDG_CONFIG_HOME:path.join(root,'config'),XDG_CACHE_HOME:path.join(root,'cache-home'),XDG_DATA_HOME:path.join(root,'data')}}),wait=ms=>new Promise(r=>setTimeout(r,ms));let browser;
 const started=Date.now(),result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),native,fixture:root,checks:[],passed:false};
 (async()=>{try{
  await seed(f,cbm);require('node:child_process').spawnSync('git',['init','-q',project]);

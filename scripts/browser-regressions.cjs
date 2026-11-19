@@ -7,7 +7,7 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const evidence=(process.env.DECK2_EVIDENCE_DIR||path.join(repo,'target/browser-regressions'));fs.mkdirSync(evidence,{recursive:true});
 fs.mkdirSync(path.join(root,'project'));fs.copyFileSync(path.join(repo,'crates/host/tests/fake_native.py'),path.join(root,'codex'));fs.chmodSync(path.join(root,'codex'),0o700);
 fs.writeFileSync(path.join(root,'mode'),'stream');
-const host=spawn(process.argv[2] || path.join(repo,'dist/deck2'),['serve','--project',path.join(root,'project'),'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open']);
+const host=spawn(process.argv[2] || path.join(repo,'dist/deck2'),['serve','--foreground','--project',path.join(root,'project'),'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open']);
 let browser;const checks=[];
 (async()=>{try {
  for(let i=0;i<100&&!fs.existsSync(path.join(root,'state/launcher.json'));i++)await wait(100);

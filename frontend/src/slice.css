@@ -258,10 +258,16 @@
 .inspector-actions button[aria-expanded=true] {background:var(--tint);color:var(--ink)}
 .inspector-actions small {font-size:10px;font-variant-numeric:tabular-nums}
 .inline-agents {margin-block:16px;min-width:0}
-.inline-agent-button {width:100%;min-height:40px;gap:8px;flex-wrap:wrap;padding:6px 0}
-.inline-agent-button strong {font-weight:500}
-.inline-agent-status {flex:1;min-width:0}
-.inline-agent-elapsed {font-size:11px;font-variant-numeric:tabular-nums}
+.inline-agent-button {width:100%;min-height:40px;gap:8px;padding:6px 0}
+.inline-agent-button strong {font-weight:500;flex:none}
+.inline-agent-status {display:flex;align-items:center;gap:.35rem;flex:1;min-width:0}
+.inline-agent-label {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inline-agent-elapsed {font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.inline-agent-working {width:12px;height:12px;flex:none}
+@media(prefers-reduced-motion:no-preference) {
+ .inline-agent-working {animation:inline-agent-spin 1.2s linear infinite}
+}
+@keyframes inline-agent-spin {to {transform:rotate(360deg)}}
 .provider-icon {display:inline-flex;flex:none;color:var(--muted)}
 .inline-agent-detail {padding:0 0 12px 26px;color:var(--muted);line-height:1.6}
 .inline-agent-detail>p {margin-block:8px}

@@ -679,6 +679,31 @@ mod tests {
             1
         );
     }
+    #[test]
+    fn settled_member_failure_releases_existing_lead_input_after_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("state.db");
+        let mut store = Store::open(&db, "/fixture").unwrap();
+        store.register_codex("a".repeat(64)).unwrap();
+        session(&mut store, "session-a", "root-alpha");
+        let mut task = delegate(&mut store, "root-alpha", "a1");
+        complete_root(&mut store, "root-alpha");
+        let attempt = &mut task.attempts[0];
+        attempt.phase = Phase::Uncertain;
+        attempt.dispatch_ms = Some(crate::now());
+        attempt.settled_ms = Some(crate::now());
+        attempt.detail = "Member deadline exceeded".into();
+        store.save_task(&task).unwrap();
+        let input = serde_json::from_value(json!({"api":deck2_shared::API,"id":"queued-after-timeout",
+            "session":"session-a","prompt":"Continue once","mode":"session_v1","queue":true})).unwrap();
+        store.admit(&input).unwrap();
+        drop(store);
+        let mut store = Store::open(&db, "/fixture").unwrap();
+        assert_eq!(store.task(&task.id).unwrap().attempts[0].phase, Phase::Failed);
+        assert_eq!(store.claim_next().unwrap().unwrap().id, "queued-after-timeout");
+        assert!(store.claim_next().unwrap().is_none());
+    }
+
     // Protects spawn-before-dispatch recovery: Preparing is an ownership claim,
     // even without an acknowledged turn or PID publication. Never auto-replay.
     #[test]

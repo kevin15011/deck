@@ -28,3 +28,10 @@ test('dismissal dates validate before projection and maximum renders in Subagent
  }
  for(const ms of [maximum+1,Number.MAX_SAFE_INTEGER,-1,NaN,Infinity,null,'100',1.5])expect(()=>task(projection(ms))).toThrow('Invalid failure dismissal');
 });
+
+test('the subagent card measures a settled attempt from its acceptance to settlement',()=>{
+ const input=projection(0);
+ input.attempts[0]!.settled_ms=3_720_001;
+ const html=renderToStaticMarkup(<Subagents tasks={[task(input)]} session="s" visible connected onError={()=>{}} decisions={[]}/>);
+ expect(html).toContain('1 h 2 min');
+});

@@ -25,7 +25,7 @@ const delay = ms => new Promise(r => setTimeout(r, ms));
 async function start() {
   const old = fs.existsSync(path.join(state, 'launcher.json')) ? fs.readFileSync(path.join(state, 'launcher.json'), 'utf8') : '';
   const log = fs.openSync(path.join(root, 'host.log'), 'a', 0o600);
-  host = spawn(binary, ['serve', '--project', before.project, '--state-dir', state, '--codex', sentinel, '--no-open'], { stdio: ['ignore', log, log] });
+  host = spawn(binary, ['serve', '--foreground', '--project', before.project, '--state-dir', state, '--codex', sentinel, '--no-open'], { stdio: ['ignore', log, log] });
   fs.closeSync(log);
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {

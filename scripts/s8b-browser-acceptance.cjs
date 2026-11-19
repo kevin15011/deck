@@ -6,7 +6,7 @@ const repo=path.resolve(__dirname,'..'),out=path.resolve(process.env.DECK2_EVIDE
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'deck2-s8b-'));fs.mkdirSync(out,{recursive:true});fs.mkdirSync(path.join(root,'project'));
 fs.copyFileSync(path.join(repo,'crates/host/tests/fake_native.py'),path.join(root,'codex'));fs.chmodSync(path.join(root,'codex'),0o700);fs.writeFileSync(path.join(root,'mode'),'images');fs.writeFileSync(path.join(root,'allow-prepare'),'ready');
 const fixture=fs.readFileSync(path.join(repo,'target/s8b/synthetic.png')),digest=crypto.createHash('sha256').update(fixture).digest('hex');
-const host=spawn(binary,['serve','--project',path.join(root,'project'),'--state-dir',path.join(root,'state'),'--codex',real?'/home/kevin15011/.local/bin/codex':path.join(root,'codex'),'--no-open'],{stdio:'ignore'});
+const host=spawn(binary,['serve','--foreground','--project',path.join(root,'project'),'--state-dir',path.join(root,'state'),'--codex',real?'/home/kevin15011/.local/bin/codex':path.join(root,'codex'),'--no-open'],{stdio:'ignore'});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let browser;
 const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),fixtureSha256:digest,real,root,checks:[],captures:[],passed:false};
 (async()=>{try{

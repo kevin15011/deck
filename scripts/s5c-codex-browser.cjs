@@ -21,7 +21,7 @@ async function endOperation(id,allowed,p=page){return until(async()=>{const o=aw
 async function button(name,p=page){await p.getByRole('button',{name,exact:true}).click();return applyButton(p);}
 async function stop(target=host){if(target?.exitCode===null){target.kill('SIGINT');await Promise.race([new Promise(r=>target.once('exit',r)),delay(12000).then(()=>target.kill('SIGKILL'))]);}}
 (async()=>{const started=Date.now();try{
- host=spawn(binary,['serve','--project',project,'--state-dir',state,'--artifact-store',store,'--codex','/home/kevin15011/.local/bin/codex','--investigator-codex','--no-open'],{stdio:['ignore',log,log]});
+ host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',state,'--artifact-store',store,'--codex','/home/kevin15011/.local/bin/codex','--investigator-codex','--no-open'],{stdio:['ignore',log,log]});
  await until(()=>fs.existsSync(path.join(state,'launcher.json'))&&fs.readFileSync(path.join(root,'host.log'),'utf8').includes('Investigator'),60000);
  const launcher=JSON.parse(fs.readFileSync(path.join(state,'launcher.json'))),base='http://'+launcher.host,{url}=await(await fetch(base+'/launch',{method:'POST',body:launcher.admin})).json();
  browser=await chromium.launch({executablePath:'/snap/bin/chromium',headless:true,args:['--no-sandbox']});const context=await browser.newContext({viewport:{width:1440,height:1000}});page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(url);await page.waitForFunction(()=>document.querySelector('.connection')?.textContent.includes('Connected'));await config();

@@ -1,3 +1,4 @@
+mod message_times;
 use deck2_shared::{API, POLICY, Phase, Receipt, Submit};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
@@ -17,9 +18,11 @@ pub mod images;
 pub mod launcher;
 pub mod lifecycle;
 pub mod managed_tools;
+mod directories;
 pub mod native;
 mod observations;
 mod activity;
+pub mod application;
 mod task_panel;
 mod member_integration;
 mod codex_member;
@@ -172,10 +175,12 @@ impl Store {
         if meta("schema")? != "1" && !["true", "false"].contains(&meta("trusted")?.as_str()) {
             return Err(invalid.into());
         }
-        if meta("session")?.is_empty() {
+        let default_session = meta("session")?;
+        let project = meta("project")?;
+        let unbound_workspace = project.is_empty() && default_session.is_empty();
+        if default_session.is_empty() && !unbound_workspace {
             return Err(invalid.into());
         }
-        let project = meta("project")?;
         let project = project.as_str();
         if ["15", "16", "17", "18"].contains(&meta("schema")?.as_str()) { crate::projects::inspect(conn)?; }
         let mut normal_attempts = std::collections::HashMap::new();
@@ -214,7 +219,7 @@ impl Store {
                 }
                 ids.insert(id);
             }
-            if !ids.contains(&meta("session")?) {
+            if !unbound_workspace && !ids.contains(&default_session) {
                 return Err(invalid.into());
             }
             let mut stmt = conn
@@ -438,7 +443,7 @@ impl Store {
             for (key, value) in [
                 ("schema", "1".to_string()),
                 ("project", project.to_string()),
-                ("session", uuid::Uuid::new_v4().to_string()),
+                ("session", if project.is_empty() { String::new() } else { uuid::Uuid::new_v4().to_string() }),
             ] {
                 conn.execute("INSERT INTO meta VALUES (?1,?2)", params![key, value])
                     .map_err(|_| "State write failed")?;
@@ -478,14 +483,16 @@ impl Store {
                     title: "Project conversation".into(),
                     native: None,
                 };
-                conn.execute(
-                    "INSERT INTO sessions VALUES (?1,?2)",
-                    params![
-                        id,
-                        serde_json::to_string(&session).map_err(|_| "Cannot encode session")?
-                    ],
-                )
-                .map_err(|_| "Cannot migrate session")?;
+                if !id.is_empty() {
+                    conn.execute(
+                        "INSERT INTO sessions VALUES (?1,?2)",
+                        params![
+                            id,
+                            serde_json::to_string(&session).map_err(|_| "Cannot encode session")?
+                        ],
+                    )
+                    .map_err(|_| "Cannot migrate session")?;
+                }
                 let mut stmt = conn
                     .prepare("SELECT body FROM receipts")
                     .map_err(|_| "Cannot read legacy receipts")?;
@@ -566,6 +573,7 @@ impl Store {
         store.init_settings_model()?;
         store.init_external_tools()?;
         store.init_activity()?;
+        message_times::backfill(&store.conn).map_err(|e| format!("Cannot recover message timestamps: {e}"))?;
         if !["17", "18"].contains(&schema.as_str()) {
             for mut session in store.sessions()? {
                 session.original_generation = session.original.as_ref().map(|_| session.contract.as_ref().unwrap().generation);
@@ -607,8 +615,16 @@ impl Store {
             }
         }
         for mut t in store.tasks()? {
+            let mut repaired = false;
             for a in &mut t.attempts {
-                if a.phase.active() {
+                // Older Codex workers recorded successful process teardown and
+                // then classified the same attempt as uncertain after dispatch.
+                if a.phase == Phase::Uncertain && a.settled_ms.is_some()
+                    && a.provenance.integration == "app-server/session-mcp-member-v1"
+                    && !a.detail.starts_with("member_cleanup_uncertain:") {
+                    a.phase = if a.cancel_requested { Phase::Cancelled } else { Phase::Failed };
+                    repaired = true;
+                } else if a.phase.active() {
                     a.phase = if a.dispatch_ms.is_some() || a.native_pid.is_some() || a.phase != Phase::Accepted {
                         Phase::Uncertain
                     } else {
@@ -618,7 +634,7 @@ impl Store {
                     a.detail="Host restarted. No replay; dispatched ownership is uncertain. Undispatched work was stopped.".into();
                 }
             }
-            store.save_task(&t)?;
+            if repaired { store.save_normal_task(&t)?; } else { store.save_task(&t)?; }
         }
         Ok(store)
     }
@@ -678,13 +694,22 @@ impl Store {
                 .as_ref()
                 .and_then(|s| s.session_contract.as_ref())
                 .ok_or("Normal receipt admission missing")?;
-            let all = self.all()?;
-            let ordinal = all
-                .iter()
-                .filter(|p| p.session == r.session)
-                .position(|p| p.id == r.id)
-                .map(|n| n + 1)
-                .unwrap_or_else(|| all.iter().filter(|p| p.session == r.session).count() + 1);
+            // The previous event already owns the attempt number. The ledger's
+            // unique (task, attempt, kind) index also serves reopened sessions.
+            let recorded: Option<i64> = if let Some(previous) = &prior {
+                self.conn.query_row(
+                    "SELECT json_extract(body,'$.attemptNumber') FROM session_events WHERE task=?1 AND attempt=?2 AND kind=?3",
+                    params![contract.lead_task, r.attempt, format!("receipt:{}", previous.revision)],
+                    |row| row.get::<_, Option<i64>>(0),
+                ).optional().map_err(|_| "Cannot read receipt ordinal")?.flatten()
+            } else { None };
+            let ordinal = match recorded {
+                Some(number) => number,
+                None => self.conn.query_row(
+                    "SELECT 1+count(*) FROM receipts WHERE json_extract(body,'$.session')=?1 AND rowid<coalesce((SELECT rowid FROM receipts WHERE id=?2),9223372036854775807)",
+                    params![r.session,r.id], |row| row.get::<_, i64>(0),
+                ).map_err(|_| "Cannot assign receipt ordinal")?,
+            };
             let event = serde_json::json!({"type":"receipt.updated","receiptId":r.id,"taskId":contract.lead_task,"attempt":r.attempt,"attemptNumber":ordinal,"revision":r.revision,"phase":r.phase,"at_ms":now(),"prompt":if prior.is_none(){Some(&r.prompt)}else{None},"delta":r.text.strip_prefix(prior.as_ref().map(|p|p.text.as_str()).unwrap_or("")).unwrap_or(&r.text),"detail":r.detail});
             self.conn
                 .execute_batch("SAVEPOINT normal_receipt_event")
@@ -891,7 +916,7 @@ impl Store {
                 ));
             }
         }
-        let runner = snapshot.native.as_ref().map(|n| format!("{} {} / {}", match n.runner { deck2_shared::NativeRunner::Codex => "codex", deck2_shared::NativeRunner::Opencode => "opencode" }, n.version, n.protocol)).unwrap_or_else(|| "codex 0.166.0 / app-server stdio".into());
+        let runner = snapshot.native.as_ref().map(|n| format!("{} {} / {}", match n.runner { deck2_shared::NativeRunner::Codex => "codex", deck2_shared::NativeRunner::Opencode => "opencode" }, n.version, n.protocol)).unwrap_or_else(|| "codex / app-server stdio".into());
         let mut r = Receipt {
             context: Default::default(),
             continuation: None,
@@ -932,6 +957,7 @@ impl Store {
             dispatch_ms: None,
             acknowledgment_ms: None,
             first_output_ms: None,
+            message_times: Vec::new(),
             revision: 0,
             policy: if c.mode == deck2_shared::Mode::SessionV1 {
                 "deck-session-v1"

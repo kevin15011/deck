@@ -279,6 +279,34 @@ async fn http_dispatch_uses_exact_wire_after_durable_caller_and_never_twice() {
 }
 
 #[tokio::test]
+async fn quiet_turn_can_complete_after_ten_minutes() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let finish = Arc::new(tokio::sync::Notify::new());
+    let handler_entered = entered.clone();
+    let handler_finish = finish.clone();
+    let (client, server) = server(Router::new().route(
+        "/session/{id}/message",
+        post(move || async move {
+            handler_entered.notify_one();
+            handler_finish.notified().await;
+            Json(json!({"completed": true}))
+        }),
+    ))
+    .await;
+    let dispatch = claim(&mut turn());
+    let response = tokio::spawn(async move { dispatch.send(&client).await });
+    entered.notified().await;
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(601)).await;
+    tokio::time::resume();
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert!(!response.is_finished());
+    finish.notify_one();
+    assert_eq!(response.await.unwrap().unwrap()["completed"], true);
+    server.abort();
+}
+
+#[tokio::test]
 async fn lookup_classifies_only_lookup_404_as_absence() {
     async fn lookup(Path(id): Path<String>) -> (StatusCode, Json<Value>) {
         match id.as_str() {

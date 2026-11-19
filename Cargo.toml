@@ -15,3 +15,14 @@ deck2-shared = { path = "crates/shared" }
 [profile.release]
 lto = "thin"
 strip = true
+
+# Fast test suite: dependencies (SQLite C, sha2, p256, image, flate2...) are
+# compiled once with optimizations and stay cached in target/debug; deck2
+# itself stays unoptimized for fast incremental rebuilds. Line tables keep
+# panic backtraces with file:line while shrinking link time and disk use.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false

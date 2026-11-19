@@ -1,3 +1,5 @@
+#[path = "native_handoff.rs"]
+mod handoff;
 #[path = "native_transport.rs"]
 pub(crate) mod transport;
 #[path = "native_reuse.rs"]
@@ -97,6 +99,9 @@ pub struct Native {
     read_only_role: bool,
     role: Option<crate::session_roles::Role>,
     hook_state: Option<Value>,
+    /// Last acknowledged `thread/resume` for the loaded retained thread: a
+    /// digest of its exact parameters and instruction files, and native's ack.
+    loaded_resume: Option<(String, Value)>,
     admitted_mcp: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     session_authorization: Option<String>,
     process_owner: Option<ProcessOwner>,
@@ -166,6 +171,21 @@ impl Drop for Native {
         }
     }
 }
+fn request_rejection(method: &str, resume_id: Option<&str>, message: Option<&str>) -> String {
+    if let (Some(id), Some(reason)) = (resume_id, message) {
+        if reason == format!("thread {id} already has an active writer") {
+            return handoff::BUSY.into();
+        }
+        if reason == format!("thread not found: {id}")
+            || reason == format!("no rollout found for thread id {id}")
+            || reason == format!("no rollout found for thread id: {id}")
+        {
+            return "native-session-not-found".into();
+        }
+    }
+    format!("Native {method} rejected. Check native compatibility/authentication; inspect using its own CLI.")
+}
+
 impl Native {
     pub(crate) fn set_approval_mode(&mut self, mode: &str) {
         self.yolo = mode == "yolo";
@@ -252,6 +272,12 @@ impl Native {
             "--enable",
             "default_mode_request_user_input",
         ]);
+        if connected && !read_only_role
+            && let Some(source) = crate::external_tools::context_mode::passive_marketplace_source().await
+        {
+            cmd.args(["-c", "marketplaces.context-mode.source_type=\"local\""]);
+            cmd.args(["-c", &format!("marketplaces.context-mode.source={source}")]);
+        }
         // Model-declared multi-agent v2 ignores the legacy feature flags.
         // The typed agent switch also suppresses that native tool namespace.
         cmd.args(["-c", "agents.enabled=false"]);
@@ -411,6 +437,7 @@ impl Native {
             yolo: false,
             role: None,
             hook_state,
+            loaded_resume: None,
             admitted_mcp: Default::default(),
             session_authorization,
             process_owner: None,
@@ -498,7 +525,7 @@ impl Native {
         self.shared.as_ref().map(|p| p.loaded(&self.route)).unwrap_or_else(||
             self.child.as_mut().is_some_and(|c| matches!(c.try_wait(), Ok(None))))
     }
-    fn sibling_process(shared: std::sync::Arc<process::Process>, binary: PathBuf, management_identity: Option<String>, initialized: bool) -> Result<Self, String> {
+    fn sibling_process(shared: std::sync::Arc<process::Process>, binary: PathBuf, management_identity: Option<String>, initialized: bool, hook_state: Option<Value>) -> Result<Self, String> {
         let route = uuid::Uuid::new_v4().to_string();
         shared.reserve(&route)?;
         Ok(Self {
@@ -512,7 +539,7 @@ impl Native {
             partial: vec![], next: 0, team: false, scoped_tools: None, instructions: None,
             developer: false, model: None, effort: None, reasoning: None, queued: Default::default(),
             yolo: false, connected: true, session_mcp: None, session_member: false,
-            read_only_role: false, role: None, hook_state: None, admitted_mcp: Default::default(),
+            read_only_role: false, role: None, hook_state, loaded_resume: None, admitted_mcp: Default::default(),
             session_authorization: None, process_owner: None, codebase: None, codebase_slot: None,
             codebase_artifacts: None, capability_note: String::new(), external_tools: None,
         })
@@ -570,25 +597,12 @@ impl Native {
         if PREPARATION_STOP.try_with(|stop| stop.load(std::sync::atomic::Ordering::SeqCst)).unwrap_or(false) {
             return Err("Native preparation cancelled at settled RPC boundary".into());
         }
-        let missing = if method == "thread/resume" {
-            params["threadId"].as_str().map(|id| {
-                vec![
-                    format!("thread not found: {id}"),
-                    format!("no rollout found for thread id {id}"),
-                    format!("no rollout found for thread id: {id}"),
-                ]
-            })
-        } else {
-            None
-        };
+        let resume_id = params["threadId"].as_str().filter(|_| method == "thread/resume").map(str::to_owned);
         if let Some(p) = self.shared.clone() {
             let route = if method == "thread/start" || method == "thread/resume" { Some(self.route.clone()) } else { None };
             let value = p.request(method, params, route.as_deref()).await?;
             if let Some(error) = value.get("error") {
-                if error["message"].as_str().is_some_and(|m| missing.as_ref().is_some_and(|values| values.iter().any(|s| s == m))) {
-                    return Err("native-session-not-found".into());
-                }
-                return Err(format!("Native {method} rejected. Check native compatibility/authentication; inspect using its own CLI."));
+                return Err(request_rejection(method, resume_id.as_deref(), error["message"].as_str()));
             }
             let result = value.get("result").cloned().ok_or("Native response missing result")?;
             if let Some(thread) = result["thread"]["id"].as_str() { self.route = thread.into(); }
@@ -598,14 +612,13 @@ impl Native {
         let id = self.next;
         self.write(json!({"id":id,"method":method,"params":params}))
             .await?;
-        tokio::time::timeout(Duration::from_secs(30), async {
+        tokio::time::timeout(rpc_timeout(method), async {
             let mut queued_bytes = 0;
             loop {
                 let value = self.read_wire().await?;
                 if value.get("id") == Some(&json!(id)) && value.get("method").is_none() {
-                    if value.get("error").is_some() {
-                        if value["error"]["message"].as_str().is_some_and(|m|missing.as_ref().is_some_and(|values|values.iter().any(|s|s==m))){return Err("native-session-not-found".into());}
-                        return Err(format!("Native {method} rejected. Check native compatibility/authentication; inspect using its own CLI."));
+                    if let Some(error) = value.get("error") {
+                        return Err(request_rejection(method, resume_id.as_deref(), error["message"].as_str()));
                     }
                     return value.get("result").cloned().ok_or("Native response missing result".into());
                 }
@@ -622,20 +635,26 @@ impl Native {
     }
 
     /// Bounded management handshake: no thread creation, resume or provider turn.
-    pub(crate) async fn management(&mut self, project: &str) -> Result<(bool, Value), String> {
+    pub(crate) async fn initialize(&mut self) -> Result<(), String> {
         if !self.initialized {
             let started = Instant::now();
             let init=self.request("initialize",json!({"clientInfo":{"name":"deck2","version":"0.1.0"},"capabilities":{"experimentalApi":true}})).await?;
             if !init["userAgent"]
                 .as_str()
-                .is_some_and(|s| s.starts_with("deck2/0.166.0 "))
+                .and_then(|s| s.split_whitespace().next())
+                .and_then(|s| s.strip_prefix("deck2/"))
+                .is_some_and(|v| semver::Version::parse(v).is_ok())
             {
-                return Err("Unsupported native protocol identity; requires Codex 0.166.0".into());
+                return Err("Codex app-server returned an unrecognized initialization identity".into());
             }
             self.write(json!({"method":"initialized"})).await?;
             self.timing.initialization_ms += started.elapsed().as_millis() as u64;
             self.initialized = true;
         }
+        Ok(())
+    }
+    pub(crate) async fn management(&mut self, project: &str) -> Result<(bool, Value), String> {
+        self.initialize().await?;
         let config_started = Instant::now();
         let auth = self
             .request("account/read", json!({"refreshToken":false}))
@@ -709,83 +728,84 @@ impl Native {
         persistent: bool,
     ) -> Result<(String, String, String), String> {
         let (authenticated, mut config) = self.management(project).await?;
-        if self.connected && self.role.as_ref().is_some_and(|r| !r.hooks.is_empty()) {
-            let expected = self.role.as_ref().unwrap().hooks.clone();
+        if self.connected && let Some(launched) = self.hook_state.clone() {
+            let expected = self.role.as_ref().map(|r| r.hooks.clone()).unwrap_or_default();
             let before = self.hook_inventory(project).await?;
-            let mut states = serde_json::Map::new();
-            for hook in &before {
-                let key = hook["key"].as_str().ok_or("Native hook identity missing")?;
-                states.insert(key.into(), json!({"enabled":false}));
-            }
-            for (event, command) in &expected {
-                let hook = before
-                    .iter()
-                    .find(|h| {
-                        h["source"] == "user"
-                            && h["handlerType"] == "command"
-                            && h["async"] != true
-                            && h["eventName"] == *event
-                            && h["command"] == *command
-                    })
-                    .ok_or("Installed role hook is missing from native inventory")?;
-                let hash = hook["currentHash"]
-                    .as_str()
-                    .filter(|s| !s.is_empty() && s.len() <= 256 && !s.chars().any(char::is_control))
-                    .ok_or("Native hook hash invalid")?;
-                states.insert(
-                    hook["key"]
-                        .as_str()
-                        .ok_or("Native hook key missing")?
-                        .into(),
-                    json!({"enabled":true,"trusted_hash":hash}),
-                );
-            }
+            let context_mode = !self.read_only_role && crate::external_tools::context_mode::configured().await;
+            let states = hook_policy(&before, &expected, context_mode)?;
             if let Some(role) = &self.role {
                 role.verify()?;
             }
-            self.terminate().await?;
-            let mut next = Self::start_policy(
-                &self.binary,
-                None,
-                true,
-                self.session_member,
-                self.read_only_role,
-                Some(Value::Object(states)),
-                self.session_authorization.clone(),
-            )
-            .await?;
-            next.model = self.model.clone();
-            next.effort = self.effort.clone();
-            next.instructions = self.instructions.clone();
-            next.session_mcp = self.session_mcp.clone();
-            next.codebase_slot = self.codebase_slot.clone();
-            next.codebase_artifacts = self.codebase_artifacts.clone();
-            next.external_tools = self.external_tools.clone();
-            next.role = self.role.clone();
-            // Bind exclusion before any fallible ownership callback can drop the replacement.
-            next.settlement_owner = self.settlement_owner.take();
-            next.process_owner = self.process_owner.clone();
-            if let (Some(owner), Some(pid)) = (&next.process_owner, next.group) {
-                owner(pid)?;
-            }
-            *self = next;
-            let runtime = self.management(project).await?;
-            if !runtime.0 {
-                return Err("Native authentication changed during role preparation".into());
-            }
-            config = runtime.1;
-            let active = self.hook_inventory(project).await?;
-            for (event, command) in &expected {
-                if !active.iter().any(|h| {
-                    h["eventName"] == *event
-                        && h["command"] == *command
-                        && h["enabled"] != false
-                        && h["trustStatus"] == "trusted"
-                        && before
-                            .iter()
-                            .any(|b| b["key"] == h["key"] && b["currentHash"] == h["currentHash"])
-                }) {
-                    return Err("Native hook trust attestation failed".into());
+            let current = Value::Object(states.clone());
+            let retained = self.transport.is_some() || self.shared.is_some() || self.retained_lease.is_some();
+            if launched == current {
+                // Already launched with exactly the current policy (retained
+                // runtime or pre-resolved cold Lead). Native re-reads hook
+                // files on hooks/list, so this inventory is live evidence.
+                for (event, command) in &expected {
+                    if !before.iter().any(|h| {
+                        h["eventName"] == *event
+                            && h["command"] == *command
+                            && h["enabled"] != false
+                            && h["trustStatus"] == "trusted"
+                    }) {
+                        return Err("Native hook trust attestation failed".into());
+                    }
+                }
+            } else if retained {
+                // Hooks were added, removed, updated or re-trusted since this
+                // runtime started. It cannot be relaunched in place: the caller
+                // retires it and prepares one cold process. Nothing is blocked.
+                return Err(HOOKS_CHANGED.into());
+            } else {
+                // Unretained process launched without a resolved policy (members):
+                // relaunch once with the exact inventory-derived hook state.
+                self.terminate().await?;
+                let mut next = Self::start_policy(
+                    &self.binary,
+                    None,
+                    true,
+                    self.session_member,
+                    self.read_only_role,
+                    Some(Value::Object(states)),
+                    self.session_authorization.clone(),
+                )
+                .await?;
+                next.model = self.model.clone();
+                next.effort = self.effort.clone();
+                next.instructions = self.instructions.clone();
+                next.yolo = self.yolo;
+                next.management_identity = self.management_identity.clone();
+                next.session_mcp = self.session_mcp.clone();
+                next.codebase_slot = self.codebase_slot.clone();
+                next.codebase_artifacts = self.codebase_artifacts.clone();
+                next.external_tools = self.external_tools.clone();
+                next.role = self.role.clone();
+                // Bind exclusion before any fallible ownership callback can drop the replacement.
+                next.settlement_owner = self.settlement_owner.take();
+                next.process_owner = self.process_owner.clone();
+                if let (Some(owner), Some(pid)) = (&next.process_owner, next.group) {
+                    owner(pid)?;
+                }
+                *self = next;
+                let runtime = self.management(project).await?;
+                if !runtime.0 {
+                    return Err("Native authentication changed during role preparation".into());
+                }
+                config = runtime.1;
+                let active = self.hook_inventory(project).await?;
+                for (event, command) in &expected {
+                    if !active.iter().any(|h| {
+                        h["eventName"] == *event
+                            && h["command"] == *command
+                            && h["enabled"] != false
+                            && h["trustStatus"] == "trusted"
+                            && before
+                                .iter()
+                                .any(|b| b["key"] == h["key"] && b["currentHash"] == h["currentHash"])
+                    }) {
+                        return Err("Native hook trust attestation failed".into());
+                    }
                 }
             }
         }
@@ -1057,6 +1077,7 @@ impl Native {
         }
         let method = if let Some(id) = resume {
             params["threadId"] = json!(id);
+            params["excludeTurns"] = json!(true);
             "thread/resume"
         } else {
             params["ephemeral"] = json!(!persistent);
@@ -1065,7 +1086,26 @@ impl Native {
         self.timing.tool_preparation_ms += tool_started.elapsed().as_millis() as u64;
         let thread_started = Instant::now();
         self.timing.thread_method = method.into();
-        let result=self.request(method,params).await.map_err(|e| if e=="native-session-not-found" {e} else if resume.is_some() {format!("Native context unavailable or incompatible. Choose Start new execution explicitly. {e}")} else {e});
+        // Native rebuilds every MCP client on thread/resume, even for a thread
+        // already loaded on this connection. A retained thread whose exact
+        // resume parameters and instruction files are unchanged keeps its
+        // acknowledged load instead of restarting all MCP servers per turn.
+        let resume_digest = (method == "thread/resume" && self.shared.is_some())
+            .then(|| crate::tasks::digest(format!("{params}|{}", instruction_files(project)).as_bytes()));
+        let retained = resume_digest.as_ref().zip(self.loaded_resume.as_ref()).and_then(|(digest, (last, ack))| {
+            (self.timing.thread_reused && digest == last && ack["thread"]["id"] == params["threadId"]).then(|| ack.clone())
+        });
+        let result = match retained {
+            Some(ack) => {
+                self.timing.thread_method = "retained".into();
+                Ok(ack)
+            }
+            None => self.request(method, params).await,
+        };
+        self.loaded_resume = match (&result, resume_digest) {
+            (Ok(ack), Some(digest)) => Some((digest, ack.clone())),
+            _ => None,
+        };
         self.timing.thread_ms += thread_started.elapsed().as_millis() as u64;
         let r = result?;
         self.reasoning = acknowledged_reasoning(&r, method)?;
@@ -1143,7 +1183,14 @@ impl Native {
             }
         }
         if self.connected {
-            self.verify_session_mcp(&thread).await?;
+            // Full discovery makes native start a temporary copy of every MCP
+            // server (~10 s). A retained, unchanged thread keeps its verified
+            // inventory and only re-checks the Deck-owned session server.
+            let scoped = self.timing.thread_method == "retained"
+                && self.verify_retained_session_mcp(&thread).await?;
+            if !scoped {
+                self.verify_session_mcp(&thread).await?;
+            }
             if self.codebase.as_ref().is_some_and(|b| b.spec["enabled"] == true) {
                 self.capability_note = if self.admitted_mcp.contains_key("codebase-memory") {
                     "Managed codebase-memory native transport ready; index freshness remains independently required."
@@ -1273,11 +1320,11 @@ async fn bounded_probe_output(
 // This cache qualifies only the CLI version. Every attempt still verifies its
 // admitted content digest, auth, config, ownership and permissions separately.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ExecutableIdentity {
+pub struct ExecutableIdentity {
     canonical: PathBuf,
     stat: [u64; 11],
 }
-fn executable_identity(binary: &Path) -> Result<ExecutableIdentity, String> {
+pub(crate) fn executable_identity(binary: &Path) -> Result<ExecutableIdentity, String> {
     use std::os::unix::fs::MetadataExt;
     let canonical = std::fs::canonicalize(binary)
         .map_err(|_| "Codex executable missing or cannot be identified")?;
@@ -1315,6 +1362,9 @@ pub(crate) fn invalidate_qualifications() {
     cache.entries.clear();
     cache.epoch = cache.epoch.wrapping_add(1);
 }
+pub(crate) fn codex_version(output: &str) -> Option<semver::Version> {
+    output.trim().strip_prefix("codex-cli ").and_then(|v| semver::Version::parse(v).ok())
+}
 async fn qualify_version(binary: &Path) -> Result<bool, String> {
     let identity = executable_identity(binary);
     let epoch = {
@@ -1331,9 +1381,9 @@ async fn qualify_version(binary: &Path) -> Result<bool, String> {
     };
     let identity = identity?;
     let out = command_probe(binary, &["--version"]).await?;
-    if String::from_utf8_lossy(&out).trim() != "codex-cli 0.166.0" {
+    if codex_version(&String::from_utf8_lossy(&out)).is_none() {
         return Err(
-            "Unsupported Codex version. This build requires verified codex-cli 0.166.0.".into(),
+            "Selected executable did not report a Codex CLI version.".into(),
         );
     }
     if executable_identity(binary)? != identity {
@@ -1546,6 +1596,98 @@ tokio::task_local! {
 
 // Keep the preparation future (and its partially written/read RPC) owned until
 // settlement. Authority is revoked immediately; no provider turn is dispatched.
+/// Native answers `mcpServerStatus/list` only after every configured MCP server
+/// settles (each bounded by its own startup timeout). A cold Lead with a slow
+/// server (codebase-memory measured ~26 s) must not fail at a generic 30 s cap.
+const MCP_STATUS_TIMEOUT: Duration = Duration::from_secs(90);
+
+pub(crate) fn rpc_timeout(method: &str) -> Duration {
+    if method == "mcpServerStatus/list" { MCP_STATUS_TIMEOUT } else { Duration::from_secs(30) }
+}
+
+/// Identity of the instruction files native reads when loading a thread
+/// (project AGENTS files up the tree and the native home's AGENTS.md). Any
+/// change forces a real thread/resume on a retained thread.
+fn instruction_files(project: &str) -> String {
+    use std::os::unix::fs::MetadataExt;
+    let mut paths: Vec<PathBuf> = Path::new(project).ancestors()
+        .flat_map(|dir| ["AGENTS.md", "AGENTS.override.md"].map(|name| dir.join(name))).collect();
+    if let Some(home) = std::env::var_os("CODEX_HOME").map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".codex"))) {
+        paths.push(home.join("AGENTS.md"));
+        paths.push(home.join("AGENTS.override.md"));
+    }
+    paths.iter().map(|p| match std::fs::metadata(p) {
+        Ok(m) => format!("{}:{}:{}:{}:{};", p.display(), m.ino(), m.len(), m.mtime(), m.mtime_nsec()),
+        Err(_) => format!("{}:absent;", p.display()),
+    }).collect()
+}
+
+/// A retained Lead runtime whose launched hook policy no longer matches the
+/// live native inventory. Recoverable: retire it and prepare one cold process.
+pub(crate) const HOOKS_CHANGED: &str = "Native hooks changed since the retained Lead runtime started";
+
+/// Launch-time `hooks.state` derived from the live native inventory: every hook
+/// is disabled except the context-mode plugin's own (native enablement/trust
+/// kept) and the role's exact command hooks, which are trusted by current hash.
+fn hook_policy(
+    inventory: &[Value],
+    expected: &[(String, String)],
+    context_mode: bool,
+) -> Result<serde_json::Map<String, Value>, String> {
+    let mut states = serde_json::Map::new();
+    for hook in inventory {
+        if context_mode && crate::external_tools::context_mode::plugin_hook(hook) {
+            continue;
+        }
+        let key = hook["key"].as_str().ok_or("Native hook identity missing")?;
+        states.insert(key.into(), json!({"enabled":false}));
+    }
+    for (event, command) in expected {
+        let hook = inventory
+            .iter()
+            .find(|h| {
+                h["source"] == "user"
+                    && h["handlerType"] == "command"
+                    && h["async"] != true
+                    && h["eventName"] == *event
+                    && h["command"] == *command
+            })
+            .ok_or("Installed role hook is missing from native inventory")?;
+        let hash = hook["currentHash"]
+            .as_str()
+            .filter(|s| !s.is_empty() && s.len() <= 256 && !s.chars().any(char::is_control))
+            .ok_or("Native hook hash invalid")?;
+        states.insert(
+            hook["key"].as_str().ok_or("Native hook key missing")?.into(),
+            json!({"enabled":true,"trusted_hash":hash}),
+        );
+    }
+    Ok(states)
+}
+
+impl Native {
+    /// Resolve the Lead hook policy with a short-lived management process so the
+    /// retained runtime is launched once with it (no in-place relaunch).
+    async fn resolve_hook_state(
+        binary: &Path,
+        project: &str,
+        role: Option<&crate::session_roles::Role>,
+    ) -> Result<Value, String> {
+        let mut probe = Self::start_policy(binary, None, true, false, false, Some(json!({})), None).await?;
+        let result = tokio::time::timeout(Duration::from_secs(30), async {
+            probe.initialize().await?;
+            let inventory = probe.hook_inventory(project).await?;
+            let expected = role.map(|r| r.hooks.clone()).unwrap_or_default();
+            let context_mode = crate::external_tools::context_mode::configured().await;
+            hook_policy(&inventory, &expected, context_mode).map(Value::Object)
+        })
+        .await;
+        probe.terminate().await?;
+        result.map_err(|_| "Codex hook inspection timed out".to_owned())?
+    }
+}
+
 async fn prepare_attempt(
     native: &mut Native, app: &App, id: &str, editing: bool,
     resume: Option<&str>, cancel: &mut watch::Receiver<bool>,
@@ -1616,6 +1758,23 @@ async fn run_inner(
     binary: &Path,
     cancel: &mut watch::Receiver<bool>,
 ) -> Result<(), String> {
+    // Only a settled, pre-dispatch preparation may request another pass.
+    // Recreate the bridge, role snapshot and process from the current configuration.
+    let mut prepare_again = false;
+    run_once(app, id, binary, cancel, Some(&mut prepare_again)).await?;
+    if prepare_again {
+        run_once(app, id, binary, cancel, None).await?;
+    }
+    Ok(())
+}
+
+async fn run_once(
+    app: &App,
+    id: &str,
+    binary: &Path,
+    cancel: &mut watch::Receiver<bool>,
+    retry_preparation: Option<&mut bool>,
+) -> Result<(), String> {
     let app = &app.for_command(id)?;
     if app.receipt(id)?.cancel_requested {
         app.change(id, |r| r.phase = Phase::Cancelled)?;
@@ -1638,9 +1797,10 @@ async fn run_inner(
     } else {
         None
     };
+    let role_root = app.native_role_root.lock().unwrap().clone();
     let selected_role = if connected {
         Some(crate::session_roles::Role::at(
-            &app.native_role_root.lock().unwrap(),
+            &role_root,
             "lead",
         )?)
     } else {
@@ -1649,22 +1809,46 @@ async fn run_inner(
     if let (Some(bridge), Some(role)) = (&bridge, &selected_role) {
         bridge.set_role(role.clone());
     }
-    let inventory_hooks = selected_role
-        .as_ref()
-        .filter(|r| !r.hooks.is_empty())
-        .map(|_| json!({}));
+    let inventory_hooks = (selected_role.as_ref().is_some_and(|r| !r.hooks.is_empty())
+        || connected && crate::external_tools::context_mode::configured_at(&role_root).await)
+        .then(|| json!({}));
     let bridge_role_ms = bridge_role_started.elapsed().as_millis() as u64;
     let receipt = app.receipt(id)?;
     let reuse_epoch = app.native_reuse.epoch.load(std::sync::atomic::Ordering::SeqCst);
-    let reuse_key = if connected && selected_role.as_ref().is_some_and(|r| r.hooks.is_empty()) {
+    // Hook-enabled Leads are retained too: preparation re-verifies the live
+    // hook inventory and a drifted runtime is replaced, never blocking work.
+    let mut reuse_key = if connected {
         Some(reuse::key(app, binary, &receipt)?)
     } else { None };
-    let group_key = reuse::process_key(app, binary)?;
-    let checkout = if let Some(key)=&reuse_key { Some(reuse::take(app,key,&group_key,&receipt.session,receipt.fresh).await?) } else { None };
+    let common = reuse::common_key(app, binary)?;
+    let mut group_key = reuse::process_key(app, &common)?;
+    if inventory_hooks.is_some() {
+        // Hook policy is fixed at launch and a drifted runtime is retired whole,
+        // so a hook-enabled process never hosts another session's thread.
+        group_key = crate::tasks::digest(format!("{group_key}|hooks|{}", receipt.session).as_bytes());
+    }
+    let checkout = match reuse_key.clone() {
+        Some(key) => match reuse::take(app,&key,&group_key,&common,&receipt.session,receipt.fresh).await {
+            Ok(checkout) => Some(checkout),
+            Err(error) if reuse::degradable(app, &error, &receipt.session) => {
+                // Reuse is an optimization: without retained capacity, run
+                // this turn on one unretained process exactly as before.
+                eprintln!("Native reuse unavailable for this turn: {error}");
+                reuse_key = None;
+                None
+            }
+            Err(error) => return Err(error),
+        },
+        None => None,
+    };
     let (reused, mut lease) = checkout.map(|c| (c.native, c.reservation)).unwrap_or_default();
     let mut native = if let Some(native)=reused { native } else {
         let reservation = if connected { Some(std::sync::Arc::new(app.scope_lock(false)?) as std::sync::Arc<dyn Send+Sync>) } else { None };
-        let mut native=Native::start_policy(binary,None,connected,false,false,inventory_hooks,None).await?;
+        let hook_state = match inventory_hooks {
+            Some(_) if connected => Some(Native::resolve_hook_state(binary, &app.project, selected_role.as_ref()).await?),
+            other => other,
+        };
+        let mut native=Native::start_policy(binary,None,connected,false,false,hook_state,None).await?;
         native.settlement_owner=reservation;
         if let Some(mut lease) = lease.take() { lease.started(); native.retained_lease = Some(lease); }
         native
@@ -1855,6 +2039,34 @@ async fn run_inner(
     let prepared = match prepare_attempt(&mut native, app, id, editing, resume.as_deref(), cancel).await {
         Ok(Some(prepared)) => Ok(prepared),
         Ok(None) => return Ok(()),
+        Err(error) if error == handoff::BUSY && connected && retry_preparation.is_some() => {
+            let Some(thread) = resume.as_deref() else { return Err(error); };
+            if !handoff::release_idle(binary, thread, &app.project).await {
+                return Err(error);
+            }
+            native.retire_thread().await?;
+            if let Some(retry) = retry_preparation { *retry = true; }
+            return Ok(());
+        }
+        Err(error) if error == HOOKS_CHANGED && connected && retry_preparation.is_some() => {
+            // Pre-dispatch only: no input reached native. Hook-enabled runtimes
+            // own their whole process group, so retiring it affects no sibling.
+            eprintln!("Retiring retained Lead runtime: native hooks changed; preparing a cold process");
+            native.terminate().await?;
+            if let Some(retry) = retry_preparation { *retry = true; }
+            return Ok(());
+        }
+        // A hook-enabled retained runtime owns its whole (per-session) group.
+        Err(error) if error == crate::session_roles::CONFIG_CHANGED
+            && connected && (native.shared.is_none() || native.hook_state.is_some())
+            && retry_preparation.is_some() =>
+        {
+            native.terminate().await?;
+            if let Some(retry) = retry_preparation {
+                *retry = true;
+            }
+            return Ok(());
+        }
         Err(error) => Err(error),
     };
     let mut reseeded = false;
@@ -1882,11 +2094,8 @@ async fn run_inner(
                 true,
                 native.session_member,
                 false,
-                native
-                    .role
-                    .as_ref()
-                    .filter(|r| !r.hooks.is_empty())
-                    .map(|_| json!({})),
+                // Same resolved policy; preparation re-verifies it live.
+                native.hook_state.clone(),
                 native.session_authorization.clone(),
             )
             .await?;
@@ -2123,23 +2332,28 @@ async fn run_inner(
         r.detail = "Native turn running; closing this browser does not stop it".into();
     })?;
     if let Some(t) = &native.transport { t.confirm(&thread, &turn_id); }
-    let deadline = tokio::time::sleep(Duration::from_secs(600));
-    tokio::pin!(deadline);
+    let cancellation_timeout = tokio::time::sleep(Duration::from_secs(10));
+    tokio::pin!(cancellation_timeout);
     let mut cancelling = false;
     let mut proposals = std::collections::HashMap::<String, Value>::new();
     let mut scoped_proposals = std::collections::HashSet::<String>::new();
     let mut revoked_replies = std::collections::HashSet::new();
     let mut controls = tokio::time::interval(Duration::from_millis(100));
+    controls.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut deferred = None;
+    let mut written = current.text.len();
+    let mut first_delta = true;
+    let mut new_message = true;
     loop {
-        let value = tokio::select! {
-         result=native.read()=>result?,
+        let mut value = tokio::select! {
+         result=async { match deferred.take() { Some(event) => event, None => native.read().await } }=>result?,
          _=controls.tick()=>{
           if let Some(role)=&native.role {role.verify()?;}
           let receipt = app.receipt(id)?;
           if (receipt.cancel_requested || *cancel.borrow()) && !cancelling {
               app.store.lock().unwrap().cancel_tasks(id)?;
               cancelling=true;
-              deadline.as_mut().reset(tokio::time::Instant::now()+Duration::from_secs(10));
+              cancellation_timeout.as_mut().reset(tokio::time::Instant::now()+Duration::from_secs(10));
               app.change(id,|r| {r.phase=Phase::Cancelling; crate::decisions::invalidate(r,"Attempt interrupted before response release");})?;
               native.next+=1;
               native.write(json!({"id":native.next,"method":"turn/interrupt","params":{"threadId":thread,"turnId":turn_id}})).await?;
@@ -2177,14 +2391,43 @@ async fn run_inner(
          _=cancel.changed(),if !cancelling=>{
           app.store.lock().unwrap().cancel_tasks(id)?;
           cancelling=true;
-          deadline.as_mut().reset(tokio::time::Instant::now()+Duration::from_secs(10));
+          cancellation_timeout.as_mut().reset(tokio::time::Instant::now()+Duration::from_secs(10));
           app.change(id,|r|{r.cancel_requested=true;crate::decisions::invalidate(r,"Attempt cancelled");r.phase=Phase::Cancelling;r.detail="Cancellation requested; awaiting native settlement".into();})?;
           // Do not consume notifications in request(): cancellation can race completion.
           native.next+=1;native.write(json!({"id":native.next,"method":"turn/interrupt","params":{"threadId":thread,"turnId":turn_id}})).await?;
           continue;
          },
-         _=&mut deadline=>return Err("Native settlement timed out. Process group terminated; outcome remains uncertain. Inspect before recovery.".into())
+         _=&mut cancellation_timeout, if cancelling=>return Err("Native cancellation timed out. Process group terminated; outcome remains uncertain. Inspect before recovery.".into())
         };
+        // Batch only consecutive deltas of this exact item. A protocol barrier
+        // (including EOF or an approval) is handled immediately after the batch.
+        if value.get("id").is_none() && value["method"] == "item/agentMessage/delta"
+            && value["params"]["threadId"] == thread && value["params"]["turnId"] == turn_id
+            && let Some(delta) = value["params"]["delta"].as_str()
+        {
+            if !first_delta {
+                let deadline = tokio::time::Instant::now() + Duration::from_millis(50);
+                let mut batch = delta.to_owned();
+                while batch.len() < 16384 && tokio::time::Instant::now() < deadline {
+                    let Ok(next) = tokio::time::timeout_at(deadline, native.read()).await else { break };
+                    if let Ok(next_value) = &next
+                        && next_value.get("id").is_none() && next_value["method"] == value["method"]
+                        && next_value["params"]["threadId"] == thread
+                        && next_value["params"]["turnId"] == turn_id
+                        && next_value["params"]["itemId"] == value["params"]["itemId"]
+                        && let Some(text) = next_value["params"]["delta"].as_str()
+                        && written + batch.len() + text.len() <= 1024 * 1024
+                    {
+                        batch.push_str(text);
+                    } else {
+                        deferred = Some(next);
+                        break;
+                    }
+                }
+                value["params"]["delta"] = Value::String(batch);
+            }
+            first_delta = false;
+        }
         if value.get("id").is_some() && value.get("method").is_some() {
             if !(value["id"].as_u64().is_some()
                 || value["id"]
@@ -2532,7 +2775,7 @@ async fn run_inner(
             }
             continue;
         }
-        if crate::observations::advances(&value) {
+        if value["method"] != "item/agentMessage/delta" && crate::observations::advances(&value) {
             app.change(id, |r| {
                 crate::observations::observe(
                     &mut r.context,
@@ -2609,9 +2852,11 @@ async fn run_inner(
             }
         }
         if method == "item/started" && p["item"]["type"] == "agentMessage" {
+            new_message = true;
             app.change(id, |r| {
                 if !r.text.is_empty() {
                     r.text.push_str("\n\n");
+                    written = r.text.len();
                 }
             })?;
         }
@@ -2652,16 +2897,21 @@ async fn run_inner(
         }
         if method == "item/agentMessage/delta" {
             let delta = p["delta"].as_str().ok_or("Malformed native text delta")?;
-            if app.receipt(id)?.text.len() + delta.len() > 1024 * 1024 {
+            if written + delta.len() > 1024 * 1024 {
                 return Err("Response exceeded the 1 MiB limit; native process stopped; partial output retained".into());
             }
             app.change(id, |r| {
-                if r.text.len() + delta.len() <= 1024 * 1024 {
-                    r.text.push_str(delta);
-                    r.first_output_ms.get_or_insert(crate::now());
+                crate::observations::observe(&mut r.context, &value, &thread, &turn_id, &r.attempt, r.model.as_deref());
+                let at_ms = crate::now();
+                if new_message && !delta.is_empty() {
+                    r.message_times.push(deck2_shared::MessageTime { start: r.text.encode_utf16().count(), at_ms });
+                    new_message = false;
                 }
+                r.text.push_str(delta);
+                if !delta.is_empty() { r.first_output_ms.get_or_insert(at_ms); }
+                written = r.text.len();
             })?;
-            if app.receipt(id)?.text.len() >= 1024 * 1024 {
+            if written >= 1024 * 1024 {
                 return Err("Response reached the 1 MiB limit; native process stopped".into());
             }
         }
@@ -2699,6 +2949,14 @@ async fn run_inner(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn resume_rejection_distinguishes_busy_from_missing_history() {
+        let reject = |reason| super::request_rejection("thread/resume", Some("abc"), Some(reason));
+        assert!(reject("thread abc already has an active writer").contains("another Codex client"));
+        assert_eq!(reject("no rollout found for thread id abc"), "native-session-not-found");
+        assert!(!reject("thread xyz already has an active writer").contains("another Codex client"));
+    }
+
     use super::*;
     // Protocol oracle: absence is unknown; only known native acknowledgement
     // values establish a model-bound level, including on resumed threads.
@@ -3339,7 +3597,7 @@ pub(crate) fn provenance(
     binary: &Path,
     mode: &Mode,
 ) -> Result<deck2_shared::NativeProvenance, String> {
-    let bytes = std::fs::read(binary).map_err(|_| "Cannot fingerprint native executable")?;
+    let executable = crate::tasks::file_digest(binary).map_err(|_| "Cannot fingerprint native executable")?;
     let content = if *mode == Mode::SessionV1 {
         include_str!("../assets/session-roles.json")
     } else if mode.ordinary() {
@@ -3354,7 +3612,7 @@ pub(crate) fn provenance(
         INSTRUCTIONS
     };
     Ok(deck2_shared::NativeProvenance {
-        runner: "codex 0.166.0".into(),
+        runner: "codex".into(),
         integration: if *mode == Mode::SessionV1 {
             "app-server/session-mcp-v1"
         } else if *mode == Mode::Developer {
@@ -3363,7 +3621,7 @@ pub(crate) fn provenance(
             "app-server/v1-readonly-reviewed-team"
         }
         .into(),
-        executable: crate::tasks::digest(&bytes),
+        executable,
         storage: std::env::var("CODEX_HOME")
             .unwrap_or_else(|_| format!("{}/.codex", std::env::var("HOME").unwrap_or_default())),
         content: crate::tasks::digest(
@@ -3798,10 +4056,9 @@ async fn run_quality(
         let t=native.request("turn/start",json!({"threadId":thread,"input":[{"type":"text","text":prompt}],"permissions":":read-only","approvalPolicy":"never","approvalsReviewer":"user","environments":[{"environmentId":"local","cwd":snapshot}]})).await?;
         let turn=t["turn"]["id"].as_str().ok_or("Missing Quality turn")?.to_string();
         c.reviews.last_mut().unwrap().native_turn=Some(turn.clone());app.save_lifecycle(c, expected)?;
-        let deadline=tokio::time::sleep(Duration::from_secs(240));tokio::pin!(deadline);
         let mut started=std::collections::HashMap::<String,Value>::new();
         loop {
-            let v=tokio::select! { v=native.read()=>v?,_=cancel.changed()=>return Err("Quality cancelled; no successful check admitted".into()),_=&mut deadline=>return Err("Quality native settlement timeout".into())};
+            let v=tokio::select! { v=native.read()=>v?,_=cancel.changed()=>return Err("Quality cancelled; no successful check admitted".into())};
             if app.receipt(root)?.cancel_requested{return Err("Parent cancelled during Quality".into());}
             if v.get("id").is_some() && v.get("method").is_some(){return Err("Quality requested an unsupported effect; no grant released".into());}
             if v["method"].as_str().is_some_and(|m|m.starts_with("item/")) && (v["params"]["threadId"]!=thread || v["params"]["turnId"]!=turn){return Err("Foreign Quality event".into());}
@@ -4134,11 +4391,9 @@ impl Native {
             true,
             true,
             read_only,
-            if role.hooks.is_empty() {
-                None
-            } else {
-                Some(json!({}))
-            },
+            (!role.hooks.is_empty()
+                || !read_only && crate::external_tools::context_mode::configured().await)
+                .then(|| json!({})),
             spec["http_headers"]["Authorization"]
                 .as_str()
                 .map(str::to_owned),
@@ -4175,6 +4430,66 @@ impl Native {
     }
 }
 impl Native {
+    pub(crate) async fn inspect_context_mode_hooks(binary: &Path, cwd: &Path) -> Result<Vec<Value>, String> {
+        let cwd = cwd.canonicalize().map_err(|_| "Codex inspection directory is unavailable")?;
+        let cwd_text = cwd.to_str().ok_or("Codex inspection directory is not UTF-8")?;
+        let mut native = Self::start_policy_at(binary, None, true, false, false, Some(json!({})), None, Some(&cwd)).await?;
+        let result = tokio::time::timeout(Duration::from_secs(8), async {
+            native.initialize().await?;
+            native.hook_inventory(cwd_text).await
+        }).await;
+        native.terminate().await?;
+        result.map_err(|_| "Codex hook inspection timed out".to_owned())?
+    }
+
+    pub(crate) async fn check_legacy_context_mode(
+        binary: &Path,
+        cwd: &Path,
+        config_file: &Path,
+        expected: &Value,
+        remove: bool,
+    ) -> Result<(), String> {
+        let cwd = cwd.canonicalize().map_err(|_| "Codex inspection directory is unavailable")?;
+        // The config-only process keeps plugins disabled during preflight and edit.
+        let mut native = Self::start_account(binary, &cwd).await?;
+        let result = tokio::time::timeout(Duration::from_secs(8), async {
+            native.initialize().await?;
+            let config = native.request("config/read", json!({"includeLayers":true})).await?;
+            let layers = config["layers"].as_array().ok_or("Codex did not return configuration layers")?;
+            let user = layers.iter().find(|layer| {
+                layer["name"]["type"] == "user"
+                    && layer["name"]["profile"].is_null()
+                    && layer["name"]["file"].as_str().is_some_and(|file| {
+                        Path::new(file).canonicalize().is_ok_and(|path| path == config_file)
+                    })
+            }).ok_or("Codex did not report the expected user configuration")?;
+            if &user["config"]["mcp_servers"]["context-mode"] != expected
+                || layers.iter().any(|layer| {
+                    !std::ptr::eq(layer, user)
+                        && layer["config"]["mcp_servers"].as_object().is_some_and(|servers| {
+                            servers.iter().any(|(name, spec)| {
+                                crate::external_tools::context_mode::context_server(name, spec)
+                            })
+                        })
+                })
+            {
+                return Err("The legacy MCP entry changed or is also set in another Codex configuration layer.".into());
+            }
+            let version = user["version"].as_str().filter(|version| !version.is_empty())
+                .ok_or("Codex did not report a configuration version")?;
+            if remove {
+                native.request("config/value/write", json!({
+                    "keyPath":"mcp_servers.context-mode", "value":null,
+                    "mergeStrategy":"replace", "expectedVersion":version,
+                    "filePath":config_file.to_str().ok_or("Codex configuration path is not UTF-8")?
+                })).await.map_err(|_| "Codex could not remove the legacy entry. Refresh Settings and retry the migration.")?;
+            }
+            Ok(())
+        }).await;
+        native.terminate().await?;
+        result.map_err(|_| "Codex did not finish checking its configuration. Refresh Settings before retrying.".to_owned())?
+    }
+
     async fn hook_inventory(&mut self, project: &str) -> Result<Vec<Value>, String> {
         let response = self
             .request("hooks/list", json!({"cwds":[project]}))
@@ -4195,9 +4510,10 @@ impl Native {
 }
 impl Native {
     async fn verify_session_mcp(&mut self, thread: &str) -> Result<(), String> {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        let deadline = tokio::time::Instant::now() + MCP_STATUS_TIMEOUT;
         let retained_lead = self.retained_full_lead();
         loop {
+            self.timing.mcp_inventory_passes += 1;
             self.admitted_mcp.clear();
             self.mcp_catalog.clear();
             let mut session_starting = false;
@@ -4208,12 +4524,20 @@ impl Native {
             for page in 0..16 {
                 let started = Instant::now();
                 let inventory=self.request("mcpServerStatus/list",json!({"threadId":thread,"detail":"toolsAndAuthOnly","cursor":cursor,"limit":100})).await?;
-                self.timing.mcp_inventory_ms += started.elapsed().as_millis() as u64;
+                let rpc_ms = started.elapsed().as_millis() as u64;
+                self.timing.mcp_inventory_ms += rpc_ms;
+                if self.timing.mcp_inventory_passes > 1 {
+                    self.timing.mcp_retry_rpc_ms += rpc_ms;
+                } else if page == 0 {
+                    self.timing.mcp_initial_page_ms += rpc_ms;
+                } else {
+                    self.timing.mcp_pagination_ms += rpc_ms;
+                }
                 self.timing.mcp_status_requests += 1;
-                for entry in inventory["data"]
-                    .as_array()
-                    .ok_or("Native MCP inventory malformed")?
-                {
+                let validation = Instant::now();
+                let entries = inventory["data"].as_array().ok_or("Native MCP inventory malformed")?;
+                self.timing.mcp_inventory_entries += entries.len() as u64;
+                for entry in entries {
                     let name = entry["name"].as_str().ok_or("Native MCP name missing")?;
                     // Persist presentation metadata only, never native transport,
                     // authentication material, descriptions or server error text.
@@ -4322,6 +4646,7 @@ impl Native {
                         );
                     }
                 }
+                self.timing.mcp_inventory_validation_ms += validation.elapsed().as_millis() as u64;
                 cursor = inventory.get("nextCursor").cloned().unwrap_or(Value::Null);
                 if cursor.is_null() {
                     break;
@@ -4649,6 +4974,33 @@ impl Native {
     fn retained_full_lead(&self) -> bool {
         self.shared.is_some() && self.transport.is_some() && !self.session_member && !self.read_only_role
             && self.codebase.is_none()
+    }
+
+    /// Scoped readiness for a retained thread whose load parameters are
+    /// unchanged: the previous full inventory stays admitted and only the
+    /// Deck-owned session MCP is re-observed. `false` requires full discovery.
+    async fn verify_retained_session_mcp(&mut self, thread: &str) -> Result<bool, String> {
+        if self.mcp_catalog.is_empty() || !self.admitted_mcp.contains_key("deck-session") {
+            return Ok(false);
+        }
+        let started = Instant::now();
+        let entry = self.named_mcp_status(thread, "deck-session").await?;
+        self.timing.mcp_status_requests += 1;
+        self.timing.mcp_session_status_ms += started.elapsed().as_millis() as u64;
+        let Some(entry) = entry else { return Ok(false) };
+        let Some(tools) = entry["tools"].as_object()
+            .filter(|_| entry["runtimeStatus"] == "connected" && entry["toolsError"].is_null())
+        else { return Ok(false) };
+        let inventory = crate::session_mcp::tools(self.session_member);
+        let required: Vec<&str> = inventory.as_array().unwrap().iter()
+            .map(|t| t["name"].as_str().unwrap()).collect();
+        if required.iter().any(|name| !tools.contains_key(*name))
+            || self.session_member && tools.keys().any(|name| !required.contains(&name.as_str()))
+        {
+            return Ok(false);
+        }
+        self.admitted_mcp.insert("deck-session".into(), tools.keys().cloned().collect());
+        Ok(true)
     }
 
     async fn named_mcp_status(&mut self, thread: &str, name: &str) -> Result<Option<Value>, String> {

@@ -7,7 +7,7 @@ assert.equal(sha(native),'b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'deck2-multi-')),state=path.join(root,'state');
 for(const name of ['project-a','project-b']){const project=path.join(root,name);fs.mkdirSync(project);fs.mkdirSync(path.join(project,'.deck'));fs.writeFileSync(path.join(project,'.deck/config.json'),JSON.stringify({capabilities:{'codebase-memory':{enabled:false}}}));}
 const result={passed:false,binary_sha256:sha(binary),native_sha256:sha(native),root,model,effort,turns:[],basis:'Actual pinned native, embedded browser, disposable host state; existing auth, no copied credentials or modified global profile.'};
-const host=spawn(binary,['serve','--project',path.join(root,'project-a'),'--state-dir',state,'--codex',native,'--no-open'],{stdio:'ignore'});
+const host=spawn(binary,['serve','--foreground','--project',path.join(root,'project-a'),'--state-dir',state,'--codex',native,'--no-open'],{stdio:'ignore'});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let browser,page,base;const start=performance.now();
 (async()=>{try{
  for(let n=0;n<300&&!fs.existsSync(path.join(state,'launcher.json'));n++){assert.equal(host.exitCode,null);await wait(100);}

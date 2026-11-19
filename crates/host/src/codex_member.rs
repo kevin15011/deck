@@ -162,7 +162,6 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
             }
             a.acknowledgment_ms = Some(crate::now());
         })?;
-        let result:Result<(Phase,String),String>=tokio::time::timeout(Duration::from_secs(600),async {
   let mut report=String::new();
   let mut proposals=std::collections::HashMap::<String,Value>::new();
   let mut revoked_replies=std::collections::HashSet::new();
@@ -175,7 +174,8 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
      native.write(json!({"id":serde_json::from_str::<Value>(&d.request).map_err(|_|"Corrupt revoked member request")?,"result":reply})).await?;
     }
    }
-   let pending=app.receipt(&authority)?.decisions.into_iter().filter(|d|d.task.as_deref()==Some(task)&&d.attempt==attempt&&matches!(d.state,deck2_shared::DecisionState::Pending|deck2_shared::DecisionState::Responded)&&d.native.as_ref().is_none_or(|n|n.method!="deck/approve")).collect::<Vec<_>>();
+   let decisions = app.receipt(&authority)?.decisions;
+   let pending=decisions.into_iter().filter(|d|d.task.as_deref()==Some(task)&&d.attempt==attempt&&matches!(d.state,deck2_shared::DecisionState::Pending|deck2_shared::DecisionState::Responded)&&d.native.as_ref().is_none_or(|n|n.method!="deck/approve")).collect::<Vec<_>>();
    for d in pending {
     if !native.check_mcp_response(app,&authority,&d).await? { continue; }
     app.check_original_context(&session)?;
@@ -185,7 +185,11 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
      app.change(&authority,|r|{if let Some(d)=r.decisions.iter_mut().find(|v|v.id==d.id){d.state=deck2_shared::DecisionState::Delivered;d.delivered_ms=Some(crate::now());}})?;
     }
    }
-   let value=tokio::select!{v=native.read()=>v?,_=tokio::time::sleep(Duration::from_millis(100))=>continue};let p=&value["params"];
+   let value=tokio::select!{
+       v=native.read()=>v?,
+       _=tokio::time::sleep(Duration::from_millis(100))=>continue
+   };
+   let p=&value["params"];
    if value.get("id").is_some()&&value.get("method").is_some(){
     let method=value["method"].as_str().unwrap_or("");
     native.verify_role()?;
@@ -246,8 +250,6 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
    if value["method"]=="item/agentMessage/delta"{report.push_str(p["delta"].as_str().ok_or("Missing member delta")?);if report.len()>1024*1024{return Err("Member report exceeds bound".into());}update(app,task,attempt,|a|a.text=report.clone())?;}
    if value["method"]=="turn/completed"{if p["turn"]["id"]!=turn{return Err("Foreign member completion".into());}let phase=match p["turn"]["status"].as_str(){Some("completed")=>Phase::Completed,Some("interrupted")=>Phase::Cancelled,Some("failed")=>Phase::Failed,_=>return Err("Unknown member terminal status".into())};return Ok((phase,report));}
   }
- }).await.map_err(|_|"Member deadline exceeded")?;
-        result
     };
     let result: Result<(Phase, String), String> = tokio::select! {
         result=execution => result,

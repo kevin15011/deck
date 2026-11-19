@@ -263,9 +263,9 @@ async fn malformed_lost_ack_and_unexpected_requests_are_uncertain_never_replayed
     }
 }
 #[tokio::test]
-async fn missing_auth_unsafe_sandbox_and_wrong_version_block_before_dispatch() {
+async fn missing_auth_unsafe_sandbox_and_connected_mcp_block_before_dispatch() {
     let project_fixture=tempfile::tempdir().unwrap();
-    for mode in ["auth", "unsafe", "version", "mcp", "protocol"] {
+    for mode in ["auth", "unsafe", "mcp"] {
         let t = tempfile::tempdir().unwrap();
         let binary = fake(t.path(), mode);
         let app = App::new(

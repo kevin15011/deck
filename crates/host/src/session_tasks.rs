@@ -547,7 +547,7 @@ pub fn start(app: App, task: String, attempt: String) {
                         a.settled_ms=None;Phase::Uncertain
                     } else if a.cancel_requested && (a.native_pid.is_none() || a.settled_ms.is_some()) {
                         Phase::Cancelled
-                    } else if a.dispatch_ms.is_some() || (a.native_pid.is_some() && a.settled_ms.is_none()) {
+                    } else if a.settled_ms.is_none() && (a.dispatch_ms.is_some() || a.native_pid.is_some()) {
                         Phase::Uncertain
                     } else {
                         Phase::Failed
@@ -1203,6 +1203,13 @@ mod tests {
             } else if scenario=="approval" {
                 tokio::time::timeout(Duration::from_secs(8),async {while !app.receipt("parallel-root").unwrap().decisions.iter().any(|d|d.task.as_deref()==Some(task.as_str())&&d.state==deck2_shared::DecisionState::Pending) {tokio::time::sleep(Duration::from_millis(10)).await;}}).await.unwrap();
             } else {barrier(dir.path(),"ready-a").await;}
+            if scenario == "running" {
+                tokio::time::pause();
+                tokio::time::advance(Duration::from_secs(601)).await;
+                tokio::time::resume();
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                assert_eq!(app.store.lock().unwrap().task(&task).unwrap().attempts[0].phase, Phase::Running);
+            }
             let before=app.store.lock().unwrap().task(&task).unwrap();assert_eq!(before.attempts[0].dispatch_ms.is_none(),preparing);
             update(&app,&task,&attempt,crate::tasks::cancel_attempt).unwrap();
             member_settled(&app,&task).await;
@@ -1213,6 +1220,24 @@ mod tests {
             std::fs::write(dir.path().join("release-b"),"").unwrap();member_settled(&app,b).await;
             assert_eq!(app.store.lock().unwrap().task(b).unwrap().attempts[0].phase,Phase::Completed);
         }
+    }
+
+    #[tokio::test]
+    async fn dispatched_member_exit_releases_capacity_after_cleanup() {
+        let (dir, app, owners) = parallel_fixture(&["a"]);
+        let (task, attempt) = &owners[0];
+        app.start_task(task, attempt).unwrap();
+        barrier(dir.path(), "ready-a").await;
+        let before = app.store.lock().unwrap().task(task).unwrap();
+        assert!(before.attempts[0].dispatch_ms.is_some());
+        let pid = before.attempts[0].native_pid.unwrap() as i32;
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
+        member_settled(&app, task).await;
+        let store = app.store.lock().unwrap();
+        let after = store.task(task).unwrap();
+        assert_eq!(after.attempts[0].phase, Phase::Failed);
+        assert!(after.attempts[0].settled_ms.is_some());
+        assert!(!store.member_blocks_root(&Mode::SessionV1, &after.session).unwrap());
     }
 
     // Fault injection at ownership publication: a successfully spawned process

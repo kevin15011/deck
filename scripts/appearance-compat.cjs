@@ -6,7 +6,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'deck2-appearance-')),state=path
 for(const name of ['project','original','home'])fs.mkdirSync(path.join(root,name),{mode:0o700});
 fs.writeFileSync(path.join(root,'original/projects.json'),JSON.stringify({v:1,projects:[]}),{mode:0o600});
 const fake=path.join(root,'codex');fs.copyFileSync(path.join(__dirname,'../crates/host/tests/fake_native.py'),fake);fs.chmodSync(fake,0o700);
-const host=spawn(binary,['serve','--project',path.join(root,'project'),'--state-dir',state,'--history-root',path.join(root,'original'),'--artifact-store',path.join(root,'tools'),'--codex',fake,'--no-open'],{env:{...process.env,HOME:path.join(root,'home'),CODEX_HOME:path.join(root,'native')},stdio:['ignore','pipe','pipe']});
+const host=spawn(binary,['serve','--foreground','--project',path.join(root,'project'),'--state-dir',state,'--history-root',path.join(root,'original'),'--artifact-store',path.join(root,'tools'),'--codex',fake,'--no-open'],{env:{...process.env,HOME:path.join(root,'home'),CODEX_HOME:path.join(root,'native')},stdio:['ignore','pipe','pipe']});
 let log='',browser;host.stdout.on('data',b=>log+=b);host.stderr.on('data',b=>log+=b);
 const wait=ms=>new Promise(r=>setTimeout(r,ms)),started=performance.now(),result={binary:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[],passed:false};
 const unrelated={'deck2.draft':'keep draft','deck2.pending-command':'keep identity','deck2.host.fixture.git-layout':'split','deck-notification-preferences':'keep notifications'};

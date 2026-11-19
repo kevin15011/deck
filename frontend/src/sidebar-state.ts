@@ -5,13 +5,23 @@ export function sessionStatus(w:Workspace,id:string,decisions=0):WorkspaceSessio
  const pending=rows.flatMap(r=>r.decisions).filter(d=>['pending','responded','dispatching','uncertain'].includes(d.state));
  const leadPending=pending.filter(d=>!d.task||d.task==='lead');
  const approvals=leadPending.filter(d=>!d.questions.length).length,questions=leadPending.filter(d=>d.questions.length>0).length;
- const tasks=w.tasks.filter(t=>t.session===id),attempts=tasks.flatMap(t=>t.attempts.slice(-1));
  const workers=workerCounts(w,id);
  // Counts come from persisted receipts and decisions, never inferred from a rendered view.
- const errors=Number(current?.phase==='failed'||current?.phase==='uncertain')+attempts.filter(a=>a.phase==='failed'&&!a.failure_dismissal||a.phase==='uncertain').length;
+ const errors=Number(current?.phase==='failed'||current?.phase==='uncertain')+subagentErrorCount(w,id);
  const preparing=!!current&&['queued','accepted','preparing','dispatching'].includes(current.phase);
  return {preparationStatus:preparing?'preparing':current&&['running','cancelling'].includes(current.phase)?'ready':current?.phase==='failed'?'failed':'disconnected',leadActivity:{state:current?.phase==='uncertain'?'ownership-unsettled':current?.phase==='cancelling'?'running':current?.phase??'unknown',pendingApprovals:approvals,pendingQuestions:questions},activity:{workers,attention:{approvals:pending.filter(d=>!d.questions.length).length,questions:pending.filter(d=>d.questions.length>0).length,decisions,byLead:pending.filter(d=>!d.task||d.task==='lead').length+decisions,byWorkers:pending.filter(d=>!!d.task&&d.task!=='lead').length,unowned:0},errors}};
 }
+export function subagentErrorCount(w:Workspace,session:string):number {
+ return w.tasks.filter(task=>{
+  if(task.session!==session||task.owner==='lead')return false;
+  const attempt=task.attempts.at(-1);
+  if(attempt?.phase==='uncertain')return true;
+  if(attempt?.phase!=='failed'||attempt.failure_dismissal)return false;
+  const disposition=attempt.treatments.at(-1)?.disposition;
+  return disposition!=='adopted'&&disposition!=='rejected';
+ }).length;
+}
+
 export function projectStatus(projectId:string,rows:WorkspaceSession[]):ProjectActivity {
  return rows.reduce<ProjectActivity>((v,s)=>{const a=s.activity!;v.connected+=Number(s.preparationStatus==='ready');v.leadsRunning+=Number(s.leadActivity?.state==='running');v.leadsStarting+=Number(s.preparationStatus==='preparing');for(const k of ['active','queued','blocked','unsettled'] as const)v.workers[k]+=a.workers[k];for(const k of ['approvals','questions','decisions','byLead','byWorkers','unowned'] as const)v.attention[k]+=a.attention[k];v.attentionSessions+=Number(a.attention.approvals+a.attention.questions+a.attention.decisions>0);v.errors+=a.errors;return v;},{projectId,connected:0,leadsRunning:0,leadsStarting:0,workers:{active:0,queued:0,blocked:0,unsettled:0},attentionSessions:0,attention:{approvals:0,questions:0,decisions:0,byLead:0,byWorkers:0,unowned:0},errors:0});
 }

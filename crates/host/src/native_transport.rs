@@ -410,7 +410,7 @@ impl Gate {
 }
 
 pub(super) async fn read_value(
-    lines: &mut tokio::io::BufReader<tokio::process::ChildStdout>,
+    lines: &mut (impl tokio::io::AsyncBufRead + Unpin),
     partial: &mut Vec<u8>,
 ) -> Result<Value, String> {
     use tokio::io::AsyncBufReadExt;
@@ -427,9 +427,7 @@ pub(super) async fn read_value(
             .position(|b| *b == b'\n')
             .map(|i| i + 1)
             .unwrap_or(buf.len());
-        if partial.len() + count > 2 * 1024 * 1024 {
-            return Err("Native event exceeded the 2 MiB limit".into());
-        }
+        partial.try_reserve(count).map_err(|_| "Insufficient memory to read native event")?;
         let done = buf[count - 1] == b'\n';
         partial.extend_from_slice(&buf[..count]);
         lines.consume(count);
@@ -444,6 +442,15 @@ pub(super) async fn read_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn large_event_preserves_contents_and_next_event() {
+        let payload = "x".repeat(3 * 1024 * 1024);
+        let input = format!("{{\"result\":\"{payload}\"}}\n{{\"id\":2}}\n");
+        let mut reader = tokio::io::BufReader::with_capacity(4096, input.as_bytes());
+        let mut partial = Vec::new();
+        assert_eq!(read_value(&mut reader, &mut partial).await.unwrap()["result"], payload);
+        assert_eq!(read_value(&mut reader, &mut partial).await.unwrap(), json!({"id":2}));
+    }
     fn event(turn: &str) -> Value {
         json!({"method":"item/started","params":{"threadId":"thread","turnId":turn,"item":{"type":"mcpToolCall","id":"call","server":"deck-session","tool":"deck_session_history","arguments":{"after":1}}}})
     }

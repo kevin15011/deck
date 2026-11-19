@@ -4,7 +4,7 @@ const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),asse
 const native=process.env.DECK2_REAL_CODEX;if(!native)throw Error('Explicit DECK2_REAL_CODEX required');
 const binary=path.resolve(process.argv[2]||'dist/deck2'),out=path.resolve(process.env.DECK2_EVIDENCE_DIR||'target/session-parity/live-browser');fs.mkdirSync(out,{recursive:true});
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'deck2-session-live-')),project=path.join(root,'project');fs.mkdirSync(project);fs.writeFileSync(path.join(project,'fixture.txt'),'The isolated fixture value is PINE-4831.\n');
-const host=spawn(binary,['serve','--project',project,'--state-dir',path.join(root,'state'),'--codex',native,'--no-open'],{stdio:'ignore'}),wait=ms=>new Promise(r=>setTimeout(r,ms));let browser;
+const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',path.join(root,'state'),'--codex',native,'--no-open'],{stdio:'ignore'}),wait=ms=>new Promise(r=>setTimeout(r,ms));let browser;
 const started=Date.now(),result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),native,checks:[],passed:false};
 (async()=>{try{
  for(let i=0;i<200&&!fs.existsSync(path.join(root,'state/launcher.json'));i++)await wait(100);

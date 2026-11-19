@@ -249,7 +249,7 @@ impl Process {
             self.pending.lock().unwrap().remove(&id);
             return Err(e);
         }
-        let result = tokio::time::timeout(Duration::from_secs(30), rx).await;
+        let result = tokio::time::timeout(crate::native::rpc_timeout(method), rx).await;
         self.pending.lock().unwrap().remove(&id);
         match result {
             Ok(Ok(v)) => v,

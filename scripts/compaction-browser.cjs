@@ -30,7 +30,7 @@ let native=fs.readFileSync(path.join(repo,'crates/host/tests/fake_session_native
    continue
   def tool(name,args):`);
 fs.writeFileSync(path.join(root,'codex'),native,{mode:0o700});
-const host=spawn(binary,['serve','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,CODEX_HOME:path.join(root,'native')}});
+const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,CODEX_HOME:path.join(root,'native')}});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let browser,page;
 const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[],passed:false,root};const start=performance.now();
 (async()=>{try{

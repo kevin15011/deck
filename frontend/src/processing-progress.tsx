@@ -13,8 +13,7 @@ export function processingState(rows:Receipt[],connected:boolean,sending:boolean
  if(r.phase==='queued')return {phase:'waiting',label:'Message queued'};
  if(['accepted','preparing','dispatching'].includes(r.phase))return {phase:'preparing',label:'Starting Lead…'};
  if(r.phase==='cancelling')return {phase:'waiting',label:'Stopping Lead…'};
- if(r.text.trim())return {phase:'responding',label:'Responding…'};
- return {phase:'waiting',label:'Waiting for Lead…'};
+ return {phase:'working',label:'Working…'};
 }
 export function ProcessingProgress({rows,connected,sending,unconfirmed,children}:{rows:Receipt[];connected:boolean;sending:boolean;unconfirmed?:boolean;children:React.ReactNode}){
  const {phase,label}=processingState(rows,connected,sending,unconfirmed),ref=useRef<HTMLSpanElement>(null);

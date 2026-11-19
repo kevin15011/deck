@@ -4,7 +4,7 @@ const {chromium}=require('playwright'),fs=require('fs'),path=require('path'),os=
 const repo=path.resolve(__dirname,'..'),binary=path.resolve(process.argv[2]||'dist/deck2'),out=path.resolve(process.env.DECK2_EVIDENCE_DIR||'target/p14/browser');fs.mkdirSync(out,{recursive:true});
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'deck2-dictation-')),project=path.join(root,'project');fs.mkdirSync(project);
 fs.copyFileSync(path.join(repo,'crates/host/tests/fake_session_native.py'),path.join(root,'codex'));fs.chmodSync(path.join(root,'codex'),0o700);
-const host=spawn(binary,['serve','--project',project,'--state-dir',path.join(root,'state'),'--artifact-store',path.join(root,'owned'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,CODEX_HOME:path.join(root,'native'),DECK_WHISPER_CLI:path.join(root,'missing-engine')}});
+const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',path.join(root,'state'),'--artifact-store',path.join(root,'owned'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,CODEX_HOME:path.join(root,'native'),DECK_WHISPER_CLI:path.join(root,'missing-engine')}});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let browser,page;const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[],passed:false,root},started=performance.now();
 (async()=>{try{
  for(let i=0;i<200&&!fs.existsSync(path.join(root,'state/launcher.json'));i++)await wait(50);

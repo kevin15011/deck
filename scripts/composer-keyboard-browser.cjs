@@ -6,7 +6,7 @@ const git=(...args)=>execFileSync('/usr/bin/git',args,{cwd:project,env:{PATH:'/u
 git('init','-q','-b','keyboard-unborn');
 let native=fs.readFileSync(path.join(repo,'crates/host/tests/fake_session_native.py'),'utf8').replace(" elif m=='turn/start':", " elif m=='turn/interrupt':\n  result(v,{})\n  out({'method':'turn/completed','params':{'threadId':thread,'turn':{'id':'normal-turn','status':'interrupted'}}})\n elif m=='turn/start':").replace("  assert p['approvalPolicy']","  while (root/'prepare-gate').exists():time.sleep(.02)\n  assert p['approvalPolicy']").replace("  def tool(name,args):","  if 'Keyboard hold' in text:continue\n  def tool(name,args):");
 fs.writeFileSync(path.join(root,'codex'),native,{mode:0o700});
-const host=spawn(binary,['serve','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,CODEX_HOME:path.join(root,'native')}});
+const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,CODEX_HOME:path.join(root,'native')}});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let browser,page;
 const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[],passed:false,root};const start=performance.now();
 (async()=>{try{

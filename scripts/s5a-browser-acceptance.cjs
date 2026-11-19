@@ -5,7 +5,7 @@ const out=path.resolve(process.env.DECK2_EVIDENCE_DIR||'target/s5a-verification'
 const root=fs.mkdtempSync(path.join(out,'journey-')),project=path.join(root,'project'),state=path.join(root,'state');fs.mkdirSync(project);fs.mkdirSync(state,{mode:0o700});
 fs.writeFileSync(path.join(project,'queue.rs'),'pub fn dispatch(cancelled: bool) -> bool { !cancelled }\n');
 const binary=path.resolve(process.argv[2]||'dist/deck2'),log=fs.openSync(path.join(root,'host.log'),'w');
-const host=spawn(binary,['serve','--project',project,'--state-dir',state,'--no-open','--codex','/home/kevin15011/.local/bin/codex','--opencode','/home/kevin15011/.opencode/bin/opencode','--investigator-model','minimax-coding-plan/MiniMax-M2.7'],{stdio:['ignore',log,log]});
+const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',state,'--no-open','--codex','/home/kevin15011/.local/bin/codex','--opencode','/home/kevin15011/.opencode/bin/opencode','--investigator-model','minimax-coding-plan/MiniMax-M2.7'],{stdio:['ignore',log,log]});
 const delay=ms=>new Promise(r=>setTimeout(r,ms));let browser,page;const result={root,binary,binary_sha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[],timings:{}};
 async function until(fn,timeout=240000){const start=Date.now();while(Date.now()-start<timeout){const v=await fn();if(v)return v;await delay(150);}throw new Error('Owned fixture deadline exceeded');}
 async function api(method,url,body){return page.evaluate(async({method,url,body})=>{const r=await fetch(url,{method,headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});return {status:r.status,body:await r.json()};},{method,url,body});}

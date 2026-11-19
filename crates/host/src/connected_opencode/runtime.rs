@@ -162,13 +162,15 @@ impl Process {
                 let mut output = lines.into_inner().into_inner().into_inner();
                 let _ = tokio::io::copy(&mut output, &mut tokio::io::sink()).await;
             });
-            let response = process
+            let subscription = process
                 .client
                 .client
                 .get(format!("{}/event", process.client.base))
                 .basic_auth("opencode", Some(&process.client.password))
-                .send()
+                .send();
+            let response = tokio::time::timeout(Duration::from_secs(600), subscription)
                 .await
+                .map_err(|_| "Native event subscription timed out")?
                 .map_err(|_| "Native events unavailable")?;
             if !response.status().is_success() {
                 return Err("Native event authentication failed".into());

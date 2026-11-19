@@ -8,7 +8,7 @@ const evidence=process.env.DECK2_EVIDENCE_DIR||path.join(repo,'target/s2-correct
 const project=path.join(root,'project'),state=path.join(root,'state');fs.mkdirSync(project);fs.writeFileSync(path.join(project,'example.txt'),'before\n');
 fs.copyFileSync(path.join(repo,'crates/host/tests/fake_native.py'),path.join(root,'codex'));fs.chmodSync(path.join(root,'codex'),0o700);
 fs.writeFileSync(path.join(root,'mode'),kind==='snapshot'?'edit-missing':'edit-question');
-const host=spawn(process.env.DECK2_BINARY||path.join(repo,'dist/deck2'),['serve','--project',project,'--state-dir',state,'--codex',path.join(root,'codex'),'--no-open']);
+const host=spawn(process.env.DECK2_BINARY||path.join(repo,'dist/deck2'),['serve','--foreground','--project',project,'--state-dir',state,'--codex',path.join(root,'codex'),'--no-open']);
 const start=Date.now(),wait=ms=>new Promise(r=>setTimeout(r,ms));let browser;
 (async()=>{try{
  for(let i=0;i<100&&!fs.existsSync(path.join(state,'launcher.json'));i++)await wait(100);

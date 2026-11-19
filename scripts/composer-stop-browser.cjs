@@ -4,9 +4,9 @@ const repo=path.resolve(__dirname,'..'),binary=path.resolve(process.argv[2]||'di
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'deck2-stop-')),project=path.join(root,'project');fs.mkdirSync(project);
 const git=(...args)=>execFileSync('/usr/bin/git',args,{cwd:project,env:{PATH:'/usr/bin:/bin',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}});
 git('init','-q','-b','keyboard-unborn');
-let native=fs.readFileSync(path.join(repo,'crates/host/tests/fake_session_native.py'),'utf8').replace(" elif m=='turn/start':", " elif m=='turn/interrupt':\n  result(v,{})\n  out({'method':'turn/completed','params':{'threadId':thread,'turn':{'id':'normal-turn','status':'interrupted'}}})\n elif m=='turn/start':").replace("  assert p['approvalPolicy']","  while (root/'prepare-gate').exists():time.sleep(.02)\n  assert p['approvalPolicy']").replace("  def tool(name,args):","  if 'Keyboard hold' in text:continue\n  def tool(name,args):");
+let native=fs.readFileSync(path.join(repo,'crates/host/tests/fake_session_native.py'),'utf8').replace(" elif m=='turn/start':", " elif m=='turn/interrupt':\n  result(v,{})\n  out({'method':'turn/completed','params':{'threadId':p['threadId'],'turn':{'id':p['turnId'],'status':'interrupted'}}})\n elif m=='turn/start':").replace("  assert p['approvalPolicy']","  while (root/'prepare-gate').exists():time.sleep(.02)\n  assert p['approvalPolicy']").replace("  def tool(name,args):","  if 'Keyboard hold' in text:continue\n  def tool(name,args):");
 fs.writeFileSync(path.join(root,'codex'),native,{mode:0o700});
-const host=spawn(binary,['serve','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,HOME:root,XDG_DATA_HOME:path.join(root,'data'),XDG_CONFIG_HOME:path.join(root,'config'),CODEX_HOME:path.join(root,'native')}});
+const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,HOME:root,XDG_DATA_HOME:path.join(root,'data'),XDG_CONFIG_HOME:path.join(root,'config'),CODEX_HOME:path.join(root,'native')}});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let browser,page;
 const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[],passed:false,root,assets:process.env.DECK2_UI_ASSETS?Object.fromEntries(['app.js','app.css'].map(f=>[f,crypto.createHash('sha256').update(fs.readFileSync(path.join(process.env.DECK2_UI_ASSETS,f))).digest('hex')])):'embedded'};const start=performance.now();
 (async()=>{try{
@@ -14,10 +14,13 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  const launcher=JSON.parse(fs.readFileSync(path.join(root,'state/launcher.json'))),base='http://'+launcher.host,link=await(await fetch(base+'/launch',{method:'POST',body:launcher.admin})).json();
  browser=await chromium.launch({executablePath:process.env.DECK2_CHROMIUM||'/snap/bin/chromium',headless:true,args:['--no-sandbox']});const context=await browser.newContext({viewport:{width:1440,height:1000}});page=await context.newPage();page.setDefaultTimeout(10000);const errors=[];page.on('pageerror',e=>errors.push(e.stack||e.message));
  if(process.env.DECK2_UI_ASSETS)for(const file of ['app.js','app.css'])await page.route('**/'+file,route=>route.fulfill({path:path.join(process.env.DECK2_UI_ASSETS,file),contentType:file.endsWith('.js')?'application/javascript':'text/css'}));
- await page.goto(link.url);await page.waitForFunction(()=>document.querySelector('.connection')?.textContent.includes('Connected'));
+ const waitForConnection=()=>page.waitForFunction(()=>document.querySelector('.sidebar .navigation-add')?.disabled===false);
+ await page.goto(link.url);await waitForConnection();
  const ws=async()=>await(await page.request.get(base+'/api/workspace')).json();const until=async fn=>{for(let i=0;i<200;i++){const w=await ws();if(fn(w))return w;await wait(100);}throw Error('Workspace deadline');};
- const create=async title=>{await page.getByRole('button',{name:'New session in project',exact:true}).click();await page.getByLabel('Session name',{exact:true}).fill(title);await page.getByRole('button',{name:'Create session',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});await page.waitForFunction(title=>document.querySelector('.app-header h1')?.textContent===title,title);return (await ws()).sessions.find(s=>s.title===title).id;};
+ const create=async title=>{await page.getByRole('button',{name:'New session in project',exact:true}).press('Enter');await page.getByLabel('Session name',{exact:true}).fill(title);await page.getByRole('button',{name:'Create session',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});await page.waitForFunction(title=>document.querySelector('.app-header h1')?.textContent===title,title);return (await ws()).sessions.find(s=>s.title===title).id;};
  const first=await create('Stop race session'),prompt=page.locator('#prompt');
+ const primary=page.locator('.composer-actions button.send');
+ const sendNode=await primary.elementHandle();
  const untilCheck=async fn=>{for(let i=0;i<60;i++){if(await fn())return;await wait(50);}throw Error('Stop did not cancel the intended claimed input');};
  const pair=async()=>{await page.keyboard.press('Escape');await wait(40);await page.keyboard.press('Escape');};
  const attach=async()=>{const chooser=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Attach images',exact:true}).click();await(await chooser).setFiles({name:'stop.png',mimeType:'image/png',buffer:fs.readFileSync(path.join(repo,'scripts/fixtures/s8c-synthetic.png'))});await page.waitForFunction(()=>document.querySelector('.image-draft small')?.textContent==='Ready');};
@@ -26,11 +29,14 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  let pinned=await until(w=>w.receipts.at(-1)?.phase==='preparing'&&w.receipts.at(-1).dispatch_ms===null),intended=pinned.receipts.at(-1);
  await page.route('**/api/workspace',route=>route.fulfill({json:pinned}));await wait(600);
  assert.equal(await page.locator('.composer-actions button.send').count(),1);
- const stopButton=page.locator('.composer-actions button.send');
+ const stopButton=primary;
+ assert(await sendNode.evaluate(node=>node.isConnected&&node.matches('.send.stop')),'Send and Stop share a DOM button');
  assert.equal(await stopButton.getAttribute('aria-label'),'Stop Lead');
  assert.equal(await page.locator('.composer-actions [aria-label="Cancel task"]').count(),0);
  assert.equal(await stopButton.getAttribute('type'),'button');
- await prompt.fill('Draft during preparation');await prompt.press('Enter');assert.equal(await prompt.inputValue(),'Draft during preparation');
+ await prompt.fill('Draft during preparation');await prompt.press('Enter');
+ await prompt.evaluate(node=>node.form.requestSubmit());
+ assert.equal(await prompt.inputValue(),'Draft during preparation');
  assert.equal((await ws()).receipts.length,pinned.receipts.length);
  result.checks.push('Preparing input owns the single red Stop control; Enter retains draft and sends nothing');
  await prompt.fill('');
@@ -47,11 +53,21 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  await prompt.fill('Latest draft');
  let cancelCount=0,releaseCancel,observedCancel;const cancelSeen=new Promise(r=>observedCancel=r),cancelGate=new Promise(r=>releaseCancel=r);
  await page.route('**/api/commands/'+intended.id+'/cancel',async route=>{cancelCount++;const response=await route.fetch();observedCancel();await cancelGate;await route.fulfill({response});});
- await page.locator('.composer-actions button.send').evaluate(n=>{n.click();n.click();});await cancelSeen;
+ await stopButton.focus();
+ await stopButton.evaluate(n=>{n.click();n.click();});await cancelSeen;
  const stoppingButton=page.getByRole('button',{name:'Stopping Lead',exact:true});assert(await stoppingButton.isDisabled());
+ assert(await prompt.evaluate(node=>document.activeElement===node),'A focused Stop returns focus to the draft when disabled');
  await prompt.press('Enter');assert.equal(await prompt.inputValue(),'Latest draft');assert.equal(cancelCount,1);
+ await page.getByRole('button',{name:'Project conversation',exact:true}).press('Enter');
+ await page.waitForFunction(()=>document.querySelector('.app-header h1')?.textContent==='Project conversation');
+ assert.equal(await primary.getAttribute('type'),'submit');
+ assert.equal(await prompt.inputValue(),'');
+ await page.getByRole('button',{name:'Stop race session',exact:true}).press('Enter');
+ await stoppingButton.waitFor();
+ assert.equal(await prompt.inputValue(),'Latest draft');
+ assert.equal(cancelCount,1);
  releaseCancel();await page.unroute('**/api/commands/'+intended.id+'/cancel');
- result.checks.push('Rapid double click sends one real cancellation; stopping disables the same action and Enter preserves draft');
+ result.checks.push('Rapid double click cancels once; the disabled Stop returns focus, Enter preserves draft, and another session retains Send');
  await untilCheck(async()=> (await ws()).receipts.find(r=>r.id===intended.id)?.phase==='cancelled');
  assert.equal((await ws()).receipts.find(r=>r.id===queued.id).phase,'queued');assert.equal(await prompt.inputValue(),'Latest draft');assert.equal(await page.locator('.image-draft').count(),0);
  result.checks.push('Actual Stop interrupts the intended receipt despite stale preparing projection; claimed text/images stay out of draft and unrelated queued input stays queued');
@@ -63,11 +79,11 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  const beforeRecall=await until(w=>w.receipts.at(-1).phase==='preparing'&&w.receipts.at(-1).dispatch_ms===null);await page.waitForFunction(()=>document.querySelector('[aria-label="Stop Lead"]'));
  await page.route('**/api/workspace',route=>route.fulfill({json:beforeRecall}));await wait(600);
  let seen,release;const observed=new Promise(r=>seen=r),gate=new Promise(r=>release=r);
- await page.route('**/api/workspace',route=>route.abort());await page.waitForFunction(()=>document.querySelector('.connection')?.textContent.includes('Disconnected'));
+ await page.route('**/api/health',route=>route.abort());await page.route('**/api/workspace',route=>route.abort());await page.waitForFunction(()=>document.querySelector('.composer-actions .send')?.title.includes('Disconnected'));
  assert(await page.getByRole('button',{name:'Stop Lead',exact:true}).isDisabled());
  assert((await page.getByRole('button',{name:'Stop Lead',exact:true}).getAttribute('title')).includes('Disconnected'));
- await page.unroute('**/api/workspace');await page.route('**/api/workspace',route=>route.fulfill({json:beforeRecall}));
- await page.waitForFunction(()=>document.querySelector('.connection')?.textContent.includes('Connected'));
+ await page.unroute('**/api/health');await page.unroute('**/api/workspace');await page.route('**/api/workspace',route=>route.fulfill({json:beforeRecall}));
+ await waitForConnection();
  await page.emulateMedia({reducedMotion:'reduce'});
  result.checks.push('Disconnected active work retains a disabled Stop; reconnect under reduced motion restores cancellation');
  await page.route('**/api/commands/*/recall',async route=>{const response=await route.fetch();seen();await gate;await route.fulfill({response});});
@@ -85,7 +101,7 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  await page.locator('#exchange-'+unread.id).waitFor({state:'detached'});
  fs.unlinkSync(path.join(root,'prepare-gate'));await until(w=>w.receipts.find(r=>r.id===unread.id)?.phase==='cancelled');
  const audit=(await ws()).receipts.find(r=>r.id===unread.id);assert.equal(audit.prompt,'Double Escape unread input');assert.equal(audit.dispatch_ms,null);
- await page.reload();await page.waitForFunction(()=>document.querySelector('.connection')?.textContent.includes('Connected'));
+ await page.reload();await waitForConnection();
  assert.equal(await prompt.inputValue(),'Double Escape unread input');assert.equal(await page.locator('.image-draft').count(),2);
  assert.equal(await page.locator('#exchange-'+unread.id).count(),0);
  // Reopening the conversation must neither republish the exchange nor duplicate recovery.
@@ -106,7 +122,7 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  // The native effective level is model-bound and survives ordinary-session reload.
  const acknowledged=(await ws()).receipts.find(r=>r.model&&r.reasoning);
  assert(acknowledged,'Native acknowledgement must persist effective reasoning');
- await page.waitForFunction(()=>document.querySelector('.app-header .lead-reasoning')?.textContent.trim()==='· high');
+ await page.waitForFunction(()=>document.querySelector('.app-header .lead-reasoning')?.textContent.trim()==='high');
  assert(!(await page.locator('.app-header .lead-identity').innerText()).includes('reviewed edits'));
  const modelNode=await page.locator('.app-header .lead-identity span').boundingBox(),effortNode=await page.locator('.app-header .lead-reasoning').boundingBox();assert(modelNode.x+modelNode.width<=effortNode.x,'Reasoning follows matching model');
  await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>document.querySelector('.app-header .lead-reasoning')?.getBoundingClientRect().width>0);
@@ -114,17 +130,51 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  await page.screenshot({path:path.join(out,'header-narrow.png')});await page.setViewportSize({width:1440,height:1000});
  result.checks.push('Ordinary receipt native model/effort persists after reload and reopen, follows model, and stays visible at 390px');
  await page.waitForFunction(()=>!document.querySelector('.send.stop'));
- await page.route('**/api/workspace',route=>route.abort());await page.waitForFunction(()=>document.querySelector('.connection')?.textContent.includes('Disconnected'));
+ await page.route('**/api/health',route=>route.abort());await page.route('**/api/workspace',route=>route.abort());await page.waitForFunction(()=>document.querySelector('.composer-actions .send')?.title.includes('Disconnected'));
  const sendButton=page.locator('.composer-actions button.send');assert(await sendButton.isDisabled());assert.equal(await sendButton.getAttribute('aria-label'),'Send question');assert((await sendButton.getAttribute('title')).includes('Disconnected'));
- assert.equal(await prompt.inputValue(),'');await page.unroute('**/api/workspace');
- await page.waitForFunction(()=>document.querySelector('.connection')?.textContent.includes('Connected'));
+ assert.equal(await prompt.inputValue(),'');await page.unroute('**/api/health');await page.unroute('**/api/workspace');
+ await waitForConnection();
  await page.emulateMedia({reducedMotion:'reduce'});await page.screenshot({path:path.join(out,'stop.png')});
  result.checks.push('Disconnected without cancellable work shows disabled Send with reason; reconnect restores ready state under reduced motion');
  await prompt.fill('Native command permission stop');await prompt.press('Enter');
  const permission=(await until(w=>w.receipts.at(-1)?.decisions.some(d=>d.state==='pending'))).receipts.at(-1);
- await page.getByRole('button',{name:'Stop Lead',exact:true}).waitFor();await prompt.fill('Draft during permission wait');
+ await page.getByRole('button',{name:'Stop Lead',exact:true}).waitFor();
+ // Permission events open Activity asynchronously after the workspace reports the decision.
+ await page.locator('button[aria-label="Open Activity"][aria-expanded="true"]').click();
+ await page.locator('#session-inspector').waitFor({state:'hidden'});
+ await prompt.fill('Draft during permission wait');
  await page.getByRole('button',{name:'Stop Lead',exact:true}).click();await until(w=>w.receipts.find(r=>r.id===permission.id)?.phase==='cancelled');
  await page.waitForFunction(()=>!document.querySelector('.send.stop'));assert.equal(await prompt.inputValue(),'Draft during permission wait');
  result.checks.push('Real native permission wait remains cancellable through the single Stop action, retaining draft under reduced motion');
- await page.screenshot({path:path.join(out,'stop.png')});assert.deepEqual(errors,[]);result.passed=true;
+ await page.screenshot({path:path.join(out,'stop.png')});
+ // An unconfirmed send should retry the admitted payload, preserving newer edits.
+ let originalInput;
+ await page.route(base+'/api/commands',async route=>{
+  originalInput=route.request().postDataJSON();
+  await route.abort();
+ });
+ await prompt.fill('Input retained for retry');await prompt.press('Enter');
+ const retry=page.getByRole('button',{name:'Retry retained message',exact:true});
+ await retry.waitFor();assert(originalInput);
+ await page.unroute(base+'/api/commands');
+ await prompt.fill('Newer edits after unconfirmed delivery');
+ const retryRequest=page.waitForRequest(r=>r.url()===base+'/api/commands'&&r.method()==='POST');
+ await retry.click();
+ assert.deepEqual((await retryRequest).postDataJSON(),originalInput);
+ await until(w=>w.receipts.some(r=>r.id===originalInput.id&&r.phase==='completed'));
+ assert.equal(await prompt.inputValue(),'Newer edits after unconfirmed delivery');
+ result.checks.push('Once Stop settles, retained retry uses the same command and preserves newer draft edits');
+
+ const touch=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,storageState:await context.storageState()});
+ const mobile=await touch.newPage();
+ await mobile.goto(base+'/?session='+encodeURIComponent(first));
+ const mobilePrompt=mobile.locator('#prompt');
+ await mobilePrompt.waitFor();
+ const receiptCount=(await ws()).receipts.length;
+ await mobilePrompt.fill('Touch draft');await mobilePrompt.press('Enter');
+ assert.equal(await mobilePrompt.inputValue(),'Touch draft\n');
+ assert.equal((await ws()).receipts.length,receiptCount);
+ await touch.close();
+ result.checks.push('Touch Enter inserts a newline and preserves the draft without sending');
+ assert.deepEqual(errors,[]);result.passed=true;
 }finally{result.duration_ms=performance.now()-start;if(page&&!result.passed){await page.screenshot({path:path.join(out,'failure.png')}).catch(()=>{});fs.writeFileSync(path.join(out,'failure.txt'),await page.locator('body').innerText().catch(()=>''));}await browser?.close();host.kill('SIGTERM');await Promise.race([new Promise(r=>host.once('exit',r)),wait(3000)]);if(host.exitCode===null)host.kill('SIGKILL');result.hostExitCode=host.exitCode;result.hostSignal=host.signalCode;fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));}})().catch(e=>{console.error(e);process.exitCode=1;});

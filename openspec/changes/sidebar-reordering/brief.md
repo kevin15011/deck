@@ -1,0 +1,7 @@
+# Sidebar reordering
+
+Allow people to drag projects into a preferred order and reorder sessions inside their existing project. Persist navigation order across refreshes, preserve current selection and ordinary row actions, and support existing and newly discovered rows. Use Deck's compact sidebar typography and palette with a clear insertion marker and keyboard-accessible operation. Keep ordering local to Deck 2 navigation. Verification should cover both levels and persistence with actual browser interactions.
+
+Implemented with dedicated pointer grips, insertion markers, keyboard moves and persisted per-project session order. The rebuilt host passed scripts/sidebar-browser.cjs --sidebar-order-only on binary 11bd7d8d50ed4e000024011191026aa4ee5788cd06b4bdb310762001e235297b, including actual drag, reload, focus, preserved selection and cross-project rejection. TypeScript passed. The Rust subset merge regression passed. The wider sidebar browser test passed indentation, project trust, project rename and session creation, then failed its separate session-menu focus assertion before reaching its later scenarios.
+
+On fine hover-capable pointers only the hovered row reveals its grip. Keyboard focus and touch retain discovery. The packaged browser test passed hover isolation, drag, persistence after reload, and keyboard movement. A separate Chromium check covered touch visibility and keyboard focus. The shipped package is recorded in the subagent conversation space brief.

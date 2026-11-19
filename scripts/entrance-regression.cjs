@@ -3,7 +3,7 @@ const {chromium}=require(process.env.DECK2_PLAYWRIGHT_MODULE||'playwright');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{spawn}=require('node:child_process'),assert=require('node:assert/strict');
 const output=process.argv[3],binary=path.resolve(process.argv[2]),root=fs.mkdtempSync(path.join(os.tmpdir(),'deck2-entrance-'));
 fs.mkdirSync(path.join(root,'project'));
-const host=spawn(binary,['serve','--project',path.join(root,'project'),'--state-dir',path.join(root,'state'),'--no-open'],{stdio:'ignore'});
+const host=spawn(binary,['serve','--foreground','--project',path.join(root,'project'),'--state-dir',path.join(root,'state'),'--no-open'],{stdio:'ignore'});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let browser;
 const result={binarySha256:require('node:crypto').createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[],passed:false};
 (async()=>{try{

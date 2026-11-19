@@ -6,7 +6,7 @@ repo=Path(__file__).resolve().parents[1];root=Path(tempfile.mkdtemp(prefix='deck
 
 def start():
  global p,previous,base,cookie
- p=subprocess.Popen([binary,'serve','--project',str(project),'--state-dir',str(state),'--codex',str(native),'--no-open'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+ p=subprocess.Popen([binary,'serve','--foreground','--project',str(project),'--state-dir',str(state),'--codex',str(native),'--no-open'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
  for _ in range(100):
   try:
    record=json.loads((state/'launcher.json').read_text())

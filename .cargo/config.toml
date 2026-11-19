@@ -1,0 +1,5 @@
+# Tests create many short-lived SQLite databases with synchronous=FULL.
+# On WSL2 each fsync to /tmp costs ~0.5 s; tmpfs makes it free (97 s -> 0.3 s).
+# Keep the path short: some tests bind Unix sockets near the SUN_LEN limit.
+[env]
+TMPDIR = "/dev/shm"

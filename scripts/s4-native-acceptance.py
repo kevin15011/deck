@@ -7,7 +7,7 @@ project=root/'project';project.mkdir();(project/'queue.rs').write_text('pub fn c
 state=root/'state';state.mkdir(mode=0o700)
 log=(root/'host.log').open('w+')
 binary=pathlib.Path(sys.argv[1]) if len(sys.argv)>1 else base/'target/debug/deck2'
-p=subprocess.Popen([str(binary),'serve','--project',str(project),'--state-dir',str(state),'--no-open','--codex','/home/kevin15011/.local/bin/codex','--opencode','/home/kevin15011/.opencode/bin/opencode','--investigator-model','minimax-coding-plan/MiniMax-M2.7'],stdout=log,stderr=log,start_new_session=True)
+p=subprocess.Popen([str(binary),'serve','--foreground','--project',str(project),'--state-dir',str(state),'--no-open','--codex','/home/kevin15011/.local/bin/codex','--opencode','/home/kevin15011/.opencode/bin/opencode','--investigator-model','minimax-coding-plan/MiniMax-M2.7'],stdout=log,stderr=log,start_new_session=True)
 result={'binary':str(binary),'root':str(root)}
 try:
  for _ in range(300):

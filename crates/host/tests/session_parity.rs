@@ -485,7 +485,7 @@ async fn assignment_http_discovery_races_preserve_current_state() {
             "busy"=>{let input=serde_json::from_value(json!({"api":API,"id":"competing-input","session":"session-boundary","mode":"session_v1","prompt":"Current request"})).unwrap();app.store.lock().unwrap().admit(&input).unwrap();},
             "revision"=>{let a=serde_json::from_value(json!({"runnerId":"codex","modelId":"recorded-worker","thinking":"high"})).unwrap();app.store.lock().unwrap().assign_member("session-boundary","quality",a,1).unwrap();},
             "executable"=>{use std::io::Write;std::fs::OpenOptions::new().append(true).open(&binary).unwrap().write_all(b"\n# changed executable\n").unwrap();},
-            "native-config"=>std::fs::write(dir.path().join("native-role-fixture/config.toml"),"# changed selected config\n").unwrap(),
+            "native-config"=>std::fs::write(dir.path().join("native-role-fixture/config.toml"),"sandbox_mode = 'read-only'\n").unwrap(),
             _=>std::fs::write(dir.path().join(".deck/config.json"),"{}").unwrap(),
         }
         let expected=app.store.lock().unwrap().session_by_id("session-boundary").unwrap();

@@ -13,7 +13,7 @@ enum Integration { Installed, NotInstalled, Incomplete, CheckFailed }
 #[derive(Serialize)]
 pub(super) struct RunnerStatus {id:&'static str, state:Integration}
 
-fn codex_home(home:&FsPath)->Result<PathBuf,String>{
+pub(super) fn codex_home(home:&FsPath)->Result<PathBuf,String>{
     match std::env::var_os("CODEX_HOME").filter(|v|!v.is_empty()) {
         Some(p)=>{let p=PathBuf::from(p);if !p.is_absolute(){return Err("Codex home must be an absolute path".into());}Ok(p)},
         None=>Ok(home.join(".codex")),
@@ -26,7 +26,7 @@ fn command(home:&FsPath)->Result<tokio::process::Command,String>{
     Ok(c)
 }
 const OWNED:&str="<!-- rtk-owned: written by `rtk init --codex`, removed by `rtk init --codex --uninstall` -->";
-async fn read(path:&FsPath)->Result<Option<String>,String>{
+pub(super) async fn read(path:&FsPath)->Result<Option<String>,String>{
     use tokio::io::AsyncReadExt;
     match tokio::fs::metadata(path).await {
         Err(e) if e.kind()==std::io::ErrorKind::NotFound=>return Ok(None),

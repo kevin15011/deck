@@ -5,7 +5,7 @@ from pathlib import Path
 root=Path(tempfile.mkdtemp(prefix='deck2-session-origin-'));project=root/'project';project.mkdir();state=root/'state'
 binary=Path(os.environ.get('DECK2_BINARY',Path(__file__).resolve().parents[1]/'dist/deck2'))
 def launch():
- p=subprocess.Popen([str(binary),'serve','--project',str(project),'--state-dir',str(state),'--codex','/missing','--no-open'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+ p=subprocess.Popen([str(binary),'serve','--foreground','--project',str(project),'--state-dir',str(state),'--codex','/missing','--no-open'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
  deadline=time.monotonic()+10
  while time.monotonic()<deadline:
   try:

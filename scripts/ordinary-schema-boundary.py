@@ -11,7 +11,7 @@ def rows():
  with sqlite3.connect(f'file:{state}/state.db?mode=ro',uri=True) as c:return {t:c.execute(f'SELECT * FROM {t} ORDER BY rowid').fetchall() for t, in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")}
 def start(binary,name,ready=True):
  log=(root/(name+'.log')).open('w');prior=(state/'launcher.json').read_bytes() if (state/'launcher.json').exists() else None
- p=subprocess.Popen([str(binary),'serve','--project',str(project),'--state-dir',str(state),'--codex',str(fake),'--no-open'],stdout=log,stderr=log)
+ p=subprocess.Popen([str(binary),'serve',*(['--foreground'] if binary == new else []),'--project',str(project),'--state-dir',str(state),'--codex',str(fake),'--no-open'],stdout=log,stderr=log)
  deadline=time.monotonic()+20
  while p.poll() is None and time.monotonic()<deadline:
   if (state/'launcher.json').exists() and (state/'launcher.json').read_bytes()!=prior:break

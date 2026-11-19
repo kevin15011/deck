@@ -15,6 +15,29 @@ pub(crate) struct Entry {
 pub(crate) struct Navigation {
     pub projects: BTreeMap<String, Entry>,
     pub sessions: BTreeMap<String, Entry>,
+    #[serde(default)]
+    pub order_revision: u64,
+    #[serde(default)]
+    pub project_order: Vec<String>,
+    #[serde(default)]
+    pub session_order: BTreeMap<String, Vec<String>>,
+}
+
+// Replace the submitted subset in place so paging and filtering retain unseen preferences.
+pub(crate) fn merge_order(order: &mut Vec<String>, keys: Vec<String>) {
+    let visible: std::collections::BTreeSet<_> = keys.iter().cloned().collect();
+    let mut reordered = keys.into_iter();
+    order.retain_mut(|key| {
+        if !visible.contains(key) {
+            return true;
+        }
+        if let Some(next) = reordered.next() {
+            *key = next;
+            return true;
+        }
+        false
+    });
+    order.extend(reordered);
 }
 pub(crate) fn title(value: &str) -> Result<String, String> {
     let value = value.trim();
@@ -82,6 +105,47 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sidebar_order_preserves_legacy_preferences_and_unloaded_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("state.db");
+        let store = Store::open(&db, dir.path().to_str().unwrap()).unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO meta(key,value) VALUES('sidebar_navigation',?1)",
+                [r#"{"projects":{"project":{"title":"Saved name","hidden":true}},"sessions":{}}"#],
+            )
+            .unwrap();
+        let mut navigation = store.navigation().unwrap();
+        assert!(navigation.project_order.is_empty());
+        assert!(navigation.session_order.is_empty());
+        navigation.project_order = vec!["project".into(), "two".into()];
+        let existing = navigation
+            .session_order
+            .entry("project".into())
+            .or_default();
+        merge_order(
+            existing,
+            vec!["one".into(), "unloaded".into(), "three".into()],
+        );
+        merge_order(existing, vec!["three".into(), "one".into(), "new".into()]);
+        store.save_navigation(&navigation).unwrap();
+        drop(store);
+        let store = Store::open(&db, dir.path().to_str().unwrap()).unwrap();
+        let navigation = store.navigation().unwrap();
+        assert_eq!(navigation.project_order, ["project", "two"]);
+        assert_eq!(
+            navigation.session_order["project"],
+            ["three", "unloaded", "one", "new"]
+        );
+        assert!(navigation.projects["project"].hidden);
+        assert_eq!(
+            navigation.projects["project"].title.as_deref(),
+            Some("Saved name")
+        );
+    }
+
     // Protects durable rename without changing immutable ownership or native context.
     #[test]
     fn sidebar_rename_validates_and_survives_restart() {

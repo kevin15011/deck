@@ -1,6 +1,6 @@
 import {redactText} from './redaction';
 export interface Step {seq:number;command:string;task:string;attempt:string;item:string;kind:string;server:string;tool:string;args:string;owner:string;runner:string;startedMs:number;durationMs:number|null;status:'running'|'done'|'failed'|'cancelled'|'uncertain'}
-export interface ActivityPage {session:string;steps:Step[];live:Step[];older:boolean;newer:boolean}
+export interface ActivityPage {session:string;steps:Step[];live:Step[];members?:Step[];older:boolean;newer:boolean}
 /** Shell tokenization only. Retain original spelling for display redaction. */
 function words(command:string){
  const result:{value:string;raw:string}[]=[];
@@ -32,6 +32,19 @@ function redactShellWord({value,raw}:ReturnType<typeof words>[number]){
  }
  return raw;
 }
+
+function redactShellArguments(tokens:ReturnType<typeof words>){
+ let sensitiveValue=false;
+ return redactText(tokens.map(token=>{
+  if(sensitiveValue){
+   sensitiveValue=false;
+   return '[redacted]';
+  }
+  sensitiveValue=/^--[\w.-]*(?:api[-_]?key|access[-_]?key|token|password|passwd|secret|authorization)$/i.test(token.value);
+  return redactShellWord(token);
+ }).join(' '),180).replace(/\s+/g,' ');
+}
+
 export function stepLabel(step:Pick<Step,'kind'|'server'|'tool'|'args'>):{label:string;summary:string;mark:string}{
  const summary=redactText(step.args,180).replace(/\s+/g,' ');
  if(step.kind==='mcpToolCall'){
@@ -40,17 +53,27 @@ export function stepLabel(step:Pick<Step,'kind'|'server'|'tool'|'args'>):{label:
  }
  if(step.kind==='commandExecution'){
   let tokens=words(step.args);if(/^(?:.*\/)?(?:bash|sh|zsh)$/.test(tokens[0]?.value??'')){const flag=tokens.findIndex(s=>/^-[a-z]*c[a-z]*$/.test(s.value));if(flag>=0)tokens=words(tokens[flag+1]?.value??'');}
-  while(tokens[0]?.value==='env'||/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0]?.value??''))tokens.shift();
-  if(/^(?:.*\/)?rtk$/.test(tokens[0]?.value??''))return {label:'rtk',summary:redactText(tokens.slice(1).map(redactShellWord).join(' '),180),mark:'›'};
-  return {label:'shell',summary,mark:'›'};
+  const executable=tokens.findIndex(token=>token.value!=='env'&&!/^[A-Za-z_][A-Za-z0-9_]*=/.test(token.value));
+  if(executable>=0&&/^(?:.*\/)?rtk$/.test(tokens[executable]!.value))return {label:'rtk',summary:redactShellArguments(tokens.slice(executable+1)),mark:'›'};
+  return {label:'shell',summary:redactShellArguments(tokens),mark:'›'};
  }
  if(step.kind==='fileChange')return {label:redactText(step.tool,128)||'edit',summary,mark:'✎'};
  if(step.kind==='reasoning')return {label:'Thinking…',summary:'',mark:'·'};
  return {label:step.kind==='webSearch'?'web search':redactText(step.tool,128)||'tool',summary,mark:'◇'};
 }
+
+export function memberStepLabel(step:Step|undefined,owner:{task:string;attempt:string}){
+ if(!step||step.task!==owner.task||step.attempt!==owner.attempt)return;
+ if(step.kind==='reasoning')return step.status==='running'?'Thinking…':undefined;
+ const {label,summary}=stepLabel(step);
+ return step.kind==='commandExecution'&&summary?`${label} · ${summary}`:label;
+}
+
 export function activityPage(value:unknown,session:string):ActivityPage{
  const v=value as ActivityPage;
  const valid=(s:Step)=>s&&Number.isSafeInteger(s.seq)&&s.seq>0&&['command','task','attempt','item','kind','server','tool','args','owner','runner'].every(k=>typeof s[k as keyof Step]==='string')&&['running','done','failed','cancelled','uncertain'].includes(s.status)&&Number.isSafeInteger(s.startedMs)&&(s.durationMs===null||Number.isSafeInteger(s.durationMs)&&s.durationMs>=0);
- if(!v||v.session!==session||typeof v.older!=='boolean'||typeof v.newer!=='boolean'||!Array.isArray(v.steps)||v.steps.length>200||!Array.isArray(v.live)||v.live.length>32||!v.steps.every(valid)||!v.live.every(valid)||v.steps.some((s,i)=>i>0&&v.steps[i-1]!.seq>=s.seq))throw Error('Activity identity or page is invalid.');return v;
+ if(!v||v.session!==session||typeof v.older!=='boolean'||typeof v.newer!=='boolean'||!Array.isArray(v.steps)||v.steps.length>200||!Array.isArray(v.live)||v.live.length>32||!v.steps.every(valid)||!v.live.every(valid)||v.steps.some((s,i)=>i>0&&v.steps[i-1]!.seq>=s.seq))throw Error('Activity identity or page is invalid.');
+ if(v.members!==undefined&&(!Array.isArray(v.members)||v.members.length>32||!v.members.every(s=>valid(s)&&s.task&&s.attempt)||new Set(v.members.map(s=>s.task)).size!==v.members.length))throw Error('Member activity identity is invalid.');
+ return v;
 }
 export function frameBatch<T>(write:(value:T)=>void,frame:(cb:FrameRequestCallback)=>number,cancel:(id:number)=>void){let pending:number|undefined,latest:T,disposed=false;return {push(value:T){if(disposed)return;latest=value;if(pending===undefined)pending=frame(()=>{pending=undefined;if(!disposed)write(latest);});},dispose(){disposed=true;if(pending!==undefined)cancel(pending);pending=undefined;}};}

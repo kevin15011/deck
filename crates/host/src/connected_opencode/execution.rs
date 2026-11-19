@@ -356,7 +356,6 @@ async fn execute(
         }).map_err(|e|format!("OpenCode input claim refused: {e:?}"))?;
         let post=dispatch.send(&process.client);tokio::pin!(post);
         let mut controls=tokio::time::interval(Duration::from_millis(100));
-        let deadline=tokio::time::sleep(Duration::from_secs(600));tokio::pin!(deadline);
         let mut revoked=BTreeSet::new();
         loop{tokio::select!{
             response=&mut post=>{
@@ -399,7 +398,6 @@ async fn execute(
                     if let Some(d)=action{send_reply(&process.client,&d,false).await?;app.change(&owner.root,|r|{if let Some(d)=r.decisions.iter_mut().find(|a|a.id==d.id){d.state=DecisionState::Delivered;d.delivered_ms=Some(crate::now());}})?;}
                 }
             },
-            _=&mut deadline=>{turn.close();process.abort(&thread).await;return Err("OpenCode native deadline; outcome uncertain".into());}
         }}
     }.await;
     if let Err(e) = process.stop().await {

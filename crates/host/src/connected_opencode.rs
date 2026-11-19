@@ -211,7 +211,6 @@ impl Client {
         let client = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(600))
             .connect_timeout(Duration::from_secs(5))
             .build()
             .map_err(|_| Failure::Transport)?;
@@ -227,16 +226,20 @@ impl Client {
         path: &str,
         body: Option<Value>,
     ) -> Result<Value, Failure> {
-        let timeout = if method == reqwest::Method::GET {
-            Duration::from_secs(5)
+        let timeout = if method == reqwest::Method::POST && path.ends_with("/message") {
+            None
+        } else if method == reqwest::Method::GET {
+            Some(Duration::from_secs(5))
         } else {
-            Duration::from_secs(600)
+            Some(Duration::from_secs(600))
         };
         let mut request = self
             .client
             .request(method, format!("{}{path}", self.base))
-            .timeout(timeout)
             .basic_auth("opencode", Some(&self.password));
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
         if let Some(body) = body {
             request = request.json(&body);
         }

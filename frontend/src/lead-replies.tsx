@@ -1,3 +1,5 @@
+import {MessageCopy,MessageTime} from './message-copy';
+import type {Receipt} from './api';
 import {Markdown} from './markdown';
 import { useEffect, useRef, useState } from 'react';
 type LeadReply={sessionId:string;replyId:string;messageSeq:number};
@@ -55,7 +57,28 @@ export function DisplayedReply({reply,visible,root,onDisplayed,children}:{reply?
   return <div ref={content} className="reply-content" data-reply-id={reply?.replyId}>{children}</div>;
 }
 
-export function LeadReplyText({text,fallback,reply,visible,root,onDisplayed}:{text:string;fallback:string;reply?:LeadReplyDisplay;visible:boolean;root:React.RefObject<HTMLElement|null>;onDisplayed:(reply:LeadReply)=>Promise<void>}){
+function ReplySlice({text,fallback,reply,visible,root,onDisplayed}:{text:string;fallback:string;reply?:LeadReplyDisplay;visible:boolean;root:React.RefObject<HTMLElement|null>;onDisplayed:(reply:LeadReply)=>Promise<void>}){
  const start=reply?.displayStart,known=typeof start==='number'&&Number.isSafeInteger(start)&&start>=0&&start<=text.length;
  return <>{known&&start>0&&<Markdown text={text.slice(0,start)}/>}<DisplayedReply reply={known?reply:undefined} visible={visible} root={root} onDisplayed={onDisplayed}><Markdown text={(known?text.slice(start):text)||fallback}/></DisplayedReply></>;
+}
+
+
+export function leadMessageText(text:string,start:number,nextStart?:number){
+ const slice=text.slice(start,nextStart);
+ // The host inserts a blank line between native items in the combined receipt.
+ return nextStart!==undefined&&slice.endsWith('\n\n')?slice.slice(0,-2):slice;
+}
+
+export function LeadReplyText({text,times,...props}:React.ComponentProps<typeof ReplySlice>&{times?:Receipt['message_times']}){
+ if(!times?.length)return <ReplySlice text={text} {...props}/>;
+ return <>{times.map(({start,at_ms},index)=>{
+  const end=times[index+1]?.start??text.length;
+  const replyStart=props.reply?.displayStart;
+  const reply=props.reply&&typeof replyStart==='number'&&replyStart>=start&&replyStart<end
+    ?{...props.reply,displayStart:replyStart-start}:undefined;
+  return <div className="lead-message-part" key={start}>
+   {index>0&&<div className="message-meta"><MessageTime timestamp={at_ms} label="Message received"/><MessageCopy text={leadMessageText(text,start,times[index+1]?.start)}/></div>}
+   <ReplySlice {...props} reply={reply} text={text.slice(start,end)}/>
+  </div>;
+ })}</>;
 }

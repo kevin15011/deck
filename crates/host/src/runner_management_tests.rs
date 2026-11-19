@@ -55,12 +55,12 @@ async fn inspection_is_threadless_and_distinguishes_failure_boundaries() {
     ] {
         let (d, app) = fixture(case);
         let result = inspect_native(&app.binary, &app.project).await;
-        if ["ready", "missingauth"].contains(&case) {
+        if ["ready", "missingauth", "version"].contains(&case) {
             let v = result.unwrap();
-            assert_eq!(v["authenticated"], case == "ready");
+            assert_eq!(v["authenticated"], case != "missingauth");
             assert_eq!(
                 v["models"].as_array().unwrap().len(),
-                if case == "ready" { 2 } else { 0 }
+                if case != "missingauth" { 2 } else { 0 }
             );
             if case == "ready" {
                 assert_eq!(v["models"][1]["qualified"], false);
@@ -69,7 +69,6 @@ async fn inspection_is_threadless_and_distinguishes_failure_boundaries() {
             let e = result.unwrap_err();
             assert!(
                 match case {
-                    "version" => e.contains("0.166.0"),
                     "environment" => e.contains("environment"),
                     _ => e.contains("restriction"),
                 },
@@ -1032,10 +1031,43 @@ async fn maintenance_observes_changed_version_without_adopting_it() {
     std::fs::write(d.path().join("case"), "version").unwrap();
     let v = observe_installation(&app.binary, "codex").await.unwrap();
     assert_eq!(v["version"], "codex-cli 9.0.0");
-    assert_eq!(v["state"], "unsupported_version");
+    assert_eq!(v["state"], "readiness_check_required");
     assert_eq!(v["ready"], false);
     assert_eq!(app.store.lock().unwrap().configuration().unwrap(), before);
     assert!(calls(d.path()).is_empty());
+}
+
+#[tokio::test]
+async fn standalone_update_follows_launcher_and_preserves_admitted_binding() {
+    use std::os::unix::fs::symlink;
+    let (dir, app) = fixture("ready");
+    let releases = dir.path().join("standalone/releases");
+    let old = releases.join("0.166.0/bin/codex");
+    let new = releases.join("0.170.0/bin/codex");
+    for path in [&old, &new] {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::copy(&app.binary, path).unwrap();
+    }
+    let launcher = dir.path().join("launcher");
+    symlink(&old, &launcher).unwrap();
+    let original = {
+        let store = app.store.lock().unwrap();
+        let mut c = store.configuration().unwrap();
+        c.runner.as_mut().unwrap().path = old.to_str().unwrap().into();
+        c.revision = store.next_configuration_revision().unwrap();
+        store.save_configuration(&c).unwrap();
+        store.admission_snapshot(&Mode::ReadOnly).unwrap()
+    };
+    std::fs::remove_file(&launcher).unwrap();
+    symlink(&new, &launcher).unwrap();
+    std::fs::remove_file(&old).unwrap();
+    let mut identity = None;
+    follow_codex_launcher(&app, &launcher, &mut identity).await.unwrap();
+    assert_eq!(app.selected_binary().unwrap(), launcher);
+    assert_eq!(original.runner.unwrap().path, old.to_str().unwrap());
+    let revision = app.store.lock().unwrap().configuration().unwrap().revision;
+    follow_codex_launcher(&app, &launcher, &mut identity).await.unwrap();
+    assert_eq!(app.store.lock().unwrap().configuration().unwrap().revision, revision);
 }
 
 // Protects tool-specific command targeting without extension/major/config effects.

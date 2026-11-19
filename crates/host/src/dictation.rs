@@ -213,6 +213,9 @@ fn existing_source(path: &FsPath) -> Result<Option<Directory>> {
     Ok(Some(Directory(dir)))
 }
 impl Service {
+    pub(crate) fn downloading(&self) -> bool {
+        self.info.lock().unwrap().download.is_some()
+    }
     #[cfg(test)]
     fn open(path: &FsPath, artifact: Artifact) -> Result<Arc<Self>> {
         Self::open_compatible(path, artifact, None)

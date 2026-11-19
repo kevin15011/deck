@@ -690,6 +690,10 @@ pub async fn control(
             "Native launcher authentication required",
         );
     }
+    if body["command"] == "stop" {
+        app.stop_request.notify_one();
+        return Json(json!({"stopping":true})).into_response();
+    }
     // Never hold identity while waiting for history: assignment/create snapshots
     // read selected identity while holding history/Store. Keep ownership locked
     // through the device effect, in the same direction as those readers.

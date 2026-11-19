@@ -6,12 +6,24 @@ import { NavigationIcon } from './navigation-icon';
 const empty: QuotaState = { runners: { claude: { refreshAfter: 0, refreshing: false }, codex: { refreshAfter: 0, refreshing: false } } };
 const CLAUDE_REFRESH_NOTE = 'Refresh uses a tiny amount of Claude quota for one isolated Haiku request.';
 const names = { claude: 'Claude', codex: 'Codex' };
+const runners = ['claude', 'codex'] as const;
+// Quota snapshots store percentages to one decimal place.
+const remainingPercent = (usedPercent: number) => (1000 - Math.round(usedPercent * 10)) / 10;
+const quotaTone = (remaining: number) => remaining <= 5 ? 'critical' : remaining <= 10 ? 'warning' : undefined;
+const resetDuration = (remainingMs: number) => {
+    const totalMinutes = Math.floor(remainingMs / 60_000);
+    if (totalMinutes < 1) return 'less than 1 minute';
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor(totalMinutes / 60) % 24;
+    const minutes = totalMinutes % 60;
+    return [days && `${days}d`, hours && `${hours}h`, minutes && `${minutes}m`].filter(Boolean).join(' ');
+};
 const elapsed = (at: number, now: number) => {
     const seconds = Math.max(0, Math.floor((now - at) / 1000));
     return seconds < 60 ? 'just now' : seconds < 3600 ? `${Math.floor(seconds / 60)}m ago` : seconds < 86400 ? `${Math.floor(seconds / 3600)}h ago` : `${Math.floor(seconds / 86400)}d ago`;
 };
 export function QuotaContents({ state, now, onRefresh, loading = false }: { state: QuotaState; now: number; onRefresh(runner: QuotaRunner): void; loading?: boolean }) {
-    return <div className="quota-runners">{(['claude', 'codex'] as const).map(runner => {
+    return <div className="quota-runners">{runners.map(runner => {
         const view = state.runners[runner], snapshot = view.snapshot;
         const wait = Math.max(0, Math.ceil((view.refreshAfter - now) / 1000));
         return <section key={runner} className={`quota-runner quota-${runner}`} aria-label={`${names[runner]} quota`}>
@@ -19,10 +31,20 @@ export function QuotaContents({ state, now, onRefresh, loading = false }: { stat
             {view.supported===false ? <p className="muted">Quota refresh is not yet available for this runner.</p> : snapshot ? <p className="muted">Updated {elapsed(snapshot.updatedAt, now)}{snapshot.plan ? ` · Plan: ${snapshot.plan}` : ''}</p> : <p className="muted">No quota snapshot yet</p>}
             {view.supported===false ? null : snapshot?.windows.length ? snapshot.windows.map(window => {
                 const label = window.id === 'five-hour' ? '5-hour' : '7-day';
-                return <div key={window.id} className="quota-window">
-                    <div className="quota-window-label"><span>{label}</span><span>{window.usedPercent}% used</span></div>
-                    <div className="quota-track" role="progressbar" aria-label={`${names[runner]} ${label} usage`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={window.usedPercent} aria-valuetext={`${window.usedPercent}% used`}><span style={{ width: `${window.usedPercent}%` }}/></div>
-                    <p className="muted">{window.resetsAt ? <>Resets <time dateTime={new Date(window.resetsAt).toISOString()}>{new Date(window.resetsAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}</time></> : 'Reset time not reported'}</p>
+                const remaining = remainingPercent(window.usedPercent);
+                const valueText = `${remaining}% remaining`;
+                const resetAt = window.resetsAt;
+                const resetDate = resetAt == null ? null : new Date(resetAt);
+                const resetIn = resetDate && Number.isFinite(resetDate.getTime()) ? resetDate.getTime() - now : null;
+                return <div key={window.id} className="quota-window" data-quota-tone={quotaTone(remaining)}>
+                    <div className="quota-window-label"><span>{label}</span><span className="quota-value">{valueText}</span></div>
+                    <div className="quota-track" role="progressbar" aria-label={`${names[runner]} ${label} subscription quota`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining} aria-valuetext={valueText}><span style={{ width: `${remaining}%` }}/></div>
+                    <p className="muted">{resetDate && resetIn !== null ? <>
+                        {resetIn > 0 && 'Resets in '}
+                        <time dateTime={resetDate.toISOString()} title={resetDate.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'long' })}>
+                            {resetIn > 0 ? resetDuration(resetIn) : 'Scheduled reset time passed'}
+                        </time>
+                    </> : 'Reset time not reported'}</p>
                 </div>;
             }) : <p className="quota-empty">{snapshot ? 'No subscription quota data' : 'Refresh to check subscription quota.'}</p>}
             {snapshot?.overageStatus?.startsWith('allowed') && <p className="muted">Extra usage enabled: billed beyond plan limits</p>}
@@ -82,11 +104,13 @@ export function QuotaSection({ api }: { api(path: string, init?: RequestInit): P
     return <QuotaSectionView collapsed={collapsed} onToggle={() => setCollapsed(value => !value)} state={state} now={now} loading={loading} message={message} onRefresh={runner => void refresh(runner)}/>;
 }
 
-export function quotaSummary(state: QuotaState) {
-    return (['claude', 'codex'] as const).flatMap(runner => {
-        const windows = state.runners[runner].snapshot?.windows ?? [];
-        return windows.length ? [`${names[runner]} ${Math.max(...windows.map(window => window.usedPercent))}%`] : [];
-    }).join(' · ');
+function quotaSummary(state: QuotaState) {
+    return runners.flatMap(runner => {
+        const { supported, snapshot } = state.runners[runner];
+        if (supported === false || !snapshot?.windows.length) return [];
+        const remaining = Math.min(...snapshot.windows.map(window => remainingPercent(window.usedPercent)));
+        return [{ runner, remaining }];
+    });
 }
 
 export function QuotaSectionView({ collapsed, onToggle, state, now, loading, message, onRefresh }: { collapsed: boolean; onToggle(): void; state: QuotaState; now: number; loading: boolean; message: string; onRefresh(runner: QuotaRunner): void }) {
@@ -94,7 +118,10 @@ export function QuotaSectionView({ collapsed, onToggle, state, now, loading, mes
     useDisclosureMotion(body, !collapsed);
     return <section className="usage-section" aria-labelledby="usage-section-title">
         <button type="button" className="quiet usage-toggle" aria-expanded={!collapsed} aria-controls="usage-section-body" onClick={onToggle}>
-            <NavigationIcon kind="chevron" expanded={!collapsed}/><span id="usage-section-title">Usage</span>{collapsed && summary && <span className="usage-summary">{summary}</span>}
+            <NavigationIcon kind="chevron" expanded={!collapsed}/><span id="usage-section-title">Usage</span>
+            {collapsed && summary.length > 0 && <span className="usage-summary">{summary.map(({ runner, remaining }) =>
+                <span key={runner} className="quota-value" data-quota-tone={quotaTone(remaining)}>{names[runner]} {remaining}% remaining</span>
+            )}</span>}
         </button>
         <div ref={body} id="usage-section-body" className="usage-body" hidden={collapsed} inert={collapsed} aria-hidden={collapsed}>
             <QuotaContents state={state} now={now} loading={loading} onRefresh={onRefresh}/>

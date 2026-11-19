@@ -1,3 +1,5 @@
+#[path = "context_mode_runner.rs"]
+pub(crate) mod context_mode;
 #[path = "tool_updates.rs"]
 mod updates;
 #[path = "rtk_runners.rs"]

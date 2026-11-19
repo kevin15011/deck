@@ -6,7 +6,7 @@ root=pathlib.Path(tempfile.mkdtemp(prefix='deck2-acceptance-'))
 project=root/'project';project.mkdir();(project/'example.txt').write_text('Project motto: copper-otter-317. Deck is a local workspace for read-only project conversations.\n')
 state=root/'state'
 binary=pathlib.Path(sys.argv[1]) if len(sys.argv)>1 else repo/'dist/deck2'
-p=subprocess.Popen([str(binary),'serve','--project',str(project),'--state-dir',str(state),'--codex','/home/kevin15011/.local/bin/codex','--no-open'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+p=subprocess.Popen([str(binary),'serve','--foreground','--project',str(project),'--state-dir',str(state),'--codex','/home/kevin15011/.local/bin/codex','--no-open'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
 def request(path,body=None,cookie=None):
  launch=json.loads((state/'launcher.json').read_text());base='http://'+launch['host']
  headers={'Origin':base}

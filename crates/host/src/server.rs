@@ -98,6 +98,9 @@ pub struct Inner {
     pub(crate) continuity_bound: Mutex<Option<serde_json::Value>>,
     broken: AtomicBool,
     pub(crate) activity_recording_warning: AtomicBool,
+    pub restart: crate::application::Restart,
+    pub stop_request: tokio::sync::Notify,
+    queue_retry_pending: AtomicBool,
     pub shutdown_requested: AtomicBool,
     pub availability: Option<String>,
     pub(crate) auth_scope: Mutex<Option<crate::managed_tools::OwnedLock>>,
@@ -116,13 +119,17 @@ impl std::ops::Deref for App {
     }
 }
 impl App {
-    pub fn new(
+    pub fn new(store: Store, host: String, binary: PathBuf, availability: Option<String>, admin: String, recovery: String) -> Self {
+        Self::with_browser_cookie(store, host, binary, availability, admin, recovery, secret())
+    }
+    pub fn with_browser_cookie(
         mut store: Store,
         host: String,
         binary: PathBuf,
         mut availability: Option<String>,
         admin: String,
         recovery: String,
+        cookie: String,
     ) -> Self {
         let selected = store.configuration().ok().and_then(|c| c.runner);
         if selected.is_none() {
@@ -135,14 +142,14 @@ impl App {
                         .find(|p| p.is_file())
                 })
             };
-            if let Some(path) = resolved.and_then(|p| std::fs::canonicalize(p).ok())
+            if let Some(path) = resolved.filter(|p| p.is_absolute())
                 && let Ok(bytes) = std::fs::read(&path)
             {
                 let digest = crate::tasks::digest(&bytes);
                 let result = (|| -> Result<(), String> {
                     store.register_codex(digest.clone())?;
                     let mut c = store.configuration()?;
-                    c.revision += 1;
+                    c.revision = store.next_configuration_revision()?;
                     c.runner = Some(deck2_shared::RunnerBinding {
                         path: path.to_string_lossy().into_owned(),
                         executable: digest,
@@ -189,7 +196,7 @@ impl App {
             #[cfg(test)]
             release_probe:Mutex::new(None),
             runner_runtime:Mutex::new(Default::default()),
-            cookie: secret(),
+            cookie,
             admin,
             recovery,
             launch: Mutex::new(None),
@@ -201,6 +208,9 @@ impl App {
             continuity_bound: Mutex::new(None),
             broken: AtomicBool::new(broken),
             activity_recording_warning: AtomicBool::new(false),
+            restart: crate::application::Restart::new(),
+            stop_request: Default::default(),
+            queue_retry_pending: AtomicBool::new(false),
             shutdown_requested: AtomicBool::new(false),
             availability,
             team:Mutex::new(None),
@@ -465,6 +475,21 @@ impl App {
         let mut s = self.store.lock().unwrap();
         let cap = match configured.and_then(|raw| crate::session_scheduler::lead_limit(&s.configuration()?, &raw)) { Ok(cap) => cap, Err(_) => return };
         let live = match self.live_roots(&active, &s, "") { Ok(live) => live, Err(_) => return };
+        match self.native_reuse.settle_waiting_roots(&mut s, &live) {
+            Ok(true) if !self.queue_retry_pending.swap(true, Ordering::SeqCst) => {
+                let weak = Arc::downgrade(&self.inner);
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    if let Some(inner) = weak.upgrade() {
+                        let app = App::from_inner(inner);
+                        app.queue_retry_pending.store(false, Ordering::SeqCst);
+                        app.pump_queue();
+                    }
+                });
+            }
+            Err(_) => { self.broken.store(true, Ordering::SeqCst); return; }
+            _ => {}
+        }
         if s.affected_work().unwrap_or(true) && self.retain_auth_scope().is_err() { return; }
         let next = s.claim_next_with_limit(&live, cap);
         drop(s);
@@ -524,6 +549,9 @@ impl App {
         for c in self.active.lock().unwrap().values() {
             let _ = c.send(true);
         }
+    }
+    pub fn write_restart_cookie(&self, stream: &mut impl std::io::Write) -> std::io::Result<()> {
+        stream.write_all(self.cookie.as_bytes())
     }
     pub fn issue_launch(&self) -> String {
         let token = secret();
@@ -617,6 +645,13 @@ pub(crate) async fn boundary(State(app): State<App>, req: Request, next: Next) -
         record_problem(&app, &response);
         return response;
     }
+    let _restart_admission = if !public && req.method() != axum::http::Method::GET && path != "/api/application/restart" {
+        let guard = app.restart.admission.read().await;
+        if app.restart.pending() {
+            return problem(StatusCode::CONFLICT, "shutting_down", "Deck is restarting.");
+        }
+        Some(guard)
+    } else { None };
     // Dropping an in-flight handler cancels its owned work through existing drop
     // guards. Never keep a cached original grant after source replacement/revoke.
     let headers = req.headers().clone();
@@ -723,10 +758,15 @@ async fn workspace(State(app): State<App>) -> Response {
         Err(e) => return problem(StatusCode::SERVICE_UNAVAILABLE, "storage", e),
     };
     crate::observations::project(&mut receipts, &mut tasks, &sessions);
-    let mut value=serde_json::to_value(Workspace{tasks,team_availability:if !s.configuration_for(&app.project).is_ok_and(|c|c.team_enabled){Some("Team investigation is disabled for new work. Review Configuration to re-enable it.".into())}else if app.team.lock().unwrap().as_ref().is_some_and(|r|r.matches_project(&app.project)){None}else{Some(app.team_unavailable.lock().unwrap().clone())},host_id,sessions,queue_paused,steering_unavailable:"Live steering is unavailable: durable once-only delivery across a lost native acknowledgment is not yet qualified. Queue the next input instead.".into(),trusted: match s.trusted_project(&app.project) { Ok(v)=>v, Err(e)=>return problem(StatusCode::SERVICE_UNAVAILABLE,"storage",e)}, api:API,session:s.session.clone(),project:app.project.clone(),runner:"Codex 0.166.0 · reviewed edits / read-only".into(),availability:if app.broken.load(Ordering::SeqCst){Some("Receipt persistence failed. Stop Deck and inspect its state directory; dispatch is blocked.".into())}else{availability},receipts}).unwrap();
+    let default_session = if s.session.is_empty() {
+        sessions.first().map(|session| session.id.clone()).unwrap_or_default()
+    } else {
+        s.session.clone()
+    };
+    let mut value=serde_json::to_value(Workspace{tasks,team_availability:if !s.configuration_for(&app.project).is_ok_and(|c|c.team_enabled){Some("Team investigation is disabled for new work. Review Configuration to re-enable it.".into())}else if app.team.lock().unwrap().as_ref().is_some_and(|r|r.matches_project(&app.project)){None}else{Some(app.team_unavailable.lock().unwrap().clone())},host_id,sessions,queue_paused,steering_unavailable:"Live steering is unavailable: durable once-only delivery across a lost native acknowledgment is not yet qualified. Queue the next input instead.".into(),trusted: !app.project.is_empty() && match s.trusted_project(&app.project) { Ok(v)=>v, Err(e)=>return problem(StatusCode::SERVICE_UNAVAILABLE,"storage",e)}, api:API,session:default_session,project:app.project.clone(),runner:"Codex · reviewed edits / read-only".into(),availability:if app.broken.load(Ordering::SeqCst){Some("Receipt persistence failed. Stop Deck and inspect its state directory; dispatch is blocked.".into())}else{availability},receipts}).unwrap();
     crate::execution_view::project(&mut value);
     value["process_active"] = json!(!active.is_empty());
-    value["initial_project"]=json!(crate::projects::id(&app.project));
+    if !app.project.is_empty() { value["initial_project"]=json!(crate::projects::id(&app.project)); }
     value["projects"]=serde_json::to_value(s.projects().unwrap_or_default()).unwrap();
     value["project_trust"]=json!(s.projects().unwrap_or_default().iter().map(|p|(p.id.clone(),s.trusted_project(&p.root).unwrap_or(false))).collect::<std::collections::BTreeMap<_,_>>());
     let projects = s.projects().unwrap_or_default();
@@ -1151,6 +1191,7 @@ struct Trust {
     api: u32,
     project: String,
     trusted: bool,
+    binding: Option<deck2_shared::ProjectBinding>,
 }
 async fn trust(State(app): State<App>, Json(body): Json<Trust>) -> Response {
     if let Some(r) = crate::web_identity::effect_denied() { return r; }
@@ -1162,17 +1203,28 @@ async fn trust(State(app): State<App>, Json(body): Json<Trust>) -> Response {
             "Incompatible API or unavailable store",
         );
     }
-    if body.trusted {
-        let result=app.store.lock().unwrap().project_by_id(&crate::projects::id(&body.project)).and_then(|p|crate::projects::validate(&p));
-        if let Err(e)=result{return problem(StatusCode::CONFLICT,"project",e);}
+    let mut store = app.store.lock().unwrap();
+    if body.trusted || body.binding.is_some() {
+        let result = store.project_by_id(&crate::projects::id(&body.project)).and_then(|p| {
+            if body.binding.as_ref().is_some_and(|expected| *expected != p) {
+                return Err("The project folder changed. Reopen Project settings and try again.".into());
+            }
+            if body.trusted {
+                crate::projects::validate(&p)?;
+            }
+            Ok(())
+        });
+        if let Err(e) = result {
+            return problem(StatusCode::CONFLICT, "project", e);
+        }
     }
-    match app
-        .store
-        .lock()
-        .unwrap()
-        .set_trust(&body.project, body.trusted)
-    {
-        Ok(()) => { if !body.trusted {crate::cbm_automatic::stop(&app,&body.project);} Json(json!({"trusted":body.trusted})).into_response() },
+    match store.set_trust(&body.project, body.trusted) {
+        Ok(()) => {
+            if !body.trusted {
+                crate::cbm_automatic::stop(&app, &body.project);
+            }
+            Json(json!({"trusted":body.trusted})).into_response()
+        }
         Err(e) => problem(StatusCode::CONFLICT, "trust_rejected", e),
     }
 }
@@ -1319,6 +1371,8 @@ pub(crate) async fn create_session_command(app: App, mut c: SessionCommand, tran
 struct RegisterProject {
     api: u32,
     root: String,
+    #[serde(default)]
+    trusted: bool,
 }
 async fn register_project(State(app): State<App>, Json(c): Json<RegisterProject>) -> Response {
     if let Some(r) = crate::web_identity::effect_denied() {
@@ -1333,7 +1387,16 @@ async fn register_project(State(app): State<App>, Json(c): Json<RegisterProject>
     }
     let result = (|| -> Result<_, String> {
         let mut store = app.store.lock().unwrap();
-        let p = store.register_project(&c.root)?;
+        let home = std::env::var_os("HOME").unwrap_or_default();
+        let input = crate::directories::expand(&c.root, std::path::Path::new(&home));
+        if !input.is_absolute() { return Err("Enter an absolute project directory".into()); }
+        let root = input.canonicalize().map_err(|_| "Project directory is unavailable")?;
+        let root = root.to_str().ok_or("Project path must be UTF-8")?;
+        let previous = store.project_by_id(&crate::projects::id(root)).ok();
+        let p = store.select_project_folder_with_trust(root, c.trusted)?;
+        if previous.is_some_and(|old| old != p) {
+            crate::cbm_automatic::stop(&app, root);
+        }
         // Only an explicit Add restores navigation; startup adoption never does.
         let mut n = store.navigation()?;
         if let Some(entry) = n.projects.get_mut(&p.id) {
@@ -1343,7 +1406,15 @@ async fn register_project(State(app): State<App>, Json(c): Json<RegisterProject>
         Ok(p)
     })();
     match result {
-        Ok(p) => Json(p).into_response(),
+        Ok(p) => {
+            if c.trusted {
+                crate::cbm_automatic::used(&App {
+                    inner: app.inner.clone(),
+                    project: p.root.clone(),
+                });
+            }
+            Json(p).into_response()
+        }
         Err(e) => problem(StatusCode::CONFLICT, "project_rejected", e),
     }
 }
@@ -1402,12 +1473,17 @@ async fn history_navigation_action(
     }
 }
 async fn sidebar_navigation(State(app): State<App>) -> Response {
+    let history = app.history.lock().unwrap();
     let store = app.store.lock().unwrap();
     let result = (|| -> Result<serde_json::Value, String> {
         let mut n =
             serde_json::to_value(store.navigation()?).map_err(|_| "Navigation unavailable")?;
         let mut counts = std::collections::BTreeMap::new();
+        let mut adopted_order_keys = std::collections::BTreeMap::new();
         for session in store.sessions()? {
+            if let Some(key) = history.adopted_navigation_key(&session) {
+                adopted_order_keys.insert(session.id.clone(), key);
+            }
             let list = crate::session_decisions::list(&store, &session.id)?;
             let count = list["decisions"]
                 .as_array()
@@ -1418,6 +1494,7 @@ async fn sidebar_navigation(State(app): State<App>) -> Response {
             counts.insert(session.id, count);
         }
         n["decisions"] = json!(counts);
+        n["adopted_order_keys"] = json!(adopted_order_keys);
         Ok(n)
     })();
     match result {
@@ -1425,6 +1502,91 @@ async fn sidebar_navigation(State(app): State<App>) -> Response {
         Err(e) => problem(StatusCode::SERVICE_UNAVAILABLE, "navigation_unavailable", e),
     }
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SidebarOrder {
+    api: u32,
+    project: Option<String>,
+    keys: Vec<String>,
+}
+async fn reorder_sidebar(State(app): State<App>, Json(c): Json<SidebarOrder>) -> Response {
+    if let Some(r) = crate::web_identity::effect_denied() {
+        return r;
+    }
+    let history = app.history.lock().unwrap();
+    let store = app.store.lock().unwrap();
+    let result = (|| -> Result<_, String> {
+        if c.api != API || app.broken.load(Ordering::SeqCst) {
+            return Err("Incompatible API or unavailable persistence".into());
+        }
+        let unique: std::collections::BTreeSet<_> = c.keys.iter().collect();
+        if unique.len() != c.keys.len() || unique.is_empty() {
+            return Err("Expected distinct navigation items".into());
+        }
+        let mut navigation = store.navigation()?;
+        let order = if let Some(project) = c.project {
+            let workspace_keys: std::collections::BTreeSet<_> = store
+                .sessions()?
+                .into_iter()
+                .filter(|s| s.project.id == project)
+                .map(|s| {
+                    history
+                        .adopted_navigation_key(&s)
+                        .unwrap_or_else(|| json!(["local", project, s.id]).to_string())
+                })
+                .collect();
+            for key in &c.keys {
+                if workspace_keys.contains(key) {
+                    continue;
+                }
+                let parts: Vec<String> = serde_json::from_str(key)
+                    .map_err(|_| "Invalid session order key")?;
+                let valid = match parts.as_slice() {
+                    [kind, _, owner, id] if kind == "history" && owner == &project => {
+                        *key == history.navigation_key(&project, id)?
+                            && history.navigation_project(id)? == project
+                    }
+                    _ => false,
+                };
+                if !valid {
+                    return Err("Session does not belong to this project and source".into());
+                }
+            }
+            navigation.session_order.entry(project).or_default()
+        } else {
+            let projects = navigation_project_ids(&store, &history)?;
+            if c.keys.iter().any(|id| !projects.contains(id)) {
+                return Err("Unknown project".into());
+            }
+            &mut navigation.project_order
+        };
+        crate::sidebar::merge_order(order, c.keys);
+        navigation.order_revision = navigation.order_revision.saturating_add(1);
+        store.save_navigation(&navigation)?;
+        Ok(navigation)
+    })();
+    match result {
+        Ok(navigation) => Json(navigation).into_response(),
+        Err(e) => problem(StatusCode::CONFLICT, "order_rejected", e),
+    }
+}
+
+fn navigation_project_ids(
+    store: &crate::Store,
+    history: &crate::history::Reader,
+) -> Result<std::collections::BTreeSet<String>, String> {
+    let mut ids: std::collections::BTreeSet<_> =
+        store.projects()?.into_iter().map(|p| p.id).collect();
+    if let Ok(catalog) = history.catalog() {
+        for project in catalog["projects"].as_array().into_iter().flatten() {
+            if let Some(id) = project["projectId"].as_str() {
+                ids.insert(id.to_owned());
+            }
+        }
+    }
+    Ok(ids)
+}
+
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProjectNavigationAction {
@@ -1445,18 +1607,7 @@ async fn project_navigation_action(
         if c.api != API || app.broken.load(Ordering::SeqCst) {
             return Err("Incompatible API or unavailable persistence".into());
         }
-        let mut project_ids = store
-            .projects()?
-            .into_iter()
-            .map(|p| p.id)
-            .collect::<std::collections::BTreeSet<_>>();
-        if let Ok(catalog) = history.catalog() {
-            for p in catalog["projects"].as_array().into_iter().flatten() {
-                if let Some(id) = p["projectId"].as_str() {
-                    project_ids.insert(id.to_owned());
-                }
-            }
-        }
+        let project_ids = navigation_project_ids(&store, &history)?;
         if !project_ids.contains(&id) {
             return Err("Unknown project".into());
         }
@@ -1881,6 +2032,10 @@ pub fn router(app: App) -> Router {
         .route("/web-control", post(crate::web_identity::control))
         .route("/launch", post(launch))
         .route("/auth", post(auth))
+        .route("/api/application/restart", get(crate::application::status).post(crate::application::restart))
+        .route("/api/health", get(|| async {
+            ([(header::CACHE_CONTROL, "no-store")], Json(json!({"api": API})))
+        }))
         .route("/api/workspace", get(workspace))
 .route("/api/sessions/{session}/activity", get(crate::activity::page))
 .route("/api/sessions/{session}/activity/{seq}/output", get(crate::activity::output))
@@ -1921,6 +2076,8 @@ pub fn router(app: App) -> Router {
         .route("/api/tools", get(crate::external_tools::inspect))
         .route("/api/tools/{tool}", post(crate::external_tools::change))
         .route("/api/tools/rtk/runners/{runner}", post(crate::external_tools::runners::change))
+        .route("/api/tools/context-mode", get(crate::external_tools::context_mode::inspect))
+        .route("/api/tools/context-mode/runners/{runner}", post(crate::external_tools::context_mode::change))
         .route("/api/configuration", get(configuration))
         .route("/api/helpers", get(helper_catalog))
         .route("/api/helpers/plans", post(helper_plan))
@@ -1963,6 +2120,7 @@ pub fn router(app: App) -> Router {
         )
         .route("/api/commands", post(browser_submit))
         .route("/api/sidebar", get(sidebar_navigation))
+        .route("/api/sidebar/order", post(reorder_sidebar))
         .route(
             "/api/sidebar/projects/{project}/sessions/{id}/{action}",
             post(history_navigation_action),
@@ -1971,6 +2129,7 @@ pub fn router(app: App) -> Router {
             "/api/projects/{id}/{action}",
             post(project_navigation_action),
         )
+        .route("/api/directories", get(crate::directories::suggestions))
         .route("/api/projects", post(register_project))
         .route("/api/sessions", post(create_session))
         .route("/api/sessions/{id}/release", post(release_session))
@@ -2168,6 +2327,45 @@ mod tests {
             StatusCode::CONFLICT
         );
     }
+    #[tokio::test]
+    async fn project_trust_is_explicit_and_bound_to_the_registered_folder() {
+        let (d, app) = scope_fixture();
+        let root = d.path().join("trust-target");
+        std::fs::create_dir(&root).unwrap();
+        let path = root.to_str().unwrap();
+        let key = crate::projects::id(path);
+        let add = json!({"api":API,"root":root,"trusted":true});
+        let saved = || app.store.lock().unwrap().trusted_project(path).unwrap();
+
+        for (auth, origin) in [(false, true), (true, false)] {
+            assert_eq!(sidebar_call(&app, "/api/projects", add.clone(), auth, origin).await.status(), StatusCode::FORBIDDEN);
+        }
+        assert!(app.store.lock().unwrap().project_by_id(&key).is_err());
+        let startup_trust = app.store.lock().unwrap().trusted_project(&app.project).unwrap();
+        assert_eq!(sidebar_call(&app, "/api/projects", add, true, true).await.status(), StatusCode::OK);
+        assert!(saved());
+        let binding = app.store.lock().unwrap().project_by_id(&key).unwrap();
+        let add_default = json!({"api":API,"root":root});
+        assert_eq!(sidebar_call(&app, "/api/projects", add_default.clone(), true, true).await.status(), StatusCode::OK);
+        assert!(saved());
+        let revoke = json!({"api":API,"project":path,"binding":binding,"trusted":false});
+        assert_eq!(sidebar_call(&app, "/api/project/trust", revoke.clone(), true, true).await.status(), StatusCode::OK);
+        assert!(!saved());
+
+        std::fs::rename(&root, d.path().join("previous-trust-target")).unwrap();
+        std::fs::create_dir(&root).unwrap();
+        let grant = json!({"api":API,"project":path,"binding":binding,"trusted":true});
+        assert_eq!(sidebar_call(&app, "/api/project/trust", grant.clone(), true, true).await.status(), StatusCode::CONFLICT);
+        assert_eq!(sidebar_call(&app, "/api/projects", add_default, true, true).await.status(), StatusCode::OK);
+        assert!(!saved());
+        assert_eq!(sidebar_call(&app, "/api/project/trust", grant, true, true).await.status(), StatusCode::CONFLICT);
+        let replacement = app.store.lock().unwrap().project_by_id(&key).unwrap();
+        assert_eq!(sidebar_call(&app, "/api/project/trust", json!({"api":API,"project":path,"binding":replacement,"trusted":true}), true, true).await.status(), StatusCode::OK);
+        assert_eq!(sidebar_call(&app, "/api/project/trust", revoke, true, true).await.status(), StatusCode::CONFLICT);
+        assert!(saved());
+        assert_eq!(app.store.lock().unwrap().trusted_project(&app.project).unwrap(), startup_trust);
+    }
+
     // Removal is a navigation preference: retain history, reject active and last-project removal.
     #[tokio::test]
     async fn sidebar_project_remove_guards_and_restore() {

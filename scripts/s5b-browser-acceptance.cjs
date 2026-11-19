@@ -5,7 +5,7 @@ const out=path.resolve(process.env.DECK2_EVIDENCE_DIR||'target/s5b-verification'
 const root=fs.mkdtempSync(path.join(out,'journey-')),project=path.join(root,'project'),state=path.join(root,'state'),artifacts=path.join(root,'artifacts');fs.mkdirSync(project);fs.mkdirSync(state,{mode:0o700});
 const source='// A representative comment explains the operation.\n\n'.repeat(24)+'pub fn bounded_sum(values: &[i32]) -> i32 {\n    let mut total = 0;\n    for value in values { total += value; }\n    total\n}\n';fs.writeFileSync(path.join(project,'fixture.rs'),source);
 const binary=path.resolve(process.argv[2]||'dist/deck2'),log=fs.openSync(path.join(root,'host.log'),'w');
-const host=spawn(binary,['serve','--project',project,'--state-dir',state,'--artifact-store',artifacts,'--no-open','--codex','/home/kevin15011/.local/bin/codex','--opencode','/home/kevin15011/.opencode/bin/opencode','--investigator-model','minimax-coding-plan/MiniMax-M2.7'],{stdio:['ignore',log,log]});
+const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',state,'--artifact-store',artifacts,'--no-open','--codex','/home/kevin15011/.local/bin/codex','--opencode','/home/kevin15011/.opencode/bin/opencode','--investigator-model','minimax-coding-plan/MiniMax-M2.7'],{stdio:['ignore',log,log]});
 const delay=ms=>new Promise(r=>setTimeout(r,ms));let browser,page;const result={root,binary,binary_sha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[],timings:{}};
 const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 async function until(fn,timeout=300000){const start=Date.now();while(Date.now()-start<timeout){const v=await fn();if(v)return v;await delay(180);}throw new Error('Owned fixture deadline exceeded');}

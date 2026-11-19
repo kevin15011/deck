@@ -699,8 +699,8 @@ impl Runner {
  if let Some((_,rest))=line.split_once("http://127.0.0.1:"){let port: u16=rest.trim().parse().map_err(|_|"Invalid native endpoint")?;return Ok(format!("http://127.0.0.1:{port}"))}}}).await.map_err(|_|"OpenCode startup timed out")??;
             // Drain startup stdout to prevent a pipe becoming an accidental lifecycle lock.
             tokio::spawn(async move{use tokio::io::AsyncReadExt;let mut bytes=[0u8;4096];while reader.read(&mut bytes).await.is_ok_and(|n|n>0){}});
-            let client=reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(15)).redirect(reqwest::redirect::Policy::none()).build().map_err(|_|"Cannot prepare native HTTP")?;
-            let health:Value=client.get(format!("{url}/global/health")).basic_auth("opencode",Some(&password)).send().await.map_err(|_|"Native health unavailable")?.json().await.map_err(|_|"Invalid native health")?;
+            let client=reqwest::Client::builder().no_proxy().connect_timeout(Duration::from_secs(15)).redirect(reqwest::redirect::Policy::none()).build().map_err(|_|"Cannot prepare native HTTP")?;
+            let health:Value=client.get(format!("{url}/global/health")).timeout(Duration::from_secs(15)).basic_auth("opencode",Some(&password)).send().await.map_err(|_|"Native health unavailable")?.json().await.map_err(|_|"Invalid native health")?;
             if health["version"]!="1.19.1"||health["healthy"]!=true{return Err("OpenCode must be exactly 1.19.1 and healthy".into())}
             Ok((client,url))
         }.await;
@@ -788,7 +788,8 @@ impl Runner {
                 method.parse().map_err(|_| "Invalid method")?,
                 format!("{}{path}", self.url),
             )
-            .basic_auth("opencode", Some(&self.password));
+            .basic_auth("opencode", Some(&self.password))
+            .timeout(Duration::from_secs(15));
         if let Some(v) = body {
             req = req.json(&v)
         }
@@ -856,7 +857,7 @@ impl Runner {
         match execution {
             Ok(r) => {
                 r.claimed.store(true, std::sync::atomic::Ordering::SeqCst);
-                let result = if r.provenance.runner == "codex 0.166.0" {
+                let result = if matches!(r.provenance.runner.as_str(), "codex" | "codex 0.166.0") {
                     r.run_codex(&app, &task, &attempt).await
                 } else {
                     r.run_inner(&app, &task, &attempt).await
@@ -948,7 +949,7 @@ impl Runner {
             }),
             model: "gpt-6.1-sol".into(),
             provenance: NativeProvenance {
-                runner: "codex 0.166.0".into(),
+                runner: "codex".into(),
                 integration: "app-server/scoped-dynamic-v1".into(),
                 executable,
                 content: digest(
@@ -991,7 +992,7 @@ impl Runner {
             Some(codex_tools(&self.scope.tools)?),
         )
         .await?;
-        let result = tokio::time::timeout(Duration::from_secs(600), async {
+        let result = async {
             let (thread, _, model) = native.prepare(app.project.as_str()).await?;
             {
                 let s = app.store.lock().unwrap();
@@ -1031,6 +1032,9 @@ impl Runner {
                     native.write(json!({"id":v["id"],"result":{"success":success,"contentItems":[{"type":"inputText","text":body.to_string()}]}})).await?;
                     continue;
                 }
+                if matches!(v["method"].as_str(), Some("item/started" | "item/completed")) {
+                    app.record_activity(authority, task, attempt, &thread, &turn, &v);
+                }
                 if v["method"] == "item/agentMessage/delta" {
                     if p["threadId"]!=thread || p["turnId"]!=turn { return Err("Foreign Investigator output".into()); }
                     report.push_str(p["delta"].as_str().ok_or("Missing report delta")?);
@@ -1044,7 +1048,7 @@ impl Runner {
                     return Ok(Some(if report.trim().is_empty(){Phase::Failed}else{Phase::Completed}));
                 }
             }
-        }).await.unwrap_or_else(|_|Err("Codex Investigator deadline exceeded".into()));
+        }.await;
         self.scope
             .enabled
             .store(false, std::sync::atomic::Ordering::SeqCst);
@@ -1106,13 +1110,14 @@ impl Runner {
             })
             .ok_or("Native session identity missing")?
             .to_string();
-        let mut events = self
+        let subscription = self
             .client
             .get(format!("{}/event", self.url))
             .basic_auth("opencode", Some(&self.password))
-            .timeout(Duration::from_secs(660))
-            .send()
+            .send();
+        let mut events = tokio::time::timeout(Duration::from_secs(660), subscription)
             .await
+            .map_err(|_| "Native event connection timed out before dispatch")?
             .map_err(|_| "Native event connection unavailable before dispatch")?;
         if !events.status().is_success()
             || !events
@@ -1183,7 +1188,6 @@ impl Runner {
             a.acknowledgment_ms = Some(crate::now());
             s.save_task(&t)?;
         }
-        let start = std::time::Instant::now();
         let mut cancellation = None;
         loop {
             let mut t = app.store.lock().unwrap().task(task)?;
@@ -1202,9 +1206,7 @@ impl Runner {
                 .await?;
                 cancellation = Some(std::time::Instant::now());
             }
-            if start.elapsed() > Duration::from_secs(600)
-                || cancellation.is_some_and(|s| s.elapsed() > Duration::from_secs(10))
-            {
+            if cancellation.is_some_and(|s| s.elapsed() > Duration::from_secs(10)) {
                 return Err(
                     "Native settlement timed out; specialist ownership remains uncertain".into(),
                 );

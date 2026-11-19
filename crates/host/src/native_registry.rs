@@ -18,6 +18,7 @@ pub(super) struct Template {
     binary: std::path::PathBuf,
     management_identity: Option<String>,
     compatibility: String,
+    hook_state: Option<serde_json::Value>,
 }
 impl Template {
     pub fn sibling(&self) -> Result<super::Native, String> {
@@ -29,6 +30,7 @@ impl Template {
             self.binary.clone(),
             self.management_identity.clone(),
             true,
+            self.hook_state.clone(),
         )
     }
 }
@@ -94,6 +96,17 @@ impl Registry {
             }
         }
         Ok(())
+    }
+    pub fn release_stopped(&self, session: &str, pid: i32) -> bool {
+        let mut entries = self.entries.lock().unwrap();
+        let Some(entry) = entries.get(session) else { return true };
+        // Live leases own their cleanup. Only bootstrap creates these synthetic entries.
+        if entry.state != State::Uncertain || entry.group != format!("recovered-process:{pid}") {
+            return false;
+        }
+        entries.remove(session);
+        self.changed.notify_waiters();
+        true
     }
     pub fn session_state(&self, session: &str) -> Option<&'static str> {
         self.entries
@@ -221,6 +234,7 @@ impl Lease {
                 binary: native.binary.clone(),
                 management_identity: native.management_identity.clone(),
                 compatibility: compatibility.into(),
+                hook_state: native.hook_state.clone(),
             });
         if let Some(e) = self.registry.entries.lock().unwrap().get_mut(&self.session) {
             e.template = template;

@@ -22,6 +22,12 @@ pub struct StartupTiming {
     pub mcp_readiness_ms: u64,
     pub mcp_status_requests: u64,
     pub mcp_inventory_ms: u64,
+    pub mcp_initial_page_ms: u64,
+    pub mcp_pagination_ms: u64,
+    pub mcp_retry_rpc_ms: u64,
+    pub mcp_inventory_validation_ms: u64,
+    pub mcp_inventory_passes: u64,
+    pub mcp_inventory_entries: u64,
     pub mcp_session_status_ms: u64,
     pub mcp_suppression_ms: u64,
     pub mcp_retry_wait_ms: u64,
@@ -117,10 +123,18 @@ pub struct Receipt {
     #[serde(default)]
     pub acknowledgment_ms: Option<u64>,
     pub first_output_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub message_times: Vec<MessageTime>,
     pub revision: u64,
     pub policy: String,
     pub runner: String,
     pub delivery: String,
+}
+/// First delivered text of a native assistant item. Offsets index browser UTF-16 strings.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MessageTime {
+    pub start: usize,
+    pub at_ms: u64,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Workspace {

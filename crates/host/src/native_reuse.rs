@@ -25,6 +25,37 @@ pub(crate) struct Slot {
 }
 impl Slot {
     pub(crate) fn recover(&self, store: &crate::Store) -> Result<(),String> { self.registry.recover(store) }
+    pub(crate) fn settle_waiting_roots(
+        &self, store: &mut crate::Store, live: &std::collections::HashSet<String>,
+    ) -> Result<bool, String> {
+        let rows = store.all()?;
+        let mut retry = false;
+        for mut r in rows.iter().filter(|r| r.phase == Phase::Uncertain && r.mode == Mode::SessionV1).cloned() {
+            if live.contains(&r.id)
+                || !rows.iter().any(|q| q.phase == Phase::Queued && q.session == r.session)
+                || r.turn.as_deref().is_none_or(str::is_empty)
+                || !r.decisions.iter().all(|d| matches!(d.state,
+                    deck2_shared::DecisionState::Settled | deck2_shared::DecisionState::Invalidated))
+                || crate::member_integration::Integration::for_receipt(&r)
+                    != Ok(crate::member_integration::Integration::Codex)
+            { continue; }
+            let Some(pid) = r.native_pid.and_then(|p| i32::try_from(p).ok()).filter(|p| *p > 1) else { continue };
+            let Some(context) = store.session_by_id(&r.session)?.native else { continue };
+            if context.runner != Some(deck2_shared::NativeRunner::Codex)
+                || context.mode != r.mode || r.thread.as_ref() != Some(&context.thread)
+            { continue; }
+            let absent = |id| unsafe { libc::kill(id, 0) } == -1
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+            if !absent(pid) || !absent(-pid) || !self.registry.release_stopped(&r.session, pid) {
+                retry = true;
+                continue;
+            }
+            r.phase = Phase::Failed;
+            r.detail = format!("{} · Native process stopped before reporting the outcome. Context retained for the next message.", r.detail);
+            store.save(&mut r)?;
+        }
+        Ok(retry)
+    }
     pub(crate) fn resource_view(&self, session: &str) -> Value {
         let (threads,groups)=self.registry.counts();
         json!({"state":self.registry.session_state(session),"threads":threads,"processes":groups,"thread_limit":MAX_THREADS,"process_limit":MAX_GROUPS})
@@ -98,11 +129,12 @@ pub(super) fn key(
     Ok(crate::tasks::digest(inputs.as_bytes()))
 }
 
-fn common_key(app: &App, binary: &Path) -> Result<String, String> {
+pub(super) fn common_key(app: &App, binary: &Path) -> Result<String, String> {
     use std::os::unix::fs::MetadataExt;
     let home = app.native_role_root.lock().unwrap().clone();
     let mut inputs = format!("{:?}|{:?}|{:?}", executable_identity(binary)?, home, std::env::current_dir().map_err(|_| "Native spawn cwd unavailable")?);
-    for path in [home.join("config.toml"), home.join("auth.json"), home.join("managed_config.toml"), home.join("requirements.toml"), PathBuf::from("/etc/codex/managed_config.toml"), PathBuf::from("/etc/codex/requirements.toml")] {
+    inputs.push_str(&crate::session_roles::codex_policy_key(&home.join("config.toml"))?);
+    for path in [home.join("auth.json"), home.join("managed_config.toml"), home.join("requirements.toml"), PathBuf::from("/etc/codex/managed_config.toml"), PathBuf::from("/etc/codex/requirements.toml")] {
         inputs.push_str(&format!("{path:?}"));
         match std::fs::metadata(path) {
             Ok(m) => inputs.push_str(&format!("{:?}", [m.dev(),m.ino(),m.len(),m.mtime() as u64,m.mtime_nsec() as u64,m.ctime() as u64,m.ctime_nsec() as u64])),
@@ -114,9 +146,15 @@ fn common_key(app: &App, binary: &Path) -> Result<String, String> {
     inputs.push_str(&format!("{env:?}"));
     Ok(crate::tasks::digest(inputs.as_bytes()))
 }
-pub(super) fn process_key(app: &App, binary: &Path) -> Result<String, String> {
+pub(super) fn process_key(app: &App, common: &str) -> Result<String, String> {
     let home = app.native_role_root.lock().unwrap().clone();
-    let mut inputs = common_key(app, binary)?;
+    let mut inputs = common.to_owned();
+    // A running process keeps its startup catalog. New sessions after catalog
+    // registration get an up-to-date process without retiring an active sibling.
+    let config = home.join("config.toml");
+    if config.try_exists().map_err(|_| "Cannot inspect native config")? {
+        inputs.push_str(&crate::tasks::digest(crate::session_roles::read(&config, 1024 * 1024)?.as_bytes()));
+    }
     for parent in Path::new(&app.project).ancestors() {
         for path in [parent.join(".codex/config.toml"), parent.join(".deck/config.json")] {
             if path == home.join("config.toml") { continue; }
@@ -159,7 +197,7 @@ impl App {
             drop(idle);
         }
     }
-    pub(crate) async fn retire_native(&self) -> Result<(), String> {
+    pub async fn retire_native(&self) -> Result<(), String> {
         #[cfg(test)]
         self.native_reuse.retire_entered.notify_one();
         self.native_reuse.epoch.fetch_add(1, Ordering::SeqCst);
@@ -189,21 +227,29 @@ pub(super) struct Checkout {
     pub reservation: Option<registry::Lease>,
 }
 
-pub(super) async fn take(app: &App, key: &str, group_key: &str, session: &str, fresh: bool) -> Result<Checkout, String> {
+/// Retained-capacity refusals that a single unretained process can serve
+/// safely. Same-session ownership (loading/leased/retiring/uncertain) and
+/// unsettled retirement are never bypassed: they protect one native writer.
+pub(super) fn degradable(app: &App, error: &str, session: &str) -> bool {
+    (error.contains("capacity is occupied")
+        || error.starts_with("Shared launch inputs changed while retained ownership is active"))
+        && !app.native_reuse.registry.occupied(session)
+}
+
+pub(super) async fn take(app: &App, key: &str, group_key: &str, common: &str, session: &str, fresh: bool) -> Result<Checkout, String> {
     app.native_reuse.registry.wait_retiring(session).await?;
     let mut state = app.native_reuse.retirement.clone().lock_owned().await;
     if let Some(error) = state.as_ref() { return Err(error.clone()); }
     if app.native_reuse.registry.occupied(session) {
         return Err("Retained session has loading, leased, retiring or uncertain ownership".into());
     }
-    let common = common_key(app, &app.binary)?;
     let changed = {
         let mut current = app.native_reuse.common_key.lock().unwrap();
-        let changed = current.as_ref().is_some_and(|old| old != &common);
+        let changed = current.as_ref().is_some_and(|old| old != common);
         if changed && app.native_reuse.registry.counts().0 > app.native_reuse.idle.lock().unwrap().len() {
             return Err("Shared launch inputs changed while retained ownership is active; wait for settlement".into());
         }
-        *current = Some(common);
+        *current = Some(common.to_owned());
         changed
     };
     if changed {
@@ -378,16 +424,20 @@ mod tests {
     // outside the idle view. Oracle: architect28 one lease per thread/session.
     #[tokio::test]
     async fn borrowed_thread_remains_owned_until_observed_settlement() {
-        let (_dir, app) = fixture();
+        let (_dir, mut app) = fixture();
+        let admitted = app.binary.clone();
+        // The CLI default is a command name; a project's selection is a file.
+        std::sync::Arc::get_mut(&mut app.inner).unwrap().binary = "codex".into();
         let first = turn(&app, "registry-first").await;
         assert_eq!(first.phase, Phase::Completed, "{}", first.detail);
+        let common = common_key(&app, &admitted).unwrap();
         let (key, group) = {
             let entries = app.native_reuse.idle.lock().unwrap();
             let entry = entries.last().expect("completed thread retained");
-            (entry.key.clone(), process_key(&app, &app.binary).unwrap())
+            (entry.key.clone(), process_key(&app, &common).unwrap())
         };
-        let mut borrowed = take(&app, &key, &group, "reuse-session", false).await.unwrap().native.unwrap();
-        let duplicate = take(&app, &key, &group, "reuse-session", false).await;
+        let mut borrowed = take(&app, &key, &group, &common, "reuse-session", false).await.unwrap().native.unwrap();
+        let duplicate = take(&app, &key, &group, &common, "reuse-session", false).await;
         let rejected = duplicate.is_err();
         drop(duplicate);
         borrowed.retire_thread().await.unwrap();
@@ -410,6 +460,68 @@ mod tests {
         let (_tx, rx) = watch::channel(false);
         super::super::run(app.clone(), id.into(), app.binary.clone(), rx).await;
         app.receipt(id).unwrap()
+    }
+    #[tokio::test]
+    async fn hook_change_during_preparation_settles_before_one_dispatch() {
+        let (dir, app) = fixture_with_script(|script| script.replace(
+            " elif m=='hooks/list':",
+            " elif m=='hooks/list':\n  if not (root/'changed-hooks').exists():\n   (root/'changed-hooks').touch()\n   with (root/'native-home/config.toml').open('a') as f:f.write('\\n[hooks.state.example]\\nenabled = false\\n')",
+        ));
+        let home = dir.path().join("native-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("config.toml"), "[plugins.'context-mode@context-mode']\nenabled = true\n[marketplaces.context-mode]\nsource_type = 'git'\nsource = 'mksglu/context-mode'\n").unwrap();
+        let receipt = turn(&app, "preparation-hooks-change").await;
+        assert!(dir.path().join("changed-hooks").exists());
+        assert_eq!(receipt.phase, Phase::Completed, "{}", receipt.detail);
+        let wire = std::fs::read_to_string(dir.path().join("startup-wire")).unwrap();
+        let calls = wire.lines().map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap());
+        assert_eq!(calls.filter(|call| call["method"] == "turn/start").count(), 1);
+    }
+    // Oracle: hooks (context-mode plugin, user hooks) must not disable warm
+    // reuse. A changed hook inventory replaces the runtime once; never blocks.
+    #[tokio::test]
+    async fn hook_enabled_lead_is_retained_and_hook_drift_cold_starts_once() {
+        let (dir, app) = fixture();
+        let home = dir.path().join("native-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("config.toml"), "[plugins.'context-mode@context-mode']\nenabled = true\n[marketplaces.context-mode]\nsource_type = 'git'\nsource = 'mksglu/context-mode'\n").unwrap();
+        let hook = |key: &str, event: &str, command: &str| json!({"key":key,"source":"user","handlerType":"command","eventName":event,"command":command,"currentHash":format!("hash-{key}")});
+        let inventory = dir.path().join("hook-inventory.json");
+        std::fs::write(&inventory, json!([hook("user:stop:0", "stop", "echo one")]).to_string()).unwrap();
+        let cold = turn(&app, "hooks-cold").await;
+        assert_eq!(cold.phase, Phase::Completed, "{}", cold.detail);
+        assert!(!cold.startup_timing.as_ref().unwrap().process_reused);
+        let warm = turn(&app, "hooks-warm").await;
+        assert_eq!(warm.phase, Phase::Completed, "{}", warm.detail);
+        let timing = warm.startup_timing.as_ref().unwrap();
+        assert!(timing.process_reused && timing.thread_reused, "hook-enabled Lead was not retained");
+        assert_eq!(warm.native_pid, cold.native_pid);
+        // A hook added after launch is outside the launched hooks.state.
+        std::fs::write(&inventory, json!([hook("user:stop:0", "stop", "echo one"), hook("user:session_start:0", "sessionStart", "echo two")]).to_string()).unwrap();
+        let drifted = turn(&app, "hooks-drifted").await;
+        assert_eq!(drifted.phase, Phase::Completed, "{}", drifted.detail);
+        assert!(!drifted.startup_timing.as_ref().unwrap().process_reused);
+        assert_ne!(drifted.native_pid, warm.native_pid);
+        let again = turn(&app, "hooks-warm-again").await;
+        assert_eq!(again.phase, Phase::Completed, "{}", again.detail);
+        assert!(again.startup_timing.as_ref().unwrap().process_reused, "replacement runtime was not retained");
+        let wire = std::fs::read_to_string(dir.path().join("startup-wire")).unwrap();
+        let starts = wire.lines().filter(|line| serde_json::from_str::<serde_json::Value>(line).unwrap()["method"] == "turn/start").count();
+        assert_eq!(starts, 4, "each admitted input dispatches exactly once");
+        // A warm turn after an acknowledged thread/resume keeps the loaded thread
+        // (and its MCP clients). Loads: cold start, first warm resume (no prior
+        // resume ack), drift replacement; the last warm turn reloads nothing.
+        let loads = wire.lines().filter(|line| {
+            let method = serde_json::from_str::<serde_json::Value>(line).unwrap()["method"].clone();
+            method == "thread/start" || method == "thread/resume"
+        }).count();
+        assert_eq!(loads, 3, "unchanged retained threads must not be reloaded");
+        let retained = again.startup_timing.as_ref().unwrap();
+        assert_eq!(retained.thread_method, "retained");
+        // No full MCP discovery (native would start every server): one scoped
+        // session-server observation reuses the verified inventory.
+        assert_eq!((retained.mcp_inventory_passes, retained.mcp_status_requests), (0, 1));
+        app.retire_native().await.unwrap();
     }
     // Oracle: simultaneous warm Leads keep independent exact thread/turn routes,
     // and target cancellation retires only that thread's ownership reservation.
@@ -437,6 +549,12 @@ mod tests {
                 }
             }).await.unwrap();
         }
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(601)).await;
+        tokio::time::resume();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(app.receipt("parallel-active-a").unwrap().phase, Phase::Running);
+        assert_eq!(app.receipt("parallel-active-b").unwrap().phase, Phase::Running);
         assert_eq!(app.native_reuse.registry.counts(), (2,1));
         assert!(app.native_reuse.registry.occupied("reuse-session"));
         assert!(app.native_reuse.registry.occupied("parallel-session-b"));
@@ -449,6 +567,32 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(10), worker).await.unwrap().unwrap();
         assert_eq!(app.receipt("parallel-active-b").unwrap().phase, Phase::Cancelled);
         assert_eq!(app.native_reuse.registry.counts(), (0,0));
+    }
+    #[tokio::test]
+    async fn catalog_registration_allows_another_project_while_lead_runs() {
+        let (dir, app) = fixture();
+        let other = add_project(&app, &dir.path().join("catalog-sibling"), "catalog-sibling");
+        let home = app.native_role_root.lock().unwrap().clone();
+        std::fs::create_dir_all(&home).unwrap();
+        let path = home.join("config.toml");
+        std::fs::write(&path, "model = 'first'\n").unwrap();
+        let input = serde_json::from_value(json!({"api":API,"id":"catalog-held","session":"reuse-session","prompt":"Hold cancellation","mode":"session_v1"})).unwrap();
+        app.store.lock().unwrap().admit(&input).unwrap();
+        let (tx, rx) = watch::channel(false);
+        let worker = tokio::spawn(super::super::run(app.clone(), "catalog-held".into(), app.binary.clone(), rx));
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while app.receipt("catalog-held").unwrap().phase != Phase::Running { tokio::task::yield_now().await; }
+        }).await.unwrap();
+        std::fs::write(path, "model = 'first'\n[marketplaces.tools]\nsource = '/catalog'\n").unwrap();
+        let second = turn_for(&other, "catalog-other", "catalog-sibling").await;
+        let held = app.receipt("catalog-held").unwrap();
+        assert_eq!(second.phase, Phase::Completed, "{}", second.detail);
+        assert_eq!(held.phase, Phase::Running, "{}", held.detail);
+        assert_ne!(held.native_pid, second.native_pid);
+        tx.send(true).unwrap();
+        worker.await.unwrap();
+        assert_eq!(app.receipt("catalog-held").unwrap().phase, Phase::Cancelled);
+        app.retire_native().await.unwrap();
     }
     #[tokio::test]
     async fn cold_sibling_finds_compatible_group_while_every_thread_is_leased() {
@@ -515,6 +659,44 @@ mod tests {
         assert_eq!(recovered.native_reuse.registry.counts(),(1,1));
         assert_eq!(recovered.native_reuse.registry.session_state("reuse-session"),Some("uncertain"));
         assert!(!dir.path().join("dispatch-count").exists());
+    }
+    #[test]
+    fn stopped_queued_root_keeps_its_thread_and_claims_only_the_next_input() {
+        use std::os::unix::process::CommandExt;
+        let (_dir, app) = fixture();
+        let mut store = app.store.lock().unwrap();
+        let mut process = std::process::Command::new("sleep").arg("30").process_group(0).spawn().unwrap();
+        let command = |id, queue| serde_json::from_value(json!({
+            "api":API,"id":id,"session":"reuse-session","prompt":"message","mode":"session_v1","queue":queue
+        })).unwrap();
+        let mut old = store.admit(&command("previous", false)).unwrap();
+        old.phase = Phase::Uncertain;
+        old.native_pid = Some(process.id());
+        old.thread = Some("existing-thread".into());
+        old.turn = Some("previous-turn".into());
+        old.text = "partial reply".into();
+        store.save(&mut old).unwrap();
+        let mut session = store.session_by_id("reuse-session").unwrap();
+        session.native = Some(deck2_shared::NativeContext {
+            mode: Mode::SessionV1, runner: Some(deck2_shared::NativeRunner::Codex),
+            thread: old.thread.clone().unwrap(), provenance: None,
+        });
+        store.save_session(&session).unwrap();
+        store.admit(&command("next-message", true)).unwrap();
+        let slot = Slot::default();
+        slot.recover(&store).unwrap();
+        assert!(slot.settle_waiting_roots(&mut store, &Default::default()).unwrap());
+        assert!(store.claim_next().unwrap().is_none());
+        process.kill().unwrap();
+        process.wait().unwrap();
+        assert!(!slot.settle_waiting_roots(&mut store, &Default::default()).unwrap());
+        assert_eq!(slot.registry.counts(), (0,0));
+        let previous = store.get("previous").unwrap().unwrap();
+        assert_eq!(previous.phase, Phase::Failed);
+        assert_eq!(previous.text, old.text);
+        assert_eq!(store.session_by_id("reuse-session").unwrap().native, session.native);
+        assert_eq!(store.claim_next().unwrap().unwrap().id, "next-message");
+        assert!(store.claim_next().unwrap().is_none());
     }
     // Protects cross-project retention at the default execution boundary. The
     // oracle is same process, distinct stable threads and per-thread discovery.
@@ -638,7 +820,12 @@ mod tests {
                 .map(|l|serde_json::from_str::<Value>(l).unwrap())
                 .filter(|v|v["method"]=="mcpServerStatus/list").collect();
             assert_eq!(checks.len(), 2 * i + 4);
-            assert!(checks.iter().all(|v| v["serverName"].is_null()));
+            // Every fresh replacement (A) performs full discovery. Session B's
+            // first warm turn follows thread/start (no resume ack) and is full;
+            // later unchanged retained B turns use the scoped session check.
+            let full = checks.iter().filter(|v| v["serverName"].is_null()).count();
+            let scoped = checks.iter().filter(|v| v["serverName"] == "deck-session").count();
+            assert_eq!((full, scoped), (i + 4, i));
             a = next;
         }
         app.retire_native().await.unwrap();
@@ -928,6 +1115,7 @@ mod tests {
             .filter(|v: &Value| matches!(v["method"].as_str(), Some("thread/start" | "thread/resume"))).collect();
         assert_eq!(loads.len(), 2);
         assert_eq!(loads[1]["method"], "thread/resume");
+        assert_eq!(loads[1]["params"]["excludeTurns"], true);
         assert!(loads.iter().all(|v| v["params"]["config"]["agents"]["enabled"] == false));
     }
     // Pinned native config/read -> thread/start contract: an absent optional

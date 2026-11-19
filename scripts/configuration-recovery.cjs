@@ -6,7 +6,7 @@ const fs=require('node:fs'),path=require('node:path'),{spawn}=require('node:chil
 const out=path.resolve(process.env.DECK2_EVIDENCE_DIR||'target/s5a-corrections/browser');fs.mkdirSync(out,{recursive:true});
 const root=fs.mkdtempSync(path.join(out,'fixture-')),project=path.join(root,'project'),state=path.join(root,'state'),codex=path.join(root,'codex'),binary=path.resolve(process.env.DECK2_BINARY||'dist/deck2');
 fs.mkdirSync(project);fs.writeFileSync(path.join(project,'sentinel'),'unchanged');fs.copyFileSync('crates/host/tests/fake_native.py',codex);fs.chmodSync(codex,0o700);fs.writeFileSync(path.join(root,'mode'),'normal');
-const log=fs.openSync(path.join(root,'host.log'),'w'),host=spawn(binary,['serve','--project',project,'--state-dir',state,'--codex',codex,'--no-open'],{stdio:['ignore',log,log]});
+const log=fs.openSync(path.join(root,'host.log'),'w'),host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',state,'--codex',codex,'--no-open'],{stdio:['ignore',log,log]});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let browser;const result={root,binary,binary_sha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[]};
 async function until(fn){for(let i=0;i<200;i++){if(await fn())return;await wait(50);}throw Error('Fixture deadline exceeded');}
 (async()=>{const start=Date.now();try{

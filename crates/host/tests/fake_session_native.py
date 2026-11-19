@@ -11,6 +11,7 @@ thread_serial=0
 startup=(root/'startup-fixture').exists()
 if startup:
  with (root/'startup-wire').open('a') as f:f.write(json.dumps({'pid':os.getpid(),'method':'spawn','version':'--version' in sys.argv})+'\n')
+thread_specs={}  # native keeps MCP configuration per loaded thread
 thread=(root/"original-thread").read_text().strip() if (root/"original-thread").exists() else "reseed-thread" if (root/"missing-history").exists() else "normal-thread"
 if '--version' in sys.argv: print('codex-cli 0.166.0');sys.exit()
 features={sys.argv[i+1]:a=='--enable' for i,a in enumerate(sys.argv[:-1]) if a in ['--disable','--enable']}
@@ -112,6 +113,7 @@ for line in sys.stdin:
   with (root/'journey').open('a') as f:f.write(m+'\n')
   member='deck_delegate' not in [t['name'] for t in mcp('tools/list')['result']['tools']]
   with (root/'policies').open('a') as f:f.write(json.dumps({'member':member,'policy':p['approvalPolicy'],'permissions':p['permissions']})+'\n')
+  thread_specs[thread]=spec
   result(v,{'thread':{'id':thread},'activePermissionProfile':{'id':':read-only' if (root/'wrong-permission-ack').exists() else permissions},'sandbox':{'type':{':read-only':'readOnly',':workspace':'workspaceWrite',':danger-full-access':'dangerFullAccess'}[permissions],'networkAccess':False},'approvalPolicy':p['approvalPolicy'],'approvalsReviewer':'user','cwd':'/foreign-project' if (root/'wrong-member-cwd').exists() else p['cwd'],'model':p['model'],'reasoningEffort':json.loads((root/'reasoning-ack.json').read_text()) if (root/'reasoning-ack.json').exists() else p['config'].get('model_reasoning_effort','high')})
  elif m=='thread/unsubscribe':
   loaded_threads.discard(p['threadId'])
@@ -119,6 +121,7 @@ for line in sys.stdin:
   out({'method':'thread/closed','params':{'threadId':p['threadId']}})
  elif m=='thread/loaded/list':result(v,{'data':sorted(loaded_threads),'nextCursor':None})
  elif m=='mcpServerStatus/list':
+  spec=thread_specs.get(p.get('threadId'),globals().get('spec'))
   if not p.get('serverName') and (root/'slow-full-mcp').exists():time.sleep(1.5)
   entries=[{'name':'deck-session','runtimeStatus':'connected','tools':{t['name']:{} for t in mcp('tools/list')['result']['tools']}}]
   configured=json.loads((root/'native-config.json').read_text()) if (root/'native-config.json').exists() else {}
@@ -137,6 +140,7 @@ for line in sys.stdin:
     if entry['name']=='synthetic-mail':entry['tools']['send_message']={}
   result(v,{'data':[entry for entry in entries if not p.get('serverName') or entry['name']==p['serverName']],'nextCursor':None})
  elif m=='turn/start':
+  spec=thread_specs.get(p.get('threadId'),globals().get('spec'))
   turn_serial+=1
   turn='normal-turn' if turn_serial==1 else 'normal-turn-'+str(turn_serial)
   out({'method':'turn/started','params':{'threadId':thread,'turn':{'id':turn}}})
@@ -263,6 +267,26 @@ for line in sys.stdin:
    assert not integrated['isError'],integrated
   if 'Native command' in text:
    out({'id':80,'method':'item/commandExecution/requestApproval','params':{'threadId':thread,'turnId':turn,'itemId':'command-item','command':'write native-created.txt','cwd':str(root)}})
+   continue
+  if text=='Two message delivery fixture':
+   for item_id,parts in [('first',['First ', '🧭']), ('second',['Second ', 'message'])]:
+    item={'type':'agentMessage','id':item_id,'text':''}
+    out({'method':'item/started','params':{'threadId':thread,'turnId':turn,'item':item}})
+    for part in parts:
+     out({'method':'item/agentMessage/delta','params':{'threadId':thread,'turnId':turn,'itemId':item_id,'delta':part}})
+    item['text']=''.join(parts)
+    out({'method':'item/completed','params':{'threadId':thread,'turnId':turn,'item':item}})
+    time.sleep(.15)
+   out({'method':'turn/completed','params':{'threadId':thread,'turn':{'id':turn,'status':'completed'}}})
+   continue
+  if text=='Stream fixture answer':
+   transcript=''.join(f'{i:04d} ' for i in range(100))
+   for i in range(0,len(transcript),4):
+    out({'method':'item/agentMessage/delta','params':{'threadId':thread,'turnId':turn,'itemId':'stream','delta':transcript[i:i+4]}})
+    if i==0:time.sleep(.65)
+    else:time.sleep(.002)
+   (root/'stream-end-ms').write_text(str(time.time_ns()//1000000))
+   out({'method':'turn/completed','params':{'threadId':thread,'turn':{'id':turn,'status':'completed'}}})
    continue
   history=mcp('tools/call',{'name':'deck_session_history','arguments':{}})
   assert history['result']['isError'] is False

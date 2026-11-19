@@ -9,6 +9,7 @@ import {Subagents} from './subagents';
 import {InlineSubagents} from './inline-subagents';
 import {TranscriptWindow} from './transcript-window';
 import type {Task} from './api';
+import type {Step} from './activity-model';
 import {NavigationIcon} from './navigation-icon';
 import {SessionLoading} from './session-loading';
 import {type HistoryEvent as Event} from './history-projection';
@@ -84,7 +85,7 @@ function HistoricalEvent({displayReplies,e,session,snapshot,onPreview}:{displayR
 
 // Render adopted history above the normal composer and current Rust receipts.
 // Paging remains independent from the workspace poll; old raw events never enter it.
-export function OriginalMessages({session,task='',attempt,snapshot,visible=true,name,onReady,tasks=[],onBrowse=()=>{},windowLimit=120}:{windowLimit?:number;onBrowse?:()=>void;tasks?:Task[];session:string;task?:string;attempt?:number;snapshot?:string;visible?:boolean;name?:string;onReady?:(ready:boolean)=>void}) {
+export function OriginalMessages({session,task='',attempt,snapshot,visible=true,name,onReady,tasks=[],activity,connected,onBrowse=()=>{},windowLimit=120}:{windowLimit?:number;onBrowse?:()=>void;tasks?:Task[];activity?:ReadonlyMap<string,Step>;connected?:boolean;session:string;task?:string;attempt?:number;snapshot?:string;visible?:boolean;name?:string;onReady?:(ready:boolean)=>void}) {
  const replyTarget=new URL(location.href).searchParams.get('reply')||'';
  const [page,setPage]=useState<Page>(),[error,setError]=useState(''),[busy,setBusy]=useState(false),[preview,setPreview]=useState<Preview>();
  const displayReplies=useDisplayedReplies(replyApi,visible&&!task,session,(page?.messages??[]).filter(e=>e.data.role==='assistant').map(e=>e.seq),page?.boundary??0);
@@ -102,7 +103,7 @@ export function OriginalMessages({session,task='',attempt,snapshot,visible=true,
  // Imported history has recorded sequence and timestamp; place delegation rows
  // between message events and include only tasks inside this server page.
  const agents=task?[]:tasks.filter(t=>t.session===session&&t.owner!=='lead'&&t.attempts.length).filter(t=>{const at=t.attempts[0]!.accepted_ms;return (!page?.before||at>=Date.parse(events[0]?.ts??''))&&(!page?.after||at<=Date.parse(events.at(-1)?.ts??''));}).sort((a,b)=>a.attempts[0]!.accepted_ms-b.attempts[0]!.accepted_ms);
- const interleaved=events.flatMap((e,i)=>[<HistoricalEvent key={'event-'+(e.historyId??e.seq)} displayReplies={displayReplies} e={e} session={session} snapshot={page!.snapshot} onPreview={setPreview}/>,...agents.filter(t=>{const at=t.attempts[0]!.accepted_ms;return at>=Date.parse(e.ts)&&(i===events.length-1||at<Date.parse(events[i+1]!.ts));}).map(t=><InlineSubagents key={'agent-'+t.id} tasks={[t]} session={session}/>)]);
- const preceding=agents.filter(t=>t.attempts[0]!.accepted_ms<Date.parse(events[0]?.ts??'')).map(t=><InlineSubagents key={'agent-'+t.id} tasks={[t]} session={session}/>);
+ const interleaved=events.flatMap((e,i)=>[<HistoricalEvent key={'event-'+(e.historyId??e.seq)} displayReplies={displayReplies} e={e} session={session} snapshot={page!.snapshot} onPreview={setPreview}/>,...agents.filter(t=>{const at=t.attempts[0]!.accepted_ms;return at>=Date.parse(e.ts)&&(i===events.length-1||at<Date.parse(events[i+1]!.ts));}).map(t=><InlineSubagents key={'agent-'+t.id} tasks={[t]} session={session} activity={activity} connected={connected}/>)]);
+ const preceding=agents.filter(t=>t.attempts[0]!.accepted_ms<Date.parse(events[0]?.ts??'')).map(t=><InlineSubagents key={'agent-'+t.id} tasks={[t]} session={session} activity={activity} connected={connected}/>);
  return <div ref={ref} className={task?"history-content task-transcript task-transcript--full":"history-content"} tabIndex={task?0:undefined} role={task?"log":undefined} aria-label={task?"Recorded subagent conversation":undefined}>{error&&<p className="error" role="alert">{error}<button className="quiet" onClick={()=>location.reload()}>Reopen history</button></p>}{page?.before&&<button className="quiet" disabled={busy} onClick={()=>void more()}>Load older messages</button>}<TranscriptWindow limit={windowLimit} olderLabel="Show earlier loaded messages" onOlder={()=>{if(page?.before)void more();}} rows={[...preceding,...interleaved].map(element=>({key:String(element.key),element}))} viewport={historyViewport} onBrowse={onBrowse}>{row=>row.element}</TranscriptWindow>{page?.after&&<button className="quiet" disabled={busy} onClick={()=>void more(true)}>Load newer messages</button>}{busy&&page&&<p role="status">Loading history…</p>}{busy&&!page&&!task&&!error&&<SessionLoading name={name||session} onRetry={()=>location.reload()}/>}<ImagePreview image={preview} onClose={()=>setPreview(undefined)}/></div>;
 }

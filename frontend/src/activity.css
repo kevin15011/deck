@@ -4,3 +4,10 @@
 .steering-notice{padding:0 1rem;margin:0 0 .375rem;color:var(--muted);font-size:.75rem;line-height:1.4}
 .step-toggle strong{overflow-wrap:anywhere}
 .activity-turn>header{position:sticky;top:0;z-index:1;padding-block:.375rem;background:var(--surface)}
+
+.lead-message-part + .lead-message-part{margin-top:1rem}
+.live-activity .thinking-pulse{width:.5rem;height:.5rem;flex:none;border-radius:50%;background:currentColor;font-size:0}
+@media(prefers-reduced-motion:no-preference){
+ .thinking-pulse{animation:deck-thinking-pulse 1.4s ease-in-out infinite}
+ @keyframes deck-thinking-pulse{50%{opacity:.45;transform:scale(.75)}}
+}

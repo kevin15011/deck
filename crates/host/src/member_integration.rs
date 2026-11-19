@@ -49,7 +49,7 @@ impl Integration {
                     return Err("Codex assignment/binding mismatch".into());
                 }
                 (
-                    "codex 0.166.0",
+                    "codex",
                     "app-server/session-mcp-member-v1",
                     s.codex_executable
                         .clone()
@@ -123,7 +123,7 @@ impl Integration {
         }
         let valid = match selected {
             Self::Codex => {
-                a.provenance.runner == "codex 0.166.0"
+                matches!(a.provenance.runner.as_str(), "codex" | "codex 0.166.0")
                     && a.provenance.integration == "app-server/session-mcp-member-v1"
                     && s.codex_executable.as_ref() == Some(&a.provenance.executable)
                     && s.native

@@ -13,7 +13,7 @@ fs.writeFileSync(path.join(root,'mode'),'normal');
 // Capture the actual URL passed to the opener without printing its capability.
 fs.writeFileSync(path.join(root,'bin/xdg-open'),'#!/usr/bin/env python3\nimport os,sys\nif os.environ.get("DECK2_OPENER_FAIL"): sys.exit(3)\nwith open(os.environ["DECK2_CAPTURE"],"w") as f: f.write(sys.argv[1])\n',{mode:0o700});
 const capture=path.join(root,'opened-url'),env={...process.env,PATH:path.join(root,'bin')+':'+process.env.PATH,DECK2_CAPTURE:capture};
-const host=spawn(binary,['serve','--project',path.join(root,'project'),'--state-dir',state,'--codex',path.join(root,'codex')],{env,stdio:'ignore'});
+const host=spawn(binary,['serve','--foreground','--project',path.join(root,'project'),'--state-dir',state,'--codex',path.join(root,'codex')],{env,stdio:'ignore'});
 const checks=[];let browser;
 (async()=>{try{
  for(let i=0;i<100&&!fs.existsSync(capture);i++)await wait(100);

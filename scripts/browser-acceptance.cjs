@@ -5,7 +5,7 @@ const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{spa
 const repo=path.resolve(__dirname,'..');
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'deck2-browser-'));const project=path.join(root,'project'),state=path.join(root,'state');fs.mkdirSync(project);
 fs.writeFileSync(path.join(project,'example.txt'),'Project motto: amber-fox-842. Deck supports read-only conversations.\n');
-const host=spawn(path.resolve(process.argv[2] || path.join(repo,'dist/deck2')),['serve','--project',project,'--state-dir',state,'--codex','/home/kevin15011/.local/bin/codex','--no-open']);
+const host=spawn(path.resolve(process.argv[2] || path.join(repo,'dist/deck2')),['serve','--foreground','--project',project,'--state-dir',state,'--codex','/home/kevin15011/.local/bin/codex','--no-open']);
 const evidence=(process.env.DECK2_EVIDENCE_DIR||path.join(repo,'target/browser-evidence'));fs.mkdirSync(evidence,{recursive:true});
 let browser;
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -48,9 +48,9 @@ async function launchLink(){const record=JSON.parse(fs.readFileSync(path.join(st
  await page.waitForFunction(()=>document.querySelector('.send')?.disabled && document.querySelector('.alert')?.textContent.includes('Incompatible API'));
  assert.equal(await page.getByRole('textbox').inputValue(),'Mobile draft');await page.unroute('**/api/workspace');
  await page.waitForFunction(()=>document.querySelector('.connection')?.textContent.includes('Connected'));
- await page.route('**/api/workspace',route=>route.abort());
+ await page.route('**/api/health',route=>route.abort());await page.route('**/api/workspace',route=>route.abort());
  await page.waitForFunction(()=>document.querySelector('.connection')?.textContent.includes('Disconnected'));
- assert.equal(await page.getByRole('textbox').inputValue(),'Mobile draft');await page.unroute('**/api/workspace');
+ assert.equal(await page.getByRole('textbox').inputValue(),'Mobile draft');await page.unroute('**/api/health');await page.unroute('**/api/workspace');
  await page.waitForFunction(()=>document.querySelector('.connection')?.textContent.includes('Connected'));
  assert.deepEqual(errors,[]);
  // Exercise real cancellation through the browser against the exact native mode.

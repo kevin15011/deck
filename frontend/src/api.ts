@@ -7,6 +7,7 @@ export const phases = ['queued','accepted','preparing','dispatching','running','
 export type Phase = typeof phases[number];
 export interface Receipt {
  presentation?:ReceiptPresentation;
+ message_times?:{start:number;at_ms:number}[];
  context?:unknown;
  recalled_ms?:number;
  cancel_requested?:boolean;
@@ -32,6 +33,7 @@ export function receipt(v:unknown):Receipt {
  || !['model','thread','turn'].every(k=>v[k]===null || typeof v[k]==='string')
  || !['native_pid','handshake_ms','dispatch_ms','first_output_ms'].every(k=>v[k]===null || integer(v[k]))
  || !['accepted_ms','revision','local_tool_calls'].every(k=>integer(v[k]))) throw new Error('Incompatible host receipt. Reload a compatible Deck client; draft retained.');
+ if(v.message_times!==undefined&&(!Array.isArray(v.message_times)||v.message_times.some((m,i,list)=>!object(m)||!integer(m.start)||!integer(m.at_ms)||(m.start as number)>=(v.text as string).length||(i===0?m.start!==0:(m.start as number)<=list[i-1].start))))throw Error('Invalid message delivery times');
  if(v.cancel_requested!==undefined&&typeof v.cancel_requested!=='boolean')throw Error('Invalid cancellation state');
  if(v.recalled_ms!==undefined&&(!integer(v.recalled_ms)||v.dispatch_ms!==null||v.cancel_requested!==true))throw Error('Invalid recalled input timestamp');
 

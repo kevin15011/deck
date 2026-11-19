@@ -345,7 +345,7 @@ use axum::{
 async fn inspect(State(app): State<App>, Path(session): Path<String>) -> Response {
     let s = app.store.lock().unwrap();
     match s.ordinary_selection(&session) {
-        Ok(selected)=>Json(serde_json::json!({"api":API,"session":session,"selected":selected,"preparing":s.ordinary_preparing().unwrap_or(true),"limits":"Codex 0.166.0 / gpt-6.1-sol only; explicit fresh execution each input. Images to Lead only. Depth-one read-only Investigator; scoped CBM/RTK when selected in project Configuration, exact read fallback. Existing UTF-8 files only, 64 KiB, one decision per edit. YOLO and specialist image forwarding unavailable."})).into_response(),
+        Ok(selected)=>Json(serde_json::json!({"api":API,"session":session,"selected":selected,"preparing":s.ordinary_preparing().unwrap_or(true),"limits":"Codex / gpt-6.1-sol only; explicit fresh execution each input. Images to Lead only. Depth-one read-only Investigator; scoped CBM/RTK when selected in project Configuration, exact read fallback. Existing UTF-8 files only, 64 KiB, one decision per edit. YOLO and specialist image forwarding unavailable."})).into_response(),
         Err(e)=>problem(StatusCode::CONFLICT,"session_selection",e)
     }
 }

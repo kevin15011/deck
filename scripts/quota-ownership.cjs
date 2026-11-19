@@ -9,7 +9,7 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  const native=path.join(root,'codex');fs.writeFileSync(native,source,{mode:0o700});
  try{
   for(let i=0;i<2;i++){
-   const state=path.join(root,'state'+i),host=spawn(binary,['serve','--project',path.join(root,'project'),'--state-dir',state,'--codex',native,'--no-open'],{stdio:'ignore',env:{...process.env,HOME:root,CODEX_HOME:path.join(root,'auth')}});hosts.push(host);
+   const state=path.join(root,'state'+i),host=spawn(binary,['serve','--foreground','--project',path.join(root,'project'),'--state-dir',state,'--codex',native,'--no-open'],{stdio:'ignore',env:{...process.env,HOME:root,CODEX_HOME:path.join(root,'auth')}});hosts.push(host);
    await until(()=>fs.existsSync(path.join(state,'launcher.json')));const launcher=JSON.parse(fs.readFileSync(path.join(state,'launcher.json'))),base='http://'+launcher.host;
    const link=await(await fetch(base+'/launch',{method:'POST',body:launcher.admin})).json();const auth=await fetch(base+'/auth',{method:'POST',body:new URL(link.url).hash.slice(1),headers:{Origin:base}});assert.equal(auth.status,204);const cookie=auth.headers.get('set-cookie').split(';')[0];
    clients.push(async(method,url,data,signal)=>{const r=await fetch(base+url,{method,headers:{Origin:base,Cookie:cookie,'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data),signal});return {status:r.status,body:await r.json()};});

@@ -44,7 +44,7 @@ def launch(binary, project, state, label, expect_ready=True):
     log = root / (label + '.log')
     prior = (state / 'launcher.json').read_bytes() if (state / 'launcher.json').exists() else None
     with log.open('w') as stream:
-        host = subprocess.Popen([str(binary.resolve()), 'serve', '--project', str(project), '--state-dir', str(state), '--codex', str(fake), '--no-open'], stdout=stream, stderr=subprocess.STDOUT)
+        host = subprocess.Popen([str(binary.resolve()), 'serve', *(['--foreground'] if binary == a.binary else []), '--project', str(project), '--state-dir', str(state), '--codex', str(fake), '--no-open'], stdout=stream, stderr=subprocess.STDOUT)
         try:
             deadline = time.monotonic() + 20
             ready = False

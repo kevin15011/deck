@@ -286,6 +286,18 @@ impl Reader {
         );
         Ok(json!(["history", source, project, id]).to_string())
     }
+    pub(crate) fn adopted_navigation_key(&self, session: &deck2_shared::Session) -> Option<String> {
+        let original = session.original.as_ref()?;
+        if self.database.as_ref().is_some_and(|db| {
+            db.verify_snapshot(&session.id, &original.fingerprint).is_ok()
+        }) && self
+            .navigation_project(&session.id)
+            .is_ok_and(|id| id == session.project.id)
+        {
+            return self.navigation_key(&session.project.id, &session.id).ok();
+        }
+        Some(json!(["adopted", original.fingerprint, session.project.id, session.id]).to_string())
+    }
     pub(crate) fn navigation_project(&self, id: &str) -> Result<String> {
         if let Some(db) = &self.database {
             return db

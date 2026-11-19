@@ -52,7 +52,11 @@ impl Store {
         // Index persisted steps as-is, including sessions recorded by earlier builds.
         self.conn
             .execute_batch(&format!(
-                "CREATE INDEX IF NOT EXISTS activity_execution_seq ON activity_steps(session,seq) WHERE {EXECUTED_STEP};"
+                "CREATE INDEX IF NOT EXISTS activity_execution_seq ON activity_steps(session,seq) WHERE {EXECUTED_STEP};
+                 CREATE INDEX IF NOT EXISTS activity_member_attempt_seq ON activity_steps(session,task,attempt,seq) WHERE task <> '';
+                 CREATE INDEX IF NOT EXISTS activity_running_tasks ON tasks(json_extract(body, '$.session'))
+                     WHERE json_extract(body, '$.attempts[#-1].phase') = 'running'
+                       AND json_extract(body, '$.attempts[#-1].settled_ms') IS NULL;"
             ))
             .map_err(|_| "Cannot index tool activity".into())
     }
@@ -180,7 +184,12 @@ impl Store {
         let duration = item["durationMs"]
             .as_u64()
             .or_else(|| completed.then_some(now.saturating_sub(started)));
-        let body = json!({"command":command,"task":task,"attempt":attempt,"item":id,"kind":kind,"server":short(&item["server"],256),"tool":short(&item["tool"],128),"args":args,"owner":owner,"runner":runner,"startedMs":started,"durationMs":duration,"status":status});
+        let (server, tool) = if kind == "reasoning" {
+            (String::new(), String::new())
+        } else {
+            (short(&item["server"], 256), short(&item["tool"], 128))
+        };
+        let body = json!({"command":command,"task":task,"attempt":attempt,"item":id,"kind":kind,"server":server,"tool":tool,"args":args,"owner":owner,"runner":runner,"startedMs":started,"durationMs":duration,"status":status});
         let output = if kind == "reasoning" {
             String::new()
         } else {
@@ -230,6 +239,12 @@ impl Store {
         let mut tasks = HashMap::new();
         let mut project = |seq: u64, body: String| -> Result<Value, String> {
             let mut v: Value = serde_json::from_str(&body).map_err(|_| "Invalid activity data")?;
+            if v["kind"] == "reasoning" {
+                // Older stores may contain runner-supplied labels on reasoning items.
+                for field in ["args", "server", "tool"] {
+                    v[field] = json!("");
+                }
+            }
             if v["status"] == "running" {
                 let id = v["command"].as_str().ok_or("Invalid activity receipt")?;
                 let phase = if v["task"] == "" {
@@ -298,23 +313,65 @@ impl Store {
         .into_iter()
         .map(|(s, b)| project(s, b))
         .collect::<Result<Vec<_>, _>>()?;
+        // A busy Lead or sibling can evict all of an attempt's steps from the
+        // global live window. Get one independently scoped observation per row.
+        let members = load(
+            "SELECT step.seq,step.body FROM tasks AS t
+             JOIN activity_steps AS step ON step.seq = (
+                 SELECT seq FROM activity_steps
+                 WHERE session = ?1 AND seq < ?2 AND task = t.id AND task <> ''
+                   AND attempt = json_extract(t.body, '$.attempts[#-1].id')
+                 ORDER BY seq DESC LIMIT 1
+             )
+             WHERE json_extract(t.body, '$.session') = ?1
+               AND json_extract(t.body, '$.attempts[#-1].phase') = 'running'
+               AND json_extract(t.body, '$.attempts[#-1].settled_ms') IS NULL
+             ORDER BY step.seq DESC LIMIT 32",
+            i64::MAX as u64,
+        )?
+        .into_iter()
+        .map(|(s, b)| {
+            let mut step = project(s, b)?;
+            if step["kind"] != "commandExecution" {
+                step["args"] = json!("");
+            }
+            Ok(step)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
         Ok(
-            json!({"session":session,"steps":rows,"older":first>0&&exists("<",first)?,"newer":last>0&&exists(">",last)?,"live":live}),
+            json!({"session":session,"steps":rows,"older":first>0&&exists("<",first)?,"newer":last>0&&exists(">",last)?,"live":live,"members":members}),
         )
     }
 }
-/// Normalize only a tool part already accepted by OpenCode's exact-turn filter.
+/// Normalize a part already accepted by OpenCode's exact-turn filter.
 pub(crate) fn opencode_step(event: &Value, thread: &str, turn: &str) -> Option<Value> {
     if event["type"] != "message.part.updated" {
         return None;
     }
     let part = &event["properties"]["part"];
+    if part["type"] == "reasoning" {
+        let id = part["id"].as_str()?;
+        let method = if part["time"]["end"].is_u64() {
+            "item/completed"
+        } else {
+            "item/started"
+        };
+        return Some(
+            json!({"method":method,"params":{"threadId":thread,"turnId":turn,"item":{"id":id,"type":"reasoning"}}}),
+        );
+    }
     if part["type"] != "tool" {
         return None;
     }
     let name = part["tool"].as_str()?;
     let state = &part["state"];
     let input = &state["input"];
+    if !matches!(
+        state["status"].as_str(),
+        Some("running" | "completed" | "error" | "cancelled")
+    ) {
+        return None;
+    }
     let complete = matches!(
         state["status"].as_str(),
         Some("completed" | "error" | "cancelled")
@@ -406,6 +463,65 @@ mod tests {
     fn record(s: &Store, r: &deck2_shared::Receipt, v: &Value) {
         s.observe_activity(&r.id, "", &r.attempt, "thread", "turn", v)
             .unwrap();
+    }
+    #[test]
+    fn activity_members_follow_current_attempts_independently_of_the_lead_feed() {
+        let (s, r) = fixture();
+        let mut task: deck2_shared::Task = serde_json::from_value(json!({
+            "id":"task","session":r.session,"root":r.id,"parent_attempt":r.attempt,
+            "owner":"apply-deep","scope":[],"acceptance":"","revision":1,
+            "attempts":[{
+                "id":"first","prompt":"","phase":"running","detail":"",
+                "requested_model":"","provenance":{"runner":"Codex","integration":"",
+                "executable":"","storage":"","content":""},"native_session":"thread",
+                "native_message":"turn","generation":"","accepted_ms":1,
+                "cancel_requested":false,"treatments":[]
+            }]
+        }))
+        .unwrap();
+        let save = |task: &deck2_shared::Task| {
+            s.conn
+                .execute(
+                    "INSERT OR REPLACE INTO tasks(id,body) VALUES (?1,?2)",
+                    params![task.id, serde_json::to_string(task).unwrap()],
+                )
+                .unwrap();
+        };
+        let page = || s.activity_page(&r.session, &Page::default()).unwrap();
+        save(&task);
+        let mut reasoning = event("item/started", "think");
+        reasoning["params"]["item"] = json!({"id":"think","type":"reasoning",
+            "summary":["fixture-private-reasoning"],"tool":"fixture-private-reasoning"});
+        s.observe_activity(&r.id, &task.id, "first", "thread", "turn", &reasoning)
+            .unwrap();
+        for n in 0..40 {
+            record(&s, &r, &event("item/completed", &n.to_string()));
+        }
+        assert_eq!(page()["members"][0]["kind"], "reasoning");
+        assert!(!page().to_string().contains("fixture-private-reasoning"));
+        s.observe_activity(
+            &r.id,
+            &task.id,
+            "first",
+            "thread",
+            "turn",
+            &event("item/completed", "command"),
+        )
+        .unwrap();
+        assert_eq!(page()["members"][0]["item"], "command");
+
+        let mut next = task.attempts[0].clone();
+        task.attempts[0].phase = Phase::Failed;
+        next.id = "second".into();
+        task.attempts.push(next);
+        save(&task);
+        assert_eq!(page()["members"], json!([]));
+        s.observe_activity(&r.id, &task.id, "second", "thread", "turn", &reasoning)
+            .unwrap();
+        assert_eq!(page()["members"][0]["attempt"], "second");
+        task.attempts[1].phase = Phase::Uncertain;
+        save(&task);
+        assert_eq!(page()["members"], json!([]));
     }
     // Protects exact-owner capture, durable idempotence and lazy output; oracle: decision 20.
     #[test]
@@ -586,6 +702,30 @@ mod tests {
         assert_eq!(v["params"]["item"]["tool"], "search_graph");
         assert_eq!(v["params"]["item"]["durationMs"], 15);
         assert!(opencode_step(&json!({"type":"message.part.delta"}), "thread", "turn").is_none());
+    }
+    #[test]
+    fn activity_opencode_reasoning_only_projects_lifecycle() {
+        let (s, r) = fixture();
+        let mut native = json!({"type":"message.part.updated","properties":{"part":{
+            "type":"reasoning","id":"thinking","time":{"start":1},"text":"fixture-private-reasoning"
+        }}});
+        let started = opencode_step(&native, "thread", "turn").unwrap();
+        assert!(!started.to_string().contains("fixture-private-reasoning"));
+        record(&s, &r, &started);
+        assert_eq!(
+            s.activity_page(&r.session, &Page::default()).unwrap()["live"][0]["status"],
+            "running"
+        );
+        native["properties"]["part"]["time"]["end"] = json!(2);
+        record(&s, &r, &opencode_step(&native, "thread", "turn").unwrap());
+        let page = s.activity_page(&r.session, &Page::default()).unwrap();
+        assert_eq!(page["live"][0]["status"], "done");
+        assert_eq!(page["steps"], json!([]));
+        assert!(!page.to_string().contains("fixture-private-reasoning"));
+        let pending = json!({"type":"message.part.updated","properties":{"part":{
+            "type":"tool","id":"pending","tool":"bash","state":{"status":"pending"}
+        }}});
+        assert!(opencode_step(&pending, "thread", "turn").is_none());
     }
     #[tokio::test]
     async fn activity_default_router_enforces_auth_and_output_session() {

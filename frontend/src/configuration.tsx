@@ -1,11 +1,41 @@
+import {CodexRestartPrompt} from './codex-server-restart';
 import {ToolUpdateButton,validToolUpdate,type ToolUpdate} from './tool-update';
 import React,{useEffect,useRef,useState} from 'react';
-import {API,hostRequest as request,type Workspace} from './api';
+import {API,hostRequest as request,type ProjectBinding,type Workspace} from './api';
 import {useDisclosureMotion} from './view-motion';
 import {CodebaseMemory,settingsError} from './cbm';
 
-export function ConfigurationView({w,connected,projectId}:{w:Workspace;connected:boolean;projectId?:string}){
- return <div className="configuration-content simple-project-settings"><div className="settings-card"><CodebaseMemory w={w} connected={connected} projectId={projectId}/></div></div>;
+export function ConfigurationView({w,connected,project,onChanged}:{w:Workspace;connected:boolean;project:ProjectBinding;onChanged:()=>Promise<void>}){
+ const trusted=w.project_trust?.[project.id]??(project.root===w.project&&w.trusted);
+ const [saving,setSaving]=useState(false),[error,setError]=useState('');
+ const hint=React.useId();
+
+ async function changeTrust(next:boolean){
+  setSaving(true);
+  setError('');
+  try {
+   await request('POST','/api/project/trust',{api:API,project:project.root,binding:project,trusted:next});
+   try {
+    await onChanged();
+   } catch {
+    setError('Trust was saved. Deck could not refresh project settings.');
+   }
+  } catch(e) {
+   setError((e as Error).message);
+  } finally {
+   setSaving(false);
+  }
+ }
+
+ return <div className="configuration-content simple-project-settings"><div className="settings-card">
+  <div className="settings-row"><div>
+   <label className="project-trust-control"><input type="checkbox" checked={trusted} disabled={!connected||saving} aria-describedby={hint} onChange={e=>void changeTrust(e.target.checked)}/>Trust this project</label>
+   <p id={hint}>Allows Code Map to index this folder and enables reviewed editing when selected. File changes still require approval in reviewed editing modes.</p>
+   {saving&&<p role="status">Saving project trust…</p>}
+   {error&&<p role="alert" className="error">{error}</p>}
+  </div></div>
+  <CodebaseMemory key={String(trusted)} w={w} connected={connected} projectId={project.id} trusted={trusted} trustSaving={saving}/>
+ </div></div>;
 }
 type ToolId='codebase-memory'|'rtk'|'context7';
 type RunnerState='installed'|'not_installed'|'incomplete'|'check_failed';
@@ -20,7 +50,7 @@ function tools(v:unknown):Tool[]{
 }
 const names:Record<ToolId,string>={'codebase-memory':'Codebase Memory',rtk:'RTK',context7:'Context7'};
 const descriptions:Record<ToolId,string>={'codebase-memory':'Indexes trusted projects so agents can search functions and their relationships.',rtk:'Compresses command output agents read, so they use fewer tokens.',context7:'Gives agents current library documentation and code examples.'};
-export function RtkSettings({w,connected}:{w:Workspace;connected:boolean}){
+export function RtkSettings({w,connected,projectId}:{w:Workspace;connected:boolean;projectId?:string}){
  const [data,setData]=useState<Tool[]>(),[error,setError]=useState(''),[busy,setBusy]=useState<string>();
  const [changes,setChanges]=useState<{path:string;change:string}[]>([]);
  const notice=useRef<HTMLDivElement>(null);useDisclosureMotion(notice,changes.length>0);
@@ -66,5 +96,135 @@ export function RtkSettings({w,connected}:{w:Workspace;connected:boolean}){
    </section>
   </section>;
  })}
+ <ContextModeSettings key={w.host_id+':'+projectId} projectId={projectId} connected={connected} blocked={!!busy} onBusy={setBusy}/>
  </div><div ref={alert} hidden={!error} inert={!error}>{error&&<p className="error" role="alert">{error}</p>}</div></div>;
+}
+
+const contextModePath='/api/tools/context-mode';
+type ContextModeAction='install'|'update'|'migrate';
+type ContextModeOutcome='installed'|'updated'|'current';
+const contextModeStates=['not_installed','installed','incomplete','standalone','migration_available','conflict','disabled','check_failed'] as const;
+type ContextModeStatus={
+ state:typeof contextModeStates[number];
+ version:string|null;
+ detail:string;
+ outcome:ContextModeOutcome|null;
+};
+
+function contextModeStatus(value:unknown):ContextModeStatus {
+ const status=value as ContextModeStatus & {api:number};
+ if(status?.api!==API||!contextModeStates.includes(status.state)
+   ||(status.version!==null&&typeof status.version!=='string')
+   ||(status.state==='installed'&&!status.version)
+   ||typeof status.detail!=='string'
+   ||(status.outcome!==null&&(!['installed','updated','current'].includes(status.outcome)||status.state!=='installed'))) {
+  throw Error('Invalid Context Mode status');
+ }
+ return status;
+}
+
+function ContextModeSettings({projectId,connected,blocked,onBusy}:{
+ projectId?:string;connected:boolean;blocked:boolean;onBusy:(busy:string|undefined)=>void;
+}) {
+ const [status,setStatus]=useState<ContextModeStatus>();
+ const [action,setAction]=useState<ContextModeAction>();
+ const [restart,setRestart]=useState<'recommended'|'later'|'complete'>();
+ const [error,setError]=useState('');
+ const [checking,setChecking]=useState(false);
+ const lifetime=useRef(0);
+ const requestId=useRef(0);
+ const projectQuery=projectId?`?projectId=${encodeURIComponent(projectId)}`:'';
+
+ async function refresh(signal?:AbortSignal) {
+  const requestTurn=++requestId.current;
+  setChecking(true);
+  try {
+   const result=contextModeStatus(await request('GET',contextModePath+projectQuery,undefined,signal));
+   if(requestTurn===requestId.current)setStatus(result);
+  } catch(e) {
+   if(requestTurn===requestId.current)setError(settingsError(e));
+  } finally {
+   if(requestTurn===requestId.current)setChecking(false);
+  }
+ }
+
+ useEffect(()=>{
+  lifetime.current++;
+  setStatus(undefined);
+  setError('');
+  setChecking(false);
+  setAction(undefined);
+  const controller=new AbortController();
+  if(connected)void refresh(controller.signal);
+  return ()=>{
+   lifetime.current++;
+   requestId.current++;
+   controller.abort();
+  };
+ },[connected]);
+
+ async function change(next:ContextModeAction) {
+  if(blocked||checking||!connected)return;
+  const turn=lifetime.current;
+  setAction(next);
+  onBusy('context-mode:'+next);
+  setError('');
+  try {
+   const result=contextModeStatus(await request('POST',contextModePath+'/runners/codex'+projectQuery,{api:API,action:next}));
+   if(turn===lifetime.current){
+    setStatus(result);
+    if(result.outcome==='installed'||result.outcome==='updated')setRestart('recommended');
+   }
+  } catch(e) {
+   if(turn===lifetime.current){
+    setError(settingsError(e));
+    setStatus(undefined);
+    await refresh();
+   }
+  } finally {
+   if(turn===lifetime.current)setAction(undefined);
+   onBusy(undefined);
+  }
+ }
+
+ const installing=status?.state==='not_installed'||status?.state==='incomplete';
+ const installed=status?.state==='installed';
+ const canMigrate=status?.state==='migration_available';
+ const disabled=!connected||blocked||checking;
+ return <section className="settings-row" aria-labelledby="context-mode-heading">
+  <div>
+   <h3 id="context-mode-heading">Context Mode</h3>
+   <p>Native Codex plugin for keeping large tool output out of the conversation.</p>
+   <p role="status">{action==='install'?'Setting up for Codex…':action==='update'?'Refreshing the Codex plugin…':action==='migrate'?'Migrating Context Mode for Codex…':
+    !connected?'Waiting for connection':checking?'Checking Codex…':
+    installed?`Installed for Codex · ${status.version}`:
+    (canMigrate||status?.state==='standalone')?'Standalone MCP configured':
+    status?.state==='conflict'?'Conflicting Codex configuration':
+    status?.state==='incomplete'?'Plugin setup incomplete':status?.state==='disabled'?'Disabled in Codex':
+    status?.state==='not_installed'?'Not installed for Codex':"Couldn’t check Codex"}</p>
+   {status&&!installed&&<p>{status.detail}</p>}
+   {restart==='recommended'&&<CodexRestartPrompt connected={connected} projectId={projectId}
+    onLater={()=>setRestart('later')} onRestart={()=>setRestart('complete')}/>}
+   {restart==='later'&&<p role="status">Restart Codex when you’re ready from Settings → Agents &amp; tools → Codex.</p>}
+   {restart==='complete'&&<p role="status">Codex server restarted.</p>}
+   {status?.outcome==='current'&&<p role="status">Codex already has the current plugin version.</p>}
+   {error&&<p className="error" role="alert">{error}</p>}
+  </div>
+  <div className="settings-row-actions">
+   {installing&&<button type="button" className="quiet" disabled={disabled}
+    aria-label={status.state==='incomplete'?'Finish Context Mode setup for Codex':'Install Context Mode for Codex'}
+    onClick={()=>void change('install')}>{status.state==='incomplete'?'Finish setup':'Install'}</button>}
+   {canMigrate&&<button type="button" className="quiet" disabled={disabled}
+    aria-label="Install Context Mode for Codex"
+    onClick={()=>{
+     if(window.confirm('Install the official Context Mode plugin for Codex and replace the existing standalone MCP registration?')){
+      void change('migrate');
+     }
+    }}>Install</button>}
+   {installed&&<button type="button" className="quiet" disabled={disabled}
+    aria-label="Update Context Mode for Codex" onClick={()=>void change('update')}>Update</button>}
+   <button type="button" className="quiet" disabled={disabled} aria-label="Refresh Context Mode status"
+    onClick={()=>{setError('');void refresh();}}>Refresh</button>
+  </div>
+ </section>;
 }

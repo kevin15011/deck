@@ -1,7 +1,7 @@
 //! Durable workspace projects. Selection never participates in execution lookup.
 use crate::Store;
 use deck2_shared::ProjectBinding;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::{os::unix::fs::MetadataExt, path::Path};
 
 pub fn id(root: &str) -> String {
@@ -23,14 +23,14 @@ pub fn available(root: &str) -> Result<(), String> {
 }
 pub fn validate(p: &ProjectBinding) -> Result<(), String> {
     if p.id != id(&p.root) || p.identity.as_ref() != Some(&identity(&p.root)?) {
-        return Err("Recorded project identity changed; execution withheld".into());
+        return Err("This folder has been replaced. Choose Add project and select it again to use the current folder.".into());
     }
     Ok(())
 }
 impl Store {
     pub(crate) fn init_projects(&mut self, schema: &str) -> Result<(), String> {
         self.conn.execute_batch("CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY, body TEXT NOT NULL, trusted INTEGER NOT NULL CHECK(trusted IN (0,1))); ").map_err(|_| "Cannot migrate projects")?;
-        if !["15", "16", "17", "18"].contains(&schema) {
+        if !self.project.is_empty() && !["15", "16", "17", "18"].contains(&schema) {
             let p = ProjectBinding {
                 id: id(&self.project),
                 root: self.project.clone(),
@@ -113,7 +113,56 @@ impl Store {
         validate(&p)?;
         Ok(p)
     }
+    /// Only an explicit project selection may adopt a replacement directory.
+    /// History discovery keeps the previous binding until the user selects it.
+    pub fn select_project_folder(&mut self, root: &str) -> Result<ProjectBinding, String> {
+        self.select_project_folder_with_trust(root, false)
+    }
+
+    pub(crate) fn select_project_folder_with_trust(
+        &mut self,
+        root: &str,
+        grant_trust: bool,
+    ) -> Result<ProjectBinding, String> {
+        let key = id(root);
+        let existing: Option<String> = self.conn.query_row(
+            "SELECT body FROM projects WHERE id=?1", [&key], |row| row.get(0),
+        ).optional().map_err(|_| "Cannot read registered project")?;
+        let Some(existing) = existing else { return self.register_project_with_trust(root, grant_trust); };
+        let old: ProjectBinding = serde_json::from_str(&existing).map_err(|_| "Invalid registered project")?;
+        if old.id != key || old.root != root { return Err("Invalid registered project".into()); }
+        let current = ProjectBinding { id: key, root: root.into(), identity: Some(identity(root)?) };
+        if old == current {
+            if grant_trust {
+                self.set_trust(root, true)?;
+            }
+            return Ok(current);
+        }
+        if self.all()?.iter().any(|r| r.phase.active() && r.configuration.as_ref().is_some_and(|c| c.project == old)) {
+            return Err("Work is still running in the previous folder. Stop it or wait for it to finish, then add the folder again.".into());
+        }
+        let mut config = self.configuration_for(root)?;
+        config.cbm = None;
+        config.investigator = None;
+        config.revision = self.next_configuration_revision()?;
+        let tx = self.conn.transaction().map_err(|_| "Cannot open project registration")?;
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS previous_project_bindings (project TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(project,body))")
+            .map_err(|_| "Cannot preserve previous project binding")?;
+        tx.execute("INSERT OR IGNORE INTO previous_project_bindings VALUES(?1,?2)", params![current.id, serde_json::to_string(&old).unwrap()])
+            .map_err(|_| "Cannot preserve previous project binding")?;
+        tx.execute("UPDATE projects SET body=?2,trusted=?3 WHERE id=?1", params![current.id, serde_json::to_string(&current).unwrap(), grant_trust])
+            .map_err(|_| "Cannot register replacement folder")?;
+        tx.execute("INSERT INTO configurations VALUES(?1,?2)", params![config.revision, serde_json::to_string(&config).unwrap()])
+            .map_err(|_| "Cannot register replacement configuration")?;
+        tx.commit().map_err(|_| "Cannot save replacement folder")?;
+        Ok(current)
+    }
+
     pub fn register_project(&mut self, root: &str) -> Result<ProjectBinding, String> {
+        self.register_project_with_trust(root, false)
+    }
+
+    fn register_project_with_trust(&mut self, root: &str, grant_trust: bool) -> Result<ProjectBinding, String> {
         if root.len() > 4096 || root.chars().any(char::is_control) {
             return Err("Invalid project path".into());
         }
@@ -139,8 +188,8 @@ impl Store {
             .transaction()
             .map_err(|_| "Cannot register project")?;
         tx.execute(
-            "INSERT INTO projects VALUES(?1,?2,0)",
-            params![p.id, serde_json::to_string(&p).unwrap()],
+            "INSERT INTO projects VALUES(?1,?2,?3)",
+            params![p.id, serde_json::to_string(&p).unwrap(), grant_trust],
         )
         .map_err(|_| "Cannot register project")?;
         tx.execute(
@@ -188,7 +237,12 @@ pub(crate) fn inspect(conn: &Connection) -> Result<(), String> {
     {
         let s: deck2_shared::Session = serde_json::from_str(&b.map_err(|_| "Session unavailable")?)
             .map_err(|_| "Invalid session")?;
-        if s.project.id != id(&s.project.root) || read(&s.project.id)? != s.project {
+        let current = read(&s.project.id)?;
+        let recorded = current == s.project || conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM previous_project_bindings WHERE project=?1 AND body=?2)",
+            params![s.project.id, serde_json::to_string(&s.project).unwrap()], |r| r.get::<_,bool>(0),
+        ).unwrap_or(false);
+        if s.project.id != id(&s.project.root) || !recorded {
             return Err("Invalid immutable session project".into());
         }
         sessions.insert(s.id, s.project);
@@ -241,6 +295,21 @@ mod tests {
     }
     // Oracle: project compatibility 01/03. A root is part of durable identity,
     // independent of the next startup argument and of the selected project.
+    #[test]
+    fn host_without_startup_project_preserves_registered_session_on_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("state.db");
+        let mut store = Store::open(&db, "").unwrap();
+        assert!(store.projects().unwrap().is_empty());
+        assert!(store.sessions().unwrap().is_empty());
+        let binding = store.register_project(dir.path().to_str().unwrap()).unwrap();
+        let session = create(&mut store, &binding, "first-session");
+        drop(store);
+        let store = Store::open(&db, "").unwrap();
+        assert_eq!(store.projects().unwrap(), vec![binding.clone()]);
+        assert_eq!(store.execution_project(&session.id).unwrap(), binding);
+    }
+
     #[test]
     fn project73_bindings_configuration_trust_and_restart() {
         let d = tempfile::tempdir().unwrap();
@@ -350,6 +419,36 @@ mod tests {
         assert!(Store::open(&db, b.to_str().unwrap()).is_err());
         assert_eq!(std::fs::read(&db).unwrap(), before);
     }
+    #[test]
+    fn explicit_add_after_reclone_keeps_history_and_allows_new_work_after_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        let db = temp.path().join("state.db");
+        let root = root.to_str().unwrap();
+        let mut store = Store::open(&db, root).unwrap();
+        let old_session = store.session.clone();
+        let old = store.execution_project(&old_session).unwrap();
+        let mut receipt = store.admit(&command(&old_session, "previous-command")).unwrap();
+        receipt.phase = deck2_shared::Phase::Completed;
+        store.save(&mut receipt).unwrap();
+        store.set_trust(root, true).unwrap();
+        std::fs::rename(root, temp.path().join("moved")).unwrap();
+        std::fs::create_dir(root).unwrap();
+        assert!(store.register_project(root).is_err());
+        let current = store.select_project_folder(root).unwrap();
+        assert_ne!(current, old);
+        assert!(!store.trusted_project(root).unwrap());
+        let new_session = create(&mut store, &current, "new-session");
+        assert_eq!(store.select_project_folder(root).unwrap(), current);
+        drop(store);
+        let store = Store::open(&db, root).unwrap();
+        assert_eq!(store.get(&receipt.id).unwrap().unwrap().configuration.unwrap().project, old);
+        assert_eq!(store.session_by_id(&old_session).unwrap().project, old);
+        assert!(store.execution_project(&old_session).is_err());
+        assert_eq!(store.execution_project(&new_session.id).unwrap(), current);
+    }
+
     #[test]
     fn project73_root_disappearance_and_replacement_do_not_rebind() {
         let d = tempfile::tempdir().unwrap();

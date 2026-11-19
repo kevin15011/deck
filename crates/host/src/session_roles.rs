@@ -9,12 +9,15 @@ use std::{
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
 };
+pub(crate) const CONFIG_CHANGED: &str = "Native execution configuration changed during the turn";
+
 #[derive(Clone)]
 pub struct Role {
     pub instructions: String,
     pub sandbox: Option<String>,
     pub hooks: Vec<(String, String)>,
     files: BTreeMap<PathBuf, String>,
+    catalog_policy: Option<String>,
     pub fallback: bool,
     pub model: Option<String>,
     pub effort: Option<String>,
@@ -64,6 +67,41 @@ pub(crate) fn read(path: &Path, max: u64) -> Result<String, String> {
     }
     Ok(body)
 }
+// Registration makes a plugin catalog discoverable. The plugins table separately
+// selects executable plugins. Keep referenced catalogs (including profiles) bound.
+fn catalog_policy(body: &str) -> Option<String> {
+    fn references_catalog(value: &toml::Value, suffix: &str) -> bool {
+        match value {
+            toml::Value::Table(table) => table
+                .iter()
+                .any(|(key, v)| key.ends_with(suffix) || references_catalog(v, suffix)),
+            toml::Value::Array(values) => values.iter().any(|v| references_catalog(v, suffix)),
+            toml::Value::String(s) => s.ends_with(suffix),
+            _ => false,
+        }
+    }
+
+    let mut config: toml::Value = toml::from_str(body).ok()?;
+    if let Some(catalogs) = config.as_table_mut()?.remove("marketplaces") {
+        let mut catalogs = catalogs.as_table()?.clone();
+        catalogs.retain(|name, _| references_catalog(&config, &format!("@{name}")));
+        if !catalogs.is_empty() {
+            config
+                .as_table_mut()?
+                .insert("marketplaces".into(), toml::Value::Table(catalogs));
+        }
+    }
+    Some(digest(format!("{config:?}").as_bytes()))
+}
+
+pub(crate) fn codex_policy_key(path: &Path) -> Result<String, String> {
+    let body = match std::fs::symlink_metadata(path) {
+        Ok(_) => read(path, 1024 * 1024)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(_) => return Err("Native configuration unavailable".into()),
+    };
+    Ok(catalog_policy(&body).unwrap_or_else(|| digest(body.as_bytes())))
+}
 impl Role {
     pub fn load(member: &str) -> Result<Self, String> {
         let root = std::env::var_os("CODEX_HOME")
@@ -86,18 +124,17 @@ impl Role {
             .map_err(Clone::clone)?;
         let config = root.join("config.toml");
         let mut files = BTreeMap::new();
-        match std::fs::symlink_metadata(&config) {
-            Ok(_) => {
-                files.insert(
-                    config,
-                    digest(read(&root.join("config.toml"), 1024 * 1024)?.as_bytes()),
-                );
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                files.insert(config, "absent".into());
-            }
+        let body = match std::fs::symlink_metadata(&config) {
+            Ok(_) => Some(read(&config, 1024 * 1024)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(_) => return Err("Native configuration unavailable".into()),
-        }
+        };
+        files.insert(
+            config,
+            body.as_ref()
+                .map_or_else(|| "absent".into(), |s| digest(s.as_bytes())),
+        );
+        let catalog_policy = catalog_policy(body.as_deref().unwrap_or(""));
         Ok(Self {
             instructions: format!(
                 "{}\n\n{}\n\n{}",
@@ -112,26 +149,31 @@ impl Role {
             sandbox: matches!(member, "investigate" | "quality").then(|| "read-only".into()),
             hooks: vec![],
             files,
+            catalog_policy,
             fallback: true,
             model: None,
             effort: None,
         })
     }
     pub fn opencode(root: &Path, member: &str) -> Result<Self, String> {
-        Self::at(root, member)
+        let mut role = Self::at(root, member)?;
+        role.catalog_policy = None;
+        Ok(role)
     }
     pub fn verify(&self) -> Result<(), String> {
         for (path, hash) in &self.files {
-            if hash == "absent" {
-                if !matches!(std::fs::symlink_metadata(path),Err(e) if e.kind()==std::io::ErrorKind::NotFound)
-                {
-                    return Err("Native configuration changed during execution".into());
-                }
+            let body = match std::fs::symlink_metadata(path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound && hash == "absent" => continue,
+                Ok(_) => read(path, 1024 * 1024)?,
+                _ => return Err("Native configuration unavailable during execution".into()),
+            };
+            if digest(body.as_bytes()) == *hash {
                 continue;
             }
-            if digest(read(path, 16 * 1024 * 1024)?.as_bytes()) != *hash {
-                return Err("Native role generation changed during execution".into());
+            if self.catalog_policy.is_some() && catalog_policy(&body) == self.catalog_policy {
+                continue;
             }
+            return Err(CONFIG_CHANGED.into());
         }
         Ok(())
     }
@@ -164,7 +206,7 @@ mod tests {
         let with_legacy = super::Role::at(d.path(), "lead").unwrap();
         assert_eq!(clean.identity(), with_legacy.identity());
         assert!(with_legacy.hooks.is_empty());
-        std::fs::write(d.path().join("config.toml"), "# native policy changed").unwrap();
+        std::fs::write(d.path().join("config.toml"), "sandbox_mode = 'read-only'").unwrap();
         assert!(
             with_legacy.verify().is_err(),
             "Native policy changes still revoke held preparation"
@@ -180,6 +222,26 @@ mod tests {
             "broken legacy receipt"
         );
     }
+    #[test]
+    fn registering_an_unused_catalog_preserves_running_roles() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("config.toml");
+        let base = "approval_policy = 'on-request'\n";
+        std::fs::write(&path, base).unwrap();
+        let lead = super::Role::at(home.path(), "lead").unwrap();
+        let member = super::Role::at(home.path(), "apply-fast").unwrap();
+        let registered = format!("{base}[marketplaces.tools]\nsource = '/catalog'\n");
+        std::fs::write(&path, &registered).unwrap();
+        lead.verify().unwrap();
+        member.verify().unwrap();
+        let active = format!("{registered}[plugins.'sample@tools']\nenabled = true\n");
+        std::fs::write(&path, &active).unwrap();
+        assert!(lead.verify().is_err());
+        let selected = super::Role::at(home.path(), "lead").unwrap();
+        std::fs::write(&path, active.replace("/catalog", "/different")).unwrap();
+        assert!(selected.verify().is_err());
+    }
+
     #[test]
     fn parses_native_role_toml_without_executing_it() {
         let raw = "name = 'deck-lead'\ndeveloper_instructions = 'Canonical role'\nsandbox_mode = 'read-only'\n";

@@ -6,7 +6,7 @@ const run=promisify(execFile),binary=path.resolve(process.argv[2]||'dist/deck2')
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'deck2-opener-')),state=path.join(root,"state ' $() ` ; space"),bin=path.join(root,'bin'),capture=path.join(root,'capture');
 fs.mkdirSync(bin);fs.mkdirSync(path.join(root,'project'));
 const fake=path.join(root,'codex');fs.copyFileSync('crates/host/tests/fake_native.py',fake);fs.chmodSync(fake,0o700);fs.writeFileSync(path.join(root,'mode'),'normal');
-const host=spawn(binary,['serve','--project',path.join(root,'project'),'--state-dir',state,'--codex',fake,'--no-open'],{stdio:'ignore'});
+const host=spawn(binary,['serve','--foreground','--project',path.join(root,'project'),'--state-dir',state,'--codex',fake,'--no-open'],{stdio:'ignore'});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const env={...process.env,PATH:bin,WSL_DISTRO_NAME:'DeckOwnedFixture',DECK2_CAPTURE:capture};
 const opener=(name,body)=>fs.writeFileSync(path.join(bin,name),'#!/usr/bin/python3\nimport sys,os,time,json\n'+body,{mode:0o700});

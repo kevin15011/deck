@@ -177,8 +177,9 @@ pub(crate) fn selection_snapshot(app: &App, store: &Store, runners: &[&str]) -> 
     if runners.contains(&"codex") {
         let binary=config.runner.as_ref().map(|b|std::path::PathBuf::from(&b.path)).unwrap_or_else(||app.binary.clone());
         evidence.push(binary.to_string_lossy().into_owned());
-        evidence.push(std::fs::read(&binary).map(|b|crate::tasks::digest(&b)).unwrap_or_else(|_|"unavailable".into()));
-        files.extend([std::path::PathBuf::from(&app.project).join(".codex/config.toml"),native_root.join("config.toml")]);
+        evidence.push(crate::tasks::file_digest(&binary).unwrap_or_else(|_|"unavailable".into()));
+        evidence.push(crate::session_roles::codex_policy_key(&native_root.join("config.toml"))?);
+        files.push(std::path::PathBuf::from(&app.project).join(".codex/config.toml"));
     }
     for file in files {
         evidence.push(if file.try_exists().map_err(|_|"Selected configuration unavailable")? {crate::tasks::digest(crate::session_roles::read(&file,1024*1024)?.as_bytes())}else{"absent".into()});

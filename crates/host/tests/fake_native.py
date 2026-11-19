@@ -10,7 +10,7 @@ if '--version' in sys.argv:
   if mode in ['probe-flood','probe-stderr']:
    while True: os.write(2 if mode=='probe-stderr' else 1,b'x'*4096)
   time.sleep(60)
- print('codex-cli '+('0.1.0' if mode=='version' else '0.166.0'));sys.exit()
+ print('codex-cli 0.166.0');sys.exit()
 assert '--stdio' in sys.argv
 assert 'hooks' in sys.argv and 'plugins' in sys.argv and 'plugin_hooks' in sys.argv
 assert 'sandbox_mode="read-only"' in sys.argv
@@ -30,7 +30,7 @@ for line in sys.stdin:
   if mode!='edit-no-result':out({'method':'item/completed','params':{'threadId':'native-thread','turnId':'native-turn','item':{'id':'file-item','type':'fileChange','status':'completed' if allowed else 'declined','changes':changes}}})
   out({'method':'turn/completed','params':{'threadId':'native-thread','turn':{'id':'native-turn','status':'completed'}}})
   continue
- if m=='initialize':result(req,{'userAgent':'deck2/0.1.0 (fake)' if mode=='protocol' else 'deck2/0.166.0 (fake)'})
+ if m=='initialize':result(req,{'userAgent':'deck2/0.166.0 (fake)'})
  elif m=='initialized':pass
  elif m=='account/read':
   if mode=='stream':

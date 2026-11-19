@@ -6,7 +6,7 @@ const helperBin=path.join(root,'.local','bin');fs.mkdirSync(helperBin,{recursive
 for(const name of ['claude','pi','opencode','rtk','codebase-memory-mcp']){const file=path.join(helperBin,name);fs.writeFileSync(file,`#!/bin/sh
 if [ "$1" = '--version' ]; then echo '${name} 1.0'; else echo 'Usage: claude update | pi update --self | opencode upgrade | Usage: rtk | codebase-memory-mcp update'; fi
 `);fs.chmodSync(file,0o700);}
-const host=spawn(path.resolve('dist/deck2'),['serve','--project',project,'--state-dir',state,'--artifact-store',path.join(root,'artifacts'),'--codex',native,'--no-open'],{stdio:'ignore',env:{...process.env,HOME:root,PATH:helperBin+':'+process.env.PATH}}),wait=ms=>new Promise(r=>setTimeout(r,ms));let browser;
+const host=spawn(path.resolve('dist/deck2'),['serve','--foreground','--project',project,'--state-dir',state,'--artifact-store',path.join(root,'artifacts'),'--codex',native,'--no-open'],{stdio:'ignore',env:{...process.env,HOME:root,PATH:helperBin+':'+process.env.PATH}}),wait=ms=>new Promise(r=>setTimeout(r,ms));let browser;
 const evidence={kind:'Owned packaged browser and protocol fake; no real update/login/provider effect',binary_sha256:crypto.createHash('sha256').update(fs.readFileSync('dist/deck2')).digest('hex'),checks:[]};
 (async()=>{try{
  for(let i=0;i<200&&!fs.existsSync(path.join(state,'launcher.json'));i++)await wait(50);

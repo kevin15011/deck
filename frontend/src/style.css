@@ -789,7 +789,15 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .detail-pick:focus-visible{outline-offset:-2px}
 .detail-pick[aria-pressed=true]{border-color:var(--accent-border)}
 .pick-unread{position:absolute;top:-2px;right:-2px;width:7px;height:7px;background:var(--action)}
-.detail-card{flex:none;margin-bottom:.75rem}
+.subagent-detail > .detail-card {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: 40%;
+    overflow: auto;
+    margin-bottom: .75rem;
+}
+.task-description { grid-column: 1 / -1; min-width: 0; }
+.task-description > summary { cursor: pointer; font-size: .8rem; color: var(--muted); }
 .detail-card .task-result{max-height:30vh;overflow:auto}
 .detail-conversation{flex:1;min-height:0;display:flex;flex-direction:column;margin:0 1.5rem 1rem}
 .detail-conversation h4{flex:none;font-size:.8rem;margin:0 0 .5rem}
@@ -1146,11 +1154,12 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
  .mobile-approval-overlay { position: absolute; z-index: 3; bottom: max(.75rem, env(safe-area-inset-bottom)); left: .75rem; right: .75rem; }
 }
 
-/* Quota uses the shared menu/dialog surface; runner colors do not encode values alone. */
+/* Quota uses the shared menu/dialog surface. */
 .usage-section { flex:none; border-top:1px solid var(--border); padding:4px .25rem; font-size:.8rem; }
 .usage-toggle.quiet { display:flex; align-items:center; gap:6px; width:100%; min-height:36px; padding:4px 0; text-align:left; font-size:.8rem; }
 .usage-toggle .navigation-icon { width:14px; height:14px; flex-basis:14px; color:var(--muted); }
-.usage-summary { margin-left:auto; color:var(--muted); font-size:.75rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.usage-summary { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:0 8px; margin-left:auto; color:var(--muted); font-size:.75rem; }
+.usage-summary > span { white-space:nowrap; }
 .usage-body { max-height:40vh; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; padding-bottom:4px; }
 .usage-body .quota-heading button { min-height:32px; font-size:.75rem; white-space:nowrap; }
 .usage-body .muted, .usage-body .quota-note, .usage-body .quota-empty { font-size:.7rem; line-height:1.45; }
@@ -1163,12 +1172,13 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .quota-heading h3 { margin:0; font-size:.9rem; }
 .quota-window { margin-top:16px; }
 .quota-window-label { margin-bottom:8px; }
-.quota-track { height:8px; border-radius:4px; background:var(--tint); outline:1px solid var(--border); overflow:hidden; }
-.quota-track > span { display:block; height:100%; background:var(--quota-color); }
-:root { --quota-claude:#ed7777; --quota-codex:#6aa5ff; }
-:root[data-theme=light], :root[data-theme=catppuccin-latte], :root[data-theme=solarized-light], :root[data-theme=github-light] { --quota-claude:#b82d2d; --quota-codex:#1d60c4; }
-.quota-claude { --quota-color:var(--quota-claude); }
-.quota-codex { --quota-color:var(--quota-codex); }
+.quota-track { height:8px; border-radius:4px; background:var(--tint); outline:1px solid var(--quota-status-color, var(--border)); overflow:hidden; }
+.quota-track > span { display:block; height:100%; background:var(--quota-status-color, var(--quota-fill)); }
+:root { --quota-fill:#6aa5ff; }
+:root[data-theme=light], :root[data-theme=catppuccin-latte], :root[data-theme=solarized-light], :root[data-theme=github-light] { --quota-fill:#1d60c4; }
+[data-quota-tone=warning] { --quota-status-color:light-dark(#806500, #f1ce51); }
+[data-quota-tone=critical] { --quota-status-color:light-dark(#b62332, #ff747b); }
+.quota-value { color:var(--quota-status-color, inherit); }
 .quota-window .muted { margin-top:6px; }
 .quota-note, .quota-empty { color:var(--muted); line-height:1.6; margin:12px 0 0; }
 .quota-status { padding-top:12px; }
@@ -1705,8 +1715,7 @@ select:focus-visible, .question-panel textarea:focus-visible {
 .composer-queue ol{padding:0;margin:.25rem 0 0;list-style:none;max-height:8rem;overflow:auto;}
 .composer-queue .queue-ordinal{color:var(--muted);font-variant-numeric:tabular-nums;}
 .composer-queue .queue-prompt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.composer-actions .composer-stop{color:var(--error);}
-.composer-actions .composer-stop[hidden]{display:none;}
+.composer-actions .send.stop{color:var(--error);background:var(--error-bg);border-color:var(--error-border);}
 @media(pointer:coarse){.composer-queue button{min-height:44px;}}
 
 /* Settings dialog */
@@ -1738,7 +1747,6 @@ select:focus-visible, .question-panel textarea:focus-visible {
 @media(max-width:600px) { .simple-project-settings .settings-row { flex-wrap:wrap; } .simple-project-settings .settings-row>div:first-child { flex:1 1 160px; } }
 
 /* Settings keeps the notification attention signal when its dialog is closed. */
-.workbench:has(.settings-modal[data-notifications-attention="true"]) .deck-menu-toggle::after { content:""; width:.4rem; height:.4rem; border-radius:50%; background:var(--accent); margin-left:.25rem; }
 
 .rtk-settings { border-bottom:1px solid var(--border); }
 .settings-card .rtk-settings .settings-row { border:0; }

@@ -28,6 +28,8 @@ base64 = "0.22"
 p256 = { version = "0.13", features = ["ecdsa"] }
 openssl = { version = "0.10", features = ["vendored"] }
 semver = "1"
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

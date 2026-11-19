@@ -185,7 +185,6 @@ export function usePushNotifications(api: Api) {
     [denied, setDenied] = useState(
       !hint && Notification.permission === 'denied',
     );
-  const [needsReconnect,setNeedsReconnect]=useState(false);
   const [approvalActions,setApprovalActions]=useState(false);
   const refresh = async () => {
     if (hint) return;
@@ -197,7 +196,6 @@ export function usePushNotifications(api: Api) {
       ]);
       setDelivery(status.delivery);
       const subscription = await registration.pushManager.getSubscription();
-      setNeedsReconnect((!!subscription && !status.enabled) || (status.enabled && (!subscription || Notification.permission !== 'granted')));
       if (status.enabled && Notification.permission !== 'granted')
         await api('/api/push', { method: 'DELETE' });
       setRegistered(status.enabled && Notification.permission === 'granted');
@@ -213,7 +211,6 @@ export function usePushNotifications(api: Api) {
           : '',
       );
     } catch {
-      setNeedsReconnect(true);
       setMessage(
         'Notifications are unavailable. You can retry when Deck is connected.',
       );
@@ -259,7 +256,6 @@ export function usePushNotifications(api: Api) {
       });
       setRegistered(true);
       setEnabled(true);
-      setNeedsReconnect(false);
       setMessage('Notifications are on for this browser.');
     } catch {
       await subscription?.unsubscribe().catch(() => {});
@@ -278,7 +274,6 @@ export function usePushNotifications(api: Api) {
       await api('/api/push', { method: 'DELETE' });
       setRegistered(false);
       setEnabled(false);
-      setNeedsReconnect(false);
       const registration = await navigator.serviceWorker.getRegistration('/');
       await (await registration?.pushManager.getSubscription())?.unsubscribe();
       setMessage('Notifications are off for this browser.');
@@ -304,7 +299,7 @@ export function usePushNotifications(api: Api) {
     }
     finally { setBusy(false); }
   }
-  return {hint,enabled,registered,busy,loading,message,delivery,denied,enable,disable,refresh,approvalActions,changeApprovalActions,attention:denied||needsReconnect};
+  return {hint,enabled,registered,busy,loading,message,delivery,denied,enable,disable,refresh,approvalActions,changeApprovalActions};
 }
 export function NotificationsDialog({settings,onClose}:{settings:ReturnType<typeof usePushNotifications>;onClose:()=>void}) {
   const {hint,enabled,registered,busy,loading,message,delivery,denied,enable,disable,refresh,approvalActions,changeApprovalActions}=settings;

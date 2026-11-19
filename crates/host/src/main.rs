@@ -34,10 +34,17 @@ enum Cmd {
         #[arg(long,hide=true,value_parser=["intent","draining","prepared","migrated","restored-cache","candidate-selected","recovered","diagnostics"])]
         verification_pause_after: Option<String>,
     },
-    /// Serve embedded Deck assets until Ctrl-C. Browser closure does not stop tasks.
+    /// Start the local host in the background.
     Serve {
+        /// Keep the host attached to this terminal.
         #[arg(long)]
-        project: PathBuf,
+        foreground: bool,
+        #[arg(long, hide = true)]
+        background_child: bool,
+        #[arg(long, hide = true)]
+        restart_child: bool,
+        #[arg(long)]
+        project: Option<PathBuf>,
         #[arg(long)]
         state_dir: Option<PathBuf>,
         #[arg(long, default_value = "codex")]
@@ -47,7 +54,7 @@ enum Cmd {
         #[arg(long)]
         opencode: Option<PathBuf>,
         /// Compatibility option for legacy scoped read-only investigation. Canonical team roles use session assignments.
-        #[arg(long, conflicts_with_all = ["opencode", "investigator_model"])]
+        #[arg(long, requires = "project", conflicts_with_all = ["opencode", "investigator_model"])]
         investigator_codex: bool,
         /// Private shared Deck-owned helper store, independent of project state.
         #[arg(long)]
@@ -58,10 +65,15 @@ enum Cmd {
         /// Disable discovery of original Deck history for an isolated host.
         #[arg(long)]
         no_history: bool,
-        #[arg(long)]
+        #[arg(long, requires = "project")]
         investigator_model: Option<String>,
         #[arg(long, hide = true)]
         verification_cbm_claims: Option<PathBuf>,
+    },
+    /// Ask the running host to shut down gracefully.
+    Stop {
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
     },
     /// Manage the original browser identity through this host's private launcher.
     Web {
@@ -139,7 +151,7 @@ fn lock(p: &std::path::Path) -> Result<std::fs::File, String> {
 fn read_launch(p: &std::path::Path) -> Result<Launch, String> {
     serde_json::from_slice(
         &fs::read(p.join("launcher.json"))
-            .map_err(|_| "No launcher found. Start deck2 serve --project PATH")?,
+            .map_err(|_| "No launcher found. Start deck2 serve")?,
     )
     .map_err(|_| "Invalid launcher record; inspect state before restart".into())
 }
@@ -149,7 +161,7 @@ fn launch_url(p: &std::path::Path) -> Result<String, String> {
         return Err("Invalid launcher address".into());
     }
     let mut stream = std::net::TcpStream::connect(&l.host).map_err(
-        |_| "Host is not running. Restart deck2 serve with the same project/state directory.",
+        |_| "Host is not running. Restart deck2 serve with the same state directory.",
     )?;
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(5)))
@@ -179,9 +191,60 @@ fn open_browser(p: &std::path::Path) -> Result<(), String> {
     eprintln!("Browser opener completed; browser authentication is not yet confirmed.");
     Ok(())
 }
+// Keep the launch path across atomic installs, including a symlink to a versioned binary.
+fn installed_executable() -> Result<PathBuf, String> {
+    let running = std::env::current_exe().map_err(|e| e.to_string())?;
+    if let Some(name) = std::env::args_os().next() {
+        let name = PathBuf::from(name);
+        let paths: Vec<_> = if name.components().count() == 1 {
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).map(|dir| dir.join(&name)).collect()
+        } else {
+            vec![name]
+        };
+        for candidate in paths {
+            if let Ok(path) = std::path::absolute(candidate)
+                && path.canonicalize().is_ok_and(|resolved| resolved == running) {
+                return Ok(path);
+            }
+        }
+    }
+    Ok(running)
+}
+fn start_background(state: Option<PathBuf>) -> Result<(), String> {
+    use std::os::unix::{net::UnixStream, process::CommandExt};
+    use std::os::fd::OwnedFd;
+    use std::process::{Command, Stdio};
+
+    let state = directory(state)?;
+    let log_path = state.join("host.log");
+    let log = OpenOptions::new().append(true).create(true).mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW).open(&log_path).map_err(|e| e.to_string())?;
+    let (mut receiver, sender) = UnixStream::pair().map_err(|e| e.to_string())?;
+    let mut command = Command::new(installed_executable()?);
+    command.args(std::env::args_os().skip(1)).arg("--background-child")
+        .stdin(Stdio::from(OwnedFd::from(sender)))
+        .stdout(log.try_clone().map_err(|e| e.to_string())?).stderr(log);
+    // setsid is async-signal-safe between fork and exec.
+    unsafe { command.pre_exec(|| {
+        if libc::setsid() < 0 { return Err(std::io::Error::last_os_error()); }
+        Ok(())
+    }); }
+    let mut child = command.spawn().map_err(|e| format!("Cannot start host: {e}"))?;
+    drop(command);
+    let mut ready = [0];
+    if receiver.read_exact(&mut ready).is_err() || ready != [1] {
+        let _ = child.wait();
+        return Err(format!("Host failed to start. See {}", log_path.display()));
+    }
+    println!("Deck is running in the background. Use deck2 open, deck2 status or deck2 stop.");
+    Ok(())
+}
+
 fn main() {
     let cli = Cli::parse();
-    let result = if let Cmd::CbmSupervisor {
+    let result = if let Cmd::Serve { foreground: false, background_child: false, restart_child: false, state_dir, .. } = &cli.command {
+        start_background(state_dir.clone())
+    } else if let Cmd::CbmSupervisor {
         store,
         service,
         verification_pause_after,
@@ -202,6 +265,20 @@ async fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Cmd::CbmSupervisor { .. } => unreachable!(),
         Cmd::CodebaseBridge => codebase_bridge().await,
+        Cmd::Stop { state_dir } => {
+            let p = directory(state_dir)?;
+            let launch = read_launch(&p)?;
+            let addr = launch.host.parse::<std::net::SocketAddr>().map_err(|_| "Invalid launcher address")?;
+            if !addr.ip().is_loopback() { return Err("Invalid launcher address".into()); }
+            let response = reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none())
+                .timeout(std::time::Duration::from_secs(5)).build().map_err(|e| e.to_string())?
+                .post(format!("http://{addr}/web-control"))
+                .json(&serde_json::json!({"admin":launch.admin,"command":"stop"}))
+                .send().await.map_err(|_| "Host is not reachable")?;
+            if !response.status().is_success() { return Err("Host rejected shutdown".into()); }
+            println!("Deck shutdown requested.");
+            Ok(())
+        }
         Cmd::Web {state_dir,command} => {
             let p=directory(state_dir)?; let l=read_launch(&p)?;
             let (name,id)=match command {WebCommand::Devices=>("devices",None),WebCommand::Pair=>("pair",None),WebCommand::Revoke{device_id}=>("revoke",Some(device_id))};
@@ -299,6 +376,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Cmd::Serve {
+            foreground: _, background_child, restart_child,
             project,
             state_dir,
             codex,
@@ -311,22 +389,48 @@ async fn run(cli: Cli) -> Result<(), String> {
             investigator_model,
             verification_cbm_claims,
         } => {
+            let launcher_path = installed_executable()?;
+            let browser_cookie = if restart_child {
+                let mut bytes = [0u8; 64];
+                std::io::stdin().read_exact(&mut bytes).map_err(|_| "Missing restart handoff")?;
+                if !bytes.iter().all(u8::is_ascii_hexdigit) { return Err("Invalid restart handoff".into()); }
+                String::from_utf8(bytes.to_vec()).map_err(|_| "Invalid restart handoff")?
+            } else { server::secret() };
+            let startup_signal = if background_child {
+                use std::os::fd::{AsFd, AsRawFd};
+                let fd = std::io::stdin().as_fd().try_clone_to_owned().map_err(|e| e.to_string())?;
+                let null = std::fs::File::open("/dev/null").map_err(|e| e.to_string())?;
+                if unsafe { libc::dup2(null.as_raw_fd(), 0) } < 0 { return Err("Cannot detach stdin".into()); }
+                Some(std::fs::File::from(fd))
+            } else { None };
             if let Some(path) = verification_cbm_claims.as_deref() {
                 deck2::cbm_management::verification_claims(path)?;
             }
             let p = directory(state_dir)?;
             let existing_state=p.join("state.db").is_file();
-            let project = match fs::canonicalize(&project) {Ok(p)=>p,Err(_) if existing_state && project.is_absolute()=>project,Err(_)=>return Err("Project does not exist".into())};
-            if !project.is_dir() && !existing_state {
-                return Err("Project must be a directory".into());
-            }
-            let project = project
-                .to_str()
-                .ok_or("Project path must be UTF-8")?
-                .to_string();
+            let project = project.map(|path| -> Result<String, String> {
+                let root = match fs::canonicalize(&path) {
+                    Ok(root) => root,
+                    Err(_) if existing_state && path.is_absolute() => path,
+                    Err(_) => return Err("Project does not exist".into()),
+                };
+                if !root.is_dir() && !existing_state {
+                    return Err("Project must be a directory".into());
+                }
+                root.into_os_string().into_string().map_err(|_| "Project path must be UTF-8".into())
+            }).transpose()?;
             let _lock = lock(&p)?;
-            let mut store = Store::open(&p.join("state.db"), &project)?;
-            if std::path::Path::new(&project).is_dir() {store.register_project(&project)?;}
+            let mut store = Store::open(&p.join("state.db"), project.as_deref().unwrap_or(""))?;
+            if let Some(root) = &project && std::path::Path::new(root).is_dir() {
+                store.select_project_folder(root)?;
+            }
+            let project = project.unwrap_or_else(|| store.project.clone());
+            let launcher = (codex == std::path::Path::new("codex")).then(|| {
+                std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                    .filter(|p| p.is_absolute()).map(|p| p.join("codex"))
+                    .find(|p| p.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
+            }).flatten();
+            let codex = launcher.clone().unwrap_or(codex);
             let availability = native::version(&codex).await.err();
             // Reuse this state's browser origin so scoped drafts survive restart.
             // Never silently move to another port if it is occupied.
@@ -369,14 +473,29 @@ async fn run(cli: Cli) -> Result<(), String> {
             f.write_all(&serde_json::to_vec(&l).unwrap())
                 .and_then(|_| f.sync_all())
                 .map_err(|_| "Cannot persist launcher")?;
-            let app = App::new(
+            let app = App::with_browser_cookie(
                 store,
                 host.clone(),
                 codex,
                 availability,
                 admin,
                 launcher::recovery(&p),
+                browser_cookie,
             );
+            app.restart.enable(launcher_path.clone());
+            if let Some(launcher) = launcher {
+                let mut previous = None;
+                if let Err(e) = deck2::runner_management::follow_codex_launcher(&app, &launcher, &mut previous).await {
+                    eprintln!("Codex launcher discovery: {e}");
+                }
+                let host = app.clone();
+                tokio::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        let _ = deck2::runner_management::follow_codex_launcher(&host, &launcher, &mut previous).await;
+                    }
+                });
+            }
             let app=app.project_context(&deck2::projects::id(&project)).unwrap_or(app);
             app.history_root(if no_history {
                 None
@@ -394,7 +513,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             app.adopt_history(p.join("original-history.db")).await;
             deck2::web_push::start(app.clone(),p.clone());
             println!(
-                "Deck host ready on {host} · project {project}\nRead-only project execution; Codex may refresh its own auth/cache.\n{}\nStop host: Ctrl-C. Browser closure keeps it running.",
+                "Deck host ready on {host}\nRead-only project execution; Codex may refresh its own auth/cache.\n{}\nStop host: deck2 stop (use the same state directory). Browser closure keeps it running.",
                 launcher::guidance(&p)
             );
             *app.artifact_store.lock().unwrap() = artifact_store;
@@ -450,12 +569,15 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
             let cloned = app.clone();
             let server =
-                axum::serve(listener, server::router(app).into_make_service_with_connect_info::<std::net::SocketAddr>()).with_graceful_shutdown(async move {
-                    let _ = tokio::signal::ctrl_c().await;
-                    cloned.shutdown();
+                axum::serve(listener, server::router(app.clone()).into_make_service_with_connect_info::<std::net::SocketAddr>()).with_graceful_shutdown(async move {
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {},
+                        _ = cloned.stop_request.notified() => {},
+                    }
+                    if !cloned.restart.pending() { cloned.shutdown(); }
                     deck2::dictation::close(&cloned).await;
                 });
-            if !no_open {
+            if !no_open && !restart_child {
                 let path = p.clone();
                 tokio::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -467,11 +589,28 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .await;
                 });
             }
+            if let Some(mut ready) = startup_signal {
+                ready.write_all(&[1]).map_err(|_| "Startup client disconnected")?;
+            }
+            app.pump_queue();
             let result = server
                 .await
                 .map_err(|_| "Local host transport failed".to_string());
             deck2::session_mcp::close_codebase().await;
-            result
+            result?;
+            if let Some(candidate) = app.restart.take() {
+                app.retire_native().await?;
+                use std::os::{fd::{AsRawFd, OwnedFd}, unix::{net::UnixStream, process::CommandExt}};
+                let (reader, mut writer) = UnixStream::pair().map_err(|e| e.to_string())?;
+                app.write_restart_cookie(&mut writer).map_err(|e| e.to_string())?;
+                drop(writer);
+                let args = std::env::args_os().skip(1).filter(|v| v != "--background-child" && v != "--restart-child");
+                let err = std::process::Command::new(format!("/proc/self/fd/{}", candidate.as_raw_fd()))
+                    .arg0(launcher_path).args(args).arg("--restart-child")
+                    .stdin(std::process::Stdio::from(OwnedFd::from(reader))).exec();
+                return Err(format!("Cannot restart Deck: {err}"));
+            }
+            Ok(())
         }
     }
 }

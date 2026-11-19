@@ -7,18 +7,18 @@ import {gsap} from 'gsap';
 import './activity.css';
 
 export function useActivity(session:string,enabled:boolean){
- const [snapshot,setSnapshot]=useState<{cursor:string;page:ActivityPage;stepsKey:string;liveKey:string}>();
+ const [snapshot,setSnapshot]=useState<{cursor:string;page:ActivityPage;stepsKey:string;liveKey:string;membersKey:string}>();
  const [failure,setFailure]=useState<{session:string;message:string}>();
  const [location,setLocation]=useState<{session:string;cursor:string}>();
  const cursor=location?.session===session?location.cursor:'';
  useEffect(()=>{if(!session||!enabled)return;let stopped=false,timer:ReturnType<typeof setTimeout>;const controller=new AbortController();
   const batch=frameBatch<ActivityPage>(page=>{
-   const stepsKey=JSON.stringify(page.steps),liveKey=JSON.stringify(page.live);
+   const stepsKey=JSON.stringify(page.steps),liveKey=JSON.stringify(page.live),membersKey=JSON.stringify(page.members??[]);
    setSnapshot(previous=>{
     const samePage=previous?.page.session===session&&previous.cursor===cursor;
     const sameSteps=samePage&&previous.stepsKey===stepsKey;
-    if(sameSteps&&previous.liveKey===liveKey&&previous.page.older===page.older&&previous.page.newer===page.newer)return previous;
-    return {cursor,stepsKey,liveKey,page:sameSteps?{...page,steps:previous.page.steps}:page};
+    if(sameSteps&&previous.liveKey===liveKey&&previous.membersKey===membersKey&&previous.page.older===page.older&&previous.page.newer===page.newer)return previous;
+    return {cursor,stepsKey,liveKey,membersKey,page:{...page,steps:sameSteps?previous.page.steps:page.steps,members:samePage&&previous.membersKey===membersKey?previous.page.members:page.members}};
    });
   },requestAnimationFrame,cancelAnimationFrame);
   const poll=async()=>{
@@ -41,12 +41,14 @@ function Disclosure({label,children}:{label:string;children:React.ReactNode}){
  return <div className="activity-disclosure"><button className="quiet" aria-expanded={open} onClick={()=>setOpen(v=>!v)}>{label}<span aria-hidden="true">{open?' −':' +'}</span></button><div ref={ref} hidden={!open} inert={!open}>{open&&children}</div></div>;
 }
 export function LiveActivity({steps,receipts,connected}:{steps:Step[];receipts:Receipt[];connected:boolean}){
- const working=receipts.filter(active).at(-1),current=working?steps.find(s=>s.command===working.id&&s.status==='running')??steps.find(s=>s.command===working.id):undefined;
+ const working=receipts.filter(r=>r.phase==='running').at(-1);
+ const owned=working?steps.filter(s=>!s.task&&s.command===working.id&&s.attempt===working.attempt):[];
+ const current=owned.find(s=>s.status==='running')??owned[0];
  const label=current?stepLabel(current):undefined;
  const text=working&&connected?(current&&label?`${current.owner==='lead'?'':current.owner+' · '}${label.label}${label.summary?' · '+label.summary:''}`:'Thinking…'):'';
  const ref=useRef<HTMLDivElement>(null),last=useRef('');if(text)last.current=text;useDisclosureMotion(ref,!!text);
  useLayoutEffect(()=>{const node=ref.current;if(!node||!text)return;if(!matchMedia('(prefers-reduced-motion: reduce)').matches)gsap.fromTo(node,{opacity:.65},{opacity:1,duration:.12,overwrite:true,clearProps:'opacity'});return()=>{gsap.killTweensOf(node);};},[text]);
- return <div ref={ref} hidden={!text} className="live-activity" role="status" aria-live="polite"><span aria-hidden="true">{label?.mark??'·'}</span><span>{last.current}</span>{current&&<small>{current.runner}</small>}</div>;
+ return <div ref={ref} hidden={!text} className="live-activity" role="status" aria-live="polite"><span aria-hidden="true" className={text&&(!current||current.kind==='reasoning')?'thinking-pulse':undefined}>{label?.mark??'·'}</span><span>{last.current}</span>{current&&<small>{current.runner}</small>}</div>;
 }
 function StepOutput({step,session}:{step:Step;session:string}){
  const [output,setOutput]=useState<string>(),[error,setError]=useState('');

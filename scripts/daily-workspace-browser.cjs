@@ -27,7 +27,7 @@ native=native.replace("  if 'Fresh graph' in text:",`  if 'Daily delivery' in te
   if 'Fresh graph' in text:`);
 native=native.replace("if not (root/'coordination-task').exists() and any(","if not (root/'daily-tasks').exists() and not (root/'coordination-task').exists() and any(");
 fs.writeFileSync(path.join(root,'codex'),native,{mode:0o700});fs.writeFileSync(path.join(root,'hold-alpha'),'');
-const host=spawn(binary,['serve','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,CODEX_HOME:path.join(root,'native')}});
+const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,CODEX_HOME:path.join(root,'native')}});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let browser,page;
 const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[],passed:false,root};const start=performance.now();
 (async()=>{try{

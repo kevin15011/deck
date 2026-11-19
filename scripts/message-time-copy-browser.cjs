@@ -6,7 +6,7 @@ const git=(...args)=>execFileSync('/usr/bin/git',args,{cwd:project,env:{PATH:'/u
 git('init','-q','-b','keyboard-unborn');
 let native=fs.readFileSync(path.join(repo,'crates/host/tests/fake_session_native.py'),'utf8').replace(" elif m=='turn/start':", " elif m=='turn/interrupt':\n  result(v,{})\n  out({'method':'turn/completed','params':{'threadId':thread,'turn':{'id':'normal-turn','status':'interrupted'}}})\n elif m=='turn/start':").replace("  assert p['approvalPolicy']","  while (root/'prepare-gate').exists():time.sleep(.02)\n  assert p['approvalPolicy']").replace("  def tool(name,args):","  if 'Keyboard hold' in text:continue\n  def tool(name,args):");
 fs.writeFileSync(path.join(root,'codex'),native,{mode:0o700});
-const host=spawn(binary,['serve','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,HOME:root,XDG_DATA_HOME:path.join(root,'data'),XDG_CONFIG_HOME:path.join(root,'config'),CODEX_HOME:path.join(root,'native')}});
+const host=spawn(binary,['serve','--foreground','--project',project,'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore',env:{...process.env,HOME:root,XDG_DATA_HOME:path.join(root,'data'),XDG_CONFIG_HOME:path.join(root,'config'),CODEX_HOME:path.join(root,'native')}});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let browser,page;
 const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[],passed:false,root,assets:process.env.DECK2_UI_ASSETS?Object.fromEntries(['app.js','app.css'].map(f=>[f,crypto.createHash('sha256').update(fs.readFileSync(path.join(process.env.DECK2_UI_ASSETS,f))).digest('hex')])):'embedded'};const start=performance.now();
 (async()=>{try{
@@ -16,7 +16,7 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  if(process.env.DECK2_UI_ASSETS)for(const file of ['app.js','app.css'])await page.route('**/'+file,route=>route.fulfill({path:path.join(process.env.DECK2_UI_ASSETS,file),contentType:file.endsWith('.js')?'application/javascript':'text/css'}));
  await page.goto(link.url);await page.getByRole('button',{name:'Add project',exact:true}).waitFor();await page.waitForFunction(()=>!document.querySelector('.navigation-add')?.disabled);
  const ws=async()=>await(await page.request.get(base+'/api/workspace')).json();const until=async fn=>{for(let i=0;i<200;i++){const w=await ws();if(fn(w))return w;await wait(100);}throw Error('Workspace deadline');};
- const create=async title=>{await page.getByRole('button',{name:'New session in project',exact:true}).click();await page.getByLabel('Session name',{exact:true}).fill(title);await page.getByRole('button',{name:'Create session',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});await page.waitForFunction(title=>document.querySelector('.app-header h1')?.textContent===title,title);return (await ws()).sessions.find(s=>s.title===title).id;};
+ const create=async title=>{await page.locator('.project-row').first().hover();await page.getByRole('button',{name:'New session in project',exact:true}).click();await page.getByLabel('Session name',{exact:true}).fill(title);await page.getByRole('button',{name:'Create session',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});await page.waitForFunction(title=>document.querySelector('.app-header h1')?.textContent===title,title);return (await ws()).sessions.find(s=>s.title===title).id;};
 
  await context.grantPermissions(['clipboard-read','clipboard-write']);
  await create('Message metadata checks');
@@ -54,7 +54,7 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  assert.equal(await page.locator('textarea[readonly]').count(),0);
  result.checks.push('HTTP/denied Clipboard fallback copies source and removes temporary textarea');
  // Explicit network edge projection exercises streaming and absent-time states without inventing timestamps.
- const pinned=JSON.parse(JSON.stringify(completed)),stream=pinned.receipts.find(r=>r.id===recorded.id);stream.phase='running';stream.text='partial';stream.first_output_ms=null;
+ const pinned=JSON.parse(JSON.stringify(completed)),stream=pinned.receipts.find(r=>r.id===recorded.id);stream.phase='running';stream.text='partial';stream.first_output_ms=null;delete stream.message_times;
  await page.route('**/api/workspace',route=>route.fulfill({json:pinned}));
  await page.waitForFunction(()=>document.querySelector('.lead .answer')?.textContent==='partial');assert.equal(await time.count(),0);
  stream.text='partial + next chunk';stream.first_output_ms=recorded.first_output_ms;
@@ -62,6 +62,16 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  await exchange.locator('.lead .message-copy').click();assert.equal(await page.evaluate(()=>window.fallbackCopy),'partial + next chunk');
  await page.locator('.sidebar .session[aria-current=page] .agent-indicator[data-state=working]').waitFor();
  result.checks.push('Streaming copy reads latest actual text; missing timestamp renders no guessed time; sidebar working indicator preserved');
+ stream.text='First 🧭\n\nSecond message';const later=recorded.first_output_ms+11*60*1000;
+ stream.message_times=[{start:0,at_ms:recorded.first_output_ms},{start:'First 🧭\n\n'.length,at_ms:later}];
+ await exchange.locator('.lead-message-part time').waitFor();
+ assert.deepEqual(await time.evaluateAll(nodes=>nodes.map(n=>n.dateTime)),[recorded.first_output_ms,later].map(ms=>new Date(ms).toISOString()));
+ assert.equal(await exchange.locator('.lead-message-part').last().locator('.reply-content').textContent(),'Second message');
+ const buttons=exchange.locator('.lead .message-copy');assert.equal(await buttons.count(),2);
+ for(const [index,expected] of ['First 🧭','Second message'].entries()){
+  await buttons.nth(index).click();assert.equal(await page.evaluate(()=>window.fallbackCopy),expected);
+ }
+ result.checks.push('Separate native messages retain their individual times and Unicode offsets');
  await page.unroute('**/api/workspace');
  await page.waitForFunction(text=>document.querySelector('.lead .answer')?.textContent===text,recorded.text);
  await page.setViewportSize({width:390,height:844});await page.emulateMedia({reducedMotion:'reduce'});
@@ -70,5 +80,23 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  const box=await exchange.locator('.lead .message-copy').boundingBox();assert(box.width>=44&&box.height>=44);
  await page.screenshot({path:path.join(out,'narrow.png')});
  await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:path.join(out,'desktop.png')});
+ await prompt.fill('Two message delivery fixture');await prompt.press('Enter');
+ const next=await until(w=>w.receipts.some(r=>r.prompt==='Two message delivery fixture'&&r.phase==='completed'));
+ const multi=next.receipts.find(r=>r.prompt==='Two message delivery fixture');
+ assert.equal(multi.text,'First 🧭\n\nSecond message');assert.deepEqual(multi.message_times.map(m=>m.start),[0,'First 🧭\n\n'.length]);
+ assert.ok(multi.message_times[1].at_ms>multi.message_times[0].at_ms);
+ await page.reload();
+ const parts=page.locator('#exchange-'+multi.id+' .lead time');await parts.nth(1).waitFor();
+ assert.deepEqual(await parts.evaluateAll(nodes=>nodes.map(n=>n.dateTime)),multi.message_times.map(m=>new Date(m.at_ms).toISOString()));
+ result.checks.push('Native item starts and streamed deltas survive reload with one timestamp per message');
+ await page.emulateMedia({reducedMotion:'no-preference'});fs.writeFileSync(path.join(root,'prepare-gate'),'');await prompt.fill('Keyboard hold');await prompt.press('Enter');
+ await page.locator('.lead-progress[data-phase=preparing]').waitFor();
+ assert.equal(await page.locator('.live-activity').isVisible(),false,'Thinking must stay hidden until the native turn starts');
+ fs.unlinkSync(path.join(root,'prepare-gate'));
+ const pulse=page.locator('.live-activity .thinking-pulse');await pulse.waitFor();
+ assert.notEqual(await pulse.evaluate(node=>getComputedStyle(node).animationName),'none');
+ await page.emulateMedia({reducedMotion:'reduce'});
+ assert.equal(await pulse.evaluate(node=>getComputedStyle(node).animationName),'none');
+ result.checks.push('Thinking animates during a live turn and honours reduced motion');
  assert.deepEqual(errors,[]);result.checks.push('Narrow and reduced-motion keyboard control remains visible with 44px target; no browser errors');result.passed=true;
 }finally{result.duration_ms=performance.now()-start;if(page&&!result.passed){await page.screenshot({path:path.join(out,'failure.png')}).catch(()=>{});fs.writeFileSync(path.join(out,'failure.txt'),await page.locator('body').innerText().catch(()=>''));}await browser?.close();host.kill('SIGTERM');await Promise.race([new Promise(r=>host.once('exit',r)),wait(3000)]);if(host.exitCode===null)host.kill('SIGKILL');result.hostExitCode=host.exitCode;result.hostSignal=host.signalCode;fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));}})().catch(e=>{console.error(e);process.exitCode=1;});

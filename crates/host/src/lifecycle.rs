@@ -471,7 +471,7 @@ impl Store {
                 })
                 || a.model.as_deref() != Some("gpt-6.1-sol")
                 || a.requested_model != "gpt-6.1-sol"
-                || a.runner != "codex 0.166.0")
+                || !matches!(a.runner.as_str(), "codex" | "codex 0.166.0"))
         {
             gaps.push("Quality parent authority or assignment does not match this change".into());
         }

@@ -8,7 +8,7 @@
 .project-navigation .project-group>.project-row{background:transparent;border-radius:0}
 .project-navigation .project-row,.project-navigation .session-row{min-height:38px;height:auto;flex-shrink:0}
 .project-navigation .project-toggle.quiet{padding-left:2px;min-height:38px}
-.project-navigation .project-group .project-sessions{padding-left:18px}
+.project-navigation .project-group .project-sessions{padding-left:41px}
 .project-navigation .project-sessions::before{display:none}
 .project-navigation .session-row .session{min-height:38px;padding-inline:8px;border-radius:var(--control-radius)}
 .project-navigation .session-row:has(.session.selected){background:var(--tint);border-radius:var(--control-radius);box-shadow:inset 2px 0 var(--accent)}

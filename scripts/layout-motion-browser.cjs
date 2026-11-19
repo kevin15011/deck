@@ -7,7 +7,7 @@ const repo=path.resolve(__dirname,'..'),out=path.resolve(process.env.DECK2_EVIDE
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'deck2-layout-'));fs.mkdirSync(out,{recursive:true});fs.mkdirSync(path.join(root,'project'));
 fs.copyFileSync(path.join(repo,'crates/host/tests/fake_native.py'),path.join(root,'codex'));fs.chmodSync(path.join(root,'codex'),0o700);
 fs.writeFileSync(path.join(root,'mode'),'stream');fs.writeFileSync(path.join(root,'allow-prepare'),'ready');
-const host=spawn(binary,['serve','--project',path.join(root,'project'),'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore'});
+const host=spawn(binary,['serve','--foreground','--project',path.join(root,'project'),'--state-dir',path.join(root,'state'),'--codex',path.join(root,'codex'),'--no-open'],{stdio:'ignore'});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let browser;
 const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),checks:[],captures:[],passed:false};
 (async()=>{try{
