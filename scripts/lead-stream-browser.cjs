@@ -73,6 +73,10 @@ async function check() {
         await page.getByRole('dialog').waitFor({state: 'hidden'});
         async function send(prompt, keyboard=false) {
             await page.locator('#prompt').fill(prompt);
+            assert(await page.locator('#prompt').evaluate(input =>
+                document.activeElement === input && getComputedStyle(input).outlineStyle === 'none'
+                && input.closest('.composer').classList.contains('composer-input-focused')
+            ), 'Focus should follow the rounded composer after opening a session');
             const sendButton = page.locator('.composer-actions button.send[type=submit]:enabled');
             await sendButton.waitFor();
             const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/commands' && r.request().method() === 'POST');

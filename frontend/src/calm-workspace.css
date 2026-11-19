@@ -1,7 +1,7 @@
 /* Slice 2: the approved conversation-first composition, using existing palette tokens.
    Row actions reveal immediately; GSAP continues to own animated panels and controls. */
 @media(min-width:1001px){
- .workbench:not(.sidebar-collapsed){grid-template-columns:224px minmax(0,1fr)}
+ .workbench[data-sidebar-docked]{grid-template-columns:224px minmax(0,1fr)}
  .workbench>.sidebar{padding-inline:10px}
 }
 .project-navigation .project-group{margin-block:4px 16px;border-radius:0}
@@ -74,3 +74,82 @@
 
 /* Keep focused async controls reachable while their current change settles. */
 .simple-project-settings button[aria-disabled="true"] { opacity: .5; cursor: default; }
+
+/* One navigation surface, laid out in the grid only while pinned. */
+.workbench > .app-body { grid-area:1 / -2; }
+.workbench > .sidebar { grid-area:1 / 1; width:auto; max-width:none; height:auto; max-height:none; margin:0; border:0; border-right:1px solid var(--border); color:var(--ink); }
+.workbench > .session-drawer {
+ position:fixed;
+ inset:0 auto 0 0;
+ width:min(320px, calc(100vw - 16px));
+ padding-inline:max(.75rem, env(safe-area-inset-left)) .75rem;
+ border-right-color:var(--border);
+ box-shadow:0 8px 32px var(--backdrop);
+}
+.workbench > .session-drawer:not([open]) { pointer-events:none; }
+.session-drawer .session-selection-plane { fill:var(--tint); }
+.sidebar-controls { display:flex; align-items:center; gap:2px; }
+.sidebar-controls .quiet, .sidebar-opener.quiet { display:grid; place-items:center; width:36px; min-height:36px; padding:4px; }
+.sidebar .sidebar-pin { color:var(--accent); }
+.sidebar-opener.quiet { position:relative; flex:none; }
+.sidebar-opener > .sidebar-attention-count { position:absolute; top:0; right:0; box-shadow:0 0 0 1px var(--surface); }
+
+.sidebar-attention {
+ flex:none;
+ margin:.25rem 0 .5rem;
+ padding:.5rem 0;
+ border-block:1px solid var(--border);
+}
+.sidebar-attention > h2 { margin:0 .375rem .25rem; color:var(--muted); font-size:.75rem; }
+.sidebar-attention ul { list-style:none; margin:0; padding:0; max-height:min(9rem, 24dvh); overflow:auto; overscroll-behavior:contain; scrollbar-width:thin; }
+.sidebar-attention-row.quiet {
+ width:100%;
+ min-height:40px;
+ padding:.25rem .375rem;
+ display:flex;
+ gap:.5rem;
+ align-items:center;
+ justify-content:space-between;
+ text-align:left;
+ color:var(--ink);
+}
+.sidebar-attention-row[aria-current="page"] { background:var(--tint); }
+.sidebar-attention-session { min-width:0; }
+.sidebar-attention-session > :is(strong,small) { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sidebar-attention-session > strong { font-size:.8125rem; font-weight:500; }
+.sidebar-attention-session > small { color:var(--muted); font-size:.6875rem; }
+.sidebar-attention-count {
+ flex:none;
+ min-width:16px;
+ padding:1px 4px;
+ border-radius:99px;
+ background:color-mix(in srgb, var(--warning) 15%, var(--surface));
+ color:var(--warning);
+ font-size:.625rem;
+ font-weight:600;
+ font-variant-numeric:tabular-nums;
+ line-height:14px;
+ text-align:center;
+}
+@media (max-width:1000px) {
+ .sidebar-controls .quiet, .sidebar-opener.quiet { width:44px; min-height:44px; }
+ .sidebar-attention-row.quiet { min-height:44px; }
+}
+@media (prefers-reduced-motion:no-preference) {
+ .workbench > .session-drawer {
+  opacity:0;
+  transform:translateX(-10px);
+  transition:opacity 140ms ease-out, transform 140ms ease-out,
+             display 140ms allow-discrete, overlay 140ms allow-discrete;
+ }
+ .workbench > .session-drawer[open] { opacity:1; transform:none; }
+ .workbench > .session-drawer::backdrop {
+  opacity:0;
+  transition:opacity 140ms ease-out, display 140ms allow-discrete, overlay 140ms allow-discrete;
+ }
+ .workbench > .session-drawer[open]::backdrop { opacity:1; }
+ @starting-style {
+  .workbench > .session-drawer[open] { opacity:0; transform:translateX(-10px); }
+  .workbench > .session-drawer[open]::backdrop { opacity:0; }
+ }
+}

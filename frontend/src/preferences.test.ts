@@ -1,5 +1,5 @@
 import {test,expect} from 'bun:test';
-import {readPreference,savePreference,resolveFont,resolveTheme,resolveSplit,resolveContentMode,resolveChatWidth} from './preferences';
+import {readPreference,savePreference,resolveFont,resolveTheme,resolveSplit,resolveContentMode,resolveChatWidth, resolveSidebarPinned } from './preferences';
 // Protects optional browser preferences: untrusted storage cannot prevent editing.
 // Oracle: original defaults/25–75 bounds and legacy panel fallback; fails on unsafe reads/writes or invalid output.
 test('appearance values validate and optional storage failure stays usable',()=>{
@@ -26,4 +26,11 @@ test('chat width defaults safely and persists independently',()=>{
  expect(readPreference('theme',storage)).toBe('');
  const broken=()=>{throw Error('Storage unavailable');};expect(resolveChatWidth(readPreference('chat-width',broken))).toBe('compact');
  expect(()=>savePreference('chat-width','compact',broken)).not.toThrow();
+});
+
+test('sidebar pin preference takes precedence over legacy saved layout',()=>{
+ expect(resolveSidebarPinned('', 'true')).toBe(false);
+ expect(resolveSidebarPinned('', 'false')).toBe(true);
+ expect(resolveSidebarPinned('true', 'true')).toBe(true);
+ expect(resolveSidebarPinned('false', 'false')).toBe(false);
 });

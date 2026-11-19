@@ -3,7 +3,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {SessionIndicators} from './session-indicators';
 import {test,expect} from 'bun:test';
 import {API,receipt,type Workspace,type Decision} from './api';
-import {sessionStatus,projectStatus,subagentErrorCount} from './sidebar-state';
+import {sessionStatus,projectStatus,subagentErrorCount,sidebarAttention} from './sidebar-state';
 import {processingState} from './processing-progress';
 const r=receipt({fresh:false,session:'session-a',id:'receipt-a',prompt:'Fixture input',phase:'running',text:'',detail:'',native_pid:123,model:null,local_tool_calls:0,thread:'thread',turn:'turn',accepted_ms:1,handshake_ms:null,dispatch_ms:1,first_output_ms:null,revision:1,policy:'fixture',runner:'codex',delivery:'observed'});
 const w:Workspace={api:API,host_id:'fixture-host',sessions:[],session:'session-a',project:'/fixture',runner:'codex',availability:null,receipts:[r],tasks:[],trusted:false,queue_paused:false,steering_unavailable:'',team_availability:null};
@@ -95,4 +95,19 @@ test('only unresolved latest subagent failures and unsettled ownership count as 
  expect(b.activity?.errors).toBe(1);
  expect(projectStatus('p',[a,b]).errors).toBe(4);
  expect(JSON.stringify(tasks)).toBe(before);
+});
+
+test('sidebar attention counts distinct pending requests for existing sessions',()=>{
+ const approval={id:'permission',state:'pending',task:'member',questions:[]} as unknown as Decision;
+ const question={id:'choice',state:'pending',questions:[{}]} as Decision;
+ const liveIds=['session-a','session-b','working-only'];
+ const value={...w,sessions:liveIds.map(id=>({id,title:id,native:null})),receipts:[
+  {...r,decisions:[approval,question,{...approval,id:'settled',state:'settled' as const}]},
+  {...r,id:'same-request',decisions:[approval]},
+  {...r,session:'working-only'},
+ ]};
+ expect([...sidebarAttention(value,{'session-b':2,removed:3})]).toEqual([['session-a',2],['session-b',2]]);
+ value.receipts[0]!.decisions=[{...approval,state:'delivered'},{...question,state:'responded'}];
+ value.receipts[1]!.decisions=[];
+ expect([...sidebarAttention(value,{'session-b':2})]).toEqual([['session-b',2]]);
 });

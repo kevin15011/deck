@@ -58,3 +58,7 @@ export function resolveContentMode(value:unknown,legacyCollapsed:unknown=''):Con
 
 export type ChatWidth='full'|'compact';
 export function resolveChatWidth(value:unknown):ChatWidth { return value==='full'?'full':'compact'; }
+
+export function resolveSidebarPinned(value:unknown,legacyCollapsed:unknown):boolean {
+ return value==='true'||value!=='false'&&legacyCollapsed!=='true';
+}

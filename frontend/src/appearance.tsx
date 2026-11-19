@@ -1,3 +1,4 @@
+import {focusSidebarOpener} from './drawer-motion';
 import {CodexServerRestart} from './codex-server-restart';
 import {useActiveIndicator,useDisclosureMotion} from './view-motion';
 import {request} from './api';
@@ -124,10 +125,11 @@ export function Appearance({installDeck,resources,notifications,dictation,onDict
  const active=narrow?drilled:true;
  useActiveIndicator(settingsNav,section,'[aria-pressed="true"]',open&&(!narrow||!drilled));
  useLayoutEffect(()=>{const node=dialog.current;if(!node)return;const media=matchMedia('(prefers-reduced-motion: reduce)');
+  const finish=()=>{node.close();const target=returnFocus.current;if(target?.isConnected&&target.getClientRects().length&&!target.closest('[inert]'))target.focus({preventScroll:true});else focusSidebarOpener();};
   gsap.killTweensOf(node);
   if(open){const firstOpen=!node.open;if(firstOpen){returnFocus.current=document.activeElement instanceof HTMLElement?document.activeElement:null;node.showModal();setSection(dictation?'Dictation':'Appearance');setDrilled(narrow&&dictation);setQuery('');}node.inert=false;node.removeAttribute('aria-hidden');if(!media.matches){if(firstOpen)gsap.set(node,{opacity:.7,y:8,scale:.99});gsap.to(node,{opacity:1,y:0,scale:1,duration:.2,ease:'power2.out',overwrite:true});}else gsap.set(node,{clearProps:'opacity,transform'});}
-  else if(node.open){node.inert=true;node.setAttribute('aria-hidden','true');const finish=()=>{node.close();const target=returnFocus.current;if(target?.isConnected&&target.getClientRects().length)target.focus({preventScroll:true});else document.querySelector<HTMLElement>('[aria-label="Toggle project navigation"]')?.focus({preventScroll:true});};if(media.matches)finish();else gsap.to(node,{opacity:0,y:6,scale:.99,duration:.14,ease:'power2.out',overwrite:true,onComplete:finish});setPicker(false);}
-  const settle=()=>{if(media.matches){gsap.killTweensOf(node);if(!open&&node.open){node.close();returnFocus.current?.focus({preventScroll:true});}else gsap.set(node,{clearProps:'opacity,transform'});}};media.addEventListener('change',settle);
+  else if(node.open){node.inert=true;node.setAttribute('aria-hidden','true');if(media.matches)finish();else gsap.to(node,{opacity:0,y:6,scale:.99,duration:.14,ease:'power2.out',overwrite:true,onComplete:finish});setPicker(false);}
+  const settle=()=>{if(media.matches){gsap.killTweensOf(node);if(!open&&node.open)finish();else gsap.set(node,{clearProps:'opacity,transform'});}};media.addEventListener('change',settle);
   return()=>{media.removeEventListener('change',settle);gsap.killTweensOf(node);};
  },[open]);
  useLayoutEffect(()=>{const node=panel.current;if(!node||!open||!active)return;const media=matchMedia('(prefers-reduced-motion: reduce)');if(!media.matches)gsap.fromTo(node,{opacity:.7,x:5},{opacity:1,x:0,duration:.18,ease:'power2.out',clearProps:'opacity,transform'});return()=>{gsap.killTweensOf(node);gsap.set(node,{clearProps:'opacity,transform'});};},[open,section,active]);

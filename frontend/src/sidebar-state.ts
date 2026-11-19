@@ -44,3 +44,21 @@ export function workerCounts(w:Workspace,session:string){
  workers.blocked+=new Set(pending.filter(d=>d.task&&d.task!=='lead'&&!w.tasks.some(t=>t.session===session&&t.id===d.task)).map(d=>d.task)).size;
  return workers;
 }
+
+/** The sidebar count includes pending native requests and actionable session decisions.
+ * Worker blocks from the same native requests already appear in the receipt. */
+export function sidebarAttention(w:Workspace|undefined,decisions:Record<string,number>|undefined){
+ const requests=new Map<string,Set<string>>();
+ for(const receipt of w?.receipts??[]){
+  for(const decision of receipt.decisions){
+   if(decision.state!=='pending')continue;
+   const ids=requests.get(receipt.session)??new Set<string>();
+   ids.add(decision.id);
+   requests.set(receipt.session,ids);
+  }
+ }
+ return new Map((w?.sessions??[]).flatMap(session=>{
+  const count=(requests.get(session.id)?.size??0)+(decisions?.[session.id]??0);
+  return count>0?[[session.id,count] as const]:[];
+ }));
+}

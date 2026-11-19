@@ -339,8 +339,8 @@ pre { margin: .75rem 0; white-space: pre-wrap; overflow-wrap: anywhere; font-siz
 small, .muted, .empty-note { color: var(--muted); }
 .skip { position: fixed; top: -100px; left: 1rem; z-index: 10; padding: .75rem; background: var(--surface); }
 .skip:focus { top: 1rem; }
-.workbench { position: fixed; inset: 0; height: 100dvh; display: grid; grid-template-columns: 224px minmax(0, 1fr); overflow: hidden; }
-.workbench.sidebar-collapsed { grid-template-columns: 60px minmax(0, 1fr); }
+.workbench { position: fixed; inset: 0; height: 100dvh; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+.workbench[data-sidebar-docked] { grid-template-columns: 224px minmax(0, 1fr); }
 .sidebar { display: flex; flex-direction: column; min-height: 0; padding: 1rem .75rem; border-right: 1px solid var(--border); overflow: hidden; background: var(--canvas); }
 .brand { display: flex; align-items: center; gap: .125rem; padding: 0 .25rem .75rem; }
 .brand-mark { display: flex; align-items: center; justify-content: center; height: 24px; width: 24px; flex: 0 0 24px; background: transparent; color: var(--on-action); font-size: 1.25rem; line-height: 1; font-weight: 600; }
@@ -379,19 +379,14 @@ small, .muted, .empty-note { color: var(--muted); }
 .history-error p { overflow-wrap: anywhere; }
 .dialog-project-path { display: block; margin-top: .25rem; font-size: .7rem; overflow-wrap: anywhere; }
 .history-more { min-height: 36px; font-size: .7rem; padding: .5rem; }
-.navigation-rail button { display: flex; align-items: center; justify-content: center; min-height: 40px; padding: .5rem; }
 .session-list { list-style: none; margin: 0; padding: 0; }
 .session { width: 100%; display: flex; text-align: left; align-items: center; min-height: 32px; padding: 0 .5rem; margin: 0; background: transparent; color: var(--ink); font-weight: 400; }
 .session:hover { background: var(--tint); }
 .session.selected { background: var(--tint); box-shadow: none; }
 .session-label { display: block; min-width: 0; width: 100%; }
 .session strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 18px; font-weight: 400; }
-.sidebar-collapsed .sidebar { padding: 1rem .5rem; }
-.sidebar-collapsed .brand { justify-content: center; padding: 0 0 .75rem; }
-.sidebar-collapsed .sidebar .brand-word, .sidebar-collapsed .sidebar .session-label, .sidebar-collapsed .sidebar > .empty-note { display: none; }
 .app-body { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); }
 .app-header { display: flex; align-items: center; gap: .75rem; height: 56px; flex: 0 0 56px; padding: .5rem 1rem; border-bottom: 1px solid var(--border); }
-.sidebar-toggle { padding: .5rem; font-size: 1.25rem; flex: 0 0 36px; }
 .session-identity { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 1rem; flex: 1; }
 .eyebrow { font-size: .65rem; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 0 0 .35rem; }
 .app-header h1 { font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -616,13 +611,13 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .drawer-heading h2 { font-size: 1rem; font-weight: 500; }
 .drawer-close { display: flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: .5rem; }
 @media (max-width: 1200px) and (min-width: 1001px) {
-    .workbench { grid-template-columns: 200px minmax(0, 1fr); }
+    .workbench[data-sidebar-docked] { grid-template-columns: 200px minmax(0, 1fr); }
     .conversation { padding: 1.5rem; }
     .chat-label { padding-left: 1.5rem; }
     .chat-label small { display: none; }
 }
 @media (max-width: 1000px) {
-    .workbench, .workbench.sidebar-collapsed { display: block; top: var(--mobile-viewport-top, 0px); bottom: auto; height: var(--mobile-viewport-height, 100dvh); }
+    .workbench { display: block; top: var(--mobile-viewport-top, 0px); bottom: auto; height: var(--mobile-viewport-height, 100dvh); }
     .sidebar { display: none; }
     .project-toggle.quiet, .project-new.quiet, .session { min-height: 40px; }
     .project-new.quiet { flex-basis: 40px; }
@@ -965,6 +960,9 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 
 /* A bounded history window uses explicit row/offset anchoring across eviction. */
 .conversation { overflow-anchor: none; }
+/* The two transcript segments meet only when both adjacent boundaries are loaded. */
+.conversation:has(> [data-adopted-history][data-history-gap]) > .transcript-window,
+.conversation:has(> .transcript-window:not([data-window-start="0"])) > [data-adopted-history]:not([data-history-gap],[data-history-focus]) { display: none; }
 .history-navigation { min-height: 2.5rem; color: var(--muted); font-size: .75rem; }
 
 .progressive-transcript { overflow-anchor: none; }
@@ -1063,7 +1061,6 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 @media(max-width:600px){.theme-dialog[open]{width:calc(100vw - 16px);max-height:calc(100dvh - 16px);height:calc(100dvh - 16px)}}
 .theme-swatch{width:16px;height:16px;flex:0 0 16px}
 .theme-check{width:14px;height:14px;flex:0 0 14px;margin-left:auto;color:var(--accent)}
-.sidebar-collapsed .sidebar .deck-menu{padding:8px 4px}.sidebar-collapsed .sidebar .deck-menu-toggle span:not(.menu-attention){display:none}
 .install-dialog{max-width:min(420px,calc(100vw - 24px))}.install-dialog p{font-size:.85rem;line-height:1.5}
 /* Mobile navigation: one full-width scroll region, then a separate secondary action. */
 .session-drawer .project-toolbar { gap: .5rem; margin-bottom: .5rem; }
@@ -1120,7 +1117,6 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .composer-reconnect span { flex: 1; }
 .composer-reconnect button { flex: none; min-height: 40px; }
 @media (max-width:1000px) {
-    .sidebar-toggle { flex-basis: 44px; min-height: 44px; }
     .app-header { height: 48px; flex-basis: 48px; padding-block: .25rem; }
     .session-identity { grid-template-rows: 18px 13px; }
     .session-control-actions button, .session-permissions > summary, .session-mcp-availability, .predecessor-link { min-height: 44px; }
@@ -1142,8 +1138,8 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 .approvals .approval-actions { flex-wrap: wrap; gap: .5rem; align-self: stretch; }
 .queue-edit.quiet { flex: none; min-height: 44px; font-size: .75rem; }
 .menu-attention { display: inline-block; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--warning); box-shadow: 0 0 0 2px var(--surface); }
-.sidebar-toggle, .deck-menu-toggle { position: relative; }
-.sidebar-toggle > .menu-attention, .deck-menu-toggle > .menu-attention { position: absolute; right: 5px; top: 5px; }
+.deck-menu-toggle { position: relative; }
+.deck-menu-toggle > .menu-attention { position: absolute; right: 5px; top: 5px; }
 .notifications-dialog { border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.28); font-size: .8rem; }
 .notification-settings p { color: var(--muted); line-height: 1.6; }
 .workspace-dialog .notification-approval-setting { min-height: 44px; align-items: center; cursor: pointer; }
@@ -1292,7 +1288,7 @@ details > pre { border: 1px solid var(--border); padding: .75rem; background: va
 /* Indent content, leaving the full row and its canvas plane connected to chat. */
 .project-sessions .session-row > .drag-handle{margin-left:24px}
 @media (min-width:1001px){
- .workbench:not(.sidebar-collapsed){grid-template-columns:248px minmax(0,1fr)}
+ .workbench[data-sidebar-docked]{grid-template-columns:248px minmax(0,1fr)}
  .sidebar{padding-inline:6px}
  .sidebar .project-sessions{margin-left:0}
 }
@@ -1455,7 +1451,7 @@ select:focus-visible, .question-panel textarea:focus-visible {
 /* The moving selection shares the chat canvas; only its measured row joins the edge. */
 .sidebar, .session-drawer { isolation: isolate; }
 .sidebar { position: relative; }
-.workbench:not(.sidebar-collapsed) > .sidebar, .session-drawer {
+.workbench[data-sidebar-docked] > .sidebar, .session-drawer {
     border-right-color: transparent;
     background-clip: padding-box;
 }
@@ -1494,14 +1490,15 @@ select:focus-visible, .question-panel textarea:focus-visible {
 .workspace-pane { position:relative; }
 
 /* The textarea alone transfers focus paint to its rounded composer perimeter. */
-.composer-focus-ready textarea:focus-visible { outline: none; }
+.composer textarea:focus-visible { outline: none; }
+.composer:has(textarea:focus-visible) { border-color: color-mix(in srgb, var(--focus) 38%, var(--border)); }
 .composer-focus-light { position: absolute; inset: -1px; width: calc(100% + 2px); height: calc(100% + 2px); overflow: hidden; pointer-events: none; color: var(--focus); }
 .composer.composer-input-focused { border-color: color-mix(in srgb, var(--focus) 38%, var(--border)); }
 @media (prefers-reduced-motion: reduce), (prefers-contrast: more), (forced-colors: active) {
-    .composer-input-focused { outline: 2px solid var(--focus); outline-offset: 2px; }
+    .composer:has(textarea:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 }
 @media (forced-colors: active) {
-    .composer-input-focused { outline-color: Highlight; }
+    .composer:has(textarea:focus-visible) { outline-color: Highlight; }
 }
 
 /* Static theme light pools stop before the chat-facing edge so the selected
@@ -1674,8 +1671,6 @@ select:focus-visible, .question-panel textarea:focus-visible {
 .has-document-toggle .diff-viewport { margin-top:2.75rem; }
 .sidebar-brand { display:flex; align-items:center; justify-content:space-between; flex:none; }
 .sidebar-brand .brand { min-width:0; flex:1; }
-.sidebar-collapsed .sidebar-brand { flex-direction:column; }
-.sidebar-collapsed .sidebar-brand .brand { padding-bottom:.25rem; }
 .app-header > .content-modes { margin-left:auto; flex:none; }
 .app-header .content-modes button[aria-pressed=true] { background:var(--border); }
 .session-title-line { display:grid; grid-template-columns:minmax(0,max-content) minmax(0,max-content); align-items:baseline; gap:.5rem; min-width:0; }

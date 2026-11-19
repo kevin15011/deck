@@ -1,4 +1,4 @@
-import React,{useEffect,useLayoutEffect,useId,useRef,useState} from 'react';
+import React,{useEffect,useLayoutEffect,useId,useMemo,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {gsap} from 'gsap';
 import {API,request,load,save,type Workspace} from './api';
@@ -9,7 +9,8 @@ import {useDisclosureMotion} from './view-motion';
 import {ConfigurationView} from './configuration';
 import {useSelectionMotion} from './selection-motion';
 import {SessionIndicators,ProjectIndicators} from './session-indicators';
-import {sessionStatus,projectStatus} from './sidebar-state';
+import {sessionStatus,projectStatus,sidebarAttention} from './sidebar-state';
+import {sidebarOpenerClass,sidebarPanelId} from './drawer-motion';
 import './indicators.css';
 import './sidebar.css';
 import {orderedRows,useSidebarOrder} from './sidebar-order';
@@ -24,6 +25,32 @@ function acceptNavigation(previous:Navigation,next:Navigation){
  return (next.order_revision??0)>=(previous.order_revision??0)?next:{...next,...orderPreferences(previous)};
 }
 type Original=ReturnType<typeof useOriginalHistory>;
+function sidebarProjects(w:Workspace|undefined,h:Original,meta:Navigation){
+ return [...h.projects.map(p=>({id:p.projectId,root:p.path,name:p.name,available:p.available,original:true,hidden:p.hidden})),...(w?.projects??[]).filter(p=>!h.projects.some(o=>o.projectId===p.id)).map(p=>({...p,name:p.root.split('/').pop()||p.root,available:true,original:false,hidden:false}))].filter(p=>!meta.projects[p.id]?.hidden&&(!p.hidden||p.root===w?.project||h.selection?.project===p.id));
+}
+export function useSidebarAttention(w:Workspace|undefined,h:Original,meta:Navigation){
+ return useMemo(()=>{
+  const projects=new Map(sidebarProjects(w,h,meta).map(p=>[p.id,p]));
+  const counts=sidebarAttention(w,meta.decisions);
+  return (w?.sessions??[]).flatMap(session=>{
+   const project=projects.get(session.project?.id??''),count=counts.get(session.id);
+   if(!project||!count)return [];
+   const historyMeta=session.original?meta.sessions[historyKey(h.source,project.id,session.id)]:undefined;
+   if(historyMeta?.hidden)return [];
+   return [{
+    id:session.id,project:project.id,projectName:meta.projects[project.id]?.title??project.name,
+    title:historyMeta?.title??session.title,history:!!session.original,count,
+   }];
+  });
+ },[w,h.projects,h.source,h.selection?.project,meta]);
+}
+export function SidebarOpener({count,open,onOpen}:{count:number;open:boolean;onOpen:()=>void}){
+ const attention=count===1?'1 other session needs attention':count+' other sessions need attention';
+ const label='Open projects and sessions'+(count?' · '+attention:'');
+ return <button type="button" className={'quiet '+sidebarOpenerClass} aria-label={label} title={label} aria-haspopup="dialog" aria-expanded={open} aria-controls={sidebarPanelId} onClick={onOpen}>
+  <NavigationIcon kind="panel"/>{count>0&&<span className="sidebar-attention-count" aria-hidden="true">{count}</span>}
+ </button>;
+}
 type Mutation={kind:'add'|'project'|'session'|'history';action:'rename'|'remove';id:string;title:string;project?:string};
 const historyKey=(source:string,project:string,id:string)=>JSON.stringify(['history',source,project,id]);
 function NavigationActions({ label, menuName, busy, renameDisabled = false, renameLabel, removeLabel, removeDescription, onRename, onRemove, onSettings }: { label: string; menuName: string; busy: boolean; renameDisabled?: boolean; renameLabel: string; removeLabel: string; removeDescription: string; onRename: () => void; onRemove: () => void; onSettings?: () => void }) {
@@ -42,9 +69,11 @@ function NavigationActions({ label, menuName, busy, renameDisabled = false, rena
     useEffect(() => {
         if(!position) return;
         const resized = () => close();
-        const scrolled = (event:Event) => { if(!menu.current?.contains(event.target as Node)) close(false); };
-        window.addEventListener('resize',resized); document.addEventListener('scroll',scrolled,true);
-        return () => {window.removeEventListener('resize',resized);document.removeEventListener('scroll',scrolled,true);};
+        const viewport=trigger.current?.closest<HTMLElement>('.navigation-scroll');
+        const offset=viewport?.scrollTop;
+        const scrolled=()=>{if(viewport?.scrollTop!==offset)close(false);};
+        window.addEventListener('resize',resized);viewport?.addEventListener('scroll',scrolled);
+        return () => {window.removeEventListener('resize',resized);viewport?.removeEventListener('scroll',scrolled);};
     }, [position]);
     return <span className="project-actions"><button ref={trigger} type="button" className="project-more quiet" disabled={busy} aria-label={`More options for ${label}`} title="More options" aria-haspopup="menu" aria-expanded={!!position} aria-controls={position ? id : undefined} onClick={() => position ? close() : open()} onKeyDown={event => { if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();open(event.key==='ArrowUp');} }}><NavigationIcon kind="more"/></button>{position && createPortal(<div ref={menu} id={id} className="project-menu" role="menu" aria-label={menuName} style={position} onKeyDown={event => {
         if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();return;}
@@ -52,7 +81,7 @@ function NavigationActions({ label, menuName, busy, renameDisabled = false, rena
         const items=[...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')], index=items.indexOf(document.activeElement as HTMLButtonElement);
         const next=event.key==='ArrowDown'?(index+1)%items.length:event.key==='ArrowUp'?(index+items.length-1)%items.length:event.key==='Home'?0:event.key==='End'?items.length-1:undefined;
         if(next!==undefined){event.preventDefault();items[next]?.focus();}
-    }}>{onSettings&&<button type="button" role="menuitem" className="quiet" onClick={()=>{close();onSettings();}}>Project settings</button>}<button type="button" role="menuitem" className="quiet" disabled={renameDisabled} onClick={() => {close();onRename();}}>{renameLabel}</button><button type="button" role="menuitem" className="quiet menu-remove" title={removeDescription} aria-description={removeDescription} onClick={() => {close();onRemove();}}>{removeLabel}</button></div>,trigger.current?.closest('dialog[open]')??document.body)}</span>;
+    }}>{onSettings&&<button type="button" role="menuitem" className="quiet" onClick={()=>{close();onSettings();}}>Project settings</button>}<button type="button" role="menuitem" className="quiet" disabled={renameDisabled} onClick={() => {close();onRename();}}>{renameLabel}</button><button type="button" role="menuitem" className="quiet menu-remove" title={removeDescription} aria-description={removeDescription} onClick={() => {close();onRemove();}}>{removeLabel}</button></div>,trigger.current?.closest('dialog:modal')??document.body)}</span>;
 }
 
 function MutationDialog({value,onClose,onSave}:{value:Mutation;onClose:()=>void;onSave:(title:string,trusted:boolean)=>Promise<void>}){
@@ -70,12 +99,13 @@ function MutationDialog({value,onClose,onSave}:{value:Mutation;onClose:()=>void;
  </div>
  </>:<label>Name<input required autoFocus value={text} maxLength={160} onChange={e=>setText(e.target.value)}/></label>}{error&&<p role="alert" className="error">{error}</p>}<div className="dialog-actions"><button type="button" className="quiet" disabled={pending} onClick={onClose}>Cancel</button><button type="submit" disabled={pending}>{pending?'Saving…':value.kind==='add'?'Add project':value.action==='remove'?'Remove':'Save'}</button></div></form></dialog>;
 }
-export function Sidebar({meta,setMeta,w,history:h,selected,connected,busy,collapsed=false,onSelect,onHistory,onNew,onChanged}:{meta:Navigation;setMeta:React.Dispatch<React.SetStateAction<Navigation>>;w?:Workspace;history:Original;selected:string;connected:boolean;busy:boolean;collapsed?:boolean;onSelect:(id:string)=>void;onHistory:(v:HistorySelection)=>void;onNew:(project:string)=>void;onChanged:()=>Promise<void>}){
+export function Sidebar({meta,setMeta,w,history:h,selected,connected,busy,collapsed=false,attention,onSelect,onHistory,onNew,onChanged}:{meta:Navigation;setMeta:React.Dispatch<React.SetStateAction<Navigation>>;w?:Workspace;history:Original;selected:string;connected:boolean;busy:boolean;collapsed?:boolean;attention:ReturnType<typeof useSidebarAttention>;onSelect:(id:string)=>void;onHistory:(v:HistorySelection)=>void;onNew:(project:string)=>void;onChanged:()=>Promise<void>}){
  const ref=useRef<HTMLDivElement>(null);useSelectionMotion(ref,collapsed);
  const [mutation,setMutation]=useState<Mutation>(),[error,setError]=useState(''),[settings,setSettings]=useState<{name:string;root:string}>();
- const [open,setOpen]=useState<string[]>(()=>{try{return JSON.parse(load('sidebar-expanded')||'[]');}catch{return [];}}),[initialized,setInitialized]=useState(false),[unread,setUnread]=useState<Set<string>>(new Set()),[checked,setChecked]=useState(0);
+ const [expansion,setOpen]=useState<string[]|undefined>(()=>{try{const stored=JSON.parse(load('sidebar-expanded')||'null');return Array.isArray(stored)?stored.filter(value=>typeof value==='string'):undefined;}catch{return undefined;}}),[unread,setUnread]=useState<Set<string>>(new Set()),[checked,setChecked]=useState(0);
  const visibleSelection=h.selection?.session??selected;
- const naturalProjects=[...h.projects.map(p=>({id:p.projectId,root:p.path,name:p.name,available:p.available,original:true,hidden:p.hidden})),...(w?.projects??[]).filter(p=>!h.projects.some(o=>o.projectId===p.id)).map(p=>({...p,name:p.root.split('/').pop()||p.root,available:true,original:false,hidden:false}))].filter(p=>!meta.projects[p.id]?.hidden&&(!p.hidden||p.root===w?.project||h.selection?.project===p.id));
+ const open=expansion??[];
+ const naturalProjects=sidebarProjects(w,h,meta);
  const projects=orderedRows(naturalProjects,meta.project_order,p=>p.id);
  const projectOrder={keys:projects.map(p=>p.id)};
  const ordering=useSidebarOrder(async ({project,keys})=>{
@@ -85,7 +115,11 @@ export function Sidebar({meta,setMeta,w,history:h,selected,connected,busy,collap
    setError('');
   }catch(e){setError(String(e));throw e;}
  },!connected||busy||collapsed);
- useEffect(()=>{if(!initialized&&projects.length){const owner=projects.find(p=>w?.sessions.some(s=>s.id===visibleSelection&&s.project?.id===p.id))?.id??h.selection?.project??projects[0]!.id;setOpen(v=>v.length?v:[owner]);setInitialized(true);}},[projects.length,initialized,visibleSelection]);
+ useEffect(()=>{
+  if(expansion!==undefined||!projects.length)return;
+  const owner=projects.find(p=>w?.sessions.some(s=>s.id===visibleSelection&&s.project?.id===p.id))?.id??h.selection?.project??projects[0]!.id;
+  setOpen([owner]);
+ },[expansion,projects,visibleSelection,w,h.selection?.project]);
  useEffect(()=>{if(!connected)return;const controller=new AbortController();let timer:ReturnType<typeof setTimeout>;const poll=async()=>{try{const n=await request('GET','/api/sidebar',undefined,controller.signal) as Navigation;if(!controller.signal.aborted){setMeta(previous=>acceptNavigation(previous,n));setChecked(Date.now());}}catch(e){if(!controller.signal.aborted)setError(String(e));}try{let cursor:number|undefined;const ids=new Set<string>();do{const n=await request('GET','/api/replies'+(cursor?'?cursor='+cursor:''),undefined,controller.signal) as {replies:{sessionId:string}[];nextCursor?:number};n.replies.forEach(r=>ids.add(r.sessionId));cursor=n.nextCursor;}while(cursor&&!controller.signal.aborted);if(!controller.signal.aborted)setUnread(ids);}catch{/* No inferred read receipts on unavailable device context. */}if(!controller.signal.aborted)timer=setTimeout(poll,2000);};void poll();return()=>{controller.abort();clearTimeout(timer);};},[connected]);
  async function mutate(text:string,trusted:boolean){if(!mutation)return;let url:string,body:object={api:API};if(mutation.kind==='add'){url='/api/projects';body={api:API,root:text,trusted};}else if(mutation.kind==='project'){url=`/api/projects/${encodeURIComponent(mutation.id)}/${mutation.action}`;body={api:API,title:mutation.action==='rename'?text:undefined};}else if(mutation.kind==='history'){url=`/api/sidebar/projects/${encodeURIComponent(mutation.project!)}/sessions/${encodeURIComponent(mutation.id)}/${mutation.action}`;body={api:API,title:mutation.action==='rename'?text:undefined};}else{url=`/api/sessions/${encodeURIComponent(mutation.id)}/${mutation.action}`;body={api:API,title:mutation.action==='rename'?text:undefined};}await request('POST',url,body);const nextMeta=await request('GET','/api/sidebar') as Navigation;setMeta(previous=>acceptNavigation(previous,nextMeta));await onChanged();if(mutation.action==='remove'&&mutation.kind!=='add'){
  const current=w?.sessions.find(s=>s.id===visibleSelection);
@@ -99,7 +133,17 @@ export function Sidebar({meta,setMeta,w,history:h,selected,connected,busy,collap
 
  useEffect(()=>{for(const [key,value] of Object.entries(meta.sessions)){try{const [kind,source,project,id]=JSON.parse(key);if(kind==='history'&&source===h.source&&value.title)h.rename(project,id,value.title);}catch{/* Ambiguous legacy keys cannot target a session safely. */}}},[meta.sessions,h.pages,h.source]);
  const fresh=connected&&Date.now()-checked<10000;
- return <div ref={ref} className="project-navigation"><div className="project-toolbar"><h2>Projects</h2><button type="button" className="quiet navigation-add" disabled={!connected||busy} onClick={()=>setMutation({kind:'add',action:'rename',id:'',title:''})}><NavigationIcon kind="plus"/>Add project</button></div><div className="navigation-scroll" ref={ordering.scroll}><ul className="project-tree">{projects.map(p=>{
+ return <div ref={ref} className="project-navigation"><div className="project-toolbar"><h2>Projects</h2><button type="button" className="quiet navigation-add" disabled={!connected||busy} onClick={()=>setMutation({kind:'add',action:'rename',id:'',title:''})}><NavigationIcon kind="plus"/>Add project</button></div>{attention.length>0&&<section className="sidebar-attention" aria-labelledby="sidebar-attention-heading">
+  <h2 id="sidebar-attention-heading">Needs attention</h2>
+  <ul>{attention.map(row=>{
+   const current=row.id===visibleSelection;
+   return <li key={row.id}><button type="button" className="quiet sidebar-attention-row" aria-current={current?'page':undefined}
+    title={row.projectName+' / '+row.title} onClick={()=>row.history?onHistory({project:row.project,session:row.id}):onSelect(row.id)}>
+    <span className="sidebar-attention-session"><strong>{row.title}</strong><small>{row.projectName}</small></span>
+    <span className="sidebar-attention-count"><span className="sr-only">Actions pending: </span>{row.count}</span>
+   </button></li>;
+  })}</ul>
+ </section>}<div className="navigation-scroll" ref={ordering.scroll}><ul className="project-tree">{projects.map(p=>{
  const title=meta.projects[p.id]?.title??p.name;
  const historical=h.pages[p.id]?.sessions??[];
  const naturalRows=[...historical.filter(s=>!s.removed).map(s=>({id:s.sessionId,title:s.title,history:true,orderKey:historyKey(h.source,p.id,s.sessionId)})),...(w?.sessions??[]).filter(s=>s.project?.id===p.id&&!(s.original&&historical.some(o=>o.sessionId===s.id))).map(s=>({id:s.id,title:s.title,history:!!s.original,orderKey:s.original?meta.adopted_order_keys?.[s.id]:JSON.stringify(['local',p.id,s.id])}))].filter(s=>!s.history||!meta.sessions[historyKey(h.source,p.id,s.id)]?.hidden);
