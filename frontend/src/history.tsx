@@ -1,13 +1,13 @@
 import {MessageCopy} from './message-copy';
 import {useDisplayedReplies,DisplayedReply} from './lead-replies';
-import React,{useEffect,useLayoutEffect,useRef,useState} from 'react';
+import React,{useEffect,useLayoutEffect,useRef,useState,type RefObject} from 'react';
 import {gsap} from 'gsap';
 import {request,load,save} from './api';
 import {Markdown} from './markdown';
 import {ImagePreview,type Preview} from './images';
 import {Subagents} from './subagents';
 import {InlineSubagents} from './inline-subagents';
-import {TranscriptWindow} from './transcript-window';
+import {captureTranscriptAnchor,restoreTranscriptAnchor,restoreTranscriptPosition,useTranscriptScroll,type TranscriptDirection} from './transcript-scroll';
 import type {Task} from './api';
 import type {Step} from './activity-model';
 import {NavigationIcon} from './navigation-icon';
@@ -37,6 +37,90 @@ async function initialHistoryPage(session:string,signal:AbortSignal,task='',atte
  }catch{/* Missing/retired reply never replaces the current history with a guess. */}}
  return page;
 }
+const historyKey=(e:Event)=>String(e.historyId??e.seq);
+
+function usePagedTranscript({session,task,attempt,snapshot,replyTarget,revision,viewport,content,embedded,onBrowse,onHistoryTarget,visible=true}:{
+ session:string;task:string;attempt?:number;snapshot?:string;replyTarget:string;revision:number;
+ viewport:RefObject<HTMLElement|null>;content:RefObject<HTMLElement|null>;embedded?:boolean;onBrowse?:()=>void;onHistoryTarget?:()=>void;visible?:boolean;
+}){
+ const [page,setPage]=useState<Page>(),[error,setError]=useState(''),[busy,setBusy]=useState(true);
+ const [failedDirection,setFailedDirection]=useState<TranscriptDirection>();
+ const controller=useRef<AbortController|undefined>(undefined);
+ const pending=useRef(true);
+ const positioned=useRef(false);
+ const anchor=useRef<ReturnType<typeof captureTranscriptAnchor>>(undefined);
+ useEffect(()=>{
+  const c=new AbortController();
+  controller.current=c;positioned.current=false;pending.current=true;anchor.current=undefined;
+  setPage(undefined);setError('');setFailedDirection(undefined);setBusy(true);
+  void initialHistoryPage(session,c.signal,task,attempt,snapshot).then(value=>{
+   if(!c.signal.aborted){setPage(value);setBusy(false);}
+  }).catch(err=>{
+   if(!c.signal.aborted){pending.current=false;setError(String(err));setBusy(false);}
+  });
+  return()=>c.abort();
+ },[session,task,attempt,snapshot,replyTarget,revision]);
+
+ async function more(direction:TranscriptDirection){
+  const signal=controller.current?.signal;
+  const newer=direction==='newer';
+  const cursor=newer?page?.after:page?.before;
+  if(!page||!cursor||pending.current||!signal||signal.aborted)return;
+  onBrowse?.();pending.current=true;setBusy(true);
+  try{
+   const query=new URLSearchParams({snapshot:page.snapshot,[newer?'after':'before']:String(cursor),limit:'40'});
+   if(task)query.set('taskId',task);
+   if(attempt!==undefined)query.set('attempt',String(attempt));
+   const next=await request('GET',`/api/history/sessions/${enc(session)}?${query}`,undefined,signal) as Page;
+   if(signal.aborted)return;
+   const messages=newer?[...page.messages,...next.messages]:[...next.messages,...page.messages];
+   const trimmed=messages.length>120,retained=newer?messages.slice(-120):messages.slice(0,120);
+   const node=viewport.current,root=content.current;
+   if(node&&root){
+    const reading=captureTranscriptAnchor(node,root,new Set(page.messages.map(historyKey)));
+    const evicted=trimmed&&captureTranscriptAnchor(node,root,new Set(
+     (newer?messages.slice(0,-120):messages.slice(120)).map(historyKey)));
+    const inLive=embedded&&!reading&&root.getBoundingClientRect().bottom<node.getBoundingClientRect().top;
+    // The reader may have reversed direction while the request was in flight.
+    if(evicted||inLive){pending.current=false;setBusy(false);return;}
+    anchor.current=reading;
+   }
+   setFailedDirection(undefined);setError('');
+   setPage({...next,messages:retained,
+    before:newer?(trimmed?retained[0]?.historyId:page.before):next.before,
+    after:newer?next.after:(trimmed?retained.at(-1)?.historyId:page.after)});
+   setBusy(false);
+  }catch(err){
+   if(!signal.aborted){pending.current=false;setError(String(err));setFailedDirection(direction);setBusy(false);}
+  }
+ }
+
+ useTranscriptScroll(viewport,(direction,node,threshold)=>{
+  const root=content.current;
+  if(!visible||!root?.getClientRects().length||pending.current||error||!(direction==='older'?page?.before:page?.after))return false;
+  const distance=direction==='older'?node.scrollTop:node.scrollHeight-node.scrollTop-node.clientHeight;
+  if(distance>threshold)return false;
+  void more(direction);
+  return true;
+ });
+ useLayoutEffect(()=>{
+  if(!page)return;
+  pending.current=false;
+  const node=viewport.current,root=content.current;
+  if(!visible||!node?.clientHeight||!root)return;
+  if(!positioned.current){
+   positioned.current=true;
+   const target=page.targetSeq?root.querySelector<HTMLElement>(`[data-history-seq="${page.targetSeq}"]`):null;
+   if(target){
+    onBrowse?.();onHistoryTarget?.();
+    restoreTranscriptPosition(node,node.scrollTop+target.getBoundingClientRect().top-node.getBoundingClientRect().top-(node.clientHeight-target.offsetHeight)/2);
+   }else if(!embedded)restoreTranscriptPosition(node,node.scrollHeight);
+  }else restoreTranscriptAnchor(node,root,anchor.current);
+  anchor.current=undefined;
+ },[page,visible]);
+ return {page,busy,error,setError,failedDirection,retryPage:()=>{if(failedDirection)void more(failedDirection);}};
+}
+
 export function useOriginalHistory(connected:boolean,onError:(s:string)=>void){
  const [adopted,setAdopted]=useState(false),[sourceId,setSourceId]=useState('');
  const [projects,setProjects]=useState<Project[]>([]),[issues,setIssues]=useState<string[]>([]),[expanded,setExpanded]=useState<string[]>([]),[pages,setPages]=useState<Record<string,Sessions>>({}),[busy,setBusy]=useState('');
@@ -57,19 +141,19 @@ function OriginalProject({p,history:h,onSelect,selected,children,onNew,canCreate
  const open=h.expanded.includes(p.projectId),ref=useRef<HTMLDivElement>(null),body=useRef<HTMLDivElement>(null),page=h.pages[p.projectId];useDisclosureMotion(body,open);useActiveIndicator(ref,h.selection?.session??selected,'[aria-current="page"]',!!page);
  return <li className="project-group"><div className="project-row"><button className="project-toggle quiet" aria-expanded={open} onClick={()=>h.toggle(p.projectId)}><NavigationIcon kind="chevron" expanded={open}/><span className="project-name"><strong>{p.name}</strong><small>{p.available?p.path:'Unavailable · '+p.path}</small></span></button><button type="button" className="quiet project-new" aria-label={"New conversation in "+p.name} title="New conversation" disabled={!canCreate(p.projectId)} onClick={()=>onNew(p.projectId)}><NavigationIcon kind="plus"/></button></div><div ref={body} hidden={!open} inert={!open}><div ref={ref} className="project-sessions">{page?.sessions.filter(s=>!s.removed).map(s=><button key={s.sessionId} className={'session quiet'+((h.selection?.session??selected)===s.sessionId?' selected':'')} aria-current={(h.selection?.session??selected)===s.sessionId?'page':undefined} onClick={()=>onSelect({project:p.projectId,session:s.sessionId})}><span className="session-label"><strong>{s.title}</strong><small>{s.members?.lead?.runnerId||'Original binding'} · {h.adopted?'Saved history':'Historical'}{ s.issue?' · Check history':''}</small></span></button>)}</div>{children}{h.busy===p.projectId&&<p className="activity-meta" role="status">Loading history…</p>}{page?.error&&<button className="quiet" disabled={!!h.busy} onClick={()=>void h.sessions(p.projectId)}>Retry conversations</button>}{page?.nextCursor&&<button className="quiet" disabled={!!h.busy} onClick={()=>void h.sessions(p.projectId,true)}>More conversations</button>}</div></li>;
 }
-export function OriginalConversation({selection,name,onNavigation,navigationOpen,continuationIssue}:{selection:HistorySelection;name?:string;onNavigation:()=>void;navigationOpen:boolean;continuationIssue?:string}){
- const [page,setPage]=useState<Page>(),[error,setError]=useState(''),[busy,setBusy]=useState(true),[preview,setPreview]=useState<Preview>(),[retry,setRetry]=useState(0),[task,setTask]=useState(''),[tasks,setTasks]=useState<string[]>([]);
+export function OriginalConversation({selection,name,navigationOpener,navigationOpen,continuationIssue}:{selection:HistorySelection;name?:string;navigationOpener:React.ReactNode;navigationOpen:boolean;continuationIssue?:string}){
+ const [preview,setPreview]=useState<Preview>(),[retry,setRetry]=useState(0),[task,setTask]=useState(''),[tasks,setTasks]=useState<string[]>([]);
  const [panel,setPanel]=useState('conversation');
  const panelTabs=useRef<HTMLDivElement>(null);useActiveIndicator(panelTabs,panel,'[aria-selected="true"]');
  const replyTarget=new URL(location.href).searchParams.get('reply')||'';
+ const ref=useRef<HTMLDivElement>(null),viewport=useRef<HTMLElement>(null),content=useRef<HTMLDivElement>(null);
+ const {page,busy,error,setError,failedDirection,retryPage}=usePagedTranscript({session:selection.session,task,replyTarget,revision:retry,viewport,content,visible:panel==='conversation'});
  const rows=page?.messages??[];
  const displayReplies=useDisplayedReplies(replyApi,!navigationOpen&&panel==='conversation',selection.session,rows.filter(e=>e.data.role==='assistant').map(e=>e.seq),page?.boundary??0);
- const ref=useRef<HTMLDivElement>(null),pending=useRef(false),controller=useRef<AbortController|undefined>(undefined),scroll=useRef<{height:number;top:number}|undefined>(undefined);
- useLayoutEffect(()=>{const node=ref.current?.querySelector<HTMLElement>('.conversation');if(!node||!page)return;const target=page.targetSeq?node.querySelector<HTMLElement>(`[data-history-seq="${page.targetSeq}"]`):null;if(target&&!scroll.current)target.scrollIntoView({block:'center'});else node.scrollTop=scroll.current?scroll.current.top+node.scrollHeight-scroll.current.height:node.scrollHeight;scroll.current=undefined;},[page]);
+ useEffect(()=>{if(page)setTasks(page.tasks);},[page]);
+ useEffect(()=>{setPreview(undefined);},[selection.session,task,retry,replyTarget]);
  useLayoutEffect(()=>{const node=ref.current;if(!node)return;gsap.killTweensOf(node);if(!matchMedia('(prefers-reduced-motion: reduce)').matches)gsap.fromTo(node,{opacity:node.style.opacity||.65},{opacity:1,duration:.18,ease:'power2.out',clearProps:'opacity'});return()=>{gsap.killTweensOf(node);};},[selection.session,retry,task,replyTarget,panel]);
- useEffect(()=>{const c=new AbortController();controller.current=c;scroll.current=undefined;setPage(undefined);setPreview(undefined);setError('');pending.current=true;setBusy(true);void initialHistoryPage(selection.session,c.signal,task).then(v=>{if(!c.signal.aborted){setPage(v as Page);setTasks((v as Page).tasks);}}).catch(e=>{if(!c.signal.aborted)setError(String(e));}).finally(()=>{if(!c.signal.aborted){pending.current=false;setBusy(false);}});return()=>c.abort();},[selection.session,retry,task,replyTarget]);
- async function more(newer=false){if(!page||pending.current)return;const signal=controller.current?.signal;pending.current=true;setBusy(true);const node=ref.current?.querySelector<HTMLElement>('.conversation');if(node&&!newer)scroll.current={height:node.scrollHeight,top:node.scrollTop};try{const p=await request('GET',`/api/history/sessions/${enc(selection.session)}?snapshot=${enc(page.snapshot)}&${newer?'after='+page.after:'before='+page.before}&limit=40${task?'&taskId='+enc(task):''}`,undefined,signal) as Page;if(!signal?.aborted){const messages=newer?[...page.messages,...p.messages]:[...p.messages,...page.messages],trimmed=messages.length>120,retained=newer?messages.slice(-120):messages.slice(0,120);setPage({...p,messages:retained,before:newer?(trimmed?retained[0]?.historyId:page.before):p.before,after:newer?p.after:(trimmed?retained.at(-1)?.historyId:page.after)});};}catch(e){if(!signal?.aborted)setError(String(e));}finally{if(!signal?.aborted){pending.current=false;setBusy(false);}}}
- return <div className="app-body history-view" ref={ref}><header className="app-header"><button type="button" className="quiet slice-menu" aria-label="Toggle project navigation" aria-expanded={navigationOpen} onClick={onNavigation}><NavigationIcon kind="menu"/></button><div className="session-identity"><div className="session-identity-text"><h1>{name||page?.summary.title||'Original session history'}</h1><p className="lead-identity">{page?.summary.members?.lead?.runnerId||'Original binding'} <span>{page?.summary.members?.lead?.modelId}</span>{page?.summary.members?.lead?.thinking&&<small className="lead-reasoning">· {page.summary.members.lead.thinking}</small>}</p></div></div><div className="connection" role="status">Historical access</div></header><div ref={panelTabs} className="workspace-tabs" role="tablist" aria-label="Session workspace">{['conversation','subagents'].map(p=><button key={p} type="button" role="tab" id={"original-tab-"+p} aria-controls={"original-panel-"+p} tabIndex={panel===p?0:-1} aria-selected={panel===p} onKeyDown={e=>{if(["ArrowLeft","ArrowRight","Home","End"].includes(e.key)){e.preventDefault();const next=e.key==="Home"?"conversation":e.key==="End"?"subagents":p==="conversation"?"subagents":"conversation";setPanel(next);panelTabs.current?.querySelector<HTMLButtonElement>("#original-tab-"+next)?.focus();}}} onClick={()=>setPanel(p)}>{p==='conversation'?'Conversation':'Subagents'}</button>)}</div><main id="original-panel-conversation" role="tabpanel" aria-labelledby="original-tab-conversation" hidden={panel!=='conversation'} className="chat-pane history-opening-pane">{busy&&!page&&!error&&<SessionLoading name={name||selection.session} onRetry={()=>setRetry(v=>v+1)}/>}<p className="activity-meta">{continuationIssue||(page?.adopted?'History preserved in SQLite. Continuation is unavailable for this binding or project in this host.':'Original session history. Execution and changes remain with its original host.')}</p>{error&&<div className="error" role="alert">{error}<button className="quiet" onClick={()=>setRetry(v=>v+1)}>Reopen history</button></div>}{page?.issue&&<p className="activity-meta" role="status">{page.issue}</p>}{tasks.some(t=>t!=='lead')&&<label className="activity-meta">Conversation <select aria-label="Conversation" value={task} onChange={e=>setTask(e.target.value)}><option value="">Lead</option>{tasks.filter(t=>t!=='lead').map(t=><option key={t} value={t}>{t}</option>)}</select></label>}<section id="conversation" className="conversation" tabIndex={0} aria-label="Recorded messages"><div className="history-content">{page?.before&&<button className="quiet" disabled={busy} onClick={()=>void more()}>Load older messages</button>}{page&&rows.map(e=><HistoricalEvent key={e.historyId??e.seq} displayReplies={displayReplies} e={e} session={selection.session} snapshot={page.snapshot} onPreview={setPreview}/>)}{page?.after&&<button className="quiet" disabled={busy} onClick={()=>void more(true)}>Load newer messages</button>}{busy&&page&&<p role="status">Loading history…</p>}</div></section></main><section id="original-panel-subagents" role="tabpanel" aria-labelledby="original-tab-subagents" hidden={panel!=='subagents'} className="workspace-panel"><Subagents key={selection.project+selection.session} session={selection.session} tasks={[]} decisions={[]} historySession visible={panel==='subagents'&&!navigationOpen} connected={false} onError={setError}/></section><ImagePreview image={preview} onClose={()=>setPreview(undefined)}/></div>;
+ return <div className="app-body history-view" ref={ref}><header className="app-header">{navigationOpener}<div className="session-identity"><div className="session-identity-text"><h1>{name||page?.summary.title||'Original session history'}</h1><p className="lead-identity">{page?.summary.members?.lead?.runnerId||'Original binding'} <span>{page?.summary.members?.lead?.modelId}</span>{page?.summary.members?.lead?.thinking&&<small className="lead-reasoning">· {page.summary.members.lead.thinking}</small>}</p></div></div><div className="connection" role="status">Historical access</div></header><div ref={panelTabs} className="workspace-tabs" role="tablist" aria-label="Session workspace">{['conversation','subagents'].map(p=><button key={p} type="button" role="tab" id={"original-tab-"+p} aria-controls={"original-panel-"+p} tabIndex={panel===p?0:-1} aria-selected={panel===p} onKeyDown={e=>{if(["ArrowLeft","ArrowRight","Home","End"].includes(e.key)){e.preventDefault();const next=e.key==="Home"?"conversation":e.key==="End"?"subagents":p==="conversation"?"subagents":"conversation";setPanel(next);panelTabs.current?.querySelector<HTMLButtonElement>("#original-tab-"+next)?.focus();}}} onClick={()=>setPanel(p)}>{p==='conversation'?'Conversation':'Subagents'}</button>)}</div><main id="original-panel-conversation" role="tabpanel" aria-labelledby="original-tab-conversation" hidden={panel!=='conversation'} className="chat-pane history-opening-pane">{busy&&!page&&!error&&<SessionLoading name={name||selection.session} onRetry={()=>setRetry(v=>v+1)}/>}<p className="activity-meta">{continuationIssue||(page?.adopted?'History preserved in SQLite. Continuation is unavailable for this binding or project in this host.':'Original session history. Execution and changes remain with its original host.')}</p>{error&&<div className="error" role="alert">{error}<button className="quiet" onClick={failedDirection?retryPage:()=>setRetry(v=>v+1)}>{failedDirection?'Retry history':'Reopen history'}</button></div>}{page?.issue&&<p className="activity-meta" role="status">{page.issue}</p>}{tasks.some(t=>t!=='lead')&&<label className="activity-meta">Conversation <select aria-label="Conversation" value={task} onChange={e=>setTask(e.target.value)}><option value="">Lead</option>{tasks.filter(t=>t!=='lead').map(t=><option key={t} value={t}>{t}</option>)}</select></label>}<section ref={viewport} id="conversation" className="conversation" tabIndex={0} aria-label="Recorded messages"><div ref={content} className="history-content" aria-busy={busy}>{page&&rows.map(e=><div key={historyKey(e)} data-timeline-key={historyKey(e)}><HistoricalEvent displayReplies={displayReplies} e={e} session={selection.session} snapshot={page.snapshot} onPreview={setPreview}/></div>)}</div></section></main><section id="original-panel-subagents" role="tabpanel" aria-labelledby="original-tab-subagents" hidden={panel!=='subagents'} className="workspace-panel"><Subagents key={selection.project+selection.session} session={selection.session} tasks={[]} decisions={[]} historySession visible={panel==='subagents'&&!navigationOpen} connected={false} onError={setError}/></section><ImagePreview image={preview} onClose={()=>setPreview(undefined)}/></div>;
 }
 function HistoricalEvent({displayReplies,e,session,snapshot,onPreview}:{displayReplies:ReturnType<typeof useDisplayedReplies>;e:Event;session:string;snapshot:string;onPreview:(v:Preview)=>void}){
  const replyRoot=useRef<HTMLElement|null>(null),holder=useRef<HTMLDivElement>(null);
@@ -85,25 +169,31 @@ function HistoricalEvent({displayReplies,e,session,snapshot,onPreview}:{displayR
 
 // Render adopted history above the normal composer and current Rust receipts.
 // Paging remains independent from the workspace poll; old raw events never enter it.
-export function OriginalMessages({session,task='',attempt,snapshot,visible=true,name,onReady,tasks=[],activity,connected,onBrowse=()=>{},windowLimit=120}:{windowLimit?:number;onBrowse?:()=>void;tasks?:Task[];activity?:ReadonlyMap<string,Step>;connected?:boolean;session:string;task?:string;attempt?:number;snapshot?:string;visible?:boolean;name?:string;onReady?:(ready:boolean)=>void}) {
+export function OriginalMessages({session,task='',attempt,snapshot,visible=true,name,onReady,tasks=[],activity,connected,onBrowse,onHistoryTarget,viewport}:{
+ viewport?:RefObject<HTMLElement|null>;onBrowse?:()=>void;onHistoryTarget?:()=>void;tasks?:Task[];activity?:ReadonlyMap<string,Step>;
+ connected?:boolean;session:string;task?:string;attempt?:number;snapshot?:string;visible?:boolean;
+ name?:string;onReady?:(ready:boolean)=>void;
+}) {
  const replyTarget=new URL(location.href).searchParams.get('reply')||'';
- const [page,setPage]=useState<Page>(),[error,setError]=useState(''),[busy,setBusy]=useState(false),[preview,setPreview]=useState<Preview>();
+ const [preview,setPreview]=useState<Preview>(),[retry,setRetry]=useState(0);
+ const ownViewport=useRef<HTMLDivElement>(null),content=useRef<HTMLDivElement>(null);
+ const {page,busy,error,failedDirection,retryPage}=usePagedTranscript({session,task,attempt,snapshot,replyTarget,revision:retry,
+  viewport:viewport??ownViewport,content,embedded:!!viewport,onBrowse,onHistoryTarget,visible});
  const displayReplies=useDisplayedReplies(replyApi,visible&&!task,session,(page?.messages??[]).filter(e=>e.data.role==='assistant').map(e=>e.seq),page?.boundary??0);
- const controller=useRef<AbortController|undefined>(undefined),pending=useRef(false),ref=useRef<HTMLDivElement>(null);
- const historyViewport=useRef<HTMLElement|null>(null);
- useLayoutEffect(()=>{historyViewport.current=task?ref.current:ref.current?.closest<HTMLElement>('.conversation')??null;});
- const historyAnchor=useRef<{id:string;offset:number}|null>(null);
- const ready=useRef(onReady);ready.current=onReady;useLayoutEffect(()=>{ready.current?.(false);return()=>ready.current?.(false);},[session]);useLayoutEffect(()=>{if(page||error)ready.current?.(true);},[page,error]);
- useEffect(()=>{const c=new AbortController();controller.current=c;setPage(undefined);setError('');pending.current=true;setBusy(true);void initialHistoryPage(session,c.signal,task,attempt,snapshot).then(v=>{if(!c.signal.aborted)setPage(v as Page);}).catch(e=>{if(!c.signal.aborted)setError(String(e));}).finally(()=>{if(!c.signal.aborted){pending.current=false;setBusy(false);}});return()=>c.abort();},[session,replyTarget,task,attempt,snapshot]);
- useLayoutEffect(()=>{if(task&&page&&ref.current)ref.current.scrollTop=ref.current.scrollHeight;if(page?.targetSeq)ref.current?.querySelector<HTMLElement>(`[data-history-seq="${page.targetSeq}"]`)?.scrollIntoView({block:"center"});},[page]);
- async function more(newer=false){if(!page||pending.current||!(newer?page.after:page.before))return;onBrowse();pending.current=true;setBusy(true);const signal=controller.current?.signal,node=task?ref.current:ref.current?.closest('.conversation'),height=node?.scrollHeight??0,top=node?.scrollTop??0;try{const p=await request('GET',`/api/history/sessions/${enc(session)}?snapshot=${enc(page.snapshot)}&${newer?'after='+page.after:'before='+page.before}&limit=40${task?'&taskId='+enc(task):''}${attempt!==undefined?'&attempt='+attempt:''}`,undefined,signal) as Page;if(!signal?.aborted){const first=node&&Array.from(node.querySelectorAll<HTMLElement>('[data-history-seq]')).find(el=>el.getBoundingClientRect().bottom>node.getBoundingClientRect().top+32);if(first)historyAnchor.current={id:first.dataset.historySeq!,offset:first.getBoundingClientRect().top-node!.getBoundingClientRect().top};const messages=newer?[...page.messages,...p.messages]:[...p.messages,...page.messages],trimmed=messages.length>120,retained=newer?messages.slice(-120):messages.slice(0,120);setPage({...p,messages:retained,before:newer?(trimmed?retained[0]?.historyId:page.before):p.before,after:newer?p.after:(trimmed?retained.at(-1)?.historyId:page.after)});}}catch(e){if(!signal?.aborted)setError(String(e));}finally{if(!signal?.aborted){pending.current=false;setBusy(false);}}}
- useLayoutEffect(()=>{const a=historyAnchor.current,node=task?ref.current:ref.current?.closest('.conversation');if(a&&node){const el=node.querySelector<HTMLElement>(`[data-history-seq="${a.id}"]`);if(el)node.scrollTop+=el.getBoundingClientRect().top-node.getBoundingClientRect().top-a.offset;historyAnchor.current=null;}},[page]);
+ const ready=useRef(onReady);ready.current=onReady;
+ useLayoutEffect(()=>{ready.current?.(false);return()=>ready.current?.(false);},[session]);
+ useLayoutEffect(()=>{if(page||error)ready.current?.(true);},[page,error]);
 
  const events=page?.messages??[];
  // Imported history has recorded sequence and timestamp; place delegation rows
  // between message events and include only tasks inside this server page.
  const agents=task?[]:tasks.filter(t=>t.session===session&&t.owner!=='lead'&&t.attempts.length).filter(t=>{const at=t.attempts[0]!.accepted_ms;return (!page?.before||at>=Date.parse(events[0]?.ts??''))&&(!page?.after||at<=Date.parse(events.at(-1)?.ts??''));}).sort((a,b)=>a.attempts[0]!.accepted_ms-b.attempts[0]!.accepted_ms);
- const interleaved=events.flatMap((e,i)=>[<HistoricalEvent key={'event-'+(e.historyId??e.seq)} displayReplies={displayReplies} e={e} session={session} snapshot={page!.snapshot} onPreview={setPreview}/>,...agents.filter(t=>{const at=t.attempts[0]!.accepted_ms;return at>=Date.parse(e.ts)&&(i===events.length-1||at<Date.parse(events[i+1]!.ts));}).map(t=><InlineSubagents key={'agent-'+t.id} tasks={[t]} session={session} activity={activity} connected={connected}/>)]);
+ const interleaved=events.flatMap((e,i)=>[<HistoricalEvent key={historyKey(e)} displayReplies={displayReplies} e={e} session={session} snapshot={page!.snapshot} onPreview={setPreview}/>,...agents.filter(t=>{const at=t.attempts[0]!.accepted_ms;return at>=Date.parse(e.ts)&&(i===events.length-1||at<Date.parse(events[i+1]!.ts));}).map(t=><InlineSubagents key={'agent-'+t.id} tasks={[t]} session={session} activity={activity} connected={connected}/>)]);
  const preceding=agents.filter(t=>t.attempts[0]!.accepted_ms<Date.parse(events[0]?.ts??'')).map(t=><InlineSubagents key={'agent-'+t.id} tasks={[t]} session={session} activity={activity} connected={connected}/>);
- return <div ref={ref} className={task?"history-content task-transcript task-transcript--full":"history-content"} tabIndex={task?0:undefined} role={task?"log":undefined} aria-label={task?"Recorded subagent conversation":undefined}>{error&&<p className="error" role="alert">{error}<button className="quiet" onClick={()=>location.reload()}>Reopen history</button></p>}{page?.before&&<button className="quiet" disabled={busy} onClick={()=>void more()}>Load older messages</button>}<TranscriptWindow limit={windowLimit} olderLabel="Show earlier loaded messages" onOlder={()=>{if(page?.before)void more();}} rows={[...preceding,...interleaved].map(element=>({key:String(element.key),element}))} viewport={historyViewport} onBrowse={onBrowse}>{row=>row.element}</TranscriptWindow>{page?.after&&<button className="quiet" disabled={busy} onClick={()=>void more(true)}>Load newer messages</button>}{busy&&page&&<p role="status">Loading history…</p>}{busy&&!page&&!task&&!error&&<SessionLoading name={name||session} onRetry={()=>location.reload()}/>}<ImagePreview image={preview} onClose={()=>setPreview(undefined)}/></div>;
+ return <div ref={ownViewport} data-adopted-history={viewport?true:undefined} data-history-gap={viewport&&page?.after?true:undefined} data-history-focus={viewport&&page?.targetSeq?true:undefined} className={task?"history-content task-transcript task-transcript--full progressive-transcript":"history-content"} tabIndex={task?0:undefined} role={task?"log":undefined} aria-label={task?"Recorded subagent conversation":undefined}>
+  {error&&<p className="error" role="alert">{error}<button className="quiet" onClick={failedDirection?retryPage:()=>setRetry(value=>value+1)}>{failedDirection?'Retry history':'Reopen history'}</button></p>}
+  <div ref={content} aria-busy={busy}>{[...preceding,...interleaved].map(element=><div key={element.key} data-timeline-key={String(element.key)}>{element}</div>)}</div>
+  {busy&&!page&&!task&&!error&&<SessionLoading name={name||session} onRetry={()=>setRetry(value=>value+1)}/>}
+  <ImagePreview image={preview} onClose={()=>setPreview(undefined)}/>
+ </div>;
 }

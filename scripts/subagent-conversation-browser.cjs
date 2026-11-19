@@ -17,20 +17,29 @@ async function main() {
    import React from ${JSON.stringify(path.join(root, 'node_modules/react/index.js'))};
    import {createRoot} from ${JSON.stringify(path.join(root, 'node_modules/react-dom/client.js'))};
    import {Subagents} from ${JSON.stringify(path.join(root, 'frontend/src/subagents.tsx'))};
+   import ${JSON.stringify(path.join(root, 'frontend/src/style.css'))};
+   import ${JSON.stringify(path.join(root, 'frontend/src/themes.css'))};
+   import ${JSON.stringify(path.join(root, 'frontend/src/slice.css'))};
+   import ${JSON.stringify(path.join(root, 'frontend/src/calm-workspace.css'))};
    const root = createRoot(document.getElementById('root'));
+   const accepted_ms = Date.now() - 60_000;
    window.show = (phase = 'running') => root.render(
     <Subagents session="s" visible connected decisions={[]} onError={console.error}
      tasks={[{id:'t', session:'s', owner:'apply-fast', attempts:[
-      {id:'old', phase:'cancelled', provenance:{}, treatments:[]},
-      {id:'a', phase, provenance:{}, treatments:[]}
+      {id:'old', accepted_ms, phase:'cancelled', provenance:{}, treatments:[]},
+      ...Array.from({length:14}, (_,i) => ({id:'prior-'+i, accepted_ms, phase:'completed', provenance:{}, treatments:[]})),
+      {id:'a', accepted_ms, phase, provenance:{}, treatments:[]}
      ]}]} />
    );
    window.show();
   `);
   execFileSync('bun', ['build', entry, '--target=browser', '--outdir', temp], {cwd:root});
   const bundle = fs.readFileSync(path.join(temp, 'entry.js'));
-  browser = await chromium.launch({executablePath:process.env.DECK2_CHROMIUM || chromium.executablePath()});
-  const page = await browser.newPage();
+  const css = fs.readFileSync(path.join(temp, 'entry.css'));
+  browser = process.env.DECK2_BROWSER_CDP
+   ? await chromium.connectOverCDP(process.env.DECK2_BROWSER_CDP)
+   : await chromium.launch({executablePath:process.env.DECK2_CHROMIUM || chromium.executablePath()});
+  const page = await browser.newPage({viewport:{width:360,height:740}});
   page.setDefaultTimeout(5000);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -51,8 +60,11 @@ async function main() {
   let settled = false;
   await page.route('http://conversation.test/**', route => {
    const url = new URL(route.request().url());
-   if (url.pathname === '/') return route.fulfill({contentType:'text/html',body:'<div id="root"></div><script src="/app.js"></script>'});
+   if (url.pathname === '/') return route.fulfill({contentType:'text/html',body:'<meta charset="utf-8"><link rel="stylesheet" href="/app.css"><div class="slice-panes"><aside id="root" class="inspector" data-mode="floating" style="position:fixed;top:24px;right:12px;left:12px;height:650px;transform:translate(0)"></aside></div><script src="/app.js"></script>'});
    if (url.pathname === '/app.js') return route.fulfill({contentType:'text/javascript',body:bundle});
+   if (url.pathname === '/avatars/apply-fast.png') return route.fulfill({path:path.join(root,'frontend/public/avatars/apply-fast.png')});
+   if (url.pathname === '/app.css') return route.fulfill({contentType:'text/css',body:css});
+   if (url.pathname.endsWith('/cancel')) return route.fulfill({json:{}});
    const [,attempt,endpoint] = url.pathname.match(/^\/api\/sessions\/s\/tasks\/t\/attempts\/([^/]+)\/(exchanges|transcript)$/) || [];
    if (!attempt) return route.fulfill({status:404});
    const identity = {session:'s',task:'t',attempt};
@@ -71,6 +83,9 @@ async function main() {
   assert.equal(await articles.count(),2);
   assert.equal(await articles.nth(1).locator('.markdown strong').textContent(),'de ayuda');
   assert.equal(await articles.nth(1).locator('.markdown br').count(),1);
+  const cancel = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/cancel'));
+  await page.getByRole('button',{name:'Cancel specialist'}).click();
+  assert.equal(new URL((await cancel).url()).pathname,'/api/tasks/t/attempts/a/cancel');
   settled = true;
   await page.evaluate(() => window.show('completed'));
   const terminalPoll = await page.waitForResponse(response =>
@@ -83,10 +98,41 @@ async function main() {
   assert.equal(await articles.count(),4);
   assert.equal(await articles.nth(1).locator('.markdown p').last().textContent(),'de ayuda.');
   assert.match(await articles.nth(2).locator('[title]').getAttribute('title'),/Content: other$/);
-  await page.getByLabel('Task attempt').selectOption('old');
+  const picker = page.getByRole('button',{name:/^Task attempt:/});
+  const options = page.getByRole('group',{name:'Task attempts'});
+  const current = options.getByRole('button',{pressed:true});
+  await picker.focus();
+  await picker.press('Enter');
+  await current.waitFor();
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-pressed') === 'true');
+  const anchor = await picker.boundingBox();
+  const popup = await options.boundingBox();
+  assert(popup.x >= 0 && popup.x + popup.width <= 360);
+  assert(popup.y >= anchor.y + anchor.height || popup.y + popup.height <= anchor.y);
+  assert(await options.evaluate(node => node.scrollHeight > node.clientHeight));
+  await page.keyboard.press('Escape');
+  await options.waitFor({state:'hidden'});
+  assert(await picker.evaluate(node => document.activeElement === node));
+  await picker.click();
+  await options.waitFor();
+  await page.getByRole('heading',{name:'Apply Fast',exact:true}).click();
+  await options.waitFor({state:'hidden'});
+  await picker.click();
+  await options.getByRole('button',{name:/^Attempt 1 cancelled/}).click();
   await log.getByText('Old attempt only',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:/Cancel specialist|Cancellation requested/}).count(),0);
   assert.equal(await log.getByText('de ayuda',{exact:true}).count(),0);
-  await page.getByLabel('Task attempt').selectOption('a');
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+  await picker.press('Enter');
+  await current.waitFor();
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-pressed') === 'true');
+  const latest = options.getByRole('button',{name:/^Attempt 16 completed/});
+  await page.keyboard.press('ArrowDown');
+  assert(await options.getByRole('button',{name:/^Attempt 2 completed/}).evaluate(node => document.activeElement === node));
+  await page.keyboard.press('End');
+  assert(await latest.evaluate(node => document.activeElement === node));
+  await page.keyboard.press('Enter');
+  await options.waitFor({state:'hidden'});
   await log.getByText('New message',{exact:true}).waitFor();
   assert.equal(await articles.count(),4);
   await page.reload();

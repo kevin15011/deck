@@ -1,6 +1,5 @@
 /* S1 adaptations to the copied Deck presentation; no runtime/session imports. */
 .app-body {--pane-split:50%}
-.slice-menu {display:none}
 .slice-theme {font-size:.7rem;color:var(--muted);display:grid;gap:.5rem}
 .slice-theme select {background:var(--surface);color:var(--ink);border:1px solid var(--border);padding:.5rem}
 .slice-foot {font-size:.65rem;color:var(--muted);margin-top:1rem}
@@ -15,7 +14,6 @@
 .app-error button {font-size:.75rem;padding:.375rem .5rem}
 @media (min-width:1001px){.view-nav .workspace-tabs button:first-of-type {display:none}}
 @media (max-width:1000px){
- .slice-menu {display:block}
  .slice-panes {display:flex}
  .slice-panes>.chat-pane,.slice-panes>.workspace-pane {width:100%;flex:1}
  .slice-panes:not(.activity-selected)>.workspace-pane,.slice-panes.activity-selected>.chat-pane {display:none}
@@ -125,12 +123,9 @@
 .session-configuration label{display:block;margin:.5rem 0}
 
 /* Layout controls keep all session children mounted; only their visibility changes. */
-.sidebar-contents{display:flex;flex-direction:column;min-height:0;flex:1}
-.sidebar-contents[hidden],.chat-label[hidden]{display:none}
+.chat-label[hidden]{display:none}
 .sidebar-brand{display:flex;align-items:center;justify-content:space-between}
 .sidebar-brand .brand{min-width:0}
-.sidebar-collapsed .sidebar-brand{flex-direction:column}
-.sidebar-collapsed .sidebar-brand .brand{padding:0}
 .theme-reveal-wave{position:fixed;inset:0;pointer-events:none;view-transition-name:deck-theme-wave;z-index:2147483647}
 @media(min-width:1001px){.content-workspace .view-nav .workspace-tabs{grid-column:1/-1;border-left:0}.sidebar-toggle{min-height:36px}.content-chat .slice-panes>.workspace-pane[hidden],.content-workspace .slice-panes>.chat-pane[hidden]{display:none}}
 
@@ -143,10 +138,9 @@
 .workspace-stack>.workspace-panel[hidden]{display:none}
 .shell-workspace .git-pane{padding:0}
 .sidebar>.deck-menu{flex:none}
-.navigation-rail{flex:1}
 .agent-avatar{flex:none;object-fit:contain;image-rendering:pixelated;border:1px solid var(--border)}
 .project-group>button,.project-group .new-conversation{display:flex;align-items:center;gap:6px}
-@media(min-width:1001px){.shell-workspace .chat-tab{display:none}.sidebar-brand{flex-direction:row}.sidebar-collapsed .sidebar-brand{flex-direction:column}.app-header .content-modes{order:5}.slice-readonly{font-size:11px}}
+@media(min-width:1001px){.shell-workspace .chat-tab{display:none}.sidebar-brand{flex-direction:row}.app-header .content-modes{order:5}.slice-readonly{font-size:11px}}
 @media(max-width:1000px){.slice-panes>.shell-workspace{display:flex}.slice-panes>.shell-workspace[hidden]{display:none}.workspace-stack>.workspace-panel{width:100%}}
 
 .history-view>.chat-pane{flex:1;overflow:hidden}
@@ -286,8 +280,8 @@
 }
 @media(max-width:600px){
  /* Header additions get a second row rather than squeezing the session title. */
- .app-header {display:grid;grid-template-columns:28px minmax(0,1fr) auto auto;height:auto;flex-basis:auto;row-gap:4px}
- .app-header .slice-menu {grid-column:1;grid-row:1;padding:4px}
+ .app-header {display:grid;grid-template-columns:44px minmax(0,1fr) auto auto;height:auto;flex-basis:auto;row-gap:4px}
+ .app-header .sidebar-opener {grid-column:1;grid-row:1;padding:4px}
  .app-header .session-identity {grid-column:2/-1;grid-row:1}
  .app-header .inspector-actions {grid-column:2;grid-row:2;margin-left:auto}
  .app-header .session-menu {grid-column:3;grid-row:2}
@@ -318,3 +312,30 @@
 .inspector-size::after {content:'';position:absolute;right:5px;bottom:5px;width:7px;height:7px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted)}
 .inspector-size:focus-visible,.inspector-move:focus-visible {outline:2px solid var(--focus);outline-offset:2px}
 @media(max-width:1000px){.inspector>.workspace-tabs {padding-left:0;padding-right:44px}.inspector .workspace-tabs {cursor:default;touch-action:auto}}
+
+.task-metadata:has(.attempt-trigger) {align-items:center}
+.attempt-picker {min-width:0}
+.attempt-trigger.quiet, select.attempt-trigger {
+  display:inline-flex; align-items:center; gap:.4rem; max-width:100%; min-height:28px;
+  padding:.15rem .45rem; border-radius:4px; border:1px solid var(--border);
+  background:var(--card); color:var(--ink); font:inherit; font-variant-numeric:tabular-nums;
+}
+.attempt-trigger.quiet:hover, .attempt-picker:has(:popover-open) .attempt-trigger {background:var(--tint)}
+.attempt-chevron {width:.35rem;height:.35rem;border:solid currentColor;border-width:0 1px 1px 0;transform:translateY(-.1rem) rotate(45deg)}
+.attempt-popup {
+  position-area:bottom span-right; position-try-fallbacks:flip-block,flip-inline,flip-block flip-inline;
+  justify-self:start; align-self:start; margin:.25rem 0; padding:.25rem;
+  inline-size:max-content; max-inline-size:min(17rem,calc(100vw - 1rem)); max-block-size:min(15rem,45dvh);
+  overflow:auto; overscroll-behavior:contain; border:1px solid var(--border); border-radius:6px;
+  background:var(--surface); color:var(--ink); box-shadow:0 6px 18px #0003; font-size:.75rem;
+}
+.attempt-option.quiet {
+  display:grid; grid-template-columns:minmax(0,1fr) auto 1em; align-items:center; gap:.65rem;
+  width:100%; min-height:30px; padding:.25rem .45rem; border:0; border-radius:3px;
+  background:transparent; text-align:start; font:inherit; font-variant-numeric:tabular-nums;
+}
+.attempt-option.quiet:hover, .attempt-option.quiet[aria-pressed=true] {background:var(--tint);color:var(--ink)}
+.attempt-option.quiet[aria-pressed=true] {font-weight:600}
+.attempt-phase {color:var(--muted);font-weight:400}
+.attempt-check {color:var(--action)}
+.attempt-trigger.quiet:focus-visible, select.attempt-trigger:focus-visible, .attempt-option.quiet:focus-visible {outline:1px solid var(--focus);outline-offset:-1px}
