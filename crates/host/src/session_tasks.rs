@@ -275,6 +275,8 @@ pub(crate) fn tool_with_original(
                 provenance,
                 native_session: None,
                 native_message: None,
+                guidance_open: false,
+                guidance: vec![],
                 generation: uuid::Uuid::new_v4().to_string(),
                 accepted_ms: crate::now(),
                 dispatch_ms: None,
@@ -496,7 +498,7 @@ fn listed_tasks(store:&Store, session:&str, records:&[Value])->Result<Vec<Value>
     }
     Ok(values)
 }
-fn check_owner(store: &Store, r: &deck2_shared::Receipt, t: &Task) -> Result<(), String> {
+pub(crate) fn check_owner(store: &Store, r: &deck2_shared::Receipt, t: &Task) -> Result<(), String> {
     let lead = r
         .configuration
         .as_ref()
@@ -834,7 +836,8 @@ pub fn inspect_events(conn: &rusqlite::Connection) -> Result<(), String> {
             }
             continue;
         }
-        if kind.starts_with("receipt:") {
+        let steering_input = kind.strip_prefix("steering:");
+        if kind.starts_with("receipt:") || steering_input.is_some() {
             let data: Value = serde_json::from_str(&body).map_err(|_| invalid)?;
             let id = data["receiptId"].as_str().ok_or(invalid)?;
             let encoded: String = conn
@@ -845,15 +848,21 @@ pub fn inspect_events(conn: &rusqlite::Connection) -> Result<(), String> {
             if seq <= 0
                 || receipt.session != session
                 || receipt.attempt != attempt
-                || data["revision"]
-                    .as_u64()
-                    .is_none_or(|n| n == 0 || n > receipt.revision)
                 || receipt
                     .configuration
                     .as_ref()
                     .and_then(|s| s.session_contract.as_ref())
                     .is_none_or(|c| c.lead_task != task)
             {
+                return Err(invalid.into());
+            }
+            let event_matches = match steering_input {
+                Some(input) => crate::steering::matches_accepted_event(&receipt, input, &data),
+                None => data["revision"]
+                    .as_u64()
+                    .is_some_and(|n| n > 0 && n <= receipt.revision),
+            };
+            if !event_matches {
                 return Err(invalid.into());
             }
             continue;

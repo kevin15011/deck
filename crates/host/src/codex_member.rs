@@ -33,6 +33,8 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
     {
         return Err("Member executable changed".into());
     }
+    let (_, version) = crate::native::qualify_version(Path::new(&binding.path)).await?;
+    let supports_guidance = version >= semver::Version::new(0, 170, 0);
     validate_original_task(app, &t)?;
     let bridge = crate::session_mcp::Bridge::start_member(app, task, attempt).await?;
     let role = crate::session_roles::Role::at(&app.native_role_root.lock().unwrap(), &t.owner)?;
@@ -159,16 +161,23 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
             a.native_message = Some(turn.clone());
             if !a.cancel_requested {
                 a.phase = Phase::Running;
+                a.guidance_open = supports_guidance;
             }
             a.acknowledgment_ms = Some(crate::now());
         })?;
   let mut report=String::new();
   let mut proposals=std::collections::HashMap::<String,Value>::new();
   let mut revoked_replies=std::collections::HashSet::new();
+  let mut steering: Option<(String, deck2_shared::SteeringCommand, tokio::time::Instant)> = None;
+  let mut controls = tokio::time::interval(Duration::from_millis(100));
+  controls.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
   loop {
    native.verify_role()?;
-   let live=app.store.lock().unwrap().task(task)?.attempts.iter().any(|a|a.id==attempt&&a.phase.active()&&!a.cancel_requested);
-   if !live{return Err("Member was cancelled; outcome requires process settlement".into());}
+   let current=app.store.lock().unwrap().task(task)?;
+   let active=current.attempts.iter().find(|a|a.id==attempt&&a.phase.active()&&!a.cancel_requested)
+       .ok_or("Member was cancelled; outcome requires process settlement")?;
+   let guidance_pending=active.guidance_open && active.guidance.iter().any(|g|
+       g.input.state==deck2_shared::SteeringState::Pending);
    for d in app.receipt(&authority)?.decisions.iter().filter(|d|d.task.as_deref()==Some(task)&&d.attempt==attempt&&d.generation==a.generation&&d.thread==thread&&d.turn==turn) {
     if let Some(reply)=crate::codex_protocol::revoked_reply(d)? && revoked_replies.insert(d.id.clone()) {
      native.write(json!({"id":serde_json::from_str::<Value>(&d.request).map_err(|_|"Corrupt revoked member request")?,"result":reply})).await?;
@@ -186,9 +195,28 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
     }
    }
    let value=tokio::select!{
+       biased;
        v=native.read()=>v?,
-       _=tokio::time::sleep(Duration::from_millis(100))=>continue
+       _=controls.tick()=>{
+        if steering.as_ref().is_some_and(|(_,_,deadline)| tokio::time::Instant::now() >= *deadline) {
+         let (_,command,_) = steering.take().unwrap();
+         crate::member_guidance::resolve(app,task,attempt,&command,None)?;
+        }
+        if guidance_pending && steering.is_none()
+            && let Some(command) = crate::member_guidance::claim(app,task,attempt,&thread,&turn)? {
+         let rpc = format!("deck-steer-{}",uuid::Uuid::new_v4());
+         native.steer_member(&rpc,&command).await?;
+         steering = Some((rpc,command,tokio::time::Instant::now()+Duration::from_secs(10)));
+        }
+        continue;
+       }
    };
+   if value.get("method").is_none() && steering.as_ref()
+       .is_some_and(|(rpc,_,_)|value["id"].as_str()==Some(rpc)) {
+    let (_,command,_) = steering.take().unwrap();
+    crate::member_guidance::resolve(app,task,attempt,&command,Some(&value))?;
+    continue;
+   }
    let p=&value["params"];
    if value.get("id").is_some()&&value.get("method").is_some(){
     let method=value["method"].as_str().unwrap_or("");
@@ -255,10 +283,17 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
         result=execution => result,
         _=cancelled(app,task,attempt) => Err("Member cancelled during preparation or execution".into()),
     };
+    // Close at the observed protocol boundary, before process cleanup can block.
+    let closed = if supports_guidance {
+        update(app, task, attempt, crate::member_guidance::close)
+    } else {
+        Ok(())
+    };
     native
         .terminate()
         .await
         .map_err(|e| format!("member_cleanup_uncertain:{e}"))?;
+    closed?;
     if result.is_err() {
         update(app, task, attempt, |a| a.settled_ms = Some(crate::now()))?;
     }

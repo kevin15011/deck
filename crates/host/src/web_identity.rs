@@ -79,6 +79,7 @@ pub struct Identity {
     pub assignment_config: Option<PathBuf>,
     pub root: Option<PathBuf>,
     pub policy: Policy,
+    pub local_state: Option<PathBuf>,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -188,6 +189,18 @@ fn now_iso() -> String {
     })
     .unwrap()
 }
+const REMEMBER_SECONDS: u64 = 180 * 24 * 60 * 60;
+const LOCAL_DEVICE_PREFIX: &str = "local-";
+
+fn expiry() -> Result<String> {
+    let c = rusqlite::Connection::open_in_memory().map_err(|_| fail())?;
+    c.query_row(
+        "SELECT strftime('%Y-%m-%dT%H:%M:%fZ',?1/1000.0,'unixepoch')",
+        [(crate::now() + REMEMBER_SECONDS * 1000) as i64],
+        |r| r.get(0),
+    )
+    .map_err(|_| fail())
+}
 fn host_of(origin: &str) -> Option<String> {
     let u = reqwest::Url::parse(origin).ok()?;
     if !["http", "https"].contains(&u.scheme())
@@ -203,10 +216,70 @@ fn h<'a>(headers: &'a HeaderMap, key: &str) -> Option<&'a str> {
     headers.get(key)?.to_str().ok()
 }
 pub fn cookie(headers: &HeaderMap) -> Option<&str> {
+    credential(headers).map(|(_, token)| token)
+}
+fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     h(headers, "cookie")?
         .split(';')
         .map(str::trim)
-        .find_map(|s| s.strip_prefix("deck_device="))
+        .find_map(|s| s.split_once('=').filter(|(key, _)| *key == name).map(|(_, value)| value))
+}
+fn local_cookie_name(headers: &HeaderMap) -> Option<String> {
+    let (host, port) = h(headers, "host")?.split_once(':')?;
+    (matches!(host, "127.0.0.1" | "localhost") && port.parse::<u16>().is_ok())
+        .then(|| format!("deck_device_{port}"))
+}
+fn credential(headers: &HeaderMap) -> Option<(bool, &str)> {
+    if let Some(token) = cookie_value(headers, "deck_device") {
+        return Some((false, token));
+    }
+    Some((true, cookie_value(headers, &local_cookie_name(headers)?)?))
+}
+fn direct_host(headers: &HeaderMap, peer: Option<SocketAddr>) -> Option<&str> {
+    local_cookie_name(headers)?;
+    let host = h(headers, "host")?;
+    (peer.is_some_and(|p| p.ip().is_loopback())
+        && h(headers, "origin").is_none_or(|o| o == format!("http://{host}"))
+        && !headers.keys().any(|k| {
+            k == "forwarded"
+                || k.as_str().starts_with("x-forwarded-")
+                || k.as_str().contains("funnel")
+        }))
+    .then_some(host)
+}
+// Cookies are host-only in browsers, but HTTP cookies do not isolate ports.
+fn local_digest(token: &str, host: &str) -> String {
+    crate::tasks::digest(format!("{host}/{token}").as_bytes())
+}
+fn local_device_id(id: &str) -> bool {
+    id.strip_prefix(LOCAL_DEVICE_PREFIX)
+        .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
+}
+fn set_cookie(headers: &mut HeaderMap, name: &str, token: &str, max_age: u64) {
+    headers.append(
+        header::SET_COOKIE,
+        format!("{name}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}")
+            .parse()
+            .unwrap(),
+    );
+}
+pub(crate) fn expire_cookie(headers: &mut HeaderMap, name: &str) {
+    set_cookie(headers, name, "", 0);
+}
+pub(crate) fn clear_stale_device(
+    identity: &Identity,
+    headers: &HeaderMap,
+    peer: Option<SocketAddr>,
+    response: &mut Response,
+) {
+    if direct_host(headers, peer).is_none() || identity.authorized(headers, peer) {
+        return;
+    }
+    match credential(headers) {
+        Some((true, _)) => expire_cookie(response.headers_mut(), &local_cookie_name(headers).unwrap()),
+        Some((false, _)) => expire_cookie(response.headers_mut(), "deck_device"),
+        None => {}
+    }
 }
 fn loopback(s: &str) -> bool {
     ["127.0.0.1", "::1", "::ffff:127.0.0.1"].contains(&s)
@@ -258,7 +331,7 @@ impl Identity {
             let home=std::env::var_os("HOME").map(PathBuf::from).ok_or("web-config-unavailable")?;
             Some(std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).filter(|p|p.is_absolute()).unwrap_or_else(||home.join(".config")).join("deck/config.json"))
         };
-        Ok(Self { root, policy, assignment_config })
+        Ok(Self { root, policy, assignment_config, local_state: None })
     }
     pub(crate) fn scheduler_config(&self) -> std::result::Result<Value,String> {
         let Some(path)=&self.assignment_config else {return Ok(json!({}));};
@@ -282,7 +355,10 @@ impl Identity {
         open_at(&root(self.root.as_deref().ok_or_else(fail)?)?, "web", true)
     }
     fn devices(&self) -> Result<Vec<Device>> {
-        let v = value(&self.web()?, "devices.json")?;
+        Self::read_devices(&self.web()?, "devices.json")
+    }
+    fn read_devices(dir: &File, filename: &str) -> Result<Vec<Device>> {
+        let v = value(dir, filename)?;
         if !v.as_array().is_some_and(|ds| {
             ds.iter().all(|d| {
                 ["expiresAt", "tailscaleIdentity"]
@@ -400,51 +476,111 @@ impl Identity {
                 .as_bytes(),
         ))
     }
-    pub fn authorized(&self, headers: &HeaderMap, peer: Option<SocketAddr>) -> bool {
-        let Some(token) = cookie(headers) else {
-            return false;
-        };
-        if token.len() != 43
-            || !token
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-        {
-            return false;
-        }
-        let hash = crate::tasks::digest(token.as_bytes());
-        self.devices().is_ok_and(|ds| {
-            ds.iter().any(|d| {
-                d.revoked_at.is_none()
-                    && d.expires_at
-                        .as_deref()
-                        .is_none_or(|s| timestamp(s).is_ok_and(|t| t > crate::now() as i64))
-                    && equal(&d.hash, &hash)
-                    && d.tailscale_identity
-                        .as_ref()
-                        .is_none_or(|id| self.serve_identity(headers, peer).as_ref() == Some(id))
+    fn active(d: &Device) -> bool {
+        d.revoked_at.is_none()
+            && d.expires_at.as_deref().is_none_or(|s| {
+                timestamp(s).is_ok_and(|t| t > crate::now() as i64)
             })
-        })
+    }
+
+    fn access(&self, headers: &HeaderMap, peer: Option<SocketAddr>) -> Result<(bool, Device)> {
+        let (local, token) = credential(headers).ok_or("device-required")?;
+        if token.len() != 43
+            || !token.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            return Err("device-required");
+        }
+        let (devices, hash) = if local {
+            let host = direct_host(headers, peer).ok_or("device-required")?;
+            (self.local_devices()?, local_digest(token, host))
+        } else {
+            (self.devices()?, crate::tasks::digest(token.as_bytes()))
+        };
+        let device = devices.into_iter().find(|d| {
+            equal(&d.hash, &hash)
+                && Self::active(d)
+                && (!local || d.expires_at.is_some())
+                && d.tailscale_identity.as_ref().is_none_or(|id| {
+                    self.serve_identity(headers, peer).as_ref() == Some(id)
+                })
+        }).ok_or("device-required")?;
+        Ok((local, device))
+    }
+    pub(crate) fn remembered(&self, headers: &HeaderMap, peer: Option<SocketAddr>) -> bool {
+        self.access(headers, peer).is_ok_and(|(_, d)| d.expires_at.is_some())
+    }
+    pub fn authorized(&self, headers: &HeaderMap, peer: Option<SocketAddr>) -> bool {
+        self.access(headers, peer).is_ok()
     }
     pub(crate) fn device_id(&self, headers: &HeaderMap, peer: Option<SocketAddr>) -> Result<String> {
-        if !self.authorized(headers, peer) { return Err("device-required"); }
-        let hash=crate::tasks::digest(cookie(headers).ok_or("device-required")?.as_bytes());
-        self.devices()?.into_iter().find(|d|equal(&d.hash,&hash)).map(|d|d.id).ok_or("device-required")
+        self.access(headers, peer).map(|(_, d)| d.id).map_err(|_| "device-required")
     }
-    pub(crate) fn active_device_ids(&self)->Result<std::collections::HashSet<String>>{
-        let mut active=std::collections::HashSet::new();
-        for d in self.devices()? {if d.revoked_at.is_none()&&d.expires_at.as_deref().map(timestamp).transpose()?.is_none_or(|t|t>crate::now() as i64){active.insert(d.id);}}
+    pub(crate) fn active_device_ids<'a>(&self, ids: impl Iterator<Item = &'a str>) -> Result<std::collections::HashSet<String>> {
+        let (mut local, mut original) = (false, false);
+        for id in ids {
+            if local_device_id(id) { local = true; } else { original = true; }
+        }
+        let mut active = std::collections::HashSet::new();
+        if original {
+            active.extend(self.devices()?.into_iter().filter(Self::active).map(|d| d.id));
+        }
+        if local {
+            active.extend(self.local_devices()?.into_iter().filter(Self::active).map(|d| d.id));
+        }
         Ok(active)
     }
-    pub(crate) fn active_device(&self,id:&str)->bool {self.active_device_ids().is_ok_and(|ids|ids.contains(id))}
-    pub(crate) fn renew_notification_device(&self,headers:&HeaderMap,peer:Option<SocketAddr>)->Result<String>{
-        let id=self.device_id(headers,peer)?;
-        let mut devices=self.devices()?;
-        let expires=crate::now()+180*24*60*60*1000u64;
-        let c=rusqlite::Connection::open_in_memory().map_err(|_|fail())?;
-        let iso:String=c.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ',?1/1000.0,'unixepoch')",[expires as i64],|r|r.get(0)).map_err(|_|fail())?;
-        devices.iter_mut().find(|d|d.id==id).ok_or("device-required")?.expires_at=Some(iso);
+    pub(crate) fn active_device(&self,id:&str)->bool {
+        self.active_device_ids(std::iter::once(id)).is_ok_and(|ids| ids.contains(id))
+    }
+    pub(crate) fn renew_notification_device(&self, headers: &HeaderMap, peer: Option<SocketAddr>) -> Result<String> {
+        let (local, device) = self.access(headers, peer).map_err(|_| "device-required")?;
+        let token = cookie(headers).ok_or("device-required")?;
+        if local {
+            let name = local_cookie_name(headers).ok_or("device-required")?;
+            let end = timestamp(device.expires_at.as_deref().ok_or("device-required")?)?;
+            let remaining = (end - crate::now() as i64).max(0) / 1000;
+            return Ok(format!("{name}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={remaining}"));
+        }
+        let mut devices = self.devices()?;
+        devices.iter_mut().find(|d| d.id == device.id).ok_or("device-required")?.expires_at = Some(expiry()?);
         self.save(&devices)?;
-        Ok(format!("deck_device={}; Path=/; HttpOnly; SameSite=Strict; Max-Age=15552000{}",cookie(headers).ok_or("device-required")?,if h(headers,"origin").is_some_and(|o|o.starts_with("https://")){"; Secure"}else{""}))
+        Ok(format!("deck_device={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={REMEMBER_SECONDS}{}",if h(headers,"origin").is_some_and(|o|o.starts_with("https://")){"; Secure"}else{""}))
+    }
+    fn local_devices(&self) -> Result<Vec<Device>> {
+        let Some(path) = &self.local_state else { return Ok(vec![]); };
+        let dir = root(path)?;
+        self.devices_or_new_in(&dir, "local-devices.json")
+    }
+    fn save_local(&self, devices: &[Device]) -> Result<()> {
+        let dir = root(self.local_state.as_deref().ok_or_else(fail)?)?;
+        let bytes = serde_json::to_vec(devices).map_err(|_| fail())?;
+        if bytes.len() > 1024 * 1024 {
+            return Err(fail());
+        }
+        atomic(&dir, "local-devices.json", &bytes)
+    }
+    fn remember_local(&self, host: &str) -> Result<String> {
+        let mut devices = self.local_devices()?;
+        devices.retain(Self::active);
+        let token = token();
+        devices.push(Device {
+            id: format!("{LOCAL_DEVICE_PREFIX}{}", uuid::Uuid::new_v4()),
+            name: "Local browser".into(),
+            created_at: now_iso(),
+            hash: local_digest(&token, host),
+            revoked_at: None,
+            expires_at: Some(expiry()?),
+            tailscale_identity: None,
+            extra: Default::default(),
+        });
+        self.save_local(&devices)?;
+        Ok(token)
+    }
+    fn revoke(&self, id: &str, local: bool) -> Result<()> {
+        let mut devices = if local { self.local_devices()? } else { self.devices()? };
+        let device = devices.iter_mut().find(|d| d.id == id).ok_or("device-unknown")?;
+        device.revoked_at.get_or_insert_with(now_iso);
+        if local { self.save_local(&devices) } else { self.save(&devices) }
     }
     fn save(&self, devices: &[Device]) -> Result<()> {
         atomic(
@@ -452,25 +588,6 @@ impl Identity {
             "devices.json",
             &serde_json::to_vec(devices).map_err(|_| fail())?,
         )
-    }
-    fn local(&self, headers: &HeaderMap, host: &str, peer: Option<SocketAddr>) -> bool {
-        let port = host.rsplit(':').next().unwrap_or("");
-        self.serve_identity(headers, peer).is_some()
-            || peer.is_some_and(|p| p.ip().is_loopback())
-                && h(headers, "origin").is_some_and(|o| {
-                    [
-                        format!("http://127.0.0.1:{port}"),
-                        format!("http://localhost:{port}"),
-                    ]
-                    .iter()
-                    .any(|s| s == o)
-                        && host_of(o).as_deref() == h(headers, "host")
-                })
-                && !headers.keys().any(|k| {
-                    k == "forwarded"
-                        || k.as_str().starts_with("x-forwarded-")
-                        || k.as_str().contains("funnel")
-                })
     }
     fn issue(&self, headers: &HeaderMap, name: &str, peer: Option<SocketAddr>) -> Result<Response> {
         let mut ds = self.devices_or_new()?;
@@ -516,12 +633,15 @@ impl Identity {
                 .create(p)
                 .map_err(|_| fail())?;
         }
-        let dir = self.web()?;
-        let p = PathBuf::from(format!("/proc/self/fd/{}/devices.json", dir.as_raw_fd()));
+        self.devices_or_new_in(&self.web()?, "devices.json")
+    }
+    fn devices_or_new_in(&self, dir: &File, filename: &str) -> Result<Vec<Device>> {
+        use std::os::fd::AsRawFd;
+        let p = PathBuf::from(format!("/proc/self/fd/{}/{filename}", dir.as_raw_fd()));
         if fs::symlink_metadata(p).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
             Ok(vec![])
         } else {
-            self.devices()
+            Self::read_devices(dir, filename)
         }
     }
 }
@@ -588,6 +708,82 @@ pub struct Runtime {
     pub identity: Identity,
     challenge: Option<Challenge>,
 }
+pub async fn browser_device_status(
+    axum::extract::State(app): axum::extract::State<App>,
+    headers: HeaderMap,
+    peer: Option<axum::Extension<axum::extract::ConnectInfo<SocketAddr>>>,
+) -> Response {
+    let owner = app.history.lock().unwrap();
+    let runtime = app.web_identity.lock().unwrap();
+    let identity = &runtime.identity;
+    let peer = peer.map(|p| p.0.0);
+    let device = identity.access(&headers, peer).ok();
+    let available = direct_host(&headers, peer).is_some()
+        && match &device {
+            Some((false, _)) => owner.web_writable().is_ok(),
+            _ => identity.local_state.is_some(),
+        };
+    let expires_at = device.and_then(|(_, d)| d.expires_at);
+    Json(json!({"available": available, "remembered": expires_at.is_some(), "expiresAt": expires_at})).into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserDeviceChoice {
+    remember: bool,
+}
+
+pub async fn change_browser_device(
+    axum::extract::State(app): axum::extract::State<App>,
+    headers: HeaderMap,
+    peer: Option<axum::Extension<axum::extract::ConnectInfo<SocketAddr>>>,
+    Json(choice): Json<BrowserDeviceChoice>,
+) -> Response {
+    let peer = peer.map(|p| p.0.0);
+    let Some(host) = direct_host(&headers, peer) else {
+        return problem(StatusCode::FORBIDDEN, "request-forbidden", "Browser access can only be changed at this host’s loopback address");
+    };
+    let owner = app.history.lock().unwrap();
+    let runtime = app.web_identity.lock().unwrap();
+    let identity = &runtime.identity;
+    let result = (|| -> Result<Response> {
+        // Revalidate after body extraction and while identity writers are serialized.
+        let device = credential(&headers).map(|_| identity.access(&headers, peer)).transpose()
+            .map_err(|_| "device-required")?;
+        if device.as_ref().is_some_and(|(local, _)| !local) {
+            owner.web_writable().map_err(|_| "ownership")?;
+        }
+        admit()?;
+        let mut response = Json(json!({"ok":true})).into_response();
+        let response_headers = response.headers_mut();
+        if choice.remember {
+            match device {
+                Some((true, _)) => {}
+                Some((false, _)) => {
+                    let value = identity.renew_notification_device(&headers, peer)?;
+                    response_headers.append(header::SET_COOKIE, value.parse().map_err(|_| fail())?);
+                }
+                None => {
+                    let token = identity.remember_local(host)?;
+                    set_cookie(response_headers, &local_cookie_name(&headers).unwrap(), &token, REMEMBER_SECONDS);
+                }
+            }
+        } else if let Some((local, device)) = device {
+            identity.revoke(&device.id, local)?;
+            let local_name = local_cookie_name(&headers).unwrap();
+            expire_cookie(response_headers, if local { &local_name } else { "deck_device" });
+        }
+        // Never leave a session grant that could mask expiry or revocation.
+        app.expire_browser_session(response_headers);
+        Ok(response)
+    })();
+    result.unwrap_or_else(|code| match code {
+        "device-required" => problem(StatusCode::FORBIDDEN, code, "Device access ended"),
+        "ownership" => problem(StatusCode::CONFLICT, code, "The existing device store is read-only"),
+        _ => problem(StatusCode::SERVICE_UNAVAILABLE, code, "Browser access could not be updated"),
+    })
+}
+
 pub async fn local_access(
     axum::extract::State(app): axum::extract::State<App>,
     headers: HeaderMap,
@@ -599,15 +795,15 @@ pub async fn local_access(
     let runtime = app.web_identity.lock().unwrap();
     let identity = &runtime.identity;
     let peer = peer.map(|p| p.0.0);
-    if !identity.local(&headers, &app.host, peer) {
+    if identity.authorized(&headers, peer) {
+        return Json(json!({"ok":true})).into_response();
+    }
+    if identity.serve_identity(&headers, peer).is_none() {
         return problem(
             StatusCode::FORBIDDEN,
             "request-forbidden",
             "Local access is unavailable",
         );
-    }
-    if identity.authorized(&headers, peer) {
-        return Json(json!({"ok":true})).into_response();
     }
     if cookie(&headers).is_some() {
         return problem(
@@ -704,8 +900,15 @@ pub async fn control(
     let result = (|| -> Result<Value> {
         match body["command"].as_str() {
             Some("devices") => {
-                let mut v =
-                    serde_json::to_value(runtime.identity.devices()?).map_err(|_| fail())?;
+                let mut devices = runtime.identity.local_devices()?;
+                if runtime.identity.root.is_some() {
+                    match runtime.identity.devices() {
+                        Ok(original) => devices.extend(original),
+                        Err(e) if devices.is_empty() => return Err(e),
+                        Err(_) => {}
+                    }
+                }
+                let mut v = serde_json::to_value(devices).map_err(|_| fail())?;
                 for d in v.as_array_mut().unwrap() {
                     d.as_object_mut().unwrap().remove("hash");
                     d.as_object_mut().unwrap().remove("tailscaleIdentity");
@@ -730,14 +933,12 @@ pub async fn control(
                 Ok(json!({"code":code,"url":format!("http://{}/#pair={token}",app.host)}))
             }
             Some("revoke") => {
-                owner.web_writable().map_err(|_| "ownership")?;
-                let mut ds = runtime.identity.devices()?;
-                let d = ds
-                    .iter_mut()
-                    .find(|d| Some(d.id.as_str()) == body["deviceId"].as_str())
-                    .ok_or("device-unknown")?;
-                d.revoked_at.get_or_insert_with(now_iso);
-                runtime.identity.save(&ds)?;
+                let id = body["deviceId"].as_str().ok_or("device-unknown")?;
+                let local = runtime.identity.local_devices()?.iter().any(|d| d.id == id);
+                if !local {
+                    owner.web_writable().map_err(|_| "ownership")?;
+                }
+                runtime.identity.revoke(id, local)?;
                 Ok(json!({"ok":true}))
             }
             _ => Err("query-unknown"),
@@ -797,6 +998,7 @@ mod tests {
                 assignment_config: None,
                 root: Some(source.clone()),
                 policy: Policy::default(),
+                local_state: None,
             });
             let f = Self {
                 _dir: dir,
@@ -992,7 +1194,7 @@ mod tests {
         req.headers_mut()
             .insert("content-type", "application/json".parse().unwrap());
         *req.body_mut() = Body::from("{}");
-        assert_eq!(router.clone().oneshot(req).await.unwrap().status(), 409);
+        assert_eq!(router.clone().oneshot(req).await.unwrap().status(), 403);
         for cmd in ["pair", "revoke"] {
             let mut req = f.req("/web-control");
             *req.method_mut() = Method::POST;

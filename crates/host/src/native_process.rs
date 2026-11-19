@@ -16,6 +16,7 @@ struct Route {
     closed: bool,
     bound: bool,
     loading: bool,
+    steering: Option<String>,
 }
 struct Pending {
     reply: oneshot::Sender<Result<Value, String>>,
@@ -127,6 +128,7 @@ impl Process {
                 closed: false,
                 bound: false,
                 loading: false,
+                steering: None,
             },
         );
         Ok(())
@@ -155,6 +157,7 @@ impl Process {
             closed: false,
             bound: false,
             loading: false,
+            steering: None,
         });
         if r.closed || r.events.is_some() {
             return Err("Native thread closed or already leased".into());
@@ -165,6 +168,7 @@ impl Process {
     }
     pub fn park(&self, route: &str) {
         if let Some(r) = self.routes.lock().unwrap().get_mut(route) {
+            r.steering = None;
             r.events = None;
         }
     }
@@ -217,6 +221,22 @@ impl Process {
                 "Native pipe write failed; delivery may be uncertain".into()
             })
     }
+    pub(super) fn register_steering(&self, route: &str, id: &str) -> Result<(), String> {
+        let mut routes = self.routes.lock().unwrap();
+        let route = routes.get_mut(route).ok_or("Native steering route unavailable")?;
+        if route.closed || route.events.is_none() || route.steering.is_some() {
+            return Err("Native steering route is not available for a new request".into());
+        }
+        route.steering = Some(id.into());
+        Ok(())
+    }
+    pub(super) fn forget_steering(&self, route: &str, id: &str) {
+        if let Some(route) = self.routes.lock().unwrap().get_mut(route)
+            && route.steering.as_deref() == Some(id)
+        {
+            route.steering = None;
+        }
+    }
     pub async fn request(
         &self,
         method: &str,
@@ -262,6 +282,16 @@ impl Process {
     async fn route(&self, v: Value) -> Result<(), String> {
         if v.get("method").is_none() {
             let id = v["id"].as_str().unwrap_or("");
+            if id.starts_with("deck-steer-") {
+                let mut routes = self.routes.lock().unwrap();
+                if let Some(route) = routes.values_mut().find(|r| r.steering.as_deref() == Some(id)) {
+                    route.steering = None;
+                    if let Some(tx) = &route.events {
+                        tx.try_send(Ok(v)).map_err(|_| "Native thread event overflow")?;
+                    }
+                }
+                return Ok(());
+            }
             let pending = self.pending.lock().unwrap().remove(id);
             if let Some(pending) = pending {
                 if let Some(route) = &pending.route {
@@ -396,6 +426,16 @@ for line in sys.stdin:
         p.route(event("a")).await.unwrap();
         assert_eq!(ar.recv().await.unwrap().unwrap()["params"]["threadId"], "a");
         assert_eq!(br.recv().await.unwrap().unwrap()["params"]["threadId"], "b");
+        // Steering replies carry only a request ID and turn ID. Keep them on
+        // their owning route even when two threads use the same turn ID.
+        let steer = |id: &str| json!({"id":id,"result":{"turnId":"same-turn"}});
+        p.register_steering("a", "deck-steer-a").unwrap();
+        p.register_steering("b", "deck-steer-b").unwrap();
+        p.route(steer("deck-steer-b")).await.unwrap();
+        p.route(steer("deck-steer-a")).await.unwrap();
+        assert_eq!(ar.try_recv().unwrap().unwrap()["id"], "deck-steer-a");
+        assert_eq!(br.try_recv().unwrap().unwrap()["id"], "deck-steer-b");
+        p.register_steering("a", "deck-steer-retired").unwrap();
         p.park("a");
         p.route(event("a")).await.unwrap();
         p.route(json!({"id":"late","method":"item/tool/call","params":{"threadId":"a","turnId":"same-turn"}})).await.unwrap();
@@ -410,6 +450,7 @@ for line in sys.stdin:
             "late/unmatched/duplicate input crossed routes"
         );
         let mut resumed = p.attach("a", &a).unwrap();
+        p.route(steer("deck-steer-retired")).await.unwrap();
         assert!(
             resumed.try_recv().is_err(),
             "idle events were accumulated for the next attempt"

@@ -92,6 +92,7 @@ pub struct Native {
     effort: Option<String>,
     reasoning: Option<deck2_shared::EffectiveReasoning>,
     queued: std::collections::VecDeque<Value>,
+    member_steering_rpcs: std::collections::HashSet<String>,
     yolo: bool,
     connected: bool,
     session_mcp: Option<Value>,
@@ -431,6 +432,7 @@ impl Native {
             effort: None,
             reasoning: None,
             queued: Default::default(),
+            member_steering_rpcs: Default::default(),
             connected,
             session_member,
             read_only_role,
@@ -500,6 +502,15 @@ impl Native {
             .await
             .map_err(|_| "Native pipe write failed; delivery may be uncertain".into())
     }
+    pub(crate) async fn steer_member(
+        &mut self,
+        rpc: &str,
+        command: &deck2_shared::SteeringCommand,
+    ) -> Result<(), String> {
+        self.member_steering_rpcs.insert(rpc.to_owned());
+        self.write(crate::member_guidance::wire(rpc, command)).await
+    }
+
     async fn read_wire(&mut self) -> Result<Value, String> {
         if let Some(events) = &mut self.events {
             return events.recv().await.ok_or("Native thread event reader ended")?;
@@ -538,6 +549,7 @@ impl Native {
             route, events: None, transport: None,
             partial: vec![], next: 0, team: false, scoped_tools: None, instructions: None,
             developer: false, model: None, effort: None, reasoning: None, queued: Default::default(),
+            member_steering_rpcs: Default::default(),
             yolo: false, connected: true, session_mcp: None, session_member: false,
             read_only_role: false, role: None, hook_state, loaded_resume: None, admitted_mcp: Default::default(),
             session_authorization: None, process_owner: None, codebase: None, codebase_slot: None,
@@ -622,7 +634,11 @@ impl Native {
                     }
                     return value.get("result").cloned().ok_or("Native response missing result".into());
                 }
-                if value.get("id").is_some() {
+                // An exact issued steering reply can arrive during a member's
+                // independent MCP status request, even after the steering deadline.
+                let steering_reply = value.get("method").is_none()
+                    && value["id"].as_str().is_some_and(|rpc| self.member_steering_rpcs.contains(rpc));
+                if value.get("id").is_some() && !steering_reply {
                     return Err("Unexpected native request during preparation; dispatch blocked".into());
                 }
                 queued_bytes += value.to_string().len();
@@ -1353,7 +1369,7 @@ pub(crate) fn executable_identity(binary: &Path) -> Result<ExecutableIdentity, S
 #[derive(Default)]
 struct Qualifications {
     epoch: u64,
-    entries: std::collections::HashMap<PathBuf, ExecutableIdentity>,
+    entries: std::collections::HashMap<PathBuf, (ExecutableIdentity, semver::Version)>,
 }
 static QUALIFICATIONS: std::sync::LazyLock<std::sync::Mutex<Qualifications>> =
     std::sync::LazyLock::new(Default::default);
@@ -1365,27 +1381,26 @@ pub(crate) fn invalidate_qualifications() {
 pub(crate) fn codex_version(output: &str) -> Option<semver::Version> {
     output.trim().strip_prefix("codex-cli ").and_then(|v| semver::Version::parse(v).ok())
 }
-async fn qualify_version(binary: &Path) -> Result<bool, String> {
+pub(crate) async fn qualify_version(binary: &Path) -> Result<(bool, semver::Version), String> {
     let identity = executable_identity(binary);
     let epoch = {
         let mut cache = QUALIFICATIONS
             .lock()
             .map_err(|_| "Qualification cache unavailable")?;
-        match &identity {
-            Ok(identity) if cache.entries.get(binary) == Some(identity) => return Ok(true),
-            _ => {
-                cache.entries.remove(binary);
+        if let Ok(identity) = &identity {
+            if let Some((cached, version)) = cache.entries.get(binary) {
+                if identity == cached {
+                    return Ok((true, version.clone()));
+                }
             }
         }
+        cache.entries.remove(binary);
         cache.epoch
     };
     let identity = identity?;
     let out = command_probe(binary, &["--version"]).await?;
-    if codex_version(&String::from_utf8_lossy(&out)).is_none() {
-        return Err(
-            "Selected executable did not report a Codex CLI version.".into(),
-        );
-    }
+    let version = codex_version(&String::from_utf8_lossy(&out))
+        .ok_or("Selected executable did not report a Codex CLI version.")?;
     if executable_identity(binary)? != identity {
         return Err(
             "Codex executable changed during qualification; retry after maintenance settles".into(),
@@ -1399,9 +1414,9 @@ async fn qualify_version(binary: &Path) -> Result<bool, String> {
         if cache.entries.len() >= 32 {
             cache.entries.clear();
         }
-        cache.entries.insert(binary.to_path_buf(), identity);
+        cache.entries.insert(binary.to_path_buf(), (identity, version.clone()));
     }
-    Ok(false)
+    Ok((false, version))
 }
 pub async fn version(binary: &Path) -> Result<(), String> {
     qualify_version(binary).await.map(|_| ())
@@ -1788,9 +1803,10 @@ async fn run_once(
     app.check_original_context(&app.receipt(id)?.session)?;
     let start = Instant::now();
     let version_started = Instant::now();
-    let qualification_cached = qualify_version(binary).await?;
+    let (qualification_cached, version) = qualify_version(binary).await?;
     let version_ms = version_started.elapsed().as_millis() as u64;
     let connected = app.receipt(id)?.mode == Mode::SessionV1;
+    let can_steer = connected && version >= semver::Version::new(0, 170, 0);
     let bridge_role_started = Instant::now();
     let bridge = if connected {
         Some(crate::session_mcp::Bridge::start(app, id).await?)
@@ -2272,8 +2288,12 @@ async fn run_once(
                 .iter()
                 .rev()
                 .map(|r| {
+                    let live = r.steering.iter().filter(|input| input.state == deck2_shared::SteeringState::Accepted)
+                        .rev().take(2).collect::<Vec<_>>().into_iter().rev()
+                        .map(|input| format!("\nEarlier live user input: {}", input.command.text.chars().take(512).collect::<String>()))
+                        .collect::<String>();
                     format!(
-                        "Earlier user input: {}\nRecorded answer: {}",
+                        "Earlier user input: {}{live}\nRecorded answer: {}",
                         r.prompt.chars().take(2048).collect::<String>(),
                         r.text.chars().take(2048).collect::<String>()
                     )
@@ -2329,6 +2349,7 @@ async fn run_once(
         r.acknowledgment_ms = Some(crate::now());
         r.turn = Some(turn_id.clone());
         r.phase = Phase::Running;
+        r.can_steer = can_steer;
         r.detail = "Native turn running; closing this browser does not stop it".into();
     })?;
     if let Some(t) = &native.transport { t.confirm(&thread, &turn_id); }
@@ -2344,6 +2365,7 @@ async fn run_once(
     let mut written = current.text.len();
     let mut first_delta = true;
     let mut new_message = true;
+    let mut steering: Option<(String, deck2_shared::SteeringCommand, tokio::time::Instant)> = None;
     loop {
         let mut value = tokio::select! {
          result=async { match deferred.take() { Some(event) => event, None => native.read().await } }=>result?,
@@ -2358,7 +2380,27 @@ async fn run_once(
               native.next+=1;
               native.write(json!({"id":native.next,"method":"turn/interrupt","params":{"threadId":thread,"turnId":turn_id}})).await?;
           }
+          if steering.as_ref().is_some_and(|(_, _, deadline)| tokio::time::Instant::now() >= *deadline) {
+              let (rpc, command, _) = steering.take().unwrap();
+              if let Some(process) = &native.shared {
+                  process.forget_steering(&native.route, &rpc);
+              }
+              crate::steering::resolve(app, id, &command, None)?;
+          }
           if !cancelling {
+              if can_steer && steering.is_none()
+                  && receipt.steering.iter().any(|input| input.state == deck2_shared::SteeringState::Pending)
+              {
+                  app.check_original_context(&receipt.session)?;
+                  if let Some(command) = crate::steering::claim(app, id, &thread, &turn_id)? {
+                      let rpc = format!("deck-steer-{}", uuid::Uuid::new_v4());
+                      if let Some(process) = &native.shared {
+                          process.register_steering(&native.route, &rpc)?;
+                      }
+                      native.write(crate::steering::wire(&rpc, &command)).await?;
+                      steering = Some((rpc, command, tokio::time::Instant::now() + Duration::from_secs(10)));
+                  }
+              }
               for d in receipt.decisions.iter().filter(|d|d.task.is_none() && d.attempt==receipt.attempt && d.generation==generation && d.thread==thread && d.turn==turn_id) {
                   if let Some(reply)=crate::codex_protocol::revoked_reply(d)?
                       && revoked_replies.insert(d.id.clone()) {
@@ -2399,6 +2441,13 @@ async fn run_once(
          },
          _=&mut cancellation_timeout, if cancelling=>return Err("Native cancellation timed out. Process group terminated; outcome remains uncertain. Inspect before recovery.".into())
         };
+        if value.get("method").is_none()
+            && steering.as_ref().is_some_and(|(rpc, _, _)| value["id"].as_str() == Some(rpc.as_str()))
+        {
+            let (_, command, _) = steering.take().unwrap();
+            crate::steering::resolve(app, id, &command, Some(&value))?;
+            continue;
+        }
         // Batch only consecutive deltas of this exact item. A protocol barrier
         // (including EOF or an approval) is handled immediately after the batch.
         if value.get("id").is_none() && value["method"] == "item/agentMessage/delta"
@@ -4400,7 +4449,11 @@ impl Native {
         )
         .await?;
         let default_effort = role.effort.clone();
-        n.instructions = Some(role.instructions.clone());
+        n.instructions = Some(format!(
+            "{}\n\n{}",
+            role.instructions,
+            crate::member_guidance::MEMBER_POLICY
+        ));
         n.role = Some(role);
         n.model = Some(assignment.model_id.clone());
         n.effort = assignment.thinking.clone().or(default_effort);

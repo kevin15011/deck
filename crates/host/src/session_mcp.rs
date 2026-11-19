@@ -141,7 +141,7 @@ impl Bridge {
 pub(crate) fn coordination_tool(member: bool, name: &str) -> bool {
     matches!(name, "deck_session_history" | "deck_task_result" | "deck_approve")
         || !member && matches!(name, "deck_delegate" | "deck_task_list"
-            | "deck_task_wait" | "deck_task_cancel" | "deck_task_integrate")
+            | "deck_task_wait" | "deck_task_cancel" | "deck_task_integrate" | "deck_task_guide")
 }
 pub(crate) fn tools(member: bool) -> Value {
     let mut tools = json!([
@@ -152,6 +152,7 @@ pub(crate) fn tools(member: bool) -> Value {
     if !member {
         tools.as_array_mut().unwrap().extend([
   json!({"name":"deck_delegate","description":"Delegate to a configured member. continueTaskId preserves logical task and recorded owner.","inputSchema":{"type":"object","properties":{"agent":{"type":"string"},"task":{"type":"string"},"continueTaskId":{"type":"string"},"acceptance":{"type":"object"}},"required":["agent","task"]}}),
+  json!({"name":"deck_task_guide","description":"Send in-scope Lead guidance to the exact live Codex member turn. Use deck_task_list for its identities. Retry an interrupted call only with the same commandId and arguments. An unknown delivery never authorizes replay.","inputSchema":{"type":"object","additionalProperties":false,"required":["taskId","attemptId","threadId","expectedTurnId","commandId","text"],"properties":{"taskId":{"type":"string"},"attemptId":{"type":"string"},"threadId":{"type":"string"},"expectedTurnId":{"type":"string"},"commandId":{"type":"string","format":"uuid"},"text":{"type":"string","minLength":1,"maxLength":16384}}}}),
   json!({"name":"deck_task_cancel","description":"Cancel a delegated task.","inputSchema":{"type":"object","properties":{"taskId":{"type":"string"}},"required":["taskId"]}}),
   json!({"name":"deck_task_integrate","description":"Record Lead review of an exact retrieved terminal report. Adoption is not independent verification.","inputSchema":{"type":"object","properties":{"taskId":{"type":"string"},"attempt":{"type":"integer","minimum":1},"commandId":{"type":"string"},"state":{"enum":["integrated","blocked","discarded"]},"note":{"type":"string"},"evidenceSeqs":{"type":"array","items":{"type":"integer"}}},"required":["taskId","attempt","commandId","state","note","evidenceSeqs"]}})
  ]);
@@ -339,6 +340,23 @@ async fn handle(
                 let args = &v["params"]["arguments"];
                 let result = if name == "deck_task_wait" {
                     wait(&s, &app, args).await
+                } else if name == "deck_task_guide" {
+                    let admission = (|| {
+                        let history = app.history.lock().map_err(|_| "Original history unavailable")?;
+                        let store = app.store.lock().map_err(|_| "State lock failed")?;
+                        if s.member_task.is_some() || !app.persistence_available()
+                            || app.shutdown_requested.load(std::sync::atomic::Ordering::SeqCst)
+                            || !live(&s, &store) {
+                            return Err("Lead authority revoked".into());
+                        }
+                        history.check_context(&store.session_by_id(&s.session)?)?;
+                        let lead = store.get(&s.root)?.ok_or("Lead unavailable")?;
+                        crate::member_guidance::admit(&store, &lead, args)
+                    })();
+                    match admission {
+                        Ok(admission) => crate::member_guidance::wait(&app, admission).await,
+                        Err(error) => Err(error),
+                    }
                 } else if name == "deck_approve" {
                     approve(&s, &app, args).await
                 } else {

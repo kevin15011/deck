@@ -236,6 +236,9 @@ impl App {
     }
     pub(crate) fn for_command(&self, id:&str)->Result<Self,String>{ self.for_session(&self.receipt(id)?.session) }
     pub(crate) fn native_admin(&self, value: &str) -> bool { value == self.admin }
+    pub(crate) fn expire_browser_session(&self, headers: &mut axum::http::HeaderMap) {
+        crate::web_identity::expire_cookie(headers, &self.cookie_name);
+    }
     pub fn history_source(&self) -> Option<PathBuf> { self.history.lock().unwrap().root.clone() }
     pub fn browser_identity(&self, identity: crate::web_identity::Identity) { self.web_identity.lock().unwrap().identity = identity; }
     pub(crate) fn check_original_context(&self, id: &str) -> Result<(), String> {
@@ -706,7 +709,12 @@ async fn launch(State(app): State<App>, body: String) -> Response {
     }
     Json(json!({"url":format!("http://{}/#{}",app.host,app.issue_launch())})).into_response()
 }
-async fn auth(State(app): State<App>, body: String) -> Response {
+async fn auth(
+    State(app): State<App>,
+    headers: axum::http::HeaderMap,
+    peer: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>,
+    body: String,
+) -> Response {
     let mut token = app.launch.lock().unwrap();
     if token.as_deref() != Some(&body) {
         return problem(
@@ -719,18 +727,25 @@ async fn auth(State(app): State<App>, body: String) -> Response {
         );
     }
     *token = None;
+    drop(token);
     let mut response = StatusCode::NO_CONTENT.into_response();
-    // Loopback HTTP only. HttpOnly and SameSite protect the host session; launch
-    // capability is single-use and the separate launcher admin key stays native.
-    response.headers_mut().insert(
-        header::SET_COOKIE,
-        format!(
-            "{}={}; HttpOnly; SameSite=Strict; Path=/",
-            app.cookie_name, app.cookie
-        )
-        .parse()
-        .unwrap(),
-    );
+    let identity = app.web_identity.lock().unwrap().identity.clone();
+    let peer = peer.map(|p| p.0.0);
+    if identity.remembered(&headers, peer) {
+        app.expire_browser_session(response.headers_mut());
+    } else {
+        // Keep the legacy session cookie for a valid, single-use launcher.
+        response.headers_mut().insert(
+            header::SET_COOKIE,
+            format!(
+                "{}={}; HttpOnly; SameSite=Strict; Path=/",
+                app.cookie_name, app.cookie
+            )
+            .parse()
+            .unwrap(),
+        );
+        crate::web_identity::clear_stale_device(&identity, &headers, peer, &mut response);
+    }
     response
 }
 async fn workspace(State(app): State<App>) -> Response {
@@ -763,7 +778,7 @@ async fn workspace(State(app): State<App>) -> Response {
     } else {
         s.session.clone()
     };
-    let mut value=serde_json::to_value(Workspace{tasks,team_availability:if !s.configuration_for(&app.project).is_ok_and(|c|c.team_enabled){Some("Team investigation is disabled for new work. Review Configuration to re-enable it.".into())}else if app.team.lock().unwrap().as_ref().is_some_and(|r|r.matches_project(&app.project)){None}else{Some(app.team_unavailable.lock().unwrap().clone())},host_id,sessions,queue_paused,steering_unavailable:"Live steering is unavailable: durable once-only delivery across a lost native acknowledgment is not yet qualified. Queue the next input instead.".into(),trusted: !app.project.is_empty() && match s.trusted_project(&app.project) { Ok(v)=>v, Err(e)=>return problem(StatusCode::SERVICE_UNAVAILABLE,"storage",e)}, api:API,session:default_session,project:app.project.clone(),runner:"Codex · reviewed edits / read-only".into(),availability:if app.broken.load(Ordering::SeqCst){Some("Receipt persistence failed. Stop Deck and inspect its state directory; dispatch is blocked.".into())}else{availability},receipts}).unwrap();
+    let mut value=serde_json::to_value(Workspace{tasks,team_availability:if !s.configuration_for(&app.project).is_ok_and(|c|c.team_enabled){Some("Team investigation is disabled for new work. Review Configuration to re-enable it.".into())}else if app.team.lock().unwrap().as_ref().is_some_and(|r|r.matches_project(&app.project)){None}else{Some(app.team_unavailable.lock().unwrap().clone())},host_id,sessions,queue_paused,steering_unavailable:"Live steering requires a running Codex Lead turn.".into(),trusted: !app.project.is_empty() && match s.trusted_project(&app.project) { Ok(v)=>v, Err(e)=>return problem(StatusCode::SERVICE_UNAVAILABLE,"storage",e)}, api:API,session:default_session,project:app.project.clone(),runner:"Codex · reviewed edits / read-only".into(),availability:if app.broken.load(Ordering::SeqCst){Some("Receipt persistence failed. Stop Deck and inspect its state directory; dispatch is blocked.".into())}else{availability},receipts}).unwrap();
     crate::execution_view::project(&mut value);
     value["process_active"] = json!(!active.is_empty());
     if !app.project.is_empty() { value["initial_project"]=json!(crate::projects::id(&app.project)); }
@@ -2028,6 +2043,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::web_push::routes())
         .merge(crate::session_contract::routes())
         .route("/api/local-access", post(crate::web_identity::local_access))
+        .route("/api/browser-device", get(crate::web_identity::browser_device_status).post(crate::web_identity::change_browser_device).layer(DefaultBodyLimit::max(1024)))
         .route("/pair", post(crate::web_identity::pair))
         .route("/web-control", post(crate::web_identity::control))
         .route("/launch", post(launch))
@@ -2142,6 +2158,7 @@ pub fn router(app: App) -> Router {
         .route("/api/decisions/{id}/responses", post(resolve))
         .route("/api/decisions/{id}/responses/reconcile", post(reconcile_permission))
         .route("/api/commands/{id}/cancel", post(cancel))
+        .route("/api/commands/{id}/steering", post(crate::steering::submit))
         .route("/api/commands/{id}/recall", post(recall_input))
         .route(
             "/api/sessions/{session}/git-identity",

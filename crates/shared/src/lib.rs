@@ -77,6 +77,10 @@ pub struct EffectiveReasoning {
 pub struct Receipt {
     #[serde(default)]
     pub context: ContextState,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub can_steer: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steering: Vec<SteeringReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub continuation: Option<OutcomeContinuation>,
     #[serde(default)]
@@ -129,6 +133,41 @@ pub struct Receipt {
     pub policy: String,
     pub runner: String,
     pub delivery: String,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SteeringState {
+    Pending,
+    Dispatching,
+    Accepted,
+    Rejected,
+    Uncertain,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SteeringCommand {
+    pub id: String,
+    pub session: String,
+    pub thread_id: String,
+    pub expected_turn_id: String,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SteeringReceipt {
+    #[serde(flatten)]
+    pub command: SteeringCommand,
+    pub state: SteeringState,
+    pub admitted_ms: u64,
+}
+/// A Deck Lead's scoped instruction, independent of user steering and decisions.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemberGuidance {
+    pub input: SteeringReceipt,
+    pub lead_receipt: String,
+    pub lead_attempt: String,
 }
 /// First delivered text of a native assistant item. Offsets index browser UTF-16 strings.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -348,6 +387,10 @@ pub struct Task {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskAttempt {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub guidance_open: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub guidance: Vec<MemberGuidance>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_dismissal: Option<FailureDismissal>,
     /// Zero is the legacy positional encoding; new admissions always write a number.

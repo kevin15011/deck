@@ -166,6 +166,16 @@ impl Store {
         self.save_task(&t)
     }
     pub(crate) fn save_task(&self, t: &Task) -> Result<(), String> {
+        let mut normalized;
+        let t = if t.attempts.iter().any(crate::member_guidance::needs_close) {
+            normalized = t.clone();
+            for a in normalized.attempts.iter_mut().filter(|a| crate::member_guidance::needs_close(a)) {
+                crate::member_guidance::close(a);
+            }
+            &normalized
+        } else {
+            t
+        };
         let prior = self.tasks()?.into_iter().find(|old| old.id == t.id);
         self.conn.execute_batch("SAVEPOINT task_public_exchange").map_err(|_| "Cannot begin task write")?;
         let result = (|| {
@@ -358,6 +368,8 @@ impl Store {
                     provenance: assignment.clone(),
                     native_session: None,
                     native_message: None,
+                    guidance_open: false,
+                    guidance: vec![],
                     generation: uuid::Uuid::new_v4().to_string(),
                     accepted_ms: now(),
                     dispatch_ms: None,
@@ -506,6 +518,7 @@ use rusqlite::OptionalExtension;
 pub(crate) fn cancel_attempt(a: &mut TaskAttempt) {
     if a.phase.active() {
         a.cancel_requested = true;
+        crate::member_guidance::close(a);
         if a.phase == Phase::Accepted {
             a.phase = Phase::Cancelled;
             a.settled_ms = Some(now());

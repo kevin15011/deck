@@ -34,17 +34,24 @@ fn safe(s: &str) -> bool {
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
+fn provider_subdomain(host: &str, suffix: &str) -> bool {
+    host.strip_suffix(suffix).is_some_and(|prefix| {
+        prefix.split('.').all(|label| {
+            !label.is_empty()
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
+    })
+}
+fn is_wns(host: &str) -> bool {
+    provider_subdomain(host, ".notify.windows.com")
+}
 fn endpoint(s: &str) -> Result<reqwest::Url> {
     let u = reqwest::Url::parse(s).map_err(|_| "push-subscription-invalid")?;
     let host = u.host_str().unwrap_or("");
-    let apple = host.strip_suffix(".push.apple.com").is_some_and(|p| {
-        !p.is_empty()
-            && p.split('.').all(|s| {
-                !s.is_empty()
-                    && s.bytes()
-                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-            })
-    });
+    let apple = provider_subdomain(host, ".push.apple.com");
+    let wns = is_wns(host);
     if s.len() > 4096
         || s.bytes().any(|b| b.is_ascii_whitespace() || b == b'\\')
         || u.scheme() != "https"
@@ -52,8 +59,8 @@ fn endpoint(s: &str) -> Result<reqwest::Url> {
         || u.password().is_some()
         || u.fragment().is_some()
         || u.port().is_some()
-        || u.path() == "/"
-        || !(host == "fcm.googleapis.com" || host == "updates.push.services.mozilla.com" || apple)
+        || (u.path() == "/" && !(wns && u.query().is_some_and(|q| !q.is_empty())))
+        || !(host == "fcm.googleapis.com" || host == "updates.push.services.mozilla.com" || apple || wns)
     {
         return Err("push-provider-unsupported".into());
     }
@@ -177,7 +184,11 @@ impl Runtime {
         if self.blocked {
             return Err("notification-storage-unavailable".into());
         }
-        app.history.lock().unwrap().web_writable()?;
+        app.history
+            .lock()
+            .unwrap()
+            .web_writable()
+            .map_err(|_| "push-history-unavailable")?;
         if self.storage.is_none() {
             let source = app.history_source().ok_or("push-unavailable")?;
             let dest = self.destination.as_deref().ok_or("push-unavailable")?;
@@ -195,7 +206,9 @@ impl Runtime {
         let active_ids = if records.is_empty() {
             std::collections::HashSet::new()
         } else {
-            identity.active_device_ids().map_err(String::from)?
+            identity
+                .active_device_ids(records.iter().filter_map(|r| r["deviceId"].as_str()))
+                .map_err(String::from)?
         };
         for r in records {
             let active = active_ids.contains(r["deviceId"].as_str().unwrap());
@@ -677,6 +690,9 @@ async fn transport(app: &App, j: &Job, private: &str) -> Result<u16> {
     let mut send = client.post(url.clone());
     for (key, val) in request.headers() {
         send = send.header(key.as_str(), val.as_bytes());
+    }
+    if is_wns(host) {
+        send = send.header("X-WNS-Type", "wns/raw");
     }
     Ok(send
         .body(request.into_body())
@@ -1675,6 +1691,42 @@ mod tests {
             .unwrap();
         (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
     }
+    #[tokio::test]
+    async fn push_status_reports_unavailable_history_owner() {
+        let (_dir, app, token, _clock) = fixture().await;
+        *app.history.lock().unwrap() = Default::default();
+        let (status, body) = call(&app, &token, "GET", "/api/push", Value::Null).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "push-history-unavailable");
+    }
+    #[tokio::test]
+    async fn push_registration_accepts_public_browser_providers() {
+        let (_dir, app, token, _clock) = fixture().await;
+        let (status, body) = call(&app, &token, "GET", "/api/push", Value::Null).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["enabled"], false);
+        for url in [
+            "https://wns2-ln2p.notify.windows.com/w/?token=fixture",
+            "https://fcm.googleapis.com/send/fixture",
+            "https://updates.push.services.mozilla.com/wpush/v2/fixture",
+            "https://web.push.apple.com/fixture",
+        ] {
+            let mut subscription = sub();
+            subscription["endpoint"] = json!(url);
+            let (status, body) = call(
+                &app,
+                &token,
+                "POST",
+                "/api/push",
+                json!({"subscription": subscription}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{url}: {body}");
+        }
+        let (status, body) = call(&app, &token, "GET", "/api/push", Value::Null).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["enabled"], true);
+    }
     // Oracle: public/private destination partitions match original policy, and
     // malformed peer keys/expired subscriptions fail before any external effect.
     #[test]
@@ -1707,6 +1759,12 @@ mod tests {
             "https://user@fcm.googleapis.com/x",
             "https://fcm.googleapis.com/x#fragment",
             "https://fcm.googleapis.com/",
+            "http://wns2-ln2p.notify.windows.com/w/?token=fixture",
+            "https://wns2-ln2p.notify.windows.com.evil.test/w/",
+            "https://fake-notify.windows.com/w/",
+            "https://wns2-ln2p.notify.windows.com:444/w/",
+            "https://user@wns2-ln2p.notify.windows.com/w/",
+            "https://wns2-ln2p.notify.windows.com/w/#fragment",
         ] {
             let mut s = original.clone();
             s["endpoint"] = json!(endpoint);

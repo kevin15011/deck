@@ -353,6 +353,42 @@ impl Store {
         }
         result
     }
+    /// Compiled managed content (for example the connected session continuity
+    /// policy) can change between builds. Admission records the current mode
+    /// selection while dispatch requires this build's exact content, so a stale
+    /// selection would refuse every new turn. Record this build's content as a
+    /// new revision per project; admitted attempts keep their exact revision.
+    /// Team is excluded: its RTK selection intentionally differs and dispatch
+    /// does not compare it with the compiled list.
+    /// Runs at startup after projects are migrated.
+    pub(crate) fn refresh_compiled_selections(&mut self) -> Result<(), String> {
+        let compiled = definitions();
+        let mut roots = std::collections::BTreeSet::from([self.project.clone()]);
+        roots.extend(self.projects()?.into_iter().map(|p| p.root));
+        for root in roots {
+            let Ok(mut c) = self.configuration_for(&root) else { continue };
+            let mut changed = false;
+            for mode in ["read_only", "reviewed_edit", "session_v1", "developer"] {
+                let Some(recorded) = c.modes.get(mode) else { continue };
+                let current: Vec<String> = compiled.iter()
+                    .filter(|d| d.modes.iter().any(|m| m == mode))
+                    .map(|d| d.digest.clone())
+                    .collect();
+                if *recorded == current { continue; }
+                for id in &current {
+                    self.definition(id)?;
+                    if !c.definitions.contains(id) { c.definitions.push(id.clone()); }
+                }
+                c.modes.insert(mode.into(), current);
+                changed = true;
+            }
+            if changed {
+                c.revision = self.next_configuration_revision()?;
+                self.save_configuration(&c)?;
+            }
+        }
+        Ok(())
+    }
     // Host-wide RTK lives in meta. Current per-project records mirror it for
     // compatibility; historical revisions and already admitted work stay exact.
     pub(crate) fn init_settings_model(&mut self) -> Result<(), String> {
@@ -1058,6 +1094,49 @@ mod tests {
         })
         .unwrap();
         s
+    }
+    // Regression: a build whose compiled session policy changed refused every
+    // connected turn ("Admitted native content is unavailable in this build")
+    // because every project's recorded session_v1 selection kept the old digest.
+    // Oracle: startup converges all projects to this build's content with one
+    // new revision each, is idempotent, and historical revisions stay exact.
+    #[test]
+    fn compiled_content_change_refreshes_recorded_mode_selections() {
+        let d = tempfile::tempdir().unwrap();
+        let a = d.path().join("a"); let b = d.path().join("b");
+        std::fs::create_dir(&a).unwrap(); std::fs::create_dir(&b).unwrap();
+        let path = d.path().join("state.db");
+        let (b_root, stale_revision) = {
+            let mut s = Store::open(&path, a.to_str().unwrap()).unwrap();
+            let b_root = s.register_project(b.to_str().unwrap()).unwrap().root;
+            let mut old = definitions().into_iter().find(|d| d.modes.iter().any(|m| m == "session_v1")).unwrap();
+            old.body = "Previous build's session continuity policy".into();
+            old.digest = digest(old.body.as_bytes());
+            s.conn.execute("INSERT INTO definitions VALUES(?1,?2)", params![old.digest, serde_json::to_string(&old).unwrap()]).unwrap();
+            let mut stale_revision = 0;
+            for root in [a.to_str().unwrap(), b_root.as_str()] {
+                let mut c = s.configuration_for(root).unwrap();
+                c.revision = s.next_configuration_revision().unwrap();
+                c.definitions.push(old.digest.clone());
+                c.modes.insert("session_v1".into(), vec![old.digest.clone()]);
+                s.save_configuration(&c).unwrap();
+                stale_revision = c.revision;
+            }
+            (b_root, stale_revision)
+        };
+        let s = Store::open(&path, a.to_str().unwrap()).unwrap();
+        let expected = s.admission_definition_ids(&deck2_shared::Mode::SessionV1).unwrap();
+        for root in [a.to_str().unwrap(), b_root.as_str()] {
+            assert_eq!(s.configuration_for(root).unwrap().modes["session_v1"], expected, "{root}");
+        }
+        assert_eq!(s.admission_snapshot(&deck2_shared::Mode::SessionV1).unwrap().definitions, expected);
+        let stale: String = s.conn.query_row("SELECT body FROM configurations WHERE revision=?1", [stale_revision as i64], |r| r.get(0)).unwrap();
+        assert_ne!(serde_json::from_str::<Configuration>(&stale).unwrap().modes["session_v1"], expected, "history is not rewritten");
+        let revisions = |s: &Store| s.conn.query_row("SELECT count(*) FROM configurations", [], |r| r.get::<_, i64>(0)).unwrap();
+        let before = revisions(&s);
+        drop(s);
+        let s = Store::open(&path, a.to_str().unwrap()).unwrap();
+        assert_eq!(revisions(&s), before, "an unchanged build records no new revision");
     }
     // Protects atomic activation if the operation receipt cannot be persisted.
     // Protects legacy state migration and host-wide launch selection across projects.

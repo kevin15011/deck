@@ -39,6 +39,8 @@ mod quota;
 pub mod rtk;
 pub mod runner_management;
 pub mod server;
+mod steering;
+mod member_guidance;
 pub mod web_identity;
 pub mod web_push;
 mod notification_store;
@@ -573,6 +575,7 @@ impl Store {
         store.init_settings_model()?;
         store.init_external_tools()?;
         store.init_activity()?;
+        store.refresh_compiled_selections()?;
         message_times::backfill(&store.conn).map_err(|e| format!("Cannot recover message timestamps: {e}"))?;
         if !["17", "18"].contains(&schema.as_str()) {
             for mut session in store.sessions()? {
@@ -665,6 +668,7 @@ impl Store {
         .transpose()
     }
     pub fn save(&mut self, r: &mut Receipt) -> Result<(), String> {
+        steering::settle_owned_input(r);
         if r.recalled_ms.is_some() && (!r.cancel_requested || r.dispatch_ms.is_some()) {
             return Err("Recalled input cannot acquire native dispatch authority".into());
         }
@@ -717,6 +721,18 @@ impl Store {
             let result = (|| -> Result<(), String> {
                 self.conn.execute("INSERT INTO receipts VALUES (?1,?2) ON CONFLICT(id) DO UPDATE SET body=excluded.body",params![r.id,body]).map_err(|_|"Durable receipt write failed; dispatch is blocked")?;
                 self.conn.execute("INSERT INTO session_events(session,task,attempt,kind,body) VALUES (?1,?2,?3,?4,?5)",params![r.session,contract.lead_task,r.attempt,format!("receipt:{}",r.revision),event.to_string()]).map_err(|_|"Durable session event write failed; dispatch is blocked")?;
+                for input in r.steering.iter().filter(|input| {
+                    input.state == deck2_shared::SteeringState::Accepted
+                        && !prior.as_ref().is_some_and(|previous| previous.steering.iter().any(|record| {
+                            record.command.id == input.command.id && record.state == input.state
+                        }))
+                }) {
+                    let message = steering::accepted_event(r, input);
+                    self.conn.execute(
+                        "INSERT INTO session_events(session,task,attempt,kind,body) VALUES (?1,?2,?3,?4,?5)",
+                        params![r.session,contract.lead_task,r.attempt,format!("steering:{}",input.command.id),message.to_string()],
+                    ).map_err(|_| "Cannot commit acknowledged live message history")?;
+                }
                 for d in r.decisions.iter().filter(|d|d.state==deck2_shared::DecisionState::Pending && !prior.as_ref().is_some_and(|p|p.decisions.iter().any(|old|old.id==d.id&&old.revision==d.revision&&old.state==deck2_shared::DecisionState::Pending))) {
                     let occurrence=serde_json::json!({"decisionId":d.id,"revision":d.revision,"at_ms":now()});
                     self.conn.execute("INSERT OR IGNORE INTO session_events(session,task,attempt,kind,body) VALUES (?1,?2,?3,?4,?5)",params![r.session,contract.lead_task,r.attempt,format!("notification:attention:{}:{}",d.id,d.revision),occurrence.to_string()]).map_err(|_|"Durable attention event write failed; dispatch is blocked")?;
@@ -919,6 +935,8 @@ impl Store {
         let runner = snapshot.native.as_ref().map(|n| format!("{} {} / {}", match n.runner { deck2_shared::NativeRunner::Codex => "codex", deck2_shared::NativeRunner::Opencode => "opencode" }, n.version, n.protocol)).unwrap_or_else(|| "codex / app-server stdio".into());
         let mut r = Receipt {
             context: Default::default(),
+            can_steer: false,
+            steering: Vec::new(),
             continuation: None,
             attachments,
             configuration: Some(snapshot),

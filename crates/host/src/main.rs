@@ -509,7 +509,9 @@ async fn run(cli: Cli) -> Result<(), String> {
                 })
             });
             let original = app.history_source();
-            app.browser_identity(deck2::web_identity::Identity::discover(original, no_history || artifact_store.is_some())?);
+            let mut identity = deck2::web_identity::Identity::discover(original, no_history || artifact_store.is_some())?;
+            identity.local_state = Some(p.clone());
+            app.browser_identity(identity);
             app.adopt_history(p.join("original-history.db")).await;
             deck2::web_push::start(app.clone(),p.clone());
             println!(

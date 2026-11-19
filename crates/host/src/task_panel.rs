@@ -155,6 +155,18 @@ fn public_text(a: &deck2_shared::TaskAttempt) -> &str {
         &a.text
     }
 }
+fn guidance_exchange(
+    a: &deck2_shared::TaskAttempt,
+    g: &deck2_shared::MemberGuidance,
+) -> Option<Value> {
+    let delivery = crate::member_guidance::delivery(g.input.state)?;
+    Some(json!({
+        "id":format!("guidance:{}",g.input.command.id),"role":"lead","source":"lead-guidance",
+        "at_ms":g.input.admitted_ms,"text":g.input.command.text,"delivery":delivery,
+        "provenance":{"runner":a.provenance.runner,"integration":a.provenance.integration,"content":a.provenance.content},
+    }))
+}
+
 /// Called inside the same persistence transaction as the task. No wire payload,
 /// approval parameters, private reasoning or process credential enters this projection.
 pub(crate) fn record(
@@ -187,6 +199,17 @@ pub(crate) fn record(
         };
         if old.is_none() {
             append("lead-delegation", "lead", &a.prompt, 0)?;
+        }
+        for guidance in &a.guidance {
+            let recorded = old.is_some_and(|prior| prior.guidance.iter().any(|old|
+                old.input.command.id == guidance.input.command.id
+                    && crate::member_guidance::delivery(old.input.state).is_some()));
+            if !recorded && let Some(body) = guidance_exchange(a, guidance) {
+                conn.execute(
+                    "INSERT INTO session_events(session,task,attempt,kind,body) VALUES (?1,?2,?3,?4,?5)",
+                    params![t.session,t.id,a.id,format!("public:guidance:{}",guidance.input.command.id),body.to_string()],
+                ).map_err(|_| "Cannot persist public guidance")?;
+            }
         }
         let text = public_text(a);
         let previous = old.map(public_text).unwrap_or("");
@@ -290,6 +313,13 @@ pub(crate) fn inspect(
     }
     if kind.starts_with("public:") {
         let source = v["source"].as_str().ok_or(invalid)?;
+        if source == "lead-guidance" {
+            let valid = a.guidance.iter().any(|g| {
+                kind == format!("public:guidance:{}", g.input.command.id)
+                    && guidance_exchange(a, g).as_ref() == Some(&v)
+            });
+            return if valid { Ok(()) } else { Err(invalid.into()) };
+        }
         let text = v["text"]
             .as_str()
             .filter(|s| !s.is_empty() && s.len() <= 16384)
