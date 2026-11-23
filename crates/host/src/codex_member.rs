@@ -335,3 +335,104 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
                 .into();
     })
 }
+
+const INTEGRATION: &str = "app-server/session-mcp-member-v1";
+
+// A host restart leaves dispatched Codex members uncertain. When the Lead has
+// queued input and the member's recorded process group is provably gone, the
+// reservation is released once: the outcome stays unknown, partial output and
+// decisions are kept, and the assignment never replays. A live or unrecorded
+// process keeps ownership (see Store::explain_member_wait).
+pub(crate) fn settle_recovered(
+    store: &mut crate::Store,
+    live: &std::collections::HashSet<String>,
+) -> Result<bool, String> {
+    let waiting: std::collections::HashSet<String> = store
+        .pending_receipts()?
+        .into_iter()
+        .filter(|r| r.phase == Phase::Queued && r.mode == deck2_shared::Mode::SessionV1)
+        .map(|r| r.session)
+        .collect();
+    let mut retry = false;
+    for mut task in store.tasks()? {
+        if !waiting.contains(&task.session) {
+            continue;
+        }
+        for index in 0..task.attempts.len() {
+            let a = &task.attempts[index];
+            if a.phase != Phase::Uncertain
+                || a.provenance.integration != INTEGRATION
+                || live.contains(&a.id)
+            {
+                continue;
+            }
+            let Some(pid) = a.native_pid.and_then(|p| i32::try_from(p).ok()).filter(|p| *p > 1)
+            else {
+                continue;
+            };
+            if !crate::claude::process_group_stopped(pid) {
+                retry = true;
+                continue;
+            }
+            let a = &mut task.attempts[index];
+            a.phase = Phase::Failed;
+            a.settled_ms = Some(crate::now());
+            a.detail = "Host restarted and the previous Codex member process stopped without a confirmed result. Outcome unknown; the assignment will never replay.".into();
+            let attempt = a.id.clone();
+            save_recovered(store, &task, &attempt)?;
+        }
+    }
+    Ok(retry)
+}
+
+// Settlement, decision cleanup and the Lead's outcome notice commit together.
+fn save_recovered(store: &mut crate::Store, task: &deck2_shared::Task, attempt: &str) -> Result<(), String> {
+    store
+        .conn
+        .execute_batch("SAVEPOINT codex_member_recovery")
+        .map_err(|_| "Cannot begin Codex member recovery")?;
+    let result = (|| {
+        store.save_normal_task(task)?;
+        let a = task.attempts.iter().find(|a| a.id == attempt).ok_or("Member attempt missing")?;
+        if let Some(mut root) = store.get(task.authority_root(a))? {
+            let mut changed = false;
+            for d in root
+                .decisions
+                .iter_mut()
+                .filter(|d| d.task.as_deref() == Some(task.id.as_str()) && d.attempt == attempt)
+            {
+                match d.state {
+                    deck2_shared::DecisionState::Pending | deck2_shared::DecisionState::Responded => {
+                        d.state = deck2_shared::DecisionState::Invalidated;
+                        d.detail = "Member process stopped; no outstanding reply may authorize another attempt".into();
+                        changed = true;
+                    }
+                    deck2_shared::DecisionState::Delivered => {
+                        d.state = deck2_shared::DecisionState::Settled;
+                        changed = true;
+                    }
+                    _ => {}
+                }
+            }
+            if changed {
+                store.save(&mut root)?;
+            }
+        }
+        if let Err(error) = store.enqueue_task_outcome(&task.id, attempt) {
+            let mut task = task.clone();
+            let a = task.attempts.iter_mut().find(|a| a.id == attempt).ok_or("Member attempt missing")?;
+            a.detail.push_str(&format!(" Lead continuation unavailable: {error}"));
+            store.save_normal_task(&task)?;
+        }
+        store
+            .conn
+            .execute_batch("RELEASE codex_member_recovery")
+            .map_err(|_| "Cannot commit Codex member recovery".into())
+    })();
+    if result.is_err() {
+        let _ = store
+            .conn
+            .execute_batch("ROLLBACK TO codex_member_recovery; RELEASE codex_member_recovery");
+    }
+    result
+}

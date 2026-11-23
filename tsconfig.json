@@ -19,6 +19,7 @@
   },
   "include": [
     "frontend/src",
+    "crates/host/bridge",
     "scripts/build-web.ts"
   ]
 }

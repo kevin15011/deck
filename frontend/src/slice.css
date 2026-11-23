@@ -263,6 +263,7 @@
 }
 @keyframes inline-agent-spin {to {transform:rotate(360deg)}}
 .provider-icon {display:inline-flex;flex:none;color:var(--muted)}
+.provider-icon--claude {color:#d97757}
 .inline-agent-detail {padding:0 0 12px 26px;color:var(--muted);line-height:1.6}
 .inline-agent-detail>p {margin-block:8px}
 .inline-agent-technical {font-size:11px;min-height:32px;padding:4px 0}

@@ -7,7 +7,8 @@ export const phases = ['queued','accepted','preparing','dispatching','running','
 export type Phase = typeof phases[number];
 export type SteeringCommand={id:string;session:string;threadId:string;expectedTurnId:string;text:string};
 const steeringStates=['pending','dispatching','accepted','rejected','uncertain'] as const;
-export type SteeringReceipt=SteeringCommand&{state:typeof steeringStates[number];admittedMs:number};
+export type QueuedSteeringSource={id:string;attempt:string};
+export type SteeringReceipt=SteeringCommand&{state:typeof steeringStates[number];admittedMs:number;queuedSource?:QueuedSteeringSource};
 export interface Receipt {
  can_steer?:boolean;
  steering?:SteeringReceipt[];
@@ -15,6 +16,7 @@ export interface Receipt {
  message_times?:{start:number;at_ms:number}[];
  context?:unknown;
  recalled_ms?:number;
+ steered_to?:string;
  cancel_requested?:boolean;
  reasoning?:{model:string;effort:string;source:string};
  continuation?:{task:string;attempt:string;source_seq:number;origin:string};
@@ -30,7 +32,10 @@ export interface MemberAssignment {runnerId:string;modelId:string;thinking?:stri
 export interface SessionContract {version:number;revision:number;members:Record<string,MemberAssignment>;approvals:string;generation:number;leadTask:string}
 export interface ProjectBinding {id:string;root:string;identity:string|null}
 export interface Session {project?:ProjectBinding;original?:{fingerprint:string;task:string;attempt:number;thread:string;model:string};contract?:SessionContract;id:string;title:string;native:{thread:string;mode:Mode}|null}
-export interface Workspace {process_active?:boolean;session_availability?:Record<string,string|null>;project_availability?:Record<string,string|null>;project_team_availability?:Record<string,string|null>;initial_project?:string;projects?:ProjectBinding[];project_trust?:Record<string,boolean>;host_id:string;sessions:Session[];queue_paused:boolean;steering_unavailable:string;trusted:boolean; api:number; session:string; project:string; runner:string; availability:string|null; receipts:Receipt[];tasks:Task[];team_availability:string|null}
+export interface Workspace {decision_revisions?:Record<string,number>;steerable_queued?:string[];process_active?:boolean;session_availability?:Record<string,string|null>;project_availability?:Record<string,string|null>;project_team_availability?:Record<string,string|null>;initial_project?:string;projects?:ProjectBinding[];project_trust?:Record<string,boolean>;host_id:string;sessions:Session[];queue_paused:boolean;steering_unavailable:string;trusted:boolean; api:number; session:string; project:string; runner:string; availability:string|null; receipts:Receipt[];tasks:Task[];team_availability:string|null}
+export function sessionStorageScope(workspace:Workspace,session:Session){
+ return `host.${workspace.host_id}.project.${encodeURIComponent(session.project?.root??workspace.project)}.session.${session.id}`;
+}
 const object=(v:unknown):v is Record<string,unknown>=>typeof v==='object' && v!==null && !Array.isArray(v);
 const integer=(v:unknown)=>typeof v==='number' && Number.isSafeInteger(v) && v>=0;
 export function isSteeringCommand(v:unknown):v is SteeringCommand {
@@ -38,6 +43,8 @@ export function isSteeringCommand(v:unknown):v is SteeringCommand {
 }
 export function steeringReceipt(v:unknown):SteeringReceipt {
  if(!object(v)||!steeringStates.includes(v.state as SteeringReceipt['state'])||!integer(v.admittedMs)||!isSteeringCommand(v))throw Error('Invalid live delivery receipt');
+ const queue=(v as Record<string,unknown>).queuedSource;
+ if(queue!==undefined&&(!object(queue)||typeof queue.id!=='string'||typeof queue.attempt!=='string'))throw Error('Invalid queued live delivery source');
  return v as SteeringReceipt;
 }
 export function receipt(v:unknown):Receipt {
@@ -49,6 +56,7 @@ export function receipt(v:unknown):Receipt {
  if(v.cancel_requested!==undefined&&typeof v.cancel_requested!=='boolean')throw Error('Invalid cancellation state');
  if(v.can_steer!==undefined&&typeof v.can_steer!=='boolean')throw Error('Invalid live steering capability');
  if(v.steering!==undefined&&(!Array.isArray(v.steering)||v.steering.map(steeringReceipt).some(s=>s.session!==v.session||s.threadId!==v.thread||s.expectedTurnId!==v.turn)))throw Error('Live message belongs to a different turn');
+ if(v.steered_to!==undefined&&(typeof v.steered_to!=='string'||v.phase!=='cancelled'||v.dispatch_ms!==null))throw Error('Invalid queued live reservation');
  if(v.recalled_ms!==undefined&&(!integer(v.recalled_ms)||v.dispatch_ms!==null||v.cancel_requested!==true))throw Error('Invalid recalled input timestamp');
 
  if(v.requested_model!==undefined&&v.requested_model!==null&&typeof v.requested_model!=='string')throw new Error('Invalid requested model policy');
@@ -64,14 +72,23 @@ export function receipt(v:unknown):Receipt {
  if(v.attachments!==undefined&&(!Array.isArray(v.attachments)||v.attachments.length>8))throw new Error('Invalid image projection');
  return {...v,presentation:receiptPresentation(v.presentation,v.model),attachments:(v.attachments as unknown[]|undefined)?.map(imageAttachment)??[],requested_model:v.requested_model??null,configuration:snapshot(v.configuration),acknowledgment_ms:v.acknowledgment_ms??null,mode,decisions:(v.decisions as unknown[]|undefined)?.map(decision)??[]} as unknown as Receipt;
 }
-export function workspace(v:unknown):Workspace {
+export function workspace(v:unknown, receiptCache?:WeakMap<object,Receipt>):Workspace {
  if(!object(v) || v.api!==API || !['session','project','runner'].every(k=>typeof v[k]==='string') || !(v.availability===null || typeof v.availability==='string') || !Array.isArray(v.receipts)) throw new Error('Incompatible API or host response. Reload a compatible Deck client; draft retained.');
+ if(v.decision_revisions!==undefined&&(!object(v.decision_revisions)||Object.values(v.decision_revisions).some(revision=>!integer(revision))))throw Error('Invalid decision revision');
  if(v.process_active!==undefined&&typeof v.process_active!=='boolean')throw Error('Invalid process ownership projection');
  for(const key of ['project_availability','project_team_availability','session_availability'])if(v[key]!==undefined&&(!object(v[key])||Object.values(v[key]).some(reason=>reason!==null&&typeof reason!=='string')))throw Error('Invalid project availability');
  if(typeof v.host_id!=='string'||typeof v.queue_paused!=='boolean'||typeof v.steering_unavailable!=='string'||!Array.isArray(v.sessions)||v.sessions.some(s=>!object(s)||typeof s.id!=='string'||typeof s.title!=='string'||!(s.native===null||(object(s.native)&&typeof s.native.thread==='string'&&['read_only','reviewed_edit','team','developer','ordinary_read_only_v1','ordinary_reviewed_v1','session_v1'].includes(s.native.mode as string)))))throw new Error('Incompatible conversation projection');
  if(v.trusted!==undefined&&typeof v.trusted!=='boolean')throw new Error('Incompatible project trust');
  if(!Array.isArray(v.tasks)||!(v.team_availability===null||typeof v.team_availability==='string'))throw new Error('Incompatible team projection');
- const receipts=v.receipts.map(receipt);
+ if(v.steerable_queued!==undefined&&(!Array.isArray(v.steerable_queued)||v.steerable_queued.some(id=>typeof id!=='string')))throw Error('Invalid live queue eligibility');
+ const receipts=v.receipts.map(item=>{
+  if(!receiptCache||!object(item))return receipt(item);
+  const cached=receiptCache.get(item);
+  if(cached)return cached;
+  const parsed=receipt(item);
+  receiptCache.set(item,parsed);
+  return parsed;
+ });
  const roots=new Map(receipts.map(r=>[r.id,r.session]));
  const parentAttempts=new Map<string,Set<string>>();
  for(const r of receipts){
@@ -163,17 +180,26 @@ export function commandNotAccepted(e:unknown,id:string,session:string):boolean {
 
 export interface Provenance {runner:string;integration:string;executable:string;storage:string;content:string}
 export interface FailureDismissal {command_id:string;at_ms:number;revision:number}
-export interface TaskAttempt {failure_dismissal?:FailureDismissal;number?:number;context?:unknown;preparation_ms:number|null;tool_connection_ms:number|null;id:string;prompt:string;source_report:string|null;phase:Phase;detail:string;requested_model:string;observed_model:string|null;provenance:Provenance;native_session:string|null;native_message:string|null;generation:string;accepted_ms:number;dispatch_ms:number|null;acknowledgment_ms:number|null;first_output_ms:number|null;settled_ms:number|null;cancel_requested:boolean;report:{attempt:string;digest:string;text:string}|null;treatments:{report:string;lead_attempt:string;disposition:string;reason:string}[]}
+const failureDismissalBlockers = ['cleanup_running', 'outcome_unsettled', 'decision_unsettled'] as const;
+export interface TaskAttempt {failure_dismissal_blocker?:typeof failureDismissalBlockers[number];authority?:{root:string;attempt:string};failure_dismissal?:FailureDismissal;number?:number;context?:unknown;preparation_ms:number|null;tool_connection_ms:number|null;id:string;prompt:string;source_report:string|null;phase:Phase;detail:string;requested_model:string;observed_model:string|null;provenance:Provenance;native_session:string|null;native_message:string|null;generation:string;accepted_ms:number;dispatch_ms:number|null;acknowledgment_ms:number|null;first_output_ms:number|null;settled_ms:number|null;cancel_requested:boolean;report:{attempt:string;digest:string;text:string}|null;treatments:{report:string|null;lead_attempt:string;disposition:string;reason:string}[]}
 export interface Task {original?:{display_id:string;task_id:string;fingerprint:string;maximum:number};id:string;session:string;root:string;parent_attempt:string;owner:string;scope:string[];acceptance:string;revision:number;attempts:TaskAttempt[]}
 export function task(v:unknown,leadAttempts?:Set<string>):Task {
  if(!object(v)||!['id','session','root','parent_attempt','owner','acceptance'].every(k=>typeof v[k]==='string')||!integer(v.revision)||!Array.isArray(v.scope)||!v.scope.every(s=>typeof s==='string')||!Array.isArray(v.attempts))throw new Error('Invalid task projection');
  if(v.original!==undefined&&(!object(v.original)||typeof v.original.task_id!=='string'||typeof v.original.display_id!=='string'||typeof v.original.fingerprint!=='string'||!/^[a-f0-9]{64}$/.test(v.original.fingerprint)||!integer(v.original.maximum)||(v.original.maximum as number)<1))throw new Error('Invalid original task binding');
  for(const a of v.attempts){
   if(!object(a)||!['id','prompt','detail','requested_model','generation'].every(k=>typeof a[k]==='string')||!phases.includes(a.phase as Phase)||!['source_report','observed_model','native_session','native_message'].every(k=>a[k]===null||typeof a[k]==='string')||!integer(a.accepted_ms)||!['preparation_ms','tool_connection_ms','dispatch_ms','acknowledgment_ms','first_output_ms','settled_ms'].every(k=>a[k]===null||integer(a[k]))||typeof a.cancel_requested!=='boolean'||!object(a.provenance)||!['runner','integration','executable','storage','content'].every(k=>typeof (a.provenance as Record<string,unknown>)[k]==='string')||!Array.isArray(a.treatments))throw new Error('Invalid task attempt');
+  if(a.authority!==undefined&&(!object(a.authority)||typeof a.authority.root!=='string'||typeof a.authority.attempt!=='string'))throw new Error('Invalid task attempt authority');
+  if(a.failure_dismissal_blocker!==undefined&&!failureDismissalBlockers.some(blocker=>blocker===a.failure_dismissal_blocker))throw Error('Invalid failure dismissal blocker');
   if(a.failure_dismissal!==undefined&&(!object(a.failure_dismissal)||typeof a.failure_dismissal.command_id!=='string'||(!integer(a.failure_dismissal.at_ms)||Number(a.failure_dismissal.at_ms)>8640000000000000)||!integer(a.failure_dismissal.revision)||Number(a.failure_dismissal.revision)>Number(v.revision)||a.phase!=='failed'))throw Error('Invalid failure dismissal');
   if(a.number!==undefined&&(!integer(a.number)||(a.number as number)<0))throw new Error('Invalid logical attempt number');
   if(a.report!==null&&(!object(a.report)||a.report.attempt!==a.id||typeof a.report.text!=='string'||typeof a.report.digest!=='string'||!/^[a-f0-9]{64}$/.test(a.report.digest)))throw new Error('Report attempt mismatch');
-  for(const t of a.treatments){if(!object(t)||!object(a.report)||t.report!==a.report.digest||(t.lead_attempt!==v.parent_attempt&&!(object(a.configuration)&&sessionContract(a.configuration.session_contract)&&typeof t.lead_attempt==='string'&&leadAttempts?.has(t.lead_attempt)))||typeof t.reason!=='string'||!['adopted','rejected','followup_required'].includes(t.disposition as string))throw new Error('Treatment provenance mismatch');}
+  for(const t of a.treatments){
+   if(!object(t)||(t.lead_attempt!==v.parent_attempt&&!(object(a.configuration)&&sessionContract(a.configuration.session_contract)&&typeof t.lead_attempt==='string'&&leadAttempts?.has(t.lead_attempt)))||typeof t.reason!=='string'||!['adopted','rejected','followup_required'].includes(t.disposition as string))throw new Error('Treatment provenance mismatch');
+   const matchesOutcome=object(a.report)
+    ? t.report===a.report.digest
+    : t.report===null&&t.disposition==='followup_required'&&['completed','failed','cancelled'].includes(a.phase as string);
+   if(!matchesOutcome)throw new Error('Treatment provenance mismatch');
+  }
  }
  if(new Set(v.attempts.map(a=>(a as TaskAttempt).id)).size!==v.attempts.length)throw new Error('Duplicate attempt identity');
  return v as unknown as Task;

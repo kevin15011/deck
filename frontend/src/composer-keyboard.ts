@@ -69,7 +69,7 @@ export function useComposerKeyboard(turn: string | undefined, onConfirm: () => v
         setHintTurn(undefined);
         return listenForDoubleEscape(window, {
             turn: () => latest.current.turn,
-            blocked: event => hasOpenDismissLayer() || document.hidden || !document.getElementById('prompt')?.getClientRects().length || !!document.getElementById('prompt')?.closest('[hidden], [inert]') || !!(document.getElementById('prompt') as HTMLTextAreaElement | null)?.disabled || !!document.querySelector('dialog[open]') || (event.target instanceof Element && !!event.target.closest('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [popover], details[open]')),
+            blocked: event => hasOpenDismissLayer() || document.hidden || !document.getElementById('prompt')?.getClientRects().length || !!document.getElementById('prompt')?.closest('[hidden], [inert]') || !!(document.getElementById('prompt') as HTMLTextAreaElement | null)?.disabled || !!document.querySelector('dialog[open], .composer-quota-panel:popover-open') || (event.target instanceof Element && !!event.target.closest('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [popover], details[open]')),
             onHint: setHintTurn,
             onConfirm: () => latest.current.onConfirm(),
         });

@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
 [[ "$(bun --version)" == "1.4.0" ]] || { echo 'Build requires Bun 1.4.0' >&2; exit 1; }
-bun install --frozen-lockfile
+bun install --frozen-lockfile --omit optional
 bun run typecheck
 bun run build
 cargo build --locked -p deck2 --release

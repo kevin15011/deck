@@ -45,6 +45,10 @@ pub(super) struct Registry {
     changed: tokio::sync::Notify,
 }
 impl Registry {
+    pub fn retiring(&self) -> bool {
+        self.entries.lock().unwrap().values().any(|entry| entry.state == State::Retiring)
+    }
+
     pub async fn wait_retiring(&self, session: &str) -> Result<(), String> {
         tokio::time::timeout(std::time::Duration::from_secs(15), async {
             loop {
@@ -73,7 +77,7 @@ impl Registry {
             r.phase == deck2_shared::Phase::Uncertain && r.mode == deck2_shared::Mode::SessionV1
         }) {
             if !crate::member_integration::Integration::for_receipt(&r)
-                .is_ok_and(|i| i.concurrent_lead())
+                .is_ok_and(|i| i.supports_retained_lead())
             {
                 continue;
             }

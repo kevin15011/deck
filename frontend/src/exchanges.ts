@@ -19,6 +19,12 @@ const utf8 = new TextEncoder();
 export function appendConversation(previous:ConversationMessage[], chunks:ExchangeMessage[]):ConversationMessage[] {
  const messages = previous.slice();
  for (const chunk of chunks) {
+  if (chunk.source === 'lead-guidance') {
+   // A late receipt re-issues the same input with its final delivery. It updates
+   // the row already on screen instead of adding another one.
+   const index = messages.findIndex(m => m.source === 'lead-guidance' && m.id === chunk.id);
+   if (index >= 0) { messages[index] = {...chunk, sequence: messages[index].sequence}; continue; }
+  }
   const tail = messages.at(-1);
   const nextOffset = chunk.offset === undefined ? undefined : chunk.offset + utf8.encode(chunk.text).length;
   if (tail && chunk.offset !== undefined && chunk.offset > 0 && chunk.offset === tail.nextOffset &&

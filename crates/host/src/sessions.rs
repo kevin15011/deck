@@ -2,9 +2,36 @@
 //! serializes queue cancellation, claim, and the single project execution slot.
 use crate::{AdmissionError, Store};
 use deck2_shared::{
-    API, Mode, NativeContext, Phase, Receipt, ScopedSubmit, Session, SessionCommand, Submit,
+    API, DecisionState, Mode, NativeContext, Phase, Receipt, ScopedSubmit, Session, SessionCommand, Submit,
 };
 use rusqlite::{OptionalExtension, params};
+pub(crate) struct RemovalPreview {
+    next: String,
+    receipts: Vec<(String, u64)>,
+    tasks: Vec<(String, u32)>,
+    attempts: Vec<String>,
+}
+
+impl RemovalPreview {
+    pub(crate) fn ensure_unchanged(&self, current: &Self) -> Result<(), String> {
+        if self.receipts != current.receipts || self.tasks != current.tasks {
+            return Err(
+                "Session work changed while removal was waiting. Review the session and try again."
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn owns_worker(&self, key: &str) -> bool {
+        if let Some(attempt) = key.strip_prefix("child:") {
+            self.attempts.iter().any(|id| id == attempt)
+        } else {
+            self.receipts.iter().any(|(id, _)| id == key)
+        }
+    }
+}
+
 impl Store {
     pub fn host_id(&self) -> Result<String, String> {
         self.conn
@@ -53,9 +80,6 @@ impl Store {
             } else {
                 Err("Conversation identity conflict".into())
             };
-        }
-        if self.sessions()?.len() >= 64 {
-            return Err("Conversation limit reached".into());
         }
         let contract = c
             .members
@@ -139,7 +163,7 @@ impl Store {
     pub fn admit(&mut self, c: &ScopedSubmit) -> Result<Receipt, AdmissionError> {
         if c.queue
             && self
-                .all()
+                .pending_receipts()
                 .map_err(super::storage_error)?
                 .iter()
                 .filter(|r| r.phase == Phase::Queued)
@@ -164,17 +188,53 @@ impl Store {
     pub(crate) fn claim_next_with_limit(&mut self, live: &std::collections::HashSet<String>, cap: usize) -> Result<Option<Receipt>, String> {
         let paused = self.queue_paused()?;
         let cursor: String = self.conn.query_row("SELECT value FROM meta WHERE key='lead_cursor'", [], |row| row.get(0)).optional().map_err(|_| "Cannot read Lead cursor")?.unwrap_or_default();
-        let all = self.all()?;
+        let pending = self.pending_receipts()?;
+        let Some(occupied) = self.occupied_roots(&pending, live)? else { return Ok(None) };
         let mut eligible = Vec::new();
-        for r in all.into_iter().filter(|r| r.phase == Phase::Queued && (!paused || r.mode == Mode::SessionV1)) {
-            if self.root_available(&r.mode, &r.session, live, cap)? && !self.member_blocks_root(&r.mode, &r.session)? { eligible.push(r); }
+        for r in pending.into_iter().filter(|r| r.phase == Phase::Queued && (!paused || r.mode == Mode::SessionV1)) {
+            if self.root_available_with_occupied(&r.mode, &r.session, &occupied, cap)?
+                && !self.member_blocks_root(&r.mode, &r.session)?
+            {
+                eligible.push(r);
+            }
         }
-        // Stable receipt arrival order within each session, round robin across
-        // sessions. Stable sorting preserves receipts rowid order within a session,
-        // including tied timestamps and wall-clock rollback. The durable cursor
-        // survives disconnects and host restart.
-        eligible.sort_by(|a,b| (a.session <= cursor).cmp(&(b.session <= cursor)).then(a.session.cmp(&b.session)));
-        let Some(mut r) = eligible.into_iter().next() else { return Ok(None); };
+        // Round robin across sessions, with durable receipt rowid order
+        // within each session even when wall-clock timestamps go backward.
+        eligible.sort_by(|a, b| {
+            (a.session <= cursor)
+                .cmp(&(b.session <= cursor))
+                .then_with(|| a.session.cmp(&b.session))
+        });
+        let mut selected = None;
+        for candidates in eligible.chunk_by(|a, b| a.session == b.session) {
+            let mut first_outcome = None;
+            for candidate in candidates {
+                if candidate.continuation.is_none() || candidate.dispatch_ms.is_some() {
+                    selected = Some(candidate);
+                    break;
+                }
+                if first_outcome.is_some() {
+                    continue;
+                }
+                // Settle redundant outcomes under the same Store lock as admission.
+                // Keep the earliest needed outcome queued when user input takes priority.
+                if self.outcome_already_integrated(candidate)? {
+                    let mut skipped = candidate.clone();
+                    skipped.phase = Phase::Completed;
+                    skipped.detail = "Task result already integrated by the Lead. No additional turn needed.".into();
+                    self.save(&mut skipped)?;
+                } else {
+                    first_outcome = Some(candidate);
+                }
+            }
+            selected = selected.or(first_outcome);
+            if selected.is_some() {
+                break;
+            }
+        }
+        let Some(mut r) = selected.cloned() else {
+            return Ok(None);
+        };
         let session = self.session_by_id(&r.session)?;
         if r.mode.editing() && !self.trusted_project(&session.project.root)? {
             self.pause_queue(true)?;
@@ -228,7 +288,7 @@ impl Store {
         self.save_session(&s)?;
         Ok(s)
     }
-    pub fn remove_session(&mut self, id: &str) -> Result<(), String> {
+    pub(crate) fn removal_preview(&self, id: &str) -> Result<RemovalPreview, String> {
         if self.session_by_id(id)?.original.is_some() {
             return Err("Original history is retained. Removing adopted sessions is not available in this migration increment.".into());
         }
@@ -236,61 +296,177 @@ impl Store {
             .sessions()?
             .into_iter()
             .find(|s| s.id != id)
-            .ok_or("Keep at least one conversation; create another before removing this one")?
+            .ok_or("Keep at least one conversation. Create another before removing this one.")?
             .id;
         if self.changes()?.iter().any(|c| c.request.session == id) {
-            return Err("Developer lifecycle evidence is retained; keep this conversation to inspect or continue the change. Release native context instead after work settles.".into());
+            return Err("This session contains developer lifecycle evidence. Keep it to inspect or continue the change.".into());
         }
-        if self.tasks()?.iter().any(|t| t.session == id) {
+        if self.ordinary_preparing()? {
             return Err(
-                "Task evidence is retained; this conversation cannot be released or removed in S4"
-                    .into(),
+                "Wait for session preparation to settle before removing local history.".into(),
             );
         }
-        if self.all()?.iter().any(|r| {
-            r.session == id
-                && (r.phase.active() || r.phase == Phase::Uncertain || r.phase == Phase::Queued)
-        }) {
-            return Err("Active, queued or uncertain evidence cannot be removed".into());
-        }
-        let ids: Vec<_> = self
+        let receipts: Vec<_> = self
             .all()?
             .into_iter()
             .filter(|r| r.session == id)
-            .map(|r| r.id)
             .collect();
-        let tx = self
-            .conn
-            .transaction()
-            .map_err(|_| "Cannot begin removal")?;
-        for id in ids {
-            tx.execute("DELETE FROM receipts WHERE id=?1", [id])
-                .map_err(|_| "Cannot remove local receipt")?;
+        let tasks: Vec<_> = self
+            .tasks()?
+            .into_iter()
+            .filter(|t| t.session == id)
+            .collect();
+        let phases = || {
+            receipts.iter().map(|r| &r.phase).chain(
+                tasks
+                    .iter()
+                    .flat_map(|t| t.attempts.iter().map(|a| &a.phase)),
+            )
+        };
+        if phases().any(|phase| *phase == Phase::Uncertain) {
+            return Err("Resolve uncertain process ownership before removing this session.".into());
         }
-        tx.execute("DELETE FROM image_cancellations WHERE session=?1", [id])
-            .map_err(|_| "Cannot remove upload identities")?;
-        tx.execute("DELETE FROM images WHERE session=?1", [id])
-            .map_err(|_| "Cannot remove conversation images")?;
-        tx.execute("DELETE FROM session_selections WHERE session=?1", [id])
-            .map_err(|_| "Cannot remove local selection")?;
-        for table in ["session_decisions", "decision_commands", "decision_replies"] {
+        if receipts
+            .iter()
+            .any(|r| r.continuation.is_some() && r.phase == Phase::Queued)
+        {
+            return Err(
+                "Finish or cancel the queued subagent follow-up before removing this session."
+                    .into(),
+            );
+        }
+        if phases().any(|phase| phase.active() || *phase == Phase::Queued) {
+            return Err(
+                "Finish or cancel active and queued work before removing this session.".into(),
+            );
+        }
+        if receipts.iter().flat_map(|r| &r.decisions).any(|d| {
+            matches!(
+                d.state,
+                DecisionState::Pending | DecisionState::Responded | DecisionState::Dispatching
+            )
+        }) || crate::session_decisions::has_unresolved(self, id)?
+        {
+            return Err(
+                "Resolve or cancel outstanding decisions before removing this session.".into(),
+            );
+        }
+        if tasks.iter().any(|t| {
+            t.attempts.last().is_some_and(|a| {
+                a.treatments
+                    .last()
+                    .is_some_and(|v| v.disposition == "followup_required")
+                    && receipts.iter().any(|r| {
+                        r.id == t.authority_root(a)
+                            && !r.cancel_requested
+                            && r.phase != Phase::Cancelled
+                    })
+            })
+        }) {
+            return Err("Finish the requested subagent follow-up or cancel its originating input before removing this session.".into());
+        }
+        Ok(RemovalPreview {
+            next,
+            receipts: receipts.into_iter().map(|r| (r.id, r.revision)).collect(),
+            attempts: tasks
+                .iter()
+                .flat_map(|t| t.attempts.iter().map(|a| a.id.clone()))
+                .collect(),
+            tasks: tasks.into_iter().map(|t| (t.id, t.revision)).collect(),
+        })
+    }
+
+    pub fn remove_session(&mut self, id: &str) -> Result<(), String> {
+        self.remove_session_checked(id, None)
+    }
+
+    pub(crate) fn remove_session_checked(
+        &mut self,
+        id: &str,
+        before_retirement: Option<&RemovalPreview>,
+    ) -> Result<(), String> {
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )
+        .map_err(|_| "Cannot begin local session removal")?;
+        let current = self.removal_preview(id)?;
+        if let Some(before) = before_retirement {
+            before.ensure_unchanged(&current)?;
+        }
+        let remove_default = id == self.session;
+
+        // Capture dependents while their owning receipt/snapshot rows still exist.
+        for sql in [
+            "DELETE FROM snapshot_accesses WHERE json_extract(body,'$.snapshot') IN
+                (SELECT id FROM read_snapshots WHERE json_extract(body,'$.root') IN
+                    (SELECT id FROM receipts WHERE json_extract(body,'$.session')=?1))",
+            "DELETE FROM snapshot_views WHERE id IN
+                (SELECT id FROM read_snapshots WHERE json_extract(body,'$.root') IN
+                    (SELECT id FROM receipts WHERE json_extract(body,'$.session')=?1))",
+            "DELETE FROM read_snapshots WHERE json_extract(body,'$.root') IN
+                (SELECT id FROM receipts WHERE json_extract(body,'$.session')=?1)",
+            "DELETE FROM permission_rejections WHERE decision_id IN
+                (SELECT json_extract(d.value,'$.id') FROM receipts r, json_each(r.body,'$.decisions') d
+                    WHERE json_extract(r.body,'$.session')=?1)",
+            "DELETE FROM task_calls WHERE root IN
+                (SELECT id FROM receipts WHERE json_extract(body,'$.session')=?1)",
+            "DELETE FROM tasks WHERE json_extract(body,'$.session')=?1",
+            "DELETE FROM receipts WHERE json_extract(body,'$.session')=?1",
+        ] {
+            tx.execute(sql, [id]).map_err(|_| "Cannot remove local execution history")?;
+        }
+        for table in [
+            "image_cancellations",
+            "images",
+            "session_selections",
+            "session_epochs",
+            "session_decisions",
+            "decision_commands",
+            "decision_replies",
+            "activity_steps",
+            "session_events",
+        ] {
             tx.execute(&format!("DELETE FROM {table} WHERE session=?1"), [id])
-                .map_err(|_| "Cannot remove durable decisions")?;
+                .map_err(|_| "Cannot remove local session records")?;
         }
-        tx.execute("DELETE FROM activity_steps WHERE session=?1", [id])
-            .map_err(|_| "Cannot remove local activity")?;
-        tx.execute("DELETE FROM session_events WHERE session=?1", [id])
-            .map_err(|_| "Cannot remove local session events")?;
+        let session = self.session_by_id(id)?;
+        let mut navigation = self.navigation()?;
+        if let Some(order) = navigation.session_order.get_mut(&session.project.id) {
+            let key = serde_json::json!(["local", session.project.id, id]).to_string();
+            let count = order.len();
+            order.retain(|entry| entry != &key);
+            if order.len() != count {
+                navigation.order_revision = navigation
+                    .order_revision
+                    .checked_add(1)
+                    .ok_or("Navigation order revision exhausted")?;
+                self.save_navigation(&navigation)?;
+            }
+        }
+        tx.execute(
+            "DELETE FROM meta WHERE key='lead_cursor' AND value=?1",
+            [id],
+        )
+        .map_err(|_| "Cannot remove saved queue position")?;
         tx.execute("DELETE FROM sessions WHERE id=?1", [id])
-            .map_err(|_| "Cannot remove local conversation")?;
-        if id == self.session {
-            tx.execute("UPDATE meta SET value=?1 WHERE key='session'", [&next])
-                .map_err(|_| "Cannot persist default conversation")?;
+            .map_err(|_| "Cannot remove local session")?;
+        if remove_default {
+            tx.execute(
+                "UPDATE meta SET value=?1 WHERE key='session'",
+                [&current.next],
+            )
+            .map_err(|_| "Cannot persist default session")?;
         }
-        tx.commit().map_err(|_| "Cannot commit local removal")?;
-        if id == self.session {
-            self.session = next;
+        // Surviving evidence must satisfy the same ownership and link checks as restart.
+        Self::inspect(&tx, &self.project)?;
+        tx.commit()
+            .map_err(|_| "Cannot commit local session removal")?;
+        if remove_default {
+            self.session = current.next;
         }
         Ok(())
     }
+
+
 }

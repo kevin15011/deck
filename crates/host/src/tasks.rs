@@ -409,7 +409,7 @@ impl Store {
                     );
                 }
                 let treatment = Treatment {
-                    report: o.report.clone(),
+                    report: Some(o.report.clone()),
                     lead_attempt: a.attempt.clone(),
                     disposition: o.disposition.clone(),
                     reason: o.reason.clone(),

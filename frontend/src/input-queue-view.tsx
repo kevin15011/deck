@@ -3,7 +3,20 @@ import {gsap} from 'gsap';
 import {type Receipt} from './api';
 import {sessionQueue,cancelQueuedInput} from './input-queue';
 import {useDisclosureMotion} from './view-motion';
-export function InputQueue({receipts,session,connected,paused,onPause,onError,onRefresh}:{receipts:Receipt[];session:string;connected:boolean;paused:boolean;onPause?:((paused:boolean)=>void);onError:(text:string)=>void;onRefresh?:()=>void}){
+type InputQueueProps = {
+ receipts:Receipt[];
+ session:string;
+ connected:boolean;
+ paused:boolean;
+ steerable?:string[];
+ sendingLive?:string;
+ onSendNow?:(input:Receipt)=>void;
+ onPause?:(paused:boolean)=>void;
+ onError:(text:string)=>void;
+ onRefresh?:()=>void;
+};
+
+export function InputQueue({receipts,session,connected,paused,steerable,sendingLive,onSendNow,onPause,onError,onRefresh}:InputQueueProps){
  const rows=sessionQueue(receipts,session),root=useRef<HTMLElement>(null),list=useRef<HTMLOListElement>(null);
  const locks=useRef(new Set<string>()),[cancelling,setCancelling]=useState(new Set<string>()),[notice,setNotice]=useState('');
  const open=rows.length>0,focused=useRef<string|undefined>(undefined);
@@ -25,7 +38,20 @@ export function InputQueue({receipts,session,connected,paused,onPause,onError,on
  return <section ref={root} className="composer-queue" hidden={!open} inert={!open} aria-label="Queued messages" onFocusCapture={e=>{focused.current=(e.target as Element).closest<HTMLElement>('[data-command-id]')?.dataset.commandId;}} onBlurCapture={e=>{if(e.relatedTarget&&e.relatedTarget!==document.body&&!e.currentTarget.contains(e.relatedTarget as Node))focused.current=undefined;}}>
   <div className="composer-queue-heading"><strong role="status">{rows.length} queued{!connected?' · last known':paused?' · paused':''}</strong>{onPause&&<button type="button" className="quiet" disabled={!connected} onClick={()=>onPause(!paused)}>{paused?'Resume queue':'Pause queue'}</button>}</div>
   <p className="sr-only">Order shown is acceptance order within this session. The host scheduler controls dispatch.</p>
-  <ol ref={list}>{rows.map((r,i)=><li key={r.id} data-command-id={r.id}><span className="queue-ordinal" aria-label={`Waiting item ${i+1} in this session`}>{i+1}.</span><span className="queue-prompt" title={r.prompt}>{r.prompt||`${r.attachments.length} attached images`}</span><button type="button" className="quiet" disabled={!connected||cancelling.has(r.id)||!r.attempt} title={!r.attempt?'This historical input has no exact cancellation identity. Inspect Activity.':'Cancel only while undispatched'} aria-label={`Cancel queued message ${i+1}`} onClick={()=>void cancel(r)}>{cancelling.has(r.id)?'Cancelling…':'Cancel'}</button></li>)}</ol>
+  <ol ref={list}>{rows.map((input,i)=>{
+   const number=i+1;
+   const isCancelling=cancelling.has(input.id);
+   return <li key={input.id} data-command-id={input.id}>
+    <span className="queue-ordinal" aria-label={`Waiting item ${number} in this session`}>{number}.</span>
+    <span className="queue-prompt" title={input.prompt}>{input.prompt||`${input.attachments.length} attached images`}</span>
+    {onSendNow&&(steerable?.includes(input.id)||sendingLive===input.id)&&
+     <button type="button" className="quiet" disabled={!connected||!!sendingLive||isCancelling}
+      aria-label={`Send now, queued message ${number}`} onClick={()=>onSendNow(input)}>Send now</button>}
+    <button type="button" className="quiet" disabled={!connected||isCancelling||sendingLive===input.id||!input.attempt}
+     title={!input.attempt?'This historical input has no exact cancellation identity. Inspect Activity.':'Cancel only while undispatched'}
+     aria-label={`Cancel queued message ${number}`} onClick={()=>void cancel(input)}>{isCancelling?'Cancelling…':'Cancel'}</button>
+   </li>;
+  })}</ol>
   {notice&&<p className="activity-meta" role="status">{notice}</p>}
  </section>;
 }

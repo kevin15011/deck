@@ -4,21 +4,20 @@ export type ApprovalMode = 'relay' | 'yolo';
 export type ApprovalModeSource = 'session' | 'default';
 export type ApprovalSummary = { approvalMode?: ApprovalMode; approvalModeSource?: ApprovalModeSource };
 export function ApprovalChip({ mode='relay' }: { mode?:ApprovalMode; source?:ApprovalModeSource }) {
-    return <span className={`approval-mode-chip${mode==='yolo'?' is-yolo':''}`} title={mode==='yolo'?'Agents act without asking. Enabled for this session.':'Agents ask for your approval before acting'}>{mode==='yolo'?'YOLO':'Ask first'}</span>;
+    return <span className={`approval-mode-chip${mode==='yolo'?' is-yolo':''}`} title={mode==='yolo'?'YOLO is enabled for this session. Runner and role limits still apply.':'Agents ask for approval when a native action requires it'}>{mode==='yolo'?'YOLO':'Ask first'}</span>;
 }
 function YoloWarnings({ acknowledged, onAcknowledged, disabled=false }: { acknowledged:boolean; onAcknowledged:(value:boolean)=>void; disabled?:boolean }) {
     const panel=useRef<HTMLDivElement>(null);
     useLayoutEffect(()=>{const node=panel.current;if(!node)return;if(!matchMedia('(prefers-reduced-motion: reduce)').matches)gsap.fromTo(node,{opacity:.5,y:4},{opacity:1,y:0,duration:.18,ease:'power2.out',clearProps:'opacity,transform'});return ()=>{gsap.killTweensOf(node);};},[]);
     return <div ref={panel} className="yolo-warning"><ul>
-        <li>Agents can run shell commands, edit or delete files and use the network without asking you first.</li>
-        <li>Codex: approvals off with a full-access sandbox. Read-only review roles and narrower configured role policies remain restricted.</li>
-        <li>Native execution for Claude and Pi is not yet supported in this build. OpenCode preserves native permission rules; explicit native deny rules still apply.</li>
-        <li>Deck does not sandbox YOLO sessions — use it only in projects you trust.</li>
+        <li>Depending on the runner, agents can run shell commands, edit or delete files and use the network without asking you first.</li>
+        <li>Codex Lead can use full access in trusted projects. Read-only and narrower role policies still apply.</li>
+        <li>Claude Code can edit workspace files in trusted projects in either mode. OpenCode applies its native permission rules.</li>
         <li>You can switch it off at any time. The change applies from your next message.</li>
     </ul><label className="approval-checkbox"><input type="checkbox" required checked={acknowledged} disabled={disabled} onChange={event=>onAcknowledged(event.target.checked)}/>I understand the risks</label></div>;
 }
 export function YoloFields({ enabled, acknowledged, onEnabled, onAcknowledged, disabled=false }: { enabled:boolean; acknowledged:boolean; onEnabled:(value:boolean)=>void; onAcknowledged:(value:boolean)=>void; disabled?:boolean }) {
-    return <div className="yolo-fields"><p className="muted">YOLO is off by default and applies only to this session. You can enable it later from the session controls.</p><label className="approval-checkbox"><input type="checkbox" checked={enabled} disabled={disabled} onChange={event=>{onEnabled(event.target.checked);onAcknowledged(false);}}/>YOLO mode — agents run without asking for permission</label>{enabled&&<YoloWarnings acknowledged={acknowledged} onAcknowledged={onAcknowledged} disabled={disabled}/>}</div>;
+    return <div className="yolo-fields"><p className="muted">YOLO is off by default and applies only to this session. You can enable it later from the session controls.</p><label className="approval-checkbox"><input type="checkbox" checked={enabled} disabled={disabled} onChange={event=>{onEnabled(event.target.checked);onAcknowledged(false);}}/>YOLO mode — allow broader native permissions</label>{enabled&&<YoloWarnings acknowledged={acknowledged} onAcknowledged={onAcknowledged} disabled={disabled}/>}</div>;
 }
 export function SessionCreateButton({ yolo, acknowledged, disabled=false, pending=false }: { yolo:boolean; acknowledged:boolean; disabled?:boolean; pending?:boolean }) {
     return <button disabled={disabled||pending||(yolo&&!acknowledged)}>{pending?'Saving…':'Create session'}</button>;

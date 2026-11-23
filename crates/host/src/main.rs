@@ -576,6 +576,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                         _ = tokio::signal::ctrl_c() => {},
                         _ = cloned.stop_request.notified() => {},
                     }
+                    cloned.close_workspace_updates();
                     if !cloned.restart.pending() { cloned.shutdown(); }
                     deck2::dictation::close(&cloned).await;
                 });
@@ -598,6 +599,9 @@ async fn run(cli: Cli) -> Result<(), String> {
             let result = server
                 .await
                 .map_err(|_| "Local host transport failed".to_string());
+            if app.shutdown_requested.load(std::sync::atomic::Ordering::SeqCst) && !app.restart.pending() {
+                app.drain_shutdown().await;
+            }
             deck2::session_mcp::close_codebase().await;
             result?;
             if let Some(candidate) = app.restart.take() {

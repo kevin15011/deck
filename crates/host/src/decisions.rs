@@ -117,7 +117,11 @@ impl Store {
             for row in rows {
                 let mut r: Receipt = serde_json::from_str(&row.map_err(|_| "Cannot read attempt")?)
                     .map_err(|_| "Corrupt attempt")?;
-                if r.configuration.as_ref().is_some_and(|c| c.project == binding) && r.mode.editing() && r.phase.active() {
+                let can_write = r.mode.editing() || r.mode == deck2_shared::Mode::SessionV1
+                    && r.configuration.as_ref().and_then(|s| s.session_contract.as_ref())
+                        .and_then(|c| c.members.get("lead"))
+                        .is_some_and(|lead| matches!(lead.runner_id.as_str(), "codex" | "claude"));
+                if r.configuration.as_ref().is_some_and(|c| c.project == binding) && can_write && r.phase.active() {
                     r.cancel_requested = true;
                     invalidate(
                         &mut r,
@@ -154,7 +158,7 @@ impl Store {
         if r.session != session || r.attempt != attempt {
             return Err("Input ownership changed; recall not confirmed".into());
         }
-        if r.dispatch_ms.is_some()
+        if r.steered_to.is_some() || r.dispatch_ms.is_some()
             || !(matches!(
                 r.phase,
                 deck2_shared::Phase::Queued
@@ -186,6 +190,10 @@ impl Store {
         let mut original=None;
         for id in std::iter::once(command.to_string()).chain(all.iter().filter(|r|r.id!=command && scope.contains(&r.id)).map(|r|r.id.clone())) {
             let mut r=self.get(&id)?.ok_or("Cancellation owner missing")?;
+            if r.steered_to.is_some() {
+                if id == command { return Ok(r); }
+                continue;
+            }
             if r.phase==deck2_shared::Phase::Queued {
                 r.phase=deck2_shared::Phase::Cancelled;
                 r.detail="Cancelled while definitely undispatched; native was never launched".into();
@@ -343,7 +351,7 @@ impl Store {
         if r.mode == Mode::SessionV1 {
             let current = self.session_by_id(&r.session)?.contract.ok_or("Connected contract missing")?;
             let admitted = r.configuration.as_ref().and_then(|s| s.session_contract.as_ref()).ok_or("Admitted contract missing")?;
-            if admitted.generation != current.generation || admitted.grants_revoked_at != current.grants_revoked_at || admitted.revision != current.revision || admitted.lead_task != current.lead_task {
+            if admitted.generation != current.generation || admitted.grants_revoked_at != current.grants_revoked_at || admitted.lead_task != current.lead_task {
                 return Ok(None);
             }
         }
@@ -459,7 +467,7 @@ impl Store {
         if crate::session_tasks::validate_authority(self, &t, a).is_err() {return Ok(None);}
         let admitted=a.configuration.as_ref().and_then(|s|s.session_contract.as_ref()).ok_or("Member assignment missing")?;
         let current=self.session_by_id(&r.session)?.contract.ok_or("Session contract missing")?;
-        if admitted.revision!=current.revision || admitted.grants_revoked_at!=current.grants_revoked_at {return Ok(None);}
+        if admitted.grants_revoked_at != current.grants_revoked_at {return Ok(None);}
 
         let Some(d) = r.decisions.iter_mut().find(|d| {
             d.id == decision

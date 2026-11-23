@@ -45,10 +45,10 @@ const result={binarySha256:crypto.createHash('sha256').update(fs.readFileSync(bi
  const readCount=()=>fs.existsSync(path.join(root,'quota-reads'))?fs.readFileSync(path.join(root,'quota-reads'),'utf8').trim().split('\n').length:0;
  for(let i=0;i<3;i++)assert.equal((await page.request.get(base+'/api/quota')).status(),200);
  assert.equal(readCount(),0);await page.getByRole('button',{name:'Refresh Codex quota',exact:true}).click();await page.getByText('Plan: pro',{exact:false}).waitFor();assert.equal(readCount(),1);
- assert.equal(await page.getByRole('button',{name:'Refresh Claude quota'}).isDisabled(),true);
+ assert.equal(await page.getByRole('button',{name:'Refresh Claude quota'}).isDisabled(),false);
  const cooldown=await page.request.post(base+'/api/quota/codex/refresh',{headers:{Origin:base},data:{}});assert.equal(cooldown.status(),409);assert.equal(readCount(),1);
  const quota=await(await page.request.get(base+'/api/quota')).json();assert.equal(quota.runners.codex.snapshot.windows[0].usedPercent,42.2);assert.equal(JSON.stringify(quota).includes('private-account'),false);
- result.checks.push('Passive host-only quota reads dispatch no native query; explicit account refresh is allowlisted, cooldown applies and unported Claude is disabled');
+ result.checks.push('Passive host-only quota reads dispatch no native query; explicit account refresh is allowlisted, cooldown applies and Claude refresh is independently available');
  await prompt.fill('Daily delivery');await page.keyboard.press('Enter');await until(w=>w.tasks.length===2&&w.tasks.some(t=>t.attempts.at(-1).context?.observation?.tokens===70000));
  await page.waitForFunction(()=>document.querySelector('#tab-subagents')?.getAttribute('aria-selected')==='true');await page.waitForFunction(()=>document.querySelector('#subagents-status')?.textContent==='1 active subagents');await prompt.fill('Retained draft while reading agents');await page.getByRole('tab',{name:'Subagents',exact:true}).click();
  await page.locator('.task-card').filter({hasText:'Investigate'}).getByRole('button',{name:'Open full view'}).click();await page.getByRole('log',{name:'Investigate conversation'}).getByText('Live alpha conversation').waitFor();

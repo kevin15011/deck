@@ -61,7 +61,7 @@ impl Store {
         }
         if !matches!(
             n.transport,
-            Some(NativeTransport::CodexJsonRpc | NativeTransport::DeckMcp)
+            Some(NativeTransport::CodexJsonRpc | NativeTransport::DeckMcp | NativeTransport::ClaudeSdk)
         ) {
             return Ok(None);
         }
@@ -108,6 +108,11 @@ impl Store {
         let Some(assignment) = c.members.get(&role) else {
             return Ok(None);
         };
+        if n.transport == Some(NativeTransport::ClaudeSdk)
+            && (role != "lead" || assignment.runner_id != crate::claude::RUNNER)
+        {
+            return Ok(None);
+        }
         if snapshot.project.id.is_empty()
             || !crate::session_contract::MEMBERS.contains(&role.as_str())
         {
@@ -152,14 +157,14 @@ impl Store {
         let Some(c) = s.contract else {
             return Ok(false);
         };
-        let role = scope.actor["role"]
-            .as_str()
-            .ok_or("Permission role missing")?;
+        if scope.issuer["transport"] == json!(NativeTransport::ClaudeSdk)
+            && !self.trusted_project(&self.execution_project(&d.session)?.root)?
+        {
+            return Ok(false);
+        }
         if scope.actor["generation"] != c.generation
             || scope.actor["revocation"] != c.grants_revoked_at
-            || scope.actor["assignment_revision"] != c.revision
             || scope.actor["lead_task"] != c.lead_task
-            || scope.actor["assignment"] != json!(c.members.get(role))
             || scope.actor["project"] != json!(self.execution_project(&d.session)?)
         {
             return Ok(false);
@@ -191,10 +196,7 @@ impl Store {
         let Some(c) = s.contract else { return Ok(None) };
         if wanted.actor["generation"] != c.generation
             || wanted.actor["revocation"] != c.grants_revoked_at
-            || wanted.actor["assignment_revision"] != c.revision
             || wanted.actor["lead_task"] != c.lead_task
-            || wanted.actor["assignment"]
-                != json!(c.members.get(wanted.actor["role"].as_str().unwrap_or("")))
             || wanted.actor["project"] != json!(self.execution_project(&d.session)?)
         {
             return Ok(None);
@@ -216,6 +218,11 @@ impl Store {
                     continue;
                 };
                 let recorded = source.native.as_ref().and_then(|n| n.permission.as_ref());
+                if source.native.as_ref().is_some_and(|n| n.transport == Some(NativeTransport::ClaudeSdk))
+                    && (!source.grant_consumed || recorded.is_none())
+                {
+                    continue;
+                }
                 if let Some(recorded) = recorded
                     && (source
                         .native
@@ -243,8 +250,8 @@ impl Store {
                     }
                     continue;
                 }
-                // Legacy and bare AllowSession remain exact, including their
-                // retained native identity. Selected bounds alone allow variance.
+                // The admitted actor includes the exact assignment and its revision.
+                // Legacy and bare AllowSession also require the retained native identity.
                 if source.native.as_ref().and_then(|n| n.identity.as_ref())
                     == d.native.as_ref().and_then(|n| n.identity.as_ref())
                     && same_scope(&reconstructed, &wanted)
@@ -330,15 +337,21 @@ pub(crate) fn view(d: &Decision) -> Option<Value> {
                     | "permissions"
                     | "mcp"
                     | "relay"
+                    | "claude_workspace_read"
                     | "historical_delegation_role"
             )
         )
     {
         return None;
     }
-    let lifetime = "Valid across reconnects and host restart until revoked, assignments change or canonical session authority is replaced.";
+    let lifetime = "Valid for the matching admitted assignment and revision across reconnects and host restart until revoked or the session authority is replaced.";
+    let exact_description = if p.material["category"] == "claude_workspace_read" {
+        "Exact Claude tool, inputs and workspace target for this actor."
+    } else {
+        "Exact material request for this actor."
+    };
     let mut options = vec![
-        json!({"id":p.option_id,"kind":"exact","category":p.material["category"],"label":"This exact request","description":format!("Exact material request for this actor. {lifetime}"),"survives_host_restart":true,"revocation":"deck_session","lifetime":"canonical_session","actor":p.actor["role"]}),
+        json!({"id":p.option_id,"kind":"exact","category":p.material["category"],"label":"This exact request","description":format!("{exact_description} {lifetime}"),"survives_host_restart":true,"revocation":"deck_session","lifetime":"canonical_session","actor":p.actor["role"]}),
     ];
     let fresh = crate::permission_bounds::options(d, p);
     for o in &p.options {
@@ -910,7 +923,7 @@ mod tests {
         assert!(!s.session_grant(&pending).unwrap());
     }
     #[tokio::test]
-    async fn exact_categories_reject_changed_material_assignment_and_uncertain_sources() {
+    async fn exact_categories_reject_changed_material_and_uncertain_sources() {
         let (_dir, app, _bridge) = crate::session_mcp::tests::fixture().await;
         let mut s = app.store.lock().unwrap();
         let r = s.get("coordination-root").unwrap().unwrap();
@@ -961,45 +974,73 @@ mod tests {
                 "uncertain response is not consent"
             );
         }
-        let source = request(
-            &s,
-            &r,
-            None,
-            200,
-            "item/commandExecution/requestApproval",
-            command(),
-        );
-        consent(&mut s, &source);
-        let mut session = s.session_by_id(&r.session).unwrap();
-        session.contract.as_mut().unwrap().revision += 1;
-        s.save_session(&session).unwrap();
-        assert!(
-            !s.session_grant(&source).unwrap(),
-            "assignment changes invalidate consent"
-        );
-        let response = Resolve {
+    }
+
+    #[tokio::test]
+    async fn assignment_edits_preserve_admitted_consent_and_fence_new_admissions() {
+        let (_dir, app, _bridge) = crate::session_mcp::tests::fixture().await;
+        let mut s = app.store.lock().unwrap();
+        let r = s.get("coordination-root").unwrap().unwrap();
+        let task = member(&mut s, &r, "apply-deep", "assignment-member");
+        let method = "item/commandExecution/requestApproval";
+        let lead_grant = request(&s, &r, None, 200, method, command());
+        let member_grant = request(&s, &r, Some(&task), 201, method, command());
+        consent(&mut s, &lead_grant);
+        consent(&mut s, &member_grant);
+        let lead_pending = request(&s, &r, None, 202, method, command());
+        let member_pending = request(&s, &r, Some(&task), 203, method, command());
+        add(&mut s, &lead_pending);
+        add(&mut s, &member_pending);
+
+        let changed = s.assign_member(
+            &r.session,
+            "apply-deep",
+            deck2_shared::MemberAssignment {
+                runner_id: "codex".into(),
+                model_id: "recorded-worker".into(),
+                thinking: Some("high".into()),
+            },
+            1,
+        ).unwrap();
+        assert_eq!(changed.contract.unwrap().revision, 2);
+        let stale_reply = Resolve {
             api: API,
             command_id: "stale-selected-scope".into(),
-            expected_revision: 1,
+            expected_revision: lead_grant.revision,
             response: DecisionResponse::AllowSession,
         };
-        assert!(
-            s.resolve_scope(
-                &source.id,
-                &response,
-                Some(
-                    &source
-                        .native
-                        .as_ref()
-                        .unwrap()
-                        .permission
-                        .as_ref()
-                        .unwrap()
-                        .option_id
-                )
-            )
-            .is_err()
-        );
+        let scope = lead_grant.native.as_ref().unwrap().permission.as_ref().unwrap();
+        assert!(s.resolve_scope(&lead_grant.id, &stale_reply, Some(&scope.option_id)).is_err());
+        let lead_release = s.authorize_response(&r.id, &lead_pending.id, &r.generation)
+            .unwrap().unwrap();
+        let member_release = s.authorize_member_response(&r.id, &member_pending.id, &task, &member_pending.attempt)
+            .unwrap().unwrap();
+        for (released, grant) in [(lead_release, lead_grant), (member_release, member_grant)] {
+            assert_eq!(
+                released.native.unwrap().resolution_provenance,
+                Some(PermissionProvenance::ReusedGrant { source_decision: grant.id }),
+            );
+        }
+
+        let mut settled = s.get(&r.id).unwrap().unwrap();
+        settled.phase = Phase::Completed;
+        s.save(&mut settled).unwrap();
+        let mut settled = s.task(&task).unwrap();
+        settled.attempts[0].phase = Phase::Completed;
+        settled.attempts[0].settled_ms = Some(crate::now());
+        s.save_task(&settled).unwrap();
+        let submit = serde_json::from_value(json!({"api":API,"id":"new-assignment-root","session":r.session,
+            "mode":"session_v1","prompt":"Fresh work after the assignment changed"})).unwrap();
+        let mut fresh = s.admit(&submit).unwrap();
+        fresh.phase = Phase::Running;
+        fresh.thread = Some("fresh-thread".into());
+        fresh.turn = Some("fresh-turn".into());
+        s.save(&mut fresh).unwrap();
+        let fresh_task = member(&mut s, &fresh, "apply-deep", "new-assignment-member");
+        let fresh_lead = request(&s, &fresh, None, 204, method, command());
+        let fresh_member = request(&s, &fresh, Some(&fresh_task), 205, method, command());
+        assert!(!s.session_grant(&fresh_lead).unwrap());
+        assert!(!s.session_grant(&fresh_member).unwrap());
     }
 
     #[tokio::test]

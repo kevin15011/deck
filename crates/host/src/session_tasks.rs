@@ -6,6 +6,15 @@ use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
 use std::time::Duration;
 
+fn member_choice_error(contract: &deck2_shared::SessionContract) -> String {
+    let ids = crate::session_contract::configured_member_ids(contract).collect::<Vec<_>>();
+    if ids.is_empty() {
+        "No members are assigned for new tasks. Assign a member in Session assignments.".into()
+    } else {
+        format!("Choose a configured member role ID for agent. Available IDs: {}.", ids.join(", "))
+    }
+}
+
 pub fn tool(
     store: &mut Store,
     root: &str,
@@ -141,7 +150,7 @@ pub(crate) fn tool_with_original(
                 .ok_or("agent required")?
                 .trim_start_matches("deck-");
             if member == "lead" || !crate::session_contract::MEMBERS.contains(&member) {
-                return Err("Unknown configured member".into());
+                return Err(member_choice_error(contract));
             }
             let prompt = args["task"]
                 .as_str()
@@ -169,17 +178,8 @@ pub(crate) fn tool_with_original(
                 }
                 t
             } else {
-                if store
-                    .tasks()?
-                    .iter()
-                    .filter(|t| t.session == r.session)
-                    .count()
-                    >= 64
-                {
-                    return Err("Session task limit reached".into());
-                }
                 if !contract.members.contains_key(member) {
-                    return Err("Member has no recorded session assignment".into());
+                    return Err(member_choice_error(contract));
                 }
                 Task {
                     original: None,
@@ -327,9 +327,17 @@ pub(crate) fn tool_with_original(
                         .as_str()
                         .filter(|s| !s.trim().is_empty() && s.len() <= 512)
                         .ok_or("Bounded integration note required")?;
-                    let report = attempt.report.as_ref().ok_or("Terminal report missing")?;
-                    if attempt.phase.active() || attempt.phase == Phase::Uncertain {
+                    if !matches!(attempt.phase, Phase::Completed | Phase::Failed | Phase::Cancelled) {
                         return Err("Task process ownership is not settled".into());
+                    }
+                    let report_digest = attempt.report.as_ref().map(|report| report.digest.as_str());
+                    if state == "integrated" && (attempt.phase != Phase::Completed
+                        || attempt.report.as_ref().is_none_or(|report| report.attempt != attempt.id))
+                    {
+                        return Err("Adoption requires a completed final report".into());
+                    }
+                    if state != "blocked" && report_digest.is_none() {
+                        return Err("Terminal report missing".into());
                     }
                     let seq = terminal_seq(store, &task.id, &attempt.id)?;
                     if !args["evidenceSeqs"]
@@ -350,16 +358,20 @@ pub(crate) fn tool_with_original(
                         .map_err(|_| "Corrupt retrieval receipt")?;
                         if value["taskId"] == logical
                             && value["attempt"] == number
-                            && value["result"]["digest"] == report.digest
+                            && value["resultSeq"] == seq
+                            && match report_digest {
+                                Some(digest) => value["result"]["digest"] == digest,
+                                None => value.get("result").is_some_and(Value::is_null),
+                            }
                         {
                             retrieved = true;
                         }
                     }
                     if !retrieved {
-                        return Err("Retrieve this exact report before integration".into());
+                        return Err("Retrieve this exact terminal result before integration".into());
                     }
                     attempt.treatments.push(Treatment {
-                        report: report.digest.clone(),
+                        report: report_digest.map(str::to_owned),
                         lead_attempt: r.attempt.clone(),
                         disposition: match state {
                             "integrated" => "adopted",
@@ -578,7 +590,11 @@ pub fn start(app: App, task: String, attempt: String) {
         }
         let wake = {
             let mut store = app.store.lock().unwrap();
-            if app.shutdown_requested.load(std::sync::atomic::Ordering::SeqCst) {Ok(())}else{store.enqueue_task_outcome(&task, &attempt)}
+            if app.shutdown_requested.load(std::sync::atomic::Ordering::SeqCst) {
+                Ok(())
+            } else {
+                store.enqueue_task_outcome(&task, &attempt)
+            }
         };
         if let Err(error) = wake {
             let _ = update(&app, &task, &attempt, |a| {
@@ -609,6 +625,7 @@ async fn run(app: &App, task: &str, attempt: &str) -> Result<(), String> {
     match crate::member_integration::Integration::for_attempt(&t,a)? {
         crate::member_integration::Integration::Codex=>crate::codex_member::run(app,task,attempt).await,
         crate::member_integration::Integration::OpenCode=>crate::connected_opencode::execution::member(app,task,attempt).await,
+        crate::member_integration::Integration::Claude=>crate::claude::member::run(app,task,attempt).await,
     }
 }
 
@@ -1012,6 +1029,12 @@ impl Store {
         if a.phase.active() || a.phase == Phase::Uncertain || a.phase == Phase::Queued {
             return Ok(());
         }
+        if crate::member_integration::Integration::for_attempt(&t, a)
+            .is_ok_and(|integration| integration == crate::member_integration::Integration::Claude)
+            && validate_authority(self, &t, a).is_err()
+        {
+            return Ok(());
+        }
         let id = format!(
             "outcome-{}",
             &digest(format!("{task}:{attempt}").as_bytes())[..48]
@@ -1061,6 +1084,52 @@ impl Store {
     }
 }
 impl Store {
+    pub(crate) fn outcome_already_integrated(&self, r: &deck2_shared::Receipt) -> Result<bool, String> {
+        let Some(c) = &r.continuation else {
+            return Ok(false);
+        };
+        if r.mode != Mode::SessionV1 || r.phase != Phase::Queued || r.dispatch_ms.is_some() {
+            return Ok(false);
+        }
+        let task = self.task(&c.task)?;
+        let Some(attempt) = task.attempts.iter().find(|a| a.id == c.attempt) else {
+            return Ok(false);
+        };
+        let (Some(report), Some(treatment)) = (&attempt.report, attempt.treatments.last()) else {
+            return Ok(false);
+        };
+        if task.session != r.session
+            || task.authority_root(attempt) != c.origin
+            || attempt.phase != Phase::Completed
+            || report.attempt != c.attempt
+            || treatment.report.as_deref() != Some(report.digest.as_str())
+            || treatment.disposition != "adopted"
+            || terminal_seq(self, &c.task, &c.attempt)? as i64 != c.source_seq
+        {
+            return Ok(false);
+        }
+        if let Some(raw) = &task.structured {
+            let claims: Value = serde_json::from_str(raw).map_err(|_| "Corrupt task findings")?;
+            if claims["findings"].as_array().is_some_and(|findings| {
+                findings.iter().any(|f| f["state"] == "open" || f["state"] == "blocker")
+            }) {
+                return Ok(false);
+            }
+        }
+        // Integration is durable before the Lead finishes its turn. If that turn
+        // was interrupted, the queued outcome still gives the Lead a way to resume.
+        self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM receipts
+             WHERE json_extract(body, '$.session') = ?1
+               AND json_extract(body, '$.attempt') = ?2
+               AND json_extract(body, '$.mode') = 'session_v1'
+               AND json_extract(body, '$.phase') = 'completed'
+               AND json_extract(body, '$.cancel_requested') IS NOT TRUE)",
+            params![r.session, treatment.lead_attempt],
+            |row| row.get(0),
+        ).map_err(|_| "Cannot read integrating Lead receipt".into())
+    }
+
     pub fn outcome_prompt(&self, r: &deck2_shared::Receipt) -> Result<Option<String>, String> {
         let Some(c) = &r.continuation else {
             return Ok(None);
@@ -1098,11 +1167,99 @@ impl Store {
 mod tests {
     use super::*;
     fn prepared() -> Store {
-        let mut s = Store::open_memory("/fixture").unwrap();
+        prepare(Store::open_memory("/fixture").unwrap())
+    }
+    fn prepare(mut s: Store) -> Store {
         s.register_codex("a".repeat(64)).unwrap();
         let c=serde_json::from_value(json!({"api":deck2_shared::API,"id":"normal-owner-test","title":"Session","members":{"lead":{"runnerId":"codex","modelId":"gpt-6.1-sol"},"investigate":{"runnerId":"codex","modelId":"gpt-6.1-sol"}}})).unwrap();
         s.create_session(&c).unwrap();
         s
+    }
+    #[test]
+    fn integrated_outcome_yields_to_next_user_input() {
+        check_outcome_queue("integrated", false, false, true);
+    }
+
+    #[test]
+    fn integrated_outcome_yields_to_next_user_input_after_reopen() {
+        check_outcome_queue("integrated", false, true, true);
+    }
+
+    #[test]
+    fn outcome_queue_preserves_blocked_or_unresolved_work() {
+        check_outcome_queue("blocked", false, true, false);
+        check_outcome_queue("integrated", true, true, false);
+    }
+
+    fn check_outcome_queue(state: &str, with_finding: bool, reopen: bool, skip: bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.db");
+        let mut s = prepare(Store::open(&path, "/fixture").unwrap());
+        let session = "normal-owner-test";
+        let lead = "lead-before-outcome";
+        root(&mut s, lead, session);
+        let mut delegation = json!({"agent":"investigate","task":"Inspect the project"});
+        if with_finding {
+            delegation["findings"] = json!({"items":[{"id":"F1","state":"blocker","text":"Follow-up required"}]});
+        }
+        let admitted = tool(&mut s, lead, "deck_delegate", &delegation, "delegate").unwrap();
+        let id = admitted["taskId"].as_str().unwrap();
+        let mut task = s.task(id).unwrap();
+        let attempt = &mut task.attempts[0];
+        attempt.phase = Phase::Completed;
+        attempt.settled_ms = Some(crate::now());
+        attempt.report = Some(deck2_shared::TaskReport {
+            attempt: attempt.id.clone(),
+            digest: digest(b"Evidence"),
+            text: "Evidence".into(),
+        });
+        let attempt = attempt.id.clone();
+        s.save_normal_task(&task).unwrap();
+        s.enqueue_task_outcome(id, &attempt).unwrap();
+        let outcome = s.pending_receipts().unwrap().into_iter()
+            .find(|r| r.continuation.is_some()).unwrap();
+        let user = serde_json::from_value(json!({
+            "api":deck2_shared::API,"id":"next-real-user-input","session":session,
+            "prompt":"Next user message","mode":"session_v1","queue":true
+        })).unwrap();
+        s.admit(&user).unwrap();
+        let seq = terminal_seq(&s, id, &attempt).unwrap();
+        tool(&mut s, lead, "deck_task_result", &json!({"taskId":id,"attempt":1}), "read").unwrap();
+        tool(&mut s, lead, "deck_task_integrate",
+            &json!({"taskId":id,"attempt":1,"state":"integrated","note":"Checked report","evidenceSeqs":[seq]}),
+            "integrate").unwrap();
+        if state == "blocked" {
+            tool(&mut s, lead, "deck_task_integrate",
+                &json!({"taskId":id,"attempt":1,"state":"blocked","note":"Needs follow-up","evidenceSeqs":[seq]}),
+                "block").unwrap();
+        }
+        assert!(s.claim_next().unwrap().is_none(), "Lead still owns the session");
+        assert_eq!(s.get(&outcome.id).unwrap().unwrap().phase, Phase::Queued);
+        let mut receipt = s.get(lead).unwrap().unwrap();
+        receipt.phase = Phase::Completed;
+        receipt.dispatch_ms = Some(receipt.accepted_ms);
+        s.save(&mut receipt).unwrap();
+        if reopen {
+            drop(s);
+            s = Store::open(&path, "/fixture").unwrap();
+        }
+        let next = s.claim_next().unwrap().unwrap();
+        assert_eq!(next.id, user.id);
+        if !skip {
+            assert_eq!(s.get(&outcome.id).unwrap().unwrap().phase, Phase::Queued);
+            let mut settled = next;
+            settled.phase = Phase::Completed;
+            settled.dispatch_ms = Some(settled.accepted_ms);
+            s.save(&mut settled).unwrap();
+            assert_eq!(s.claim_next().unwrap().unwrap().id, outcome.id);
+            return;
+        }
+        let skipped = s.get(&outcome.id).unwrap().unwrap();
+        assert_eq!(skipped.phase, Phase::Completed);
+        assert!(skipped.dispatch_ms.is_none());
+        assert!(!s.pending_receipts().unwrap().iter().any(|r| r.id == outcome.id));
+        s.enqueue_task_outcome(id, &attempt).unwrap();
+        assert_eq!(s.get(&outcome.id).unwrap().unwrap().revision, skipped.revision);
     }
     fn root(s: &mut Store, id: &str, session: &str) {
         let c=serde_json::from_value(json!({"api":deck2_shared::API,"id":id,"session":session,"prompt":"Coordinate the task","mode":"session_v1"})).unwrap();
@@ -1294,7 +1451,12 @@ mod tests {
         let mut s=prepared();root(&mut s,"queued-cancel-origin","normal-owner-test");
         let a=tool(&mut s,"queued-cancel-origin","deck_delegate",&json!({"agent":"investigate","task":"Waiting for capacity"}),"queued-delegate").unwrap();let id=a["taskId"].as_str().unwrap();
         for command in ["cancel-first","cancel-again"] {tool(&mut s,"queued-cancel-origin","deck_task_cancel",&json!({"taskId":id,"attempt":1}),command).unwrap();}
+        let cancelled = s.task(id).unwrap();
+        let seq = terminal_seq(&s, id, &cancelled.attempts[0].id).unwrap();
+        let blocked = json!({"taskId":id,"attempt":1,"state":"blocked","note":"Needs a follow-up","evidenceSeqs":[seq]});
+        assert!(tool(&mut s,"queued-cancel-origin","deck_task_integrate",&blocked,"blocked-before-read").is_err());
         let result=tool(&mut s,"queued-cancel-origin","deck_task_result",&json!({"taskId":id,"attempt":1}),"read-cancelled").unwrap();assert_eq!(result["phase"],"cancelled");assert_eq!(result["partial"],true);assert_eq!(result["finalReport"],false);assert!(result["result"].is_null());assert!(result["resultSeq"].as_u64().unwrap()>0);
+        assert_eq!(tool(&mut s,"queued-cancel-origin","deck_task_integrate",&blocked,"blocked-after-read").unwrap()["state"], "blocked");
         let t=s.task(id).unwrap();assert!(t.attempts[0].native_pid.is_none());assert!(t.attempts[0].dispatch_ms.is_none());
         assert_eq!(s.conn.query_row("SELECT count(*) FROM session_events WHERE task=?1 AND kind='task.terminal'",[id],|r|r.get::<_,u64>(0)).unwrap(),1);
     }
@@ -1306,11 +1468,20 @@ mod tests {
         let mut s=prepared();root(&mut s,"assignment-old-root","normal-owner-test");
         let first=tool(&mut s,"assignment-old-root","deck_delegate",&json!({"agent":"investigate","task":"First work"}),"assignment-first").unwrap();
         let id=first["taskId"].as_str().unwrap();let mut t=s.task(id).unwrap();
+        let admitted = serde_json::to_value(&t.attempts[0]).unwrap();
+        let updated=serde_json::from_value(json!({"runnerId":"codex","modelId":"openai-codex/recorded-worker","thinking":"high"})).unwrap();
+        s.assign_member("normal-owner-test","investigate",updated,1).unwrap();
+        let preserved = s.task(id).unwrap();
+        assert_eq!(serde_json::to_value(&preserved.attempts[0]).unwrap(), admitted);
+        validate_authority(&s, &preserved, &preserved.attempts[0]).unwrap();
+        // An already admitted Lead turn cannot gain a newly configured role.
+        let added = serde_json::from_value(json!({"runnerId":"codex","modelId":"gpt-6.1-sol"})).unwrap();
+        s.assign_member("normal-owner-test", "quality", added, 2).unwrap();
+        assert!(tool(&mut s, "assignment-old-root", "deck_delegate",
+            &json!({"agent":"quality","task":"Unadmitted role"}), "assignment-old-role").is_err());
         t.attempts[0].phase=Phase::Completed;t.attempts[0].settled_ms=Some(crate::now());t.attempts[0].context.compacted=true;s.save_task(&t).unwrap();
         let observation=t.attempts[0].context.clone();
         let mut r=s.get("assignment-old-root").unwrap().unwrap();r.phase=Phase::Completed;s.save(&mut r).unwrap();
-        let updated=serde_json::from_value(json!({"runnerId":"codex","modelId":"openai-codex/recorded-worker","thinking":"high"})).unwrap();
-        s.assign_member("normal-owner-test","investigate",updated,1).unwrap();
         assert_eq!(s.task(id).unwrap().attempts[0].context,observation);
         root(&mut s,"assignment-new-root","normal-owner-test");
         tool(&mut s,"assignment-new-root","deck_delegate",&json!({"agent":"investigate","continueTaskId":id,"task":"Continue"}),"assignment-continue").unwrap();

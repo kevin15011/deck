@@ -136,7 +136,7 @@ fn view(app: &App, session: &str) -> Result<Value, String> {
                 .all()?
                 .iter()
                 .any(|r| r.session == session && r.phase.active() && r.dispatch_ms.is_some()),
-            store.session_by_id(session)?.contract.as_ref().and_then(|c|c.members.get("lead")).and_then(|a|crate::member_integration::Integration::select(&a.runner_id).ok()).is_some_and(|i|i.concurrent_lead()),
+            store.session_by_id(session)?.contract.as_ref().and_then(|c|c.members.get("lead")).and_then(|a|crate::member_integration::Integration::select(&a.runner_id).ok()).is_some_and(|i|i.supports_retained_lead()),
         )
     };
     // Inventory is evidence of the last completed discovery, never cached authority.

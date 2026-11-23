@@ -28,6 +28,18 @@ fn ids(v: &Value) -> bool {
 fn unresolved(d: &Value) -> bool {
     d["state"] == "pending" || d["state"] == "deferred"
 }
+pub(crate) fn has_unresolved(store: &Store, session: &str) -> Result<bool, String> {
+    store
+        .conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_decisions WHERE session=?1
+            AND json_extract(body,'$.state') IN ('pending','deferred'))",
+            [session],
+            |row| row.get(0),
+        )
+        .map_err(|_| "Cannot inspect outstanding decisions".into())
+}
+
 pub fn list(store: &Store, session: &str) -> Result<Value, String> {
     let mut q = store
         .conn
@@ -172,7 +184,7 @@ pub fn delegation(
             return Err("Invalid current user replan evidence".into());
         }
     } else if args.get("commandId").is_some() {
-        return Err("commandId requires dependency replan".into());
+        return Err("Omit commandId for ordinary delegation. It is required only with replan.".into());
     }
     dependencies(store, &r.session, &links, &action)?;
     state.as_object_mut().unwrap().remove("originalDependencies");

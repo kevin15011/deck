@@ -2,7 +2,9 @@
 const {chromium}=require('playwright'),fs=require('fs'),path=require('path'),os=require('os'),assert=require('assert/strict'),crypto=require('crypto'),{spawn,execFileSync}=require('child_process');
 process.env.PW_TEST_SCREENSHOT_NO_FONTS_READY='1';
 const orderOnly=process.argv.includes('--sidebar-order-only');
+const attentionOnly=process.argv.includes('--sidebar-attention-only');
 const redesignOnly=process.argv.includes('--sidebar-redesign-only');
+const inspectorOnly=process.argv.includes('--sidebar-inspector-only');
 const binary=path.resolve(process.argv[2]),out=path.resolve(process.env.DECK2_EVIDENCE_DIR||'../browser-evidence');fs.mkdirSync(out,{recursive:true});
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'deck-sidebar-')),project=path.join(root,'Deck'),second=path.join(root,'Naf EC'),state=path.join(root,'state'),original=path.join(root,'original');
 const wait=ms=>new Promise(r=>setTimeout(r,ms)),hash=b=>crypto.createHash('sha256').update(b).digest('hex');
@@ -19,7 +21,25 @@ for(const [i,title] of ['whisper','Terminal','Collision history',...(orderOnly||
 const deviceToken=crypto.randomBytes(32).toString('base64url');write(path.join(original,'web/devices.json'),[{id:'sidebar-browser',name:'Sidebar browser',createdAt:'2026-01-01T00:00:00Z',hash:hash(deviceToken)}]);
 const fake=path.join(root,'fake-codex');let transport=fs.readFileSync(path.resolve('crates/host/tests/fake_session_native.py'),'utf8');transport=transport.replace("  out({'method':'item/agentMessage/delta','params':{'threadId':thread,'turnId':turn,'delta':'Connected reply'}})",`  out({'method':'item/started','params':{'threadId':thread,'turnId':turn,'item':{'type':'agentMessage','id':'final'}}})
   out({'method':'item/agentMessage/delta','params':{'threadId':thread,'turnId':turn,'delta':'Connected reply'}})
-  out({'method':'item/completed','params':{'threadId':thread,'turnId':turn,'item':{'type':'agentMessage','id':'final','phase':'final_answer','text':'Connected reply'}}})`);fs.writeFileSync(fake,transport,{mode:0o700});
+  out({'method':'item/completed','params':{'threadId':thread,'turnId':turn,'item':{'type':'agentMessage','id':'final','phase':'final_answer','text':'Connected reply'}}})`);
+if(attentionOnly){
+ transport=transport.replace("pending_mcp=None","pending_mcp=None\nsidebar_requests=set()");
+ transport=transport.replace(" if not m and v.get('id')==80:",` if not m and v.get('id') in sidebar_requests:
+  sidebar_requests.remove(v['id'])
+  with (root/'sidebar-permission-responses').open('a') as log:
+   log.write(json.dumps({'id':v['id'],'decision':v.get('result',{}).get('decision')})+'\\n')
+  if not sidebar_requests:
+   out({'method':'turn/completed','params':{'threadId':thread,'turn':{'id':turn,'status':'completed'}}})
+  continue
+ if not m and v.get('id')==80:`);
+ transport=transport.replace("  if 'Native command' in text:",`  if text=='Native command attention fixture':
+   for request_id,command in [(90,'write first-fixture.txt'),(91,'write second-fixture.txt')]:
+    sidebar_requests.add(request_id)
+    out({'id':request_id,'method':'item/commandExecution/requestApproval','params':{'threadId':thread,'turnId':turn,'itemId':'command-'+str(request_id),'command':command,'cwd':str(root)}})
+   continue
+  if 'Native command' in text:`);
+}
+fs.writeFileSync(fake,transport,{mode:0o700});
 let host,browser,page;let log='';
 const hostArgs=['serve','--foreground','--project',project,'--state-dir',state,'--history-root',original,'--artifact-store',path.join(root,'tools'),'--codex',fake,'--no-open'];
 async function startHost(){host=spawn(binary,hostArgs,{stdio:['ignore','pipe','pipe']});host.stdout.on('data',b=>log+=b);host.stderr.on('data',b=>log+=b);for(let i=0;i<1200;i++){if(host.exitCode!==null)throw Error(log);if(fs.existsSync(path.join(state,'launcher.json'))){try{const launcher=JSON.parse(fs.readFileSync(path.join(state,'launcher.json')));const response=await fetch('http://'+launcher.host+'/launch',{method:'POST',body:launcher.admin});if(response.ok)return {launcher,link:await response.json()};}catch{}}await wait(50);}throw Error('Host readiness timed out; see sanitized host.log');}
@@ -37,6 +57,298 @@ const errors=[],checks=[],report={binary:hash(fs.readFileSync(binary)),root,chec
    report.browserAssets[file]=hash(fs.readFileSync(asset));
    await page.route(url=>url.origin===base&&url.pathname==='/'+file,route=>route.fulfill({path:asset}));
   }
+ }
+ if(inspectorOnly){
+  await page.addInitScript(()=>localStorage.setItem('deck2.sidebar-pinned','false'));
+  await page.goto(link.url,{waitUntil:'domcontentloaded'});
+  const prompt=page.locator('#prompt');
+  const opener=page.getByRole('button',{name:/^Open projects and sessions/});
+  const inspectorButton=page.getByRole('button',{name:'Open Subagents',exact:true});
+  const inspector=page.getByRole('dialog',{name:'Session inspector',exact:true});
+  const panel=page.getByRole('dialog',{name:'Projects and sessions',exact:true});
+  const draft='Keep this draft while reviewing Subagents';
+  await prompt.waitFor();
+  const {session}=await page.evaluate(async()=>await (await fetch('/api/workspace')).json());
+  await inspectorButton.click();
+  await inspector.getByRole('tab',{name:'Subagents',selected:true}).waitFor();
+  await inspector.getByRole('button',{name:'Dock inspector'}).click();
+  for(const mode of ['docked','floating']){
+   await prompt.fill(draft);
+   await prompt.focus();
+   await page.mouse.move(8,340);
+   await panel.waitFor();
+   assert(await inspector.isVisible(),`the ${mode} inspector stays visible with the left drawer open`);
+   assert(await panel.evaluate(el=>!el.matches(':modal')),'hover leaves the drawer modeless');
+   const title=`Workspace refreshed while pointer is stationary (${mode})`;
+   const renamed=await page.evaluate(async({id,title})=>{
+    const response=await fetch('/api/sessions/'+id+'/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api:7,title})});
+    return response.status;
+   },{id:session,title});
+   assert.equal(renamed,200);
+   await page.getByRole('heading',{name:title,exact:true}).waitFor();
+   assert(await panel.isVisible(),'workspace refresh keeps the drawer open with a stationary pointer');
+   assert(await inspector.isVisible(),'workspace refresh keeps the inspector open');
+   assert(await prompt.evaluate(el=>el===document.activeElement),'hover and refresh retain composer focus');
+   assert.equal(await prompt.inputValue(),draft);
+   await page.mouse.move(100,340,{steps:4});
+   await page.waitForTimeout(250);
+   assert(await panel.isVisible(),'moving from the edge into the drawer keeps it open');
+   await page.mouse.move(600,340);
+   await panel.waitFor({state:'hidden'});
+   if(mode==='docked')await inspector.getByRole('button',{name:'Float inspector'}).click();
+  }
+  checks.push('Docked and floating Subagents coexist with the edge drawer through a live workspace refresh, preserving composer focus and draft');
+
+  await opener.click();
+  await panel.waitFor();
+  assert(await panel.evaluate(el=>el.matches(':modal')),'explicit sidebar opening remains modal with the inspector open');
+  await page.keyboard.press('Escape');
+  await panel.waitFor({state:'hidden'});
+  assert(await inspector.isVisible(),'closing the explicit drawer retains the inspector');
+
+  await page.setViewportSize({width:860,height:640});
+  await inspector.getByRole('button',{name:'Dock inspector'}).waitFor({state:'hidden'});
+  await page.mouse.move(8,340);
+  await page.waitForTimeout(250);
+  assert.equal(await panel.isVisible(),false,'the narrow focus-contained inspector blocks edge hover');
+  await opener.press('Enter');
+  await panel.waitFor();
+  assert(await panel.evaluate(el=>el.matches(':modal')),'keyboard can still open modal navigation in a narrow viewport');
+  await page.keyboard.press('Escape');
+  await panel.waitFor({state:'hidden'});
+  const cdp=await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:1});
+  const openerBox=await opener.boundingBox();
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:openerBox.x+openerBox.width/2,y:openerBox.y+openerBox.height/2}]});
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await panel.waitFor();
+  assert(await panel.evaluate(el=>el.matches(':modal')),'tapping the opener still opens modal navigation');
+  await cdp.detach();
+  checks.push('Explicit keyboard and touch opening stay modal and the narrow inspector retains hover priority');
+  assert.deepEqual(errors,[]);
+  report.passed=true;
+  console.log(JSON.stringify({passed:true,checks}));
+  return;
+ }
+ if(attentionOnly){
+  const api=async(url,body)=>page.evaluate(async({url,body})=>{
+   const response=await fetch(url,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api:7,...body})}:undefined);
+   return {status:response.status,body:await response.json()};
+  },{url,body});
+  await page.goto(link.url,{waitUntil:'domcontentloaded'});
+  const opener=page.getByRole('button',{name:/^Open projects and sessions/});
+  if(!await opener.isVisible()){
+   await page.getByRole('button',{name:'Unpin sidebar',exact:true}).click();
+  }
+  await opener.waitFor();
+  const initialWorkspace=(await api('/api/workspace')).body;
+  const initial=initialWorkspace.sessions.find(s=>s.id===initialWorkspace.session);
+  const initialRoute=new URL(page.url()).search;
+  for(const [url,body] of [
+   ['/api/projects',{root:second,trusted:true}],
+   ['/api/projects/'+secondPid+'/rename',{title:'Other project'}],
+   ['/api/sessions',{id:'attention-background',project_id:secondPid,title:'Background review',members:{lead:{runnerId:'codex',modelId:'gpt-6.1-sol'}},approvals:'relay'}],
+  ]){
+   const result=await api(url,body);assert.equal(result.status,200,JSON.stringify(result.body));
+  }
+  const prompt=page.locator('#prompt');
+  await prompt.fill('Draft in the current session');
+  await prompt.focus();
+  const command=crypto.randomUUID();
+  const accepted=await api('/api/commands',{id:command,session:'attention-background',prompt:'Native command attention fixture',mode:'session_v1',fresh:false,queue:true,attachments:[]});
+  assert.equal(accepted.status,200,JSON.stringify(accepted.body));
+  await page.waitForFunction(async id=>(await(await fetch('/api/workspace')).json()).receipts.find(r=>r.id===id)?.decisions.filter(d=>d.state==='pending').length===2,command);
+  const rail=page.getByRole('region',{name:'Sessions needing attention'});
+  const title=rail.getByRole('button',{name:/^Background review Other project/});
+  await title.waitFor();
+  assert(await prompt.evaluate(el=>el===document.activeElement),'arrival retains composer focus');
+  assert.equal(await prompt.inputValue(),'Draft in the current session');
+  checks.push('Background native permission displays session and project without moving composer focus');
+  const panel=page.getByRole('dialog',{name:'Projects and sessions'});
+  const transcript=page.getByRole('region',{name:'Recorded messages'});
+  for(const [width,height] of [[1440,900],[1440,680],[860,640]]){
+   await page.setViewportSize({width,height});
+   await page.mouse.move(500,height-16);
+   for(const y of [16,Math.floor(height/2),height-16]){
+    await page.mouse.move(10,y);
+    await panel.waitFor();
+    await page.mouse.move(100,y,{steps:4});
+    await page.waitForTimeout(250);
+    assert(await panel.isVisible(),'the drawer stays open after crossing into it');
+    await page.mouse.move(500,y,{steps:4});
+    await panel.waitFor({state:'hidden'});
+   }
+  }
+  await page.setViewportSize({width:1440,height:900});
+  const attentionTarget=await title.boundingBox();
+  await page.mouse.move(attentionTarget.x+1,attentionTarget.y+attentionTarget.height/2);
+  await page.waitForTimeout(250);
+  assert(await title.isVisible(),'hovering the edge of an attention bubble preserves its action');
+  assert.equal(await panel.isVisible(),false);
+  const geometry=await transcript.boundingBox();
+  await page.mouse.move(0,190);
+  await panel.waitFor();
+  assert.equal(await panel.evaluate(el=>el.matches(':modal')),false);
+  await rail.waitFor({state:'hidden'});
+  assert.deepEqual(await transcript.boundingBox(),geometry,'hover overlay preserves chat geometry');
+  assert(await prompt.evaluate(el=>el===document.activeElement),'edge hover preserves composer focus');
+  await page.mouse.move(100,190);
+  await page.waitForTimeout(250);
+  assert(await panel.isVisible(),'moving from edge into drawer retains it');
+  await page.mouse.move(500,190);
+  await panel.waitFor({state:'hidden'});
+  await title.waitFor();
+  await page.mouse.move(0,190);
+  await panel.waitFor();
+  await page.keyboard.press('Escape');
+  await panel.waitFor({state:'hidden'});
+  await page.mouse.move(1,195);
+  await page.waitForTimeout(230);
+  assert.equal(await panel.isVisible(),false,'dismissed hover stays closed while pointer remains at edge');
+  assert(await prompt.evaluate(el=>el===document.activeElement),'hover dismissal preserves composer focus');
+  await page.mouse.move(500,190);
+  const usage=page.getByRole('button',{name:/Subscription usage, remaining quota/});
+  await usage.click();
+  const usagePanel=page.getByRole('region',{name:'Subscription usage',exact:true});
+  await usagePanel.waitFor();
+  await page.mouse.move(10,190);
+  await page.waitForTimeout(250);
+  assert.equal(await panel.isVisible(),false,'an open popover keeps the edge from revealing navigation');
+  await page.keyboard.press('Escape');
+  await usagePanel.waitFor({state:'hidden'});
+  await page.mouse.move(9,200);
+  await panel.waitFor();
+  await page.mouse.move(500,200);
+  await panel.waitFor({state:'hidden'});
+
+  await opener.click();
+  await panel.waitFor();
+  assert(await panel.evaluate(el=>el.matches(':modal')),'explicit opening remains modal');
+  await rail.waitFor({state:'hidden'});
+  await panel.getByRole('button',{name:'Pin sidebar',exact:true}).click();
+  await page.getByRole('navigation',{name:'Projects and sessions'}).waitFor();
+  await rail.waitFor({state:'hidden'});
+  await page.getByRole('button',{name:'Unpin sidebar',exact:true}).click();
+  await title.waitFor();
+  checks.push('Hover crossing, leave and dismissal stay modeless and preserve composer focus, geometry, explicit modal and docking');
+
+  const trigger=rail.getByRole('button',{name:'Review permissions for Background review · Other project'});
+  const review=rail.getByRole('region',{name:'Background review',exact:true});
+  await trigger.press('Enter');
+  await review.getByRole('button',{name:'Close permission review'}).waitFor();
+  const firstReview=review.getByRole('region',{name:'Permission request'}).filter({hasText:'write first-fixture.txt'});
+  const secondReview=review.getByRole('region',{name:'Permission request'}).filter({hasText:'write second-fixture.txt'});
+  await firstReview.waitFor();
+  await secondReview.waitFor();
+  await page.mouse.move(0,190);
+  await page.waitForTimeout(230);
+  assert.equal(await panel.isVisible(),false,'edge hover does not override an open permission review');
+  await page.screenshot({path:path.join(out,'attention-review-desktop.png')});
+  await page.keyboard.press('Escape');
+  await review.waitFor({state:'hidden'});
+  assert(await trigger.evaluate(el=>el===document.activeElement),'Escape returns focus to review trigger');
+  await trigger.click();
+  const receipt=(await api('/api/workspace')).body.receipts.find(r=>r.id===command);
+  const approval=receipt.decisions.find(d=>JSON.stringify(d.presentation.details).includes('first-fixture.txt'));
+  const workspaceUrl=base+'/api/workspace';
+  const holdReceipt=async snapshot=>page.route(workspaceUrl,async route=>{
+   const response=await route.fetch();
+   const body=await response.json();
+   body.receipts=body.receipts.map(r=>r.id===snapshot.id?snapshot:r);
+   await route.fulfill({response,json:body});
+  });
+  const approvalUrl=base+'/api/decisions/'+approval.id+'/responses';
+  const approvals=[];
+  await holdReceipt(receipt);
+  await page.route(approvalUrl,async route=>{
+   approvals.push(route.request().postDataJSON());
+   const response=await route.fetch();
+   if(approvals.length===1)await route.abort();
+   else await route.fulfill({response});
+  });
+  await firstReview.getByRole('button',{name:'Allow once',exact:true}).click();
+  await firstReview.locator('..').getByRole('alert').filter({hasText:'Connection lost'}).waitFor();
+  await firstReview.getByRole('button',{name:'Deny',exact:true}).click();
+  await firstReview.locator('..').getByRole('alert').filter({hasText:'identity is retained'}).waitFor();
+  assert.equal(approvals.length,1,'changing the retained response sends no new authorization');
+  const approvalResponse=page.waitForResponse(r=>r.url()===approvalUrl&&r.request().method()==='POST');
+  await firstReview.getByRole('button',{name:'Allow once',exact:true}).click();
+  const acknowledged=await approvalResponse;
+  assert.equal(acknowledged.status(),200);
+  assert.equal((await acknowledged.json()).session,'attention-background');
+  assert.deepEqual(approvals,[approvals[0],approvals[0]],'retry reuses the exact original response identity');
+  await page.unroute(approvalUrl);
+  await page.unroute(workspaceUrl);
+  await firstReview.waitFor({state:'hidden'});
+  assert(await title.isVisible(),'session stays actionable while another request is pending');
+  await secondReview.getByRole('button',{name:'Deny',exact:true}).click();
+  await title.waitFor({state:'hidden'});
+  assert.equal(await prompt.inputValue(),'Draft in the current session');
+  assert.equal(new URL(page.url()).search,initialRoute);
+  assert.deepEqual(fs.readFileSync(path.join(root,'sidebar-permission-responses'),'utf8').trim().split('\n').map(JSON.parse),[
+   {id:90,decision:'accept'},{id:91,decision:'decline'},
+  ]);
+  checks.push('Keyboard review shows two live requests, prevents changed consent after a lost acknowledgment and delivers each chosen response exactly once');
+
+  const next=crypto.randomUUID();
+  const pending=await api('/api/commands',{id:next,session:'attention-background',prompt:'Native command attention deny fixture',mode:'session_v1',fresh:false,queue:true,attachments:[]});
+  assert.equal(pending.status,200,JSON.stringify(pending.body));
+  await title.waitFor();
+  await title.click();
+  await page.getByRole('heading',{name:'Background review',exact:true}).waitFor();
+  assert.equal(new URL(page.url()).searchParams.get('session'),'attention-background');
+  await opener.click();
+  const originalGroup=panel.locator('.project-group').filter({has:page.getByRole('button',{name:'New session in Deck',exact:true})});
+  const toggle=originalGroup.locator('.project-toggle');
+  if(await toggle.getAttribute('aria-expanded')==='false')await toggle.click();
+  await originalGroup.getByRole('button',{name:initial.title,exact:true}).click();
+  await panel.waitFor({state:'hidden'});
+  await page.getByRole('heading',{name:initial.title,exact:true}).waitFor();
+  assert.equal(await prompt.inputValue(),'Draft in the current session');
+
+  await page.setViewportSize({width:390,height:844});
+  await trigger.click();
+  assert(await review.evaluate(el=>{const r=el.getBoundingClientRect();return r.x>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;}),'review fits mobile viewport');
+  await page.screenshot({path:path.join(out,'attention-review-mobile.png')});
+  await page.context().setOffline(true);
+  await review.getByRole('status').filter({hasText:'Reconnect'}).waitFor();
+  assert.equal(await review.getByRole('button',{name:'Deny',exact:true}).isEnabled(),false);
+  await page.context().setOffline(false);
+  await review.getByRole('status').filter({hasText:'Reconnect'}).waitFor({state:'hidden'});
+  const denyDecision=(await api('/api/workspace')).body.receipts.find(r=>r.id===next).decisions.find(d=>d.state==='pending');
+  const denyResponse=page.waitForResponse(r=>r.url()===base+'/api/decisions/'+denyDecision.id+'/responses'&&r.request().method()==='POST');
+  await review.getByRole('button',{name:'Deny',exact:true}).click();
+  const denied=await denyResponse;
+  assert.equal(denied.status(),200);
+  assert.equal((await denied.json()).resolution.response.type,'deny');
+  await title.waitFor({state:'hidden'});
+  assert.equal(await prompt.inputValue(),'Draft in the current session');
+  assert.equal(new URL(page.url()).searchParams.get('session'),initial.id);
+  assert.equal(fs.existsSync(path.join(root,'native-created.txt')),false);
+  checks.push('Title uses ordinary two-project navigation and mobile denial leaves selected session, draft and native effect intact');
+  const staleId=crypto.randomUUID();
+  const staleInput=await api('/api/commands',{id:staleId,session:'attention-background',prompt:'Native command attention stale fixture',mode:'session_v1',fresh:false,queue:true,attachments:[]});
+  assert.equal(staleInput.status,200,JSON.stringify(staleInput.body));
+  await trigger.click();
+  const staleReceipt=(await api('/api/workspace')).body.receipts.find(r=>r.id===staleId);
+  const staleDecision=staleReceipt.decisions.find(d=>d.state==='pending');
+  const staleUrl='/api/decisions/'+staleDecision.id+'/responses';
+  await holdReceipt(staleReceipt);
+  const competing=await api(staleUrl,{command_id:crypto.randomUUID(),expected_revision:staleDecision.revision,response:{type:'deny'}});
+  assert.equal(competing.status,200);
+  const staleResponse=page.waitForResponse(r=>r.url()===base+staleUrl&&r.request().method()==='POST');
+  await review.getByRole('button',{name:'Allow once',exact:true}).click();
+  assert.equal((await staleResponse).status(),409);
+  await review.getByRole('alert').waitFor();
+  await page.unroute(workspaceUrl);
+  await title.waitFor({state:'hidden'});
+  const actual=(await api('/api/workspace')).body.receipts.find(r=>r.id===staleId).decisions[0];
+  assert.equal(actual.resolution.response.type,'deny');
+  assert.equal(fs.existsSync(path.join(root,'native-created.txt')),false);
+  checks.push('Disconnected actions disable, and a stale allow is rejected by the real host after external denial');
+  assert.deepEqual(errors,[]);
+  report.passed=true;
+  return;
  }
  if(redesignOnly){
   await page.addInitScript(()=>{if(localStorage.getItem('deck.sidebar-collapsed')===null)localStorage.setItem('deck.sidebar-collapsed','true');});
@@ -88,6 +400,14 @@ const errors=[],checks=[],report={binary:hash(fs.readFileSync(binary)),root,chec
   assert.equal(await panel.count(),0,'incoming attention leaves navigation closed');
   assert(await opener.evaluate(el=>el===document.activeElement),'incoming attention preserves focus');
   assert.match(await opener.getAttribute('title'),/2 other sessions need attention/);
+  const bubbles=page.getByRole('region',{name:'Sessions needing attention'});
+  await bubbles.getByRole('button',{name:/^Review deployment Deck Actions pending: 2/}).waitFor();
+  const answerBubble=bubbles.getByRole('button',{name:/^Confirm settings Naf EC Actions pending: 2/});
+  await answerBubble.press('Enter');
+  await page.getByRole('heading',{name:'Confirm settings',exact:true}).waitFor();
+  assert.equal(await answerBubble.getAttribute('aria-current'),'page');
+  await bubbles.getByRole('button',{name:/^Current conversation Deck/}).click();
+  await page.getByRole('heading',{name:'Current conversation',exact:true}).waitFor();
   const full=await geometry();
   assert.equal(full.x,0,'hidden sidebar reserves no rail');
   assert(await opener.evaluate(el=>el.compareDocumentPosition(el.parentElement.querySelector('h1'))&Node.DOCUMENT_POSITION_FOLLOWING));

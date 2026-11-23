@@ -13,6 +13,11 @@ test('newest queued then explicitly undispatched input then current interruption
  expect(escapeInput([running,input('claimed','preparing',{dispatch_ms:1})])?.kind).toBe('interrupt');
  expect(escapeInput([input('unknown','uncertain'),input('recalled','preparing',{recalled_ms:1})])).toBeUndefined();
 });
+test('only user input can be recalled into the draft while an outcome is queued or preparing',()=>{
+ const continuation={task:'task',attempt:'member-attempt',source_seq:1,origin:'previous-root'};
+ expect(escapeInput([input('user'),input('outcome','queued',{continuation})])?.input.id).toBe('user');
+ expect(escapeInput([input('outcome','preparing',{continuation})])).toBeUndefined();
+});
 test('exact acknowledgement restores after intervening edits; mismatched replies preserve draft/images',async()=>{
  const s=storage(),r=input('recalled');let images=0,finish!:(v:unknown)=>void;
  writeDraft(s,key,'before');

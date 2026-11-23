@@ -10,3 +10,13 @@ Follow-up: show time remaining until each subscription window resets in expanded
 
 Verified the countdown follow-up in Chromium with the real QuotaSection, a fixed subscription snapshot, and the browser clock crossing both the last-minute threshold and the reset deadline. The panel kept the reported quota percentage after the deadline. Source and fixed-timestamp checks from Apply Fast integrated (attempt 1, event 29602).
 Published the verified countdown executable atomically after inspecting its embedded assets. The initial full gate had one runner-reselection test failure; the isolated test and entire suite on retry passed, followed by a successful release build. The daemon was not restarted.
+
+Composer footer: dedicate the bottom row inside the message input to compact global Claude and Codex remaining quota on the left and smaller image/dictation/send (or Stop) icons on the right. Keep the editor above the row. Show runner and window labels, including Claude 5h and weekly when available, independent of Lead assignment. Preserve reset countdowns and warning thresholds (10%/5%). Use the existing Deck typography, quiet palette and baseline-ui controls, preserving comfortable hit targets and narrow-screen access. Share authoritative snapshots with sidebar Usage and expose real Claude subscription usage without model inference.
+
+The installed release 8e5ef7f06d9374162b9c2122e56a052dbd2f6ac609a5045b67685f64ba3927cd contains the compact composer footer, provider windows and authenticated idle refresh. Independent packaged-host Chromium fixture passed four viewport checks and provider cooldown isolation in 4.3 s. The broader Stop recall fixture timed out on both this candidate and its baseline.
+
+Composer follow-up: show Codex weekly quota and Claude five-hour and weekly quotas with recognizable, accessible runner logos. Make repeated desktop sidebar pointer entry consistent along the left edge while preserving deliberate overlays, attention actions, keyboard and touch. Browser verification pending.
+
+Accepted footer and hover follow-up from attempt 2. Chromium with candidate assets verified mouse entry and re-entry across three viewports plus quota labels and action clearance down to 320px. Installed executable predates these assets. Publish together with pending Claude permissions and delegation changes after verification.
+
+Removed the sidebar Usage control and its persisted collapse preference reader. ComposerQuota is the workspace entry point for per-runner quota and manual refresh. Typecheck passed. The Chromium composer quota scenario with current web assets and the installed host passed authenticated refresh, cooldown and four viewport widths (32.5 s). Web assets built; joint executable release pending.

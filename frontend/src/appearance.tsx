@@ -1,7 +1,7 @@
 import {focusSidebarOpener} from './drawer-motion';
 import {CodexServerRestart} from './codex-server-restart';
 import {useActiveIndicator,useDisclosureMotion} from './view-motion';
-import {request} from './api';
+import {hostRequest,request} from './api';
 import {ApplicationSettings} from './application-settings';
 import {BrowserDeviceSettings} from './browser-device';
 import {InstallSettings} from './install-settings';
@@ -86,16 +86,50 @@ function ThemePicker({value,onChange,onClose}:{value:Theme;onChange:(value:Theme
     </dialog>;
 }
 
+const claudeStatus = new Map<string, string>([
+ ['not_installed', 'Claude Code was not found on the Deck host’s PATH. Install Claude Code on the host, then check again.'],
+ ['signed_out', 'Claude Code is installed. Sign in with your Claude subscription, then check again.'],
+ ['other_provider_or_billing', 'Claude Code reports a different provider or billing mode. Select your Claude subscription, then check again.'],
+ ['environment_override', 'Deck detected a Claude authentication or provider override in the host environment. Review the environment Deck starts with, then check again.'],
+ ['configuration_override', 'Claude Code project or managed settings are outside the supported Deck profile.'],
+ ['subscription_signed_in', 'Claude Code reports an active Claude subscription sign-in.'],
+ ['unknown', 'Claude Code sign-in could not be verified. Check it in a terminal on the Deck host.'],
+]);
+
 export function AgentSettings({w,connected,projectId}:{w:Workspace;connected:boolean;projectId?:string}){
- const [agents,setAgents]=useState<{name:string;ready:boolean|null}[]>([{name:'Claude',ready:null},{name:'Codex',ready:null}]),[loading,setLoading]=useState(false),[check,setCheck]=useState(0);
+ const [agents,setAgents]=useState<{name:string;ready:boolean|null}[]>([{name:'Codex',ready:null}]),[loading,setLoading]=useState(false),[check,setCheck]=useState(0);
+ const [claude,setClaude]=useState<{status:string;available:boolean}>();
+ useEffect(()=>{
+  if(!connected)return;
+  const controller=new AbortController();
+  setClaude(undefined);
+  void hostRequest('GET','/api/runners/claude/readiness',undefined,controller.signal).then(value=>{
+   const response=value as {status?:unknown;execution_available?:unknown}|null;
+   if(!controller.signal.aborted)setClaude({
+    status:typeof response?.status==='string'&&claudeStatus.has(response.status)?response.status:'unknown',
+    available:response?.execution_available===true,
+   });
+  }).catch(()=>{if(!controller.signal.aborted)setClaude({status:'unknown',available:false});});
+  return()=>controller.abort();
+ },[w.host_id,connected,check]);
  useEffect(()=>{let live=true;if(!connected)return;setLoading(true);void(async()=>{
   let failed=false;try{await request('POST','/api/runners/refresh');}catch{failed=true;}
   try{const d=await request('GET','/api/runners') as {historical:boolean;refresh_error:string|null;observation:{ready:boolean}|null;open_code:{assignment:{runner:string}|null;ready:boolean}};
-   if(!live)return;const rows=new Map<string,boolean|null>([['Claude',null],['Codex',failed||d.refresh_error?false:d.historical?null:d.observation?d.observation.ready===true:null]]);
-   const runner=d.open_code?.assignment?.runner;if(runner&&runner!=='codex')rows.set(runner.charAt(0).toUpperCase()+runner.slice(1),d.open_code.ready===true);setAgents(Array.from(rows,([name,ready])=>({name,ready})));
-  }catch{if(live)setAgents([{name:'Claude',ready:null},{name:'Codex',ready:failed?false:null}]);}
+   if(!live)return;const rows=new Map<string,boolean|null>([['Codex',failed||d.refresh_error?false:d.historical?null:d.observation?d.observation.ready===true:null]]);
+   const runner=d.open_code?.assignment?.runner;if(runner&&runner!=='codex')rows.set(runner==='claude'?'Claude via OpenCode':runner.charAt(0).toUpperCase()+runner.slice(1),d.open_code.ready===true);setAgents(Array.from(rows,([name,ready])=>({name,ready})));
+  }catch{if(live)setAgents([{name:'Codex',ready:failed?false:null}]);}
  })().finally(()=>{if(live)setLoading(false);});return()=>{live=false;};},[w.host_id,connected,check]);
- return <><RtkSettings w={w} connected={connected} projectId={projectId}/><div className="settings-card">{agents.map(a=><div className="settings-row" key={a.name}><h3>{a.name}</h3><span role="status">{!connected?'Not checked yet':loading?'Checking…':a.ready===null?'Not checked yet':a.ready?'Ready':'Unavailable'}</span>{a.name==='Codex'&&<CodexServerRestart connected={connected} onRestart={()=>setCheck(v=>v+1)}/>}</div>)}</div><button type="button" className="quiet" disabled={!connected||loading} onClick={()=>setCheck(v=>v+1)}>Check again</button></>;
+ return <><RtkSettings w={w} connected={connected} projectId={projectId}/><div className="settings-card">
+  <div className="settings-row"><div><h3>Claude Code</h3>
+   <p role="status">{!connected?'Not checked yet':claude===undefined?'Checking…':claudeStatus.get(claude.status)}</p>
+   {connected&&(claude?.status==='signed_out'||claude?.status==='other_provider_or_billing')&&<p>On the Deck host, run <code>claude auth login --claudeai</code>.</p>}
+   {connected&&claude?.status==='unknown'&&<p>On the Deck host, run <code>claude auth status --json</code>.</p>}
+   {connected&&claude?.available&&<p>Choose Claude Code as Lead when creating a session. Deck verifies subscription limits before each turn. In trusted projects with supported settings, Claude loads project instructions, can edit and create workspace files directly, and can request one-time approval for Read, Glob, and Grep.</p>}
+   {connected&&claude?.status==='subscription_signed_in'&&!claude.available&&<p>Execution requires the Deck Claude Agent SDK bridge and Node.js 22 or later on the host PATH.</p>}
+   <p>Quota refresh is unavailable.</p>
+  </div></div>
+  {agents.map(a=><div className="settings-row" key={a.name}><h3>{a.name}</h3><span role="status">{!connected?'Not checked yet':loading?'Checking…':a.ready===null?'Not checked yet':a.ready?'Ready':'Unavailable'}</span>{a.name==='Codex'&&<CodexServerRestart connected={connected} onRestart={()=>setCheck(v=>v+1)}/>}</div>)}
+ </div><button type="button" className="quiet" disabled={!connected||loading||claude===undefined} onClick={()=>setCheck(v=>v+1)}>Check again</button></>;
 }
 
 function notificationDelivery(status:ReturnType<typeof usePushNotifications>['delivery']){
@@ -134,7 +168,7 @@ export function Appearance({installDeck,resources,notifications,dictation,onDict
  },[open]);
  useLayoutEffect(()=>{const node=panel.current;if(!node||!open||!active)return;const media=matchMedia('(prefers-reduced-motion: reduce)');if(!media.matches)gsap.fromTo(node,{opacity:.7,x:5},{opacity:1,x:0,duration:.18,ease:'power2.out',clearProps:'opacity,transform'});return()=>{gsap.killTweensOf(node);gsap.set(node,{clearProps:'opacity,transform'});};},[open,section,active]);
  const choose=(value:SettingsSection)=>{setSection(value);onDictation(value==='Dictation');setDrilled(true);};
- const visible=sections.filter(value=>normalizeSearch(value==='Agents & tools'?'Agents & tools advanced agents runners codex server daemon restart code map capabilities':value==='Application'?'Application system install restart daemon update browser access remember forget device':value).includes(normalizeSearch(query)));
+ const visible=sections.filter(value=>normalizeSearch(value==='Agents & tools'?'Agents & tools advanced agents runners claude code codex server daemon restart code map capabilities':value==='Application'?'Application system install restart daemon update browser access remember forget device':value).includes(normalizeSearch(query)));
  return <dialog ref={dialog} className="settings-modal" aria-labelledby="settings-title" onKeyDown={e=>{if(e.key!=='Tab'||(e.target as HTMLElement).closest('dialog')!==dialog.current)return;const controls=Array.from(e.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])')).filter(el=>el.getClientRects().length>0&&!el.closest('[inert]'));if(!controls.length){e.preventDefault();return;}const first=controls[0]!,last=controls[controls.length-1]!;if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}} onCancel={e=>{e.preventDefault();onBack();}} onClick={e=>{if(e.target!==e.currentTarget)return;const b=e.currentTarget.getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)onBack();}}>
   <span id="settings-title" className="sr-only">Settings</span><div className="settings-shell"><nav ref={settingsNav} className="settings-nav" aria-label="Settings sections" hidden={narrow&&drilled}><h1>Settings</h1><input type="search" aria-label="Search settings" placeholder="Search settings" value={query} onChange={e=>setQuery(e.currentTarget.value)}/>{visible.map(value=><button key={value} type="button" className="quiet" aria-pressed={active&&section===value} onClick={()=>choose(value)}><SettingsIcon section={value}/>{value}</button>)}{!visible.length&&<p role="status">No sections match</p>}</nav>
   <div className="settings-main" hidden={narrow&&!drilled}><header className="settings-modal-header">{narrow&&<button type="button" className="quiet" aria-label="Back to settings" onClick={()=>setDrilled(false)}>←</button>}<span>Settings <span aria-hidden="true">/</span> <strong>{section}</strong></span><button type="button" className="quiet settings-close" aria-label="Close settings" onClick={onBack}>×</button></header>

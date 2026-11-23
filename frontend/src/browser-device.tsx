@@ -38,7 +38,7 @@ function useBrowserDevice(){
  return {status,pending,error,change};
 }
 
-export function BrowserDeviceOffer(){
+export function BrowserDeviceOffer({connected}:{connected:boolean}){
  const {status,pending,error,change}=useBrowserDevice();
  const [dismissed,setDismissed]=useState(false);
  if(dismissed||!status?.available||status.remembered)return null;
@@ -48,7 +48,7 @@ export function BrowserDeviceOffer(){
   </div>
   <div className="browser-device-actions">
    <button type="button" className="quiet" disabled={pending} onClick={()=>setDismissed(true)}>Use this session only</button>
-   <button type="button" disabled={pending} onClick={()=>void change(true)}>Remember this device</button>
+   <button type="button" disabled={pending||!connected} onClick={()=>void change(true)}>Remember this device</button>
   </div>
  </aside>;
 }

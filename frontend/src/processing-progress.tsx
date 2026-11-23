@@ -3,16 +3,25 @@ import {gsap} from 'gsap';
 import {active,type Receipt} from './api';
 export function processingState(rows:Receipt[],connected:boolean,sending:boolean,unconfirmed=false){
  if(!connected)return {phase:'connection',label:'Reconnecting to Lead…'};
- const r=rows.find(active)??rows.find(r=>r.phase==='queued');
+ const queued=rows.find(r=>r.phase==='queued'&&!r.continuation);
+ const r=rows.find(active)??rows.find(r=>r.phase==='uncertain')??queued??rows.find(r=>r.phase==='queued');
  if(sending)return {phase:'sending',label:'Sending…'};
  if(!r)return unconfirmed?{phase:'waiting',label:'Checking delivery…'}:{phase:'idle',label:''};
  const decisions=r.decisions.filter(d=>!d.task||d.task==='lead').filter(d=>['pending','responded','dispatching','uncertain'].includes(d.state));
  if(decisions.some(d=>d.questions.length))return {phase:'question',label:'Waiting for your answer'};
  if(decisions.length)return {phase:'approval',label:'Waiting for your approval'};
  if(r.context&&typeof r.context==='object'&&'compacting' in r.context&&r.context.compacting)return {phase:'compacting',label:'Compacting context…'};
- if(r.phase==='queued')return {phase:'waiting',label:'Message queued'};
- if(['accepted','preparing','dispatching'].includes(r.phase))return {phase:'preparing',label:'Starting Lead…'};
+ if(r.phase==='uncertain')return {phase:'waiting',label:'Waiting for previous Lead turn to settle'};
+ if(r.phase==='queued'){
+  if(r.detail.startsWith('Waiting for subagent '))return {phase:'waiting',label:'Waiting for a subagent to settle'};
+  return {phase:'waiting',label:r.continuation?'Subagent result queued for Lead':'Message queued'};
+ }
  if(r.phase==='cancelling')return {phase:'waiting',label:'Stopping Lead…'};
+ if(r.continuation){
+  if(queued)return {phase:'waiting',label:'Message queued while Lead reviews a subagent result'};
+  if(r.phase==='running')return {phase:'working',label:'Reviewing a subagent result…'};
+ }
+ if(['accepted','preparing','dispatching'].includes(r.phase))return {phase:'preparing',label:'Starting Lead…'};
  return {phase:'working',label:'Working…'};
 }
 export function ProcessingProgress({rows,connected,sending,unconfirmed,children}:{rows:Receipt[];connected:boolean;sending:boolean;unconfirmed?:boolean;children:React.ReactNode}){

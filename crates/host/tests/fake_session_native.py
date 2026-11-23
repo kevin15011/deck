@@ -27,6 +27,12 @@ for line in sys.stdin:
    effect.write_text((effect.read_text() if effect.exists() else '')+'allowed\n')
   out({'method':'turn/completed','params':{'threadId':thread,'turn':{'id':turn,'status':'completed'}}})
   continue
+ if not m and v.get('id') in (90,91):
+  with (root/'cargo-replies').open('a') as f:f.write(json.dumps({'id':v['id'],'decision':v.get('result',{}).get('decision')})+'\n')
+  if v['id']==90:
+   out({'id':91,'method':'item/commandExecution/requestApproval','params':{'threadId':thread,'turnId':turn,'itemId':'cargo-two','command':'cargo test -p two --lib','cwd':str(root/'project'),'proposedExecpolicyAmendment':['cargo','test']}})
+  else:out({'method':'turn/completed','params':{'threadId':thread,'turn':{'id':turn,'status':'completed'}}})
+  continue
  if not m and v.get('id')==81:
   assert v.get('result',{}).get('action')=='accept'
   with (root/'mcp-approved').open('a') as f:f.write(json.dumps(pending_mcp)+'\n')
@@ -78,9 +84,12 @@ for line in sys.stdin:
    continue
   loaded_threads.add(thread)
   with (root/'wire').open('a') as f:f.write(json.dumps({'method':m,'params':p})+'\n')
-  assert p['approvalPolicy'] in ['never','on-request'] and p['permissions'] in [':read-only',':workspace',':danger-full-access']
   permissions=p['permissions'];policy=p['approvalPolicy']
-  if permissions!=':read-only':assert policy=='never'
+  assert policy in {
+   ':read-only': ('never', 'on-request'),
+   ':workspace': ('never', 'on-request'),
+   ':danger-full-access': ('never',),
+  }.get(permissions, ()), (permissions, policy)
   with (root/'native-protocol').open('a') as f:f.write(json.dumps({'method':m,'permissions':permissions,'approvalPolicy':policy,'threadId':p.get('threadId')})+'\n')
   assert p['model'] in ['gpt-6.1-sol','recorded-worker']
   assert len(p['developerInstructions'])>100
@@ -157,6 +166,12 @@ for line in sys.stdin:
     assert 'error' in denied,denied
    denied=mcp('tools/call',{'name':'deck_task_result','arguments':{}})
    assert denied['result']['isError'],denied
+  if member and (root/'parallel-fixture').exists():
+   (root/'codex-member-running').write_text(str(os.getpid()))
+   end=time.monotonic()+10
+   while not (root/'release-parallel').exists():
+    assert time.monotonic()<end,'release-parallel'
+    time.sleep(.01)
   text='\n'.join(x.get('text','') for x in p['input'])
   # Route only the current admitted input. Historical evidence must never
   # cause this transport fixture to replay an earlier scripted delegation.
@@ -230,6 +245,21 @@ for line in sys.stdin:
   if 'Host task outcome' in text and (root/'coordination-task').exists():
    task=(root/'coordination-task').read_text();report=tool('deck_task_result',{'taskId':task,'attempt':1})
    tool('deck_task_integrate',{'taskId':task,'attempt':1,'commandId':'coordination-integrate','state':'integrated','note':'Exact report reviewed','evidenceSeqs':report['evidenceSeqs'],'findingResolutions':[{'taskId':task,'findingId':'FIXTURE-Q1','state':'resolved','reason':'Lead inspected exact fixture report','evidenceSeqs':report['evidenceSeqs']}]})
+  if text.startswith('Direct Codex workspace edits'):
+   _,mode=text.rsplit(' ',1)
+   profile={ 'relay':':workspace', 'yolo':':danger-full-access', 'untrusted':':read-only' }[mode]
+   assert permissions==profile,(permissions,profile)
+   assert policy==('never' if mode=='yolo' else 'on-request'),policy
+   if mode!='untrusted':
+    for index in range(18):
+     path=pathlib.Path(p['environments'][0]['cwd'])/f'direct-{index}.txt'
+     item={'type':'fileChange','id':f'workspace-edit-{index}','changes':[{'path':str(path),'kind':{'type':'add'},'diff':'+direct\n'}],'status':'inProgress'}
+     out({'method':'item/started','params':{'threadId':thread,'turnId':turn,'item':item}})
+     path.write_text(mode+'\n')
+     item['status']='completed'
+     out({'method':'item/completed','params':{'threadId':thread,'turnId':turn,'item':item}})
+   out({'method':'turn/completed','params':{'threadId':thread,'turn':{'id':turn,'status':'completed'}}})
+   continue
   if 'Synthetic MCP ' in text:
    second='Synthetic MCP second' in text
    pending_mcp={'recipient':'beta@example.test' if second else 'alpha@example.test','body':'Second synthetic payload' if second else 'First synthetic payload','token':'fixture-secret-never-display'}
@@ -250,14 +280,41 @@ for line in sys.stdin:
      params.pop('toolName')
    out({'id':81,'method':'mcpServer/elicitation/request','params':params})
    continue
+  if not member and text=='Drive Lead tools':
+   # Executes the Lead tool calls a test writes as drive-N.json.
+   (root/'drive-lead').touch()
+   count,end=0,time.monotonic()+90
+   while not (root/'drive-stop').exists():
+    assert time.monotonic()<end,'drive-stop'
+    request=root/f'drive-{count}.json'
+    if request.exists():
+     reply=mcp('tools/call',json.loads(request.read_text()))
+     (root/f'drive-{count}.tmp').write_text(json.dumps(reply))
+     (root/f'drive-{count}.tmp').rename(root/f'drive-{count}.out')
+     count+=1
+    time.sleep(.01)
   if 'Delegate freshness member' in text:
    delegated=tool('deck_delegate',{'agent':'apply-deep','task':'Fresh graph offline_handler'})
    (root/'delegated-task').write_text(delegated['taskId'])
-  if 'Delegate fixture' in text:
+  if (root/'resume-fixture').exists() and text.startswith('member-resume-'):
+   step=text.removeprefix('member-resume-')
+   args={'agent':'apply-fast','task':'continuity-'+step}
+   if step!='seed': args['continueTaskId']=(root/'resume-task').read_text()
+   if step=='fresh': args['continuity']='fresh'
+   task=tool('deck_delegate',args)
+   (root/'resume-task').write_text(task['taskId'])
+  if 'Delegate fixture parallel' in text:
+   ids=[]
+   for agent in ['investigate','quality','apply-deep']:
+    delegated=mcp('tools/call',{'name':'deck_delegate','arguments':{'agent':agent,'task':'Parallel fixture '+agent}})['result']
+    assert not delegated['isError'],delegated
+    ids.append(json.loads(delegated['content'][0]['text'])['taskId'])
+   (root/'parallel-tasks').write_text('\n'.join(ids))
+  elif 'Delegate fixture' in text:
    delegated=mcp('tools/call',{'name':'deck_delegate','arguments':{'agent':next((name for name in ['apply-deep','apply-fast','architect','setup','quality'] if ('Delegate fixture '+name+' ') in text), 'investigate'),'task':'Return a bounded fixture member report.'}})['result']
    assert not delegated['isError'],delegated
    (root/'delegated-task').write_text(json.loads(delegated['content'][0]['text'])['taskId'])
-  if not (root/'waiting-fixture').exists() and not (root/'coordination-task').exists() and ('Retrieve fixture' in text or 'Host task outcome' in text):
+  if not (root/'drive-lead').exists() and not (root/'resume-fixture').exists() and not (root/'waiting-fixture').exists() and not (root/'coordination-task').exists() and ('Retrieve fixture' in text or 'Host task outcome' in text):
    task=(root/'delegated-task').read_text()
    attempt=2 if (root/'mixed-continuation').exists() and (root/'mixed-continuation').read_text()==task else 1
    retrieved=mcp('tools/call',{'name':'deck_task_result','arguments':{'taskId':task,'attempt':attempt}})['result']
@@ -265,6 +322,9 @@ for line in sys.stdin:
    retrieved=json.loads(retrieved['content'][0]['text'])
    integrated=mcp('tools/call',{'name':'deck_task_integrate','arguments':{'taskId':task,'attempt':attempt,'commandId':'fixture-integration-command-'+task+('-'+str(attempt) if attempt>1 else ''),'state':'integrated','note':'Fixture report inspected','evidenceSeqs':retrieved['evidenceSeqs']}})['result']
    assert not integrated['isError'],integrated
+  if text=='Native cargo pair':
+   out({'id':90,'method':'item/commandExecution/requestApproval','params':{'threadId':thread,'turnId':turn,'itemId':'cargo-one','command':'cargo test -p one','cwd':str(root/'project'),'proposedExecpolicyAmendment':['cargo','test']}})
+   continue
   if 'Native command' in text:
    out({'id':80,'method':'item/commandExecution/requestApproval','params':{'threadId':thread,'turnId':turn,'itemId':'command-item','command':'write native-created.txt','cwd':str(root)}})
    continue

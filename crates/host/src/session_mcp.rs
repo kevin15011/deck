@@ -17,6 +17,8 @@ struct Scope {
     attempt: String,
     session: String,
     member_task: Option<String>,
+    delegate_roles: Option<Vec<String>>,
+    git_project: Option<deck2_shared::ProjectBinding>,
     role: std::sync::Mutex<Option<crate::session_roles::Role>>,
     codebase: crate::session_freshness::Slot,
 }
@@ -69,6 +71,19 @@ impl Bridge {
         }
         true
     }
+    pub(crate) fn inventory(&self) -> Value {
+        scoped_tools(&self.scope)
+    }
+    pub(crate) async fn approve_claude_bash(
+        &self,
+        app: &App,
+        project: &deck2_shared::ProjectBinding,
+        args: &Value,
+    ) -> bool {
+        relay_approval(&self.scope, app, args, Some(project))
+            .await
+            .is_ok_and(|reply| reply["behavior"] == "allow")
+    }
     pub fn set_role(&self, role: crate::session_roles::Role) {
         *self.scope.role.lock().unwrap() = Some(role);
     }
@@ -77,6 +92,18 @@ impl Bridge {
         if receipt.mode != Mode::SessionV1 {
             return Err("Session MCP requires connected admission".into());
         }
+        let delegate_roles = receipt
+            .configuration
+            .as_ref()
+            .and_then(|snapshot| snapshot.session_contract.as_ref())
+            .filter(|contract| {
+                contract.members.get("lead").is_some_and(|lead| lead.runner_id == crate::claude::RUNNER)
+            })
+            .map(|contract| {
+                crate::session_contract::configured_member_ids(contract)
+                    .map(str::to_owned)
+                    .collect()
+            });
         let scope = Arc::new(Scope {
             app: Arc::downgrade(&app.inner),
             token: crate::server::secret(),
@@ -84,20 +111,35 @@ impl Bridge {
             attempt: receipt.attempt,
             session: receipt.session,
             member_task: None,
+            delegate_roles,
+            git_project: None,
             role: std::sync::Mutex::new(None),
             codebase: Default::default(),
         });
         Self::bind(scope).await
     }
     pub async fn start_member(app: &App, task: &str, attempt: &str) -> Result<Self, String> {
-        let t = app.store.lock().unwrap().task(task)?;
+        let (t, root, git_project) = {
+            let store = app.store.lock().unwrap();
+            let t = store.task(task)?;
+            let a = t.attempts.iter().find(|a| a.id == attempt).ok_or("Member attempt missing")?;
+            let project = a.configuration.as_ref()
+                .filter(|snapshot| snapshot.native.as_ref().is_some_and(|native| native.runner == deck2_shared::NativeRunner::Claude))
+                .map(|snapshot| &snapshot.project)
+                .filter(|project| store.trusted_project(&project.root).unwrap_or(false))
+                .cloned();
+            let root = t.authority_root(a).to_owned();
+            (t, root, project)
+        };
         let scope = Arc::new(Scope {
             app: Arc::downgrade(&app.inner),
             token: crate::server::secret(),
-            root: t.authority_root(t.attempts.iter().find(|a|a.id==attempt).ok_or("Member attempt missing")?).into(),
+            root,
             attempt: attempt.into(),
             session: t.session,
             member_task: Some(task.into()),
+            delegate_roles: None,
+            git_project,
             role: std::sync::Mutex::new(None),
             codebase: Default::default(),
         });
@@ -151,8 +193,8 @@ pub(crate) fn tools(member: bool) -> Value {
     ]);
     if !member {
         tools.as_array_mut().unwrap().extend([
-  json!({"name":"deck_delegate","description":"Delegate to a configured member. continueTaskId preserves logical task and recorded owner.","inputSchema":{"type":"object","properties":{"agent":{"type":"string"},"task":{"type":"string"},"continueTaskId":{"type":"string"},"acceptance":{"type":"object"}},"required":["agent","task"]}}),
-  json!({"name":"deck_task_guide","description":"Send in-scope Lead guidance to the exact live Codex member turn. Use deck_task_list for its identities. Retry an interrupted call only with the same commandId and arguments. An unknown delivery never authorizes replay.","inputSchema":{"type":"object","additionalProperties":false,"required":["taskId","attemptId","threadId","expectedTurnId","commandId","text"],"properties":{"taskId":{"type":"string"},"attemptId":{"type":"string"},"threadId":{"type":"string"},"expectedTurnId":{"type":"string"},"commandId":{"type":"string","format":"uuid"},"text":{"type":"string","minLength":1,"maxLength":16384}}}}),
+  json!({"name":"deck_delegate","description":"Start an ordinary delegation with agent and task. For continuation, supply continueTaskId and the recorded owner. Omit commandId unless submitting a dependency replan.","inputSchema":{"type":"object","properties":{"agent":{"type":"string"},"task":{"type":"string"},"continueTaskId":{"type":"string"},"continuity":{"enum":["auto","fresh","native"],"description":"Defaults to automatic continuity. Use fresh to start a new transcript."},"continuityJustification":{"type":"string","maxLength":512,"description":"Required for an explicit native override, which is subject to launch-time policy."},"acceptance":{"type":"object"}},"required":["agent","task"],"dependentRequired":{"replan":["commandId","continueTaskId"],"commandId":["replan"]}}}),
+  json!({"name":"deck_task_guide","description":"Send in-scope Lead guidance to the exact live Codex or Claude member turn. Use deck_task_list for its identities; the attempt must show guidance_open. Accepted means the member's native session acknowledged that input; guidance never changes the member's authority. Retry an interrupted call only with the same commandId and arguments. An unknown delivery never authorizes replay.","inputSchema":{"type":"object","additionalProperties":false,"required":["taskId","attemptId","threadId","expectedTurnId","commandId","text"],"properties":{"taskId":{"type":"string"},"attemptId":{"type":"string"},"threadId":{"type":"string"},"expectedTurnId":{"type":"string"},"commandId":{"type":"string","format":"uuid"},"text":{"type":"string","minLength":1,"maxLength":16384}}}}),
   json!({"name":"deck_task_cancel","description":"Cancel a delegated task.","inputSchema":{"type":"object","properties":{"taskId":{"type":"string"}},"required":["taskId"]}}),
   json!({"name":"deck_task_integrate","description":"Record Lead review of an exact retrieved terminal report. Adoption is not independent verification.","inputSchema":{"type":"object","properties":{"taskId":{"type":"string"},"attempt":{"type":"integer","minimum":1},"commandId":{"type":"string"},"state":{"enum":["integrated","blocked","discarded"]},"note":{"type":"string"},"evidenceSeqs":{"type":"array","items":{"type":"integer"}}},"required":["taskId","attempt","commandId","state","note","evidenceSeqs"]}})
  ]);
@@ -178,6 +220,8 @@ pub(crate) fn tools(member: bool) -> Value {
             .as_object_mut()
             .unwrap()
             .extend(dependencies.as_object().unwrap().clone());
+        delegate["inputSchema"]["properties"]["commandId"]["description"] =
+            json!("Stable identity required only for replan. Omit for ordinary delegation and continuation. For a replan retry, reuse the same ID and arguments.");
     }
     if !member {
         let properties: Value =
@@ -226,6 +270,42 @@ pub(crate) fn tools(member: bool) -> Value {
     }
     tools
 }
+fn scoped_tools(scope: &Scope) -> Value {
+    let mut inventory = tools(scope.member_task.is_some());
+    if let Some(roles) = &scope.delegate_roles
+        && let Some(delegate) = inventory
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|tool| tool["name"] == "deck_delegate")
+    {
+        let schema = &mut delegate["inputSchema"];
+        schema["properties"]["agent"]["description"] = json!(if roles.is_empty() {
+            "No members are assigned for new tasks. For continuation, use the recorded owner.".into()
+        } else {
+            format!("Choose directly from the configured role IDs for new tasks ({}) and use the recorded owner for continuations.", roles.join(", "))
+        });
+        schema["properties"]["agent"]["examples"] = json!(roles);
+        let new_owner = if roles.is_empty() {
+            json!(false)
+        } else {
+            json!({"enum": roles})
+        };
+        schema["allOf"] = json!([{
+            "if":{"not":{"required":["continueTaskId"]}},
+            "then":{"properties":{"agent":new_owner}}
+        }]);
+    }
+    if scope.git_project.is_some() {
+        inventory.as_array_mut().unwrap().push(json!({
+            "name":"deck_git_inspect",
+            "description":"Inspect the current Git state of your assigned worktree. Returns branch and status including untracked files, staged and unstaged diff statistics, and up to ten recent HEAD commits. Call again to observe new changes.",
+            "inputSchema":{"type":"object","properties":{},"additionalProperties":false},
+            "annotations":{"readOnlyHint":true,"destructiveHint":false,"openWorldHint":false}
+        }));
+    }
+    inventory
+}
 fn live(s: &Scope, store: &crate::Store) -> bool {
     if store.execution_project(&s.session).is_err() {return false;}
     if s.role
@@ -251,6 +331,48 @@ fn live(s: &Scope, store: &crate::Store) -> bool {
         store.task(task).is_ok_and(|t|t.session==s.session && t.attempts.iter().any(|a|a.id==s.attempt && a.phase.active() && !a.cancel_requested && t.authority_root(a)==s.root))
     } else {r.attempt==s.attempt && r.phase.active()}
 
+}
+
+async fn inspect_git(s: &Arc<Scope>, app: &App, args: &Value) -> Result<Value, String> {
+    if !args.as_object().is_some_and(|v| v.is_empty()) {
+        return Err("Git inspection takes no arguments and uses the assigned worktree".into());
+    }
+    let project = s.git_project.clone().ok_or("Git inspection unavailable")?;
+    let task = s.member_task.clone().ok_or("Member authority required")?;
+    app.check_original_context(&s.session)?;
+    let permit = app
+        .git_review
+        .gate
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| "Git inspection busy; retry shortly")?;
+    let scope = s.clone();
+    let app = app.clone();
+    tokio::task::spawn_blocking(move || {
+        let authority = || {
+            let store = app.store.lock().map_err(|_| "State lock failed")?;
+            if !app.persistence_available()
+                || app
+                    .shutdown_requested
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                || !live(&scope, &store)
+                || store.execution_project(&scope.session)? != project
+                || !store.trusted_project(&project.root)?
+            {
+                return Err("Git inspection authority revoked".into());
+            }
+            let t = store.task(&task)?;
+            let a = t
+                .attempts
+                .iter()
+                .find(|a| a.id == scope.attempt)
+                .ok_or("Member attempt missing")?;
+            crate::session_tasks::validate_authority(&store, &t, a)
+        };
+        crate::git_review::member_inspection(&project, Arc::new(permit), &authority)
+    })
+    .await
+    .map_err(|_| "Git inspection did not complete")?
 }
 
 async fn handle(
@@ -326,10 +448,10 @@ async fn handle(
             json!({"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"deck-session","version":"1"}}),
         ),
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({"tools":tools(s.member_task.is_some())})),
+        "tools/list" => Ok(json!({"tools":scoped_tools(&s)})),
         "tools/call" => {
             let name = v["params"]["name"].as_str().unwrap_or("");
-            if !tools(s.member_task.is_some())
+            if !scoped_tools(&s)
                 .as_array()
                 .unwrap()
                 .iter()
@@ -340,6 +462,8 @@ async fn handle(
                 let args = &v["params"]["arguments"];
                 let result = if name == "deck_task_wait" {
                     wait(&s, &app, args).await
+                } else if name == "deck_git_inspect" {
+                    inspect_git(&s, &app, args).await
                 } else if name == "deck_task_guide" {
                     let admission = (|| {
                         let history = app.history.lock().map_err(|_| "Original history unavailable")?;
@@ -594,6 +718,15 @@ impl Drop for PendingRelay {
     }
 }
 async fn approve(s: &Scope, app: &App, args: &Value) -> Result<Value, String> {
+    relay_approval(s, app, args, None).await
+}
+
+async fn relay_approval(
+    s: &Scope,
+    app: &App,
+    args: &Value,
+    bash_project: Option<&deck2_shared::ProjectBinding>,
+) -> Result<Value, String> {
     use deck2_shared::{DecisionResponse, DecisionState};
     if !crate::session_decisions::keys(args, &["tool_name", "input", "tool_use_id"])
         || !crate::session_decisions::text(&args["tool_name"], 128)
@@ -605,9 +738,15 @@ async fn approve(s: &Scope, app: &App, args: &Value) -> Result<Value, String> {
     {
         return Err("Invalid permission relay request".into());
     }
+    let live = |store: &crate::Store| {
+        live(s, store) && bash_project.is_none_or(|project| {
+            store.execution_project(&s.session).is_ok_and(|current| current == *project)
+                && store.trusted_project(&project.root).unwrap_or(false)
+        })
+    };
     let id = {
         let mut store = app.store.lock().map_err(|_| "State lock failed")?;
-        if !live(s, &store) {
+        if !live(&store) {
             return Err("Relay authority revoked".into());
         }
         let mut root = store.get(&s.root)?.ok_or("Origin missing")?;
@@ -628,7 +767,16 @@ async fn approve(s: &Scope, app: &App, args: &Value) -> Result<Value, String> {
         let thread = caller.thread.as_deref().ok_or("Native thread missing")?;
         let turn = caller.turn.as_deref().ok_or("Native turn missing")?;
         let request = uuid::Uuid::new_v4().to_string();
-        let value = json!({"id":request,"method":"mcpServer/elicitation/request","params":{"threadId":thread,"turnId":turn,"serverName":"deck-relay","toolName":args["tool_name"],"mode":"form","requestedSchema":{"type":"object","properties":{}},"_meta":{"codex_approval_kind":"mcp_tool_call","tool_params":args["input"]},"toolUseId":args["tool_use_id"]}});
+        let item = args["tool_use_id"].as_str().unwrap_or_default();
+        if bash_project.is_some() && caller.decisions.iter().any(|d| {
+            d.attempt == caller.attempt && d.generation == caller.generation && d.item == item
+        }) {
+            return Err("Duplicate Claude Bash request".into());
+        }
+        let mut value = json!({"id":request,"method":"mcpServer/elicitation/request","params":{"threadId":thread,"turnId":turn,"serverName":"deck-relay","toolName":args["tool_name"],"mode":"form","requestedSchema":{"type":"object","properties":{}},"_meta":{"codex_approval_kind":"mcp_tool_call","tool_params":args["input"]},"toolUseId":args["tool_use_id"]}});
+        if bash_project.is_some() {
+            value["params"]["itemId"] = json!(item);
+        }
         let mut d = crate::session_contract::native_decision(
             &caller,
             &caller.generation,
@@ -643,8 +791,11 @@ async fn approve(s: &Scope, app: &App, args: &Value) -> Result<Value, String> {
             "Permission request: {}",
             args["tool_name"].as_str().unwrap()
         );
-        d.native.as_mut().unwrap().identity =
-            Some(json!({"relay":args["tool_name"],"input":args["input"]}).to_string());
+        // Bash is remembered only when the host-validated command may be reused;
+        // protected Git operations keep requiring fresh confirmation.
+        d.native.as_mut().unwrap().identity = (bash_project.is_none()
+            || args["input"]["command"].as_str().is_some_and(crate::permission_bounds::bash_reusable))
+        .then(|| json!({"relay":args["tool_name"],"input":args["input"]}).to_string());
         if args["tool_name"] == "AskUserQuestion" {
             let questions = args["input"]["questions"]
                 .as_array()
@@ -709,7 +860,7 @@ async fn approve(s: &Scope, app: &App, args: &Value) -> Result<Value, String> {
     loop {
         {
             let mut store = app.store.lock().map_err(|_| "State lock failed")?;
-            if !live(s, &store)
+            if !live(&store)
                 || !app.persistence_available()
                 || app
                     .shutdown_requested

@@ -35,7 +35,7 @@ export function permissionProvenance(v:unknown):PermissionProvenance|undefined {
  if(v.kind==='reused_grant'&&text(v.source_decision))return {kind:'reused_grant',source_decision:v.source_decision as string};
  return undefined;
 }
-export interface PermissionOption {id:string;kind:'exact'|'file_set'|'folder'|'capability_subset'|'argv_prefix';category:string;label:string;description:string;actor:string;lifetime:'canonical_session';survives_host_restart:true;revocation:'deck_session'}
+export interface PermissionOption {id:string;kind:'exact'|'file_set'|'folder'|'capability_subset'|'argv_prefix'|'workspace_grep'|'workspace_read'|'bash_command'|'bash_prefix';category:string;label:string;description:string;actor:string;lifetime:'canonical_session';survives_host_restart:true;revocation:'deck_session'}
 export interface PermissionPolicy {version:1;options:PermissionOption[];selected_option_id:string|null;provenance:PermissionProvenance|null;unsupported:string[]}
 const scopeText=(v:unknown,max=4096):v is string=>typeof v==='string'&&v.trim().length>0&&v.length<=max&&!/[\x00-\x1f\x7f-\x9f]/.test(v)&&redactText(v,65536)===v;
 // Validate the complete host disclosure; never shorten or derive bounds locally.
@@ -44,7 +44,7 @@ export function permissionPolicy(v:unknown):PermissionPolicy|undefined {
  const ids=new Set<string>();let actor:unknown;
  for(const o of v.options){
   if(!object(o)||Object.keys(o).some(k=>!['id','kind','category','label','description','actor','lifetime','survives_host_restart','revocation'].includes(k))||!scopeText(o.id,512)||ids.has(o.id)||!scopeText(o.label,256)||!scopeText(o.description)||!scopeText(o.actor,64)||!/^[-a-z0-9]+$/.test(o.actor)||o.lifetime!=='canonical_session'||o.survives_host_restart!==true||o.revocation!=='deck_session')return undefined;
-  const categories:Record<string,string[]>= {exact:['command','files','permissions','mcp','relay','historical_delegation_role'],file_set:['files'],folder:['files'],capability_subset:['permissions'],argv_prefix:['command']};
+  const categories:Record<string,string[]>= {exact:['command','files','permissions','mcp','relay','claude_workspace_read','historical_delegation_role'],file_set:['files'],folder:['files'],capability_subset:['permissions'],argv_prefix:['command'],workspace_grep:['claude_workspace_read'],workspace_read:['claude_workspace_read'],bash_command:['relay'],bash_prefix:['relay']};
   if(typeof o.kind!=='string'||!Object.hasOwn(categories,o.kind)||!categories[o.kind].includes(o.category as string))return undefined;
   if(actor!==undefined&&actor!==o.actor||v.options[0].category!==o.category)return undefined;
   actor=o.actor;ids.add(o.id);

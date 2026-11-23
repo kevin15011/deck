@@ -30,8 +30,30 @@ pub(crate) fn input(v: &Value) -> bool {
             })
         })
 }
+fn automatic_predecessor_issue(
+    p: &Value,
+    now: &Value,
+    policy: &Value,
+    allow_adopted: bool,
+) -> Option<&'static str> {
+    if p["state"] != "completed" && p["stopOrigin"] != "user" && p["stopOrigin"] != "lead" {
+        Some("non-operator-predecessor")
+    } else if !allow_adopted && p["integrated"] == true {
+        Some("latest-attempt-integrated")
+    } else if p["endedAt"].as_u64().zip(now.as_u64()).is_none_or(|(at, now)| {
+        now < at || now - at >= policy["autoNativeMaxAgeMs"].as_u64().unwrap_or(0)
+    }) {
+        Some("predecessor-age")
+    } else {
+        None
+    }
+}
+
 pub(crate) fn select(x: &Value) -> Value {
     let request = x["request"].as_str().unwrap_or("auto");
+    let justified = x["justification"]
+        .as_str()
+        .is_some_and(|s| !s.trim().is_empty() && s.len() <= 512);
     let mut v = json!({"selectedAt":x["now"],"policy":{"mode":"policy","autoNativeMaxAgeMs":300000,"autoNativeMaxInputTokens":80000,"nativeHardCapInputTokens":160000,"handoffMaxBytes":32768},"override":if request=="native" {"refused"} else {"none"},"continuity":"reseeded"});
     if let Some(p) = x.get("policy").and_then(Value::as_object) {
         for (k, b) in p {
@@ -41,6 +63,9 @@ pub(crate) fn select(x: &Value) -> Value {
     let p = &x["predecessor"];
     let b = &x["bound"];
     let i = &p["input"];
+    let completed_claude_member = x["runnerId"] == "claude"
+        && p["state"] == "completed"
+        && x["claudeMemberPredecessor"] == "completed-local";
     if input(i) {
         v["input"] = i.clone();
     }
@@ -66,6 +91,25 @@ pub(crate) fn select(x: &Value) -> Value {
         "native-ownership-unproven"
     } else if p["state"] == "failed" {
         "failed-predecessor"
+    } else if x["claudeMemberPredecessor"] == "incompatible" {
+        "native-binding-mismatch"
+    } else if completed_claude_member && b.is_null() {
+        // The SDK manages transcript context for completed local Claude members.
+        // Adopting the report leaves the same task and transcript eligible for correction.
+        if request == "native" {
+            if justified {
+                v["continuity"] = json!("native");
+                v["override"] = json!("granted");
+                "justified-native-override"
+            } else {
+                "native-justification-required"
+            }
+        } else if let Some(reason) = automatic_predecessor_issue(p, &x["now"], &v["policy"], true) {
+            reason
+        } else {
+            v["continuity"] = json!("native");
+            "eligible-completed-claude-member"
+        }
     } else if !input(i)
         || i["final"] != true
         || i["nativeThreadId"] != p["nativeSessionId"]
@@ -91,31 +135,17 @@ pub(crate) fn select(x: &Value) -> Value {
         if i["tokens"].as_u64().unwrap() >= cap {
             "effective-native-cap"
         } else if request == "native" {
-            if !x["justification"]
-                .as_str()
-                .is_some_and(|s| !s.trim().is_empty() && s.len() <= 512)
-            {
+            if !justified {
                 "native-justification-required"
             } else {
                 v["continuity"] = json!("native");
                 v["override"] = json!("granted");
                 "justified-native-override"
             }
-        } else if p["state"] != "completed"
-            && p["stopOrigin"] != "user"
-            && p["stopOrigin"] != "lead"
+        } else if let Some(reason) =
+            automatic_predecessor_issue(p, &x["now"], &v["policy"], completed_claude_member)
         {
-            "non-operator-predecessor"
-        } else if p["integrated"] == true {
-            "latest-attempt-integrated"
-        } else if p["endedAt"]
-            .as_u64()
-            .zip(x["now"].as_u64())
-            .is_none_or(|(at, now)| {
-                now < at || now - at >= v["policy"]["autoNativeMaxAgeMs"].as_u64().unwrap_or(0)
-            })
-        {
-            "predecessor-age"
+            reason
         } else if i["tokens"].as_u64().unwrap()
             >= v["policy"]["autoNativeMaxInputTokens"]
                 .as_u64()
@@ -182,8 +212,22 @@ pub(crate) fn launch(app: &crate::server::App, t: &Task, a: &TaskAttempt) -> Res
     let runner=a.configuration.as_ref().and_then(|s|s.session_contract.as_ref()).and_then(|c|c.members.get(&t.owner)).map(|a|a.runner_id.as_str()).unwrap_or("codex");
     let version=a.configuration.as_ref().and_then(|s|s.native.as_ref()).map(|n|n.version.as_str()).unwrap_or("0.166.0");
     let bound = bound.filter(|b| b["version"] == version && b["configKey"] == config_key(a));
+    let claude_member_predecessor = if runner == "claude" {
+        t.attempts.iter().take_while(|p| p.id != a.id).last().map(|p| {
+            if !crate::claude::member::compatible_predecessor(t, p, a) {
+                "incompatible"
+            } else if p.phase == deck2_shared::Phase::Completed
+                && p.report.as_ref().is_some_and(|report| report.attempt == p.id) {
+                "completed-local"
+            } else {
+                "settled-local"
+            }
+        })
+    } else {
+        None
+    };
     let selection = select(
-        &json!({"now":crate::now(),"role":role,"request":state["continuity"],"justification":state["continuityJustification"],"runnerId":runner,"modelId":a.requested_model,"bound":bound,"predecessor":predecessor(t,a)}),
+        &json!({"now":crate::now(),"role":role,"request":state["continuity"],"justification":state["continuityJustification"],"runnerId":runner,"modelId":a.requested_model,"bound":bound,"predecessor":predecessor(t,a),"claudeMemberPredecessor":claude_member_predecessor}),
     );
     Ok(selection)
 }
@@ -308,6 +352,41 @@ mod tests {
                 "integrated",
                 json!({"predecessor":{"integrated":true}}),
                 "latest-attempt-integrated",
+                "reseeded",
+            ),
+            (
+                "adopted Claude",
+                json!({"runnerId":"claude","claudeMemberPredecessor":"completed-local","bound":null,
+                    "predecessor":{"integrated":true,"input":null}}),
+                "eligible-completed-claude-member",
+                "native",
+            ),
+            (
+                "stale adopted Claude",
+                json!({"runnerId":"claude","claudeMemberPredecessor":"completed-local","bound":null,
+                    "predecessor":{"integrated":true,"input":null,"endedAt":700000}}),
+                "predecessor-age",
+                "reseeded",
+            ),
+            (
+                "unjustified explicit Claude",
+                json!({"runnerId":"claude","claudeMemberPredecessor":"completed-local","bound":null,
+                    "request":"native","predecessor":{"input":null}}),
+                "native-justification-required",
+                "reseeded",
+            ),
+            (
+                "explicit Claude binding mismatch",
+                json!({"runnerId":"claude","claudeMemberPredecessor":"incompatible","bound":null,
+                    "request":"native","justification":"Correction requires the transcript","predecessor":{"input":null}}),
+                "native-binding-mismatch",
+                "reseeded",
+            ),
+            (
+                "explicit Claude review",
+                json!({"runnerId":"claude","claudeMemberPredecessor":"completed-local","bound":null,
+                    "role":"review","request":"native","justification":"Use the transcript","predecessor":{"input":null}}),
+                "assigned-review-role",
                 "reseeded",
             ),
             (

@@ -8,7 +8,8 @@ const row=(id:string,session='a',accepted_ms=1)=>({id,session,accepted_ms,attemp
 // Protects queue provenance and session ownership. Oracle: only accepted queued
 // receipts in the selected session may be shown; ordinal means session wait order.
 test('queue view isolates accepted session input and preserves acceptance order',()=>{
- const rows=[row('second','a',2),row('foreign','b'),{...row('running'),phase:'running'} as Receipt,row('first')];
+ const outcome={...row('outcome'),continuation:{task:'task',attempt:'member-attempt',source_seq:1,origin:'previous-root'}};
+ const rows=[row('second','a',2),row('foreign','b'),{...row('running'),phase:'running'} as Receipt,outcome,row('first')];
  expect(sessionQueue(rows,'a').map(r=>r.id)).toEqual(['second','first']);
  const html=renderToStaticMarkup(<InputQueue receipts={rows} session="a" connected paused={false} onPause={()=>{}} onError={()=>{}}/>);
  expect(html).toContain('Message first');expect(html).toContain('Message second');expect(html).not.toContain('Message foreign');expect(html).not.toContain('Message running');

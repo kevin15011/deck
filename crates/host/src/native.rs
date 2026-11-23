@@ -191,18 +191,28 @@ impl Native {
     pub(crate) fn set_approval_mode(&mut self, mode: &str) {
         self.yolo = mode == "yolo";
     }
+    fn lead_project_trust(&self) -> Option<bool> {
+        self.external_tools.as_ref().and_then(|(_, trusted, _)| {
+            (self.connected && !self.session_member).then_some(*trusted)
+        })
+    }
+
     pub(crate) fn permission_policy(
         &self,
         editing: bool,
     ) -> (&'static str, &'static str, &'static str) {
-        let yolo = self.connected && self.yolo;
-        let sandbox = if self.read_only_role || !yolo {
+        let trust = self.lead_project_trust();
+        let yolo = self.connected && self.yolo && trust != Some(false);
+        let role_sandbox = self.role.as_ref().and_then(|r| r.sandbox.as_deref());
+        let read_only_role = self.read_only_role || role_sandbox == Some("read-only");
+        let sandbox = if read_only_role {
             "read-only"
+        } else if yolo {
+            role_sandbox.unwrap_or("danger-full-access")
+        } else if trust == Some(true) {
+            "workspace-write"
         } else {
-            self.role
-                .as_ref()
-                .and_then(|r| r.sandbox.as_deref())
-                .unwrap_or("danger-full-access")
+            "read-only"
         };
         let (profile, kind) = match sandbox {
             "workspace-write" => (":workspace", "workspaceWrite"),
@@ -211,7 +221,7 @@ impl Native {
         };
         (
             profile,
-            if !self.read_only_role && !yolo && (editing || self.connected) {
+            if !read_only_role && !yolo && (editing || self.connected) {
                 "on-request"
             } else {
                 "never"
@@ -1425,29 +1435,58 @@ pub(crate) async fn command_probe(binary: &Path, args: &[&str]) -> Result<Vec<u8
     command_probe_at(binary,args,None).await
 }
 pub(crate) async fn command_probe_at(binary: &Path, args: &[&str], context: Option<(&str,bool)>) -> Result<Vec<u8>, String> {
-    if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1) } != 0 {
-        return Err("Cannot establish native probe ownership".into());
-    }
     let mut cmd = Command::new(binary);
-    cmd.args(args)
-        .env_remove("CODEX_REMOTE")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+    cmd.args(args).env_remove("CODEX_REMOTE");
+    if let Some((project, trusted)) = context {
+        cmd.current_dir(project);
+        if !trusted {
+            cmd.env("OPENCODE_DISABLE_PROJECT_CONFIG", "true")
+                .env("OPENCODE_DISABLE_EXTERNAL_SKILLS", "true");
+        }
+    }
+    probe(cmd, context.is_some(), false, args == ["--version"])
+        .await
+        .map(|(_, output)| output)
+}
+
+pub(crate) async fn claude_auth_probe(cmd: Command) -> Result<(bool, Vec<u8>), String> {
+    probe(cmd, false, true, false).await
+}
+
+pub(crate) async fn claude_catalog_probe(cmd: Command) -> Result<Vec<u8>, String> {
+    probe(cmd, true, false, false).await.map(|(_, output)| output)
+}
+
+pub(crate) fn own_child(cmd: &mut Command) -> Result<(), String> {
+    if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1) } != 0 {
+        return Err("Cannot establish native process ownership".into());
+    }
+    let parent = std::process::id() as i32;
     unsafe {
-        cmd.pre_exec(|| {
-            if libc::setpgid(0, 0) != 0 {
+        cmd.pre_exec(move || {
+            if libc::setpgid(0, 0) != 0 || libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+            if libc::getppid() != parent {
+                return Err(std::io::Error::other("Native process parent exited"));
+            }
             Ok(())
         });
     }
-    if let Some((project,trusted))=context {
-        cmd.current_dir(project);
-        if !trusted {cmd.env("OPENCODE_DISABLE_PROJECT_CONFIG","true").env("OPENCODE_DISABLE_EXTERNAL_SKILLS","true");}
-    }
+    Ok(())
+}
+
+async fn probe(
+    mut cmd: Command,
+    catalog: bool,
+    claude_auth: bool,
+    _version: bool,
+) -> Result<(bool, Vec<u8>), String> {
+    own_child(&mut cmd)?;
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
     let mut child = cmd
         .spawn()
         .map_err(|e| match e.kind() {
@@ -1463,7 +1502,7 @@ pub(crate) async fn command_probe_at(binary: &Path, args: &[&str], context: Opti
         fault: PROBE_CLEANUP_FAULT
             .try_with(Clone::clone)
             .ok()
-            .filter(|f| !f.help_only || args != ["--version"]),
+            .filter(|f| !f.help_only || !_version),
     };
     let stdout = child
         .stdout
@@ -1475,7 +1514,7 @@ pub(crate) async fn command_probe_at(binary: &Path, args: &[&str], context: Opti
         .ok_or("Native probe stderr unavailable")?;
     let result = tokio::time::timeout(Duration::from_secs(5), async {
         let (out, _, status) = tokio::try_join!(
-            async {if context.is_some() {let mut b=Vec::new();stdout.take(8*1024*1024+1).read_to_end(&mut b).await.map_err(|_|"Native catalog pipe failed".to_string())?;if b.len()>8*1024*1024{return Err("Native catalog exceeds bound".into());}Ok(b)}else{bounded_probe_output(stdout).await}},
+            async {if catalog {let mut b=Vec::new();stdout.take(8*1024*1024+1).read_to_end(&mut b).await.map_err(|_|"Native catalog pipe failed".to_string())?;if b.len()>8*1024*1024{return Err("Native catalog exceeds bound".into());}Ok(b)}else{bounded_probe_output(stdout).await}},
             bounded_probe_output(stderr),
             async {
                 child
@@ -1484,12 +1523,12 @@ pub(crate) async fn command_probe_at(binary: &Path, args: &[&str], context: Opti
                     .map_err(|_| "Native probe wait failed".to_string())
             }
         )?;
-        if !status.success() {
+        if !(status.success() || claude_auth && status.code() == Some(1)) {
             return Err(
                 "Native command probe failed; inspect the selected CLI in a terminal".into(),
             );
         }
-        Ok(out)
+        Ok((status.success(), out))
     })
     .await
     .unwrap_or_else(|_| Err("Native command probe timed out".into()));
@@ -1549,16 +1588,22 @@ pub(crate) async fn reap_group(pid: u32) -> Result<(), String> {
     .map_err(|_| "Native probe descendants did not settle")??;
     Ok(())
 }
+async fn run_selected(app: &App, id: &str, cancel: &mut watch::Receiver<bool>) -> Result<(), String> {
+    #[cfg(test)]
+    if crate::claude_fixture::is_admitted(&app.receipt(id)?) {
+        let transport = app.claude_transport.lock().unwrap().clone().ok_or("Claude fixture transport unavailable")?;
+        return crate::claude_fixture::lead(app, id, cancel, transport).await;
+    }
+    let path = app.execution_binary(id)?;
+    match crate::member_integration::Integration::for_receipt(&app.receipt(id)?)? {
+        crate::member_integration::Integration::Codex => run_inner(app, id, &path, cancel).await,
+        crate::member_integration::Integration::OpenCode => crate::connected_opencode::execution::lead(app, id, cancel).await,
+        crate::member_integration::Integration::Claude => crate::claude::lead(app, id, &path, cancel).await,
+    }
+}
+
 pub async fn run(app: App, id: String, _binary: PathBuf, mut cancel: watch::Receiver<bool>) {
-    let selected = app.execution_binary(&id);
-    let result = match selected {
-        Ok(path) => match app.receipt(&id).and_then(|r|crate::member_integration::Integration::for_receipt(&r)) {
-            Ok(crate::member_integration::Integration::Codex)=>run_inner(&app,&id,&path,&mut cancel).await,
-            Ok(crate::member_integration::Integration::OpenCode)=>crate::connected_opencode::execution::lead(&app,&id,&mut cancel).await,
-            Err(e)=>Err(e),
-        },
-        Err(e) => Err(e),
-    };
+    let result = crate::latency::scoped(Box::pin(run_selected(&app, &id, &mut cancel))).await;
     if let Err(message) = result {
         let _ = app.change(&id, |r| {
             let uncertain = matches!(
@@ -1808,8 +1853,12 @@ async fn run_once(
     let connected = app.receipt(id)?.mode == Mode::SessionV1;
     let can_steer = connected && version >= semver::Version::new(0, 170, 0);
     let bridge_role_started = Instant::now();
+    let mut bridge_start_ms = 0;
     let bridge = if connected {
-        Some(crate::session_mcp::Bridge::start(app, id).await?)
+        let started = Instant::now();
+        let bridge = crate::session_mcp::Bridge::start(app, id).await?;
+        bridge_start_ms = started.elapsed().as_millis() as u64;
+        Some(bridge)
     } else {
         None
     };
@@ -1843,8 +1892,15 @@ async fn run_once(
         // so a hook-enabled process never hosts another session's thread.
         group_key = crate::tasks::digest(format!("{group_key}|hooks|{}", receipt.session).as_bytes());
     }
+    let acquire_started = Instant::now();
+    let mut reuse_take_ms = 0;
     let checkout = match reuse_key.clone() {
-        Some(key) => match reuse::take(app,&key,&group_key,&common,&receipt.session,receipt.fresh).await {
+        Some(key) => match {
+            let started = Instant::now();
+            let taken = reuse::take(app,&key,&group_key,&common,&receipt.session,receipt.fresh).await;
+            reuse_take_ms = started.elapsed().as_millis() as u64;
+            taken
+        } {
             Ok(checkout) => Some(checkout),
             Err(error) if reuse::degradable(app, &error, &receipt.session) => {
                 // Reuse is an optimization: without retained capacity, run
@@ -1869,6 +1925,7 @@ async fn run_once(
         if let Some(mut lease) = lease.take() { lease.started(); native.retained_lease = Some(lease); }
         native
     };
+    let native_acquire_ms = acquire_started.elapsed().as_millis() as u64;
     if let Some(bridge) = &bridge {
         if reuse_key.is_some() {
             if native.transport.is_none() {
@@ -1884,7 +1941,7 @@ async fn run_once(
         native.codebase_slot = Some(bridge.codebase());
         native.codebase_artifacts = Some(app.artifact_root()?);
     }
-    {let store=app.store.lock().unwrap();native.external_tools=Some((store.external_settings()?,store.trusted_project(&app.project)?,crate::external_tools::home()?));}
+    {let store=crate::latency::locked(&app.store);native.external_tools=Some((store.external_settings()?,store.trusted_project(&app.project)?,crate::external_tools::home()?));}
     {
         let app = app.clone();
         let id = id.to_owned();
@@ -1945,7 +2002,7 @@ async fn run_once(
         });
     }
     {
-        let s = app.store.lock().unwrap();
+        let s = crate::latency::locked(&app.store);
         let snapshot = receipt
             .configuration
             .as_ref()
@@ -1995,15 +2052,15 @@ async fn run_once(
     }
     let provenance_ms = provenance_started.elapsed().as_millis() as u64;
     let mut resume = {
-        let history = app.history.lock().map_err(|_| "Original history unavailable")?;
-        let s = app.store.lock().map_err(|_| "State lock failed")?;
+        let history = crate::latency::locked_checked(&app.history).map_err(|_| "Original history unavailable")?;
+        let s = crate::latency::locked_checked(&app.store).map_err(|_| "State lock failed")?;
         let session = s.session_by_id(&receipt.session)?;
         history.check_context(&session)?;
         if session.original.is_some() && (receipt.fresh || receipt.mode != Mode::SessionV1) {
             return Err("Original continuation cannot replace its native context".into());
         }
 
-        if editing && !s.trusted_project(&app.project)? {
+        if (editing || native.lead_project_trust() == Some(true)) && !s.trusted_project(&app.project)? {
             return Err("Project edit trust was revoked; dispatch blocked".into());
         }
         if receipt.fresh {
@@ -2052,6 +2109,7 @@ async fn run_once(
         }
     };
     let generation = uuid::Uuid::new_v4().to_string();
+    let prepare_started = Instant::now();
     let prepared = match prepare_attempt(&mut native, app, id, editing, resume.as_deref(), cancel).await {
         Ok(Some(prepared)) => Ok(prepared),
         Ok(None) => return Ok(()),
@@ -2149,6 +2207,7 @@ async fn run_once(
         }
         result => result?,
     };
+    let prepare_ms = prepare_started.elapsed().as_millis() as u64;
     let (thread, mut delivery, model) = prepared;
     if let Some(lease) = &native.retained_lease { lease.prepared(&native, &group_key); }
     if connected {
@@ -2210,8 +2269,8 @@ async fn run_once(
         return Ok(());
     }
     {
-        let history = app.history.lock().map_err(|_| "Original history unavailable")?;
-        let mut s = app.store.lock().map_err(|_| "State lock failed")?;
+        let history = crate::latency::locked_checked(&app.history).map_err(|_| "Original history unavailable")?;
+        let mut s = crate::latency::locked_checked(&app.store).map_err(|_| "State lock failed")?;
         if editing && !s.trusted_project(&app.project)? {
             return Err("Edit trust revoked before dispatch".into());
         }
@@ -2236,8 +2295,21 @@ async fn run_once(
         native.timing.provenance_ms = provenance_ms;
         native.timing.version_ms = version_ms;
         native.timing.qualification_cached = qualification_cached;
+        native.timing.bridge_start_ms = bridge_start_ms;
+        native.timing.reuse_take_ms = reuse_take_ms;
+        native.timing.native_acquire_ms = native_acquire_ms;
+        native.timing.prepare_ms = prepare_ms;
+        (native.timing.run_lock_wait_us, native.timing.run_lock_acquisitions) = crate::latency::run_waits();
+        if let Some(waits) = crate::latency::take_submit(id) {
+            waits.apply(&mut native.timing);
+        }
+        let handshake_ms = start.elapsed().as_millis() as u64;
+        // Disjoint top-level phases of this pass; the remainder is unmeasured.
+        native.timing.other_ms = handshake_ms.saturating_sub(
+            version_ms + bridge_role_ms + native_acquire_ms + provenance_ms + prepare_ms,
+        );
         r.startup_timing = Some(native.timing.clone());
-        r.handshake_ms = Some(start.elapsed().as_millis() as u64);
+        r.handshake_ms = Some(handshake_ms);
         r.thread = Some(thread.clone());
         r.delivery = delivery;
         r.model = Some(model);
@@ -2338,9 +2410,26 @@ async fn run_once(
     }
     native.verify_role()?;
     let (permissions, approval_policy, _) = native.permission_policy(editing);
+    if native.lead_project_trust() == Some(true) {
+        let store = app.store.lock().unwrap();
+        let current = store.execution_project(&receipt.session)?;
+        if current.root != app.project || !store.trusted_project(&current.root)? {
+            return Err("Project trust or ownership changed before native turn start".into());
+        }
+    }
     app.check_original_context(&receipt.session)?;
     if let Some(t) = &native.transport { t.arm(&thread); }
-    let turn=native.request("turn/start",native.turn_assignment(json!({"threadId":thread,"input":input,"approvalPolicy":approval_policy,"approvalsReviewer":"user","permissions":permissions,"environments":[{"environmentId":"local","cwd":app.project}]}))).await?;
+    let start_params = native.turn_assignment(json!({"threadId":thread,"input":input,"approvalPolicy":approval_policy,"approvalsReviewer":"user","permissions":permissions,"environments":[{"environmentId":"local","cwd":app.project}]}));
+    let turn = tokio::select! {
+        result = native.request("turn/start", start_params) => Some(result?),
+        Ok(_) = cancel.wait_for(|cancelled| *cancelled && app.shutdown_requested.load(std::sync::atomic::Ordering::SeqCst)) => None,
+    };
+    let Some(turn) = turn else {
+        // A start may already have reached native. Without an acknowledgment
+        // there is no turn ID to interrupt. Settle the process without retrying.
+        native.terminate().await?;
+        return Err("Host stopped during native dispatch; no outcome was confirmed and the input will not replay".into());
+    };
     let turn_id = turn["turn"]["id"]
         .as_str()
         .ok_or("Native turn acknowledgment missing identity")?
@@ -2865,6 +2954,12 @@ async fn run_once(
             {
                 return Err("Native changed an unresolved proposal".into());
             }
+        }
+        if connected && method == "item/completed" && p["item"]["type"] == "fileChange"
+            && let Some(item) = p["item"]["id"].as_str()
+        {
+            proposals.remove(item);
+            scoped_proposals.remove(item);
         }
         if editing && method == "item/completed" && p["item"]["type"] == "fileChange" {
             let r = app.receipt(id)?;
@@ -3415,7 +3510,8 @@ for line in sys.stdin:
             let source = include_str!("../tests/fake_native.py").replace(
                 "  if mode=='lost-ack':sys.exit(0)",
                 r#"  if mode=='image-fault':
-   (root/'image-path').write_text(next(v['path'] for v in p['input'] if v['type']=='localImage'))
+   (root/'image-path.tmp').write_text(next(v['path'] for v in p['input'] if v['type']=='localImage'))
+   (root/'image-path.tmp').rename(root/'image-path')
    while not (root/'release-fault').exists():time.sleep(.005)
    if (root/'fault').read_text() in ['error','uncertain']:out({'id':req['id'],'error':{'message':'fixture error'}})
    elif (root/'fault').read_text()=='ack':result(req,{'turn':{}})

@@ -23,40 +23,108 @@ async function main() {
   for(let i=0;i<200&&!url;i++){try {url=launch();} catch {await new Promise(r=>setTimeout(r,50));}}
   assert.ok(url, 'temporary host started');
   browser = await chromium.launch({executablePath:process.env.DECK2_CHROMIUM || chromium.executablePath(),args:['--no-sandbox']});
-  const page = await browser.newPage();
+  const page = await browser.newPage({viewport:{width:1440,height:900},reducedMotion:'reduce'});
+  const assets=process.env.DECK2_WEB_ASSETS;
+  if(assets)await page.route(/\/app\.(?:css|js)$/,route=>
+   route.fulfill({path:path.join(assets,path.basename(new URL(route.request().url()).pathname))}));
   const base=new URL(url).origin;
   const health=base+'/api/health';
   assert.equal((await fetch(health)).status,403);
+  const snapshot = url => url.pathname === '/api/workspace' && url.searchParams.get('transport') === 'events';
+  const events = url => url.pathname === '/api/workspace/events';
+ const refresh = async () => {
+  // An expired cursor forces a bootstrap, including its recovery UI.
+  await page.route(events, r=>r.fulfill({
+   contentType:'text/event-stream', body:'event: resync\ndata: {}\n\n',
+  }), {times:1});
+  await page.evaluate(() => {
+   window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted:true}));
+   window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted:true}));
+  });
+ };
+  let snapshots = 0;
+  page.on('request', r => { if (snapshot(new URL(r.url()))) snapshots++; });
+  const initial=page.waitForResponse(r=>snapshot(new URL(r.url())) && r.ok());
   await page.goto(url);
-  await page.waitForResponse(r=>r.url()===base+'/api/workspace' && r.ok());
+  await initial;
+  await page.waitForTimeout(1200);
+  assert.equal(snapshots, 1, 'Idle workspace should use the open SSE connection');
   const draft=page.locator('#prompt');
   await draft.fill('Keep my unsent draft');
+  const transcript=page.locator('#conversation'),inspector=page.locator('#session-inspector');
+  await transcript.click({position:{x:18,y:100}});
+  await page.keyboard.press('Space');
+  const focus=await transcript.evaluate(el=>({
+   focused:document.activeElement===el,shadow:getComputedStyle(el).boxShadow,outline:getComputedStyle(el).outlineStyle,
+  }));
+  assert.deepEqual(focus,{focused:true,shadow:'none',outline:'none'});
+  await page.getByRole('button',{name:'Open Subagents',exact:true}).click();
+  await inspector.waitFor();
+  const geometry=()=>Promise.all([transcript,draft,inspector].map(el=>el.boundingBox()));
+  const initialGeometry=await geometry();
+  let probes=0;
+  page.on('request',r=>{if(r.url()===health)probes++;});
   let release;
   const gate=new Promise(resolve=>{release=resolve;});
-  await page.route('**/api/workspace',async route=>{await gate;await route.continue();});
-  const probe=await page.waitForResponse(r=>r.url()===health);
-  assert.equal(probe.status(),200);
-  assert.match(probe.headers()['cache-control'],/no-store/);
+  await page.route(snapshot,async route=>{await gate;await route.continue();});
+  await refresh();
   await page.getByText('Updating sessions…',{exact:true}).waitFor();
   assert.equal(await page.getByRole('button',{name:'Reconnect',exact:true}).count(),0);
-  const refreshed=page.waitForResponse(r=>r.url()===base+'/api/workspace' && r.ok());
+  assert.deepEqual(await geometry(),initialGeometry);
+  const refreshed=page.waitForResponse(r=>snapshot(new URL(r.url())) && r.ok());
   release();await refreshed;
   await page.getByText('Updating sessions…',{exact:true}).waitFor({state:'hidden'});
-  await page.unroute('**/api/workspace');
-  await page.route('**/api/workspace',r=>r.abort());
+  assert.equal(probes,0,'A pending snapshot should not start a health probe');
+  await page.unroute(snapshot);
+  await page.route(snapshot,r=>r.abort());
   await page.route('**/api/health',r=>r.abort());
-  await page.getByRole('button',{name:'Reconnect',exact:true}).waitFor();
+  await refresh();
+  const reconnect=page.getByRole('button',{name:'Reconnect',exact:true});
+  await reconnect.waitFor();
+  assert.match(await page.locator('#subagents-status').textContent(),/^Stale:/);
+  assert.deepEqual(await geometry(),initialGeometry);
+  const probe=page.waitForResponse(r=>r.url()===health);
   await page.unroute('**/api/health');
-  await page.getByText('Updating sessions…',{exact:true}).waitFor();
-  await page.getByRole('button',{name:'Reconnect',exact:true}).waitFor({state:'hidden'});
-  await page.unroute('**/api/workspace');
-  await page.getByText('Updating sessions…',{exact:true}).waitFor({state:'hidden'});
-  await page.route('**/api/workspace',r=>r.fulfill({json:{api:0}}));
+  const healthResponse=await probe;
+  assert.equal(healthResponse.status(),200);
+  assert.match(healthResponse.headers()['cache-control'],/no-store/);
+  await page.getByRole('alert').filter({hasText:'Session data is stale'}).waitFor();
+  await page.unroute(snapshot);
+  await reconnect.waitFor({state:'hidden'});
+  assert.match(await page.locator('#subagents-status').textContent(),/^\d+ active subagents/);
+  await page.route(snapshot,r=>r.fulfill({json:{api:0}}));
+  await refresh();
   await page.getByRole('alert').filter({hasText:'Incompatible API'}).waitFor();
-  await page.unroute('**/api/workspace');
+  await page.unroute(snapshot);
   await page.getByRole('alert').filter({hasText:'Incompatible API'}).waitFor({state:'hidden'});
+  await page.route(snapshot,r=>r.fulfill({status:403,json:{message:'Test session expired'}}));
+  await refresh();
+  await page.getByRole('alert').filter({hasText:'Test session expired'}).waitFor();
+  await reconnect.focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  assert.equal(await reconnect.evaluate(el=>document.activeElement===el&&el.matches(':focus-visible')&&getComputedStyle(el).outlineStyle==='solid'),true);
+  await page.unroute(snapshot);
+  await page.keyboard.press('Space');
+  await reconnect.waitFor({state:'hidden'});
   assert.equal(await draft.inputValue(),'Keep my unsent draft');
-  console.log('Passed: authenticated health probe, delayed snapshot, loss of connectivity, automatic recovery, retained draft.');
+  const beforeOffline = snapshots;
+  await page.context().setOffline(true);
+  await reconnect.waitFor();
+  assert.match(await page.locator('#subagents-status').textContent(),/^Stale:/);
+  const replay = page.waitForRequest(r=>events(new URL(r.url())));
+  await page.context().setOffline(false);
+  assert.ok(new URL((await replay).url()).searchParams.get('after'), 'Reconnection sent the retained cursor');
+  await reconnect.waitFor({state:'hidden'});
+  assert.equal(snapshots, beforeOffline, 'Returning online with a retained cursor should replay without a snapshot');
+  assert.equal(await draft.inputValue(),'Keep my unsent draft');
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted:true})));
+  const beforeResume = snapshots;
+  const stream = page.waitForRequest(r=>new URL(r.url()).pathname==='/api/workspace/events');
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted:true})));
+  assert.ok(new URL((await stream).url()).searchParams.get('after'), 'Resumed tab retained its cursor');
+  assert.equal(snapshots, beforeResume);
+  console.log('Passed: idle stream, offline recovery, resume cursor, transcript focus, stable geometry, delayed snapshot, loss of connectivity, reachable but stale snapshot, keyboard reconnect, automatic recovery, retained draft.');
  } finally {
   await browser?.close();
   if(host.exitCode===null){host.kill('SIGINT');await new Promise(resolve=>host.once('exit',resolve));}

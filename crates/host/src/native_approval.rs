@@ -9,6 +9,7 @@ pub fn validate_native(d: &Decision) -> Result<(), String> {
         Some(NativeTransport::OpencodeHttp) => {
             crate::connected_opencode::execution::validate_approval(d)
         }
+        Some(NativeTransport::ClaudeSdk) => crate::claude::approval::validate(d),
         Some(NativeTransport::DeckMcp) => {
             if n.method != "deck/approve" || n.parameters.len() > 65536 {
                 return Err("Native action invalid".into());
@@ -49,11 +50,12 @@ pub(crate) fn permission_material(d:&Decision)->Option<Value> {
     let n=d.native.as_ref()?;
     match n.transport? {
         deck2_shared::NativeTransport::CodexJsonRpc => crate::codex_protocol::permission_material(d),
+        deck2_shared::NativeTransport::ClaudeSdk => crate::claude::approval::permission_material(d),
         deck2_shared::NativeTransport::DeckMcp => {
             let mut p:Value=serde_json::from_str(&n.parameters).ok()?;
             if n.method!="deck/approve" || !p["_meta"]["tool_params"].is_object() || crate::codex_protocol::native_tool_name(&p)?=="AskUserQuestion" {return None;}
             let o=p.as_object_mut()?;
-            for k in ["threadId","turnId","toolUseId"] {o.remove(k);}
+            for k in ["threadId","turnId","toolUseId","itemId"] {o.remove(k);}
             Some(serde_json::json!({"category":"relay","request":p}))
         }
         _=>None,

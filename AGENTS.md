@@ -17,6 +17,8 @@
 
 # Continuidad de las sesiones
 
+- Deck no debe bloquear el trabajo del usuario. Actualizar la interfaz o recuperar la conexión debe permitir seguir redactando y conservar la cola. Limita las esperas por permisos o por un resultado incierto a las operaciones que realmente dependan de ellos.
+
 - Deck debe permitir que las personas retomen su trabajo en la misma sesión. Un intento interrumpido puede tener un resultado desconocido incluso después de liberar el proceso que lo ejecutaba.
 - Cuando se confirme que el intento dejó de ejecutarse, libera su reserva y atiende el siguiente mensaje de la cola una sola vez. Conserva el contexto nativo, el historial, las respuestas parciales y las decisiones registradas. Nunca reenvíes automáticamente el turno interrumpido.
 - Si un proceso o una aprobación aún requiere atención, muestra qué está esperando la sesión y cómo continuar. Verifica la continuidad con un mensaje en cola, tanto con el daemon en marcha como después de un reinicio.

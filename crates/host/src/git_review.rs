@@ -1,5 +1,5 @@
 //! Read-only working-tree review. Git runs only against private metadata with no
-//! repository configuration, hooks, attributes, alternates, or inherited environment.
+//! repository configuration, hooks, or inherited environment.
 use crate::server::{App, problem};
 use axum::{
     Json,
@@ -454,9 +454,40 @@ fn git_output(
     limit: usize,
 ) -> Result<(Vec<u8>, bool), String> {
     check(deadline)?;
+    let mut cmd = git_command(work.path());
+    cmd.arg("--git-dir").arg(
+        gitdir
+            .map(FsPath::to_path_buf)
+            .unwrap_or_else(|| work.path().join("empty.git")),
+    );
+    if matches!(
+        args,
+        ["cat-file", "--batch"] | ["cat-file", "--batch-check"]
+    ) {
+        cmd.stdin(
+            File::open(work.path().join("object-requests"))
+                .map_err(|_| error("Object request file unavailable"))?,
+        );
+    }
+    cmd.args(args);
+    let (bytes, status) = run_git(work, cmd, deadline, limit, &|| Ok(()))?;
+    if !(status.success()
+        || (args.first() == Some(&"diff")
+            || args.get(1) == Some(&"check-ignore")
+            || args == ["symbolic-ref", "--quiet", "--short", "HEAD"])
+            && status.code() == Some(1))
+    {
+        return Err(error(
+            "Git metadata unsupported or changed; refresh to retry",
+        ));
+    }
+    Ok((bytes, status.success()))
+}
+
+fn git_command(cwd: &FsPath) -> Command {
     // Fixed system executable; PATH, GIT_*, HOME and loader overrides are not inherited.
     let mut cmd = Command::new("/usr/bin/git");
-    cmd.current_dir(work.path())
+    cmd.current_dir(cwd)
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("LC_ALL", "C")
@@ -468,12 +499,20 @@ fn git_output(
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    cmd.arg("--no-pager").arg("--git-dir").arg(
-        gitdir
-            .map(FsPath::to_path_buf)
-            .unwrap_or_else(|| work.path().join("empty.git")),
-    );
+        .stderr(Stdio::null())
+        .arg("--no-pager");
+    cmd
+}
+
+fn run_git(
+    work: &Arc<Work>,
+    mut cmd: Command,
+    deadline: Instant,
+    limit: usize,
+    authority: &dyn Fn() -> Result<(), String>,
+) -> Result<(Vec<u8>, std::process::ExitStatus), String> {
+    check(deadline)?;
+    authority()?;
     use std::os::unix::process::CommandExt;
     unsafe {
         cmd.pre_exec(|| {
@@ -490,19 +529,9 @@ fn git_output(
             Ok(())
         });
     }
-    if matches!(
-        args,
-        ["cat-file", "--batch"] | ["cat-file", "--batch-check"]
-    ) {
-        cmd.stdin(
-            File::open(work.path().join("object-requests"))
-                .map_err(|_| error("Object request file unavailable"))?,
-        );
-    }
-    cmd.args(args);
     let mut child = cmd
         .spawn()
-        .map_err(|_| error("Git unavailable: /usr/bin/git is required"))?;
+        .map_err(|_| error("Cannot start Git with the required process restrictions"))?;
     let pipe = child.stdout.take().unwrap();
     let reader = std::thread::spawn(move || {
         let mut bytes = Vec::new();
@@ -514,8 +543,8 @@ fn git_output(
         match child.try_wait() {
             Ok(Some(status)) => break Ok(status),
             Ok(None) => {
-                if Instant::now() > deadline {
-                    break Err(error("Git review process deadline exceeded"));
+                if let Err(e) = check(deadline).and_then(|()| authority()) {
+                    break Err(e);
                 }
                 std::thread::sleep(Duration::from_millis(5));
             }
@@ -551,18 +580,255 @@ fn git_output(
     if bytes.len() > limit {
         return Err(error("Git review output limit reached"));
     }
-    if !(status.success()
-        || (args.first() == Some(&"diff")
-            || args.get(1) == Some(&"check-ignore")
-            || args == ["symbolic-ref", "--quiet", "--short", "HEAD"])
-            && status.code() == Some(1))
-    {
-        return Err(error(
-            "Git metadata unsupported or changed; refresh to retry",
+    authority()?;
+    Ok((bytes, status))
+}
+
+/// Resolve only Git's standard reciprocal linked-worktree layout. No common
+/// directory outside this layout, repository config, or hooks are imported.
+fn member_metadata(project: &FsPath, root: &File) -> Result<(File, File), String> {
+    let dot_git = FsPath::new(".git");
+    if let Ok(git) = open(root, dot_git, true) {
+        if !is_missing(&git, FsPath::new("commondir")) {
+            return Err(error("Unsupported Git common directory"));
+        }
+        return Ok((
+            git.try_clone()
+                .map_err(|_| error("Git directory unavailable"))?,
+            git,
         ));
     }
-    Ok((bytes, status.success()))
+    let pointer = read(root, dot_git, 4096)?;
+    let target = std::str::from_utf8(&pointer)
+        .ok()
+        .and_then(|s| s.trim_end_matches(['\r', '\n']).strip_prefix("gitdir: "))
+        .filter(|s| !s.is_empty())
+        .ok_or("Invalid linked Git directory pointer")?;
+    let git_path = project
+        .join(target)
+        .canonicalize()
+        .map_err(|_| error("Linked Git directory unavailable"))?;
+    let worktrees = git_path
+        .parent()
+        .filter(|p| p.ends_with("worktrees"))
+        .ok_or("Unsupported linked Git directory")?;
+    let common = directory(
+        worktrees
+            .parent()
+            .ok_or("Git common directory unavailable")?,
+    )?;
+    let git = open(
+        &common,
+        &FsPath::new("worktrees").join(git_path.file_name().unwrap()),
+        true,
+    )?;
+    let common_pointer = read(&git, FsPath::new("commondir"), 4096)?;
+    let backlink = read(&git, FsPath::new("gitdir"), 4096)?;
+    let backlink = std::str::from_utf8(&backlink)
+        .map_err(|_| error("Invalid linked Git backlink"))?
+        .trim_end_matches(['\r', '\n']);
+    if !matches!(
+        common_pointer.as_slice(),
+        b"../..\n" | b"../.." | b"../..\r\n"
+    ) || backlink.is_empty()
+        || git_path.join(backlink).canonicalize().ok() != Some(project.join(dot_git))
+    {
+        return Err(error("Git metadata is not registered to this worktree"));
+    }
+    Ok((git, common))
 }
+
+/// Landlock keeps live worktree and object reads descriptor-scoped and blocks
+/// repository writes and helper execution, including if a path changes mid-call.
+fn restrict_member_git(
+    readable: &[File],
+    executables: &[File],
+    null: &File,
+) -> std::io::Result<()> {
+    use std::io::Error;
+    const EXECUTE: u64 = 1;
+    const WRITE_FILE: u64 = 1 << 1;
+    const READ_FILE: u64 = 1 << 2;
+    const READ_DIR: u64 = 1 << 3;
+    const ABI3_ACCESS: u64 = (1 << 15) - 1;
+    fn checked(value: libc::c_long) -> std::io::Result<libc::c_long> {
+        if value < 0 {
+            Err(Error::last_os_error())
+        } else {
+            Ok(value)
+        }
+    }
+    #[repr(C, packed)]
+    struct Rule {
+        access: u64,
+        parent_fd: i32,
+    }
+    unsafe {
+        if checked(libc::syscall(libc::SYS_landlock_create_ruleset, 0, 0, 1))? < 3 {
+            return Err(Error::from_raw_os_error(libc::ENOSYS));
+        }
+        let rules = File::from_raw_fd(checked(libc::syscall(
+            libc::SYS_landlock_create_ruleset,
+            &ABI3_ACCESS,
+            size_of::<u64>(),
+            0,
+        ))? as i32);
+        for (file, access) in readable
+            .iter()
+            .map(|f| (f, READ_FILE | READ_DIR))
+            .chain(executables.iter().map(|f| (f, READ_FILE | EXECUTE)))
+            .chain([(null, READ_FILE | WRITE_FILE)])
+        {
+            let rule = Rule {
+                access,
+                parent_fd: file.as_raw_fd(),
+            };
+            checked(libc::syscall(
+                libc::SYS_landlock_add_rule,
+                rules.as_raw_fd(),
+                1,
+                &rule,
+                0,
+            ))?;
+        }
+        checked(libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) as libc::c_long)?;
+        checked(libc::syscall(
+            libc::SYS_landlock_restrict_self,
+            rules.as_raw_fd(),
+            0,
+        ))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn member_inspection(
+    project: &deck2_shared::ProjectBinding,
+    permit: Arc<OwnedSemaphorePermit>,
+    authority: &dyn Fn() -> Result<(), String>,
+) -> Result<serde_json::Value, String> {
+    use std::os::unix::{fs::MetadataExt, process::CommandExt};
+    let deadline = Instant::now() + Duration::from_secs(3);
+    authority()?;
+    let path = FsPath::new(&project.root);
+    let root = directory(path)?;
+    let stat = root
+        .metadata()
+        .map_err(|_| error("Project identity unavailable"))?;
+    if project.identity.as_deref() != Some(&format!("{}:{}", stat.dev(), stat.ino())) {
+        return Err(error("Assigned project directory was replaced"));
+    }
+    let (gitdir, common) = member_metadata(path, &root)?;
+    let objects = open(&common, FsPath::new("objects"), true)?;
+    let object_path = fs::read_link(format!("/proc/self/fd/{}", objects.as_raw_fd()))
+        .map_err(|_| error("Git object directory unavailable"))?;
+    let work = Work::new(Some(permit))?;
+    let private = work.path().join("empty.git");
+    for (source, name) in [
+        (&gitdir, "HEAD"),
+        (&gitdir, "index"),
+        (&common, "packed-refs"),
+        (&common, "shallow"),
+        (&common, "info/exclude"),
+    ] {
+        if let Some(bytes) = optional_read(source, FsPath::new(name), 16 * 1024 * 1024)? {
+            if name == "info/exclude" {
+                fs::create_dir(private.join("info"))
+                    .map_err(|_| error("Cannot prepare Git excludes"))?;
+            }
+            fs::write(private.join(name), bytes)
+                .map_err(|_| error("Cannot prepare Git inspection"))?;
+        } else if name == "HEAD" {
+            return Err(error("Git HEAD unavailable"));
+        }
+    }
+    if !is_missing(&common, FsPath::new("refs")) {
+        let mut budget = 16 * 1024 * 1024;
+        let mut entries = 0;
+        copy_tree(
+            &open(&common, FsPath::new("refs"), true)?,
+            &private.join("refs"),
+            &mut budget,
+            &mut entries,
+            deadline,
+            0,
+        )?;
+    }
+
+    let directories = Arc::new([
+        root,
+        objects,
+        directory(work.path())?,
+        directory(FsPath::new("/usr/lib"))?,
+    ]);
+    let loader = match std::env::consts::ARCH {
+        "x86_64" => "/lib64/ld-linux-x86-64.so.2",
+        "aarch64" => "/lib/ld-linux-aarch64.so.1",
+        _ => return Err(error("Git inspection is unavailable on this architecture")),
+    };
+    let executables = Arc::new([
+        File::open("/usr/bin/git").map_err(|_| error("Git unavailable"))?,
+        File::open(loader).map_err(|_| error("Git dynamic loader unavailable"))?,
+    ]);
+    // Git opens the null device while sanitizing its standard descriptors.
+    let null = Arc::new(File::open("/dev/null").map_err(|_| error("Null device unavailable"))?);
+    let parent = std::process::id() as libc::pid_t;
+    let run = |args: &[&str]| -> Result<String, String> {
+        let mut cmd = git_command(work.path());
+        cmd.env("GIT_OBJECT_DIRECTORY", &object_path)
+            .env("GIT_CONFIG_GLOBAL", work.path().join("no-global-config"))
+            .arg("--git-dir")
+            .arg(&private)
+            .arg("--work-tree=.")
+            .args(args);
+        let directories = directories.clone();
+        let executables = executables.clone();
+        let null = null.clone();
+        unsafe {
+            cmd.pre_exec(move || {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) < 0
+                    || libc::fchdir(directories[0].as_raw_fd()) < 0
+                {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::getppid() != parent {
+                    return Err(std::io::Error::from_raw_os_error(libc::ESRCH));
+                }
+                restrict_member_git(directories.as_ref(), executables.as_ref(), &null)
+            });
+        }
+        let (bytes, status) = run_git(&work, cmd, deadline, 48 * 1024, authority)?;
+        if !status.success() {
+            return Err(error("Git could not inspect the assigned worktree"));
+        }
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    };
+    let status = run(&[
+        "status",
+        "--porcelain=v1",
+        "--branch",
+        "--untracked-files=all",
+        "--ignore-submodules=all",
+    ])?;
+    let diff = [
+        "diff",
+        "--stat",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--ignore-submodules=all",
+    ];
+    let unstaged = run(&diff)?;
+    let staged = run(&[&diff[..], &["--cached"]].concat())?;
+    let commits = if status.starts_with("## No commits yet on ") {
+        String::new()
+    } else {
+        run(&["log", "-10", "--format=%h %cs %s", "HEAD", "--"])?
+    };
+    Ok(serde_json::json!({
+        "status": status, "unstagedDiffStat": unstaged, "stagedDiffStat": staged,
+        "recentCommits": commits,
+    }))
+}
+
 fn settled(child: &mut std::process::Child, pid: u32, _work: &Work) -> bool {
     #[cfg(test)]
     if _work.unknown.load(std::sync::atomic::Ordering::SeqCst) {

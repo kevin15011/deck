@@ -2,9 +2,9 @@ import {imageAttachment,type Receipt} from './api';
 import {recoverDraft} from './draft-storage';
 export function escapeInput(receipts:Receipt[]):{kind:'recall'|'interrupt';input:Receipt}|undefined {
  receipts=receipts.filter(r=>r.recalled_ms===undefined);
- const queued=receipts.filter(r=>r.phase==='queued').at(-1);
+ const queued=receipts.filter(r=>r.phase==='queued'&&!r.continuation).at(-1);
  if(queued)return {kind:'recall',input:queued};
- const unread=receipts.find(r=>(r.phase==='accepted'||r.phase==='preparing')&&r.dispatch_ms===null);
+ const unread=receipts.find(r=>(r.phase==='accepted'||r.phase==='preparing')&&r.dispatch_ms===null&&!r.continuation);
  if(unread)return {kind:'recall',input:unread};
  const running=receipts.find(r=>['dispatching','running','cancelling'].includes(r.phase));
  if(running)return {kind:'interrupt',input:running};

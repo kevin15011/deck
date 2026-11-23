@@ -10,6 +10,13 @@ pub const MEMBERS: &[&str] = &[
     "quality",
     "setup",
 ];
+pub(crate) fn configured_member_ids(contract: &SessionContract) -> impl Iterator<Item = &str> {
+    MEMBERS
+        .iter()
+        .copied()
+        .filter(|&id| id != "lead" && contract.members.contains_key(id))
+}
+
 pub fn validate(c: &SessionContract) -> Result<(), String> {
     if c.version != 1
         || c.revision == 0
@@ -54,10 +61,14 @@ impl Store {
         self.save_session(&s)?;
         Ok(s)
     }
-    pub(crate) fn assignment_ready(&self, session: &str, expected: u64) -> Result<(), String> {
+    fn assignment_ready(&self, session: &str, member: &str, expected: u64) -> Result<(), String> {
         let s = self.session_by_id(session)?;
         let c = s.contract.ok_or("Historical restricted session has no connected assignment contract")?;
         if c.revision != expected { return Err("assignment-revision-stale".into()); }
+        // Only the Lead assignment replaces the session's native context and generation.
+        if member != "lead" {
+            return Ok(());
+        }
         if self.all()?.iter().any(|r| r.session == session && (r.phase.active() || matches!(r.phase, Phase::Queued | Phase::Uncertain)))
             || self.tasks()?.iter().any(|t| t.session == session && t.attempts.iter().any(|a| a.phase.active() || matches!(a.phase, Phase::Queued | Phase::Uncertain))) {
             return Err("session-busy".into());
@@ -76,7 +87,7 @@ impl Store {
             .contract
             .as_mut()
             .ok_or("Historical restricted session has no connected assignment contract")?;
-        self.assignment_ready(session, expected)?;
+        self.assignment_ready(session, member, expected)?;
         if c.members.get(member) == Some(&assignment) {
             return Ok(s);
         }
@@ -117,7 +128,7 @@ use axum::{
 };
 use serde::Deserialize;
 pub(crate) async fn model_data(app: &App) -> Result<Value, String> {
-    model_data_for(app, &["codex", "opencode"]).await
+    model_data_for(app, &["codex", "opencode", crate::claude::RUNNER]).await
 }
 async fn model_data_for(app: &App, runners: &[&str]) -> Result<Value, String> {
     {let store=app.store.lock().unwrap();crate::projects::validate(&store.project_by_id(&crate::projects::id(&app.project))?)?;}
@@ -128,13 +139,24 @@ async fn model_data_for(app: &App, runners: &[&str]) -> Result<Value, String> {
         let mut models=native["models"].as_array().ok_or("Native model inventory missing")?.iter().map(|m|json!({"modelId":m["model"],"label":m["model"],"thinkingLevels":m["thinkingLevels"]})).collect::<Vec<_>>();
         let aliases=models.iter().map(|m|json!({"modelId":format!("openai-codex/{}",m["modelId"].as_str().unwrap()),"label":m["label"],"thinkingLevels":m["thinkingLevels"]})).collect::<Vec<_>>();models.extend(aliases);
         Ok::<Value,String>(json!({"runnerId":"codex","label":"Codex","available":native["ready"]==true,"models":models}))
-    }.await.unwrap_or_else(|e|json!({"runnerId":"codex","label":"Codex","available":false,"models":[],"reason":e}));
+    };
     let trusted=app.store.lock().unwrap().trusted_project(&app.project)?;
-    let opencode=if !runners.contains(&"opencode") { json!({"runnerId":"opencode","available":false,"models":[]}) } else { match crate::connected_opencode::source::inventory(&app.project,trusted).await {
+    let opencode=async { if !runners.contains(&"opencode") { json!({"runnerId":"opencode","available":false,"models":[]}) } else { match crate::connected_opencode::source::inventory(&app.project,trusted).await {
         Ok(models)=>json!({"runnerId":"opencode","label":"OpenCode","available":true,"models":models.iter().map(|m|{let mut levels=m.variants.clone();levels.push("off".into());json!({"modelId":m.id(),"label":m.id(),"thinkingLevels":levels})}).collect::<Vec<_>>()}),
         Err(e)=>json!({"runnerId":"opencode","label":"OpenCode","available":false,"models":[],"reason":e}),
-    }};
-    Ok(json!({"runners":[codex,opencode]}))
+    }}};
+    let claude = async {
+        if !runners.contains(&crate::claude::RUNNER) { return None; }
+        Some(match crate::claude::inventory(app).await {
+            Ok(models) => json!({"runnerId":"claude","label":"Claude Code","available":true,"models":models}),
+            Err(e) => json!({"runnerId":"claude","label":"Claude Code","available":false,"models":[],"reasonCode":e}),
+        })
+    };
+    let (codex, opencode, claude) = tokio::join!(codex, opencode, claude);
+    let codex = codex.unwrap_or_else(|e|json!({"runnerId":"codex","label":"Codex","available":false,"models":[],"reason":e}));
+    let mut inventory = vec![codex, opencode];
+    inventory.extend(claude);
+    Ok(json!({"runners":inventory}))
 }
 async fn models(crate::server::ProjectState(app): crate::server::ProjectState<App>) -> Response {
     match model_data(&app).await {
@@ -160,7 +182,10 @@ pub async fn validate_available(
 fn validate_inventory(data: &Value, members: &std::collections::BTreeMap<String, MemberAssignment>) -> Result<(), String> {
     for (member, a) in members {
         if !MEMBERS.contains(&member.as_str()) || a.runner_id.is_empty() || a.runner_id.len()>64 { return Err("Unsupported member or runner assignment".into()); }
-        let runner = data["runners"].as_array().and_then(|r| r.iter().find(|r| r["runnerId"] == a.runner_id && r["available"] == true)).ok_or("Assigned runner is unavailable")?;
+        let runner = data["runners"].as_array().and_then(|r| r.iter().find(|r| r["runnerId"] == a.runner_id)).ok_or("Assigned runner is unavailable")?;
+        if runner["available"] != true {
+            return Err(runner["reasonCode"].as_str().unwrap_or("Assigned runner is unavailable").into());
+        }
         resolve_model(&runner["models"], a, None)?;
     }
     Ok(())
@@ -168,7 +193,7 @@ fn validate_inventory(data: &Value, members: &std::collections::BTreeMap<String,
 pub(crate) use crate::member_integration::resolve_model;
 
 pub(crate) fn selection_snapshot(app: &App, store: &Store, runners: &[&str]) -> Result<String,String> {
-    if runners.iter().any(|r| !matches!(*r,"codex"|"opencode")) { return Err("Unsupported assigned runner".into()); }
+    if runners.iter().any(|r| !matches!(*r,"codex"|"opencode"|crate::claude::RUNNER)) { return Err("Unsupported assigned runner".into()); }
     let config=store.configuration_for(&app.project)?;
     let mut evidence=vec![serde_json::to_string(&config).map_err(|_|"Invalid selected configuration")?];
     let native_root=app.native_role_root.lock().unwrap().clone();
@@ -192,18 +217,21 @@ pub(crate) fn selection_snapshot(app: &App, store: &Store, runners: &[&str]) -> 
         evidence.push(crate::tasks::digest(&std::fs::read(path).map_err(|_|"OpenCode executable unavailable")?));
         evidence.push(crate::connected_opencode::source::configuration(&app.project,trusted)?);
     }
+    if runners.contains(&crate::claude::RUNNER) {
+        evidence.push(crate::claude::selection_key()?);
+    }
     evidence.push(app.web_identity.lock().unwrap().identity.assignment_members()?.to_string());
     Ok(crate::tasks::digest(serde_json::to_string(&evidence).unwrap().as_bytes()))
 }
-fn assignment_snapshot(app: &App, session: &str, expected: u64, runner: &str) -> Result<String,String> {
+fn assignment_snapshot(app: &App, session: &str, command: &Assign) -> Result<String,String> {
     let history=app.history.lock().map_err(|_|"Original ownership unavailable")?;
     #[cfg(test)]
     { let probe=app.assignment_probe.lock().unwrap().take(); if let Some(probe)=probe { probe(); } }
     let store=app.store.lock().map_err(|_|"State lock failed")?;
     history.check_context(&store.session_by_id(session)?)?;
     store.execution_project(session)?;
-    store.assignment_ready(session,expected)?;
-    selection_snapshot(app,&store,&[runner])
+    store.assignment_ready(session, &command.member_id, command.expected_revision)?;
+    selection_snapshot(app, &store, &[&command.assignment.runner_id])
 }
 
 #[derive(Deserialize)]
@@ -224,7 +252,7 @@ async fn assign(
         return error("Incompatible API".into());
     }
     if crate::web_identity::authorize().is_err() { return crate::server::problem(StatusCode::FORBIDDEN,"device-required","Device access ended"); }
-    let before = match assignment_snapshot(&app, &session, c.expected_revision, &c.assignment.runner_id) { Ok(v)=>v, Err(e)=>return error(e) };
+    let before = match assignment_snapshot(&app, &session, &c) { Ok(v)=>v, Err(e)=>return error(e) };
     if let Err(e) = validate_available(
         &app,
         &std::collections::BTreeMap::from([(c.member_id.clone(), c.assignment.clone())]),
@@ -239,7 +267,7 @@ async fn assign(
         let mut store = app.store.lock().map_err(|_| "State lock failed")?;
         history.check_context(&store.session_by_id(&session)?)?;
         store.execution_project(&session)?;
-        store.assignment_ready(&session,c.expected_revision)?;
+        store.assignment_ready(&session, &c.member_id, c.expected_revision)?;
         if selection_snapshot(&app, &store, &[&c.assignment.runner_id])? != before { return Err("Assignment configuration or executable changed during discovery".into()); }
         crate::web_identity::admit().map_err(str::to_owned)?;
         store.assign_member(&session,&c.member_id,c.assignment,c.expected_revision)
@@ -473,7 +501,9 @@ pub async fn creation_members(
     let runners=selected.values().map(|a|a.runner_id.as_str()).collect::<Vec<_>>();
     let data=model_data_for(app,&runners).await?;
     validate_inventory(&data,&selected)?;
-    for role in MEMBERS {next.entry((*role).into()).or_insert_with(||lead.clone());}
+    if lead.runner_id != crate::claude::RUNNER {
+        for role in MEMBERS {next.entry((*role).into()).or_insert_with(||lead.clone());}
+    }
     validate(&SessionContract {version:1,revision:1,generation:1,members:next.clone(),approvals:"relay".into(),lead_task:"new-admission-validation".into(),grants_revoked_at:0})?;
     Ok(next)
 }

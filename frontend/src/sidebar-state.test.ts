@@ -25,6 +25,19 @@ test('only observed pending work creates processing state',()=>{
  expect(processingState([{...r,decisions:[{state:'pending',questions:[{}]} as Decision]}],true,false).phase).toBe('question');
 });
 
+test('queued input waits behind the active outcome while approvals still take precedence',()=>{
+ const outcome={...r,phase:'running' as const,continuation:{task:'task',attempt:'member-attempt',source_seq:1,origin:'previous-root'}};
+ const queued={...r,id:'queued',phase:'queued' as const};
+ expect(processingState([outcome],true,false).phase).toBe('working');
+ expect(processingState([outcome,queued],true,false).phase).toBe('waiting');
+ const approval:Decision={
+  id:'approval',session:r.session,command:outcome.id,attempt:'lead-attempt',generation:'generation',
+  thread:'thread',turn:'turn',item:'item',request:'request',revision:1,state:'pending',
+  file:null,questions:[],resolution:null,dispatch_ms:null,delivered_ms:null,grant_consumed:false,detail:'',
+ };
+ expect(processingState([{...outcome,decisions:[approval]},queued],true,false).phase).toBe('approval');
+});
+
 // Protects observed completion independently from connection readiness and unread receipts.
 test('composed completed indicator is available while disconnected and preserves unread',()=>{
  const session=sessionStatus({...w,receipts:[{...r,phase:'completed'}]},'session-a');

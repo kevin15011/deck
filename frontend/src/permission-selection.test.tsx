@@ -11,13 +11,36 @@ export const broader={...exact,id:'opaque-files',kind:'file_set',label:'These fi
 export const policy={version:1,options:[exact,broader],selected_option_id:null,provenance:null,unsupported:[]};
 const projection=(p:unknown)=>({version:1,kind:'tool',validated:true,details:{operation:'update',paths:['/project/src/a.ts']},responses:['deny','allow_once','allow_session'],permission_policy:p});
 const render=(p:unknown)=>renderToStaticMarkup(<Review d={{id:'decision',revision:7,state:'pending',questions:[],detail:'',presentation:decisionPresentation(projection(p))} as unknown as Decision} connected onError={()=>{}}/>);
-test('host offers survive decoding and remain explicit with exact initial selection',()=>{
+test('host offers survive decoding and remain explicit with the qualified scope initially selected',()=>{
  expect((decisionPresentation(projection(policy)) as any)?.permission_policy).toEqual(policy);
  const {selected_option_id,...withoutSelection}=policy;
  expect(permissionPolicy(withoutSelection)?.selected_option_id).toBeNull();
  const html=render(policy);expect(html).toContain('opaque-files');
- expect(html).not.toMatch(/value="opaque-files" selected/);
- expect(html).toContain('value="opaque-exact" selected');
+ expect(html).toContain('value="opaque-files" selected');
+ expect(html).toContain('value="opaque-exact"');
+});
+test('an exact Claude search offer can produce scoped session consent',()=>{
+ const offer={...exact,category:'claude_workspace_read'};
+ const p=decisionPresentation(projection({...policy,options:[offer]}))?.permission_policy;
+ const scope=selectedScope(p,scopeBinding('grep',1,p),null);
+ expect(scope?.id).toBe(offer.id);
+ expect(consentRequest(7,'response-id',1,{type:'allow_session'},scope?.id).scope_option_id).toBe(offer.id);
+});
+test('Claude Grep renders Any and attaches it only to explicit session consent',()=>{
+ const grepExact={...exact,category:'claude_workspace_read'};
+ const any={...grepExact,id:'opaque-workspace-grep',kind:'workspace_grep',label:'Any',description:'Search any pattern within the admitted workspace.'};
+ const offer={...policy,options:[grepExact,any]};
+ expect(render(offer)).toContain('value="opaque-workspace-grep" selected');
+ const p=permissionPolicy(offer)!;
+ const binding=scopeBinding('grep',1,p);
+ const exactSelection={binding,id:grepExact.id};
+ expect(selectedScope(p,binding,exactSelection)?.id).toBe(grepExact.id);
+ const scope=selectedScope(p,scopeBinding('new-grep',1,p),exactSelection);
+ expect(scope?.id).toBe(any.id);
+ for(const response of ['deny','allow_once','allow_session'] as const){
+  expect(consentRequest(7,'response-id',1,{type:response},scope?.id).scope_option_id)
+   .toBe(response==='allow_session'?any.id:undefined);
+ }
 });
 test('malformed and unsupported policy disables only session consent',()=>{
  for(const p of [null,{}, {...policy,version:2},{...policy,options:[]},{...policy,options:[broader]},
@@ -43,17 +66,19 @@ test('all selected scope kinds disclose the complete host bounds and lifetime',(
   const html=renderToStaticMarkup(<><PermissionScopeChoice policy={p} scope={selected} disabled={false} onChange={()=>{}}/><button>Consent</button></>);
   const primary=html.slice(0,html.indexOf('<button>Consent')).replace(/<[^>]+>/g,' ');
   expect(primary).toContain(option.description);expect(primary).toContain('lead');
-  for(const meaning of [/this session/,/restarting the app/,/ends when revoked/,/team or session permissions change/,/revoke from session permissions/i,/other roles.*separate permission/i])expect(primary).toMatch(meaning);
+  for(const meaning of [/this session/,/restarting the app/,/ends when revoked/,/same admitted assignment revision/,/revoke from session permissions/i,/other roles.*separate permission/i])expect(primary).toMatch(meaning);
  }
 });
 test('selection never follows a changed offer, request or revision and unknown selection fails closed',()=>{
- const p=permissionPolicy(policy)!,key=scopeBinding('d',7,p),selection={binding:key,id:broader.id};
- expect(selectedScope(p,key,selection)?.kind).toBe('file_set');
- for(const bound of [scopeBinding('other',7,p),scopeBinding('d',8,p),scopeBinding('d',7,{...p,options:[p.options[0]]})])expect(selectedScope(p,bound,selection)?.kind).toBe('exact');
+ const p=permissionPolicy(policy)!,key=scopeBinding('d',7,p),selection={binding:key,id:exact.id};
+ expect(selectedScope(p,key,selection)?.kind).toBe('exact');
+ for(const bound of [scopeBinding('other',7,p),scopeBinding('d',8,p)])expect(selectedScope(p,bound,selection)?.kind).toBe('file_set');
+ const exactOnly={...p,options:[p.options[0]]};
+ expect(selectedScope(exactOnly,scopeBinding('d',7,exactOnly),selection)?.kind).toBe('exact');
  expect(selectedScope(p,key,{binding:key,id:'unoffered'})).toBeUndefined();
  expect(selectedScope(null,key,selection)).toBeUndefined();
- // A host record of a previously selected broad option is never a new default.
- const historical={...p,selected_option_id:broader.id};expect(selectedScope(historical,scopeBinding('d',7,historical),null)?.kind).toBe('exact');
+ const historical={...p,selected_option_id:exact.id};
+ expect(selectedScope(historical,scopeBinding('d',7,historical),null)?.kind).toBe('file_set');
 });
 test('opaque selection and UUID remain immutable through retries and uncertain errors',()=>{
  const response={type:'allow_session' as const};
@@ -111,4 +136,12 @@ test('production response path sends opaque IDs, retains errors and retries exac
   globalThis.fetch=originalFetch;
   if(storageDescriptor)Object.defineProperty(globalThis,'localStorage',storageDescriptor);else Reflect.deleteProperty(globalThis,'localStorage');
  }
+});
+
+test('default selection is the broadest offer when exact, command and family coexist',()=>{
+ const relay={...exact,category:'relay'};
+ const cmd={...relay,id:'cmd',kind:'bash_command',label:'This command, any timeout'};
+ const fam={...relay,id:'fam',kind:'bash_prefix',label:'Same command family'};
+ const p=permissionPolicy({...policy,options:[relay,cmd,fam]})!;
+ expect(selectedScope(p,scopeBinding('b',1,p),null)?.id).toBe('fam');
 });

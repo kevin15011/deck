@@ -97,6 +97,32 @@ async function check() {
             throw Error('Turn did not finish');
         }
         const first = await completed(await send('Remember and continue'));
+        async function verifyComposerClearance() {
+            const clearance = await page.locator('.chat-pane').evaluate(pane => {
+                const tail = pane.querySelector('.transcript-window').getBoundingClientRect();
+                const stack = pane.querySelector('.conversation-float-stack').getBoundingClientRect();
+                return {aboveStatus:stack.top-tail.bottom,aboveComposer:pane.querySelector('.composer-dock').getBoundingClientRect().top-tail.bottom};
+            });
+            assert(clearance.aboveStatus>=0 && clearance.aboveStatus<=48,
+                'The latest reply should clear the floating status without reserving the composer a second time: '+JSON.stringify(clearance));
+            return clearance;
+        }
+        if (process.argv.includes('--chat-layout-only')) {
+            await page.setViewportSize({width:1440,height:420});
+            const id = await send('Motion keyboard fixture answer',true);
+            const answer = page.locator('#exchange-'+id+' .answer');
+            await answer.getByText('word-47',{exact:false}).waitFor({state:'attached'});
+            await page.getByText('Working…',{exact:true}).waitFor();
+            await page.waitForFunction(() => {
+                const view = document.querySelector('#conversation');
+                return view.scrollHeight > view.clientHeight && view.scrollHeight-view.scrollTop-view.clientHeight<=2;
+            });
+            console.log('Live composer clearance',await verifyComposerClearance());
+            fs.writeFileSync(path.join(root,'finish-motion'),'');
+            assert.equal((await completed(id)).text,burst+final);
+            assert.deepEqual(pageErrors,[]);
+            return;
+        }
         // Seed settled history only inside the private fixture database.
         execFileSync('python3', ['-c', `
 import sqlite3,sys,json
@@ -106,6 +132,8 @@ with sqlite3.connect(sys.argv[1]) as db:
         row.update(id=f'history-{i}',attempt=f'old-{i}',text='Older answer',prompt=f'Older question {i}')
         db.execute("insert into receipts values (?,?)",(row['id'],json.dumps(row)))
 `, path.join(state,'state.db'), first.id]);
+        // Fixture SQL bypasses the daemon's commit notification; bootstrap the seeded history.
+        await page.reload();
         await page.getByText('Older question 104', {exact:true}).waitFor();
         const expected = Array.from({length:100}, (_,i)=>String(i).padStart(4,'0')+' ').join('');
         await page.evaluate(expected => {
@@ -217,6 +245,7 @@ print(json.dumps([[r['delta'],r['attemptNumber']] for r in rows if r['delta']]))
                 assert.equal(flights[0].inert,true);
             }
             assert(samples.every(sample=>sample.bottomGap<=2),'The transcript should follow live output at the bottom');
+            await verifyComposerClearance();
             assert(await page.locator('#prompt').evaluate(node=>node===document.activeElement));
             const copyLead = exchange.locator('.assistant-message').getByRole('button',{name:'Copy message'});
             if (!keyboard) {

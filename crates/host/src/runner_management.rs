@@ -410,7 +410,7 @@ impl Store {
     }
     pub fn affected_work(&self) -> Result<bool, String> {
         Ok(self
-            .all()?
+            .pending_receipts()?
             .iter()
             .any(|r| r.phase.active() || matches!(r.phase, Phase::Queued | Phase::Uncertain))
             || self.tasks_unsettled()?)
@@ -667,7 +667,9 @@ impl App {
             .as_ref()
             .and_then(|s| s.runner.as_ref());
         if let Some(b) = b {
-            if !receipt.configuration.as_ref().is_some_and(crate::connected_opencode::admitted) {validate_binding(b)?;}
+            if !receipt.configuration.as_ref().is_some_and(|s|
+                crate::connected_opencode::admitted(s) || crate::claude::admitted(s)
+            ) { validate_binding(b)?; }
             if b.ownership == "deck_owned"
                 && pin_package(&self.artifact_root()?)? != Path::new(&b.path)
             {
@@ -697,9 +699,6 @@ impl App {
             .runner
             .map(|b| PathBuf::from(b.path))
             .unwrap_or_else(|| self.binary.clone()))
-    }
-    pub(crate) fn runner_available(&self) -> Option<String> {
-        self.runner_available_for(&self.store.lock().unwrap(), &self.project)
     }
     pub(crate) fn runner_available_for(&self, store: &Store, project: &str) -> Option<String> {
         let c = match store.configuration_for(project) {
@@ -1172,13 +1171,17 @@ const MAINTENANCE_TARGETS: [&str; 6] = [
     "rtk",
     "codebase-memory-mcp",
 ];
-fn installed_path(app: &App, target: &str) -> Result<PathBuf, String> {
+pub(crate) fn installed_path(app: &App, target: &str) -> Result<PathBuf, String> {
     if !MAINTENANCE_TARGETS.contains(&target) {
         return Err("Unknown maintenance target".into());
     }
     if target == "codex" {
         return app.selected_binary();
     }
+    path_tool(target)
+}
+
+pub(crate) fn path_tool(target: &str) -> Result<PathBuf, String> {
     std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
         .filter(|p| p.is_absolute())
         .map(|p| p.join(target))
@@ -1645,6 +1648,7 @@ pub fn routes() -> Router<App> {
     Router::new()
         .route("/api/runners", get(inspect))
         .route("/api/runners/refresh", post(refresh))
+        .route("/api/runners/claude/readiness", get(crate::claude_readiness::readiness))
         .route("/api/runners/codex/daemon/restart", post(restart_codex_daemon))
         .route("/api/runners/maintenance", post(maintenance))
         .route(

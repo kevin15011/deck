@@ -32,6 +32,28 @@ pub struct StartupTiming {
     pub mcp_suppression_ms: u64,
     pub mcp_retry_wait_ms: u64,
     pub mcp_local_verify_ms: u64,
+    /// Admission lock waits in the submit handler (monotonic microseconds).
+    pub submit_lock_wait_us: u64,
+    pub submit_active_wait_us: u64,
+    pub submit_history_wait_us: u64,
+    pub submit_store_wait_us: u64,
+    /// Handler entry until every admission lock was held.
+    pub submit_lock_span_us: u64,
+    /// Static tag of the dominant traced holder; `untraced` when none overlapped.
+    pub submit_blocker: String,
+    pub submit_blocker_us: u64,
+    /// Store/receipt lock waits observed by the running command before dispatch.
+    pub run_lock_wait_us: u64,
+    pub run_lock_acquisitions: u64,
+    /// Nested inside `bridge_role_ms` / `native_acquire_ms`.
+    pub bridge_start_ms: u64,
+    pub reuse_take_ms: u64,
+    /// Process reuse checkout plus any cold process start.
+    pub native_acquire_ms: u64,
+    /// Thread/tool/MCP readiness (`prepare_attempt`).
+    pub prepare_ms: u64,
+    /// `handshake_ms` minus the disjoint phases above; unmeasured time.
+    pub other_ms: u64,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -102,6 +124,9 @@ pub struct Receipt {
     /// Unread input retracted from conversation; audit receipt is retained.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recalled_ms: Option<u64>,
+    /// A queued receipt reserved or consumed by live delivery to this root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steered_to: Option<String>,
     #[serde(default)]
     pub decisions: Vec<Decision>,
     pub id: String,
@@ -155,12 +180,21 @@ pub struct SteeringCommand {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QueuedSteeringSource {
+    pub id: String,
+    pub attempt: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SteeringReceipt {
     #[serde(flatten)]
     pub command: SteeringCommand,
     pub state: SteeringState,
     pub admitted_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued_source: Option<QueuedSteeringSource>,
 }
 /// A Deck Lead's scoped instruction, independent of user steering and decisions.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -498,7 +532,7 @@ pub struct TaskReport {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Treatment {
-    pub report: String,
+    pub report: Option<String>,
     pub lead_attempt: String,
     pub disposition: String,
     pub reason: String,
@@ -688,6 +722,7 @@ pub struct ContextReading {
 pub enum NativeRunner {
     Codex,
     Opencode,
+    Claude,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -695,6 +730,7 @@ pub enum NativeTransport {
     CodexJsonRpc,
     OpencodeHttp,
     DeckMcp,
+    ClaudeSdk,
 }
 /// Exact launch evidence. Storage is a native namespace identity, never credentials.
 /// Migration cannot reconstruct this authority from a historical model label.

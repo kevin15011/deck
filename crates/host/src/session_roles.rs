@@ -82,6 +82,20 @@ fn catalog_policy(body: &str) -> Option<String> {
     }
 
     let mut config: toml::Value = toml::from_str(body).ok()?;
+    // Codex itself records this state while it runs (project trust on a
+    // first thread, UI notices, hook trust). A running process never reloads
+    // it and Deck pins hook trust at launch and re-verifies hooks live, so it
+    // must never revoke an attempt or a retained runtime.
+    let table = config.as_table_mut()?;
+    for runtime in ["projects", "tui", "notice"] {
+        table.remove(runtime);
+    }
+    if let Some(toml::Value::Table(hooks)) = table.get_mut("hooks") {
+        hooks.remove("state");
+        if hooks.is_empty() {
+            table.remove("hooks");
+        }
+    }
     if let Some(catalogs) = config.as_table_mut()?.remove("marketplaces") {
         let mut catalogs = catalogs.as_table()?.clone();
         catalogs.retain(|name, _| references_catalog(&config, &format!("@{name}")));
@@ -110,7 +124,7 @@ impl Role {
             .ok_or("Native home unavailable")?;
         Self::at(&root, member)
     }
-    pub fn at(root: &Path, member: &str) -> Result<Self, String> {
+    pub(crate) fn packaged_instructions(member: &str) -> Result<String, String> {
         if !crate::session_contract::MEMBERS.contains(&member) {
             return Err("Unknown canonical role".into());
         }
@@ -122,6 +136,20 @@ impl Role {
             })
             .as_ref()
             .map_err(Clone::clone)?;
+        Ok(format!(
+            "{}\n\n{}\n\n{}",
+            roles[member]["agentBody"]
+                .as_str()
+                .ok_or("Canonical role missing")?,
+            roles[member]["skillBody"]
+                .as_str()
+                .ok_or("Canonical skill missing")?,
+            crate::session_skills::GUIDANCE
+        ))
+    }
+
+    pub fn at(root: &Path, member: &str) -> Result<Self, String> {
+        let instructions = Self::packaged_instructions(member)?;
         let config = root.join("config.toml");
         let mut files = BTreeMap::new();
         let body = match std::fs::symlink_metadata(&config) {
@@ -136,16 +164,7 @@ impl Role {
         );
         let catalog_policy = catalog_policy(body.as_deref().unwrap_or(""));
         Ok(Self {
-            instructions: format!(
-                "{}\n\n{}\n\n{}",
-                roles[member]["agentBody"]
-                    .as_str()
-                    .ok_or("Canonical role missing")?,
-                roles[member]["skillBody"]
-                    .as_str()
-                    .ok_or("Canonical skill missing")?,
-                crate::session_skills::GUIDANCE
-            ),
+            instructions,
             sandbox: matches!(member, "investigate" | "quality").then(|| "read-only".into()),
             hooks: vec![],
             files,
@@ -242,6 +261,26 @@ mod tests {
         assert!(selected.verify().is_err());
     }
 
+    // Codex records trust for a project the first time it opens a thread
+    // there, mid-attempt. That bookkeeping must never fail the turn.
+    #[test]
+    fn codex_runtime_bookkeeping_preserves_running_roles() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("config.toml");
+        let base = "approval_policy = 'on-request'\n[projects.'/a']\ntrust_level = 'trusted'\n";
+        std::fs::write(&path, base).unwrap();
+        let lead = super::Role::at(home.path(), "lead").unwrap();
+        let key = super::codex_policy_key(&path).unwrap();
+        let written = format!(
+            "{base}[projects.'/new']\ntrust_level = 'trusted'\n[tui.model_availability_nux]\nseen = 1\n\
+             [notice]\nhide = true\n[hooks.state.'x:stop:0:0']\ntrusted_hash = 'h'\n"
+        );
+        std::fs::write(&path, &written).unwrap();
+        lead.verify().unwrap();
+        assert_eq!(super::codex_policy_key(&path).unwrap(), key);
+        std::fs::write(&path, format!("{written}[mcp_servers.extra]\ncommand = 'x'\n")).unwrap();
+        assert!(lead.verify().is_err(), "Native MCP changes still revoke the attempt");
+    }
     #[test]
     fn parses_native_role_toml_without_executing_it() {
         let raw = "name = 'deck-lead'\ndeveloper_instructions = 'Canonical role'\nsandbox_mode = 'read-only'\n";

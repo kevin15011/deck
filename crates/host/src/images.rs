@@ -93,19 +93,6 @@ impl Store {
         if cancelled {
             return Ok(());
         }
-        let count: i64 = self
-            .conn
-            .query_row(
-                "SELECT count(*) FROM image_cancellations WHERE session=?1",
-                [session],
-                |r| r.get(0),
-            )
-            .map_err(|_| "Cannot inspect upload history")?;
-        if count >= 4096 {
-            return Err(
-                "Upload history is full; keep this draft or remove the settled conversation".into(),
-            );
-        }
         if let Ok(a) = self.uploaded_image(session, upload) {
             self.remove_image(session, &a.id)?;
         }
@@ -174,20 +161,6 @@ impl Store {
             .map_err(|_| "Cannot inspect removed upload")?;
         if cancelled {
             return Err("This upload was removed; select the image again".into());
-        }
-        // Cancellations retain tiny retry identities to reject late body completions.
-        let count: i64 = self
-            .conn
-            .query_row(
-                "SELECT count(*) FROM image_cancellations WHERE session=?1",
-                [session],
-                |r| r.get(0),
-            )
-            .map_err(|_| "Cannot inspect upload history")?;
-        if count >= 4096 {
-            return Err(
-                "Upload history is full; create a new conversation for further images".into(),
-            );
         }
         let existing: Option<String> = self
             .conn

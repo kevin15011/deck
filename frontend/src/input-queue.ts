@@ -2,7 +2,7 @@ import {API,request,type Receipt} from './api';
 import type {CommandTransport} from './command-admission';
 // Workspace receipts are in authoritative arrival order, including clock rollback.
 export function sessionQueue(receipts:Receipt[],session:string):Receipt[]{
- return receipts.filter(r=>r.session===session&&r.phase==='queued'&&r.recalled_ms===undefined);
+ return receipts.filter(r=>r.session===session&&r.phase==='queued'&&!r.continuation&&r.recalled_ms===undefined);
 }
 /** Undispatched-only cancellation; a start race must refuse, never interrupt. */
 export async function cancelQueuedInput(input:Receipt,transport:CommandTransport=request):Promise<void>{

@@ -11,7 +11,7 @@ use axum::{
 use deck2_shared::{API, Problem, Receipt, ScopedSubmit, SessionCommand, Workspace};
 use serde_json::json;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap, HashSet},
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -79,8 +79,10 @@ pub struct Inner {
     pub(crate) device_history_probe: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub(crate) dictation: tokio::sync::OnceCell<Arc<crate::dictation::Service>>,
     pub(crate) quota_runtime: Mutex<crate::quota::Runtime>,
+    pub(crate) claude_quota_runtime: Mutex<crate::quota::Runtime>,
     pub(crate) git_review: crate::git_review::Runtime,
     pub store: Mutex<Store>,
+    pub(crate) workspace_updates: crate::workspace_events::Updates,
     pub artifact_store: Mutex<Option<PathBuf>>,
     pub host: String,
     pub binary: PathBuf,
@@ -91,8 +93,11 @@ pub struct Inner {
     recovery: String,
     launch: Mutex<Option<String>>,
     pub(crate) active: Mutex<HashMap<String, watch::Sender<bool>>>,
+    session_removals: Mutex<HashSet<String>>,
     pub(crate) delegated_cursor: Mutex<String>,
     pub(crate) native_reuse: crate::native::reuse::Slot,
+    #[cfg(test)]
+    pub(crate) claude_transport: Mutex<Option<crate::claude_fixture::Transport>>,
     pub(crate) session_credentials: Mutex<HashMap<String, String>>,
     #[cfg(test)]
     pub(crate) continuity_bound: Mutex<Option<serde_json::Value>>,
@@ -172,9 +177,12 @@ impl App {
         let native_reuse=crate::native::reuse::Slot::default();
         let broken=native_reuse.recover(&store).is_err();
         let project = store.project.clone();
+        let workspace_updates = store.workspace_updates.clone();
+        workspace_updates.observe(&store.conn);
         let app=Self { project: project.clone(), inner: Arc::new(Inner {
             initial_project: project,
             store: Mutex::new(store),
+            workspace_updates,
             web_push: Mutex::new(Default::default()),
             web_identity: Mutex::new(Default::default()),
             history: Mutex::new(Default::default()),
@@ -184,6 +192,7 @@ impl App {
             device_history_probe: Mutex::new(None),
             dictation:tokio::sync::OnceCell::new(),
             quota_runtime: Mutex::new(Default::default()),
+            claude_quota_runtime: Mutex::new(Default::default()),
             git_review: Default::default(),
             artifact_store: Mutex::new(None),
             cookie_name: format!("deck2_{}", host.rsplit(':').next().unwrap_or("local")),
@@ -201,8 +210,11 @@ impl App {
             recovery,
             launch: Mutex::new(None),
             active: Mutex::new(HashMap::new()),
+            session_removals: Mutex::default(),
             delegated_cursor: Mutex::new(String::new()),
             native_reuse,
+            #[cfg(test)]
+            claude_transport: Mutex::new(None),
             session_credentials: Mutex::new(HashMap::new()),
             #[cfg(test)]
             continuity_bound: Mutex::new(None),
@@ -290,7 +302,7 @@ impl App {
         !self.broken.load(Ordering::SeqCst)
     }
     pub fn storage_failed(&self) {
-        self.broken.store(true, Ordering::SeqCst);
+        self.mark_broken();
         if let Ok(active) = self.active.try_lock() {
             for c in active.values() {
                 let _ = c.send(true);
@@ -373,7 +385,7 @@ impl App {
     }
     pub fn change(&self, id: &str, f: impl FnOnce(&mut Receipt)) -> Result<(), String> {
         let result = (|| {
-            let mut s = self.store.lock().map_err(|_| "State lock failed")?;
+            let mut s = crate::latency::locked_checked(&self.store).map_err(|_| "State lock failed")?;
             let mut r = s.get(id)?.ok_or("Receipt missing")?;
             f(&mut r);
             if !r.phase.active() {
@@ -382,7 +394,7 @@ impl App {
             s.save(&mut r)
         })();
         if result.is_err() {
-            self.broken.store(true, Ordering::SeqCst);
+            self.mark_broken();
             for c in self.active.lock().unwrap().values() {
                 let _ = c.send(true);
             }
@@ -390,8 +402,7 @@ impl App {
         result
     }
     pub fn receipt(&self, id: &str) -> Result<Receipt, String> {
-        self.store
-            .lock()
+        crate::latency::locked_checked(&self.store)
             .map_err(|_| "State lock failed")?
             .get(id)?
             .ok_or("Unknown command identity".into())
@@ -440,8 +451,14 @@ impl App {
         for r in store.all()?.into_iter().filter(|r|r.cancel_requested) {if let Some(sender)=active.get(&r.id) {let _=sender.send(true);}}
         Ok(())
     }
+    fn mark_broken(&self) {
+        self.broken.store(true, Ordering::SeqCst);
+        self.workspace_updates.notify();
+    }
     pub fn clear_active(&self, id: &str) {
-        self.active.lock().unwrap().remove(id);
+        if self.active.lock().unwrap().remove(id).is_some() {
+            self.workspace_updates.notify();
+        }
         // Legacy settlement can be observed before its worker key is removed.
         // Retry only the exclusive legacy lane; connected admission retains its
         // own fair pump. start_task rechecks live keys and durable uncertainty.
@@ -478,7 +495,19 @@ impl App {
         let mut s = self.store.lock().unwrap();
         let cap = match configured.and_then(|raw| crate::session_scheduler::lead_limit(&s.configuration()?, &raw)) { Ok(cap) => cap, Err(_) => return };
         let live = match self.live_roots(&active, &s, "") { Ok(live) => live, Err(_) => return };
-        match self.native_reuse.settle_waiting_roots(&mut s, &live) {
+        #[cfg(test)]
+        if let Some(transport) = self.claude_transport.lock().unwrap().as_ref()
+            && transport.settle_waiting_roots(&mut s, &live).is_err()
+        {
+            self.mark_broken();
+            return;
+        }
+        let live_members = active.keys().filter_map(|key| key.strip_prefix("child:").map(str::to_owned)).collect();
+        let recovered = crate::claude::settle_recovered(&mut s, &live)
+            .and_then(|claude| crate::claude::member::settle_recovered(&mut s, &live_members).map(|member| claude || member))
+            .and_then(|claude| crate::codex_member::settle_recovered(&mut s, &live_members).map(|member| claude || member))
+            .and_then(|claude| self.native_reuse.settle_waiting_roots(&mut s, &live).map(|codex| claude || codex));
+        match recovered {
             Ok(true) if !self.queue_retry_pending.swap(true, Ordering::SeqCst) => {
                 let weak = Arc::downgrade(&self.inner);
                 tokio::spawn(async move {
@@ -490,14 +519,21 @@ impl App {
                     }
                 });
             }
-            Err(_) => { self.broken.store(true, Ordering::SeqCst); return; }
+            Err(_) => { self.mark_broken(); return; }
             _ => {}
         }
-        if s.affected_work().unwrap_or(true) && self.retain_auth_scope().is_err() { return; }
+        // Explanation only; a failure here must not hold the queue.
+        let _ = s.explain_member_wait();
+        let affected = s.affected_work().unwrap_or(true);
+        if affected && self.retain_auth_scope().is_err() { return; }
         let next = s.claim_next_with_limit(&live, cap);
+        if affected && matches!(&next, Ok(None)) {
+            // A redundant outcome can drain the queue without starting a worker.
+            self.release_auth_if_settled(&active, &s);
+        }
         drop(s);
         if next.is_err() {
-            self.broken.store(true, Ordering::SeqCst);
+            self.mark_broken();
             return;
         }
         if let Ok(Some(r)) = next {
@@ -515,6 +551,9 @@ impl App {
             self.pump_queue();
         }
     }
+    pub fn close_workspace_updates(&self) {
+        self.workspace_updates.close();
+    }
     pub fn shutdown(&self) {
         {let _admission=self.active.lock().unwrap();
         self.shutdown_requested.store(true, Ordering::SeqCst);}
@@ -531,19 +570,19 @@ impl App {
                 Ok(roots) => {
                     for root in roots {
                         if store.request_cancel(&root).is_err() {
-                            self.broken.store(true, Ordering::SeqCst);
+                            self.mark_broken();
                         }
                     }
                 }
                 Err(_) => {
-                    self.broken.store(true, Ordering::SeqCst);
+                    self.mark_broken();
                 }
             }
             if let Ok(tasks) = store.tasks() {
                 for task in tasks {
                     for attempt in &task.attempts {
                         if store.cancel_tasks(task.authority_root(attempt)).is_err() {
-                            self.broken.store(true, Ordering::SeqCst);
+                            self.mark_broken();
                         }
                     }
                 }
@@ -551,6 +590,19 @@ impl App {
         }
         for c in self.active.lock().unwrap().values() {
             let _ = c.send(true);
+        }
+    }
+    pub async fn drain_shutdown(&self) {
+        let drain = async {
+            self.retire_native().await.ok();
+            // A worker can exit while its detached native cleanup still owns
+            // the child. Keep the runtime alive to reap it before exiting.
+            while !self.active.lock().unwrap().is_empty() || self.native_retiring() {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        };
+        if tokio::time::timeout(std::time::Duration::from_secs(15), drain).await.is_err() {
+            eprintln!("Deck shutdown: native settlement is still unconfirmed");
         }
     }
     pub fn write_restart_cookie(&self, stream: &mut impl std::io::Write) -> std::io::Result<()> {
@@ -615,6 +667,7 @@ pub(crate) async fn boundary(State(app): State<App>, req: Request, next: Next) -
     let origin = h.get(header::ORIGIN).and_then(|v| v.to_str().ok());
     let host = h.get(header::HOST).and_then(|v| v.to_str().ok());
     let launch = path == "/launch";
+    let workspace_stream = path == "/api/workspace/events";
     // Keep each admission requirement independent; diagnostics contain only the
     // failed boundary, never headers, cookies, capabilities or request bodies.
     let recovery = format!(
@@ -674,8 +727,8 @@ pub(crate) async fn boundary(State(app): State<App>, req: Request, next: Next) -
     if original_auth && !public && !local_access && !authority.as_ref().is_some_and(|a|a.accepted()) {
         use futures_util::StreamExt;
         let (parts, body) = response.into_parts();
-        let stream = futures_util::stream::try_unfold((body.into_data_stream(), identity, headers, peer), |(mut body, identity, headers, peer)| async move {
-            let mut timer = tokio::time::interval(std::time::Duration::from_millis(100));
+        let stream = futures_util::stream::try_unfold((body.into_data_stream(), identity, headers, peer), move |(mut body, identity, headers, peer)| async move {
+            let mut timer = tokio::time::interval(std::time::Duration::from_millis(if workspace_stream { 5000 } else { 100 }));
             loop {
                 if !identity.authorized(&headers,peer) {return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied,"Device access ended"));}
                 tokio::select! {
@@ -748,69 +801,242 @@ async fn auth(
     }
     response
 }
-async fn workspace(State(app): State<App>) -> Response {
-    let availability = app.runner_available();
-    // Match admission lock order and project process ownership with receipts.
-    let active = app.active.lock().unwrap();
-    let history=app.history.lock().unwrap();
-    let s = app.store.lock().unwrap();
-    let mut receipts = match s.all() {
-        Ok(r) => r,
-        Err(e) => return problem(StatusCode::SERVICE_UNAVAILABLE, "storage", e),
+#[derive(serde::Deserialize)]
+struct WorkspaceQuery { transport: Option<String> }
+
+async fn workspace(State(app): State<App>, uri: axum::http::Uri) -> Response {
+    if axum::extract::Query::<WorkspaceQuery>::try_from_uri(&uri)
+        .is_ok_and(|q| q.transport.as_deref() == Some("events")) {
+        return crate::workspace_events::bootstrap(app).await;
+    }
+    tokio::task::spawn_blocking(move || workspace_response(&app))
+        .await
+        .unwrap_or_else(|_| StatusCode::SERVICE_UNAVAILABLE.into_response())
+}
+
+fn workspace_response(app: &App) -> Response {
+    match project_workspace(app) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => error,
+    }
+}
+
+pub(crate) fn project_workspace(app: &App) -> Result<serde_json::Value, Response> {
+    // Match admission lock order. Release shared state before projecting JSON.
+    let mut trace = crate::latency::Trace::new("workspace");
+    let active = trace.lock(&app.active, crate::latency::Lock::Active);
+    let history = trace.lock(&app.history, crate::latency::Lock::History);
+    let store = trace.lock(&app.store, crate::latency::Lock::Store);
+    let storage = |error: String| problem(StatusCode::SERVICE_UNAVAILABLE, "storage", error);
+    // Capture the durable rows under the admission locks. Only turns with
+    // approvals or a possible steering role need decoding before release.
+    let receipt_rows = (|| -> rusqlite::Result<Vec<(String, bool)>> {
+        let mut stmt = store.conn.prepare_cached(
+            "SELECT body, COALESCE(json_array_length(body, '$.decisions') > 0
+             OR json_extract(body, '$.phase') IN ('queued', 'running'), false)
+             FROM receipts ORDER BY rowid",
+        )?;
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect()
+    })().map_err(|_| storage("State read failed".into()))?;
+    let decode = |body: &str| {
+        serde_json::from_str::<deck2_shared::Receipt>(body)
+            .map_err(|_| storage("Corrupt receipt; preserve state for inspection".into()))
     };
-    let (host_id, sessions, queue_paused) = match (s.host_id(), s.sessions(), s.queue_paused()) {
-        (Ok(h), Ok(s), Ok(p)) => (h, s, p),
-        _ => {
-            return problem(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "storage",
-                "Conversation state unavailable",
-            );
+    let relevant_receipts: Vec<_> = receipt_rows.iter()
+        .filter(|(_, relevant)| *relevant)
+        .map(|(body, _)| decode(body))
+        .collect::<Result<_, _>>()?;
+    let mut tasks = store.tasks().map_err(storage)?;
+    let sessions = store.sessions().map_err(storage)?;
+    let host_id = store.host_id().map_err(storage)?;
+    let queue_paused = store.queue_paused().map_err(storage)?;
+    let trusted =
+        !app.project.is_empty() && store.trusted_project(&app.project).map_err(storage)?;
+    let steerable_queued =
+        crate::steering::eligible_queue_ids(&store, &relevant_receipts).map_err(storage)?;
+    let dismissal_blockers: Vec<_> = tasks
+        .iter()
+        .map(|task| {
+            crate::task_panel::failure_dismissal_blocker(task, &relevant_receipts, |attempt| {
+                active.contains_key(&format!("child:{attempt}"))
+            })
+        })
+        .collect();
+    let process_active = !active.is_empty();
+    let default_session = if store.session.is_empty() {
+        sessions
+            .first()
+            .map(|session| session.id.clone())
+            .unwrap_or_default()
+    } else {
+        store.session.clone()
+    };
+
+    let broken = app.broken.load(Ordering::SeqCst);
+    let unavailable =
+        broken.then(|| "Receipt persistence failed; dispatch is blocked.".to_string());
+    let availability = if broken {
+        Some("Receipt persistence failed. Stop Deck and inspect its state directory; dispatch is blocked.".into())
+    } else {
+        app.runner_available_for(&store, &app.project)
+    };
+    let projects = store.projects().unwrap_or_default();
+    let project_trust: BTreeMap<_, _> = projects
+        .iter()
+        .map(|p| {
+            (
+                p.id.clone(),
+                store.trusted_project(&p.root).unwrap_or(false),
+            )
+        })
+        .collect();
+    let project_availability: BTreeMap<_, _> = projects
+        .iter()
+        .map(|p| {
+            let reason = unavailable
+                .clone()
+                .or_else(|| crate::projects::validate(p).err())
+                .or_else(|| app.runner_available_for(&store, &p.root));
+            (p.id.clone(), reason)
+        })
+        .collect();
+    let mut availability_by_runner = HashMap::new();
+    let session_availability: BTreeMap<_, _> = sessions
+        .iter()
+        .filter_map(|session| {
+            let runner = &session.contract.as_ref()?.members.get("lead")?.runner_id;
+            let root = &session.project.root;
+            let reason = availability_by_runner
+                .entry((runner, root))
+                .or_insert_with(|| {
+                    unavailable.clone().or_else(|| match runner.as_str() {
+                        "opencode" => crate::connected_opencode::source::executable().err(),
+                        crate::claude::RUNNER => crate::claude::executable()
+                            .and_then(|_| crate::claude::node_runtime())
+                            .err(),
+                        "codex" => app.runner_available_for(&store, root),
+                        _ => Some("Selected runner is unavailable".into()),
+                    })
+                });
+            Some((session.id.clone(), reason.clone()))
+        })
+        .collect();
+    let team = app.team.lock().unwrap();
+    let team_disabled =
+        "Team investigation is disabled for new work. Review Configuration to re-enable it.";
+    let team_availability = |project: &str, is_initial| {
+        if !store
+            .configuration_for(project)
+            .is_ok_and(|c| c.team_enabled)
+        {
+            Some(team_disabled.to_string())
+        } else if team
+            .as_ref()
+            .is_some_and(|runner| runner.matches_project(project))
+        {
+            None
+        } else if is_initial {
+            Some(app.team_unavailable.lock().unwrap().clone())
+        } else {
+            Some("Investigator is not prepared for this project.".to_string())
         }
     };
-    let mut tasks = match s.tasks() {
-        Ok(v) => v,
-        Err(e) => return problem(StatusCode::SERVICE_UNAVAILABLE, "storage", e),
-    };
-    crate::observations::project(&mut receipts, &mut tasks, &sessions);
-    let default_session = if s.session.is_empty() {
-        sessions.first().map(|session| session.id.clone()).unwrap_or_default()
-    } else {
-        s.session.clone()
-    };
-    let mut value=serde_json::to_value(Workspace{tasks,team_availability:if !s.configuration_for(&app.project).is_ok_and(|c|c.team_enabled){Some("Team investigation is disabled for new work. Review Configuration to re-enable it.".into())}else if app.team.lock().unwrap().as_ref().is_some_and(|r|r.matches_project(&app.project)){None}else{Some(app.team_unavailable.lock().unwrap().clone())},host_id,sessions,queue_paused,steering_unavailable:"Live steering requires a running Codex Lead turn.".into(),trusted: !app.project.is_empty() && match s.trusted_project(&app.project) { Ok(v)=>v, Err(e)=>return problem(StatusCode::SERVICE_UNAVAILABLE,"storage",e)}, api:API,session:default_session,project:app.project.clone(),runner:"Codex · reviewed edits / read-only".into(),availability:if app.broken.load(Ordering::SeqCst){Some("Receipt persistence failed. Stop Deck and inspect its state directory; dispatch is blocked.".into())}else{availability},receipts}).unwrap();
-    crate::execution_view::project(&mut value);
-    value["process_active"] = json!(!active.is_empty());
-    if !app.project.is_empty() { value["initial_project"]=json!(crate::projects::id(&app.project)); }
-    value["projects"]=serde_json::to_value(s.projects().unwrap_or_default()).unwrap();
-    value["project_trust"]=json!(s.projects().unwrap_or_default().iter().map(|p|(p.id.clone(),s.trusted_project(&p.root).unwrap_or(false))).collect::<std::collections::BTreeMap<_,_>>());
-    let projects = s.projects().unwrap_or_default();
-    let unavailable = app.broken.load(Ordering::SeqCst).then(|| "Receipt persistence failed; dispatch is blocked.".to_string());
-    value["project_availability"] = json!(projects.iter().map(|p| {
-        (p.id.clone(), unavailable.clone().or_else(|| crate::projects::validate(p).err()).or_else(|| app.runner_available_for(&s, &p.root)))
-    }).collect::<std::collections::BTreeMap<_,_>>());
-    let team = app.team.lock().unwrap();
-    value["session_availability"]=json!(value["sessions"].as_array().into_iter().flatten().filter_map(|session|{
-        let id=session["id"].as_str()?;let runner=session["contract"]["members"]["lead"]["runnerId"].as_str()?;
-        let root=session["project"]["root"].as_str()?;
-        let reason=unavailable.clone().or_else(|| if runner=="opencode"{crate::connected_opencode::source::executable().err()}else if runner=="codex"{app.runner_available_for(&s,root)}else{Some("Selected runner is unavailable".into())});
-        Some((id.to_owned(),reason))
-    }).collect::<std::collections::BTreeMap<_,_>>());
-    value["project_team_availability"] = json!(projects.iter().map(|p| {
-        let reason = if !s.configuration_for(&p.root).is_ok_and(|c| c.team_enabled) {
-            Some("Team investigation is disabled for new work. Review Configuration to re-enable it.".to_string())
-        } else if team.as_ref().is_some_and(|r| r.matches_project(&p.root)) { None }
-        else { Some("Investigator is not prepared for this project.".to_string()) };
-        (p.id.clone(), reason)
-    }).collect::<std::collections::BTreeMap<_,_>>());
+    let team_availability_for_initial = team_availability(&app.project, true);
+    let project_team_availability: BTreeMap<_, _> = projects
+        .iter()
+        .map(|p| (p.id.clone(), team_availability(&p.root, false)))
+        .collect();
     drop(team);
 
-    if let Some(receipts)=value["receipts"].as_array_mut(){for r in receipts {
-        let raw:deck2_shared::Receipt=match serde_json::from_value(r.clone()){Ok(r)=>r,Err(_)=>continue};
-        let offset=history.notification_boundary(&raw.session).unwrap_or(0);
-        for (at,d) in raw.decisions.iter().enumerate(){if let Ok(Some((seq,_)))=crate::web_push::decision_occurrence(&s,&raw,d){r["decisions"][at]["notificationSeq"]=json!(seq+offset);}}
-    }}
-    Json(value).into_response()
+    let mut boundary_by_session = HashMap::new();
+    let decision_notifications: HashMap<_, Vec<_>> = relevant_receipts
+        .iter()
+        .filter(|receipt| !receipt.decisions.is_empty())
+        .map(|receipt| {
+            let offset = *boundary_by_session
+                .entry(&receipt.session)
+                .or_insert_with(|| history.notification_boundary(&receipt.session).unwrap_or(0));
+            let occurrences = receipt.decisions.iter().map(|decision| {
+                crate::web_push::decision_occurrence(&store, receipt, decision)
+                    .ok()
+                    .flatten()
+                    .map(|(seq, _)| seq + offset)
+            }).collect();
+            (receipt.id.as_str(), occurrences)
+        })
+        .collect();
+    let decision_revisions = (|| -> rusqlite::Result<BTreeMap<String, u64>> {
+        let mut stmt = store
+            .conn
+            .prepare_cached("SELECT session, COUNT(*) FROM decision_commands GROUP BY session")?;
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect()
+    })()
+    .map_err(|_| storage("Decision revisions unavailable".into()))?;
+    drop(boundary_by_session);
+    drop(availability_by_runner);
+    trace.release();
+    drop(store);
+    drop(history);
+    drop(active);
+
+    let mut receipts = receipt_rows.into_iter()
+        .map(|(body, _)| decode(&body))
+        .collect::<Result<Vec<_>, _>>()?;
+    crate::observations::project(&mut receipts, &mut tasks, &sessions);
+    let snapshot = Workspace {
+        tasks,
+        team_availability: team_availability_for_initial,
+        host_id,
+        sessions,
+        queue_paused,
+        steering_unavailable: "Live steering requires a running Lead turn that accepts live input.".into(),
+        trusted,
+        api: API,
+        session: default_session,
+        project: app.project.clone(),
+        runner: "Codex · reviewed edits / read-only".into(),
+        availability,
+        receipts,
+    };
+    let mut value = serde_json::to_value(&snapshot).unwrap();
+    for (receipt, value) in snapshot
+        .receipts
+        .iter()
+        .zip(value["receipts"].as_array_mut().unwrap())
+    {
+        crate::execution_view::project_receipt(receipt, value);
+        if let Some(notifications) = decision_notifications.get(receipt.id.as_str()) {
+            for (at, seq) in notifications.iter().enumerate() {
+                if let Some(seq) = seq {
+                    value["decisions"][at]["notificationSeq"] = json!(seq);
+                }
+            }
+        }
+    }
+    for (task, blocker) in value["tasks"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .zip(dismissal_blockers)
+    {
+        if let Some(blocker) = blocker {
+            let attempt = task["attempts"].as_array_mut().unwrap().last_mut().unwrap();
+            attempt["failure_dismissal_blocker"] = json!(blocker);
+        }
+    }
+    value["steerable_queued"] = json!(steerable_queued);
+    value["process_active"] = json!(process_active);
+    if !app.project.is_empty() {
+        value["initial_project"] = json!(crate::projects::id(&app.project));
+    }
+    value["projects"] = json!(projects);
+    value["project_trust"] = json!(project_trust);
+    value["project_availability"] = json!(project_availability);
+    value["session_availability"] = json!(session_availability);
+    value["project_team_availability"] = json!(project_team_availability);
+    value["decision_revisions"] = json!(decision_revisions);
+    Ok(value)
 }
 async fn changes(State(app): State<App>) -> Response {
     let s = app.store.lock().unwrap();
@@ -1001,12 +1227,14 @@ async fn submit(
     }
     // Active registration and durable acceptance are serialized to prevent a
     // concurrent retry from launching a second native process.
-    let owner=app.store.lock().unwrap().session_project(&command.session);
+    let mut trace = crate::latency::Trace::new("submit");
+    let owner=trace.transient(&app.store).session_project(&command.session);
     let app=match owner {Ok(p)=>App{inner:app.inner.clone(),project:p.root},Err(e)=>return problem(StatusCode::CONFLICT,"session",e)};
-    let scheduler_config = app.web_identity.lock().unwrap().identity.scheduler_config();
-    let mut active = app.active.lock().unwrap();
-    let history = app.history.lock().unwrap();
-    let mut store = app.store.lock().unwrap();
+    let scheduler_config = trace.transient(&app.web_identity).identity.scheduler_config();
+    let mut active = trace.lock(&app.active, crate::latency::Lock::Active);
+    let history = trace.lock(&app.history, crate::latency::Lock::History);
+    let mut store = trace.lock(&app.store, crate::latency::Lock::Store);
+    trace.acquired();
     let existing = match store.get(&command.id) {
         Ok(r) => r.is_some(),
         Err(e) => return problem(StatusCode::SERVICE_UNAVAILABLE, "storage", e),
@@ -1021,7 +1249,7 @@ async fn submit(
     // Decide under the same admission lock as worker reservations and retries.
     // Do not let an idle-looking session jump ahead of its older queued input.
     if !existing && command.mode == deck2_shared::Mode::SessionV1 && !command.queue {
-        let waiting = match store.all() {
+        let waiting = match store.pending_receipts() {
             Ok(rows) => rows.iter().any(|r| r.session == command.session && r.phase == deck2_shared::Phase::Queued),
             Err(e) => return problem(StatusCode::SERVICE_UNAVAILABLE, "storage", e),
         };
@@ -1037,10 +1265,10 @@ async fn submit(
     if !existing && !command.queue {
         let selected = store.session_by_id(&command.session).ok().and_then(|s|s.contract)
             .and_then(|c|c.members.get("lead").cloned());
-        let unavailable = if selected.is_some_and(|a|a.runner_id=="opencode") {
-            crate::connected_opencode::source::executable().err()
-        } else {
-            app.runner_available_for(&store, &app.project)
+        let unavailable = match selected.as_ref().map(|a| a.runner_id.as_str()) {
+            Some("opencode") => crate::connected_opencode::source::executable().err(),
+            Some(crate::claude::RUNNER) => crate::claude::executable().and_then(|_| crate::claude::node_runtime()).err(),
+            _ => app.runner_available_for(&store, &app.project),
         };
         if let Some(reason) = unavailable {
             return problem(StatusCode::SERVICE_UNAVAILABLE, "native_unavailable", reason);
@@ -1076,7 +1304,7 @@ async fn submit(
         Err(e) => {
             app.release_auth_if_settled(&active, &store);
             if e.storage {
-                app.broken.store(true, Ordering::SeqCst);
+                app.mark_broken();
                 return problem(StatusCode::SERVICE_UNAVAILABLE, "storage", e.message);
             }
             if !existing {
@@ -1086,6 +1314,9 @@ async fn submit(
         }
     };
     let commit_ms = received.elapsed().as_secs_f64() * 1000.0;
+    if !existing {
+        crate::latency::remember_submit(&command.id, trace.waits().clone());
+    }
     if !existing && !command.queue {
         let (sender, receiver) = watch::channel(false);
         active.insert(command.id.clone(), sender);
@@ -1096,6 +1327,7 @@ async fn submit(
             receiver,
         ));
     }
+    let waits = trace.release();
     drop(store);
     drop(history);
     drop(active);
@@ -1107,7 +1339,17 @@ async fn submit(
     let timing = if existing {
         format!("deck_receipt;dur={response_ms:.2}")
     } else {
-        format!("deck_commit;dur={commit_ms:.2}, deck_receipt;dur={response_ms:.2}")
+        format!(
+            "deck_commit;dur={commit_ms:.2}, deck_receipt;dur={response_ms:.2}, \
+             deck_lock_active;dur={:.2}, deck_lock_history;dur={:.2}, deck_lock_store;dur={:.2}, \
+             deck_lock_pre;dur={:.2}, deck_lock_blocker;dur={:.2};desc=\"{}\"",
+            waits.active_us as f64 / 1000.0,
+            waits.history_us as f64 / 1000.0,
+            waits.store_us as f64 / 1000.0,
+            waits.pre_us as f64 / 1000.0,
+            waits.blocker_us as f64 / 1000.0,
+            if waits.blocker.is_empty() { "none" } else { waits.blocker },
+        )
     };
     response.headers_mut().insert("server-timing", timing.parse().unwrap());
     if needs_pump {
@@ -1174,6 +1416,9 @@ async fn cancel(State(app): State<App>, Path(id): Path<String>) -> Response {
             Err(e) => {
                 app.storage_failed();
                 return problem(StatusCode::SERVICE_UNAVAILABLE, "storage", e);
+            }
+            Ok(Some(r)) if r.steered_to.is_some() => {
+                return problem(StatusCode::CONFLICT, "queue_moved", "This queued message already belongs to live delivery");
             }
             Ok(Some(_)) => {}
         }
@@ -1753,11 +1998,55 @@ async fn remove_session(
     if c.api != API {
         return problem(StatusCode::CONFLICT, "session_rejected", "Incompatible API");
     }
-    if let Err(e) = app.retire_native_session(&id).await { return problem(StatusCode::CONFLICT, "session_rejected", e); }
-    match app.store.lock().unwrap().remove_session(&id) {
+    match remove_local_session(&app, &id).await {
         Ok(()) => Json(json!({"removed":id})).into_response(),
         Err(e) => problem(StatusCode::CONFLICT, "session_rejected", e),
     }
+}
+
+async fn remove_local_session(app: &App, id: &str) -> Result<(), String> {
+    // Keep an older removal request from deleting a newly created session
+    // with the same ID. Input admission still proceeds during native shutdown.
+    if !app.session_removals.lock().unwrap().insert(id.to_owned()) {
+        return Err("Removal is already in progress for this session.".into());
+    }
+    struct Removal<'a>(&'a App, &'a str);
+    impl Drop for Removal<'_> {
+        fn drop(&mut self) {
+            self.0.session_removals.lock().unwrap().remove(self.1);
+        }
+    }
+    let _removal = Removal(app, id);
+    let restart = format!("session-restart:{id}");
+    let ensure_idle = |active: &HashMap<String, watch::Sender<bool>>,
+                       preview: &crate::sessions::RemovalPreview| {
+        if active
+            .keys()
+            .any(|key| key == &restart || preview.owns_worker(key))
+        {
+            return Err(
+                "Wait for this session's native process to settle before removing local history."
+                    .into(),
+            );
+        }
+        app.native_removal_ready(id)
+    };
+    let preview = || {
+        let active = app.active.lock().unwrap();
+        let store = app.store.lock().unwrap();
+        let preview = store.removal_preview(id)?;
+        ensure_idle(&active, &preview)?;
+        Ok::<_, String>(preview)
+    };
+    let before = preview()?;
+    app.retire_native_session_checked(id, || before.ensure_unchanged(&preview()?))
+        .await?;
+
+    // Hold the same locks as admission for the final worker and durable checks.
+    let active = app.active.lock().unwrap();
+    let mut store = app.store.lock().unwrap();
+    ensure_idle(&active, &before)?;
+    store.remove_session_checked(id, Some(&before))
 }
 
 async fn configuration(ProjectState(app): ProjectState<App>) -> Response {
@@ -2053,6 +2342,7 @@ pub fn router(app: App) -> Router {
             ([(header::CACHE_CONTROL, "no-store")], Json(json!({"api": API})))
         }))
         .route("/api/workspace", get(workspace))
+        .route("/api/workspace/events", get(crate::workspace_events::events))
 .route("/api/sessions/{session}/activity", get(crate::activity::page))
 .route("/api/sessions/{session}/activity/{seq}/output", get(crate::activity::output))
         .route("/api/dictation", get(crate::dictation::summary))
@@ -2159,6 +2449,7 @@ pub fn router(app: App) -> Router {
         .route("/api/decisions/{id}/responses/reconcile", post(reconcile_permission))
         .route("/api/commands/{id}/cancel", post(cancel))
         .route("/api/commands/{id}/steering", post(crate::steering::submit))
+        .route("/api/commands/{id}/steering/queued", post(crate::steering::submit_queued))
         .route("/api/commands/{id}/recall", post(recall_input))
         .route(
             "/api/sessions/{session}/git-identity",
@@ -2188,6 +2479,135 @@ mod tests {
         (d, app)
     }
 
+    #[tokio::test]
+    async fn workspace_stream_authorizes_and_replays_commit_between_bootstrap_and_subscribe() {
+        use http_body_util::BodyExt;
+        let dir = tempfile::tempdir().unwrap();
+        let store =
+            Store::open(&dir.path().join("state.db"), dir.path().to_str().unwrap()).unwrap();
+        let app = App::new(
+            store,
+            "127.0.0.1:1234".into(),
+            "/missing".into(),
+            None,
+            "admin".into(),
+            "recover".into(),
+        );
+        let router = router(app.clone());
+        let get = |path: &str, authenticated| {
+            let mut req = axum::http::Request::builder()
+                .uri(path)
+                .header("host", &app.host);
+            if authenticated {
+                req = req.header("cookie", format!("{}={}", app.cookie_name, app.cookie));
+            }
+            req.body(Body::empty()).unwrap()
+        };
+        let denied = router
+            .clone()
+            .oneshot(get("/api/workspace/events", false))
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        let bootstrap = router
+            .clone()
+            .oneshot(get("/api/workspace?transport=events", true))
+            .await
+            .unwrap();
+        assert_eq!(bootstrap.status(), StatusCode::OK);
+        let cursor = bootstrap.headers()["x-deck-workspace-cursor"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let initial: serde_json::Value =
+            serde_json::from_slice(&bootstrap.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(initial["queue_paused"], true);
+        let change = sidebar_call(
+            &app,
+            "/api/queue",
+            json!({"api": API, "paused": false}),
+            true,
+            true,
+        )
+        .await;
+        assert_eq!(change.status(), StatusCode::OK);
+        let path = format!("/api/workspace/events?after={cursor}");
+        for _ in 0..2 {
+            let response = router.clone().oneshot(get(&path, true)).await.unwrap();
+            assert_eq!(
+                response.headers()[header::CONTENT_TYPE],
+                "text/event-stream"
+            );
+            let mut body = response.into_body();
+            assert_eq!(
+                body.frame().await.unwrap().unwrap().into_data().unwrap(),
+                ": ready\n\n"
+            );
+            let frame = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                loop {
+                    let frame = body.frame().await.unwrap().unwrap().into_data().unwrap();
+                    if !frame.starts_with(b"event: heartbeat") {
+                        break frame;
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            let frame = std::str::from_utf8(&frame).unwrap();
+            assert!(frame.contains("event: delta"));
+            let payload: serde_json::Value = serde_json::from_str(
+                frame
+                    .lines()
+                    .find_map(|line| line.strip_prefix("data: "))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(payload["fields"]["queue_paused"], false);
+            assert_eq!(payload["collections"], json!({}));
+        }
+        // Publish enough committed revisions to evict the original cursor.
+        for revision in 0..33 {
+            let response = sidebar_call(
+                &app,
+                "/api/queue",
+                json!({"api": API, "paused": revision % 2 == 0}),
+                true,
+                true,
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let snapshot = router
+                .clone()
+                .oneshot(get("/api/workspace?transport=events", true))
+                .await
+                .unwrap();
+            assert_eq!(snapshot.status(), StatusCode::OK);
+        }
+        let lagged = router.clone().oneshot(get(&path, true)).await.unwrap();
+        let frames = lagged.into_body().collect().await.unwrap().to_bytes();
+        assert!(
+            std::str::from_utf8(&frames)
+                .unwrap()
+                .contains("event: resync")
+        );
+        let foreign_epoch = router
+            .oneshot(get("/api/workspace/events?after=old:0", true))
+            .await
+            .unwrap();
+        let frames = foreign_epoch
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        assert!(
+            std::str::from_utf8(&frames)
+                .unwrap()
+                .contains("event: resync")
+        );
+    }
+
     async fn sidebar_call(
         app: &App,
         path: &str,
@@ -2211,6 +2631,293 @@ mod tests {
             .await
             .unwrap()
     }
+
+    // Protects send-latency attribution: a send delayed by a workspace
+    // projection must name it, with waits that fit inside the observed span.
+    // Oracle: the holder's known hold time; fails if the blocker is untagged.
+    #[tokio::test]
+    async fn send_behind_a_workspace_projection_reports_the_projection() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("state.db"), dir.path().to_str().unwrap()).unwrap();
+        let session = store.session.clone();
+        let app = App::new(store, "127.0.0.1:1234".into(), "/missing".into(), None, "admin".into(), "recover".into());
+        // Build the router before contention: production builds it once at startup.
+        let routed = router(app.clone());
+        let post = |id: &str| {
+            let body = json!({"api":API,"session":session,"id":id,"prompt":"p","queue":true,"fresh":false});
+            axum::http::Request::builder().method("POST").uri("/api/commands")
+                .header("host", &app.host).header("content-type", "application/json")
+                .header("cookie", format!("{}={}", app.cookie_name, app.cookie))
+                .header("origin", format!("http://{}", app.host))
+                .body(Body::from(body.to_string())).unwrap()
+        };
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let holder = {
+            let app = app.clone();
+            std::thread::spawn(move || {
+                let mut trace = crate::latency::Trace::new("workspace");
+                let active = trace.lock(&app.active, crate::latency::Lock::Active);
+                let history = trace.lock(&app.history, crate::latency::Lock::History);
+                let store = trace.lock(&app.store, crate::latency::Lock::Store);
+                held_tx.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                trace.release();
+                drop((store, history, active));
+            })
+        };
+        held_rx.recv().unwrap();
+        let blocked = routed.clone().oneshot(post("behind-projection")).await.unwrap();
+        holder.join().unwrap();
+        assert_eq!(blocked.status(), StatusCode::OK);
+        let timing = blocked.headers()["server-timing"].to_str().unwrap().to_owned();
+        let part = |name: &str| -> f64 {
+            timing.split(", ").find_map(|p| p.strip_prefix(name)?.strip_prefix(";dur=")?.split(';').next()?.parse().ok())
+                .unwrap_or_else(|| panic!("{name} missing in {timing}"))
+        };
+        assert!(timing.contains("deck_lock_blocker") && timing.contains("desc=\"workspace\""), "{timing}");
+        assert!(part("deck_lock_blocker") >= 100.0, "{timing}");
+        // The first lock the sender needs is the one being held.
+        assert!(part("deck_lock_pre") + part("deck_lock_active") >= 100.0, "{timing}");
+        assert!(part("deck_lock_pre") + part("deck_lock_active") + part("deck_lock_history") + part("deck_lock_store")
+            <= part("deck_receipt"), "waits exceed the handler wall time: {timing}");
+        let kept = crate::latency::take_submit("behind-projection").expect("submit waits retained for dispatch");
+        assert_eq!(kept.blocker, "workspace");
+        // A send after release is uncontended and says so.
+        let idle = routed.clone().oneshot(post("after-release")).await.unwrap();
+        assert_eq!(idle.status(), StatusCode::OK);
+        let idle_timing = idle.headers()["server-timing"].to_str().unwrap().to_owned();
+        assert!(idle_timing.contains("desc=\"none\""), "{idle_timing}");
+        assert_eq!(crate::latency::ORDER_VIOLATIONS.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn remove_settled_local_session_with_task_history() {
+        use deck2_shared::Phase;
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().to_str().unwrap();
+        let path = dir.path().join("state.db");
+        let project_file = dir.path().join("project.txt");
+        let native_transcript = dir.path().join("native-transcript.jsonl");
+        std::fs::write(&project_file, "Project contents").unwrap();
+        std::fs::write(&native_transcript, "Native history").unwrap();
+        let mut store = Store::open(&path, project).unwrap();
+        let keep = store.session.clone();
+        let session = "removal-fixture";
+        store.register_codex("a".repeat(64)).unwrap();
+        store
+            .create_session(
+                &serde_json::from_value(json!({
+                    "api": API, "id": session, "title": "Disposable history",
+                    "members": {"lead":{"runnerId":"codex","modelId":"gpt-6.1-sol"},
+                                 "investigate":{"runnerId":"codex","modelId":"gpt-6.1-sol"}}
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        let mut root = store
+            .admit(
+                &serde_json::from_value(json!({
+                    "api": API, "id": "removal-root", "session": session,
+                    "prompt": "Coordinate the task", "mode": "session_v1"
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        root.phase = Phase::Running;
+        root.generation = "fixture-generation".into();
+        root.dispatch_ms = Some(crate::now());
+        root.thread = Some("fixture-thread".into());
+        root.turn = Some("fixture-turn".into());
+        store.save(&mut root).unwrap();
+        let task = crate::session_tasks::tool(
+            &mut store,
+            &root.id,
+            "deck_delegate",
+            &json!({"agent":"investigate","task":"Inspect the project"}),
+            "fixture-delegation",
+        )
+        .unwrap();
+        let decision = crate::session_decisions::tool(
+            &mut store,
+            &root.id,
+            "deck_decision_open",
+            &json!({"commandId":"removal-open-question","key":"scope","question":"Continue?",
+                "source":{"promptId":root.id}}),
+        )
+        .unwrap();
+        let mut task = store.task(task["taskId"].as_str().unwrap()).unwrap();
+        let attempt = task.attempts[0].id.clone();
+        root.phase = Phase::Completed;
+        store.save(&mut root).unwrap();
+        let keep_input = store
+            .admit(
+                &serde_json::from_value(json!({
+                    "api": API, "id": "unrelated-queued", "session": keep,
+                    "prompt": "Keep this input", "mode": "read_only", "queue": true
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        let snapshot = store
+            .capture_snapshot(
+                &root.id,
+                &task.id,
+                &attempt,
+                "fixture-snapshot",
+                "project.txt",
+                "Project contents".into(),
+                deck2_shared::HelperSelection {
+                    version: "fixture".into(),
+                    executable: "fixture".into(),
+                    catalog: "fixture".into(),
+                },
+            )
+            .unwrap();
+        store
+            .snapshot_access(&snapshot.id, &attempt, "fixture-read")
+            .unwrap();
+        let app = App::new(
+            store,
+            "127.0.0.1:32123".into(),
+            "/missing-native".into(),
+            Some("unavailable fixture".into()),
+            "admin".into(),
+            "reopen".into(),
+        );
+
+        let remove = || {
+            sidebar_call(
+                &app,
+                "/api/sessions/removal-fixture/remove",
+                json!({"api": API}),
+                true,
+                true,
+            )
+        };
+        for (phase, message) in [
+            (Phase::Accepted, "active and queued work"),
+            (Phase::Uncertain, "uncertain process ownership"),
+        ] {
+            task.attempts[0].phase = phase;
+            app.store.lock().unwrap().save_task(&task).unwrap();
+            let response = remove().await;
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+            let body = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            assert!(String::from_utf8_lossy(&body).contains(message));
+            assert!(app.store.lock().unwrap().task(&task.id).is_ok());
+        }
+        {
+            let store = app.store.lock().unwrap();
+            task.attempts[0].phase = Phase::Completed;
+            task.attempts[0].settled_ms = Some(crate::now());
+            store.save_normal_task(&task).unwrap();
+        }
+        let response = remove().await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("outstanding decisions"));
+        let outcome = {
+            let mut store = app.store.lock().unwrap();
+            crate::session_decisions::user(
+                &mut store,
+                session,
+                &json!({
+                    "commandId":"removal-cancel-question","decisionId":decision["decisionId"],
+                    "expectedRevision":1,"type":"decision.cancel","note":"Cancelled by user"
+                }),
+            )
+            .unwrap();
+            store.enqueue_task_outcome(&task.id, &attempt).unwrap();
+            store
+                .all()
+                .unwrap()
+                .into_iter()
+                .find(|r| r.continuation.is_some())
+                .unwrap()
+        };
+        assert_eq!(remove().await.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            sidebar_call(
+                &app,
+                &format!("/api/commands/{}/cancel", outcome.id),
+                json!({}),
+                true,
+                true
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        {
+            let store = app.store.lock().unwrap();
+            Store::inspect(&store.conn, project).unwrap();
+            store
+                .conn
+                .execute_batch(
+                    "CREATE TRIGGER fail_removal BEFORE DELETE ON sessions
+                BEGIN SELECT RAISE(ABORT, 'fixture fault'); END;",
+                )
+                .unwrap();
+        }
+        assert_eq!(remove().await.status(), StatusCode::CONFLICT);
+        {
+            let store = app.store.lock().unwrap();
+            assert!(store.task(&task.id).is_ok());
+            assert!(store.get(&root.id).unwrap().is_some());
+            assert!(store.read_snapshot(&snapshot.id, Some(&attempt)).is_ok());
+            Store::inspect(&store.conn, project).unwrap();
+            store
+                .conn
+                .execute_batch("DROP TRIGGER fail_removal")
+                .unwrap();
+        }
+        let response = remove().await;
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        drop(app);
+
+        let store = Store::open(&path, project).unwrap();
+        assert!(store.session_by_id(session).is_err());
+        assert!(store.get(&root.id).unwrap().is_none());
+        assert!(store.task(&task.id).is_err());
+        assert_eq!(store.session_by_id(&keep).unwrap().id, keep);
+        assert_eq!(
+            store.get(&keep_input.id).unwrap().unwrap().phase,
+            Phase::Queued
+        );
+        for table in [
+            "task_calls",
+            "read_snapshots",
+            "snapshot_accesses",
+            "session_events",
+            "session_decisions",
+            "decision_commands",
+        ] {
+            let rows: usize = store
+                .conn
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(rows, 0, "{table}");
+        }
+        assert_eq!(
+            std::fs::read_to_string(&project_file).unwrap(),
+            "Project contents"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&native_transcript).unwrap(),
+            "Native history"
+        );
+    }
+
     // protects: Q91-01 rejects target authority reuse and mismatched retries at the production route.
     // Oracle: explicit transition creates a new current contract and leaves
     // historical session identity, selection, native context and grants intact.
@@ -2713,7 +3420,7 @@ mod tests {
         )
         .await;
         assert_eq!(conflict.status(), StatusCode::CONFLICT);
-        let workspace = workspace(State(app.clone())).await;
+        let workspace = workspace_response(&app);
         let value: serde_json::Value =
             serde_json::from_slice(&workspace.into_body().collect().await.unwrap().to_bytes()).unwrap();
         assert!(value["project_availability"][&pb.id].is_null());
@@ -2819,7 +3526,7 @@ mod tests {
             s.save_configuration(&c).unwrap();
             p
         };
-        let r = workspace(State(app.clone())).await;
+        let r = workspace_response(&app);
         let v: serde_json::Value =
             serde_json::from_slice(&r.into_body().collect().await.unwrap().to_bytes()).unwrap();
         assert!(v["availability"].is_string());

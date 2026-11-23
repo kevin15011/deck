@@ -2,7 +2,7 @@
 //! callers render these bounded projections without decoding native protocols.
 use deck2_shared::{Decision, NativeTransport, Receipt};
 use serde_json::{Value, json};
-fn bounded(value: &Value, depth: usize) -> Value {
+pub(crate) fn bounded(value: &Value, depth: usize) -> Value {
     if depth > 6 {
         return json!("[Display depth limit]");
     }
@@ -73,6 +73,9 @@ pub(crate) fn decision(d: &Decision) -> Value {
     if crate::native_approval::validate_native(d).is_err() {
         return json!({"version":1,"kind":"unavailable","validated":false,"details":Value::Null});
     }
+    if n.transport == Some(NativeTransport::ClaudeSdk) && d.file.is_some() {
+        return json!({"version":1,"kind":"file_edit","validated":true,"details":Value::Null,"responses":["allow_once","deny"]});
+    }
     let projected = match n.transport {
         Some(NativeTransport::CodexJsonRpc) => {
             crate::codex_protocol::action_view(&n.method, &n.parameters)
@@ -81,6 +84,7 @@ pub(crate) fn decision(d: &Decision) -> Value {
             crate::connected_opencode::execution::action_view(&n.method, &n.parameters)
         }
         Some(NativeTransport::DeckMcp) => crate::session_mcp::action_view(&n.parameters),
+        Some(NativeTransport::ClaudeSdk) => crate::claude::approval::action_view(n),
         None => None,
     };
     let Some((kind, details)) = projected else {
@@ -126,21 +130,15 @@ pub(crate) fn receipt(r: &Receipt) -> Value {
                     .filter(|v| r.model.as_deref() == Some(&v.model)),
             )
         }
-        Some(crate::member_integration::Integration::OpenCode) | None => Value::Null,
+        Some(crate::member_integration::Integration::OpenCode | crate::member_integration::Integration::Claude) | None => Value::Null,
     };
-    json!({"version":1,"recorded_runner":recorded,"integration_available":integration.is_some(),"reasoning":reasoning,"retained_runtime_supported":integration.is_some_and(|i|i.concurrent_lead()) && r.mode==deck2_shared::Mode::SessionV1})
+    json!({"version":1,"recorded_runner":recorded,"integration_available":integration.is_some(),"reasoning":reasoning,"retained_runtime_supported":integration.is_some_and(|i|i.supports_retained_lead()) && r.mode==deck2_shared::Mode::SessionV1})
 }
-pub(crate) fn project(workspace: &mut Value) {
-    if let Some(receipts) = workspace["receipts"].as_array_mut() {
-        for value in receipts {
-            if let Ok(r) = serde_json::from_value::<Receipt>(value.clone()) {
-                value["presentation"] = receipt(&r);
-                if let Some(decisions) = value["decisions"].as_array_mut() {
-                    for (value, d) in decisions.iter_mut().zip(&r.decisions) {
-                        value["presentation"] = decision(d);
-                    }
-                }
-            }
+pub(crate) fn project_receipt(receipt_value: &Receipt, value: &mut Value) {
+    value["presentation"] = receipt(receipt_value);
+    if let Some(decisions) = value["decisions"].as_array_mut() {
+        for (value, decision_value) in decisions.iter_mut().zip(&receipt_value.decisions) {
+            value["presentation"] = decision(decision_value);
         }
     }
 }

@@ -48,6 +48,13 @@ test('foreign reports and stale Lead treatments are rejected',()=>{
  const a={preparation_ms:10,tool_connection_ms:5,id:'attempt',prompt:'trace',source_report:null,phase:'completed',detail:'recorded',requested_model:'p/m',observed_model:'p/m',provenance:{runner:'opencode',integration:'v1',executable:'hash',storage:'owned',content:'hash'},native_session:'native',native_message:'message',generation:'generation',accepted_ms:1,dispatch_ms:2,acknowledgment_ms:3,first_output_ms:4,settled_ms:5,cancel_requested:false,report:{attempt:'attempt',digest:'a'.repeat(64),text:'evidence'},treatments:[{report:'a'.repeat(64),lead_attempt:'lead',disposition:'adopted',reason:'source inspected'}]};
  const t={id:'task',session:'fixture-session',root:'fixture',parent_attempt:'lead',owner:'investigator',scope:['src'],acceptance:'trace',revision:1,attempts:[a]};expect(task(t).owner).toBe('investigator');
  for(const bad of [{...t,attempts:[{...a,report:{...a.report,attempt:'foreign'}}]},{...t,attempts:[{...a,treatments:[{...a.treatments[0],lead_attempt:'foreign'}]}]},{...t,attempts:[a,a]},{...t,attempts:[{...a,provenance:{}}]}])expect(()=>task(bad)).toThrow();
+ const blocked={...a,phase:'failed',report:null,treatments:[{...a.treatments[0],report:null,disposition:'followup_required'}]};
+ expect(task({...t,attempts:[blocked]}).attempts[0].report).toBeNull();
+ for(const invalid of [
+  {...blocked,phase:'uncertain'},
+  {...blocked,treatments:[{...blocked.treatments[0],disposition:'adopted'}]},
+  {...blocked,treatments:[{...blocked.treatments[0],lead_attempt:'foreign'}]},
+ ])expect(()=>task({...t,attempts:[invalid]})).toThrow();
  expect(()=>workspace({...w,tasks:[{...t,root:'foreign'}]})).toThrow();
 });
 

@@ -16,7 +16,11 @@ use serde_json::{Value, json};
 pub(crate) struct Runtime {
     after: u64,
     busy: bool,
+    error: Option<String>,
 }
+
+const CODEX: &str = "codex";
+const CLAUDE: &str = "claude";
 
 // Original quota allowlist: account identifiers, credits and raw payloads never leave the host.
 pub(crate) fn snapshot(data: &Value, at: u64) -> Value {
@@ -57,64 +61,145 @@ pub(crate) fn snapshot(data: &Value, at: u64) -> Value {
     }
     s
 }
+
+fn claude_snapshot(data: &Value, at: u64) -> Result<Value, String> {
+    let plan = data["plan"]
+        .as_str()
+        .filter(|plan| matches!(*plan, "pro" | "max" | "ultra" | "team" | "enterprise"))
+        .ok_or("Invalid Claude subscription metadata")?;
+    let source = data["windows"]
+        .as_array()
+        .ok_or("Invalid Claude quota windows")?;
+    let mut windows = Vec::new();
+    for item in source.iter().take(37) {
+        let Some(id) = item["id"].as_str().filter(|id| {
+            matches!(
+                *id,
+                "five-hour"
+                    | "seven-day"
+                    | "seven-day-oauth-apps"
+                    | "seven-day-opus"
+                    | "seven-day-sonnet"
+            ) || id.strip_prefix("model:").is_some_and(|label| {
+                !label.trim().is_empty()
+                    && label.len() <= 40
+                    && label
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b' ' | b'-' | b'.'))
+            })
+        }) else {
+            continue;
+        };
+        let Some(used) = item["usedPercent"]
+            .as_f64()
+            .filter(|p| (0.0..=100.0).contains(p))
+        else {
+            continue;
+        };
+        if windows.iter().any(|window: &Value| window["id"] == id) {
+            continue;
+        }
+        let mut window = json!({"id":id,"usedPercent":(used * 10.0).round() / 10.0});
+        if let Some(reset) = item["resetsAt"]
+            .as_u64()
+            .filter(|ms| (1..=8_640_000_000_000_000).contains(ms))
+        {
+            window["resetsAt"] = json!(reset);
+        }
+        windows.push(window);
+    }
+    let mut snapshot = json!({"runnerId":CLAUDE,"updatedAt":at,"windows":windows,"plan":plan});
+    if data["extraUsage"] == true {
+        snapshot["overageStatus"] = json!("allowed");
+    }
+    Ok(snapshot)
+}
+
 impl Store {
-    fn quota(&self) -> Result<Option<Value>, String> {
+    fn quota(&self, runner: &str) -> Result<Option<Value>, String> {
         let text: Option<String> = self
             .conn
-            .query_row("SELECT value FROM meta WHERE key='quota.codex'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT value FROM meta WHERE key=?1",
+                [format!("quota.{runner}")],
+                |r| r.get(0),
+            )
             .optional()
             .map_err(|_| "Quota storage unavailable")?;
         text.map(|t| serde_json::from_str(&t).map_err(|_| "Quota snapshot unavailable".into()))
             .transpose()
     }
-    fn save_quota(&self, value: &Value) -> Result<(), String> {
-        self.conn.execute("INSERT INTO meta(key,value) VALUES('quota.codex',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[value.to_string()]).map_err(|_|"Quota persistence failed")?;
+    fn save_quota(&self, runner: &str, value: &Value) -> Result<(), String> {
+        self.conn.execute("INSERT INTO meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[format!("quota.{runner}"), value.to_string()]).map_err(|_|"Quota persistence failed")?;
         Ok(())
     }
 }
 impl App {
+    fn quota_runtime(&self, runner: &str) -> &std::sync::Mutex<Runtime> {
+        if runner == CLAUDE {
+            &self.claude_quota_runtime
+        } else {
+            &self.quota_runtime
+        }
+    }
+
     pub(crate) fn observe_quota(&self, value: &Value) -> Result<(), String> {
         if value["method"] == "account/rateLimits/updated"
             && value["params"]["rateLimits"].is_object()
         {
-            self.store
-                .lock()
-                .unwrap()
-                .save_quota(&snapshot(&value["params"]["rateLimits"], crate::now()))?;
+            self.store.lock().unwrap().save_quota(
+                CODEX,
+                &snapshot(&value["params"]["rateLimits"], crate::now()),
+            )?;
         }
         Ok(())
     }
-    fn quota_state(&self) -> Result<Value, String> {
-        let snapshot = self.store.lock().unwrap().quota()?;
-        let runtime = self.quota_runtime.lock().unwrap();
-        let mut codex =
-            json!({"refreshAfter":runtime.after,"refreshing":runtime.busy,"supported":true});
-        if let Some(s) = snapshot {
-            codex["snapshot"] = s;
+    pub(crate) fn observe_claude_quota(&self, data: &Value) -> Result<(), String> {
+        let snapshot = claude_snapshot(data, crate::now())?;
+        self.store.lock().unwrap().save_quota(CLAUDE, &snapshot)?;
+        self.claude_quota_runtime.lock().unwrap().error = None;
+        Ok(())
+    }
+
+    fn quota_state(&self) -> Value {
+        let store = self.store.lock().unwrap();
+        let mut runners = json!({});
+        for runner in [CODEX, CLAUDE] {
+            let runtime = self.quota_runtime(runner).lock().unwrap();
+            let mut view =
+                json!({"refreshAfter":runtime.after,"refreshing":runtime.busy,"supported":true});
+            match store.quota(runner) {
+                Ok(Some(snapshot)) => view["snapshot"] = snapshot,
+                Ok(None) => {}
+                Err(error) => view["error"] = json!(error),
+            }
+            if let Some(error) = &runtime.error {
+                view["error"] = json!(error);
+            }
+            runners[runner] = view;
         }
-        Ok(
-            json!({"runners":{"codex":codex,"claude":{"refreshAfter":0,"refreshing":false,"supported":false}}}),
-        )
+        json!({"runners":runners})
     }
 }
 pub(crate) async fn read(State(app): State<App>) -> Response {
-    match app.quota_state() {
-        Ok(s) => Json(s).into_response(),
-        Err(e) => problem(StatusCode::SERVICE_UNAVAILABLE, "quota-unavailable", e),
-    }
+    Json(app.quota_state()).into_response()
 }
 pub(crate) async fn refresh(State(app): State<App>, Path(runner): Path<String>) -> Response {
-    if let Some(r) = crate::web_identity::effect_denied() { return r; }
-
-    if runner != "codex" {
-        return problem(
-            StatusCode::BAD_REQUEST,
-            "quota-unavailable",
-            "This runner's quota refresh is not yet ported.",
-        );
+    if let Some(r) = crate::web_identity::effect_denied() {
+        return r;
     }
+
+    let runner = match runner.as_str() {
+        CODEX => CODEX,
+        CLAUDE => CLAUDE,
+        _ => {
+            return problem(
+                StatusCode::BAD_REQUEST,
+                "quota-unavailable",
+                "This runner does not offer subscription quota refresh.",
+            );
+        }
+    };
     // Match native admission's active -> Store -> auth lock order. Selection and
     // its digest are bound while exclusive operations cannot enter this host.
     let admission = (|| -> Result<_, String> {
@@ -128,29 +213,34 @@ pub(crate) async fn refresh(State(app): State<App>, Path(runner): Path<String>) 
         {
             return Err("Settle sign-in and maintenance before refreshing quota".into());
         }
-        let binding = store.configuration()?.runner;
-        let binary = binding
-            .as_ref()
-            .map(|b| std::path::PathBuf::from(&b.path))
-            .unwrap_or_else(|| app.binary.clone());
-        if let Some(b) = binding
-            && std::fs::read(&binary)
-                .ok()
-                .is_none_or(|bytes| crate::tasks::digest(&bytes) != b.executable)
-        {
-            return Err(
-                "Selected Codex executable changed. Review Runners before refreshing.".into(),
-            );
-        }
-        let mut runtime = app.quota_runtime.lock().unwrap();
+        let mut runtime = app.quota_runtime(runner).lock().unwrap();
         if runtime.busy || crate::now() < runtime.after {
-            return Err("Wait a minute between quota refreshes.".into());
+            return Err("Wait a minute between refreshes for this runner.".into());
         }
+        let binary = if runner == CODEX {
+            let binding = store.configuration()?.runner;
+            let binary = binding
+                .as_ref()
+                .map(|b| std::path::PathBuf::from(&b.path))
+                .unwrap_or_else(|| app.binary.clone());
+            if let Some(b) = binding
+                && std::fs::read(&binary)
+                    .ok()
+                    .is_none_or(|bytes| crate::tasks::digest(&bytes) != b.executable)
+            {
+                return Err(
+                    "Selected Codex executable changed. Review Runners before refreshing.".into(),
+                );
+            }
+            Some(binary)
+        } else {
+            None
+        };
         // A separate shared file belongs to this query, so another host's
         // exclusive admission cannot enter until its child group is reaped.
         let scope = app.scope_lock(false)?;
         let (tx, _rx) = tokio::sync::watch::channel(false);
-        active.insert("quota-refresh".into(), tx);
+        active.insert(active_key(runner).into(), tx);
         runtime.after = crate::now() + 60_000;
         runtime.busy = true;
         Ok((
@@ -158,6 +248,7 @@ pub(crate) async fn refresh(State(app): State<App>, Path(runner): Path<String>) 
             std::sync::Arc::new(Reservation {
                 app: app.clone(),
                 scope: Some(scope),
+                runner,
                 #[cfg(test)]
                 before_clear: None,
             }),
@@ -170,30 +261,45 @@ pub(crate) async fn refresh(State(app): State<App>, Path(runner): Path<String>) 
     // Own the effect independently of HTTP cancellation; always settle the process and busy state.
     let owned = app.clone();
     let result = tokio::spawn(async move {
-        let result = native_refresh(&binary, Some(reservation.clone()))
-            .await
-            .and_then(|data| {
-                owned
-                    .store
-                    .lock()
-                    .unwrap()
-                    .save_quota(&snapshot(&data, crate::now()))?;
-                Ok(data)
-            });
+        let result = if let Some(binary) = binary {
+            native_refresh(&binary, Some(reservation.clone()))
+                .await
+                .and_then(|data| {
+                    owned
+                        .store
+                        .lock()
+                        .unwrap()
+                        .save_quota(CODEX, &snapshot(&data, crate::now()))
+                })
+                .map_err(|_| "Could not refresh Codex quota. Previous snapshot kept.".into())
+        } else {
+            crate::native::PROBE_RESERVATION
+                .scope(reservation.clone(), crate::claude::read_quota())
+                .await
+                .and_then(|data| owned.observe_claude_quota(&data))
+        };
+        owned.quota_runtime(runner).lock().unwrap().error = result.as_ref().err().cloned();
         drop(reservation);
         result
     })
     .await;
     match result {
-        Ok(Ok(_)) => match app.quota_state() {
-            Ok(s) => Json(json!({"ok":true,"state":s})).into_response(),
-            Err(e) => problem(StatusCode::SERVICE_UNAVAILABLE, "quota-unavailable", e),
-        },
-        _ => problem(
+        Ok(Ok(())) => Json(json!({"ok":true,"state":app.quota_state()})).into_response(),
+        outcome => problem(
             StatusCode::SERVICE_UNAVAILABLE,
             "quota-refresh-failed",
-            "Could not refresh quota. Previous snapshot kept.",
+            outcome
+                .ok()
+                .and_then(Result::err)
+                .unwrap_or_else(|| "Could not refresh quota.".into()),
         ),
+    }
+}
+fn active_key(runner: &str) -> &'static str {
+    if runner == CLAUDE {
+        "claude-quota-refresh"
+    } else {
+        "quota-refresh"
     }
 }
 // The worker and Native's detached reaper share ownership. Only the last
@@ -201,6 +307,7 @@ pub(crate) async fn refresh(State(app): State<App>, Path(runner): Path<String>) 
 struct Reservation {
     app: App,
     scope: Option<crate::managed_tools::OwnedLock>,
+    runner: &'static str,
     #[cfg(test)]
     before_clear: Option<Box<dyn FnOnce() + Send + Sync>>,
 }
@@ -214,8 +321,8 @@ impl Drop for Reservation {
         // Keep quota admission closed through removal and scheduler progress.
         // No admission can replace the fixed entry while busy remains true;
         // clear_active takes its own active lock, so hold no runtime guard here.
-        self.app.clear_active("quota-refresh");
-        self.app.quota_runtime.lock().unwrap().busy = false;
+        self.app.clear_active(active_key(self.runner));
+        self.app.quota_runtime(self.runner).lock().unwrap().busy = false;
     }
 }
 async fn native_refresh(
@@ -252,8 +359,8 @@ mod tests {
         assert_eq!(value["plan"], "pro");
         assert!(value.get("accountId").is_none());
         assert!(value.get("credits").is_none());
-        s.save_quota(&value).unwrap();
-        assert_eq!(s.quota().unwrap(), Some(value));
+        s.save_quota(CODEX, &value).unwrap();
+        assert_eq!(s.quota(CODEX).unwrap(), Some(value));
     }
 }
 
@@ -308,6 +415,7 @@ for line in sys.stdin:
         let old = Reservation {
             app: app.clone(),
             scope: Some(app.scope_lock(false).unwrap()),
+            runner: CODEX,
             before_clear: Some(Box::new(move || {
                 entered_tx.send(()).unwrap();
                 release_rx.lock().unwrap().recv().unwrap();
@@ -434,7 +542,11 @@ for line in sys.stdin:
             );
             *app.scope_root.lock().unwrap() = Some(dir.path().join("scopes"));
             let previous = snapshot(&json!({"planType":"old"}), 1);
-            app.store.lock().unwrap().save_quota(&previous).unwrap();
+            app.store
+                .lock()
+                .unwrap()
+                .save_quota(CODEX, &previous)
+                .unwrap();
             if failure == "compatible" {
                 let (tx, _) = tokio::sync::watch::channel(false);
                 app.active.lock().unwrap().insert("ordinary".into(), tx);
@@ -453,7 +565,10 @@ for line in sys.stdin:
             assert!(!app.quota_runtime.lock().unwrap().busy);
             assert!(app.scope_lock(true).is_ok());
             if failure != "compatible" {
-                assert_eq!(app.store.lock().unwrap().quota().unwrap(), Some(previous));
+                assert_eq!(
+                    app.store.lock().unwrap().quota(CODEX).unwrap(),
+                    Some(previous)
+                );
             }
         }
     }

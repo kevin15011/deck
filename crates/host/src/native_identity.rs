@@ -66,6 +66,7 @@ pub(crate) fn validate_binding(b: &NativeBinding) -> Result<(), String> {
     let protocol = match b.runner {
         NativeRunner::Codex => "app-server",
         NativeRunner::Opencode => "http-sse",
+        NativeRunner::Claude => "stream-json",
     };
     if b.protocol != protocol
         || b.version.is_empty()
@@ -141,11 +142,14 @@ pub(crate) fn inspect(conn: &Connection) -> Result<(), String> {
                     Some(NativeTransport::CodexJsonRpc)
                         if crate::codex_protocol::native_method(&n.method) => {}
                     Some(NativeTransport::DeckMcp) if n.method == "deck/approve" => {}
+                    Some(NativeTransport::ClaudeSdk)
+                        if n.method == crate::claude::approval::METHOD => {}
                     Some(NativeTransport::OpencodeHttp)
                         if matches!(n.method.as_str(), "permission.asked" | "question.asked") => {}
                     // Unknown legacy methods stay unknown, never acquire a transport.
                     None if !crate::codex_protocol::native_method(&n.method)
-                        && n.method != "deck/approve" => {}
+                        && n.method != "deck/approve"
+                        && n.method != crate::claude::approval::METHOD => {}
                     _ => return Err("Native decision transport mismatch".into()),
                 }
             }

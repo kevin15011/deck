@@ -1,7 +1,7 @@
 import React,{useEffect,useLayoutEffect,useId,useMemo,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {gsap} from 'gsap';
-import {API,request,load,save,type Workspace} from './api';
+import {API,request,load,save,sessionStorageScope,type Decision,type Workspace} from './api';
 import {useOriginalHistory,type HistorySelection} from './history';
 import {NavigationIcon} from './navigation-icon';
 import {useDismissLayer} from './dismiss-layer';
@@ -30,9 +30,21 @@ function sidebarProjects(w:Workspace|undefined,h:Original,meta:Navigation){
 }
 export function useSidebarAttention(w:Workspace|undefined,h:Original,meta:Navigation){
  return useMemo(()=>{
+  if(!w)return [];
   const projects=new Map(sidebarProjects(w,h,meta).map(p=>[p.id,p]));
   const counts=sidebarAttention(w,meta.decisions);
-  return (w?.sessions??[]).flatMap(session=>{
+  const permissions=new Map<string,Map<string,Decision>>();
+  for(const receipt of w.receipts){
+   if(!counts.has(receipt.session))continue;
+   for(const d of receipt.decisions){
+    if(d.state!=='pending'||d.session!==receipt.session||d.command!==receipt.id||d.questions.length||
+       !d.presentation?.validated||d.presentation.kind==='question'||(d.presentation.kind==='file_edit'&&!d.file))continue;
+    const requests=permissions.get(d.session)??new Map<string,Decision>();
+    requests.set(d.id,d);
+    permissions.set(d.session,requests);
+   }
+  }
+  return w.sessions.flatMap(session=>{
    const project=projects.get(session.project?.id??''),count=counts.get(session.id);
    if(!project||!count)return [];
    const historyMeta=session.original?meta.sessions[historyKey(h.source,project.id,session.id)]:undefined;
@@ -40,6 +52,7 @@ export function useSidebarAttention(w:Workspace|undefined,h:Original,meta:Naviga
    return [{
     id:session.id,project:project.id,projectName:meta.projects[project.id]?.title??project.name,
     title:historyMeta?.title??session.title,history:!!session.original,count,
+    permissions:[...(permissions.get(session.id)?.values()??[])],storageScope:sessionStorageScope(w,session),
    }];
   });
  },[w,h.projects,h.source,h.selection?.project,meta]);

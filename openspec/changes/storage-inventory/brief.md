@@ -1,0 +1,1 @@
+Documented host, managed tools, browser and runner storage in docs/storage-inventory.md. Local metadata-only snapshot includes SQLite page aggregates, managed artifacts and separate legacy roots. Checked source reference targets. Browser and runner profile sizes were outside measurement scope.

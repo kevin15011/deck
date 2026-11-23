@@ -34,11 +34,19 @@ async function run() {
             const json = value => route.fulfill({json: value});
             if (endpoint === '/') return route.fulfill({path: 'frontend/index.html', contentType: 'text/html'});
             if (endpoint === '/app.js' || endpoint === '/app.css') return route.fulfill({path: path.join(assets, endpoint.slice(1))});
-            if (endpoint === '/api/workspace') return json(workspace);
+            if (endpoint === '/api/workspace') return route.fulfill({json: workspace,
+                headers: {'x-deck-workspace-cursor': '00000000000000000000000000000000:0'}});
+            if (endpoint === '/api/workspace/events') return; // Keep the idle stream open for the modal exercise.
             if (endpoint === '/api/sidebar') return json({projects: {}, sessions: {}});
             if (endpoint === '/api/history/projects') return json({projects: [], issues: []});
-            if (endpoint === '/api/models') return json({runners: [{runnerId: 'codex', label: 'Codex', available: true,
-                models: ['a', 'b'].map(modelId => ({modelId, label: modelId, thinkingLevels: ['high', 'low']}))}]});
+            if (endpoint === '/api/models') return json({runners: [
+                {runnerId: 'codex', label: 'Codex', available: true,
+                    models: ['a', 'b'].map(modelId => ({modelId, label: modelId, thinkingLevels: ['high', 'low']}))},
+                {runnerId: 'claude', label: 'Claude Code', available: true, models: [
+                    {modelId: 'default', label: 'Claude Code default', thinkingLevels: []},
+                    {modelId: 'sonnet', label: 'Sonnet', thinkingLevels: ['low', 'high']},
+                ]},
+            ]});
             if (endpoint === '/api/sessions/assign/assignments') {
                 const input = route.request().postDataJSON();
                 calls.push([input.memberId, input.expectedRevision]);
@@ -139,11 +147,25 @@ async function run() {
         assert.equal(await reasoning('Lead').inputValue(), 'high');
         assert.deepEqual(calls.slice(9), [['lead', 9]]);
 
+        const runner = modal.getByLabel('Runner for architect', {exact: true});
+        await runner.selectOption('claude');
+        await model('architect').selectOption('sonnet');
+        await reasoning('architect').selectOption('high');
+        await save.click();
+        await saved.waitFor();
+        assert.deepEqual(contract.members.architect, {runnerId: 'claude', modelId: 'sonnet', thinking: 'high'});
+        await modal.getByRole('button', {name: 'Done', exact: true}).click();
+        await page.getByRole('button', {name: 'Session', exact: true}).press('Enter');
+        await page.getByRole('button', {name: 'Session assignments', exact: true}).click();
+        assert.equal(await runner.inputValue(), 'claude');
+        assert.equal(await model('architect').inputValue(), 'sonnet');
+        assert.equal(await reasoning('architect').inputValue(), 'high');
+
         await page.setViewportSize({width: 320, height: 780});
         assert(await modal.evaluate(node => node.scrollWidth <= node.clientWidth));
         await modal.getByRole('button', {name: 'Done', exact: true}).click();
         await modal.waitFor({state: 'hidden'});
-        console.log('Assignment dialog revision, retries, conflicts, pending clicks and responsive layout passed');
+        console.log('Assignment dialog revision, retries, conflicts, Claude member model and effort, and responsive layout passed');
     } finally {
         await browser?.close();
         fs.rmSync(assets, {recursive: true, force: true});

@@ -7,10 +7,9 @@ type ComposerActionProps = {
     label: string;
     title: string;
     onStop: () => void;
-    showLabel?: boolean;
 };
 
-export function ComposerAction({stop, stopping, disabled, label, title, onStop, showLabel}: ComposerActionProps) {
+export function ComposerAction({stop, stopping, disabled, label, title, onStop}: ComposerActionProps) {
     const action = useRef<HTMLButtonElement>(null);
     const focused = useRef(false);
 
@@ -28,7 +27,7 @@ export function ComposerAction({stop, stopping, disabled, label, title, onStop, 
     return <button
         ref={action}
         type={stop ? 'button' : 'submit'}
-        className={stop ? 'send stop' : showLabel ? 'send composer-labeled' : 'send'}
+        className={stop ? 'send stop' : 'send'}
         disabled={disabled}
         aria-label={label}
         aria-busy={stopping || undefined}
@@ -42,7 +41,7 @@ export function ComposerAction({stop, stopping, disabled, label, title, onStop, 
             if (event.relatedTarget && event.relatedTarget !== document.body) focused.current = false;
         }}
     >
-        {showLabel ? label : stop
+        {stop
             ? <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
             : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>}
     </button>;

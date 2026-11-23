@@ -1,6 +1,6 @@
-import React,{useLayoutEffect,useRef,useState,type ReactNode,type RefObject} from 'react';
+import React,{useEffect,useLayoutEffect,useRef,useState,type ReactNode,type RefObject} from 'react';
 import {transcriptRenderBudget,windowRange} from './conversation-timeline';
-import {captureTranscriptAnchor,restoreTranscriptAnchor,useTranscriptScroll,type TranscriptDirection} from './transcript-scroll';
+import {captureTranscriptAnchor,restoreTranscriptAnchor,restoreTranscriptPosition,useTranscriptScroll,type TranscriptDirection} from './transcript-scroll';
 // Dense Markdown costs much more to mount than short messages. Keep one
 // complete row even if it exceeds the budget so every turn stays reachable.
 function budgetedRange<T>(rows:T[],edge:number,direction:'older'|'newer',limit:number,cost:(row:T)=>number){
@@ -25,6 +25,8 @@ export function LiveTranscriptWindow<T extends Row>({rows,viewport,children,foll
 }){
  const root=useRef<HTMLDivElement>(null);
  const [page,setPage]=useState<KeyedBounds>();
+ const [fill,setFill]=useState<{first:string;tail:string}>();
+ const filledTail=useRef<string|undefined>(undefined);
  const rendered=useRef<{bounds:KeyedBounds;tail:string;page?:KeyedBounds;preferStart:boolean}>(undefined);
  const change=useRef<{anchor:ReturnType<typeof captureTranscriptAnchor>;direction:TranscriptDirection}>(undefined);
  const tail=rows.at(-1)?.key;
@@ -39,8 +41,13 @@ export function LiveTranscriptWindow<T extends Row>({rows,viewport,children,foll
   :preferStart&&!append?budgetedRange(rows,0,'newer',limit,rowCost)
   :budgetedRange(rows,rows.length,'older',limit,rowCost);
  const focus=!page&&!preferStart&&focusKey?rows.findIndex(row=>row.key===focusKey):-1;
- const {start,end}:Bounds=focus>=0&&(focus<range.start||focus>=range.end)
+ const visibleRange:Bounds=focus>=0&&(focus<range.start||focus>=range.end)
   ?budgetedRange(rows,focus+1,'older',limit,rowCost):range;
+ const {end}=visibleRange;
+ const preceding=rows[visibleRange.start-1]?.key;
+ const start=fill&&fill.tail===tail&&fill.first===preceding&&end===rows.length
+  ?visibleRange.start-1:visibleRange.start;
+ const olderKey=start>0&&end-start<limit?rows[start-1]?.key:undefined;
 
  useTranscriptScroll(viewport,(direction,node,threshold)=>{
   const content=root.current;
@@ -79,12 +86,33 @@ export function LiveTranscriptWindow<T extends Row>({rows,viewport,children,foll
   }
   rendered.current=tail?{bounds:{first:rows[start]!.key,last:rows[end-1]!.key},tail,page,preferStart}:undefined;
  });
+ useEffect(()=>{
+  const node=viewport.current,content=root.current;
+  if(!node||!content||end!==rows.length)return;
+  const layout=()=>{
+   if(!following.current||!content.getClientRects().length||!node.clientHeight)return;
+   const padding=parseFloat(getComputedStyle(node).paddingBottom);
+   const bottom=content.getBoundingClientRect().bottom+padding;
+   // Admit one complete predecessor beyond the budget if the mounted tail leaves a gap.
+   if(!preferStart&&tail&&olderKey&&filledTail.current!==tail&&bottom<node.getBoundingClientRect().bottom-1){
+    filledTail.current=tail;
+    setFill({first:olderKey,tail});
+    return;
+   }
+   restoreTranscriptPosition(node,node.scrollHeight-node.clientHeight);
+  };
+  layout();
+  const observer=new ResizeObserver(layout);
+  observer.observe(content);
+  observer.observe(node);
+  return()=>observer.disconnect();
+ },[viewport,following,tail,olderKey,end,rows.length,preferStart]);
  return <div ref={root} className="transcript-window" data-window-start={start} data-window-end={end} data-window-total={rows.length}>
   {rows.slice(start,end).map(row=><div key={row.key} data-timeline-key={row.key}>{children(row)}</div>)}
  </div>;
 }
 
-/** The file and subagent lists keep their explicit pagination controls. */
+/** The file list keeps explicit pagination controls. */
 export function TranscriptWindow<T extends Row>({rows,viewport,children,onBrowse,limit=120,olderLabel,newerLabel}:{
  rows:T[];viewport:RefObject<HTMLElement|null>;children:(row:T)=>ReactNode;
  onBrowse:()=>void;limit?:number;olderLabel:string;newerLabel:string;
@@ -116,5 +144,48 @@ export function TranscriptWindow<T extends Row>({rows,viewport,children,onBrowse
   {start>0&&<button type="button" className="quiet history-window-control" onClick={()=>move(true)}>{olderLabel}</button>}
   {rows.slice(start,end).map(row=><div key={row.key} data-timeline-key={row.key}>{children(row)}</div>)}
   {end<rows.length&&<button type="button" className="quiet history-window-control" onClick={()=>move(false)}>{newerLabel}</button>}
+ </div>;
+}
+
+/** Newest-first task lists follow arrivals at the top and retain a keyed page during browsing. */
+export function RecentTaskWindow<T extends Row>({rows,viewport,children,visible,detail,limit=20}:{
+ rows:T[];viewport:RefObject<HTMLElement|null>;children:(row:T)=>ReactNode;
+ visible:boolean;detail:boolean;limit?:number;
+}){
+ const [page,setPage]=useState<{head?:string}>();
+ const root=useRef<HTMLDivElement>(null);
+ const head=useRef<string|undefined>(undefined);
+ const following=useRef(true);
+ const move=useRef<{anchor:ReturnType<typeof captureTranscriptAnchor>;latest:boolean}|undefined>(undefined);
+ const retained=page?.head??(following.current?undefined:head.current);
+ const start=retained?Math.max(0,rows.findIndex(row=>row.key===retained)):0;
+ const end=Math.min(start+limit,rows.length);
+ function browse(older:boolean){
+  const content=root.current,node=viewport.current;
+  if(!content||!node||(older?end===rows.length:start===0))return;
+  const step=Math.max(1,Math.floor(limit/3));
+  const next=Math.min(Math.max(0,start+(older?step:-step)),Math.max(0,rows.length-limit));
+  const latest=next===0;
+  move.current={anchor:captureTranscriptAnchor(node,content,new Set(rows.slice(next,next+limit).map(row=>row.key))),latest};
+  following.current=latest;
+  setPage({head:latest?undefined:rows[next]!.key});
+ }
+ useTranscriptScroll(viewport,()=>false,node=>{
+  if(visible&&!detail)following.current=start===0&&node.scrollTop<1;
+ });
+ useLayoutEffect(()=>{
+  head.current=rows[start]?.key;
+  const node=viewport.current,content=root.current,position=move.current;
+  if(detail){following.current=false;return;}
+  if(!visible||!node||!content)return;
+  if(position?.latest)restoreTranscriptPosition(node,0);
+  else if(position)restoreTranscriptAnchor(node,content,position.anchor);
+  move.current=undefined;
+  following.current=start===0&&node.scrollTop<1;
+ });
+ return <div ref={root} className="transcript-window">
+  {start>0&&<button type="button" className="quiet history-window-control" onClick={()=>browse(false)}>Load newer subagents</button>}
+  {rows.slice(start,end).map(row=><div key={row.key} data-timeline-key={row.key}>{children(row)}</div>)}
+  {end<rows.length&&<button type="button" className="quiet history-window-control" onClick={()=>browse(true)}>Load older subagents</button>}
  </div>;
 }

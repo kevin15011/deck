@@ -28,12 +28,15 @@ impl Slot {
     pub(crate) fn settle_waiting_roots(
         &self, store: &mut crate::Store, live: &std::collections::HashSet<String>,
     ) -> Result<bool, String> {
-        let rows = store.all()?;
+        let rows = store.pending_receipts()?;
         let mut retry = false;
         for mut r in rows.iter().filter(|r| r.phase == Phase::Uncertain && r.mode == Mode::SessionV1).cloned() {
+            // The intent names the process and thread before turn/start. A
+            // missing reply leaves the result unknown but cannot keep owning
+            // the queue once the recorded process group is gone.
             if live.contains(&r.id)
                 || !rows.iter().any(|q| q.phase == Phase::Queued && q.session == r.session)
-                || r.turn.as_deref().is_none_or(str::is_empty)
+                || r.dispatch_ms.is_none()
                 || !r.decisions.iter().all(|d| matches!(d.state,
                     deck2_shared::DecisionState::Settled | deck2_shared::DecisionState::Invalidated))
                 || crate::member_integration::Integration::for_receipt(&r)
@@ -42,7 +45,8 @@ impl Slot {
             let Some(pid) = r.native_pid.and_then(|p| i32::try_from(p).ok()).filter(|p| *p > 1) else { continue };
             let Some(context) = store.session_by_id(&r.session)?.native else { continue };
             if context.runner != Some(deck2_shared::NativeRunner::Codex)
-                || context.mode != r.mode || r.thread.as_ref() != Some(&context.thread)
+                || context.mode != r.mode || context.thread.is_empty()
+                || r.thread.as_ref() != Some(&context.thread)
             { continue; }
             let absent = |id| unsafe { libc::kill(id, 0) } == -1
                 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
@@ -180,6 +184,10 @@ pub(super) fn process_key(app: &App, common: &str) -> Result<String, String> {
 }
 
 impl App {
+    pub(crate) fn native_retiring(&self) -> bool {
+        self.native_reuse.registry.retiring()
+    }
+
     pub(crate) fn shutdown_native(&self) {
         self.native_reuse.epoch.fetch_add(1, Ordering::SeqCst);
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
@@ -209,17 +217,47 @@ impl App {
         settle(self, idle, state).await
     }
     pub(crate) async fn retire_native_session(&self, session: &str) -> Result<(), String> {
+        self.retire_native_session_checked(session, || Ok(())).await
+    }
+    pub(crate) async fn retire_native_session_checked(
+        &self,
+        session: &str,
+        ready: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), String> {
         #[cfg(test)]
         self.native_reuse.retire_entered.notify_one();
         let state = self.native_reuse.retirement.clone().lock_owned().await;
-        if let Some(error) = state.as_ref() { return Err(error.clone()); }
+        ready()?;
+        if let Some(error) = state.as_ref() {
+            return Err(error.clone());
+        }
         let idle = {
             let mut entries = self.native_reuse.idle.lock().unwrap();
-            entries.iter().position(|i| i.native.runtime_session.as_deref() == Some(session)).map(|i| entries.remove(i))
+            entries
+                .iter()
+                .position(|i| i.native.runtime_session.as_deref() == Some(session))
+                .map(|i| entries.remove(i))
         };
-        if let Some(idle) = idle { settle(self, vec![idle], state).await?; }
+        if let Some(idle) = idle {
+            settle(self, vec![idle], state).await?;
+        }
         Ok(())
     }
+
+    pub(crate) fn native_removal_ready(&self, session: &str) -> Result<(), String> {
+        match self.native_reuse.registry.session_state(session) {
+            Some("uncertain") => Err(
+                "Resolve uncertain native process ownership before removing this session.".into(),
+            ),
+            None | Some("idle") => Ok(()),
+            Some(_) => Err(
+                "Wait for this session's native process to settle before removing local history."
+                    .into(),
+            ),
+        }
+    }
+
+
 }
 
 pub(super) struct Checkout {
@@ -461,6 +499,98 @@ mod tests {
         super::super::run(app.clone(), id.into(), app.binary.clone(), rx).await;
         app.receipt(id).unwrap()
     }
+
+    #[tokio::test]
+    async fn remove_session_rechecks_input_during_native_retirement() {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use tower::ServiceExt;
+
+        let (_dir, app) = fixture();
+        let first = turn(&app, "removal-first-turn").await;
+        assert_eq!(first.phase, Phase::Completed, "{}", first.detail);
+        assert!(app.native_reuse.loaded_session("reuse-session"));
+        let router = crate::server::router(app.clone());
+        let auth = router
+            .clone()
+            .oneshot(
+                Request::post("/auth")
+                    .header("host", &app.host)
+                    .header("origin", format!("http://{}", app.host))
+                    .body(Body::from(app.issue_launch()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let cookie = auth.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        let request = |path: &str, body: Value| {
+            Request::post(path)
+                .header("host", &app.host)
+                .header("origin", format!("http://{}", app.host))
+                .header("cookie", cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        };
+        let remove = || request("/api/sessions/reuse-session/remove", json!({"api": API}));
+        let queue = |id: &str| {
+            request(
+                "/api/commands",
+                json!({
+                    "api": API, "id": id, "session": "reuse-session", "mode": "read_only",
+                    "prompt": "Keep this input", "queue": true, "fresh": true
+                }),
+            )
+        };
+        app.store.lock().unwrap().pause_queue(true).unwrap();
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(queue("blocked-removal"))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            router.clone().oneshot(remove()).await.unwrap().status(),
+            StatusCode::CONFLICT
+        );
+        assert!(app.native_reuse.loaded_session("reuse-session"));
+        let cancel = request("/api/commands/blocked-removal/cancel", json!({}));
+        assert_eq!(
+            router.clone().oneshot(cancel).await.unwrap().status(),
+            StatusCode::OK
+        );
+
+        let barrier = std::sync::Arc::new((tokio::sync::Notify::new(), tokio::sync::Notify::new()));
+        *app.native_reuse.expiry_barrier.lock().unwrap() = Some(barrier.clone());
+        let removal = tokio::spawn(router.clone().oneshot(remove()));
+        tokio::time::timeout(Duration::from_secs(5), barrier.0.notified())
+            .await
+            .unwrap();
+        let duplicate = router.clone().oneshot(remove()).await.unwrap();
+        let admitted = router
+            .clone()
+            .oneshot(queue("racing-removal"))
+            .await
+            .unwrap();
+        barrier.1.notify_one();
+        let result = removal.await.unwrap().unwrap();
+        assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+        assert_eq!(admitted.status(), StatusCode::OK);
+        assert_eq!(result.status(), StatusCode::CONFLICT);
+        assert_eq!(app.receipt("racing-removal").unwrap().phase, Phase::Queued);
+        assert!(app.receipt("removal-first-turn").is_ok());
+    }
+
     #[tokio::test]
     async fn hook_change_during_preparation_settles_before_one_dispatch() {
         let (dir, app) = fixture_with_script(|script| script.replace(
@@ -662,6 +792,12 @@ mod tests {
     }
     #[test]
     fn stopped_queued_root_keeps_its_thread_and_claims_only_the_next_input() {
+        for turn in [Some("previous-turn"), None] {
+            assert_stopped_queued_root(turn);
+        }
+    }
+
+    fn assert_stopped_queued_root(turn: Option<&str>) {
         use std::os::unix::process::CommandExt;
         let (_dir, app) = fixture();
         let mut store = app.store.lock().unwrap();
@@ -673,7 +809,8 @@ mod tests {
         old.phase = Phase::Uncertain;
         old.native_pid = Some(process.id());
         old.thread = Some("existing-thread".into());
-        old.turn = Some("previous-turn".into());
+        old.turn = turn.map(str::to_owned);
+        old.dispatch_ms = Some(crate::now());
         old.text = "partial reply".into();
         store.save(&mut old).unwrap();
         let mut session = store.session_by_id("reuse-session").unwrap();
@@ -1658,6 +1795,39 @@ mod tests {
         );
         app.retire_native().await.unwrap();
     }
+    #[tokio::test]
+    async fn codex_direct_workspace_edits_with_and_without_yolo() {
+        let (dir, app) = fixture();
+        let project = dir.path().to_str().unwrap();
+        for (mode, trusted) in [("relay", true), ("yolo", true), ("untrusted", false)] {
+            let id = format!("direct-codex-{mode}");
+            let command = serde_json::from_value(json!({
+                "api": API, "id": id, "session": "reuse-session",
+                "prompt": format!("Direct Codex workspace edits {mode}"), "mode": "session_v1"
+            })).unwrap();
+            {
+                let mut store = app.store.lock().unwrap();
+                store.set_trust(project, trusted).unwrap();
+                store.set_approvals("reuse-session", if mode == "relay" { "relay" } else { "yolo" }).unwrap();
+                store.admit(&command).unwrap();
+            }
+            let (tx, rx) = watch::channel(false);
+            app.active.lock().unwrap().insert(id.clone(), tx);
+            super::super::run(app.clone(), id.clone(), app.binary.clone(), rx).await;
+            let receipt = app.receipt(&id).unwrap();
+            assert_eq!(receipt.phase, Phase::Completed, "{}", receipt.detail);
+            assert!(receipt.decisions.is_empty());
+            if trusted {
+                for index in 0..18 {
+                    assert_eq!(std::fs::read_to_string(dir.path().join(format!("direct-{index}.txt"))).unwrap(), format!("{mode}\n"));
+                }
+            } else {
+                assert_eq!(std::fs::read_to_string(dir.path().join("direct-0.txt")).unwrap(), "yolo\n");
+            }
+        }
+        app.retire_native().await.unwrap();
+    }
+
     // protects: real native elicitation -> explicit session consent -> repeated
     // native turns, and authenticated busy input -> durable queue -> automatic
     // settlement dispatch. Oracle: one consent, three distinct effects in FIFO,
@@ -1673,6 +1843,7 @@ mod tests {
         let cookie=auth.headers()["set-cookie"].to_str().unwrap().split(';').next().unwrap().to_string();
         {
             let mut s=app.store.lock().unwrap();let mut session=s.session_by_id("reuse-session").unwrap();
+            s.set_trust(&app.project, true).unwrap();
             let assignment=session.contract.as_ref().unwrap().members["lead"].clone();
             session.contract.as_mut().unwrap().members.insert("apply-deep".into(),assignment);
             s.save_session(&session).unwrap();

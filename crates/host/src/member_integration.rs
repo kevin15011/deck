@@ -9,6 +9,7 @@ use deck2_shared::{
 pub(crate) enum Integration {
     Codex,
     OpenCode,
+    Claude,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ExecutionProfile {
@@ -20,15 +21,22 @@ impl Integration {
         match runner {
             "codex" => Ok(Self::Codex),
             "opencode" => Ok(Self::OpenCode),
+            crate::claude::RUNNER => Ok(Self::Claude),
             _ => Err("Assigned member integration is unavailable; no fallback".into()),
         }
     }
-    pub(crate) fn concurrent_lead(self) -> bool {
-        match self { Self::Codex => true, Self::OpenCode => false }
+    pub(crate) fn shares_lead_slots(self) -> bool {
+        matches!(self, Self::Codex | Self::Claude)
+    }
+    pub(crate) fn supports_retained_lead(self) -> bool {
+        self == Self::Codex
     }
     pub(crate) fn profile(self) -> ExecutionProfile {
         match self {
-            Self::Codex => ExecutionProfile::IndependentDedicated,
+            // Codex and Claude members each own a dedicated native process, bridge,
+            // session UUID and scoped MCP credential; nothing is shared but the
+            // read-only credential store, so they may run beside the Lead.
+            Self::Codex | Self::Claude => ExecutionProfile::IndependentDedicated,
             Self::OpenCode => ExecutionProfile::ExclusiveDelegated,
         }
     }
@@ -57,6 +65,7 @@ impl Integration {
                     "Native-owned session storage".into(),
                 )
             }
+            Self::Claude => return crate::claude::member::bind(s, a, member, trusted),
             Self::OpenCode => {
                 crate::connected_opencode::source::bind(s, a, member, trusted)?;
                 let n = s
@@ -107,6 +116,7 @@ impl Integration {
                 Ok(selected)
             }
             Self::OpenCode if crate::connected_opencode::admitted(s) => Ok(selected),
+            Self::Claude if crate::claude::admitted(s) => Ok(selected),
             _ => Err("Root native evidence does not match its selected integration".into()),
         }
     }
@@ -130,6 +140,7 @@ impl Integration {
                         .as_ref()
                         .is_none_or(|n| n.runner == NativeRunner::Codex)
             }
+            Self::Claude => crate::claude::member::matches_attempt(s, &t.owner, &a.provenance),
             Self::OpenCode => {
                 crate::connected_opencode::admitted(s)
                     && a.provenance.runner == "opencode 1.19.1"
@@ -158,6 +169,16 @@ pub(crate) fn resolve_model(
     match Integration::select(&a.runner_id)? {
         Integration::Codex => crate::codex_protocol::resolve_model(models, a, fallback),
         Integration::OpenCode => crate::connected_opencode::resolve_public_model(models, a),
+        Integration::Claude => {
+            let model = models.as_array().and_then(|rows| rows.iter().find(|row| row["modelId"] == a.model_id))
+                .ok_or("Claude Code does not offer the selected model for this project")?;
+            if let Some(effort) = &a.thinking
+                && !model["thinkingLevels"].as_array().is_some_and(|levels| levels.iter().any(|level| level == effort))
+            {
+                return Err("Claude Code does not offer the selected effort for this model".into());
+            }
+            Ok((a.model_id.clone(), a.thinking.clone()))
+        }
     }
 }
 
@@ -166,6 +187,11 @@ pub(crate) fn snapshot_runner_matches(
     s: &AdmissionSnapshot,
     c: &crate::configuration::Configuration,
 ) -> bool {
-    (s.runner == c.runner || crate::connected_opencode::admitted(s))
+    #[cfg(test)]
+    if crate::claude_fixture::admitted(s) {
+        return s.codex_executable == c.codex_executable;
+    }
+    (s.runner == c.runner || crate::connected_opencode::admitted(s) || crate::claude::admitted(s)
+        || s.session_contract.as_ref().is_some_and(|contract| contract.members.keys().any(|role| crate::claude::member::admitted(s, role))))
         && s.codex_executable == c.codex_executable
 }

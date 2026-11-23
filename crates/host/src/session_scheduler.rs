@@ -73,13 +73,28 @@ pub(crate) fn lead_limit(base: &crate::configuration::Configuration, raw: &Value
 }
 impl Store {
     pub(crate) fn root_available(&self, mode: &Mode, session: &str, live: &HashSet<String>, cap: usize) -> Result<bool, String> {
+        let pending = self.pending_receipts()?;
+        let Some(occupied) = self.occupied_roots(&pending, live)? else { return Ok(false) };
+        self.root_available_with_occupied(mode, session, &occupied, cap)
+    }
+    pub(crate) fn occupied_roots(&self, pending: &[deck2_shared::Receipt], live: &HashSet<String>) -> Result<Option<Vec<deck2_shared::Receipt>>, String> {
+        let mut occupied: Vec<_> = pending.iter().filter(|r|
+            r.phase.active() || r.phase == Phase::Uncertain || live.contains(&r.id)
+        ).cloned().collect();
+        for id in live {
+            if !occupied.iter().any(|r| &r.id == id) {
+                // A settled receipt can still own a live process during drain.
+                let Some(receipt) = self.get(id)? else { return Ok(None) };
+                occupied.push(receipt);
+            }
+        }
+        Ok(Some(occupied))
+    }
+    pub(crate) fn root_available_with_occupied(&self, mode: &Mode, session: &str, occupied: &[deck2_shared::Receipt], cap: usize) -> Result<bool, String> {
         if !(1..=2).contains(&cap) { return Err("Lead budget exceeds the qualified process envelope".into()); }
-        let parallel = *mode == Mode::SessionV1 && self.session_by_id(session)?.contract.as_ref().and_then(|c| c.members.get("lead")).and_then(|a| crate::member_integration::Integration::select(&a.runner_id).ok()).is_some_and(|i| i.concurrent_lead());
-        let all = self.all()?;
-        if live.iter().any(|id| !all.iter().any(|r| &r.id == id)) { return Ok(false); }
-        let occupied: Vec<_> = all.iter().filter(|r| r.phase.active() || r.phase == Phase::Uncertain || live.contains(&r.id)).collect();
+        let parallel = *mode == Mode::SessionV1 && self.session_by_id(session)?.contract.as_ref().and_then(|c| c.members.get("lead")).and_then(|a| crate::member_integration::Integration::select(&a.runner_id).ok()).is_some_and(|i| i.shares_lead_slots());
         if occupied.is_empty() { return Ok(true); }
-        if !parallel || occupied.len() >= cap || occupied.iter().any(|r| r.session == session || r.mode != Mode::SessionV1 || !crate::member_integration::Integration::for_receipt(r).is_ok_and(|i| i.concurrent_lead())) {
+        if !parallel || occupied.len() >= cap || occupied.iter().any(|r| r.session == session || r.mode != Mode::SessionV1 || !crate::member_integration::Integration::for_receipt(r).is_ok_and(|i| i.shares_lead_slots())) {
             return Ok(false);
         }
         Ok(true)
@@ -165,6 +180,45 @@ impl Store {
             }
         }
         Ok(false)
+    }
+    // Queued Lead input held by an unsettled member says what it waits for and
+    // how to continue. The default detail returns once nothing holds it.
+    pub(crate) fn explain_member_wait(&mut self) -> Result<(), String> {
+        const QUEUED: &str = "Waiting in the durable queue; definitely undispatched";
+        const PREFIX: &str = "Waiting for subagent ";
+        let queued: Vec<_> = self
+            .pending_receipts()?
+            .into_iter()
+            .filter(|r| r.phase == Phase::Queued && r.mode == Mode::SessionV1)
+            .collect();
+        if queued.is_empty() {
+            return Ok(());
+        }
+        let tasks = self.tasks()?;
+        for mut r in queued {
+            let blocker = tasks.iter().filter(|t| t.session == r.session).find_map(|t| {
+                t.attempts
+                    .iter()
+                    .position(|a| a.phase == Phase::Uncertain)
+                    .map(|i| (t, i))
+            });
+            let detail = match blocker {
+                Some((t, i)) => {
+                    let recover = "stop Deck, run `deck2 recover --confirm-native-stopped` (nothing is replayed) and start Deck again.";
+                    match t.attempts[i].native_pid {
+                        Some(pid) => format!("{PREFIX}{} (attempt {}): Deck restarted while it ran and its process {pid} has not been confirmed stopped. This message is sent automatically once that process exits. If it already exited, {recover}", t.logical_id(), t.number(i)),
+                        None => format!("{PREFIX}{} (attempt {}): Deck restarted before it recorded its process, so Deck cannot prove it stopped. Check that no process from that subagent is still running, then {recover}", t.logical_id(), t.number(i)),
+                    }
+                }
+                None if r.detail.starts_with(PREFIX) => QUEUED.into(),
+                None => continue,
+            };
+            if r.detail != detail {
+                r.detail = detail;
+                self.save(&mut r)?;
+            }
+        }
+        Ok(())
     }
     #[cfg(test)]
     fn claim_member(
@@ -312,7 +366,7 @@ impl Store {
             return Ok(());
         }
         let project = self.session_project(&root.session)?.id;
-        for other in self.all()?.into_iter().filter(|r|r.id!=root.id && r.mode==Mode::SessionV1 && (r.phase.active() || r.phase==Phase::Uncertain)) {
+        for other in self.pending_receipts()?.into_iter().filter(|r|r.id!=root.id && r.mode==Mode::SessionV1 && (r.phase.active() || r.phase==Phase::Uncertain)) {
             if self.session_project(&other.session)?.id!=project {continue;}
             for (own,sibling) in [(root,&other),(&other,root)] {
                 let lead=own.configuration.as_ref().and_then(|s|s.session_contract.as_ref()).ok_or("Overlap Lead contract missing")?;
@@ -377,7 +431,7 @@ impl Store {
                 }
             }
         }
-        for root in self.all()?.into_iter().filter(|r| r.phase.active() || r.phase==Phase::Uncertain) {
+        for root in self.pending_receipts()?.into_iter().filter(|r| r.phase.active() || r.phase==Phase::Uncertain) {
             if self.session_project(&root.session)?.id != project {
                 continue;
             }
@@ -702,6 +756,87 @@ mod tests {
         assert_eq!(store.task(&task.id).unwrap().attempts[0].phase, Phase::Failed);
         assert_eq!(store.claim_next().unwrap().unwrap().id, "queued-after-timeout");
         assert!(store.claim_next().unwrap().is_none());
+    }
+
+    // Oracle: after a restart, queued Lead input waits (and says why) while the
+    // dispatched member's process group lives, then is claimed exactly once
+    // after it exits. The member never replays; its outcome notice follows.
+    #[test]
+    fn stopped_codex_member_releases_queued_lead_input_after_restart() {
+        use std::os::unix::process::CommandExt;
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("state.db");
+        let mut s = Store::open(&db, "/fixture").unwrap();
+        s.register_codex("a".repeat(64)).unwrap();
+        session(&mut s, "session-a", "root-alpha");
+        let t = delegate(&mut s, "root-alpha", "a1");
+        let unrecorded = delegate(&mut s, "root-alpha", "a2");
+        let mut process = std::process::Command::new("sleep").arg("30").process_group(0).spawn().unwrap();
+        let mut claimed = s.claim_member("", &HashSet::new()).unwrap().unwrap();
+        assert_eq!(claimed.id, t.id);
+        claimed.attempts[0].phase = Phase::Running;
+        claimed.attempts[0].native_pid = Some(process.id());
+        claimed.attempts[0].dispatch_ms = Some(crate::now());
+        claimed.attempts[0].text = "partial member output".into();
+        s.save_task(&claimed).unwrap();
+        complete_root(&mut s, "root-alpha");
+        let input = serde_json::from_value(json!({"api":deck2_shared::API,"id":"queued-after-reboot",
+            "session":"session-a","prompt":"Continue once","mode":"session_v1","queue":true})).unwrap();
+        s.admit(&input).unwrap();
+        drop(s);
+
+        let mut s = Store::open(&db, "/fixture").unwrap();
+        assert_eq!(s.task(&t.id).unwrap().attempts[0].phase, Phase::Uncertain);
+        let none = HashSet::new();
+        assert!(crate::codex_member::settle_recovered(&mut s, &none).unwrap(), "live group must retry");
+        s.explain_member_wait().unwrap();
+        let waiting = s.get("queued-after-reboot").unwrap().unwrap();
+        assert!(waiting.detail.contains(&format!("process {}", process.id())), "{}", waiting.detail);
+        assert!(s.claim_next().unwrap().is_none());
+
+        process.kill().unwrap();
+        process.wait().unwrap();
+        assert!(!crate::codex_member::settle_recovered(&mut s, &none).unwrap());
+        let settled = s.task(&t.id).unwrap();
+        assert_eq!(settled.attempts[0].phase, Phase::Failed);
+        assert!(settled.attempts[0].settled_ms.is_some());
+        assert_eq!(settled.attempts[0].text, "partial member output");
+        assert_eq!(settled.attempts.len(), 1, "no replay attempt");
+        assert_eq!(s.task(&unrecorded.id).unwrap().attempts[0].phase, Phase::Cancelled, "undispatched work is stopped, never replayed");
+        s.explain_member_wait().unwrap();
+        assert_eq!(s.get("queued-after-reboot").unwrap().unwrap().detail, "Waiting in the durable queue; definitely undispatched");
+        assert_eq!(s.claim_next().unwrap().unwrap().id, "queued-after-reboot");
+        assert!(s.claim_next().unwrap().is_none(), "one Lead turn at a time");
+        let notices: Vec<_> = s.all().unwrap().into_iter().filter(|r| r.continuation.is_some()).collect();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0].phase, Phase::Queued);
+        assert!(!crate::codex_member::settle_recovered(&mut s, &none).unwrap());
+        assert_eq!(s.all().unwrap().iter().filter(|r| r.continuation.is_some()).count(), 1, "notice is not duplicated");
+    }
+
+    // A member that never recorded its process stays owned; the queue explains
+    // how to continue instead of guessing.
+    #[test]
+    fn unrecorded_member_process_keeps_queue_and_explains_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("state.db");
+        let mut s = Store::open(&db, "/fixture").unwrap();
+        s.register_codex("a".repeat(64)).unwrap();
+        session(&mut s, "session-a", "root-alpha");
+        let t = delegate(&mut s, "root-alpha", "a1");
+        s.claim_member("", &HashSet::new()).unwrap().unwrap();
+        complete_root(&mut s, "root-alpha");
+        let input = serde_json::from_value(json!({"api":deck2_shared::API,"id":"queued-unprovable",
+            "session":"session-a","prompt":"Continue once","mode":"session_v1","queue":true})).unwrap();
+        s.admit(&input).unwrap();
+        drop(s);
+        let mut s = Store::open(&db, "/fixture").unwrap();
+        assert!(!crate::codex_member::settle_recovered(&mut s, &HashSet::new()).unwrap());
+        assert_eq!(s.task(&t.id).unwrap().attempts[0].phase, Phase::Uncertain);
+        s.explain_member_wait().unwrap();
+        let detail = s.get("queued-unprovable").unwrap().unwrap().detail;
+        assert!(detail.contains("deck2 recover --confirm-native-stopped"), "{detail}");
+        assert!(s.claim_next().unwrap().is_none());
     }
 
     // Protects spawn-before-dispatch recovery: Preparing is an ownership claim,

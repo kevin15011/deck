@@ -26,3 +26,5 @@ T3 can select a local executable via pathToClaudeCodeExecutable. This source obs
 - [Live input and interrupt](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode)
 - [Permission and question callbacks](https://code.claude.com/docs/en/agent-sdk/user-input)
 - [Session continuity](https://code.claude.com/docs/en/agent-sdk/sessions)
+
+The October 7, 2026 Help Center update clarifies the runtime billing distinction: local SDK and print-mode runs signed in with a Claude plan draw from subscription limits; linked Console API credits apply when using an API key. This establishes the documented billing route, not a transaction-level measurement or a right to distribute a third-party OAuth flow. Keep authentication in the existing CLI. Account-level optional extra usage remains distinct from an API-key fallback. [Anthropic billing clarification](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)

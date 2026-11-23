@@ -1,4 +1,5 @@
 mod message_times;
+pub(crate) mod latency;
 use deck2_shared::{API, POLICY, Phase, Receipt, Submit};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
@@ -38,7 +39,12 @@ pub mod ordinary;
 mod quota;
 pub mod rtk;
 pub mod runner_management;
+mod claude;
+mod claude_readiness;
+#[cfg(test)]
+mod claude_fixture;
 pub mod server;
+mod workspace_events;
 mod steering;
 mod member_guidance;
 pub mod web_identity;
@@ -123,6 +129,7 @@ pub struct Store {
     conn: Connection,
     pub session: String,
     pub project: String,
+    workspace_updates: workspace_events::Updates,
 }
 impl Store {
     pub fn open(path: &Path, project: &str) -> Result<Self, String> {
@@ -330,10 +337,14 @@ impl Store {
                                 } else {
                                     treatment.lead_attempt != r.attempt
                                 }) || {
-                                    a.report
-                                        .as_ref()
-                                        .is_none_or(|report| report.digest != treatment.report)
-                                        || !matches!(
+                                    let matches_outcome = match &a.report {
+                                        Some(report) => treatment.report.as_deref() == Some(report.digest.as_str()),
+                                        None => r.mode == deck2_shared::Mode::SessionV1
+                                            && treatment.report.is_none()
+                                            && treatment.disposition == "followup_required"
+                                            && matches!(a.phase, deck2_shared::Phase::Completed | deck2_shared::Phase::Failed | deck2_shared::Phase::Cancelled),
+                                    };
+                                    !matches_outcome || !matches!(
                                             treatment.disposition.as_str(),
                                             "adopted" | "rejected" | "followup_required"
                                         )
@@ -555,6 +566,7 @@ impl Store {
             session,
             project: conn.query_row("SELECT value FROM meta WHERE key='project'", [], |r| r.get(0)).map_err(|_| "Recorded project missing")?,
             conn,
+            workspace_updates: Default::default(),
         };
         store.init_configuration()?;
         store.init_snapshots()?;
@@ -589,6 +601,12 @@ impl Store {
             .execute("UPDATE meta SET value='18' WHERE key='schema'", [])
             .map_err(|_| "Cannot publish helper-compatible schema")?;
         Self::inspect(&store.conn, project)?;
+        store.conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS receipts_pending ON receipts(id)
+                 WHERE (json_extract(body, '$.phase') IN ('completed', 'cancelled', 'failed')) IS NOT TRUE;
+             CREATE INDEX IF NOT EXISTS receipts_thread ON receipts(
+                 json_extract(body, '$.session'), json_extract(body, '$.thread'));",
+        ).map_err(|_| "Cannot prepare receipt lookup indexes")?;
         store
             .conn
             .execute_batch("COMMIT")
@@ -642,10 +660,21 @@ impl Store {
         Ok(store)
     }
     pub fn all(&self) -> Result<Vec<Receipt>, String> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT body FROM receipts ORDER BY rowid")
-            .map_err(|_| "State read failed")?;
+        self.read_receipts("SELECT body FROM receipts ORDER BY rowid")
+    }
+
+    // Admission and recovery need current ownership, including queued and
+    // uncertain work. Keep the durable arrival order without decoding settled transcripts.
+    pub(crate) fn pending_receipts(&self) -> Result<Vec<Receipt>, String> {
+        self.read_receipts(
+            "SELECT body FROM receipts INDEXED BY receipts_pending
+             WHERE (json_extract(body, '$.phase') IN ('completed', 'cancelled', 'failed')) IS NOT TRUE
+             ORDER BY rowid",
+        )
+    }
+
+    fn read_receipts(&self, sql: &str) -> Result<Vec<Receipt>, String> {
+        let mut stmt = self.conn.prepare_cached(sql).map_err(|_| "State read failed")?;
         let rows = stmt
             .query_map([], |r| r.get::<_, String>(0))
             .map_err(|_| "State read failed")?;
@@ -654,6 +683,18 @@ impl Store {
                 .map_err(|_| "Corrupt receipt; preserve state for inspection".into())
         })
         .collect()
+    }
+
+    fn last_in_thread(&self, session: &str, thread: &str) -> Result<Option<Receipt>, String> {
+        let body: Option<String> = self.conn.query_row(
+            "SELECT body FROM receipts
+             WHERE json_extract(body, '$.session')=?1 AND json_extract(body, '$.thread')=?2
+             ORDER BY rowid DESC LIMIT 1",
+            params![session, thread],
+            |row| row.get(0),
+        ).optional().map_err(|_| "Cannot read previous receipt")?;
+        body.map(|body| serde_json::from_str(&body).map_err(|_| "Corrupt prior receipt".into()))
+            .transpose()
     }
     pub fn get(&self, id: &str) -> Result<Option<Receipt>, String> {
         let body: Option<String> = self
@@ -671,6 +712,9 @@ impl Store {
         steering::settle_owned_input(r);
         if r.recalled_ms.is_some() && (!r.cancel_requested || r.dispatch_ms.is_some()) {
             return Err("Recalled input cannot acquire native dispatch authority".into());
+        }
+        if r.steered_to.is_some() && (r.phase != Phase::Cancelled || r.dispatch_ms.is_some() || r.recalled_ms.is_some()) {
+            return Err("Queued live source cannot acquire next-turn dispatch authority".into());
         }
         if r.configuration.as_ref().is_some_and(|c|self.session_project(&r.session).as_ref()!=Ok(&c.project)) {return Err("Admission project binding mismatch".into());}
         let prior = if r.mode == deck2_shared::Mode::SessionV1 {
@@ -721,6 +765,7 @@ impl Store {
             let result = (|| -> Result<(), String> {
                 self.conn.execute("INSERT INTO receipts VALUES (?1,?2) ON CONFLICT(id) DO UPDATE SET body=excluded.body",params![r.id,body]).map_err(|_|"Durable receipt write failed; dispatch is blocked")?;
                 self.conn.execute("INSERT INTO session_events(session,task,attempt,kind,body) VALUES (?1,?2,?3,?4,?5)",params![r.session,contract.lead_task,r.attempt,format!("receipt:{}",r.revision),event.to_string()]).map_err(|_|"Durable session event write failed; dispatch is blocked")?;
+                steering::sync_queued_sources(self, r, prior.as_ref())?;
                 for input in r.steering.iter().filter(|input| {
                     input.state == deck2_shared::SteeringState::Accepted
                         && !prior.as_ref().is_some_and(|previous| previous.steering.iter().any(|record| {
@@ -776,15 +821,14 @@ impl Store {
         if (c.prompt.trim().is_empty() && c.attachments.is_empty()) || c.prompt.len() > 16384 {
             return Err("Enter a prompt of at most 16 KiB".into());
         }
-        let all = self.all().map_err(storage_error)?;
-        if let Some(r) = all.iter().find(|r| r.id == c.id) {
+        if let Some(r) = self.get(&c.id).map_err(storage_error)? {
             return if r.prompt == c.prompt
                 && r.mode == c.mode
                 && r.session == session
                 && r.fresh == fresh
                 && r.attachments.iter().map(|a| &a.id).eq(c.attachments.iter())
             {
-                Ok(r.clone())
+                Ok(r)
             } else {
                 Err("Command identity conflicts with previously accepted input".into())
             };
@@ -824,12 +868,6 @@ impl Store {
         if !queued && !self.root_available(&c.mode, session, &std::collections::HashSet::new(), self.configuration().map_err(storage_error)?.execution_budget.lead).map_err(storage_error)? {
             return Err("An active or uncertain task must settle before new dispatch".into());
         }
-        if all.len() >= 256 {
-            return Err(
-                "This project history is full; remove a settled conversation before adding work"
-                    .into(),
-            );
-        }
         if !queued && c.mode.editing() && !self.trusted_project(&project.root).map_err(storage_error)? {
             return Err("Trust this project for reviewed editing before submitting. Trust grants no file effect.".into());
         }
@@ -860,17 +898,21 @@ impl Store {
                 .ok_or("Historical restricted sessions cannot use connected authority")?;
             crate::session_contract::validate(&contract)?;
             let assignment=contract.members.get("lead").ok_or("Lead assignment missing")?.clone();
-            if !matches!(assignment.runner_id.as_str(),"codex"|"opencode"){return Err("Selected Lead runner is unavailable".into());}
             snapshot.session_contract = Some(contract);
-            crate::connected_opencode::source::bind(&mut snapshot,&assignment,"lead",self.trusted_project(&project.root)?)?;
+            match assignment.runner_id.as_str() {
+                "codex" | "opencode" => crate::connected_opencode::source::bind(&mut snapshot,&assignment,"lead",self.trusted_project(&project.root)?)?,
+                #[cfg(test)]
+                crate::claude_fixture::RUNNER if std::env::var_os("DECK2_CLAUDE_FIXTURE_CHILD").is_some() => crate::claude_fixture::bind(&mut snapshot),
+                crate::claude::RUNNER => {
+                    crate::claude::bind(&mut snapshot)?;
+                }
+                _ => return Err("Selected Lead runner is unavailable".into()),
+            }
         }
         let mut continued_model = None;
         if !fresh
             && let Some(context) = self.session_by_id(session)?.native
-            && let Some(previous) = all
-                .iter()
-                .rev()
-                .find(|r| r.session == session && r.thread.as_ref() == Some(&context.thread))
+            && let Some(previous) = self.last_in_thread(session, &context.thread).map_err(storage_error)?
         {
             if previous.mode != c.mode {
                 return Err("Historical context mode differs; choose Start new execution".into());
@@ -932,7 +974,7 @@ impl Store {
                 ));
             }
         }
-        let runner = snapshot.native.as_ref().map(|n| format!("{} {} / {}", match n.runner { deck2_shared::NativeRunner::Codex => "codex", deck2_shared::NativeRunner::Opencode => "opencode" }, n.version, n.protocol)).unwrap_or_else(|| "codex / app-server stdio".into());
+        let runner = snapshot.native.as_ref().map(|n| format!("{} {} / {}", match n.runner { deck2_shared::NativeRunner::Codex => "codex", deck2_shared::NativeRunner::Opencode => "opencode", deck2_shared::NativeRunner::Claude => "claude" }, n.version, n.protocol)).unwrap_or_else(|| "codex / app-server stdio".into());
         let mut r = Receipt {
             context: Default::default(),
             can_steer: false,
@@ -947,6 +989,7 @@ impl Store {
             generation: String::new(),
             cancel_requested: false,
             recalled_ms: None,
+            steered_to: None,
             decisions: Vec::new(),
             id: c.id.clone(),
             prompt: c.prompt.clone(),
@@ -1015,7 +1058,7 @@ impl Store {
             for a in &mut t.attempts {
                 if a.phase == Phase::Uncertain {
                     a.phase = Phase::Failed;
-                    a.detail="Operator acknowledged native processes stopped. Outcome remains unknown; no replay.".into();
+                    a.detail=task_panel::STOPPED_UNKNOWN.into();
                     count += 1;
                 }
             }

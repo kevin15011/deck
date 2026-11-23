@@ -41,7 +41,7 @@ export function PermissionScopeChoice({policy,scope,disabled,onChange}:{policy:P
   const change=()=>{if(media.matches)settle();};media.addEventListener('change',change);
   return()=>{media.removeEventListener('change',change);gsap.killTweensOf(node);};
  },[scope.id,scope.description]);
- return <div className="permission-scope-choice"><label>Session scope <select aria-label="Session permission scope" value={scope.id} disabled={disabled} onChange={event=>onChange(event.target.value)}>{policy.options.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}</select></label><div ref={detail}><p className="review-scope">For <strong>{scope.actor}</strong> in this session: {scope.description.replace(/ Valid across reconnects and host restart until revoked, assignments change or canonical session authority is replaced\.$/,'')} Survives restarting the app; ends when revoked or the team or session permissions change. Revoke from session permissions. Other roles need separate permission.</p>{scope.kind==='exact'&&policy.unsupported.map((limit,i)=><p key={i} className="activity-meta">{limit}</p>)}</div></div>;
+ return <div className="permission-scope-choice"><label>Session scope <select aria-label="Session permission scope" value={scope.id} disabled={disabled} onChange={event=>onChange(event.target.value)}>{policy.options.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}</select></label><div ref={detail}><p className="review-scope">For <strong>{scope.actor}</strong> in this session: {scope.description.replace(/ Valid (?:across reconnects and host restart until revoked, assignments change or canonical session authority is replaced|for the matching admitted assignment and revision across reconnects and host restart until revoked or the session authority is replaced)\.$/,'')} Survives restarting the app for work with the same admitted assignment revision. It ends when revoked or the session authority changes. Revoke from session permissions. Other roles need separate permission.</p>{scope.kind==='exact'&&policy.unsupported.map((limit,i)=><p key={i} className="activity-meta">{limit}</p>)}</div></div>;
 }
 
 export async function submitReviewResponse(d:Decision,response:DecisionResponse,storageScope='',scopeOptionId?:string){
@@ -50,7 +50,7 @@ export async function submitReviewResponse(d:Decision,response:DecisionResponse,
   async function send(body:Resolve){
    try {
     const result=decision(await request('POST',`/api/decisions/${encodeURIComponent(d.id)}/responses`,body));
-    if(result.id!==d.id||result.resolution?.command_id!==body.command_id)throw new Error('Decision acknowledgment identity mismatch; reconnect before continuing.');
+    if(result.id!==d.id||result.session!==d.session||result.command!==d.command||result.resolution?.command_id!==body.command_id)throw new Error('Decision acknowledgment identity mismatch; reconnect before continuing.');
    }catch(e){
     if((answersNotAccepted(e,d.id,body)||permissionResponseNotAccepted(e,d.id,body))&&load(key)===JSON.stringify(body))save(key,'');
     throw e;
@@ -103,7 +103,7 @@ export function Review({d,onError,connected,storageScope='',conversation=false,o
   const change=()=>{if(media.matches)settle();};media.addEventListener('change',change);
   return()=>{media.removeEventListener('change',change);gsap.killTweensOf(node);};
  },[view]);
- async function respond(response:DecisionResponse){if(sending.current||!allowed(response.type==='deny'&&display?.kind==='question'?'dismiss':response.type))return;
+ async function respond(response:DecisionResponse){if(sending.current||disabled||!allowed(response.type==='deny'&&display?.kind==='question'?'dismiss':response.type))return;
   try{
    responseFocus.current=!!reviewBody.current?.contains(document.activeElement);sending.current=true;setBusy(true);
    await submitReviewResponse(d,response,storageScope,scope?.id);

@@ -823,13 +823,16 @@ async fn cancellation_preserves_partial_native_notification() {
 // S1-Q01 also covers a nominally supported schema with corrupt persisted data.
 #[test]
 fn corrupt_supported_receipt_is_rejected_before_writes() {
-    let project_fixture=tempfile::tempdir().unwrap();
+    let project_fixture = tempfile::tempdir().unwrap();
     let t = tempfile::tempdir().unwrap();
     let path = t.path().join("state.db");
     let mut store = Store::open(&path, project_fixture.path().to_str().unwrap()).unwrap();
     store.accept(&command("corrupt-command", "retain")).unwrap();
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
+    // The previous store used the same schema version without receipt lookup indexes.
+    conn.execute_batch("DROP INDEX receipts_pending; DROP INDEX receipts_thread;")
+        .unwrap();
     conn.execute("UPDATE receipts SET body='corrupt JSON'", [])
         .unwrap();
     drop(conn);
@@ -852,6 +855,37 @@ fn corrupt_supported_receipt_is_rejected_before_writes() {
             .unwrap(),
         "corrupt JSON"
     );
+}
+
+#[test]
+fn indexed_receipts_reject_malformed_writes() {
+    let project_fixture = tempfile::tempdir().unwrap();
+    let t = tempfile::tempdir().unwrap();
+    let path = t.path().join("state.db");
+    let project = project_fixture.path().to_str().unwrap();
+    let mut store = Store::open(&path, project).unwrap();
+    store.accept(&command("valid-command", "retain")).unwrap();
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let read_body = || {
+        conn.query_row::<String, _, _>(
+            "SELECT body FROM receipts WHERE id='valid-command'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    let before = read_body();
+    assert!(
+        conn.execute("UPDATE receipts SET body='corrupt JSON' WHERE id='valid-command'", [])
+            .is_err()
+    );
+    assert!(
+        conn.execute("INSERT INTO receipts VALUES ('malformed-command', 'corrupt JSON')", [])
+            .is_err()
+    );
+    assert_eq!(read_body(), before);
+    assert!(store.get("malformed-command").unwrap().is_none());
 }
 
 // S2 external-effect contract: fake only at native edge; production HTTP, store,

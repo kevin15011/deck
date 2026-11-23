@@ -2,8 +2,9 @@ import type {DecisionResponse,Resolve} from './api';
 import type {PermissionPolicy} from './presentation';
 export const scopeBinding=(id:string,revision:number,policy:PermissionPolicy|null|undefined)=>JSON.stringify([id,revision,policy]);
 export function selectedScope(policy:PermissionPolicy|null|undefined,binding:string,selection:{binding:string;id:string}|null){
- // New/revised offers always start exact; an old selection never follows a request.
- return policy?.options.find(o=>o.id===(selection?.binding===binding?selection.id:policy.options[0].id));
+ if(selection?.binding===binding)return policy?.options.find(o=>o.id===selection.id);
+ // Host orders offers narrow to broad, so the default is the broadest non-exact.
+ return policy?.options.filter(o=>o.kind!=='exact').at(-1)??policy?.options[0];
 }
 export function sameConsent(a:Resolve,b:Resolve){
  return a.expected_revision===b.expected_revision&&a.scope_option_id===b.scope_option_id&&JSON.stringify(a.response)===JSON.stringify(b.response);

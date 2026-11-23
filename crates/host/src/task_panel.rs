@@ -9,10 +9,53 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use deck2_shared::{Phase, Task};
+use deck2_shared::{DecisionState, Phase, Receipt, Task};
 use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
 use serde_json::{Value, json};
+
+fn has_unsettled_decision(receipts: &[Receipt], task: &str, attempt: &str) -> bool {
+    receipts
+        .iter()
+        .flat_map(|receipt| &receipt.decisions)
+        .any(|decision| {
+            decision.task.as_deref() == Some(task)
+                && decision.attempt == attempt
+                && matches!(
+                    decision.state,
+                    DecisionState::Pending
+                        | DecisionState::Responded
+                        | DecisionState::Delivered
+                        | DecisionState::Uncertain
+                )
+        })
+}
+
+// Older persisted attempts record operator-confirmed process death in this field.
+pub(crate) const STOPPED_UNKNOWN: &str =
+    "Operator acknowledged native processes stopped. Outcome remains unknown; no replay.";
+
+fn can_acknowledge_failure(a: &deck2_shared::TaskAttempt) -> bool {
+    a.phase == Phase::Failed && (a.settled_ms.is_some() || a.detail == STOPPED_UNKNOWN)
+}
+
+pub(crate) fn failure_dismissal_blocker(
+    task: &Task,
+    receipts: &[Receipt],
+    worker_active: impl FnOnce(&str) -> bool,
+) -> Option<&'static str> {
+    let attempt = task.attempts.last()?;
+    if attempt.phase != Phase::Failed || attempt.failure_dismissal.is_some() {
+        return None;
+    }
+    if worker_active(&attempt.id) {
+        return Some("cleanup_running");
+    }
+    if !can_acknowledge_failure(attempt) {
+        return Some("outcome_unsettled");
+    }
+    has_unsettled_decision(receipts, &task.id, &attempt.id).then_some("decision_unsettled")
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -71,22 +114,9 @@ impl Store {
             .last()
             .filter(|a| a.id == attempt)
             .ok_or("Dismissal requires the latest exact attempt")?;
-        if a.phase != Phase::Failed
-            || a.settled_ms.is_none()
+        if !can_acknowledge_failure(a)
             || a.failure_dismissal.is_some()
-            || self.all()?.iter().any(|r| {
-                r.decisions.iter().any(|d| {
-                    d.task.as_deref() == Some(task)
-                        && d.attempt == attempt
-                        && matches!(
-                            d.state,
-                            deck2_shared::DecisionState::Pending
-                                | deck2_shared::DecisionState::Responded
-                                | deck2_shared::DecisionState::Delivered
-                                | deck2_shared::DecisionState::Uncertain
-                        )
-                })
-            })
+            || has_unsettled_decision(&self.all()?, task, attempt)
         {
             return Err(
                 "Task failure is not dismissible while ownership or effects are unsettled".into(),
@@ -204,7 +234,19 @@ pub(crate) fn record(
             let recorded = old.is_some_and(|prior| prior.guidance.iter().any(|old|
                 old.input.command.id == guidance.input.command.id
                     && crate::member_guidance::delivery(old.input.state).is_some()));
-            if !recorded && let Some(body) = guidance_exchange(a, guidance) {
+            let reconciled = old.is_some_and(|prior| prior.guidance.iter().any(|old|
+                old.input.command.id == guidance.input.command.id
+                    && old.input.state == deck2_shared::SteeringState::Uncertain
+                    && guidance.input.state != old.input.state));
+            if reconciled && let Some(body) = guidance_exchange(a, guidance) {
+                // A native receipt arrived after the input was recorded as unconfirmed.
+                // The earlier row stays so every reader's cursor remains valid. This final row
+                // supersedes it for fresh readers, and readers past it receive it as an update.
+                conn.execute(
+                    "INSERT INTO session_events(session,task,attempt,kind,body) VALUES (?1,?2,?3,?4,?5)",
+                    params![t.session,t.id,a.id,format!("public:guidance:{}:final",guidance.input.command.id),body.to_string()],
+                ).map_err(|_| "Cannot reconcile public guidance")?;
+            } else if !recorded && let Some(body) = guidance_exchange(a, guidance) {
                 conn.execute(
                     "INSERT INTO session_events(session,task,attempt,kind,body) VALUES (?1,?2,?3,?4,?5)",
                     params![t.session,t.id,a.id,format!("public:guidance:{}",guidance.input.command.id),body.to_string()],
@@ -261,7 +303,7 @@ pub(crate) async fn exchanges(
             return Err("Invalid exchange cursor or page limit".into());
         }
         if q.cursor>0 && !store.conn.query_row("SELECT EXISTS(SELECT 1 FROM session_events WHERE seq=?1 AND session=?2 AND task=?3 AND attempt=?4 AND kind LIKE 'public:%')",params![q.cursor,session,task,attempt],|r|r.get::<_,bool>(0)).map_err(|_|"Cannot validate exchange cursor")? {return Err("Cursor belongs to another ledger".into());}
-        let mut stmt=store.conn.prepare("SELECT seq,body FROM session_events WHERE session=?1 AND task=?2 AND attempt=?3 AND kind LIKE 'public:%' AND seq>?4 ORDER BY seq LIMIT ?5").map_err(|_|"Cannot read exchanges")?;
+        let mut stmt=store.conn.prepare("SELECT seq,body FROM session_events e WHERE session=?1 AND task=?2 AND attempt=?3 AND kind LIKE 'public:%' AND seq>?4 AND NOT EXISTS(SELECT 1 FROM session_events f WHERE f.session=e.session AND f.task=e.task AND f.attempt=e.attempt AND f.kind=e.kind||':final') ORDER BY seq LIMIT ?5").map_err(|_|"Cannot read exchanges")?;
         let mut messages = stmt
             .query_map(
                 params![session, task, attempt, q.cursor, q.limit + 1],
@@ -315,8 +357,19 @@ pub(crate) fn inspect(
         let source = v["source"].as_str().ok_or(invalid)?;
         if source == "lead-guidance" {
             let valid = a.guidance.iter().any(|g| {
-                kind == format!("public:guidance:{}", g.input.command.id)
-                    && guidance_exchange(a, g).as_ref() == Some(&v)
+                let current = guidance_exchange(a, g);
+                let earlier = current.clone().map(|mut row| {
+                    row["delivery"] = json!("unknown");
+                    row
+                });
+                let id = &g.input.command.id;
+                (kind == format!("public:guidance:{id}")
+                    && (current.as_ref() == Some(&v)
+                        || (earlier.as_ref() == Some(&v)
+                            && g.input.state != deck2_shared::SteeringState::Uncertain)))
+                    || (kind == format!("public:guidance:{id}:final")
+                        && g.input.state != deck2_shared::SteeringState::Uncertain
+                        && current.as_ref() == Some(&v))
             });
             return if valid { Ok(()) } else { Err(invalid.into()) };
         }
@@ -354,8 +407,7 @@ pub(crate) fn inspect(
                 .and_then(|n| n.checked_add(1))
                 != Some(d.revision as u64)
             || t.revision < d.revision
-            || a.phase != Phase::Failed
-            || a.settled_ms.is_none()
+            || !can_acknowledge_failure(a)
         {
             return Err(invalid.into());
         }
@@ -529,6 +581,54 @@ mod tests {
         );
         crate::session_tasks::inspect_events(&app.store.lock().unwrap().conn).unwrap();
     }
+    #[tokio::test]
+    async fn interrupted_failure_projects_blocker_and_rejects_dismissal() {
+        let (app, task, attempt) = fixture();
+        let revision = {
+            let store = app.store.lock().unwrap();
+            let mut task = store.task(&task).unwrap();
+            task.attempts[0].phase = deck2_shared::Phase::Failed;
+            task.attempts[0].settled_ms = None;
+            store.save_normal_task(&task).unwrap();
+            task.revision
+        };
+        let (status, workspace) = call(&app, "/api/workspace", None, true, true).await;
+        assert_eq!(status, StatusCode::OK);
+        let projected = workspace["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == task)
+            .unwrap();
+        assert_eq!(
+            projected["attempts"][0]["failure_dismissal_blocker"],
+            "outcome_unsettled"
+        );
+
+        let path =
+            format!("/api/sessions/panel-session/tasks/{task}/attempts/{attempt}/dismiss-failure");
+        let body = json!({"api":deck2_shared::API,"commandId":"interrupted-command","expectedRevision":revision});
+        assert_eq!(
+            call(&app, &path, Some(body), true, true).await.0,
+            StatusCode::CONFLICT
+        );
+        let persisted = app.store.lock().unwrap().task(&task).unwrap();
+        assert_eq!(persisted.revision, revision);
+        assert!(persisted.attempts[0].failure_dismissal.is_none());
+        let mut recovered = persisted;
+        recovered.attempts[0].detail = super::STOPPED_UNKNOWN.into();
+        app.store.lock().unwrap().save_normal_task(&recovered).unwrap();
+        let body = json!({"api":deck2_shared::API,"commandId":"seen-stopped-attempt","expectedRevision":recovered.revision});
+        assert_eq!(call(&app, &path, Some(body), true, true).await.0, StatusCode::OK);
+        let store = app.store.lock().unwrap();
+        let seen = store.task(&task).unwrap();
+        assert!(seen.attempts[0].failure_dismissal.is_some());
+        assert!(seen.attempts[0].settled_ms.is_none());
+        assert_eq!(seen.attempts[0].detail, super::STOPPED_UNKNOWN);
+        crate::session_tasks::inspect_events(&store.conn).unwrap();
+
+    }
+
     #[tokio::test]
     async fn dismissal_rejects_stale_foreign_unsettled_and_rolls_back_storage_failure() {
         let (app, task, attempt) = fixture();

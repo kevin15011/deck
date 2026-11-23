@@ -275,15 +275,17 @@ fn removal_wins_over_late_upload_and_pins_win_over_removal() {
     assert_eq!(s.uploaded_image(&session, "kept-upload").unwrap(), a);
 }
 
-// Q01: a lost acknowledgment remains retryable at the bounded ledger limit.
+// Q01: the cancellation ledger never blocks a conversation, and a lost
+// acknowledgment remains retryable however long the ledger grows.
 #[test]
-fn acknowledged_removal_retries_at_cancellation_capacity() {
+fn cancellation_ledger_has_no_capacity_limit() {
     let s = Store::open_memory("/fixture").unwrap();
     let session = s.session.clone();
-    for i in 0..4096 {
+    for i in 0..4097 {
         s.cancel_upload(&session, &format!("removed-{i}")).unwrap();
     }
-    assert!(s.cancel_upload(&session, "new-removal").is_err());
+    s.cancel_upload(&session, "new-removal")
+        .expect("removals continue past any former ledger limit");
     s.cancel_upload(&session, "removed-0")
         .expect("durable cancellation must remain acknowledgeable");
 }

@@ -340,6 +340,120 @@ fn profile(s: &PermissionScope) -> Option<Value> {
         json!({"network":network,"read":read,"write":write,"context":without(p,&["permissions","startedAtMs"])}),
     )
 }
+// Claude's Read, Glob and Grep are the only tools that reach a Lead prompt with
+// a reusable scope. Each "Any" varies only its own target/pattern fields; every
+// other input stays exact. Grep keeps its original kind and bounds so earlier
+// grants remain valid.
+fn workspace_tool(s: &PermissionScope) -> Option<(&'static str, Value)> {
+    if s.material["category"] != "claude_workspace_read" {
+        return None;
+    }
+    let (kind, varying): (&'static str, &[&str]) = match s.material["tool"].as_str()? {
+        "Grep" => (
+            "workspace_grep",
+            &["pattern", "path", "output_mode", "-A", "-B", "-C", "context", "-n", "head_limit", "offset"],
+        ),
+        "Glob" => ("workspace_read", &["pattern", "path"]),
+        "Read" => ("workspace_read", &["file_path", "offset", "limit", "pages"]),
+        _ => return None,
+    };
+    let root = Path::new(s.actor["project"]["root"].as_str()?);
+    // Admission and release validate the canonical target and its identity.
+    // Reuse can vary that target within the same admitted project.
+    let target = Path::new(s.material["target"]["path"].as_str()?);
+    if !root.is_absolute() || !target.starts_with(root) {
+        return None;
+    }
+    let context = without(&s.material["input"], varying);
+    Some((
+        kind,
+        if kind == "workspace_grep" {
+            json!({"root":root,"context":context})
+        } else {
+            json!({"root":root,"tool":s.material["tool"],"context":context})
+        },
+    ))
+}
+
+const BASH_FAMILIES: &[&[&str]] = &[
+    &["cargo", "test"],
+    &["cargo", "check"],
+    &["cargo", "build"],
+    &["cargo", "clippy"],
+    &["bun", "test"],
+    &["git", "status"],
+    &["git", "diff"],
+    &["git", "log"],
+    &["git", "show"],
+];
+const BASH_DENIED_FLAGS: &[&str] = &[
+    "--config", "--manifest-path", "--target-dir", "--output", "--ext-diff", "--textconv",
+    "--git-dir", "--work-tree", "--exec-path", "--preload", "--cwd", "--exec", "-c", "-C", "-Z",
+];
+/// A Bash command that may be remembered for the session. Only plain words
+/// qualify (no quoting, expansion, chaining, redirection or globs). Git needs a
+/// recognised subcommand without global options; verbs that discard work
+/// (reset, restore, clean, checkout, rebase, push, ...) and destructive forms of
+/// stash/branch/tag never qualify and need fresh informed confirmation.
+pub(crate) fn bash_reusable(command: &str) -> bool {
+    if command.is_empty() || command.len() > 2000 || !plain_words(command) {
+        return false;
+    }
+    let t: Vec<&str> = command.split_whitespace().collect();
+    if t.first() != Some(&"git") {
+        return true;
+    }
+    let Some(sub) = t.get(1) else { return false };
+    let rest = &t[2..];
+    let destructive_flag = |flags: &[&str]| rest.iter().any(|a| flags.contains(a) || a.starts_with("--force") || a.starts_with("--delete"));
+    match *sub {
+        "status" | "diff" | "log" | "show" | "add" | "commit" | "fetch" | "blame" | "ls-files"
+        | "rev-parse" | "describe" => !destructive_flag(&["--amend"]) || *sub != "commit",
+        "branch" => !destructive_flag(&["-d", "-D", "-m", "-M", "-f", "-c", "-C"]),
+        "tag" => !destructive_flag(&["-d", "-f"]),
+        "stash" => matches!(rest.first().copied(), None | Some("list") | Some("show") | Some("push")),
+        _ => false,
+    }
+}
+fn plain_words(command: &str) -> bool {
+    command.chars().all(|c| c == ' ' || c.is_ascii_alphanumeric() || "_./:=+@%,-".contains(c))
+}
+fn bash_command(s: &PermissionScope) -> Option<&str> {
+    let p = &s.material["request"];
+    if s.material["category"] != "relay" || p["toolName"] != "Bash" {
+        return None;
+    }
+    let args = p["_meta"]["tool_params"].as_object()?;
+    if !args.keys().all(|k| k == "command" || k == "timeout") {
+        return None;
+    }
+    let command = args.get("command")?.as_str()?;
+    bash_reusable(command).then_some(command)
+}
+fn bash_prefix(command: &str) -> Option<[&'static str; 2]> {
+    if !plain_words(command) {
+        return None;
+    }
+    let t: Vec<&str> = command.split(' ').filter(|t| !t.is_empty()).collect();
+    let family = BASH_FAMILIES.iter().find(|f| t.len() >= 2 && t[0] == f[0] && t[1] == f[1])?;
+    if t.iter().skip(2).any(|a| {
+        BASH_DENIED_FLAGS.iter().any(|f| a == f || a.starts_with(&format!("{f}=")))
+            || a.starts_with("--config")
+    }) {
+        return None;
+    }
+    Some([family[0], family[1]])
+}
+fn bash_bounds(s: &PermissionScope) -> Vec<(&'static str, Value)> {
+    let Some(command) = bash_command(s) else { return vec![] };
+    let Some(root) = s.actor["project"]["root"].as_str() else { return vec![] };
+    let mut out = vec![("bash_command", json!({"root":root,"command":command}))];
+    if let Some(prefix) = bash_prefix(command) {
+        out.push(("bash_prefix", json!({"root":root,"prefix":prefix})));
+    }
+    out
+}
+
 pub(crate) fn options(d: &Decision, s: &PermissionScope) -> Vec<PermissionScopeOption> {
     let mut out = Vec::new();
     match s.material["category"].as_str() {
@@ -378,6 +492,34 @@ pub(crate) fn options(d: &Decision, s: &PermissionScope) -> Vec<PermissionScopeO
         Some("permissions") => {
             if let Some(bounds) = profile(s) {
                 out.push(option(s,"capability_subset","These capabilities or fewer",format!("Network access: {}. Read paths: {}. Write paths: {}. Paths or descendants may be requested; read never authorizes write. Execution environment stays exact.",bounds["network"],bounds["read"],bounds["write"]),bounds));
+            }
+        }
+        Some("claude_workspace_read") => {
+            if let Some((kind, bounds)) = workspace_tool(s) {
+                let root = bounds["root"].as_str().unwrap_or_default();
+                let tool = s.material["tool"].as_str().unwrap_or_default();
+                out.push(option(
+                    s,
+                    kind,
+                    "Any",
+                    if kind == "workspace_grep" {
+                        format!("Claude Grep with any pattern and permitted target under {root}. Other search options stay the same.")
+                    } else {
+                        format!("Claude {tool} with any file or pattern under {root}. Other options stay the same.")
+                    },
+                    bounds,
+                ));
+            }
+        }
+        Some("relay") => {
+            for (kind, bounds) in bash_bounds(s) {
+                let root = bounds["root"].as_str().unwrap_or_default();
+                if kind == "bash_command" {
+                    out.push(option(s, kind, "This command, any timeout", format!("Claude Bash running exactly this command in {root}. Only the timeout may vary."), bounds));
+                } else {
+                    let prefix = bounds["prefix"].as_array().map(|p| p.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(" ")).unwrap_or_default();
+                    out.push(option(s, kind, "Same command family", format!("Claude Bash `{prefix}` in {root} with other plain arguments. No shell syntax, config or path overrides; timeout may vary."), bounds));
+                }
             }
         }
         _ => {} // No third-party/relay effect registry is admitted by this product.
@@ -457,6 +599,12 @@ pub(crate) fn contains(
                 })
         }),
         "argv_prefix" => command_bounds(scope).as_ref() == Some(b),
+        "workspace_grep" | "workspace_read" => {
+            workspace_tool(scope).is_some_and(|(kind, bounds)| kind == offered.kind && &bounds == b)
+        }
+        "bash_command" | "bash_prefix" => bash_bounds(scope)
+            .iter()
+            .any(|(kind, bounds)| *kind == offered.kind && bounds == b),
         "capability_subset" => profile(scope).is_some_and(|p| {
             p["context"] == b["context"]
                 && (p["network"] != true || b["network"] == true)
@@ -464,5 +612,76 @@ pub(crate) fn contains(
                 && subset(&p["write"], &b["write"])
         }),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn scope(tool: &str, input: Value, target: &str) -> PermissionScope {
+        PermissionScope {
+            options: vec![],
+            selected_option: None,
+            version: 1,
+            actor: json!({"project":{"root":"/work"},"role":"lead"}),
+            issuer: json!({}),
+            material: json!({"category":"claude_workspace_read","tool":tool,"input":input,"target":{"path":target}}),
+            option_id: String::new(),
+        }
+    }
+    // Oracle: "Any" varies only the tool's own pattern/target fields, never another
+    // option, tool or the workspace boundary. Fails if one grant crosses tools.
+    #[test]
+    fn any_varies_only_the_tools_own_target_within_the_workspace() {
+        let read = |p: &str, extra: Value| {
+            let mut i = json!({"file_path":p});
+            i["limit"] = extra;
+            workspace_tool(&scope("Read", i, p)).unwrap()
+        };
+        assert_eq!(read("/work/a", json!(10)), read("/work/b", json!(10)));
+        assert_eq!(read("/work/a", json!(10)), read("/work/a", json!(11)));
+        let glob = |pat: &str, path: &str| {
+            workspace_tool(&scope("Glob", json!({"pattern":pat,"path":path}), path)).unwrap()
+        };
+        assert_eq!(glob("*.rs", "/work/x"), glob("*.ts", "/work/y"));
+        let grep = |pat: &str, mode: &str| {
+            workspace_tool(&scope("Grep", json!({"pattern":pat,"output_mode":mode}), "/work")).unwrap()
+        };
+        assert_eq!(grep("a", "content").0, "workspace_grep");
+        assert_eq!(grep("a", "content"), grep("b", "content"));
+        assert_eq!(grep("a", "content"), grep("a", "count"));
+        let allow_large = |v: bool| workspace_tool(&scope("Read", json!({"file_path":"/work/a","allow_large":v}), "/work/a")).unwrap();
+        assert_ne!(allow_large(true).1, allow_large(false).1);
+        // A Read grant is not a Glob grant, even with identical remaining inputs.
+        assert_ne!(read("/work/a", json!(1)).1["tool"], glob("*", "/work").1["tool"]);
+        assert!(workspace_tool(&scope("Read", json!({"file_path":"/etc/p"}), "/etc/p")).is_none());
+        assert!(workspace_tool(&scope("Edit", json!({}), "/work/a")).is_none());
+    }
+
+    fn bash(command: &str) -> PermissionScope {
+        let mut s = scope("Bash", json!({}), "/work");
+        s.material = json!({"category":"relay","request":{"toolName":"Bash","_meta":{"tool_params":{"command":command,"timeout":5}}}});
+        s
+    }
+    // Oracle: only plain family commands get a prefix; protected Git and shell
+    // syntax never widen. Fails if a destructive or chained command is offered reuse.
+    #[test]
+    fn bash_reuse_is_bounded_to_plain_families_and_unprotected_commands() {
+        let kinds = |c: &str| bash_bounds(&bash(c)).into_iter().map(|b| b.0).collect::<Vec<_>>();
+        assert_eq!(kinds("cargo test -p x foo"), ["bash_command", "bash_prefix"]);
+        assert_eq!(bash_bounds(&bash("cargo test a")).pop(), bash_bounds(&bash("cargo test b --lib")).pop());
+        assert!(kinds("cargo test && rm -rf /").is_empty());
+        assert!(kinds("echo $(id)").is_empty());
+        assert_eq!(kinds("git commit -m"), ["bash_command"]);
+        assert_eq!(kinds("git add src/a.rs"), ["bash_command"]);
+        assert_eq!(kinds("git branch"), ["bash_command"]);
+        assert!(kinds("git branch -D x").is_empty());
+        assert!(kinds("git -c core.pager=x status").is_empty());
+        assert_eq!(kinds("cargo test --config x=y"), ["bash_command"]);
+        assert_eq!(kinds("git diff --output=x"), ["bash_command"]);
+        assert_eq!(kinds("npm publish"), ["bash_command"]);
+        for c in ["git reset --hard", "git clean -fd", "git stash drop", "git restore f", "git checkout -- f"] {
+            assert!(kinds(c).is_empty(), "{c}");
+        }
     }
 }
