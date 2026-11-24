@@ -351,6 +351,11 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
                         crate::member_guidance::reconcile_late(app, task, attempt, &command, state)?;
                     }
                 }
+                Some("context" | "context_reset") if initialized => {
+                    update(app, task, attempt, |a| {
+                        crate::observations::observe_claude(&mut a.context, &event, &thread, attempt, attempt, a.observed_model.as_deref());
+                    })?;
+                }
                 Some("delta") if initialized => {
                     let delta = event["text"].as_str().ok_or("Missing Claude member text delta")?;
                     if text.len() + delta.len() > MAX_TEXT {
@@ -361,6 +366,20 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
                         a.first_output_ms.get_or_insert_with(now);
                         a.text.clone_from(&text);
                     })?;
+                }
+                Some("activity") if initialized => {
+                    if let Some(item) = activity_item(&event) {
+                        let method = if event["phase"] == "completed" { "item/completed" } else { "item/started" };
+                        let value = json!({"method":method,"params":{"threadId":thread,"turnId":attempt,"item":item}});
+                        let root = {
+                            let store = app.store.lock().unwrap();
+                            let t = store.task(task)?;
+                            t.attempts.iter().find(|a| a.id == attempt).map(|a| t.authority_root(a).to_owned())
+                        };
+                        if let Some(root) = root {
+                            app.record_activity(&root, task, attempt, &thread, attempt, &value);
+                        }
+                    }
                 }
                 Some("permission" | "workspace_write") if initialized => {
                     let request = event["request"].as_str().filter(|id| Uuid::parse_str(id).is_ok())
@@ -420,6 +439,27 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
                 .ok_or("Claude member SDK exited without confirmed settlement".into())
         }),
     )
+}
+
+/// Map one bridge lifecycle signal onto the shared, already-bounded step shape.
+/// Only an id, a coarse kind, a short summary and a status are accepted.
+fn activity_item(event: &Value) -> Option<Value> {
+    let id = event["id"].as_str().filter(|s| !s.is_empty() && s.len() <= 200)?;
+    let cap = |key: &str, n: usize| -> String { event[key].as_str().unwrap_or("").chars().take(n).collect() };
+    let status = match event["status"].as_str() {
+        Some("cancelled") => "cancelled",
+        Some("failed") => "failed",
+        _ => "completed",
+    };
+    let mut item = match event["kind"].as_str()? {
+        "reasoning" => json!({"id":id,"type":"reasoning"}),
+        "command" => json!({"id":id,"type":"commandExecution","command":cap("command", 240)}),
+        "file" => json!({"id":id,"type":"fileChange","changes":[{"path":cap("path", 240)}]}),
+        "tool" => json!({"id":id,"type":"dynamicToolCall","tool":cap("tool", 64),"arguments":cap("summary", 160)}),
+        _ => return None,
+    };
+    item["status"] = json!(if event["phase"] == "completed" { status } else { "running" });
+    Some(item)
 }
 
 fn settle(

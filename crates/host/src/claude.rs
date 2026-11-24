@@ -813,6 +813,12 @@ async fn stream(
                 app.change(id, |r| r.can_steer = r.phase == Phase::Running && !r.cancel_requested)?;
                 initialized = true;
             }
+            Some("context" | "context_reset") if initialized => {
+                app.change(id, |r| {
+                    let turn = r.turn.clone().unwrap_or_default();
+                    crate::observations::observe_claude(&mut r.context, &event, thread, &turn, &r.attempt, r.model.as_deref());
+                })?;
+            }
             Some(kind @ ("steer_ack" | "steer_rejected" | "steer_unconsumed")) if initialized => {
                 let steer = event["id"].as_str().filter(|id| Uuid::parse_str(id).is_ok())
                     .ok_or("Invalid Claude live message ID")?;

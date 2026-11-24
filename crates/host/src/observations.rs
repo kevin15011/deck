@@ -88,6 +88,53 @@ pub(crate) fn observe(
     });
 }
 
+/// Claude Code reports its own current-request occupancy (`getContextUsage`, summary detail):
+/// the last response's input + cache accounting plus local estimates, against the resolved
+/// window. It is never cumulative billing. Missing or malformed fields leave the prior reading.
+pub(crate) fn observe_claude(
+    state: &mut ContextState,
+    event: &Value,
+    thread: &str,
+    turn: &str,
+    attempt: &str,
+    model: Option<&str>,
+) {
+    let ok = |s: &str| !s.is_empty() && s.len() <= 256 && !s.chars().any(char::is_control);
+    if event["session_id"] != thread || !ok(thread) || !ok(turn) {
+        return;
+    }
+    // Compaction boundary: earlier readings no longer describe the window.
+    if event["type"] == "context_reset" {
+        state.observation = None;
+        return;
+    }
+    if event["type"] != "context" {
+        return;
+    }
+    let count = |v: &Value| v.as_u64().filter(|n| *n <= 9_007_199_254_740_991);
+    let Some(tokens) = count(&event["tokens"]) else {
+        return;
+    };
+    // An absent or invalid window stays unknown; it is never guessed.
+    let capacity = count(&event["capacity"]).filter(|n| *n > 0);
+    state.observation = Some(deck2_shared::ContextReading {
+        basis: "claude-context-usage".into(),
+        tokens: Some(tokens),
+        capacity,
+        native_thread_id: thread.into(),
+        native_turn_id: turn.into(),
+        attempt: attempt.into(),
+        model_id: event["model"]
+            .as_str()
+            .or(model)
+            .filter(|s| !s.is_empty() && s.len() <= 256 && !s.chars().any(char::is_control))
+            .map(str::to_owned),
+        observed_ms: crate::now(),
+    });
+    state.compacted = false;
+    state.compacting = None;
+}
+
 /// Progressive transcript reads are exact session/task/attempt reads, never report retrieval/integration.
 pub(crate) async fn transcript(
     axum::extract::State(app): axum::extract::State<crate::server::App>,
@@ -365,5 +412,45 @@ mod tests {
         let reading = c.observation.unwrap();
         assert_eq!(reading.tokens, None);
         assert_eq!(reading.capacity, None);
+    }
+
+    // Protects Claude context: partial/malformed/foreign frames never replace a good reading,
+    // and a post-compaction reading supersedes the cleared state. Oracle: SDK
+    // getContextUsage contract (integer totalTokens, positive rawMaxTokens, exact session).
+    #[test]
+    fn claude_reading_requires_complete_exact_data_and_latest_wins() {
+        let frame = |tokens: Value, capacity: Value, session: &str| {
+            json!({"type":"context","session_id":session,"tokens":tokens,"capacity":capacity,"model":"m"})
+        };
+        let mut c = ContextState::default();
+        observe_claude(&mut c, &frame(json!(40000), json!(200000), "thread"), "thread", "turn", "attempt", None);
+        let good = c.observation.clone().unwrap();
+        assert_eq!((good.basis.as_str(), good.tokens, good.capacity), ("claude-context-usage", Some(40000), Some(200000)));
+        assert_eq!((good.native_turn_id.as_str(), good.model_id.as_deref()), ("turn", Some("m")));
+        for bad in [
+            frame(json!(null), json!(200000), "thread"),
+            frame(json!(-1), json!(200000), "thread"),
+            frame(json!(1.5), json!(200000), "thread"),
+            frame(json!(1), json!(200000), "foreign"),
+        ] {
+            observe_claude(&mut c, &bad, "thread", "turn", "attempt", None);
+            assert_eq!(c.observation.as_ref(), Some(&good));
+        }
+        // A missing or invalid window keeps valid tokens and leaves capacity unknown.
+        for window in [json!(null), json!(0), json!("200000"), json!(9_007_199_254_740_992u64)] {
+            let mut t = ContextState::default();
+            observe_claude(&mut t, &frame(json!(7), window, "thread"), "thread", "turn", "attempt", None);
+            let r = t.observation.unwrap();
+            assert_eq!((r.tokens, r.capacity), (Some(7), None));
+        }
+        observe_claude(&mut c, &json!({"type":"context_reset","session_id":"foreign"}), "thread", "turn", "attempt", None);
+        assert_eq!(c.observation.as_ref(), Some(&good));
+        observe_claude(&mut c, &frame(json!(1), json!(200000), "thread"), "thread", "", "attempt", None);
+        assert_eq!(c.observation.as_ref(), Some(&good));
+        observe_claude(&mut c, &json!({"type":"context_reset","session_id":"thread"}), "thread", "turn", "attempt", None);
+        assert!(c.observation.is_none());
+        c.compacted = true;
+        observe_claude(&mut c, &frame(json!(9000), json!(200000), "thread"), "thread", "turn", "attempt", None);
+        assert_eq!((c.observation.unwrap().tokens, c.compacted), (Some(9000), false));
     }
 }

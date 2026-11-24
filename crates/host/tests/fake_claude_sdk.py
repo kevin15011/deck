@@ -103,6 +103,69 @@ FLOW = [
     ("Bash", {"command": "git reset --hard HEAD"}),
 ]
 
+def context_reply(message):
+    """Native-shaped summary read: current-request occupancy, never billing totals."""
+    request = message["request"]
+    assert request.get("detail") == "summary" and not catalog
+    marker = home / ("context-reads-" + thread)
+    reads = int(marker.read_text()) + 1 if marker.exists() else 1
+    marker.write_text(str(reads))
+    if (home / "context-unsupported").exists():
+        emit({"type": "control_response", "response": {
+            "subtype": "error", "request_id": message["request_id"], "error": "unsupported"}})
+        return
+    used = 12000 + reads * 1000
+    body = {
+        "categories": [{"name": "Messages", "tokens": used, "color": "x", "kind": "used"}],
+        "totalTokens": used, "maxTokens": 167000, "rawMaxTokens": 200000,
+        "percentage": round(used / 2000), "gridRows": [], "model": "fixture-model",
+        "memoryFiles": [], "mcpTools": [], "agents": [], "isAutoCompactEnabled": True,
+        "apiUsage": {"input_tokens": 3, "output_tokens": 50,
+                     "cache_creation_input_tokens": 500, "cache_read_input_tokens": used - 553}}
+    if (home / "context-tokens-only").exists():
+        del body["rawMaxTokens"]
+    response(message["request_id"], body)
+
+
+def serve_context(count):
+    """Answer pending context reads while a turn is still running, like the real CLI."""
+    for _ in range(count):
+        message = json.loads(sys.stdin.readline())
+        assert message["request"]["subtype"] == "get_context_usage", message
+        context_reply(message)
+
+
+def compact_boundary():
+    emit({"type": "system", "subtype": "compact_boundary", "session_id": thread,
+          "compact_metadata": {"trigger": "auto", "pre_tokens": 150000, "post_tokens": 9000}})
+
+
+def assistant():
+    emit({"type": "assistant", "session_id": thread, "parent_tool_use_id": None,
+          "message": {"role": "assistant", "content": [{"type": "text", "text": "Partial"}]}})
+
+
+def context_scenario(name):
+    # init and the first assistant event already queued reads in the bridge.
+    if name == "slow":
+        pass  # telemetry never answers; the turn must still settle at once
+    elif name == "tokens-only":
+        (home / "context-tokens-only").write_text("")
+        serve_context(2)
+    elif name == "compact-stale":
+        compact_boundary()
+        serve_context(1)  # reply to a read that began before the boundary
+    elif name == "compact-fresh":
+        compact_boundary()
+        serve_context(1)
+        assistant()
+        serve_context(1)
+    elif name == "compact-clears":
+        serve_context(2)
+        compact_boundary()
+    finish("Context " + name)
+
+
 def flow_step(index):
     if index >= len(FLOW):
         emit({"type": "result", "subtype": "success", "is_error": False,
@@ -158,6 +221,14 @@ def wait_for(name):
     while not (home / name).exists():
         assert time.monotonic() < end, name
         time.sleep(.01)
+
+def gate(name):
+    """Browser fixture only: hold until the driver releases this step."""
+    if (home / "browser-fixture").exists():
+        end = time.monotonic() + 90
+        while not (home / name).exists():
+            assert time.monotonic() < end, name
+            time.sleep(.02)
 
 server = None
 inventory = []
@@ -217,6 +288,8 @@ for line in sys.stdin:
                     "seven_day_sonnet": {"utilization": None, "resets_at": None},
                     "extra_usage": {"is_enabled": (home / "credits-enabled").exists(), "used_credits": 15},
                 }})
+        elif request["subtype"] == "get_context_usage":
+            context_reply(message)
         elif request["subtype"] == "mcp_status":
             statuses = [{
                 "name": "deck-session", "status": "connected", "source": "dynamic",
@@ -312,7 +385,7 @@ for line in sys.stdin:
                 break
             wait_for("release-member")
             git = call("deck_git_inspect", {}, 93)
-            assert "after-start.txt" in git["status"] and "after-start commit" in git["recentCommits"], git
+            assert (home / "browser-fixture").exists() or ("after-start.txt" in git["status"] and "after-start commit" in git["recentCommits"]), git
             emit({"type":"result", "subtype":"success", "is_error":False, "session_id":thread,
                   "result":"Claude member report"})
             break
@@ -438,6 +511,36 @@ for line in sys.stdin:
         emit({"type": "stream_event", "session_id": thread, "parent_tool_use_id": None,
               "event": {"type": "content_block_delta", "delta": {"type": "text_delta",
                                                                  "text": "Partial"}}})
+        # A completed top-level model response: the bridge refreshes context from it.
+        emit({"type": "assistant", "session_id": thread, "parent_tool_use_id": None,
+              "message": {"role": "assistant", "content": [{"type": "text", "text": "Partial"}]}})
+        if member and not resume:
+            def stream(event, parent=None):
+                emit({"type": "stream_event", "session_id": thread, "parent_tool_use_id": parent, "event": event})
+            stream({"type": "message_start", "message": {"id": "msg_fixture"}})
+            stream({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking"}})
+            stream({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "fixture-private-reasoning"}})
+            gate("step-thinking-stop")
+            stream({"type": "content_block_stop", "index": 0})
+            gate("step-read")
+            # A sibling's nested call must never become this member's step.
+            emit({"type": "assistant", "session_id": thread, "parent_tool_use_id": "toolu_parent",
+                  "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_nested", "name": "Bash", "input": {"command": "nested-sibling"}}]}})
+            emit({"type": "assistant", "session_id": thread, "parent_tool_use_id": None,
+                  "message": {"role": "assistant", "content": [
+                      {"type": "tool_use", "id": "toolu_auto_read", "name": "Read", "input": {"file_path": "CLAUDE.md", "content": "fixture-private-payload"}}]}})
+            gate("step-bash")
+            emit({"type": "assistant", "session_id": thread, "parent_tool_use_id": None,
+                  "message": {"role": "assistant", "content": [
+                      {"type": "tool_use", "id": "toolu_auto_bash", "name": "Bash", "input": {"command": "git status --porcelain API_TOKEN=fixture-secret-value\npython3 -c 'fixture-script-secret'"}}]}})
+            gate("step-read-result")
+            emit({"type": "user", "session_id": thread, "parent_tool_use_id": None,
+                  "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_auto_read", "content": "fixture-private-output"}]}})
+            gate("step-bash-result")
+            if (home / "browser-fixture").exists():
+                emit({"type": "user", "session_id": thread, "parent_tool_use_id": None,
+                      "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_auto_bash", "content": "fixture-private-output"}]}})
+            gate("step-finish")
         if member:
             assert (resume_fixture or not resume) and model == "sonnet" and effort == "high"
             assert "ACTIVE TASK ASSIGNMENT" in content
@@ -672,6 +775,9 @@ for line in sys.stdin:
                   "session_id": thread, "result": "Integrated member report"})
             break
         if content.startswith("Hold for live steering"):
+            continue
+        if content.startswith("Context scenario "):
+            context_scenario(content.split()[-1])
             continue
         if content == "Ordinary flow":
             (project / "search").mkdir(exist_ok=True)

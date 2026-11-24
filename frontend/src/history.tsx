@@ -21,11 +21,11 @@ interface Page {targetSeq?:number;adopted?:boolean;metadata:Record<string,unknow
 interface Sessions {sessions:Summary[];nextCursor?:string|null;error?:string}
 const enc=encodeURIComponent;
 const replyApi=(path:string,init?:RequestInit)=>request(init?.method??'GET',path,init?.body?JSON.parse(String(init.body)):undefined,init?.signal??undefined);
-async function initialHistoryPage(session:string,signal:AbortSignal,task='',attempt?:number,snapshot?:string):Promise<Page>{
+async function initialHistoryPage(session:string,signal:AbortSignal,task='',attempt?:number,snapshot?:string,skipTarget=false):Promise<Page>{
  const base=`/api/history/sessions/${encodeURIComponent(session)}`;
  let page=await request('GET',base+`?limit=40${task?'&taskId='+encodeURIComponent(task):''}${attempt!==undefined?'&attempt='+attempt:''}${snapshot?'&snapshot='+encodeURIComponent(snapshot):''}`,undefined,signal) as Page;
  const target=new URL(location.href).searchParams.get('reply');
- if(!task&&target&&/^reply-[1-9][0-9]*-[1-9][0-9]*$/.test(target)&&target.length<=48){try{
+ if(!task&&!skipTarget&&target&&/^reply-[1-9][0-9]*-[1-9][0-9]*$/.test(target)&&target.length<=48){try{
   const data=await request('GET',`/api/sessions/${encodeURIComponent(session)}/replies/${encodeURIComponent(target)}`,undefined,signal) as {reply:{messageSeq:number;sessionId:string}};
   const seq=data.reply.messageSeq;
   if(data.reply.sessionId===session&&Number.isSafeInteger(seq)&&seq>0&&seq<=page.boundary){
@@ -37,8 +37,8 @@ async function initialHistoryPage(session:string,signal:AbortSignal,task='',atte
 }
 const historyKey=(e:Event)=>String(e.historyId??e.seq);
 
-function usePagedTranscript({session,task,attempt,snapshot,replyTarget,revision,viewport,content,embedded,onBrowse,onHistoryTarget,visible=true}:{
- session:string;task:string;attempt?:number;snapshot?:string;replyTarget:string;revision:number;
+function usePagedTranscript({session,task,attempt,snapshot,replyTarget,revision,viewport,content,embedded,onBrowse,onHistoryTarget,visible=true,jump=0}:{
+ session:string;task:string;attempt?:number;snapshot?:string;replyTarget:string;revision:number;jump?:number;
  viewport:RefObject<HTMLElement|null>;content:RefObject<HTMLElement|null>;embedded?:boolean;onBrowse?:()=>void;onHistoryTarget?:()=>void;visible?:boolean;
 }){
  const [page,setPage]=useState<Page>(),[error,setError]=useState(''),[busy,setBusy]=useState(true);
@@ -47,17 +47,22 @@ function usePagedTranscript({session,task,attempt,snapshot,replyTarget,revision,
  const pending=useRef(true);
  const positioned=useRef(false);
  const anchor=useRef<ReturnType<typeof captureTranscriptAnchor>>(undefined);
+ const jumped=useRef(jump),pendingJump=useRef(false);
  useEffect(()=>{
   const c=new AbortController();
+  const toLatest=jump!==jumped.current&&!!embedded;
+  jumped.current=jump;pendingJump.current=toLatest;
   controller.current=c;positioned.current=false;pending.current=true;anchor.current=undefined;
-  setPage(undefined);setError('');setFailedDirection(undefined);setBusy(true);
-  void initialHistoryPage(session,c.signal,task,attempt,snapshot).then(value=>{
+  // A jump keeps the current rows until the newest page replaces them in one commit.
+  if(!toLatest)setPage(undefined);
+  setError('');setFailedDirection(undefined);setBusy(true);
+  void initialHistoryPage(session,c.signal,task,attempt,snapshot,toLatest).then(value=>{
    if(!c.signal.aborted){setPage(value);setBusy(false);}
   }).catch(err=>{
    if(!c.signal.aborted){pending.current=false;setError(String(err));setBusy(false);}
   });
   return()=>c.abort();
- },[session,task,attempt,snapshot,replyTarget,revision]);
+ },[session,task,attempt,snapshot,replyTarget,revision,jump]);
 
  async function more(direction:TranscriptDirection){
   const signal=controller.current?.signal;
@@ -113,6 +118,7 @@ function usePagedTranscript({session,task,attempt,snapshot,replyTarget,revision,
     onBrowse?.();onHistoryTarget?.();
     restoreTranscriptPosition(node,node.scrollTop+target.getBoundingClientRect().top-node.getBoundingClientRect().top-(node.clientHeight-target.offsetHeight)/2);
    }else if(!embedded)restoreTranscriptPosition(node,node.scrollHeight);
+   else if(pendingJump.current){pendingJump.current=false;restoreTranscriptPosition(node,node.scrollHeight-node.clientHeight);}
   }else restoreTranscriptAnchor(node,root,anchor.current);
   anchor.current=undefined;
  },[page,visible]);
@@ -168,8 +174,8 @@ function HistoricalEvent({displayReplies,e,session,snapshot,onPreview}:{displayR
 
 // Render adopted history above the normal composer and current Rust receipts.
 // Paging remains independent from workspace updates; old raw events never enter it.
-export function OriginalMessages({session,task='',attempt,snapshot,visible=true,name,onReady,onBrowse,onHistoryTarget,viewport}:{
- viewport?:RefObject<HTMLElement|null>;onBrowse?:()=>void;onHistoryTarget?:()=>void;
+export function OriginalMessages({session,task='',attempt,snapshot,visible=true,name,onReady,onBrowse,onHistoryTarget,viewport,jumpToken=0,onGap}:{
+ viewport?:RefObject<HTMLElement|null>;onBrowse?:()=>void;onHistoryTarget?:()=>void;jumpToken?:number;onGap?:(gap:boolean)=>void;
  session:string;task?:string;attempt?:number;snapshot?:string;visible?:boolean;
  name?:string;onReady?:(ready:boolean)=>void;
 }) {
@@ -177,7 +183,10 @@ export function OriginalMessages({session,task='',attempt,snapshot,visible=true,
  const [preview,setPreview]=useState<Preview>(),[retry,setRetry]=useState(0);
  const ownViewport=useRef<HTMLDivElement>(null),content=useRef<HTMLDivElement>(null);
  const {page,busy,error,failedDirection,retryPage}=usePagedTranscript({session,task,attempt,snapshot,replyTarget,revision:retry,
-  viewport:viewport??ownViewport,content,embedded:!!viewport,onBrowse,onHistoryTarget,visible});
+  viewport:viewport??ownViewport,content,embedded:!!viewport,onBrowse,onHistoryTarget,visible,jump:jumpToken});
+ const gap=useRef(onGap);gap.current=onGap;
+ useLayoutEffect(()=>{gap.current?.(!!page?.after);},[page?.after]);
+ useLayoutEffect(()=>()=>gap.current?.(false),[session]);
  const displayReplies=useDisplayedReplies(replyApi,visible&&!task,session,(page?.messages??[]).filter(e=>e.data.role==='assistant').map(e=>e.seq),page?.boundary??0);
  const ready=useRef(onReady);ready.current=onReady;
  useLayoutEffect(()=>{ready.current?.(false);return()=>ready.current?.(false);},[session]);

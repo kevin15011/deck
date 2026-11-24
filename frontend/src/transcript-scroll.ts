@@ -27,13 +27,16 @@ export function restoreTranscriptAnchor(node:HTMLElement,content:HTMLElement,anc
  if(row&&anchor)restoreTranscriptPosition(node,node.scrollTop+row.getBoundingClientRect().top-node.getBoundingClientRect().top-anchor.offset);
 }
 
-export function useTranscriptScroll(viewport:RefObject<HTMLElement|null>,navigate:(direction:TranscriptDirection,node:HTMLElement,threshold:number)=>boolean,onPosition?:(node:HTMLElement,direction:TranscriptDirection)=>void,onIntent?:(node:HTMLElement,direction:TranscriptDirection)=>void){
+export function useTranscriptScroll(viewport:RefObject<HTMLElement|null>,navigate:(direction:TranscriptDirection,node:HTMLElement,threshold:number)=>boolean,onPosition?:(node:HTMLElement,direction:TranscriptDirection,intentional:boolean)=>void,onIntent?:(node:HTMLElement,direction:TranscriptDirection)=>void){
  const current=useRef({navigate,onPosition,onIntent});
  useLayoutEffect(()=>{current.current={navigate,onPosition,onIntent};});
  useEffect(()=>{
   const node=viewport.current;
   if(!node)return;
-  let top=node.scrollTop,touch:Touch|undefined;
+  let top=node.scrollTop,touch:Touch|undefined,lastIntent=-Infinity,pressed=false;
+  const touched=()=>{lastIntent=performance.now();};
+  const press=()=>{pressed=true;touched();};
+  const release=()=>{pressed=false;touched();};
   const move=(event:Event,direction:TranscriptDirection,threshold:number)=>{
    if(handled.has(event)||!node.clientHeight)return false;
    if(!current.current.navigate(direction,node,threshold))return false;
@@ -48,9 +51,14 @@ export function useTranscriptScroll(viewport:RefObject<HTMLElement|null>,navigat
    if(next===restored.get(node)||Math.abs(delta)<.5)return;
    restored.delete(node);
    const direction=delta<0?'older':'newer';
-   if(!move(event,direction,edge)&&!handled.has(event))current.current.onPosition?.(node,direction);
+   // Only reader-driven movement may page. Layout clamps, anchors and other
+   // automatic scrolls must not navigate or leave the latest rows.
+   const intentional=pressed||performance.now()-lastIntent<2000;
+   if(intentional&&move(event,direction,edge))return;
+   if(!handled.has(event))current.current.onPosition?.(node,direction,intentional);
   };
   const gesture=(event:Event,direction:TranscriptDirection)=>{
+   touched();
    if(handled.has(event)||!node.clientHeight)return false;
    current.current.onIntent?.(node,direction);
    return move(event,direction,1);
@@ -59,6 +67,7 @@ export function useTranscriptScroll(viewport:RefObject<HTMLElement|null>,navigat
    if(!event.ctrlKey&&event.deltaY)gesture(event,event.deltaY<0?'older':'newer');
   };
   const key=(event:KeyboardEvent)=>{
+   if(event.target===node)touched();
    if(event.target!==node||event.defaultPrevented||event.altKey||event.metaKey)return;
    const direction=['ArrowUp','PageUp','Home'].includes(event.key)||(event.key===' '&&event.shiftKey)?'older'
     :['ArrowDown','PageDown','End',' '].includes(event.key)?'newer':undefined;
@@ -74,12 +83,18 @@ export function useTranscriptScroll(viewport:RefObject<HTMLElement|null>,navigat
    }
    touch=point;
   };
+  node.addEventListener('pointerdown',press,{passive:true});
+  addEventListener('pointerup',release,{passive:true});
+  addEventListener('pointercancel',release,{passive:true});
   node.addEventListener('scroll',scroll,{passive:true});
   node.addEventListener('wheel',wheel,{passive:true});
   node.addEventListener('keydown',key);
   node.addEventListener('touchstart',touchStart,{passive:true});
   node.addEventListener('touchmove',touchMove,{passive:true});
   return()=>{
+   node.removeEventListener('pointerdown',press);
+   removeEventListener('pointerup',release);
+   removeEventListener('pointercancel',release);
    node.removeEventListener('scroll',scroll);
    node.removeEventListener('wheel',wheel);
    node.removeEventListener('keydown',key);

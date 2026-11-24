@@ -1,8 +1,9 @@
-import {getSessionInfo, query, type EffortLevel, type McpHttpServerConfig, type Options, type SDKUserMessage} from '@anthropic-ai/claude-agent-sdk/core';
+import {getSessionInfo, query, type EffortLevel, type McpHttpServerConfig, type Options, type SDKMessage, type SDKUserMessage} from '@anthropic-ai/claude-agent-sdk/core';
 import {randomUUID} from 'node:crypto';
 import {lstat, realpath} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createInterface} from 'node:readline';
+import {looksSecret, plainPath, summarizeCommand} from './command-summary';
 
 const [binary, requestedThread, operation, sources, rawSettings, model, effort] = process.argv.slice(2);
 const input = createInterface({input: process.stdin, crlfDelay: Infinity});
@@ -344,6 +345,113 @@ async function run() {
     }
     emit({type: 'ready', quota});
     let limited = false;
+    // Current-request occupancy comes from the CLI itself: 'summary' answers from
+    // the last response's usage (input + cache read/creation) and local estimates,
+    // with no token-count API calls. Reads are serialized and coalesced, never block
+    // the event loop, and a failed or malformed read leaves the prior reading.
+    const safe = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
+    let reading: Promise<void> | undefined;
+    let again = false;
+    // A compaction boundary invalidates every earlier measurement: replies already
+    // in flight are dropped by epoch, and nothing is shown until the next response.
+    let epoch = 0;
+    function refreshContext(): void {
+      if (reading) {
+        again = true;
+        return;
+      }
+      reading = (async () => {
+        do {
+          again = false;
+          const started = epoch;
+          try {
+            const usage = await native.getContextUsage({detail: 'summary'});
+            // Before the first response apiUsage is null and the total is a bare 0:
+            // that is absence of data, not an empty window.
+            if (started === epoch && usage.apiUsage && safe(usage.totalTokens)) {
+              // A missing window is reported as absent, never guessed.
+              const capacity = safe(usage.rawMaxTokens) && usage.rawMaxTokens > 0 ? usage.rawMaxTokens : undefined;
+              emit({type: 'context', session_id: thread, tokens: usage.totalTokens,
+                    ...(capacity ? {capacity} : {}),
+                    ...(typeof usage.model === 'string' ? {model: usage.model} : {})});
+            }
+          } catch {
+            // Unsupported or interrupted: the host keeps showing the last reading.
+          }
+        } while (again);
+      })().finally(() => { reading = undefined; });
+    }
+    // Member activity: lifecycle only. Raw thinking, tool payloads and tool output
+    // never leave this process; only a bounded one-line summary does.
+    const open = new Map<string, {kind: string; extra: Record<string, unknown>}>();
+    const blocks = new Map<number, string>();
+    let messageId = '';
+    const clip = (v: unknown, cap: number): string =>
+      typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, cap) : '';
+    function step(phase: 'started' | 'completed', id: string, kind: string, extra: Record<string, unknown> = {}): void {
+      if (!id || id.length > 200) return;
+      if (phase === 'started') {
+        if (open.has(id)) return;
+        open.set(id, {kind, extra});
+      } else {
+        // A completion restates the start summary so the stored step keeps its label.
+        const started = open.get(id);
+        if (!started) return;
+        open.delete(id);
+        extra = {...started.extra, ...extra};
+      }
+      emit({type: 'activity', session_id: thread, phase, id, kind, ...extra});
+    }
+    function closeSteps(status: string): void {
+      for (const [id, started] of [...open]) step('completed', id, started.kind, {status});
+      blocks.clear();
+    }
+    function toolStep(block: {id?: unknown; name?: unknown; input?: unknown}): void {
+      const id = typeof block.id === 'string' ? block.id : '';
+      const name = clip(block.name, 64);
+      if (!name || name.startsWith('mcp__deck-')) return;
+      const input = (block.input && typeof block.input === 'object' ? block.input : {}) as Record<string, unknown>;
+      if (name === 'Bash') {
+        step('started', id, 'command', {tool: name, command: summarizeCommand(input.command)});
+      } else if (name === 'Edit' || name === 'Write' || name === 'NotebookEdit') {
+        step('started', id, 'file', {tool: name, path: clip(input.file_path ?? input.notebook_path, 240)});
+      } else {
+        // Only a plain file path may be shown; patterns, queries and URLs can hold secrets.
+        const path = clip(input.file_path ?? input.path, 160);
+        step('started', id, 'tool', {tool: name, summary: plainPath.test(path) && !looksSecret(path) ? path : ''});
+      }
+    }
+    function observeActivity(event: SDKMessage): void {
+      if (event.type === 'stream_event' && !event.parent_tool_use_id) {
+        const e = event.event as {type: string; index?: number; message?: {id?: string};
+                                  content_block?: {type?: string}};
+        if (e.type === 'message_start') {
+          messageId = typeof e.message?.id === 'string' ? e.message.id : '';
+        } else if (e.type === 'content_block_start' && e.content_block?.type &&
+            ['thinking', 'redacted_thinking'].includes(e.content_block.type) && typeof e.index === 'number') {
+          const id = `thinking:${messageId || 'm'}:${e.index}`;
+          blocks.set(e.index, id);
+          step('started', id, 'reasoning');
+        } else if (e.type === 'content_block_stop' && typeof e.index === 'number') {
+          const id = blocks.get(e.index);
+          blocks.delete(e.index);
+          if (id) step('completed', id, 'reasoning', {status: 'completed'});
+        }
+      } else if (event.type === 'assistant' && !event.parent_tool_use_id) {
+        const content = (event.message as {content?: unknown}).content;
+        if (Array.isArray(content)) for (const block of content) {
+          if (block && block.type === 'tool_use') toolStep(block);
+        }
+      } else if (event.type === 'user' && !event.parent_tool_use_id) {
+        const content = (event.message as {content?: unknown}).content;
+        if (Array.isArray(content)) for (const block of content) {
+          if (block && block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
+            const started = open.get(block.tool_use_id);
+            if (started) step('completed', block.tool_use_id, started.kind, {status: block.is_error === true ? 'failed' : 'completed'});
+          }
+        }
+      }
+    }
     for await (const event of native) {
       if (!sent || !('session_id' in event)) continue;
       if (event.session_id !== thread) {
@@ -356,6 +464,7 @@ async function run() {
       // The CLI names every user message a turn has consumed on its replies.
       const consumed = (event as {user_message_uuids?: unknown}).user_message_uuids;
       if (Array.isArray(consumed)) for (const id of consumed) if (typeof id === 'string') settleSteer(id);
+      if (member) observeActivity(event);
       if (event.type === 'user' && 'isReplay' in event && event.isReplay && typeof event.uuid === 'string') {
         settleSteer(event.uuid);
       } else if (event.type === 'system' && event.subtype === 'init') {
@@ -365,12 +474,20 @@ async function run() {
           throw Error('Unexpected runtime capabilities');
         }
         emit({type: 'init', session_id: thread, model: event.model});
+        refreshContext();
       } else if (event.type === 'stream_event' && !event.parent_tool_use_id &&
           event.event.type === 'content_block_delta' && event.event.delta.type === 'text_delta') {
         emit({type: 'delta', session_id: thread, text: event.event.delta.text});
       } else if (event.type === 'assistant' && event.error === 'rate_limit') {
         limited = true;
+      } else if (event.type === 'assistant' && !event.parent_tool_use_id) {
+        refreshContext();
+      } else if (event.type === 'system' && event.subtype === 'compact_boundary') {
+        epoch++;
+        again = false;
+        emit({type: 'context_reset', session_id: thread});
       } else if (event.type === 'result') {
+        if (member) closeSteps(stopped ? 'cancelled' : event.subtype === 'success' && !event.is_error ? 'completed' : 'failed');
         // A message the turn never took in is neither delivered nor provably lost.
         for (const [id, state] of steers) if (state === 'sent') emit({type: 'steer_unconsumed', session_id: thread, id});
         if (!limited && event.subtype === 'success' && !event.is_error) {

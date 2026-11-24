@@ -1820,3 +1820,9 @@ select:focus-visible, .question-panel textarea:focus-visible {
 .steering-status .quiet {
     margin-inline-start: .5rem;
 }
+.jump-latest-icon { position: absolute; right: .75rem; bottom: calc(var(--conversation-float-height, 0px) + 1.25rem); z-index: 3; display: grid; place-items: center; width: 2rem; height: 2rem; padding: 0; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: var(--surface-radius, 8px); box-shadow: var(--control-shadow, 0 2px 8px #3022191a); cursor: pointer; }
+.jump-latest-icon svg { width: 1rem; height: 1rem; }
+.jump-latest-icon:hover { background: var(--tint); }
+.jump-latest-icon:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+@media (pointer: coarse) { .jump-latest-icon { width: 44px; height: 44px; } }
+@media (prefers-reduced-motion: no-preference) { .jump-latest-icon { animation: jump-latest-in .12s ease-out; } @keyframes jump-latest-in { from { opacity: 0; } } }

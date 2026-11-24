@@ -36,3 +36,18 @@ test('Lead context follows generation and native ownership, preserving historica
  expect(leadContextReceipt({...legacy,native:{...legacy.native,thread:'released'}},[old])).toBeUndefined();
  expect(JSON.stringify(receipts)).toBe(history);
 });
+
+// Claude context is the CLI's own current-request occupancy; percent is the plain ratio.
+test('Claude basis is accepted per exact owner, with a plain-ratio percentage',()=>{
+ const claude={...observation,basis:'claude-context-usage',tokens:50000,capacity:200000};
+ const c=contextReading({observation:claude},'attempt','thread','turn');
+ expect(contextEstimate(c)).toEqual({used:50000,max:200000,percent:25});
+ expect(contextEstimate({...claude,tokens:300000} as any).percent).toBe(100);
+ expect(contextReading({observation:claude},'attempt','thread','other')).toBeUndefined();
+ expect(contextReading({observation:claude,compacted:true},'attempt','thread','turn')).toBeUndefined();
+});
+
+test('valid tokens with an absent capacity stay tokens-only, never a guessed percentage',()=>{
+ const c=contextReading({observation:{...observation,basis:'claude-context-usage',tokens:42000,capacity:null}},'attempt','thread','turn');
+ expect(contextEstimate(c)).toEqual({used:42000,max:null,percent:null});
+});

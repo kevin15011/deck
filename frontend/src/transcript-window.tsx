@@ -19,9 +19,9 @@ type Row = {key:string};
 type Bounds = {start:number;end:number};
 type KeyedBounds = {first:string;last:string};
 
-export function LiveTranscriptWindow<T extends Row>({rows,viewport,children,following,limit,rowCost,focusKey,preferStart}:{
+export function LiveTranscriptWindow<T extends Row>({rows,viewport,children,following,limit,rowCost,focusKey,preferStart,jumpToken,onNewest}:{
  rows:T[];viewport:RefObject<HTMLElement|null>;children:(row:T)=>ReactNode;
- following:RefObject<boolean>;limit:number;rowCost:(row:T)=>number;focusKey?:string;preferStart:boolean;
+ following:RefObject<boolean>;limit:number;rowCost:(row:T)=>number;focusKey?:string;preferStart:boolean;jumpToken?:number;onNewest?:(newest:boolean)=>void;
 }){
  const root=useRef<HTMLDivElement>(null);
  const [page,setPage]=useState<KeyedBounds>();
@@ -70,13 +70,25 @@ export function LiveTranscriptWindow<T extends Row>({rows,viewport,children,foll
   following.current=false;
   setPage({first:rows[next.start]!.key,last:rows[next.end-1]!.key});
   return true;
- },node=>{
+ },(node,direction,intentional)=>{
+  // Layout-driven upward movement while pinned is not a reader leaving the latest rows.
+  if(!intentional&&following.current)return;
   following.current=!!root.current?.getClientRects().length&&end===rows.length&&node.scrollHeight-node.scrollTop-node.clientHeight<24;
  },(node,direction)=>{
   if(direction==='older'&&node.scrollTop>1)following.current=false;
   if(direction==='newer'&&end===rows.length&&root.current?.getClientRects().length&&node.scrollHeight-node.scrollTop-node.clientHeight<1)following.current=true;
  });
 
+ const jumped=useRef(jumpToken);
+ useLayoutEffect(()=>{
+  if(jumped.current===jumpToken)return;
+  jumped.current=jumpToken;
+  change.current=undefined;
+  following.current=true;
+  setPage(undefined);setFill(undefined);
+  const node=viewport.current;
+  if(node)restoreTranscriptPosition(node,node.scrollHeight-node.clientHeight);
+ },[jumpToken,following,viewport]);
  useLayoutEffect(()=>{
   const moved=change.current,node=viewport.current;
   if(moved&&node&&root.current){
@@ -84,6 +96,7 @@ export function LiveTranscriptWindow<T extends Row>({rows,viewport,children,foll
    if(moved.direction==='newer'&&end===rows.length&&node.scrollHeight-node.scrollTop-node.clientHeight<1)following.current=true;
    change.current=undefined;
   }
+  onNewest?.(end===rows.length);
   rendered.current=tail?{bounds:{first:rows[start]!.key,last:rows[end-1]!.key},tail,page,preferStart}:undefined;
  });
  useEffect(()=>{

@@ -6,6 +6,7 @@ use axum::{
 };
 use deck2_shared::{API, DecisionState, SteeringState};
 use std::os::unix::fs::{PermissionsExt, symlink};
+use std::time::Instant;
 use tower::ServiceExt;
 
 const HOST: &str = "127.0.0.1:32126";
@@ -489,6 +490,39 @@ async fn verify_steering(host: &App, dir: &Path) {
     for id in ["steer-root-1", "steer-root-2", "steer-root-3", "steer-root-4"] {
         assert_eq!(host.receipt(id).unwrap().thread.as_deref(), Some(thread.as_str()));
     }
+
+    // 7. Context telemetry lifecycle over the real bridge. Protects: telemetry never delays
+    // settlement; an absent window is never guessed; a compaction boundary drops readings and
+    // replies already in flight until a later response is measured. Oracle: SDK
+    // getContextUsage and compact_boundary contract. The fixture's Nth read reports 12000+1000N.
+    let reads = || std::fs::read_to_string(dir.join(format!("context-reads-{thread}")))
+        .map(|v| v.trim().parse::<u64>().unwrap()).unwrap_or(0);
+    let scenario = |name: &'static str| {
+        let (browser, host) = (&browser, &host);
+        async move {
+            let id = format!("context-{name}");
+            browser.request("POST", "/api/commands", send_command(&id, &format!("Context scenario {name}"))).await;
+            let running = wait_for(host, &id, |r| r.phase == Phase::Running || r.phase == Phase::Completed).await;
+            let started = Instant::now();
+            let done = wait_for(host, &id, |r| r.phase == Phase::Completed).await;
+            assert_eq!(done.text, format!("Context {name}"));
+            (running.phase, started.elapsed(), done.context)
+        }
+    };
+    let (_, elapsed, context) = scenario("slow").await;
+    assert!(elapsed < Duration::from_millis(1500), "settlement waited for telemetry: {elapsed:?}");
+    assert!(context.observation.is_none(), "unanswered telemetry must not invent a reading");
+    let (_, _, context) = scenario("tokens-only").await;
+    let reading = context.observation.expect("tokens-only reading");
+    assert_eq!((reading.tokens, reading.capacity), (Some(12000 + 1000 * reads()), None));
+    std::fs::remove_file(dir.join("context-tokens-only")).unwrap();
+    let (_, _, context) = scenario("compact-stale").await;
+    assert!(context.observation.is_none(), "a pre-boundary reply must not survive compaction");
+    let (_, _, context) = scenario("compact-clears").await;
+    assert!(context.observation.is_none(), "a reading before the boundary must be cleared");
+    let (_, _, context) = scenario("compact-fresh").await;
+    let reading = context.observation.expect("post-compaction reading");
+    assert_eq!((reading.tokens, reading.capacity), (Some(12000 + 1000 * reads()), Some(200000)));
 }
 
 async fn wait_steerable(browser: &Browser, id: &str) {
@@ -777,6 +811,21 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     assert_reused_grep(&first, &second);
     assert_eq!(second.thread, first.thread);
     assert_eq!(second.model.as_deref(), Some("fixture-model"));
+    // Protects Lead context: the CLI's current-request reading (window 200000, not the
+    // 167000 compaction threshold and not cumulative usage) is bound to this exact turn.
+    // Oracle: SDK getContextUsage contract (totalTokens/rawMaxTokens).
+    let reading = second.context.observation.as_ref().expect("Lead context reading");
+    assert_eq!(reading.basis, "claude-context-usage");
+    assert_eq!(
+        (reading.capacity, reading.model_id.as_deref()),
+        (Some(200000), Some("fixture-model"))
+    );
+    assert!(reading.tokens.is_some_and(|t| (13000..200000).contains(&t) && t % 1000 == 0));
+    assert_eq!(
+        (Some(&reading.native_thread_id), Some(&reading.native_turn_id), &reading.attempt),
+        (second.thread.as_ref(), second.turn.as_ref(), &second.attempt)
+    );
+    assert!(!second.context.compacted);
     assert_eq!(
         second
             .configuration
@@ -1318,6 +1367,10 @@ async fn claude_sdk_member_assignments_and_outcomes() {
             eprintln!("Build the embedded SDK first with bun run build");
             return;
         }
+        if std::env::var_os("DECK2_BROWSER_FIXTURE").is_some() {
+            run_member_fixture("claude", "browser").await;
+            return;
+        }
         for (runner, stage) in [("codex", "normal"), ("claude", "normal"), ("claude", "crash")] {
             run_member_fixture(runner, stage).await;
         }
@@ -1423,14 +1476,36 @@ async fn claude_sdk_member_assignments_and_outcomes() {
         std::fs::write(dir.join("claude-member-lead-complete"), "").unwrap();
     }
     let origin = wait_for(&host, id, |r| r.phase == Phase::Completed).await;
+    if stage == "browser" {
+        // Serve the real router to an external Chromium driver and hold the member open.
+        let listener = tokio::net::TcpListener::bind(HOST).await.unwrap();
+        let router = crate::server::router(host.clone());
+        tokio::spawn(async move {
+            axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap();
+        });
+        std::fs::write(dir.join("serve-ready"), &browser.cookie).unwrap();
+        while !dir.join("browser-done").exists() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        return;
+    }
     let running = member_state(&browser, SESSION, |t| {
         t["attempts"][0]["phase"] == "running"
             && t["attempts"][0]["first_output_ms"].is_number()
+            && t["attempts"][0]["context"]["observation"].is_object()
             && dir.join("member-scoped").is_file()
     })
     .await;
     assert_eq!(running["attempts"][0]["phase"], "running");
     let a = &running["attempts"][0];
+    // Member context is keyed to this attempt's native session/message and survives concurrency
+    // because each member has its own bridge process.
+    let reading = &a["context"]["observation"];
+    assert_eq!(reading["basis"], "claude-context-usage");
+    assert_eq!(reading["capacity"], 200000);
+    assert_eq!(reading["attempt"], a["id"]);
+    assert_eq!(reading["native_thread_id"], a["native_session"]);
+    assert_eq!(reading["native_turn_id"], a["native_message"]);
     assert_eq!(a["provenance"]["runner"], RUNNER);
     assert_eq!(
         a["provenance"]["content"],
@@ -1462,6 +1537,20 @@ async fn claude_sdk_member_assignments_and_outcomes() {
             .iter()
             .any(|message| message["role"] == "investigate" && message["text"] == "Partial")
     );
+
+    // Auto-allowed tool calls surface as bounded live steps for this attempt only.
+    let activity = browser
+        .request("GET", &format!("/api/sessions/{SESSION}/activity"), Value::Null)
+        .await;
+    let steps = activity["steps"].as_array().unwrap();
+    let all = activity.to_string();
+    assert!(!all.contains("fixture-private") && !all.contains("fixture-secret-value") && !all.contains("fixture-script-secret") && !all.contains("nested-sibling"));
+    let mine: Vec<&Value> = steps.iter().filter(|s| s["attempt"] == attempt).collect();
+    assert!(mine.iter().any(|s| s["kind"] == "commandExecution" && s["args"].as_str().unwrap().starts_with("git status")));
+    assert!(mine.iter().any(|s| s["tool"] == "Read" && s["status"] == "done"), "{all}");
+    let live = activity["members"].as_array().unwrap().iter().find(|m| m["attempt"] == attempt).unwrap();
+    assert_eq!(live["status"], "running");
+    assert_eq!(live["kind"], "commandExecution");
 
     if stage == "crash" {
         println!("Ready for Claude member host loss");
@@ -1796,6 +1885,10 @@ async fn run_member_fixture(runner: &str, stage: &str) {
     }
     if stage == "investigate-resume" {
         std::fs::write(dir.path().join("investigate-resume-fixture"), "").unwrap();
+    }
+    if stage == "browser" {
+        std::fs::write(dir.path().join("browser-fixture"), "").unwrap();
+        std::fs::write(std::env::var("DECK2_BROWSER_FIXTURE").unwrap(), dir.path().to_str().unwrap()).unwrap();
     }
     if stage == "parallel" {
         std::fs::write(dir.path().join("parallel-fixture"), "").unwrap();
