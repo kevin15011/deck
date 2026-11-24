@@ -8,7 +8,7 @@ export type Phase = typeof phases[number];
 export type SteeringCommand={id:string;session:string;threadId:string;expectedTurnId:string;text:string};
 const steeringStates=['pending','dispatching','accepted','rejected','uncertain'] as const;
 export type QueuedSteeringSource={id:string;attempt:string};
-export type SteeringReceipt=SteeringCommand&{state:typeof steeringStates[number];admittedMs:number;queuedSource?:QueuedSteeringSource};
+export type SteeringReceipt=SteeringCommand&{state:typeof steeringStates[number];admittedMs:number;queuedSource?:QueuedSteeringSource;resendRequested?:boolean};
 export interface Receipt {
  can_steer?:boolean;
  steering?:SteeringReceipt[];
@@ -16,6 +16,7 @@ export interface Receipt {
  message_times?:{start:number;at_ms:number}[];
  context?:unknown;
  recalled_ms?:number;
+ claude_startup_retry?:{retries:number;after_ms:number};
  steered_to?:string;
  cancel_requested?:boolean;
  reasoning?:{model:string;effort:string;source:string};
@@ -43,7 +44,9 @@ export function isSteeringCommand(v:unknown):v is SteeringCommand {
 }
 export function steeringReceipt(v:unknown):SteeringReceipt {
  if(!object(v)||!steeringStates.includes(v.state as SteeringReceipt['state'])||!integer(v.admittedMs)||!isSteeringCommand(v))throw Error('Invalid live delivery receipt');
- const queue=(v as Record<string,unknown>).queuedSource;
+ const fields=v as Record<string,unknown>;
+ if(fields.resendRequested!==undefined&&typeof fields.resendRequested!=='boolean')throw Error('Invalid live resend state');
+ const queue=fields.queuedSource;
  if(queue!==undefined&&(!object(queue)||typeof queue.id!=='string'||typeof queue.attempt!=='string'))throw Error('Invalid queued live delivery source');
  return v as SteeringReceipt;
 }
@@ -56,6 +59,8 @@ export function receipt(v:unknown):Receipt {
  if(v.cancel_requested!==undefined&&typeof v.cancel_requested!=='boolean')throw Error('Invalid cancellation state');
  if(v.can_steer!==undefined&&typeof v.can_steer!=='boolean')throw Error('Invalid live steering capability');
  if(v.steering!==undefined&&(!Array.isArray(v.steering)||v.steering.map(steeringReceipt).some(s=>s.session!==v.session||s.threadId!==v.thread||s.expectedTurnId!==v.turn)))throw Error('Live message belongs to a different turn');
+ const startupRetry=v.claude_startup_retry;
+ if(startupRetry!==undefined&&(!object(startupRetry)||!integer(startupRetry.retries)||!integer(startupRetry.after_ms)))throw Error('Invalid Claude startup retry');
  if(v.steered_to!==undefined&&(typeof v.steered_to!=='string'||v.phase!=='cancelled'||v.dispatch_ms!==null))throw Error('Invalid queued live reservation');
  if(v.recalled_ms!==undefined&&(!integer(v.recalled_ms)||v.dispatch_ms!==null||v.cancel_requested!==true))throw Error('Invalid recalled input timestamp');
 

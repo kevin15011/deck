@@ -4,6 +4,36 @@ use crate::native_approval::validate_native;
 use deck2_shared::{Decision, DecisionResponse, DecisionState, NativeApproval, Phase, Receipt};
 use serde_json::{Value, json};
 
+pub(crate) fn record_decision(
+    app: &crate::server::App,
+    decision: Decision,
+) -> Result<Option<&'static str>, String> {
+    // Other native callers can append to this receipt after the draft was built.
+    let result = (|| {
+        let mut store = crate::latency::locked_checked(&app.store).map_err(|_| "State lock failed")?;
+        let mut receipt = store.get(&decision.command)?.ok_or("Receipt missing")?;
+        if receipt.cancel_requested {
+            return Ok(Some("Deck cancelled this permission request"));
+        }
+        if crate::native_approval::at_capacity(&receipt) {
+            return Ok(Some(crate::native_approval::CAPACITY_DENIAL));
+        }
+        if decision.task.is_none() {
+            receipt.detail = "Waiting for native permission".into();
+        }
+        if !receipt.phase.active() {
+            receipt.context.compacting = None;
+        }
+        receipt.decisions.push(decision);
+        store.save(&mut receipt)?;
+        Ok(None)
+    })();
+    if result.is_err() {
+        app.storage_failed();
+    }
+    result
+}
+
 pub fn native_method(method: &str) -> bool {
     matches!(
         method,
@@ -56,7 +86,6 @@ pub fn native_decision(
         || r.cancel_requested
         || r.phase != Phase::Running
         || r.mode != deck2_shared::Mode::SessionV1
-        || r.decisions.len() >= 64
         || r.decisions
             .iter()
             .any(|d| d.request == request && d.generation == generation)
@@ -326,6 +355,8 @@ fn command_prefix(method: &str, p: &Value) -> Option<Value> {
             || ["bearer", "basic", "authorization", "api_key", "api-key", "apikey", "access_key", "access-key", "accesskey", "token", "password", "passwd", "secret", "sk-"].iter().any(|m| lower.contains(m))
             || s.contains('%') || s.contains('?') || s.contains('&') || (s.contains("://") && s.contains('@')) { return None; }
     }
+    let prefix: Vec<_> = a.iter().filter_map(Value::as_str).collect();
+    if !crate::permission_bounds::codex_native_prefix_reusable(p, &prefix) { return None; }
     let value = Value::Array(a.clone());
     if value.to_string().encode_utf16().count() > 8192 { return None; }
     Some(value)

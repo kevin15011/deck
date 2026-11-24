@@ -27,3 +27,11 @@ test('labelled permission action keeps redaction before consent',()=>{
  const html=renderToStaticMarkup(React.createElement(Review,{d,connected:true,onError:()=>{}}));
  expect(html).toContain('alpha@example.test');expect(html).not.toContain('top-level-secret');expect(html).not.toContain('nested-secret');
 });
+
+test('recorded Bash details redact quoted flag values before JSON escaping',()=>{
+ const command=JSON.stringify('fixture --client-secret "FIXTURE_FIRST FIXTURE_SECOND"\necho ready');
+ const display=nativeActionDetails({command});
+ expect(display).not.toContain('FIXTURE_FIRST');
+ expect(display).not.toContain('FIXTURE_SECOND');
+ expect(display).toContain('echo ready');
+});

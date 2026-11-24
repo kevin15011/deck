@@ -197,11 +197,19 @@ impl Native {
         })
     }
 
+    /// Trusted write-capable members share the Lead's relay baseline (user
+    /// decision). Read-only roles are settled by `read_only_role` first.
+    pub(crate) fn member_project_trust(&self) -> Option<bool> {
+        self.external_tools.as_ref().and_then(|(_, trusted, _)| {
+            (self.connected && self.session_member).then_some(*trusted)
+        })
+    }
+
     pub(crate) fn permission_policy(
         &self,
         editing: bool,
     ) -> (&'static str, &'static str, &'static str) {
-        let trust = self.lead_project_trust();
+        let trust = self.lead_project_trust().or(self.member_project_trust());
         let yolo = self.connected && self.yolo && trust != Some(false);
         let role_sandbox = self.role.as_ref().and_then(|r| r.sandbox.as_deref());
         let read_only_role = self.read_only_role || role_sandbox == Some("read-only");
@@ -1453,6 +1461,8 @@ pub(crate) async fn claude_auth_probe(cmd: Command) -> Result<(bool, Vec<u8>), S
     probe(cmd, false, true, false).await
 }
 
+pub(crate) const PROBE_TIMED_OUT: &str = "Native command probe timed out";
+
 pub(crate) async fn claude_catalog_probe(cmd: Command) -> Result<Vec<u8>, String> {
     probe(cmd, true, false, false).await.map(|(_, output)| output)
 }
@@ -1531,7 +1541,7 @@ async fn probe(
         Ok((status.success(), out))
     })
     .await
-    .unwrap_or_else(|_| Err("Native command probe timed out".into()));
+    .unwrap_or_else(|_| Err(PROBE_TIMED_OUT.into()));
     // Kill the entire group even when the direct child already exited.
     unsafe {
         libc::kill(-(group.pid as i32), libc::SIGKILL);
@@ -2737,12 +2747,11 @@ async fn run_once(
                     });
                     decision.state = DecisionState::Responded;
                 }
-                app.change(id, |r| {
-                    if !r.cancel_requested {
-                        r.decisions.push(decision);
-                        r.detail = "Waiting for native permission".into();
-                    }
-                })?;
+                if let Some(reason) = crate::codex_protocol::record_decision(app, decision)? {
+                    native
+                        .write(json!({"id":value["id"],"error":{"code":-32000,"message":reason}}))
+                        .await?;
+                }
                 continue;
             }
             if !(editing || connected) || cancelling || app.receipt(id)?.cancel_requested {
@@ -3153,6 +3162,34 @@ mod tests {
             n.permission_policy(false),
             (":read-only", "never", "readOnly")
         );
+        n.terminate().await.unwrap();
+    }
+    // Protects the user-approved relay baseline for Codex members (option A).
+    // Oracle: trusted write-capable members match the Lead's workspace-write /
+    // on-request; read-only roles and untrusted projects never gain writes.
+    #[tokio::test]
+    async fn trusted_write_capable_members_share_the_lead_relay_baseline() {
+        let d = tempfile::tempdir().unwrap();
+        let binary = d.path().join("codex");
+        std::fs::write(&binary, include_str!("../tests/fake_session_native.py")).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut n = Native::start(&binary).await.unwrap();
+        let settings = crate::external_tools::Settings { codebase_memory: false, rtk: false, context7: false };
+        n.connected = true;
+        n.session_member = true;
+        n.set_approval_mode("relay");
+        n.external_tools = Some((settings.clone(), true, d.path().into()));
+        assert_eq!(n.permission_policy(false), (":workspace", "on-request", "workspaceWrite"));
+        n.read_only_role = true;
+        assert_eq!(n.permission_policy(false), (":read-only", "never", "readOnly"));
+        n.read_only_role = false;
+        let mut role = crate::session_roles::Role::at(d.path(), "lead").unwrap();
+        role.sandbox = Some("read-only".into());
+        n.role = Some(role);
+        assert_eq!(n.permission_policy(false), (":read-only", "never", "readOnly"));
+        n.role = None;
+        n.external_tools = Some((settings, false, d.path().into()));
+        assert_eq!(n.permission_policy(false), (":read-only", "on-request", "readOnly"));
         n.terminate().await.unwrap();
     }
     // DAILY52-Q01: HTTP cancellation plus unobserved reaping retain admission.

@@ -190,6 +190,7 @@ pub(crate) fn admit(store: &Store, lead: &Receipt, args: &Value) -> Result<Admis
                 state: SteeringState::Pending,
                 admitted_ms: crate::now(),
                 queued_source: None,
+                resend_requested: false,
             },
             lead_receipt: lead.id.clone(),
             lead_attempt: lead.attempt.clone(),

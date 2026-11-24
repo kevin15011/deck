@@ -118,7 +118,7 @@ test('production response path sends opaque IDs, retains errors and retries exac
    if(mode==='stale')return new Response(JSON.stringify({message:'Stale scope option'}),{status:409});
    // Host Resolve intentionally does not echo scope_option_id; selection is policy metadata.
    const {scope_option_id,...resolution}=body;
-   return new Response(JSON.stringify({...d,id:path==='/api/decisions/once/responses'?'once':d.id,resolution,presentation:projection({...policy,selected_option_id:scope_option_id})}));
+   return new Response(JSON.stringify({...d,id:path==='/api/decisions/once/responses'?'once':d.id,state:'responded',revision:d.revision+1,resolution,presentation:projection({...policy,selected_option_id:scope_option_id})}));
   }) as typeof fetch;
   await expect(submitReviewResponse(d,{type:'allow_session'},'fixture',broader.id)).rejects.toThrow('Connection lost');
   expect(sent.length).toBe(1);expect(sent[0].scope_option_id).toBe(broader.id);
@@ -127,7 +127,8 @@ test('production response path sends opaque IDs, retains errors and retries exac
   // A changed selection while outcome is unknown is blocked before another effect.
   await expect(submitReviewResponse(d,{type:'allow_session'},'fixture',exact.id)).rejects.toThrow('identity is retained');expect(sent.length).toBe(1);
   mode='stale';await expect(submitReviewResponse(d,{type:'allow_session'},'fixture',broader.id)).rejects.toThrow('HTTP 409');
-  mode='ok';await submitReviewResponse(d,{type:'allow_session'},'fixture',broader.id);
+  mode='ok';
+  await expect(submitReviewResponse(d,{type:'allow_session'},'fixture',broader.id)).resolves.toMatchObject({state:'responded',revision:8});
   expect(sent.map(v=>JSON.stringify(v))).toEqual([first,first,first]);
   expect([...values.values()]).toContain(first);
   await submitReviewResponse({...d,id:'once'}, {type:'allow_once'},'fixture',broader.id);
@@ -144,4 +145,17 @@ test('default selection is the broadest offer when exact, command and family coe
  const fam={...relay,id:'fam',kind:'bash_prefix',label:'Same command family'};
  const p=permissionPolicy({...policy,options:[relay,cmd,fam]})!;
  expect(selectedScope(p,scopeBinding('b',1,p),null)?.id).toBe('fam');
+ const any={...relay,id:'any',kind:'bash_any',label:'Any'};
+ const workspace=permissionPolicy({...policy,options:[relay,cmd,fam,any]})!;
+ const selected=selectedScope(workspace,scopeBinding('b',1,workspace),null);
+ expect(consentRequest(API,'response',1,{type:'allow_session'},selected?.id).scope_option_id).toBe('any');
+});
+
+test('an MCP tool scope keeps its opaque selection and relay category',()=>{
+ const relay={...exact,category:'relay'};
+ const any={...relay,id:'mcp-tool-scope',kind:'mcp_tool_any',label:'Any for this tool'};
+ const p=permissionPolicy({...policy,options:[relay,any]})!;
+ const selected=selectedScope(p,scopeBinding('mcp',1,p),null);
+ expect(consentRequest(API,'response',1,{type:'allow_session'},selected?.id).scope_option_id).toBe(any.id);
+ expect(permissionPolicy({...p,options:[relay,{...any,category:'command'}]})).toBeUndefined();
 });

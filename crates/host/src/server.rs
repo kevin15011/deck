@@ -384,14 +384,30 @@ impl App {
         result
     }
     pub fn change(&self, id: &str, f: impl FnOnce(&mut Receipt)) -> Result<(), String> {
+        self.change_receipt(id, None, f)
+    }
+    pub(crate) fn append_claude_delta(&self, id: &str, text: &str, sdk_received_ms: Option<u64>) -> Result<(), String> {
+        self.change_receipt(id, sdk_received_ms, |r| {
+            r.first_output_ms.get_or_insert_with(crate::now);
+            r.text.push_str(text);
+        })
+    }
+    fn change_receipt(&self, id: &str, sdk_received_ms: Option<u64>, f: impl FnOnce(&mut Receipt)) -> Result<(), String> {
         let result = (|| {
             let mut s = crate::latency::locked_checked(&self.store).map_err(|_| "State lock failed")?;
             let mut r = s.get(id)?.ok_or("Receipt missing")?;
+            let previous_text_bytes = r.text.len();
             f(&mut r);
             if !r.phase.active() {
                 r.context.compacting = None;
             }
-            s.save(&mut r)
+            s.save(&mut r)?;
+            if let Some(received) = sdk_received_ms {
+                self.workspace_updates.record_claude_append(
+                    id, r.revision, received, previous_text_bytes, &r.text[previous_text_bytes..],
+                );
+            }
+            Ok(())
         })();
         if result.is_err() {
             self.mark_broken();
@@ -507,11 +523,29 @@ impl App {
             .and_then(|claude| crate::claude::member::settle_recovered(&mut s, &live_members).map(|member| claude || member))
             .and_then(|claude| crate::codex_member::settle_recovered(&mut s, &live_members).map(|member| claude || member))
             .and_then(|claude| self.native_reuse.settle_waiting_roots(&mut s, &live).map(|codex| claude || codex));
-        match recovered {
-            Ok(true) if !self.queue_retry_pending.swap(true, Ordering::SeqCst) => {
+        let recovering = match recovered {
+            Ok(recovering) => recovering,
+            Err(_) => { self.mark_broken(); return; }
+        };
+        // Explanation only; a failure here must not hold the queue.
+        let _ = s.explain_member_wait();
+        let affected = s.affected_work().unwrap_or(true);
+        if affected && self.retain_auth_scope().is_err() { return; }
+        let mut retry_at = None;
+        let next = s.claim_next_with_limit(&live, cap, &mut retry_at);
+        if affected && matches!(&next, Ok(None)) {
+            // A redundant outcome can drain the queue without starting a worker.
+            self.release_auth_if_settled(&active, &s);
+        }
+        if matches!(next, Ok(None)) {
+            let now = crate::now();
+            let retry_delay = retry_at.map(|at| at.saturating_sub(now));
+            if let Some(delay) = retry_delay.into_iter().chain(recovering.then_some(3_000)).min()
+                && !self.queue_retry_pending.swap(true, Ordering::SeqCst)
+            {
                 let weak = Arc::downgrade(&self.inner);
                 tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(delay.min(3_000))).await;
                     if let Some(inner) = weak.upgrade() {
                         let app = App::from_inner(inner);
                         app.queue_retry_pending.store(false, Ordering::SeqCst);
@@ -519,17 +553,6 @@ impl App {
                     }
                 });
             }
-            Err(_) => { self.mark_broken(); return; }
-            _ => {}
-        }
-        // Explanation only; a failure here must not hold the queue.
-        let _ = s.explain_member_wait();
-        let affected = s.affected_work().unwrap_or(true);
-        if affected && self.retain_auth_scope().is_err() { return; }
-        let next = s.claim_next_with_limit(&live, cap);
-        if affected && matches!(&next, Ok(None)) {
-            // A redundant outcome can drain the queue without starting a worker.
-            self.release_auth_if_settled(&active, &s);
         }
         drop(s);
         if next.is_err() {
@@ -562,7 +585,8 @@ impl App {
             let mut store = self.store.lock().unwrap();
             let roots = store.all().map(|rows| {
                 rows.into_iter()
-                    .filter(|r| r.phase.active())
+                    .filter(|r| r.phase.active() &&
+                        !(crate::claude::is_receipt(r) && r.dispatch_ms.is_none()))
                     .map(|r| r.id)
                     .collect::<Vec<_>>()
             });
@@ -2383,7 +2407,7 @@ pub fn router(app: App) -> Router {
         .route("/api/tools/{tool}", post(crate::external_tools::change))
         .route("/api/tools/rtk/runners/{runner}", post(crate::external_tools::runners::change))
         .route("/api/tools/context-mode", get(crate::external_tools::context_mode::inspect))
-        .route("/api/tools/context-mode/runners/{runner}", post(crate::external_tools::context_mode::change))
+        .route("/api/tools/context-mode/runners/{runner}", get(crate::external_tools::context_mode::inspect_selected).post(crate::external_tools::context_mode::change))
         .route("/api/configuration", get(configuration))
         .route("/api/helpers", get(helper_catalog))
         .route("/api/helpers/plans", post(helper_plan))
@@ -2450,6 +2474,7 @@ pub fn router(app: App) -> Router {
         .route("/api/commands/{id}/cancel", post(cancel))
         .route("/api/commands/{id}/steering", post(crate::steering::submit))
         .route("/api/commands/{id}/steering/queued", post(crate::steering::submit_queued))
+        .route("/api/commands/{root}/steering/{id}/resend", post(crate::steering::resend_queued))
         .route("/api/commands/{id}/recall", post(recall_input))
         .route(
             "/api/sessions/{session}/git-identity",

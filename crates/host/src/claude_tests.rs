@@ -5,6 +5,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use deck2_shared::{API, DecisionState, SteeringState};
+use http_body_util::BodyExt;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::time::Instant;
 use tower::ServiceExt;
@@ -41,7 +42,27 @@ impl Browser {
         Self { router, cookie }
     }
 
+    async fn open_workspace_events(&self) -> Body {
+        let get = |uri: &str| Request::get(uri).header(header::HOST, HOST)
+            .header(header::COOKIE, &self.cookie).body(Body::empty()).unwrap();
+        let response = self.router.clone().oneshot(get("/api/workspace?transport=events")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let cursor = response.headers()["x-deck-workspace-cursor"].to_str().unwrap();
+        let response = self.router.clone().oneshot(get(&format!("/api/workspace/events?after={cursor}"))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        response.into_body()
+    }
+
     async fn request(&self, method: &str, uri: &str, body: Value) -> Value {
+        let (status, body) = self.response(method, uri, body).await;
+        assert!(
+            status == StatusCode::OK || status == StatusCode::CREATED || status == StatusCode::ACCEPTED,
+            "{status}: {body}",
+        );
+        body
+    }
+
+    async fn response(&self, method: &str, uri: &str, body: Value) -> (StatusCode, Value) {
         let response = self
             .router
             .clone()
@@ -60,12 +81,7 @@ impl Browser {
             .unwrap();
         let status = response.status();
         let bytes = to_bytes(response.into_body(), MAX_FRAME).await.unwrap();
-        assert!(
-            status == StatusCode::OK || status == StatusCode::CREATED || status == StatusCode::ACCEPTED,
-            "{status}: {}",
-            String::from_utf8_lossy(&bytes)
-        );
-        serde_json::from_slice(&bytes).unwrap()
+        (status, serde_json::from_slice(&bytes).unwrap())
     }
 }
 
@@ -115,12 +131,62 @@ fn send_command(id: &str, prompt: &str) -> Value {
     json!({"api":API,"id":id,"session":SESSION,"prompt":prompt,"mode":"session_v1","fresh":false})
 }
 
+// The SDK surfaces native MCP asks using the authenticated Deck relay. A grant
+// covers new arguments to the same tool, and a different tool still needs consent.
+async fn wait_for_mcp_decisions(host: &App, id: &str, count: usize) -> Receipt {
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let receipt = host.receipt(id).unwrap();
+            if receipt.decisions.len() >= count {
+                return receipt;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.unwrap_or_else(|_| panic!("Claude MCP decisions did not reach count {count} for {id}"))
+}
+
+async fn verify_user_mcp_permission(host: &App, browser: &Browser, id: &str, member: bool) {
+    let first = wait_for_mcp_decisions(host, id, 1).await;
+    let decision = &first.decisions[0];
+    assert_eq!(decision.state, DecisionState::Pending);
+    assert_eq!(decision.task.is_some(), member);
+    let action = crate::execution_view::decision(decision);
+    assert_eq!(action["responses"], json!(["allow_once", "allow_session", "deny"]));
+    let policy = crate::permission_policy::view(decision).unwrap();
+    let any = policy["options"].as_array().unwrap().iter()
+        .find(|option| option["label"] == "Any for this tool").expect("MCP tool scope");
+    browser.request("POST", &format!("/api/decisions/{}/responses", decision.id),
+        json!({"api":API,"command_id":Uuid::new_v4().to_string(),
+            "expected_revision":decision.revision,"response":{"type":"allow_session"},
+            "scope_option_id":any["id"]})).await;
+
+    let third = wait_for_mcp_decisions(host, id, 3).await;
+    let reused = &third.decisions[1];
+    assert_eq!(reused.state, DecisionState::Delivered);
+    assert_eq!(reused.native.as_ref().unwrap().resolution_provenance,
+        Some(deck2_shared::PermissionProvenance::ReusedGrant{source_decision:decision.id.clone()}));
+    let other = &third.decisions[2];
+    assert_eq!(other.state, DecisionState::Pending);
+    browser.request("POST", &format!("/api/decisions/{}/responses", other.id),
+        json!({"api":API,"command_id":Uuid::new_v4().to_string(),
+            "expected_revision":other.revision,"response":{"type":"deny"}})).await;
+}
+
 async fn verify_coordination(host: &App, dir: &Path) {
     {
         let mut store = host.store.lock().unwrap();
         store
             .select_project_folder_with_trust(host.project.as_str(), true)
             .unwrap();
+    }
+    for settings in [
+        dir.join(".claude/settings.json"),
+        dir.join(".claude/remote-settings.json"),
+        dir.join("project/.claude/settings.json"),
+        dir.join("project/.claude/settings.local.json"),
+    ] {
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(settings, r#"{"enabledPlugins":{"example@fixture":true}}"#).unwrap();
     }
     let browser = Browser::open(host).await;
     browser
@@ -137,16 +203,25 @@ async fn verify_coordination(host: &App, dir: &Path) {
         )
         .await;
     let marker = |name: &str| std::fs::write(dir.join(name), "").unwrap();
-    marker("unexpected-mcp");
-    let blocked = "foreign-mcp-blocked";
-    browser
-        .request("POST", "/api/commands", send_command(blocked, blocked))
-        .await;
-    let rejected = wait_for(host, blocked, |r| r.phase == Phase::Failed).await;
-    assert!(rejected.dispatch_ms.is_none());
-    assert!(rejected.detail.contains("scoped Deck session tools"));
-    std::fs::remove_file(dir.join("unexpected-mcp")).unwrap();
-
+    let mut duplicate_outcomes = Vec::new();
+    for mode in ["duplicate-deck-status", "duplicate-deck-init"] {
+        marker(mode);
+        let mut command = send_command(mode, "Check configured roles");
+        command["fresh"] = json!(true);
+        browser.request("POST", "/api/commands", command).await;
+        let result = wait_for(host, mode, |r| !r.phase.active() && r.phase != Phase::Queued).await;
+        std::fs::remove_file(dir.join(mode)).unwrap();
+        duplicate_outcomes.push((
+            result.phase,
+            result.handshake_ms.is_some(),
+            result.acknowledgment_ms.is_some(),
+        ));
+    }
+    assert_eq!(
+        duplicate_outcomes,
+        [(Phase::Failed, false, false), (Phase::Failed, true, false)],
+        "a duplicate reserved server must fail before ready in status, and before acknowledgment in init"
+    );
     let codex_session = "codex-concurrent-lead";
     browser
         .request(
@@ -162,6 +237,7 @@ async fn verify_coordination(host: &App, dir: &Path) {
     codex["session"] = json!(codex_session);
     browser.request("POST", "/api/commands", codex).await;
     wait_for(host, "held-codex-lead", |r| r.phase == Phase::Running).await;
+    marker("unexpected-mcp");
     let mut claude = send_command("overlapping-claude-lead", "Check configured roles");
     claude["queue"] = json!(true);
     let queued = browser.request("POST", "/api/commands", claude).await;
@@ -178,6 +254,13 @@ async fn verify_coordination(host: &App, dir: &Path) {
     assert!(overlap.handshake_ms.is_some());
     marker("release-codex-lead");
     wait_for(host, "held-codex-lead", |r| r.phase == Phase::Completed).await;
+
+    let mcp = "user-mcp-permission";
+    browser.request("POST", "/api/commands", send_command(mcp, mcp)).await;
+    verify_user_mcp_permission(host, &browser, mcp, false).await;
+    let completed = wait_for(host, mcp, |r| r.phase == Phase::Completed).await;
+    assert_eq!(completed.text, "User MCP review completed");
+    std::fs::remove_file(dir.join("unexpected-mcp")).unwrap();
 
     for (id, key) in [
         ("delegate-and-yield", "complete"),
@@ -326,6 +409,186 @@ fn assert_png_block(block: &Value, bytes: &[u8]) {
 // Live Send now and image input through the real router, store and TypeScript
 // bridge. Only the Claude CLI's wire is a fixture; the Claude process receives
 // the same user messages the pinned SDK writes for it.
+async fn verify_startup_retry(host: &App, dir: &Path) {
+    let browser = Browser::open(host).await;
+    browser.request("POST", "/api/sessions", json!({
+        "api": API, "id": SESSION, "title": "Claude readiness",
+        "members": {"lead": {"runnerId": "claude", "modelId": "default"}}
+    })).await;
+
+    std::fs::write(dir.join("fail-startup-once"), "").unwrap();
+    std::fs::write(dir.join("pending-foreign-mcp"), "").unwrap();
+    browser.request("POST", "/api/commands", send_command("startup-retry", "Readiness fixture")).await;
+    let queued = wait_for(host, "startup-retry", |r| r.phase == Phase::Queued && r.detail.contains("retry")).await;
+    assert!(queued.dispatch_ms.is_none() && queued.native_pid.is_none());
+    let done = wait_for(host, "startup-retry", |r| r.phase == Phase::Completed).await;
+    assert_eq!(done.attempt, queued.attempt);
+    assert!(done.startup_timing.unwrap().claude_stages_ms.contains_key("deck_inventory"));
+    assert_eq!(wire_rows(dir).iter().filter(|row| row["message"]["type"] == "user").count(), 1);
+
+    std::fs::write(dir.join("credits-enabled"), "").unwrap();
+    browser.request("POST", "/api/commands", send_command("startup-blocked", "Do not dispatch")).await;
+    let blocked = wait_for(host, "startup-blocked", |r| r.phase == Phase::Failed).await;
+    assert!(blocked.detail.contains("usage credits are enabled"));
+    assert!(blocked.dispatch_ms.is_none());
+    let starts = || {
+        std::fs::read_to_string(dir.join("wire")).unwrap().lines()
+            .map(|row| serde_json::from_str::<Value>(row).unwrap())
+            .filter(|row| row["catalog"] == false && row["message"]["request"]["subtype"] == "initialize")
+            .count()
+    };
+    assert_eq!(starts(), 3);
+    std::fs::remove_file(dir.join("credits-enabled")).unwrap();
+    std::fs::write(dir.join("fail-startup-always"), "").unwrap();
+    browser.request("POST", "/api/commands", send_command("startup-exhausted", "No native delivery")).await;
+    // Allow a full wait for each launch and backoff under suite load. The retry
+    // count persists after the queue claims the attempt, so polling can still
+    // observe progress if the short queued phase has already ended.
+    for retries in [1, 2] {
+        let retry = wait_for(host, "startup-exhausted", |r| {
+            r.claude_startup_retry.as_ref().is_some_and(|retry| retry.retries >= retries)
+        }).await;
+        assert!(retry.dispatch_ms.is_none());
+    }
+    let failed = wait_for(host, "startup-exhausted", |r| r.phase == Phase::Failed).await;
+    assert!(failed.detail.contains("two retries") && failed.dispatch_ms.is_none());
+    assert_eq!(starts(), 6);
+    assert_eq!(wire_rows(dir).len(), 1);
+}
+
+async fn verify_auth_timeout(host: &App, dir: &Path) {
+    let browser = Browser::open(host).await;
+    browser.request("POST", "/api/sessions", json!({
+        "api": API, "id": SESSION, "title": "Claude authorization readiness",
+        "members": {"lead": {"runnerId": "claude", "modelId": "default"}}
+    })).await;
+    std::fs::write(dir.join("auth-timeout-once"), "").unwrap();
+    browser.request("POST", "/api/commands", send_command("auth-retry", "Readiness fixture")).await;
+    let queued = wait_for(host, "auth-retry", |r| r.phase == Phase::Queued && r.claude_startup_retry.is_some()).await;
+    assert!(queued.native_pid.is_none() && queued.dispatch_ms.is_none());
+    let done = wait_for(host, "auth-retry", |r| r.phase == Phase::Completed).await;
+    assert_eq!(done.attempt, queued.attempt);
+    assert_eq!(wire_rows(dir).len(), 1);
+}
+
+async fn verify_direct_resend(host: &App, dir: &Path) {
+    let browser = Browser::open(host).await;
+    browser.request("POST", "/api/sessions", json!({
+        "api": API, "id": SESSION, "title": "Direct Claude steering",
+        "members": {"lead": {"runnerId": "claude", "modelId": "default"}}
+    })).await;
+    browser.request("POST", "/api/commands", send_command("direct-root", "Hold for live steering direct")).await;
+    let root = wait_for(host, "direct-root", |r| r.can_steer).await;
+    let id = Uuid::new_v4().to_string();
+    let prompt = "finish echo-withheld";
+    let body = json!({"id": id, "session": SESSION, "threadId": root.thread, "expectedTurnId": root.turn, "text": prompt});
+    browser.request("POST", "/api/commands/direct-root/steering", body.clone()).await;
+    let done = wait_for(host, "direct-root", |r| r.phase == Phase::Completed).await;
+    assert_eq!(done.steering[0].state, SteeringState::Uncertain);
+    assert_eq!(browser.request("POST", "/api/commands/direct-root/steering", body).await["state"], "uncertain");
+    let resend = format!("/api/commands/direct-root/steering/{id}/resend");
+    for _ in 0..2 {
+        assert_eq!(browser.request("POST", &resend, json!({})).await["resendRequested"], true);
+    }
+    wait_for(host, &format!("live-{id}"), |r| r.phase == Phase::Completed).await;
+    assert_eq!(wire_rows(dir).iter().filter(|row| {
+        let message = &row["message"];
+        message["type"] == "user" && message["priority"] != "next" && message["message"]["content"] == prompt
+    }).count(), 1);
+}
+
+async fn verify_startup_restart(host: App, dir: &Path) {
+    let browser = Browser::open(&host).await;
+    browser.request("POST", "/api/sessions", json!({
+        "api": API, "id": SESSION, "title": "Claude readiness restart",
+        "members": {"lead": {"runnerId": "claude", "modelId": "default"}}
+    })).await;
+    std::fs::write(dir.join("hold-startup"), "").unwrap();
+    let first_prompt = "Readiness fixture";
+    let next_prompt = "Readiness after restart";
+    browser.request("POST", "/api/commands", send_command("restart-undelivered", first_prompt)).await;
+    let starting = wait_for(&host, "restart-undelivered", |r| r.detail == "Verifying Deck session tools…").await;
+    assert!(starting.dispatch_ms.is_none() && starting.native_pid.is_some());
+    assert!(starting.startup_timing.unwrap().claude_stages_ms.contains_key("usage"));
+    browser.request("POST", "/api/commands", send_command("restart-follow-up", next_prompt)).await;
+    wait_for(&host, "restart-follow-up", |r| r.phase == Phase::Queued).await;
+    host.shutdown();
+    host.drain_shutdown().await;
+    assert!(wire_rows(dir).is_empty());
+    let queued = host.receipt("restart-undelivered").unwrap();
+    assert_eq!(queued.phase, Phase::Queued);
+    assert!(queued.native_pid.is_none() && queued.dispatch_ms.is_none());
+    // Exercise both a same-version startup retry and a queued row admitted
+    // by a build with an older bridge.
+    {
+        let mut store = host.store.lock().unwrap();
+        let mut follow_up = store.get("restart-follow-up").unwrap().unwrap();
+        follow_up.configuration.as_mut().unwrap().native.as_mut().unwrap().configuration =
+            digest(b"previous Deck build's Claude bridge");
+        store.save(&mut follow_up).unwrap();
+    }
+    drop(browser);
+    drop(host);
+
+    std::fs::remove_file(dir.join("hold-startup")).unwrap();
+    let reopened = app(dir);
+    let admissions = ["restart-undelivered", "restart-follow-up"].map(|id| reopened.receipt(id).unwrap());
+    reopened.pump_queue();
+    for admitted in admissions {
+        let completed = wait_for(&reopened, &admitted.id, |r| r.phase == Phase::Completed).await;
+        assert_eq!(completed.attempt, admitted.attempt);
+        let mut expected = admitted.configuration.unwrap();
+        expected.native.as_mut().unwrap().configuration = digest(BRIDGE);
+        assert_eq!(completed.configuration.unwrap(), expected);
+    }
+    let users = wire_rows(dir);
+    assert_eq!(users.len(), 2);
+    assert_eq!(users[0]["message"]["message"]["content"], first_prompt);
+    assert_eq!(users[1]["message"]["message"]["content"], next_prompt);
+    assert_eq!(users[0]["thread"], users[1]["thread"]);
+    assert_eq!(reopened.receipt("restart-undelivered").unwrap().attempt, queued.attempt);
+}
+
+async fn verify_lead_activity(host: &App, dir: &Path) {
+    let browser = Browser::open(host).await;
+    browser.request("POST", "/api/sessions", json!({
+        "api": API, "id": SESSION, "title": "Claude activity",
+        "members": {"lead": {"runnerId": "claude", "modelId": "default"}}
+    })).await;
+    let mut events = browser.open_workspace_events().await;
+    browser.request("POST", "/api/commands", send_command("lead-activity", "Lead activity fixture")).await;
+    let uri = format!("/api/sessions/{SESSION}/activity");
+    for (kind, gate) in [("reasoning", "lead-tool"), ("commandExecution", "lead-finish")] {
+        timeout(Duration::from_secs(3), async {
+            loop {
+                let page = browser.request("GET", &uri, Value::Null).await;
+                let live = page["live"].as_array().unwrap();
+                if live.iter().any(|step| step["command"] == "lead-activity" && step["kind"] == kind && step["status"] == "running") {
+                    assert!(!page.to_string().contains("fixture-private"));
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.unwrap_or_else(|_| panic!("Lead {kind} never appeared in live activity"));
+        if kind == "reasoning" {
+            timeout(Duration::from_secs(4), async {
+                while let Some(frame) = events.frame().await {
+                    let frame = frame.unwrap().into_data().unwrap();
+                    if std::str::from_utf8(&frame).unwrap().contains("\"text\":\"Partial\"") {
+                        return;
+                    }
+                }
+                panic!("Lead partial text never reached workspace SSE");
+            }).await.expect("workspace did not publish Lead partial text");
+        }
+        std::fs::write(dir.join(gate), "").unwrap();
+    }
+    wait_for(host, "lead-activity", |r| r.phase == Phase::Completed).await;
+    let page = browser.request("GET", &uri, Value::Null).await;
+    assert!(page["live"].as_array().unwrap().iter().all(|step| step["status"] != "running"));
+    assert!(page["steps"].as_array().unwrap().iter().any(|step| step["kind"] == "commandExecution" && step["status"] == "done"));
+}
+
 async fn verify_steering(host: &App, dir: &Path) {
     host.store
         .lock()
@@ -415,12 +678,70 @@ async fn verify_steering(host: &App, dir: &Path) {
     .expect("A queued message with images is eligible for live delivery on a Claude Lead");
     assert!(eligible["receipts"].as_array().unwrap().iter().any(|r| r["id"] == "queued-live-image"));
     let queued = host.receipt("queued-live-image").unwrap();
+    for change in ["sdk", "executable digest", "executable path"] {
+        let mut candidate = host.receipt(&queued.id).unwrap();
+        let admission = candidate.configuration.as_mut().unwrap();
+        let binding = admission.native.as_mut().unwrap();
+        match change {
+            "sdk" => binding.version = "older-sdk".into(),
+            "executable digest" => binding.executable.executable = "a".repeat(64),
+            "executable path" => binding.executable.path.push_str("-other"),
+            _ => unreachable!(),
+        }
+        admission.runner = Some(binding.executable.clone());
+        host.store.lock().unwrap().save(&mut candidate).unwrap();
+        let workspace = browser.request("GET", "/api/workspace", Value::Null).await;
+        let (status, _) = browser.response("POST", "/api/commands/steer-root-2/steering/queued",
+            queued_body(&root2, &Uuid::new_v4().to_string(), &candidate)).await;
+        assert_eq!((workspace["steerable_queued"].clone(), status),
+            (json!([]), StatusCode::CONFLICT), "incompatible {change}");
+        assert_eq!(host.receipt(&queued.id).unwrap().phase, Phase::Queued);
+
+        candidate.configuration = queued.configuration.clone();
+        host.store.lock().unwrap().save(&mut candidate).unwrap();
+    }
+    // Exercise the write fence with an incompatible reservation already in
+    // storage. Keep the fixture under the store lock until both writes land.
+    let rejected_id = Uuid::new_v4().to_string();
+    {
+        let mut store = host.store.lock().unwrap();
+        let mut root = store.get(&root2.id).unwrap().unwrap();
+        root.steering.push(deck2_shared::SteeringReceipt {
+            command: deck2_shared::SteeringCommand {
+                id: rejected_id.clone(),
+                session: root.session.clone(),
+                thread_id: root.thread.clone().unwrap(),
+                expected_turn_id: root.turn.clone().unwrap(),
+                text: queued.prompt.clone(),
+            },
+            state: SteeringState::Pending,
+            admitted_ms: now(),
+            queued_source: Some(deck2_shared::QueuedSteeringSource {
+                id: queued.id.clone(),
+                attempt: queued.attempt.clone(),
+            }),
+            resend_requested: false,
+        });
+        store.save(&mut root).unwrap();
+        let mut source = store.get(&queued.id).unwrap().unwrap();
+        source.configuration.as_mut().unwrap().native.as_mut().unwrap().version = "older-sdk".into();
+        store.save(&mut source).unwrap();
+    }
+    wait_for(host, &root2.id, |r| r.steering[0].state == SteeringState::Rejected).await;
+    assert_eq!(host.receipt(&queued.id).unwrap().phase, Phase::Queued);
+    assert!(!steer_files(dir).contains(&format!("steer-{rejected_id}")));
+
+    // Older Deck bridge code does not change the admitted Claude SDK or CLI.
+    let mut candidate = host.receipt(&queued.id).unwrap();
+    candidate.configuration = queued.configuration.clone();
+    candidate.configuration.as_mut().unwrap().native.as_mut().unwrap().configuration = "a".repeat(64);
+    host.store.lock().unwrap().save(&mut candidate).unwrap();
     let queued_steer = Uuid::new_v4().to_string();
     let body = queued_body(&root2, &queued_steer, &queued);
     browser.request("POST", "/api/commands/steer-root-2/steering/queued", body.clone()).await;
     let done = wait_for(host, "steer-root-2", |r| r.phase == Phase::Completed).await;
     assert_eq!(done.text, "Steered: finish using this picture");
-    assert_eq!(done.steering[0].state, SteeringState::Accepted);
+    assert_eq!(done.steering[1].state, SteeringState::Accepted);
     let blocks = fixture_blocks(dir, &format!("steer-{queued_steer}"));
     assert_eq!(blocks.len(), 2);
     assert_eq!(blocks[0], json!({"type": "text", "text": "finish using this picture"}));
@@ -485,6 +806,77 @@ async fn verify_steering(host: &App, dir: &Path) {
     assert_eq!(host.receipt("queued-unconfirmed").unwrap().phase, Phase::Cancelled);
     assert_eq!(steer_files(dir).iter().filter(|name| **name == format!("steer-{id}")).count(), 1);
 
+    let view = browser.request("GET", "/api/workspace", Value::Null).await;
+    let original = view["receipts"].as_array().unwrap().iter().find(|r| r["id"] == "steer-root-4").unwrap();
+    assert_eq!(original["steering"][0]["state"], "uncertain");
+    let resend = format!("/api/commands/steer-root-4/steering/{id}/resend");
+    for _ in 0..2 {
+        assert_eq!(browser.request("POST", &resend, json!({})).await["resendRequested"], true);
+    }
+    let resent = wait_for(host, "queued-unconfirmed", |r| r.phase == Phase::Completed).await;
+    assert_eq!(resent.attempt, source.attempt);
+    assert!(host.receipt("steer-root-4").unwrap().steering[0].resend_requested);
+    assert_eq!(wire_rows(dir).iter().filter(|row| {
+        let message = &row["message"];
+        message["priority"] != "next" && message["message"]["content"] == "finish echo-withheld"
+    }).count(), 1);
+
+    // Simulate stopping after the durable live write fence and before writing to
+    // the bridge. Its terminal inventory is the only evidence for this window.
+    browser.request("POST", "/api/commands",
+        image_turn("steer-root-unwritten", "Exit before live steer yield", &[], false)).await;
+    let root = wait_for(host, "steer-root-unwritten", |r| r.can_steer).await;
+    let prompt = "Never yielded follow-up";
+    browser.request("POST", "/api/commands", image_turn("queued-unwritten", prompt, &[], true)).await;
+    let source = wait_for(host, "queued-unwritten", |r| r.phase == Phase::Queued).await;
+    let never_yielded = Uuid::new_v4().to_string();
+    {
+        let mut store = host.store.lock().unwrap();
+        let mut root = store.get(&root.id).unwrap().unwrap();
+        root.steering.push(deck2_shared::SteeringReceipt {
+            command: deck2_shared::SteeringCommand {
+                id: never_yielded.clone(), session: root.session.clone(),
+                thread_id: root.thread.clone().unwrap(), expected_turn_id: root.turn.clone().unwrap(),
+                text: prompt.into(),
+            },
+            state: SteeringState::Pending, admitted_ms: now(), resend_requested: false,
+            queued_source: Some(deck2_shared::QueuedSteeringSource {
+                id: source.id, attempt: source.attempt,
+            }),
+        });
+        store.save(&mut root).unwrap();
+        root.steering[0].state = SteeringState::Dispatching;
+        store.save(&mut root).unwrap();
+    }
+    std::fs::write(dir.join("exit-before-yield"), "").unwrap();
+    let stopped = wait_for(host, "steer-root-unwritten", |r| r.phase == Phase::Failed).await;
+    assert_eq!(stopped.steering[0].state, SteeringState::Rejected);
+    wait_for(host, "queued-unwritten", |r| r.phase == Phase::Completed).await;
+    assert!(!steer_files(dir).contains(&format!("steer-{never_yielded}")));
+    assert_eq!(wire_rows(dir).iter().filter(|row| {
+        row["message"]["message"]["content"] == prompt
+    }).count(), 1);
+
+    // The first result covers its own turn. Claude can consume the yielded
+    // steer in another turn before Deck shuts the CLI down.
+    browser.request("POST", "/api/commands",
+        image_turn("steer-root-next-turn", "Hold for live steering next-turn", &[], false)).await;
+    let root = wait_for(host, "steer-root-next-turn", |r| r.can_steer).await;
+    let prompt = "finish echo-withheld next-turn-consumed";
+    browser.request("POST", "/api/commands", image_turn("queued-next-turn", prompt, &[], true)).await;
+    let source = wait_for(host, "queued-next-turn", |r| r.phase == Phase::Queued).await;
+    wait_steerable(&browser, "queued-next-turn").await;
+    browser.request("POST", "/api/commands/steer-root-next-turn/steering/queued",
+        queued_body(&root, &Uuid::new_v4().to_string(), &source)).await;
+    let done = wait_for(host, "steer-root-next-turn", |r| r.phase == Phase::Completed).await;
+    assert_eq!(done.steering[0].state, SteeringState::Uncertain);
+    wait_for(host, "queued-next-turn", |r| matches!(r.phase, Phase::Completed | Phase::Cancelled)).await;
+    assert_eq!(host.receipt("queued-next-turn").unwrap().phase, Phase::Cancelled);
+    assert_eq!(wire_rows(dir).iter().filter(|row| {
+        let message = &row["message"];
+        message["type"] == "user" && message["priority"] != "next" && message["message"]["content"] == prompt
+    }).count(), 0);
+
     // 6. Every turn above resumed the one native Claude thread.
     let thread = host.store.lock().unwrap().session_by_id(SESSION).unwrap().native.unwrap().thread;
     for id in ["steer-root-1", "steer-root-2", "steer-root-3", "steer-root-4"] {
@@ -539,67 +931,153 @@ async fn wait_steerable(browser: &Browser, id: &str) {
     .unwrap_or_else(|_| panic!("{id} never became eligible for live delivery"));
 }
 
+const SDK_ENTRYPOINT_TEST: &str =
+    "claude::tests::claude_sdk_normal_entrypoint_streams_stops_and_resumes_once";
+
+fn sdk_fixture() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let node = node_runtime().expect("SDK contract test requires Node.js");
+    symlink(node.canonicalize().unwrap(), dir.path().join("node")).unwrap();
+    let executable = dir.path().join(RUNNER);
+    std::fs::write(&executable, include_str!("../tests/fake_claude_sdk.py")).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::create_dir(dir.path().join("project")).unwrap();
+    std::fs::write(
+        dir.path().join("project/CLAUDE.md"),
+        "Fixture instructions only.",
+    )
+    .unwrap();
+    dir
+}
+
+fn sdk_entrypoint_fixture() -> tempfile::TempDir {
+    let dir = sdk_fixture();
+    let project = dir.path().join("project");
+    std::fs::create_dir(project.join("search")).unwrap();
+    std::fs::create_dir(project.join(".git")).unwrap();
+    std::fs::write(project.join(".git/config"), "before\n").unwrap();
+    symlink(project.join("deny.txt"), project.join("link.txt")).unwrap();
+    std::fs::write(project.join("deny.txt"), "First line\nbefore\n").unwrap();
+    std::fs::hard_link(project.join("deny.txt"), project.join("hardlink.txt")).unwrap();
+    symlink(dir.path(), project.join("outside-dir")).unwrap();
+    dir
+}
+
+fn sdk_case(dir: &Path, action: &str) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+    command
+        .args(["--exact", SDK_ENTRYPOINT_TEST, "--nocapture"])
+        .env_clear()
+        .env("DECK2_SDK_FIXTURE", dir)
+        .env("DECK2_SDK_CASE", action)
+        .env("HOME", dir)
+        .env("PATH", dir)
+        .kill_on_drop(true);
+    command
+}
+
+async fn run_sdk_case(dir: &Path, action: &str) {
+    let started = Instant::now();
+    let mut command = sdk_case(dir, action);
+    if action == "lead-activity" {
+        command.env("DECK2_CLAUDE_STREAM_TIMING", "1");
+    }
+    let result = command.output().await.unwrap();
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    eprintln!("Claude SDK fixture {action}: {:.2?}", started.elapsed());
+    assert!(
+        result.status.success() && stdout.contains("1 passed"),
+        "Claude SDK fixture {action} failed:\n{stdout}\n{stderr}"
+    );
+    if action == "lead-activity" {
+        let sample = stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("Claude Lead stream "))
+            .expect("workspace SSE did not publish the timed Lead delta");
+        let sample: Value = serde_json::from_str(sample).unwrap();
+        assert_eq!(sample["receipt"], "lead-activity");
+        let received = sample["sdk_received_ms"].as_u64().unwrap();
+        let durable = sample["durable_append_ms"].as_u64().unwrap();
+        let published = sample["sse_published_ms"].as_u64().unwrap();
+        assert!(received <= durable && durable <= published);
+        eprintln!(
+            "Claude fixture SDK to durable {} ms, durable to SSE {} ms",
+            durable - received,
+            published - durable
+        );
+    }
+}
+
+#[tokio::test]
+async fn claude_sdk_startup_retries_and_recovers_undelivered_input() {
+    if BRIDGE.is_empty() {
+        return;
+    }
+    for action in ["startup", "auth-timeout", "startup-restart"] {
+        let dir = sdk_fixture();
+        run_sdk_case(dir.path(), action).await;
+    }
+}
+
+#[tokio::test]
+async fn claude_sdk_lead_activity_streams() {
+    if BRIDGE.is_empty() {
+        return;
+    }
+    let dir = sdk_fixture();
+    run_sdk_case(dir.path(), "lead-activity").await;
+}
+
+#[tokio::test]
+async fn claude_sdk_live_steering_and_explicit_resend() {
+    if BRIDGE.is_empty() {
+        return;
+    }
+    for action in ["steering", "direct-resend"] {
+        let dir = sdk_fixture();
+        run_sdk_case(dir.path(), action).await;
+    }
+}
+
+#[tokio::test]
+async fn claude_sdk_lead_coordinates_with_codex() {
+    if BRIDGE.is_empty() {
+        return;
+    }
+    let dir = sdk_fixture();
+    let codex = dir.path().join("codex");
+    let fixture = include_str!("../tests/fake_session_native.py").replacen(
+        "#!/usr/bin/env python3",
+        "#!/usr/bin/python3",
+        1,
+    );
+    std::fs::write(&codex, fixture).unwrap();
+    std::fs::set_permissions(codex, std::fs::Permissions::from_mode(0o700)).unwrap();
+    run_sdk_case(dir.path(), "coordination").await;
+}
+
 // The real router, SDK bundle and receipt/queue store run with a fake native
 // process. Assert prompt separation across attempts and actual stream identity.
 #[tokio::test]
 async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
-    const NAME: &str = "claude::tests::claude_sdk_normal_entrypoint_streams_stops_and_resumes_once";
     let Some(dir) = std::env::var_os("DECK2_SDK_FIXTURE").map(PathBuf::from) else {
         if BRIDGE.is_empty() {
             eprintln!("Build the embedded SDK first with bun run build");
             return;
         }
-        let dir = tempfile::tempdir().unwrap();
-        let node = node_runtime().expect("SDK contract test requires Node.js");
-        symlink(node.canonicalize().unwrap(), dir.path().join("node")).unwrap();
-        let executable = dir.path().join(RUNNER);
-        std::fs::write(&executable, include_str!("../tests/fake_claude_sdk.py")).unwrap();
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-        std::fs::create_dir(dir.path().join("project")).unwrap();
-        std::fs::write(
-            dir.path().join("project/CLAUDE.md"),
-            "Fixture instructions only.",
-        )
-        .unwrap();
-        let project = dir.path().join("project");
-        std::fs::create_dir(project.join("search")).unwrap();
-        std::fs::create_dir(project.join(".git")).unwrap();
-        std::fs::write(project.join(".git/config"), "before\n").unwrap();
-        symlink(project.join("deny.txt"), project.join("link.txt")).unwrap();
-        std::fs::write(project.join("deny.txt"), "First line\nbefore\n").unwrap();
-        std::fs::hard_link(project.join("deny.txt"), project.join("hardlink.txt")).unwrap();
-        symlink(dir.path(), project.join("outside-dir")).unwrap();
-        let command = |action: &str| {
-            let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
-            command
-                .args(["--exact", NAME, "--nocapture"])
-                .env_clear()
-                .env("DECK2_SDK_FIXTURE", dir.path())
-                .env("DECK2_SDK_CASE", action)
-                .env("HOME", dir.path())
-                .env("PATH", dir.path())
-                .kill_on_drop(true);
-            command
-        };
-        let assert_pass = |result: std::process::Output| {
-            assert!(
-                result.status.success(),
-                "{}\n{}",
-                String::from_utf8_lossy(&result.stdout),
-                String::from_utf8_lossy(&result.stderr)
-            );
-            assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));
-        };
-        assert_pass(command("normal").output().await.unwrap());
-        for file in ["wire", "state.db"] {
-            std::fs::rename(
-                dir.path().join(file),
-                dir.path().join(format!("normal-{file}")),
-            )
-            .unwrap();
-        }
+        let normal = sdk_entrypoint_fixture();
+        run_sdk_case(normal.path(), "normal").await;
+
+        // Keep all SQLite files together. The normal case may leave committed
+        // data in its WAL when the test subprocess exits.
+        let dir = sdk_entrypoint_fixture();
         std::fs::write(dir.path().join("hold-group"), "").unwrap();
-        let mut crash = command("crash").stdout(Stdio::piped()).spawn().unwrap();
+        let started = Instant::now();
+        let mut crash = sdk_case(dir.path(), "crash")
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
         let mut lines = BufReader::new(crash.stdout.take().unwrap()).lines();
         timeout(Duration::from_secs(15), async {
             while let Some(line) = lines.next_line().await.unwrap() {
@@ -612,51 +1090,8 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         .await
         .expect("Claude crash fixture timed out");
         crash.kill().await.unwrap();
-        assert_pass(command("restart").output().await.unwrap());
-        let coordination = tempfile::tempdir().unwrap();
-        symlink(
-            node.canonicalize().unwrap(),
-            coordination.path().join("node"),
-        )
-        .unwrap();
-        std::fs::copy(&executable, coordination.path().join(RUNNER)).unwrap();
-        std::fs::create_dir(coordination.path().join("project")).unwrap();
-        std::fs::write(
-            coordination.path().join("project/CLAUDE.md"),
-            "Fixture only.",
-        )
-        .unwrap();
-        let codex = coordination.path().join("codex");
-        let fixture = include_str!("../tests/fake_session_native.py").replacen(
-            "#!/usr/bin/env python3",
-            "#!/usr/bin/python3",
-            1,
-        );
-        std::fs::write(&codex, fixture).unwrap();
-        std::fs::set_permissions(codex, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let steering = tempfile::tempdir().unwrap();
-        symlink(node.canonicalize().unwrap(), steering.path().join("node")).unwrap();
-        std::fs::copy(&executable, steering.path().join(RUNNER)).unwrap();
-        std::fs::create_dir(steering.path().join("project")).unwrap();
-        std::fs::write(steering.path().join("project/CLAUDE.md"), "Fixture only.").unwrap();
-        assert_pass(
-            command("steering")
-                .env("DECK2_SDK_FIXTURE", steering.path())
-                .env("HOME", steering.path())
-                .env("PATH", steering.path())
-                .output()
-                .await
-                .unwrap(),
-        );
-        assert_pass(
-            command("coordination")
-                .env("DECK2_SDK_FIXTURE", coordination.path())
-                .env("HOME", coordination.path())
-                .env("PATH", coordination.path())
-                .output()
-                .await
-                .unwrap(),
-        );
+        eprintln!("Claude SDK fixture crash: {:.2?}", started.elapsed());
+        run_sdk_case(dir.path(), "restart").await;
         return;
     };
     const FIRST: &str = "claude-sdk-first-command";
@@ -664,6 +1099,26 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     const REJECTED: &str = "claude-sdk-rejected-command";
     let action = std::env::var("DECK2_SDK_CASE").unwrap();
     let host = app(&dir);
+    if action == "startup" {
+        verify_startup_retry(&host, &dir).await;
+        return;
+    }
+    if action == "auth-timeout" {
+        verify_auth_timeout(&host, &dir).await;
+        return;
+    }
+    if action == "direct-resend" {
+        verify_direct_resend(&host, &dir).await;
+        return;
+    }
+    if action == "startup-restart" {
+        verify_startup_restart(host, &dir).await;
+        return;
+    }
+    if action == "lead-activity" {
+        verify_lead_activity(&host, &dir).await;
+        return;
+    }
     if action == "coordination" {
         verify_coordination(&host, &dir).await;
         return;
@@ -721,9 +1176,12 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
             }),
         )
         .await;
+    // Exercise the persisted read-review lifecycle in the mode that still uses it.
+    host.store.lock().unwrap().set_approvals(SESSION, "yolo").unwrap();
     browser
         .request("POST", "/api/commands", send_command(FIRST, "First turn"))
         .await;
+    let settled_history = if action == "normal" { 63 } else { 0 };
     for (index, (tool, response)) in [
         ("Read", "allow_once"),
         ("Glob", "deny"),
@@ -732,9 +1190,18 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     .into_iter()
     .enumerate()
     {
+        let index = if index == 0 { index } else { index + settled_history };
         let receipt = wait_for(&host, FIRST, |r| r.decisions.len() > index).await;
         let decision = &receipt.decisions[index];
         assert_eq!(decision.state, DecisionState::Pending);
+        if tool == "Glob" && settled_history > 0 {
+            assert_eq!(index, 64);
+            assert!(
+                receipt.decisions[..index]
+                    .iter()
+                    .all(|d| d.state == DecisionState::Delivered)
+            );
+        }
         let workspace = browser.request("GET", "/api/workspace", Value::Null).await;
         let active = workspace["receipts"]
             .as_array()
@@ -755,6 +1222,23 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
                 presentation["details"]["input"]["file_path"],
                 json!(dir.join("project/CLAUDE.md"))
             );
+            // Hold the first native reply while seeding settled history. Once
+            // Read is delivered, the SDK's next request sees 64 closed decisions.
+            if settled_history > 0 {
+                host.change(FIRST, |receipt| {
+                    receipt.decisions.extend((0..settled_history).map(|i| {
+                        let mut settled = decision.clone();
+                        settled.id = format!("settled-fixture-{i}");
+                        settled.item = settled.id.clone();
+                        settled.request = settled.id.clone();
+                        settled.native = None;
+                        settled.state = DecisionState::Delivered;
+                        settled.delivered_ms = Some(now());
+                        settled
+                    }));
+                })
+                .unwrap();
+            }
         }
         let mut body = json!({"api":API, "command_id":Uuid::new_v4().to_string(),
             "expected_revision":decision.revision, "response":{"type":response}});
@@ -773,15 +1257,16 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
             .await;
     }
     let first = wait_for(&host, FIRST, |r| {
-        r.text == "Partial" && r.decisions.len() == 4
+        r.text == "Partial" && r.decisions.len() == 4 + settled_history
     })
     .await;
-    for (decision, allowed) in first.decisions.iter().zip([true, false, true]) {
+    let live_decisions = first.decisions.iter().filter(|d| d.native.is_some());
+    for (decision, allowed) in live_decisions.zip([true, false, true]) {
         assert_eq!(decision.state, DecisionState::Delivered);
         assert!(decision.delivered_ms.is_some());
         assert_eq!(decision.grant_consumed, allowed);
     }
-    assert_eq!(first.decisions[3].state, DecisionState::Pending);
+    assert_eq!(first.decisions.last().unwrap().state, DecisionState::Pending);
     assert_eq!(
         std::fs::read_to_string(dir.join("project/.git/config")).unwrap(),
         "before\n"
@@ -805,7 +1290,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         .await;
     let stopped = wait_for(&host, FIRST, |r| r.phase == Phase::Cancelled).await;
     assert_eq!(stopped.text, "Partial");
-    assert_eq!(stopped.decisions[3].state, DecisionState::Invalidated);
+    assert_eq!(stopped.decisions.last().unwrap().state, DecisionState::Invalidated);
     let second = wait_for(&host, SECOND, |r| r.phase == Phase::Completed).await;
     assert_eq!(second.text, "Follow-up finished");
     assert_reused_grep(&first, &second);
@@ -921,6 +1406,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
             }),
         )
         .await;
+    host.store.lock().unwrap().set_approvals(OTHER_SESSION, "yolo").unwrap();
     assert_new_grep_review(
         &host,
         &browser,
@@ -1021,8 +1507,9 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     let outside = wait_for(&host, "any-outside-grep", |r| r.phase == Phase::Completed).await;
     assert_eq!(outside.text, "Search denied");
     assert!(outside.decisions.is_empty());
-    // Ordinary multi-step flow from a clean grant state. The user always picks
-    // the broadest offered reusable option; counts are the prompts actually shown.
+    // The CLI fixture checks permit and denial replies. Only rejected Bash
+    // commands should produce permission cards in relay mode.
+    host.store.lock().unwrap().set_approvals(SESSION, "relay").unwrap();
     browser
         .request("POST", &format!("/api/sessions/{SESSION}/grants/revoke"), Value::Null)
         .await;
@@ -1049,7 +1536,9 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
             .as_array().unwrap().iter().find(|v| v["id"] == decision.id).unwrap().clone();
         let options = shown["presentation"]["permission_policy"]["options"].as_array().cloned().unwrap_or_default();
         let tool = shown["presentation"]["details"]["tool"].as_str().unwrap_or("?").to_owned();
-        let protected = shown["presentation"]["details"].to_string().contains("reset --hard");
+        // Visible protected Git carries no session scope and is denied here.
+        let protected = tool == "Bash" && options.iter().all(|o| o["kind"] == "exact") && options.len() <= 1
+            && decision.native.as_ref().unwrap().permission.is_none();
         let broad = options.last().filter(|o| o["kind"] != "exact");
         prompted.push(format!("{tool}:{}", broad.map_or("exact-only", |o| o["kind"].as_str().unwrap())));
         let mut body = json!({"api":API, "command_id":Uuid::new_v4().to_string(),
@@ -1062,12 +1551,22 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
             .request("POST", &format!("/api/decisions/{}/responses", decision.id), body)
             .await;
     };
-    let reused = flow.decisions.iter().filter(|d| matches!(d.native.as_ref().unwrap().resolution_provenance, Some(deck2_shared::PermissionProvenance::ReusedGrant { .. }))).count();
     assert_eq!(
         prompted,
-        ["Read:workspace_read", "Glob:workspace_read", "Grep:workspace_grep", "Bash:bash_prefix", "Bash:exact-only"]
+        // Any Bash use (user decision): only visible protected Git stays exact-only.
+        ["Bash:exact-only", "Bash:exact-only", "Bash:exact-only", "Bash:exact-only",
+         "Bash:exact-only", "Bash:bash_any", "Bash:exact-only"],
     );
-    assert_eq!((flow.decisions.len(), reused), (8, 3));
+    assert_eq!(flow.text, "Flow finished");
+    assert_eq!(flow.decisions.len(), prompted.len());
+    let commands: Vec<Value> = flow.decisions.iter().map(|d| {
+        let parameters: Value = serde_json::from_str(&d.native.as_ref().unwrap().parameters).unwrap();
+        parameters["_meta"]["tool_params"]["command"].clone()
+    }).collect();
+    assert_eq!(json!(commands), json!([
+        "git checkout -- f", "printf ready; git clean -fd", "(git status && git stash drop)",
+        "git reset --hard HEAD", "setsid git reset --hard", "rm -rf x", "git-reset --hard",
+    ]));
     for (mode, id) in [
         ("relay", "direct-claude-relay"),
         ("yolo", "direct-claude-yolo"),
@@ -1102,6 +1601,10 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         );
         assert!(!dir.join("escape.txt").exists());
     }
+    browser.request("POST", "/api/commands", send_command("yolo-protected", "Protected Git in yolo")).await;
+    resolve_bash(&host, &browser, "yolo-protected", Some("git reset --hard"), false).await;
+    let protected = wait_for(&host, "yolo-protected", |r| r.phase == Phase::Completed).await;
+    assert_eq!(protected.text, "Protected Git reviewed");
     host.store
         .lock()
         .unwrap()
@@ -1136,10 +1639,15 @@ fn assert_reused_grep(source_turn: &Receipt, later_turn: &Receipt) {
     };
     assert_eq!(decision.state, DecisionState::Delivered);
     assert!(decision.grant_consumed);
+    let source_grep = source_turn
+        .decisions
+        .iter()
+        .find(|d| d.item == "toolu_fixture_3")
+        .unwrap();
     assert_eq!(
         decision.native.as_ref().unwrap().resolution_provenance,
         Some(deck2_shared::PermissionProvenance::ReusedGrant {
-            source_decision: source_turn.decisions[2].id.clone(),
+            source_decision: source_grep.id.clone(),
         })
     );
 }
@@ -1462,6 +1970,10 @@ async fn claude_sdk_member_assignments_and_outcomes() {
         "high"
     );
 
+    if stage == "normal" {
+        std::fs::write(dir.join("review-user-mcp"), "").unwrap();
+        std::fs::write(dir.join("unexpected-mcp"), "").unwrap();
+    }
     let id = "delegates-claude-member";
     let prompt = if runner == RUNNER {
         "delegate-claude-member"
@@ -1488,6 +2000,9 @@ async fn claude_sdk_member_assignments_and_outcomes() {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         return;
+    }
+    if stage == "normal" {
+        verify_user_mcp_permission(&host, &browser, id, true).await;
     }
     let running = member_state(&browser, SESSION, |t| {
         t["attempts"][0]["phase"] == "running"
@@ -1966,8 +2481,10 @@ async fn resolve_bash(
     }).await.expect("Native Bash should enter Deck's review flow");
     let decision = receipt.decisions.iter().find(|d| d.state == DecisionState::Pending).unwrap();
     let issued: Value = serde_json::from_str(&decision.native.as_ref().unwrap().parameters).unwrap();
-    let plain = issued["_meta"]["tool_params"]["command"].as_str().is_some_and(crate::permission_bounds::bash_reusable);
-    assert_eq!(decision.native.as_ref().unwrap().identity.is_some(), plain, "only plain Bash is host-identified for session consent");
+    let project = Path::new(&host.project);
+    let reusable = issued["_meta"]["tool_params"]["command"].as_str().is_some_and(|command| crate::permission_bounds::bash_reusable(command, project, project));
+    assert!(decision.native.as_ref().unwrap().identity.is_some(), "reviewed Bash keeps its scope material");
+    let _ = reusable;
     if let Some(command) = command {
         let parameters: Value = serde_json::from_str(&decision.native.as_ref().unwrap().parameters).unwrap();
         assert_eq!(parameters["_meta"]["tool_params"]["command"], command);
@@ -1999,40 +2516,13 @@ async fn verify_bash(host: &App, dir: &Path, runner: &str) {
         std::fs::write(dir.join("claude-apply-lead-running"), "").unwrap();
     }
     let origin = wait_for(host, root, |r| r.phase == Phase::Completed).await;
-    resolve_bash(host, &browser, root, Some("touch should-not-exist"), false).await;
-    resolve_bash(host, &browser, root, Some("make test"), true).await;
-    // Two related member Bash requests: choose the offered family on the first.
-    {
-        let receipt = timeout(Duration::from_secs(10), async { loop {
-            let r = host.receipt(root).unwrap();
-            if r.decisions.iter().any(|d| d.state == DecisionState::Pending && d.id != "") && r.decisions.iter().filter(|d| d.state == DecisionState::Pending).count() > 0 { return r; }
-            tokio::time::sleep(Duration::from_millis(15)).await;
-        }}).await.unwrap();
-        let d = receipt.decisions.iter().find(|d| d.state == DecisionState::Pending).unwrap();
-        let shown = browser.request("GET", "/api/workspace", Value::Null).await["receipts"].as_array().unwrap().iter()
-            .find(|v| v["id"] == root).unwrap()["decisions"].as_array().unwrap().iter().find(|v| v["id"] == d.id).unwrap().clone();
-        let options = shown["presentation"]["permission_policy"]["options"].as_array().cloned().unwrap_or_default();
-        let family = options.last().filter(|o| o["kind"] != "exact").expect("member Bash should offer a family option").clone();
-        assert_eq!(family["kind"], "bash_prefix");
-        browser.request("POST", &format!("/api/decisions/{}/responses", d.id), json!({
-            "api":API, "command_id":Uuid::new_v4().to_string(), "expected_revision":d.revision,
-            "response":{"type":"allow_session"}, "scope_option_id":family["id"].clone(),
-        })).await;
-        let delegated = member_state(&browser, SESSION, |task| task["owner"] == "apply-fast").await;
-        let task = delegated["id"].as_str().unwrap().to_owned();
-        let outcome = member_outcome(host, &json!({"id":task})).await;
-        assert_eq!(outcome.phase, Phase::Completed, "{}", outcome.detail);
-        let r = host.receipt(root).unwrap();
-        let cargo: Vec<_> = r.decisions.iter().filter(|d| d.native.as_ref().is_some_and(|n| n.parameters.contains("cargo test"))).collect();
-        let reused = cargo.iter().filter(|d| matches!(d.native.as_ref().unwrap().resolution_provenance, Some(deck2_shared::PermissionProvenance::ReusedGrant { .. }))).count();
-        eprintln!("MEMBER-BASH-COUNTS visible_prompts=1 cargo_decisions={} reused={reused}", cargo.len());
-        assert_eq!((cargo.len(), reused), (2, 1));
-    }
+    resolve_bash(host, &browser, root, Some("rm -rf should-not-exist"), false).await;
     let delegated = member_state(&browser, SESSION, |task| task["owner"] == "apply-fast").await;
     let task = delegated["id"].as_str().unwrap().to_owned();
     let outcome = member_outcome(host, &json!({"id":task})).await;
     assert_eq!(outcome.phase, Phase::Completed, "{}", outcome.detail);
     assert_eq!(outcome.thread, origin.thread);
+    assert_eq!(host.receipt(root).unwrap().decisions.len(), 1);
     assert!(!dir.join("project/should-not-exist").exists());
     assert!(!dir.join("project/unsafe").exists());
     {
@@ -2048,9 +2538,9 @@ async fn verify_bash(host: &App, dir: &Path, runner: &str) {
         return;
     }
     browser.request("POST", "/api/commands", send_command("direct-claude-bash", "lead-make")).await;
-    resolve_bash(host, &browser, "direct-claude-bash", Some("make test"), true).await;
-    assert_eq!(wait_for(host, "direct-claude-bash", |r| r.phase == Phase::Completed).await.text,
-        "make test exited 0: test-passed");
+    let built = wait_for(host, "direct-claude-bash", |r| r.phase == Phase::Completed).await;
+    assert_eq!(built.text, "make test exited 0: test-passed");
+    assert!(built.decisions.is_empty());
 
     let other = "bash-independent";
     browser.request("POST", "/api/sessions", json!({

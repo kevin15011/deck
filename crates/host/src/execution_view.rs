@@ -2,30 +2,78 @@
 //! callers render these bounded projections without decoding native protocols.
 use deck2_shared::{Decision, NativeTransport, Receipt};
 use serde_json::{Value, json};
+
+const SENSITIVE_DISPLAY_VALUE: &str = "[Sensitive display value withheld]";
+
+pub(crate) fn sensitive_text(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let boundary = |ch: char| !ch.is_alphanumeric();
+    for marker in ["authorization", "api_key", "api-key", "apikey", "access_key", "access-key", "accesskey", "password", "passwd", "secret", "sk-", "ghp_", "github_pat_", "token", "bearer", "basic"] {
+        let credential_key = !matches!(marker, "sk-" | "ghp_" | "github_pat_" | "bearer" | "basic");
+        for (at, _) in lower.match_indices(marker) {
+            let tail = &lower[at + marker.len()..];
+            let flag_tail = tail.trim_start_matches(['\'', '"']);
+            if credential_key
+                && flag_tail.starts_with([' ', '\t'])
+                && lower[..at]
+                    .rsplit(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')))
+                    .next()
+                    .is_some_and(|prefix| prefix.starts_with("--"))
+            {
+                return true;
+            }
+            if !lower[..at].chars().next_back().is_none_or(boundary) {
+                // A credential suffix can occur inside an assignment key,
+                // for example clientSecret or accessToken.
+                if credential_key
+                    && tail.trim_start_matches([' ', '\t', '\'', '"']).starts_with(['=', ':'])
+                {
+                    return true;
+                }
+                continue;
+            }
+            let sensitive = match marker {
+                "sk-" | "ghp_" | "github_pat_" => true,
+                "token" => tail.trim_start_matches([' ', '\t', '\'', '"']).starts_with(['=', ':'])
+                    || lower[..at].ends_with("--") && tail.starts_with(char::is_whitespace),
+                "bearer" | "basic" => tail.starts_with(char::is_whitespace),
+                _ => tail.chars().next().is_none_or(boundary),
+            };
+            if sensitive {
+                return true;
+            }
+        }
+    }
+    lower.split("://").skip(1).any(|url| {
+        let host = url.split(['/', '?', '#', '\'', '"', ' ', '\r', '\n', '\t']).next().unwrap_or_default();
+        host.contains('@') || url.split_ascii_whitespace().next().is_some_and(|url| {
+            url.split_once('?').is_some_and(|(_, query)| query.contains('%') || query.starts_with("key=")
+                || query.contains("&key=") || query.starts_with("auth=") || query.contains("&auth=")
+                || query.starts_with("signature=") || query.contains("&signature=")
+                || query.starts_with("sig=") || query.contains("&sig="))
+        })
+    })
+}
+
+pub(crate) fn sensitive_bash(command: &str) -> bool {
+    sensitive_text(command)
+        || (command.contains("\\\n") && sensitive_text(&command.replace("\\\n", "")))
+}
+
+/// The review displays one quoted Bash string. Control and directional
+/// characters are represented visibly, including a literal backslash.
+pub(crate) fn bash_display(command: &str) -> String {
+    format!("{command:?}")
+}
+
 pub(crate) fn bounded(value: &Value, depth: usize) -> Value {
     if depth > 6 {
         return json!("[Display depth limit]");
     }
     match value {
         Value::String(s) => {
-            let lower = s.to_lowercase();
-            if [
-                "bearer ",
-                "basic ",
-                "authorization",
-                "token=",
-                "token:",
-                "api_key",
-                "apikey",
-                "password",
-                "passwd",
-                "secret",
-                "sk-",
-            ]
-            .iter()
-            .any(|p| lower.contains(p))
-            {
-                return json!("[Sensitive display value withheld]");
+            if sensitive_text(s) {
+                return json!(SENSITIVE_DISPLAY_VALUE);
             }
             json!(
                 s.chars()
@@ -87,11 +135,28 @@ pub(crate) fn decision(d: &Decision) -> Value {
         Some(NativeTransport::ClaudeSdk) => crate::claude::approval::action_view(n),
         None => None,
     };
-    let Some((kind, details)) = projected else {
+    let Some((kind, mut details)) = projected else {
         return json!({"version":1,"kind":"unavailable","validated":false,"details":Value::Null});
     };
-    let details = bounded(&details, 0);
-    let details = if details.to_string().len() <= 4096 {
+    // Scan the raw command while shell continuations are still intact.
+    if n.transport == Some(NativeTransport::CodexJsonRpc)
+        && kind == "command"
+        && details["command"].as_str().is_some_and(sensitive_bash)
+    {
+        details["command"] = json!(SENSITIVE_DISPLAY_VALUE);
+    }
+    let details = if kind == "bash" {
+        details
+    } else {
+        let mut display = bounded(&details, 0);
+        if n.transport == Some(NativeTransport::DeckMcp)
+            && details["tool"].as_str().is_some_and(crate::permission_bounds::claude_mcp_tool)
+        {
+            display["tool"] = details["tool"].clone();
+        }
+        display
+    };
+    let details = if kind == "bash" || details.to_string().len() <= 4096 {
         details
     } else {
         json!({"display":"Action exceeds the bounded display; inspect exact recorded action"})
@@ -153,5 +218,11 @@ mod tests {
         assert!(!output.to_string().contains("secret-value"));
         assert_eq!(output["input"]["safe"], "visible");
         assert_eq!(output["large"].as_str().unwrap().len(), 1024);
+        let params = json!({"toolName":"Bash","_meta":{"tool_params":{"command":"clientSecret=FIXTURE_SENTINEL echo ready"}}});
+        assert!(crate::session_mcp::action_view(&params.to_string()).is_none());
+        let params = json!({"toolName":"Bash","_meta":{"tool_params":{"command":"fixture --clientSecret FIXTURE_PUBLIC_SENTINEL"}}});
+        assert!(crate::session_mcp::action_view(&params.to_string()).is_none());
+        let params = json!({"toolName":"Bash","_meta":{"tool_params":{"command":"fixture --clientSecret\\\n   FIXTURE_CONTINUED_SENTINEL"}}});
+        assert!(crate::session_mcp::action_view(&params.to_string()).is_none());
     }
 }

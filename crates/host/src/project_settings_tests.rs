@@ -562,7 +562,7 @@ esac
     for body in [json!({"api":API,"action":"install","path":"/escape"}),json!({"api":API,"action":"install","args":["--gemini"]})]{
         let(code,_)=call(&app,"POST","/api/tools/rtk/runners/codex",body).await;assert_eq!(code,StatusCode::UNPROCESSABLE_ENTITY);
     }
-    let(code,_)=call(&app,"POST","/api/tools/rtk/runners/claude",json!({"api":API,"action":"install"})).await;assert_eq!(code,StatusCode::BAD_REQUEST);
+    let(code,_)=call(&app,"POST","/api/tools/rtk/runners/opencode",json!({"api":API,"action":"install"})).await;assert_eq!(code,StatusCode::BAD_REQUEST);
     let(code,_)=call(&app,"POST","/api/tools/rtk/runners/codex",json!({"api":0,"action":"install"})).await;assert_eq!(code,StatusCode::BAD_REQUEST);
     let commands=std::fs::read_to_string(h.join("commands")).unwrap();
     assert!(commands.lines().all(|s|matches!(s,"--version"|"init -g --codex --show"|"init -g --codex"|"init -g --codex --uninstall")));

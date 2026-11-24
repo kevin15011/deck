@@ -79,10 +79,23 @@ impl Bridge {
         app: &App,
         project: &deck2_shared::ProjectBinding,
         args: &Value,
-    ) -> bool {
-        relay_approval(&self.scope, app, args, Some(project))
-            .await
-            .is_ok_and(|reply| reply["behavior"] == "allow")
+    ) -> Result<(), String> {
+        let reply = relay_approval(&self.scope, app, args, Some(project)).await
+            .map_err(|_| "Deck could not record or deliver the Bash permission for this project and attempt")?;
+        if reply["behavior"] == "allow" {
+            return Ok(());
+        }
+        Err(reply["message"].as_str().unwrap_or("Bash permission was denied").into())
+    }
+    pub(crate) async fn approve_claude_mcp(&self, app: &App, args: &Value) -> Result<(), String> {
+        if !args["tool_name"].as_str().is_some_and(crate::permission_bounds::claude_mcp_tool) {
+            return Err("Invalid user MCP tool name".into());
+        }
+        let reply = relay_approval(&self.scope, app, args, None).await?;
+        if reply["behavior"] == "allow" {
+            return Ok(());
+        }
+        Err(reply["message"].as_str().unwrap_or("MCP permission was denied").into())
     }
     pub fn set_role(&self, role: crate::session_roles::Role) {
         *self.scope.role.lock().unwrap() = Some(role);
@@ -738,6 +751,9 @@ async fn relay_approval(
     {
         return Err("Invalid permission relay request".into());
     }
+    if args["tool_name"] == "Bash" && bash_project.is_none() {
+        return Err("Bash requires the native Claude permission adapter".into());
+    }
     let live = |store: &crate::Store| {
         live(s, store) && bash_project.is_none_or(|project| {
             store.execution_project(&s.session).is_ok_and(|current| current == *project)
@@ -746,7 +762,10 @@ async fn relay_approval(
     };
     let id = {
         let mut store = app.store.lock().map_err(|_| "State lock failed")?;
-        if !live(&store) {
+        if !live(&store)
+            || !app.persistence_available()
+            || app.shutdown_requested.load(std::sync::atomic::Ordering::SeqCst)
+        {
             return Err("Relay authority revoked".into());
         }
         let mut root = store.get(&s.root)?.ok_or("Origin missing")?;
@@ -773,6 +792,21 @@ async fn relay_approval(
         }) {
             return Err("Duplicate Claude Bash request".into());
         }
+        if let Some(project) = bash_project {
+            let root = std::path::Path::new(&project.root);
+            if caller.phase != Phase::Running {
+                return Err("Claude Bash attempt inactive".into());
+            }
+            if args["input"]["command"].as_str().is_some_and(|command| {
+                !crate::permission_bounds::claude_bash_requires_fresh_review(command, root)
+                    && crate::permission_bounds::bash_reusable(command, root, root)
+            }) {
+                return Ok(json!({"behavior":"allow"}));
+            }
+        }
+        if crate::native_approval::at_capacity(&root) {
+            return Ok(json!({"behavior":"deny","message":crate::native_approval::CAPACITY_DENIAL}));
+        }
         let mut value = json!({"id":request,"method":"mcpServer/elicitation/request","params":{"threadId":thread,"turnId":turn,"serverName":"deck-relay","toolName":args["tool_name"],"mode":"form","requestedSchema":{"type":"object","properties":{}},"_meta":{"codex_approval_kind":"mcp_tool_call","tool_params":args["input"]},"toolUseId":args["tool_use_id"]}});
         if bash_project.is_some() {
             value["params"]["itemId"] = json!(item);
@@ -791,11 +825,11 @@ async fn relay_approval(
             "Permission request: {}",
             args["tool_name"].as_str().unwrap()
         );
-        // Bash is remembered only when the host-validated command may be reused;
-        // protected Git operations keep requiring fresh confirmation.
-        d.native.as_mut().unwrap().identity = (bash_project.is_none()
-            || args["input"]["command"].as_str().is_some_and(crate::permission_bounds::bash_reusable))
-        .then(|| json!({"relay":args["tool_name"],"input":args["input"]}).to_string());
+        // Every relay keeps the material its session scope is built from. Bash
+        // with visible protected Git gets no scope (fresh_command_required) and
+        // therefore needs a fresh decision.
+        d.native.as_mut().unwrap().identity =
+            Some(json!({"relay":args["tool_name"],"input":args["input"]}).to_string());
         if args["tool_name"] == "AskUserQuestion" {
             let questions = args["input"]["questions"]
                 .as_array()
@@ -947,6 +981,16 @@ async fn relay_approval(
 
 pub(crate) fn action_view(parameters:&str)->Option<(&'static str,Value)> {
     let p:Value=serde_json::from_str(parameters).ok()?;
+    let tool = crate::codex_protocol::native_tool_name(&p);
+    let input = &p["_meta"]["tool_params"];
+    if tool == Some("Bash") {
+        let command = input["command"].as_str()?;
+        if input.to_string().len() > 16_384 || crate::execution_view::sensitive_bash(command) {
+            return None;
+        }
+        let timeout = input["timeout"].as_u64();
+        return Some(("bash", json!({"tool":"Bash","command":crate::execution_view::bash_display(command),"timeout":timeout})));
+    }
     Some(("tool",json!({"tool":crate::codex_protocol::native_tool_name(&p),"input":p["_meta"]["tool_params"]})))
 }
 
@@ -1514,6 +1558,169 @@ pub(crate) mod tests {
             StatusCode::FORBIDDEN
         );
     }
+    #[tokio::test]
+    async fn bash_cannot_bypass_the_native_adapter_through_generic_relay() {
+        let (_dir, app, bridge) = fixture().await;
+        let response = call(bridge.config.clone(), "deck_approve", json!({
+            "tool_name":"Bash","input":{"command":"git status","dangerouslyDisableSandbox":true},
+        })).await;
+        assert_eq!(response["result"]["isError"], true);
+        assert!(app.receipt("coordination-root").unwrap().decisions.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_native_requests_share_the_receipt_limit() {
+        const LIMIT: usize = 64;
+        const REQUESTS: usize = LIMIT + 4;
+        let (_dir, app, bridge) = fixture().await;
+        let root = app.receipt("coordination-root").unwrap();
+        let start = std::sync::Arc::new(tokio::sync::Barrier::new(REQUESTS));
+        let requests: Vec<_> = (0..REQUESTS)
+            .map(|i| {
+                let value = json!({"id":i,"method":"item/commandExecution/requestApproval",
+                    "params":{"threadId":"thread","turnId":"turn","itemId":format!("item-{i}"),"command":"fixture"}});
+                // All native callers can prepare from a receipt read before any inserts.
+                let decision = crate::codex_protocol::native_decision(
+                    &root,
+                    &root.generation,
+                    "thread",
+                    "turn",
+                    &value,
+                )
+                .unwrap();
+                let (app, start) = (app.clone(), start.clone());
+                tokio::spawn(async move {
+                    start.wait().await;
+                    crate::codex_protocol::record_decision(&app, decision).unwrap()
+                })
+            })
+            .collect();
+        let mut outcomes = Vec::new();
+        for request in requests {
+            outcomes.push(request.await.unwrap());
+        }
+        let reviewed = app.receipt(&root.id).unwrap().decisions;
+        assert_eq!(
+            reviewed.len(),
+            LIMIT,
+            "in-flight requests recorded on the receipt"
+        );
+        for (i, denial) in outcomes.into_iter().enumerate() {
+            let item = format!("item-{i}");
+            let recorded = reviewed.iter().any(|d| d.item == item);
+            match denial {
+                None => assert!(recorded, "request {i} has neither a decision nor a denial"),
+                Some(reason) => {
+                    assert!(!recorded);
+                    assert!(reason.contains("in-flight permission requests"));
+                }
+            }
+        }
+
+        let args = json!({"tool_name":"mcp__foreign__lookup","input":{},"tool_use_id":"next"});
+        let relay = || bridge.approve_claude_mcp(&app, &args);
+        let budget = std::time::Duration::from_secs(2);
+        let denial = tokio::time::timeout(budget, relay()).await.unwrap().unwrap_err();
+        assert!(denial.contains("in-flight permission requests"));
+
+        app.change(&root.id, |r| {
+            r.decisions[0].state = deck2_shared::DecisionState::Invalidated;
+        })
+        .unwrap();
+        let reply = relay();
+        let review = async {
+            loop {
+                if let Some(d) = app.receipt(&root.id).unwrap().decisions.get(LIMIT) {
+                    app.store.lock().unwrap().resolve(&d.id, &deck2_shared::Resolve {
+                        api: deck2_shared::API,
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        expected_revision: d.revision,
+                        response: deck2_shared::DecisionResponse::AllowOnce,
+                    }).unwrap();
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        };
+        let (reply, ()) = tokio::time::timeout(budget, async { tokio::join!(reply, review) })
+            .await
+            .expect("a settled request must free a slot for the relay");
+        assert_eq!(reply, Ok(()));
+    }
+
+    // Protects "Any" for every Claude Bash use (user decision) on the real relay
+    // path. Oracle: a reviewed unclassifiable command carries a session scope
+    // with Any; visible protected Git carries none and needs a fresh decision.
+    // Fails if the relay drops the material a scope is built from.
+    #[tokio::test]
+    async fn claude_bash_review_offers_any_except_for_visible_protected_git() {
+        let (_dir, app, bridge) = fixture().await;
+        let project = {
+            let mut s = app.store.lock().unwrap();
+            s.select_project_folder_with_trust(&app.project, true).unwrap();
+            let r = s.get("coordination-root").unwrap().unwrap();
+            s.execution_project(&r.session).unwrap()
+        };
+        let ordinary = json!({"tool_name":"Bash","input":{"command":"curl https://fixture.invalid"},"tool_use_id":"ordinary"});
+        assert!(bridge.approve_claude_bash(&app, &project, &ordinary).await.is_ok());
+        assert!(app.receipt("coordination-root").unwrap().decisions.is_empty());
+        for (n, (command, any)) in [
+            ("printf '%s' 'git reset --hard'", false),
+            ("echo ready >> notes.md", true),
+            ("printf '%s' 'git reset --hard'", false),
+            ("git stash", false),
+        ].into_iter().enumerate() {
+            let args = json!({"tool_name":"Bash","input":{"command":command},"tool_use_id":format!("bash-{n}")});
+            let review = async {
+                let d = pending(&app).await;
+                let view = crate::execution_view::decision(&d);
+                let option = d.native.as_ref().unwrap().permission.as_ref()
+                    .and_then(|p| p.options.iter().find(|o| o.kind == "bash_any"));
+                assert_eq!(option.is_some(), any, "{command}: {view}");
+                if !any {
+                    assert_eq!(view["responses"], json!(["allow_once","deny"]));
+                }
+                let response = if any { deck2_shared::DecisionResponse::AllowSession } else { deck2_shared::DecisionResponse::Deny };
+                app.store.lock().unwrap().resolve_scope(&d.id, &deck2_shared::Resolve {
+                    api:deck2_shared::API, command_id:format!("bash-scope-{n}"),
+                    expected_revision:d.revision, response,
+                }, option.map(|o| o.id.as_str())).unwrap();
+            };
+            let approval = bridge.approve_claude_bash(&app, &project, &args);
+            tokio::pin!(approval);
+            tokio::select! {
+                result = &mut approval => {
+                    panic!("Bash returned before the request could be reviewed: {result:?}");
+                }
+                () = review => {}
+            }
+            assert_eq!(approval.await.is_ok(), any);
+        }
+    }
+
+    #[tokio::test]
+    async fn quality_regression_user_mcp_public_name_reaches_review() {
+        let (_dir, app, bridge) = fixture().await;
+        let args = json!({
+            "tool_name":"mcp__fixture__secret_status", "input":{"clientSecret":"FIXTURE_SENTINEL"},
+            "tool_use_id":"public-name",
+        });
+        let approval = bridge.approve_claude_mcp(&app, &args);
+        tokio::pin!(approval);
+        let decision = tokio::select! {
+            result = &mut approval => panic!("MCP returned before review: {result:?}"),
+            decision = pending(&app) => decision,
+        };
+        let view = crate::execution_view::decision(&decision);
+        assert_eq!(view["details"]["tool"], "mcp__fixture__secret_status");
+        assert!(!view.to_string().contains("FIXTURE_SENTINEL"));
+        app.store.lock().unwrap().resolve(&decision.id, &deck2_shared::Resolve {
+            api:deck2_shared::API, command_id:"deny-public-mcp-fixture".into(),
+            expected_revision:decision.revision, response:deck2_shared::DecisionResponse::Deny,
+        }).unwrap();
+        assert!(approval.await.is_err());
+    }
+
     // Real authenticated relay requests may overlap. Delivered explicit consent
     // releases a matching pending request, while nested material IDs remain bound.
     #[tokio::test]
@@ -1536,6 +1743,14 @@ pub(crate) mod tests {
         let r=app.receipt("coordination-root").unwrap();
         assert_eq!(r.decisions[0].native.as_ref().unwrap().resolution_provenance,Some(deck2_shared::PermissionProvenance::User));
         assert_eq!(r.decisions[1].native.as_ref().unwrap().resolution_provenance,Some(deck2_shared::PermissionProvenance::ReusedGrant{source_decision:d.id}));
+        for n in 2..65 {
+            let mut reused = args.clone();
+            reused["tool_use_id"] = json!(format!("reused-{n}"));
+            let response = call(bridge.config.clone(), "deck_approve", reused).await;
+            let body: Value = serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap_or_else(|_| panic!("Reuse {n} did not receive a decision: {response}"));
+            assert_eq!(body["behavior"], "allow", "reuse {n}: {response}");
+        }
         let mut changed=args;changed["input"]["resource_id"]=json!("two");
         let third=tokio::spawn(call(bridge.config.clone(),"deck_approve",changed));
         let pending=pending(&app).await;

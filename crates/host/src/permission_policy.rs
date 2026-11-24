@@ -66,6 +66,9 @@ impl Store {
             return Ok(None);
         }
         crate::native_approval::validate_native(d)?;
+        let Some(material) = crate::native_approval::permission_material(d) else {
+            return Ok(None);
+        };
         let root = self.get(&d.command)?.ok_or("Permission origin missing")?;
         if root.session != d.session || root.mode != deck2_shared::Mode::SessionV1 {
             return Ok(None);
@@ -82,10 +85,6 @@ impl Store {
                 return Ok(None);
             };
             if t.session != d.session || t.authority_root(a) != d.command {
-                return Ok(None);
-            }
-            // Read-only members retain their existing adapter restrictions.
-            if matches!(t.owner.as_str(), "investigate" | "quality") {
                 return Ok(None);
             }
             (t.owner, a.configuration.clone())
@@ -108,6 +107,16 @@ impl Store {
         let Some(assignment) = c.members.get(&role) else {
             return Ok(None);
         };
+        // Read-only members can reuse user-granted MCP consent. Their workspace
+        // and other relay permissions retain their existing adapter restrictions.
+        if matches!(role.as_str(), "investigate" | "quality")
+            && !(assignment.runner_id == crate::claude::RUNNER
+                && material["category"] == "relay"
+                && material["request"]["toolName"].as_str()
+                    .is_some_and(crate::permission_bounds::claude_mcp_tool))
+        {
+            return Ok(None);
+        }
         if n.transport == Some(NativeTransport::ClaudeSdk)
             && (role != "lead" || assignment.runner_id != crate::claude::RUNNER)
         {
@@ -121,9 +130,6 @@ impl Store {
         let actor = json!({"project":snapshot.project,"session":d.session,"generation":c.generation,"revocation":c.grants_revoked_at,"role":role,"assignment_revision":c.revision,"assignment":assignment,"lead_task":c.lead_task});
         // Stable admission evidence, not PID, native thread, task text or MCP URL/secret.
         let issuer = json!({"transport":n.transport,"native":snapshot.native,"runner":snapshot.runner,"codex_executable":snapshot.codex_executable,"definitions":snapshot.definitions,"exclusions":snapshot.exclusions,"configuration_revision":snapshot.revision,"selection":snapshot.selection,"graph":snapshot.cbm,"helper":snapshot.helper});
-        let Some(material) = crate::native_approval::permission_material(d) else {
-            return Ok(None);
-        };
         let option_id = format!(
             "exact-v1-{}",
             crate::tasks::digest(json!([1, actor, issuer, material]).to_string().as_bytes())
@@ -137,6 +143,9 @@ impl Store {
             material,
             option_id,
         };
+        if crate::permission_bounds::fresh_command_required(&scope) {
+            return Ok(None);
+        }
         scope.options = crate::permission_bounds::options(d, &scope);
         Ok(Some(scope))
     }
@@ -1044,6 +1053,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn quality_regression_project_retrust_does_not_restore_grants() {
+        let (_dir, app, _bridge) = crate::session_mcp::tests::fixture().await;
+        let mut store = app.store.lock().unwrap();
+        store.set_trust(&app.project, true).unwrap();
+        let mut root = store.get("coordination-root").unwrap().unwrap();
+        let method = "item/commandExecution/requestApproval";
+        let grant = request(&store, &root, None, 1, method, command());
+        consent(&mut store, &grant);
+        root = store.get(&root.id).unwrap().unwrap();
+        root.phase = Phase::Completed;
+        store.save(&mut root).unwrap();
+
+        store.set_trust(&app.project, false).unwrap();
+        store.set_trust(&app.project, true).unwrap();
+        let submit = serde_json::from_value(json!({"api":API,"id":"retrusted-project-root",
+            "session":root.session,"mode":"session_v1","prompt":"Fresh request after re-trusting"})).unwrap();
+        let mut fresh = store.admit(&submit).unwrap();
+        fresh.phase = Phase::Running;
+        fresh.thread = Some("fresh-thread".into());
+        fresh.turn = Some("fresh-turn".into());
+        store.save(&mut fresh).unwrap();
+        let wanted = request(&store, &fresh, None, 2, method, command());
+        assert_eq!(store.grant_source(&wanted).unwrap(), None);
+    }
+
+    #[tokio::test]
     async fn profile_revocation_interrupts_only_affected_active_owners() {
         let (_dir, app, _bridge) = crate::session_mcp::tests::fixture().await;
         let mut s = app.store.lock().unwrap();
@@ -1420,6 +1455,35 @@ mod tests {
             .unwrap()
         );
     }
+    #[tokio::test]
+    async fn project_any_command_reuses_without_crossing_protected_boundaries() {
+        let (dir, app, _bridge) = crate::session_mcp::tests::fixture().await;
+        let mut s = app.store.lock().unwrap();
+        let r = s.get("coordination-root").unwrap().unwrap();
+        let method = "item/commandExecution/requestApproval";
+        let first = request(&s, &r, None, 846, method,
+            json!({"command":"cargo check","cwd":dir.path()}));
+        consent_selected(&mut s, &first, &option(&first, "project_any"));
+        for (command, reusable) in [
+            ("printf done", true),
+            ("git -C . status || echo retry", true),
+            ("git checkout -- f", false),
+            ("echo ready | git stash drop", false),
+            ("git -C / status", false),
+        ] {
+            let next = request(&s, &r, None, 847, method, json!({"command":command,"cwd":dir.path()}));
+            assert_eq!(s.session_grant(&next).unwrap(), reusable, "{command}");
+            if !reusable {
+                assert!(next.native.unwrap().permission.is_none());
+            }
+        }
+        let outside = request(&s, &r, None, 848, method, json!({"command":"printf done","cwd":"/"}));
+        assert!(!s.session_grant(&outside).unwrap());
+        let network = request(&s, &r, None, 849, method,
+            json!({"command":"printf done","cwd":dir.path(),"additionalPermissions":{"network":{"enabled":true}}}));
+        assert!(!s.session_grant(&network).unwrap());
+    }
+
     #[tokio::test]
     async fn qualified_argv_scope_decodes_whole_command_and_preserves_context() {
         let (dir, app, _bridge) = crate::session_mcp::tests::fixture().await;

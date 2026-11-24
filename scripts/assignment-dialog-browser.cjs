@@ -128,23 +128,26 @@ async function run() {
         // A response lost after commit must clear that draft and leave later rows for retry.
         loseReply = true;
         await model('Lead').selectOption('a');
+        await reasoning('Lead').selectOption('high');
         await model('quality').selectOption('b');
         await save.click();
         await model('Lead').and(modal.locator('select:enabled')).waitFor();
         assert(await save.isEnabled());
         assert.deepEqual(calls.slice(7), [['lead', 7]]);
+        const rememberedLead = await page.evaluate(() => JSON.parse(localStorage.getItem('deck2.session.last-assignments')).lead);
+        assert.deepEqual(rememberedLead, assignment('a', 'high'), 'a reconciled save is remembered');
         await save.click();
         await saved.waitFor();
         assert.deepEqual(calls.slice(7), [['lead', 7], ['quality', 8]]);
 
         // Accepting latest clears the dirty row and does not send a replacement.
         await model('Lead').selectOption('b');
-        externalChange = () => { contract.members.lead = assignment('a', 'high'); };
+        externalChange = () => { contract.members.lead = assignment('a', 'low'); };
         await save.click();
         await modal.getByRole('button', {name: 'Use latest for Lead'}).click();
         assert(await save.isDisabled());
         assert.equal(await model('Lead').inputValue(), 'a');
-        assert.equal(await reasoning('Lead').inputValue(), 'high');
+        assert.equal(await reasoning('Lead').inputValue(), 'low');
         assert.deepEqual(calls.slice(9), [['lead', 9]]);
 
         const runner = modal.getByLabel('Runner for architect', {exact: true});

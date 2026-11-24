@@ -44,36 +44,32 @@ def emit(message):
     print(json.dumps(message), flush=True)
 
 
+assert value("--setting-sources") == ("user,project,local" if trusted else "user")
+for flag in ("--strict-mcp-config", "--safe-mode", "--disable-slash-commands", "--mcp-config"):
+    assert not any(arg == flag or arg.startswith(flag + "=") for arg in args), flag
+settings = json.loads(value("--settings"))
+assert settings["attribution"] == {"commit": ""}
+assert settings["forceLoginMethod"] == "claudeai"
+assert not {"disableAllHooks", "disableClaudeAiConnectors", "autoMemoryEnabled", "hooks", "sandbox"} & settings.keys()
+
 if args[-3:] == ["auth", "status", "--json"]:
+    timed_out = home / "auth-timeout-once"
+    if timed_out.is_file():
+        timed_out.unlink()
+        time.sleep(10)
     emit({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty",
           "subscriptionType": "team"})
     sys.exit(0)
 
-member = trusted and value("--setting-sources") == ""
-assert value("--setting-sources") == ("project" if trusted and not member else "")
-assert "--strict-mcp-config" in args
-assert ("--safe-mode" in args) == (not trusted or member)
-assert json.loads(value("--settings"))["attribution"] == {"commit": ""}
+member = False
 catalog = "--no-session-persistence" in args
 resume_fixture = (home / "resume-fixture").exists() and trusted and not catalog
 investigate_resume = resume_fixture and (home / "investigate-resume-fixture").exists()
 apply_fixture = ((home / "apply-fixture").exists() or (resume_fixture and not investigate_resume)) and trusted and not catalog
-tools = ["Read", "Glob", "Grep"] if member else (["Read", "Glob", "Grep", "Edit", "Write"] if trusted and not catalog else [])
-if apply_fixture:
-    if member:
-        tools.extend(["Edit", "Write"])
-if (not member and trusted and not catalog) or apply_fixture:
-    tools.append("Bash")
-assert "sandbox" not in json.loads(value("--settings"))
-assert set(value("--tools").replace(",", " ").split()) == set(tools)
-assert value("--permission-mode") == ("default" if tools else "dontAsk")
-if not catalog:
-    assert json.loads(value("--settings"))["permissions"] == {"ask": [tool for tool in tools if tool != "Bash"]}
-assert "--disable-slash-commands" in args
 resume = any(arg == "--resume" or arg.startswith("--resume=") for arg in args)
 thread = option("--resume" if resume else "--session-id")
 model, effort = option("--model"), option("--effort")
-if resume_fixture and member:
+if resume_fixture:
     transcript = home / ".claude" / "projects" / re.sub(r"[^a-zA-Z0-9]", "-", str(project)) / f"{thread}.jsonl"
 if catalog:
     assert thread is None and model is None and effort is None
@@ -99,8 +95,19 @@ FLOW = [
     ("Grep", {"pattern": "One", "path": str(project / "search"), "output_mode": "content", "-B": 2}),
     ("Grep", {"pattern": "Two", "path": str(project / "CLAUDE.md"), "output_mode": "count", "head_limit": 5}),
     ("Bash", {"command": "cargo test -p one", "timeout": 5000}),
-    ("Bash", {"command": "cargo test -p two --lib", "timeout": 9000}),
+    ("Bash", {"command": "cargo test -p deck2"}),
+    ("Bash", {"command": "git status"}),
+    ("Bash", {"command": "printf ordinary", "timeout": 9000}),
+    ("Bash", {"command": "git -C . status && (printf ready | cat); cat <<'EOF'\ntask-disk-image\nEOF"}),
+    ("Bash", {"command": "git checkout -- f"}),
+    ("Bash", {"command": "printf ready; git clean -fd"}),
+    ("Bash", {"command": "(git status && git stash drop)"}),
     ("Bash", {"command": "git reset --hard HEAD"}),
+    ("Bash", {"command": "setsid git reset --hard"}),
+    ("Bash", {"command": "rm -rf x"}),
+    ("Bash", {"command": "git-reset --hard"}),
+    ("Read", {"file_path": str(home / "state.db")}),
+    ("Grep", {"pattern": "Fixture", "path": str(home / "state.db")}),
 ]
 
 def context_reply(message):
@@ -240,17 +247,15 @@ instructions = ""
 for line in sys.stdin:
     message = json.loads(line)
     if message.get("request", {}).get("subtype") == "mcp_set_servers":
+        assert set(message["request"]["servers"]) == {"deck-session"}
         server = message["request"]["servers"]["deck-session"]
         assert server["type"] == "http"
         assert mcp("initialize", 1)["serverInfo"]["name"] == "deck-session"
         inventory = mcp("tools/list", 2)["tools"]
         allowed = set(value("--allowedTools").split(","))
-        if "Bash" in allowed:
-            assert "Bash" in tools
-            allowed.remove("Bash")
         assert allowed == {
             "mcp__deck-session__" + tool["name"] for tool in inventory
-        }
+        } | {"Skill", "mcp__plugin_context-mode_context-mode"}
         response(message["request_id"], {"added": ["deck-session"], "removed": [], "errors": {}})
         continue  # Credentials never go to the fixture's wire log.
     with (home / "wire").open("a") as wire:
@@ -262,6 +267,18 @@ for line in sys.stdin:
             assert catalog or request.get("appendSystemPrompt")
             assert not request.get("systemPrompt")
             instructions = request.get("appendSystemPrompt", "")
+            member = "Deck live guidance from Lead" in instructions
+            workspace_tools = []
+            if trusted and not catalog:
+                workspace_tools.extend(["Read", "Glob", "Grep"])
+                if not member or apply_fixture:
+                    workspace_tools.extend(["Edit", "Write", "Bash"])
+            tools = [] if catalog else workspace_tools + ["Skill"]
+            assert set(value("--tools").replace(",", " ").split()) == set(tools)
+            assert value("--permission-mode") == ("dontAsk" if catalog else "default")
+            if not catalog:
+                assert set(settings["permissions"]["ask"]) == set(workspace_tools)
+                assert "--replay-user-messages" in args
             account = {"subscriptionType": "Claude Team"}
             if (home / "reject-billing").exists():
                 account["apiKeySource"] = "ANTHROPIC_API_KEY"
@@ -291,12 +308,24 @@ for line in sys.stdin:
         elif request["subtype"] == "get_context_usage":
             context_reply(message)
         elif request["subtype"] == "mcp_status":
+            if (home / "hold-startup").exists():
+                wait_for("release-startup")
+            if (home / "fail-startup-always").exists():
+                sys.exit(1)
+            if (home / "fail-startup-once").exists():
+                (home / "fail-startup-once").unlink()
+                sys.exit(1)
             statuses = [{
                 "name": "deck-session", "status": "connected", "source": "dynamic",
                 "tools": [{"name": tool["name"]} for tool in inventory],
             }]
+            if (home / "pending-foreign-mcp").exists():
+                statuses.append({"name": "unrelated", "status": "pending", "source": "user"})
             if (home / "unexpected-mcp").exists():
-                statuses.append({"name": "foreign", "status": "connected", "source": "project"})
+                statuses.append({"name": "foreign", "status": "connected", "source": "user",
+                                 "tools": [{"name": "lookup"}, {"name": "lookup_other"}]})
+            if (home / "duplicate-deck-status").exists():
+                statuses.append({"name": "deck-session", "status": "failed", "source": "user"})
             response(message["request_id"], {"mcpServers": statuses})
         elif request["subtype"] == "interrupt":
             if stopping or (member and member_action == "stop"):
@@ -310,7 +339,24 @@ for line in sys.stdin:
             break
     if message["type"] == "control_response":
         reply = message["response"]
-        if reply["request_id"] == "permission-continuity-edit":
+        if reply["request_id"] == "permission-user-mcp-first":
+            assert reply["response"]["behavior"] == "allow", "Native MCP ask was denied without user consent"
+            assert reply["response"]["updatedInput"] == {"value": "one"}
+            ask("user-mcp-reuse", "mcp__foreign__secret_status", {"value": "two"})
+            continue
+        elif reply["request_id"] == "permission-user-mcp-reuse":
+            assert reply["response"]["behavior"] == "allow"
+            assert reply["response"]["updatedInput"] == {"value": "two"}
+            ask("user-mcp-other", "mcp__foreign__lookup_other", {"value": "two"})
+            continue
+        elif reply["request_id"] == "permission-user-mcp-other":
+            assert reply["response"]["behavior"] == "deny"
+            if member:
+                ask("member-outside", input={"file_path": str(home / "state.db")})
+                continue
+            finish("User MCP review completed")
+            break
+        elif reply["request_id"] == "permission-continuity-edit":
             assert reply["response"]["behavior"] == "allow"
             edited = reply["response"]["updatedInput"]
             Path(edited["file_path"]).write_text(edited["content"])
@@ -328,7 +374,7 @@ for line in sys.stdin:
             bash("apply-unsafe", command="touch unsafe", dangerouslyDisableSandbox=True)
         elif reply["request_id"] == "permission-apply-unsafe":
             assert reply["response"]["behavior"] == "deny"
-            bash("apply-denied", command="touch should-not-exist")
+            bash("apply-denied", command="rm -rf should-not-exist")
         elif reply["request_id"] == "permission-apply-denied":
             assert reply["response"]["behavior"] == "deny"
             bash("apply-make", command="make test")
@@ -357,6 +403,9 @@ for line in sys.stdin:
         elif reply["request_id"] == "permission-member-read":
             assert reply["response"]["behavior"] == "allow"
             assert reply["response"]["updatedInput"] == {"file_path": str(project / "CLAUDE.md")}
+            if (home / "review-user-mcp").exists() and member_action == "complete":
+                ask("user-mcp-first", "mcp__foreign__secret_status", {"value": "one"})
+                continue
             ask("member-outside", input={"file_path": str(home / "state.db")})
         elif reply["request_id"] == "permission-member-outside":
             assert reply["response"]["behavior"] == "deny"
@@ -409,7 +458,14 @@ for line in sys.stdin:
                   "session_id": thread, "result": "Direct edits finished"})
             break
         elif reply["request_id"].startswith("permission-flow-"):
-            flow_step(int(reply["request_id"].rsplit("-", 1)[1]) + 1)
+            index = int(reply["request_id"].rsplit("-", 1)[1])
+            # rm -rf x (15) is covered by the user's Any Bash grant; protected Git is denied.
+            assert reply["response"]["behavior"] == ("allow" if index < 10 or index == 15 else "deny")
+            flow_step(index + 1)
+        elif reply["request_id"] == "permission-yolo-protected":
+            assert reply["response"]["behavior"] == "deny"
+            finish("Protected Git reviewed")
+            break
         elif reply["request_id"] == "permission-1":
             assert reply["response"]["behavior"] == "allow"
             assert reply["response"]["updatedInput"] == {"file_path": str(project / "CLAUDE.md")}
@@ -456,7 +512,6 @@ for line in sys.stdin:
     if message["type"] == "user":
         assert not catalog
         received_user = True
-        assert not (home / "unexpected-mcp").exists()
         content = message["message"]["content"]
         if message.get("priority") == "next":
             # A live message folded into the running turn. The CLI echoes the
@@ -493,9 +548,16 @@ for line in sys.stdin:
                           "session_id": thread, "result": "Steered: " + text}
                 if "consumed-only" in text:
                     result["user_message_uuids"] = [message["uuid"]]
+                elif "next-turn-consumed" in text:
+                    result["user_message_uuids"] = [initial_uuid]
                 emit(result)
+                if "next-turn-consumed" in text:
+                    emit({"type": "user", "message": message["message"], "session_id": thread,
+                          "parent_tool_use_id": None, "uuid": message["uuid"], "isReplay": True})
+                    emit({**result, "user_message_uuids": [message["uuid"]]})
                 break
             continue
+        initial_uuid = message.get("uuid")
         if isinstance(content, list):
             (home / "initial-blocks").write_text(json.dumps(content))
             content = "".join(b.get("text", "") for b in content if b["type"] == "text")
@@ -504,10 +566,16 @@ for line in sys.stdin:
             emit({"type":"result", "subtype":"success", "is_error":False,
                   "session_id":"00000000-0000-4000-8000-000000000001", "result":"Wrong session"})
             break
+        extra_mcp = (home / "unexpected-mcp").exists()
         emit({"type": "system", "subtype": "init", "session_id": thread,
               "model": "fixture-model",
-              "tools": tools + ["mcp__deck-session__" + tool["name"] for tool in inventory],
-              "mcp_servers": [{"name":"deck-session", "status":"connected"}] if server else []})
+              "tools": tools + ["mcp__deck-session__" + tool["name"] for tool in inventory]
+                       + (["ToolSearch"] if content == "Check configured roles" and extra_mcp else [])
+                       + (["mcp__foreign__secret_status", "mcp__foreign__lookup_other"] if extra_mcp else []),
+              "mcp_servers": ([{"name":"deck-session", "status":"connected"}] if server else [])
+                             + ([{"name":"deck-session", "status":"failed"}]
+                                if (home / "duplicate-deck-init").exists() else [])
+                             + ([{"name":"foreign", "status":"connected"}] if extra_mcp else [])})
         emit({"type": "stream_event", "session_id": thread, "parent_tool_use_id": None,
               "event": {"type": "content_block_delta", "delta": {"type": "text_delta",
                                                                  "text": "Partial"}}})
@@ -722,6 +790,9 @@ for line in sys.stdin:
             assert set(schema["required"]) == {"agent", "task"}, schema
             assert schema["dependentRequired"]["commandId"] == ["replan"], schema
             assert "commandId" in schema["dependentRequired"]["replan"], schema
+        if content == "user-mcp-permission":
+            ask("user-mcp-first", "mcp__foreign__secret_status", {"value": "one"})
+            continue
         if content == "Check configured roles":
             assert not resume
             emit({"type": "result", "subtype": "success", "is_error": False,
@@ -774,6 +845,27 @@ for line in sys.stdin:
             emit({"type": "result", "subtype": "success", "is_error": False,
                   "session_id": thread, "result": "Integrated member report"})
             break
+        if content in ("Readiness fixture", "Readiness after restart", "finish echo-withheld next-turn-consumed", "finish echo-withheld", "Never yielded follow-up"):
+            finish("Fixture completed")
+            break
+        if content == "Lead activity fixture":
+            def stream_lead(event):
+                emit({"type": "stream_event", "session_id": thread, "parent_tool_use_id": None, "event": event})
+            stream_lead({"type": "message_start", "message": {"id": "msg_lead"}})
+            stream_lead({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking"}})
+            stream_lead({"type": "content_block_delta", "index": 0,
+                         "delta": {"type": "thinking_delta", "thinking": "fixture-private-reasoning"}})
+            wait_for("lead-tool")
+            stream_lead({"type": "content_block_stop", "index": 0})
+            emit({"type": "assistant", "session_id": thread, "parent_tool_use_id": None,
+                  "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_lead",
+                      "name": "Bash", "input": {"command": "git status", "unused": "fixture-private-payload"}}]}})
+            wait_for("lead-finish")
+            finish("Lead activity complete")
+            break
+        if content == "Exit before live steer yield":
+            wait_for("exit-before-yield")
+            break
         if content.startswith("Hold for live steering"):
             continue
         if content.startswith("Context scenario "):
@@ -783,6 +875,9 @@ for line in sys.stdin:
             (project / "search").mkdir(exist_ok=True)
             (project / "search" / "a.txt").write_text("One\nTwo\n")
             flow_step(0)
+            continue
+        if content == "Protected Git in yolo":
+            bash("yolo-protected", command="git reset --hard")
             continue
         if content == "Follow up":
             grep("grant-reused")

@@ -268,3 +268,110 @@
   .workbench > .session-drawer[open]::backdrop { opacity:0; }
  }
 }
+
+.conversation-feedback { bottom: calc(var(--composer-height, 100px) + var(--permission-dock-height, 0px)); }
+/* A sibling of the composer dock: that dock clips its overflow, so a child
+   anchored above it would be invisible. */
+.permission-dock {
+  position: absolute;
+  z-index: 3;
+  inset-inline: 0;
+  bottom: calc(var(--composer-height, 100px) + .5rem);
+  width: var(--composer-column-width, calc(100% - 2 * var(--composer-inset)));
+  margin-inline: auto;
+  pointer-events: none;
+}
+.permission-dock > section {
+  max-height: min(18rem, 36dvh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--surface-radius);
+  background: var(--surface);
+}
+.permission-dock ul { list-style: none; margin: 0; padding: 0; }
+.permission-dock li + li { border-top: 1px solid var(--border); }
+.docked-permission { padding: .25rem .5rem; }
+.dock-permission-summary.quiet {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: .375rem;
+  padding: .25rem;
+  min-height: 28px;
+  text-align: start;
+  font-size: .75rem;
+  color: var(--ink);
+}
+.dock-permission-summary svg { flex: none; width: .85rem; height: .85rem; }
+.dock-permission-summary strong { flex: 0 1 auto; max-width: 62%; }
+.dock-permission-summary :is(strong,span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-permission-summary span { color: var(--muted); }
+.dock-permission-controls { display: flex; align-items: center; justify-content: flex-end; gap: .25rem; padding-bottom: .125rem; }
+.dock-permission-controls label { min-width: 0; margin-inline-end: auto; }
+/* Compact controls with a clear hierarchy: one filled primary allow, an
+   outlined secondary and quiet text actions. Every button inherits the filled
+   action color by default, so each level resets it explicitly. */
+.dock-permission-controls button {
+  min-height: 24px;
+  padding: .125rem .5rem;
+  border-radius: 6px;
+  font-size: .72rem;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.dock-permission-controls button.dock-action-primary { font-weight: 600; }
+.dock-permission-controls button.dock-action-secondary {
+  --button-action: transparent;
+  border-color: var(--border);
+  color: var(--ink);
+}
+.dock-permission-controls button.dock-action-secondary:hover:not(:disabled) { --button-action: var(--tint); }
+.dock-permission-controls button.dock-action-tertiary {
+  --button-action: transparent;
+  color: var(--muted);
+  padding-inline: .375rem;
+}
+.dock-permission-controls button.dock-action-tertiary:hover:not(:disabled) { --button-action: var(--tint); color: var(--ink); }
+.dock-permission-controls button.dock-action-deny:hover:not(:disabled) { color: var(--danger); }
+.dock-permission-controls button:disabled { opacity: .55; cursor: default; }
+/* Scope picker: themed field with its own chevron instead of the native control. */
+.dock-scope { position: relative; display: inline-flex; max-width: 100%; }
+.dock-scope select {
+  appearance: none;
+  -webkit-appearance: none;
+  max-width: 100%;
+  min-height: 24px;
+  padding: .125rem 1.5rem .125rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input);
+  color: var(--ink);
+  font: inherit;
+  font-size: .72rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.dock-scope select:hover:not(:disabled) { border-color: var(--quiet); }
+.dock-scope select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.dock-scope select:disabled { opacity: .55; cursor: default; }
+.dock-scope select option { background: var(--surface); color: var(--ink); }
+.dock-scope::after {
+  content: '';
+  position: absolute;
+  inset-inline-end: .55rem;
+  top: 50%;
+  width: .3rem;
+  height: .3rem;
+  border-inline-end: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+.dock-permission-details { margin: .25rem 0; }
+.dock-permission-details p { font-size: .75rem; margin: .25rem 0; }
+.dock-permission-details pre { white-space: pre-wrap; overflow-wrap: anywhere; }

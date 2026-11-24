@@ -40,15 +40,20 @@ function Disclosure({label,children}:{label:string;children:React.ReactNode}){
  const [open,setOpen]=useState(false),ref=useRef<HTMLDivElement>(null);useDisclosureMotion(ref,open);
  return <div className="activity-disclosure"><button className="quiet" aria-expanded={open} onClick={()=>setOpen(v=>!v)}>{label}<span aria-hidden="true">{open?' −':' +'}</span></button><div ref={ref} hidden={!open} inert={!open}>{open&&children}</div></div>;
 }
+export function LiveStep({label,inline=false}:{label?:string;inline?:boolean}){
+ if(inline)return <span data-live-step>{label}</span>;
+ return label?<p className="task-live-step muted" role="status" data-live-step>{label}</p>:null;
+}
 export function LiveActivity({steps,receipts,connected}:{steps:Step[];receipts:Receipt[];connected:boolean}){
  const working=receipts.filter(r=>r.phase==='running').at(-1);
  const owned=working?steps.filter(s=>!s.task&&s.command===working.id&&s.attempt===working.attempt):[];
  const current=owned.find(s=>s.status==='running')??owned[0];
  const label=current?stepLabel(current):undefined;
- const text=working&&connected?(current&&label?`${current.owner==='lead'?'':current.owner+' · '}${label.label}${label.summary?' · '+label.summary:''}`:'Thinking…'):'';
+ const runningBash=current?.tool==='Bash'&&current.status==='running';
+ const text=working&&connected?(runningBash?'Running Bash…':label?`${label.label}${label.summary?' · '+label.summary:''}`:'Thinking…'):'';
  const ref=useRef<HTMLDivElement>(null),last=useRef('');if(text)last.current=text;useDisclosureMotion(ref,!!text);
  useLayoutEffect(()=>{const node=ref.current;if(!node||!text)return;if(!matchMedia('(prefers-reduced-motion: reduce)').matches)gsap.fromTo(node,{opacity:.65},{opacity:1,duration:.12,overwrite:true,clearProps:'opacity'});return()=>{gsap.killTweensOf(node);};},[text]);
- return <div ref={ref} hidden={!text} className="live-activity" role="status" aria-live="polite"><span aria-hidden="true" className={text&&(!current||current.kind==='reasoning')?'thinking-pulse':undefined}>{label?.mark??'·'}</span><span>{last.current}</span>{current&&<small>{current.runner}</small>}</div>;
+ return <div ref={ref} hidden={!text} className="live-activity" role="status" aria-live="polite"><span aria-hidden="true" className={text&&(!current||current.kind==='reasoning')?'thinking-pulse':undefined}>{label?.mark??'·'}</span><LiveStep label={last.current} inline/>{current&&<small>{current.runner}</small>}</div>;
 }
 function StepOutput({step,session}:{step:Step;session:string}){
  const [output,setOutput]=useState<string>(),[error,setError]=useState('');

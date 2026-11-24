@@ -1,7 +1,38 @@
-//! Bounded host policies. No arbitrary shell families or third-party tool projections.
+//! Bounded host policies for reusable permissions.
 use deck2_shared::{Decision, PermissionScope, PermissionScopeOption};
 use serde_json::{Value, json};
 use std::path::{Component, Path, PathBuf};
+
+mod bash;
+
+pub(crate) fn bash_reusable(command: &str, root: &Path, cwd: &Path) -> bool {
+    bash::reusable(command, root, cwd)
+}
+
+pub(crate) fn claude_bash_requires_fresh_review(command: &str, root: &Path) -> bool {
+    bash::visible_protected_git(command, root, root)
+}
+
+pub(crate) fn codex_native_prefix_reusable(request: &Value, prefix: &[&str]) -> bool {
+    let cwd = request["cwd"].as_str().map(Path::new).unwrap_or(Path::new("/"));
+    if !request["command"].as_str().is_some_and(|command| bash_reusable(command, cwd, cwd)) {
+        return false;
+    }
+    let [head, args @ ..] = prefix else { return false };
+    let executable = Path::new(head).file_name().and_then(|name| name.to_str());
+    // Codex applies persistent prefixes without Deck checking the wrapped command.
+    if executable == Some("rtk") { return false; }
+    if executable == Some("git") {
+        // Codex can apply a persisted prefix without consulting Deck. Each
+        // argument after a permitted Git read verb stays part of that verb.
+        return bash::git_words(args, cwd, cwd).is_some_and(|args| {
+            args.first().is_some_and(|sub| matches!(*sub, "status" | "diff" | "log" | "show"))
+                // A shorter prefix could be extended with output or helper options.
+                && args.get(1) == Some(&"--")
+        });
+    }
+    bash::simple_command(prefix, cwd, cwd)
+}
 
 pub(crate) fn correlate_files(d: &mut Decision) {
     if let Some(n) = &mut d.native
@@ -390,31 +421,6 @@ const BASH_DENIED_FLAGS: &[&str] = &[
     "--config", "--manifest-path", "--target-dir", "--output", "--ext-diff", "--textconv",
     "--git-dir", "--work-tree", "--exec-path", "--preload", "--cwd", "--exec", "-c", "-C", "-Z",
 ];
-/// A Bash command that may be remembered for the session. Only plain words
-/// qualify (no quoting, expansion, chaining, redirection or globs). Git needs a
-/// recognised subcommand without global options; verbs that discard work
-/// (reset, restore, clean, checkout, rebase, push, ...) and destructive forms of
-/// stash/branch/tag never qualify and need fresh informed confirmation.
-pub(crate) fn bash_reusable(command: &str) -> bool {
-    if command.is_empty() || command.len() > 2000 || !plain_words(command) {
-        return false;
-    }
-    let t: Vec<&str> = command.split_whitespace().collect();
-    if t.first() != Some(&"git") {
-        return true;
-    }
-    let Some(sub) = t.get(1) else { return false };
-    let rest = &t[2..];
-    let destructive_flag = |flags: &[&str]| rest.iter().any(|a| flags.contains(a) || a.starts_with("--force") || a.starts_with("--delete"));
-    match *sub {
-        "status" | "diff" | "log" | "show" | "add" | "commit" | "fetch" | "blame" | "ls-files"
-        | "rev-parse" | "describe" => !destructive_flag(&["--amend"]) || *sub != "commit",
-        "branch" => !destructive_flag(&["-d", "-D", "-m", "-M", "-f", "-c", "-C"]),
-        "tag" => !destructive_flag(&["-d", "-f"]),
-        "stash" => matches!(rest.first().copied(), None | Some("list") | Some("show") | Some("push")),
-        _ => false,
-    }
-}
 fn plain_words(command: &str) -> bool {
     command.chars().all(|c| c == ' ' || c.is_ascii_alphanumeric() || "_./:=+@%,-".contains(c))
 }
@@ -427,16 +433,18 @@ fn bash_command(s: &PermissionScope) -> Option<&str> {
     if !args.keys().all(|k| k == "command" || k == "timeout") {
         return None;
     }
-    let command = args.get("command")?.as_str()?;
-    bash_reusable(command).then_some(command)
+    args.get("command")?.as_str()
 }
-fn bash_prefix(command: &str) -> Option<[&'static str; 2]> {
+fn bash_prefix(command: &str, root: &Path) -> Option<[&'static str; 2]> {
     if !plain_words(command) {
         return None;
     }
-    let t: Vec<&str> = command.split(' ').filter(|t| !t.is_empty()).collect();
-    let family = BASH_FAMILIES.iter().find(|f| t.len() >= 2 && t[0] == f[0] && t[1] == f[1])?;
-    if t.iter().skip(2).any(|a| {
+    let t: Vec<&str> = command.split_whitespace().collect();
+    let (head, args) = t.split_first()?;
+    let args = if *head == "git" { bash::git_words(args, root, root)? } else { args };
+    let (sub, rest) = args.split_first()?;
+    let family = BASH_FAMILIES.iter().find(|f| *head == f[0] && *sub == f[1])?;
+    if rest.iter().any(|a| {
         BASH_DENIED_FLAGS.iter().any(|f| a == f || a.starts_with(&format!("{f}=")))
             || a.starts_with("--config")
     }) {
@@ -446,12 +454,110 @@ fn bash_prefix(command: &str) -> Option<[&'static str; 2]> {
 }
 fn bash_bounds(s: &PermissionScope) -> Vec<(&'static str, Value)> {
     let Some(command) = bash_command(s) else { return vec![] };
-    let Some(root) = s.actor["project"]["root"].as_str() else { return vec![] };
-    let mut out = vec![("bash_command", json!({"root":root,"command":command}))];
-    if let Some(prefix) = bash_prefix(command) {
+    let Some(root) = s.actor["project"]["root"].as_str().map(Path::new).filter(|p| p.is_absolute()) else { return vec![] };
+    if claude_bash_requires_fresh_review(command, root) {
+        return vec![];
+    }
+    if !bash_reusable(command, root, root) {
+        return vec![("bash_any", json!({"root":root}))];
+    }
+    let mut out = vec![];
+    if plain_words(command) && command.len() <= 2000 {
+        out.push(("bash_command", json!({"root":root,"command":command})));
+    }
+    if let Some(prefix) = bash_prefix(command, root) {
         out.push(("bash_prefix", json!({"root":root,"prefix":prefix})));
     }
+    out.push(("bash_any", json!({"root":root})));
     out
+}
+
+// Require a separately safe concrete action both when offering a grant and
+// when matching it. Bounds contain only the context permitted to stay fixed.
+pub(crate) fn fresh_command_required(s: &PermissionScope) -> bool {
+    let p = &s.material["request"];
+    let root = s.actor["project"]["root"].as_str().map(Path::new);
+    if s.material["category"] == "command" {
+        let dir = p["cwd"].as_str().map(Path::new);
+        return !root.zip(dir).zip(p["command"].as_str()).is_some_and(|((root, dir), command)| {
+            bash_reusable(command, root, dir)
+        });
+    }
+    if s.material["category"] == "relay" {
+        if p["toolName"] == "Bash" {
+            return bash_bounds(s).is_empty();
+        }
+        if p["toolName"] == "command" {
+            return !root.zip(p["_meta"]["tool_params"]["command"].as_str()).is_some_and(|(root, command)| {
+                bash_reusable(command, root, root)
+            });
+        }
+    }
+    false
+}
+
+fn project_any(d: &Decision, s: &PermissionScope) -> Option<(Value, &'static str)> {
+    let p = &s.material["request"];
+    let root = project(s)?;
+    let category = s.material["category"].as_str()?;
+    let (context, description) = match category {
+        "files" => (files(d, s)?.context, "Any Codex patch in this project, including creates, changes, moves and deletes."),
+        "command" => {
+            if !cwd(p, &root)?.starts_with(&root)
+                || !only(p, &["command", "cwd", "environment", "environmentId", "kind", "additionalPermissions",
+                    "networkApprovalContext", "proposedExecpolicyAmendment", "availableDecisions", "commandActions",
+                    "proposedNetworkPolicyAmendments", "startedAtMs", "approvalId"])
+                || !(p["kind"].is_null() || p["kind"] == "command")
+                || !p["approvalId"].is_null() || !p["networkApprovalContext"].is_null()
+                || !p["proposedNetworkPolicyAmendments"].is_null()
+                || !(p["additionalPermissions"].is_null()
+                    || p["additionalPermissions"] == json!({"network":false})
+                    || p["additionalPermissions"] == json!({"network":{"enabled":false}}))
+                || fresh_command_required(s)
+            {
+                return None;
+            }
+            (without(p, &["command","commandActions","startedAtMs","proposedExecpolicyAmendment","availableDecisions"]),
+                "Any classifiable Codex command in this working directory with the same execution settings. Protected Git operations require separate review.")
+        }
+        "permissions" => {
+            if !cwd(p, &root)?.starts_with(&root) {
+                return None;
+            }
+            let profile = profile(s)?;
+            if profile["network"] != false {
+                return None;
+            }
+            (profile["context"].clone(), "Any supported file read or write capability within this project with the same execution settings. Network access requires separate review.")
+        }
+        "relay" if p["toolName"] == "command" => {
+            let input = &p["_meta"]["tool_params"];
+            if !only(input, &["command"]) || fresh_command_required(s) {
+                return None;
+            }
+            let mut context = p.clone();
+            context["_meta"]["tool_params"] = json!({});
+            (context, "Any classifiable command relayed for this project. Protected Git operations require separate review.")
+        }
+        _ => return None,
+    };
+    Some((json!({"root":root,"category":category,"context":context}), description))
+}
+
+pub(crate) fn claude_mcp_tool(tool: &str) -> bool {
+    tool.strip_prefix("mcp__")
+        .and_then(|name| name.split_once("__"))
+        .is_some_and(|(server, name)| !server.is_empty() && server != "deck-session"
+            && !name.is_empty() && tool.len() <= 128
+            && tool.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b)))
+}
+
+fn claude_mcp_bounds(s: &PermissionScope) -> Option<&str> {
+    let tool = s.material["request"]["toolName"].as_str()?;
+    (s.material["category"] == "relay"
+        && s.actor["assignment"]["runnerId"] == crate::claude::RUNNER
+        && claude_mcp_tool(tool))
+        .then_some(tool)
 }
 
 pub(crate) fn options(d: &Decision, s: &PermissionScope) -> Vec<PermissionScopeOption> {
@@ -512,9 +618,20 @@ pub(crate) fn options(d: &Decision, s: &PermissionScope) -> Vec<PermissionScopeO
             }
         }
         Some("relay") => {
+            if let Some(tool) = claude_mcp_bounds(s) {
+                out.push(option(
+                    s,
+                    "mcp_tool_any",
+                    "Any for this tool",
+                    format!("Allow {tool} with any arguments in this session."),
+                    json!({"tool":tool}),
+                ));
+            }
             for (kind, bounds) in bash_bounds(s) {
                 let root = bounds["root"].as_str().unwrap_or_default();
-                if kind == "bash_command" {
+                if kind == "bash_any" {
+                    out.push(option(s, kind, "Any", format!("Any Claude Bash command in {root}. Commands that visibly discard or rewrite Git work still require separate review."), bounds));
+                } else if kind == "bash_command" {
                     out.push(option(s, kind, "This command, any timeout", format!("Claude Bash running exactly this command in {root}. Only the timeout may vary."), bounds));
                 } else {
                     let prefix = bounds["prefix"].as_array().map(|p| p.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(" ")).unwrap_or_default();
@@ -522,32 +639,21 @@ pub(crate) fn options(d: &Decision, s: &PermissionScope) -> Vec<PermissionScopeO
                 }
             }
         }
-        _ => {} // No third-party/relay effect registry is admitted by this product.
+        _ => {}
+    }
+    if let Some((bounds, description)) = project_any(d, s) {
+        out.push(option(s, "project_any", "Any", description.into(), bounds));
     }
     // Never hide scope bounds through display truncation/redaction. Such requests
     // keep their exact option and ordinary action review, without broader choices.
-    out.retain(|o| o.description.len() <= 3000 && display_safe(&o.description));
+    out.retain(|o| o.description.len() <= 3000
+        && (o.kind == "mcp_tool_any" || display_safe(&o.description)));
     out
 }
 fn display_safe(s: &str) -> bool {
-    let lower = s.to_ascii_lowercase();
     !s.chars()
         .any(|c| c.is_control() || matches!(c,'\u{202a}'..='\u{202e}'|'\u{2066}'..='\u{2069}'))
-        && ![
-            "bearer ",
-            "basic ",
-            "authorization",
-            "token=",
-            "token:",
-            "api_key",
-            "apikey",
-            "password",
-            "passwd",
-            "secret",
-            "sk-",
-        ]
-        .iter()
-        .any(|p| lower.contains(p))
+        && !crate::execution_view::sensitive_text(s)
 }
 fn subset(wanted: &Value, allowed: &Value) -> bool {
     wanted.as_array().is_some_and(|w| {
@@ -599,10 +705,12 @@ pub(crate) fn contains(
                 })
         }),
         "argv_prefix" => command_bounds(scope).as_ref() == Some(b),
+        "project_any" => project_any(wanted, scope).is_some_and(|(bounds, _)| &bounds == b),
         "workspace_grep" | "workspace_read" => {
             workspace_tool(scope).is_some_and(|(kind, bounds)| kind == offered.kind && &bounds == b)
         }
-        "bash_command" | "bash_prefix" => bash_bounds(scope)
+        "mcp_tool_any" => claude_mcp_bounds(scope) == b["tool"].as_str(),
+        "bash_command" | "bash_prefix" | "bash_any" => bash_bounds(scope)
             .iter()
             .any(|(kind, bounds)| *kind == offered.kind && bounds == b),
         "capability_subset" => profile(scope).is_some_and(|p| {
@@ -663,13 +771,67 @@ mod tests {
         s.material = json!({"category":"relay","request":{"toolName":"Bash","_meta":{"tool_params":{"command":command,"timeout":5}}}});
         s
     }
+    #[test]
+    fn bash_any_is_reconstructed_for_each_command_in_the_project() {
+        let root = std::env::current_dir().unwrap();
+        let bounds = |command: &str| {
+            let mut scope = bash(command);
+            scope.actor["project"]["root"] = json!(root);
+            bash_bounds(&scope)
+        };
+        let any = |command: &str| bounds(command).into_iter().find(|(kind, _)| *kind == "bash_any");
+        let grant = any("echo ready").expect("offer Any for a plain command");
+        // Any Bash use (user decision): commands the classifier cannot auto-allow
+        // still offer Any, and only Any; visible protected Git never does.
+        for command in ["cargo test && rm -rf /", "printf -v PATH '%s' tools; git status",
+            "ionice -c3 rm -rf src", "cd / && git status", "cd .. && echo ready",
+            "sed -i s/a/b/ f", "find . -delete", "awk '{print}' f", "rtk rm -rf src",
+            "python3 -c 'print(1)'", "echo ready >> notes.md", "cat > f <<'EOF'\nbody\nEOF"] {
+            assert_eq!(bounds(command), vec![grant.clone()], "{command}");
+        }
+        for command in ["git status", "printf done", "(git status && echo ready) | cat",
+            "cat <<EOF\ntask-disk-image\nEOF", "git branch --list", "rtk git tag --list", "git stash list"] {
+            assert_eq!(any(command), Some(grant.clone()), "{command}");
+        }
+        for command in ["git reset --hard", "git checkout -- f", "git clean -fd",
+            "git stash drop", "echo ready; git stash pop", "(git status || git tag -d x)",
+            "cat <<EOF\n$(git reset --hard)\nEOF",
+            "cat <<'EOF'\n$(git reset --hard)\nEOF", "git branch -D x",
+            "git tag --list 'git stash pop'", "git stash clear",
+            // Wrappers that launch another program must not smuggle protected Git.
+            "setsid git reset --hard", "stdbuf -o0 git clean -fd", "watch git stash drop",
+            "flock /tmp/l git checkout -- f", "rtk git reset --hard",
+            "python3 -c 'import os; os.system(\"git reset --hard\")'", "/usr/bin/git push -f",
+            "g=git; $g rebase main", "git commit --amend -m x"] {
+            assert!(bounds(command).is_empty(), "{command}");
+        }
+        // The automatic path stays narrow: these are neither auto-allowed nor
+        // given exact or family scopes.
+        for command in ["sed -n 1e/bin/sh f", "sed s/a/b/w/tmp/x f", "find . -execdir sh -c x ;",
+            "find . -fprint /tmp/x", "cargo test && rm -rf /"] {
+            assert!(!bash_reusable(command, &root, &root), "{command}");
+        }
+        for command in ["sed -n 1,80p src/a.rs", "sed -n '120,$p' f", "find . -name '*.rs'",
+            "find src -type f -newer Cargo.toml", "rtk git status", "rtk cargo test -p deck2"] {
+            assert_eq!(any(command), Some(grant.clone()), "{command}");
+        }
+        // Changing into a project directory keeps the command classifiable.
+        assert_eq!(any("cd src && git status"), Some(grant.clone()));
+        assert_eq!(any("cd . && echo ready"), Some(grant.clone()));
+        let family = |command: &str| bounds(command).into_iter().find(|(kind, _)| *kind == "bash_prefix");
+        assert_eq!(family("git -C . git-status"), None);
+        assert_eq!(family("git -C . status"), family("git status"));
+        assert!(family("git status").is_some());
+        assert_eq!(bounds("git -C / status"), vec![grant.clone()]);
+    }
+
     // Oracle: only plain family commands get a prefix; protected Git and shell
     // syntax never widen. Fails if a destructive or chained command is offered reuse.
     #[test]
     fn bash_reuse_is_bounded_to_plain_families_and_unprotected_commands() {
-        let kinds = |c: &str| bash_bounds(&bash(c)).into_iter().map(|b| b.0).collect::<Vec<_>>();
+        let kinds = |c: &str| bash_bounds(&bash(c)).into_iter().map(|b| b.0).filter(|kind| *kind != "bash_any").collect::<Vec<_>>();
         assert_eq!(kinds("cargo test -p x foo"), ["bash_command", "bash_prefix"]);
-        assert_eq!(bash_bounds(&bash("cargo test a")).pop(), bash_bounds(&bash("cargo test b --lib")).pop());
+        assert_eq!(bash_bounds(&bash("cargo test a")).into_iter().find(|b| b.0 == "bash_prefix"), bash_bounds(&bash("cargo test b --lib")).into_iter().find(|b| b.0 == "bash_prefix"));
         assert!(kinds("cargo test && rm -rf /").is_empty());
         assert!(kinds("echo $(id)").is_empty());
         assert_eq!(kinds("git commit -m"), ["bash_command"]);
@@ -678,7 +840,7 @@ mod tests {
         assert!(kinds("git branch -D x").is_empty());
         assert!(kinds("git -c core.pager=x status").is_empty());
         assert_eq!(kinds("cargo test --config x=y"), ["bash_command"]);
-        assert_eq!(kinds("git diff --output=x"), ["bash_command"]);
+        assert!(kinds("git diff --output=x").is_empty());
         assert_eq!(kinds("npm publish"), ["bash_command"]);
         for c in ["git reset --hard", "git clean -fd", "git stash drop", "git restore f", "git checkout -- f"] {
             assert!(kinds(c).is_empty(), "{c}");

@@ -140,8 +140,18 @@ pub(crate) fn permission_material(d: &Decision) -> Option<Value> {
     )
 }
 
-pub(super) fn member_read_permit(event: &Value, project: &ProjectBinding) -> Option<Value> {
-    if !reviewable(event) {
+pub(super) fn workspace_read_permit(event: &Value, project: &ProjectBinding) -> Option<Value> {
+    // Auto-allowed Grep patterns are passed to the tool without rendering a
+    // review. Keep display checks on the other fields and on prompted requests.
+    let mut display_check = event.clone();
+    if event["tool"] == "Grep" {
+        event["input"]["pattern"].as_str()?;
+        if event["input"].to_string().len() > 2500 {
+            return None;
+        }
+        display_check["input"]["pattern"] = json!("");
+    }
+    if !reviewable(&display_check) {
         return None;
     }
     let target = project_target(event, project)?;
@@ -274,31 +284,36 @@ fn proposal_diff(before: &str, after: &str) -> String {
     diff
 }
 
+pub(super) enum Permission {
+    Denied,
+    Allowed(Value),
+    Review(String),
+}
+
 pub(super) fn record(
     store: &mut Store,
     receipt: &mut Receipt,
     project: &ProjectBinding,
     event: &Value,
     request: &str,
-) -> Result<Option<String>, String> {
+) -> Result<Permission, String> {
     let Some(item) = event["tool_use_id"].as_str().filter(|v| {
         !v.is_empty()
             && v.len() <= 128
             && v.bytes()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
     }) else {
-        return Ok(None);
+        return Ok(Permission::Denied);
     };
     if receipt.phase != Phase::Running
         || receipt.cancel_requested
-        || receipt.decisions.len() >= 64
         || receipt
             .decisions
             .iter()
             .any(|d| d.item == item || d.request == request)
         || !project_current(store, receipt, project)?
     {
-        return Ok(None);
+        return Ok(Permission::Denied);
     }
     let session = store.session_by_id(&receipt.session)?;
     let admitted = receipt
@@ -314,22 +329,30 @@ pub(super) fn record(
                 || then.lead_task != current.lead_task
         })
     {
-        return Ok(None);
+        return Ok(Permission::Denied);
     }
     let thread = receipt.thread.as_deref().ok_or("Claude thread missing")?;
     let turn = receipt
         .turn
         .as_deref()
         .ok_or("Claude approval turn missing")?;
+    if admitted.is_some_and(|contract| contract.approvals == "relay")
+        && let Some(permit) = workspace_read_permit(event, project)
+    {
+        return Ok(Permission::Allowed(permit));
+    }
+    if crate::native_approval::at_capacity(receipt) {
+        return Ok(Permission::Denied);
+    }
     let params = json!({
         "thread": thread, "turn": turn, "item": item, "request": request,
         "tool": event["tool"], "input": event["input"],
     });
     if !reviewable(&params) {
-        return Ok(None);
+        return Ok(Permission::Denied);
     }
     let Some(target) = project_target(&params, project) else {
-        return Ok(None);
+        return Ok(Permission::Denied);
     };
     let id = Uuid::new_v4().to_string();
     let mut decision = Decision {
@@ -369,7 +392,7 @@ pub(super) fn record(
     }
     receipt.decisions.push(decision);
     store.save(receipt)?;
-    Ok(Some(id))
+    Ok(Permission::Review(id))
 }
 
 pub(crate) fn validate(d: &Decision) -> Result<(), String> {
@@ -506,5 +529,26 @@ pub(super) fn delivered(r: &mut Receipt, id: &str, allowed: bool) {
             "Response sent to the Claude SDK bridge. Tool outcome is unconfirmed."
         }
         .into();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quality_regression_grep_url_literal_uses_canonical_project_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let project = ProjectBinding {
+            id: "fixture".into(),
+            root: root.to_str().unwrap().into(),
+            identity: None,
+        };
+        let permit = workspace_read_permit(
+            &json!({"tool":"Grep", "input":{"path":root, "pattern":"https://"}}),
+            &project,
+        ).unwrap();
+        assert_eq!(permit["input"], json!({"path":root,"pattern":"https://"}));
     }
 }

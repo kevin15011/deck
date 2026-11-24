@@ -1,4 +1,4 @@
-import React,{useLayoutEffect,useRef,useState} from 'react';
+import React,{useId,useLayoutEffect,useRef,useState} from 'react';
 import {API,decision,request,load,save,answersNotAccepted,permissionResponseNotAccepted,boundedAnswers,type Decision,type DecisionResponse,type Resolve} from './api';
 import {gsap} from 'gsap';
 import {redactText} from './redaction';
@@ -9,7 +9,8 @@ import {useDisclosureMotion} from './view-motion';
 
 /** Display only: exact approval parameters and grant identity stay on the decision. */
 export function nativeActionDetails(details:unknown){
- const display=redactText(JSON.stringify(details,null,2)??'Action details unavailable',65536);
+ const view=JSON.stringify(details,(key,value)=>key==='command'&&typeof value==='string'?redactText(value,65536):value,2);
+ const display=redactText(view??'Action details unavailable',65536);
  return display.length>4096?display.slice(0,4096)+'\n[Display truncated; full action retained for exact approval]':display;
 }
 export function observedDiff(before:string,after:string){
@@ -25,11 +26,16 @@ function displayValue(value:unknown){const text=redactText(typeof value==='strin
 function actionExcerpt(details:unknown){
  if(!details||typeof details!=='object'||Array.isArray(details))return displayValue(details).slice(0,160);
  const values=details as Record<string,unknown>;
- return displayValue(values.command??values.tool??values.operation??values.paths??values.display??'Recorded action').slice(0,160);
+ const input=values.input&&typeof values.input==='object'?values.input as Record<string,unknown>:undefined;
+ return displayValue(values.command??input?.command??values.operation??values.paths??input?.file_path??input?.path??input?.pattern??values.display??values.tool??'Recorded action').slice(0,160);
 }
-function ActionDetails({details}:{details:unknown}){
+function ActionDetails({details,bash=false}:{details:unknown;bash?:boolean}){
  const fields=details&&typeof details==='object'&&!Array.isArray(details)?Object.entries(details).filter(([,value])=>value!==null&&value!==undefined):[];
- return fields.length?<dl className="permission-action">{fields.map(([key,value])=><div key={key}><dt>{fieldNames[key]??key.replaceAll('_',' ')}</dt><dd><pre>{/api[_-]?key|access[_-]?key|token|password|passwd|secret|authorization/i.test(key)?'[redacted]':displayValue(value)}</pre></dd></div>)}</dl>:<pre className="permission-fallback">{displayValue(details)||'Action details unavailable. Inspect the recorded request before responding.'}</pre>;
+ return fields.length?<dl className="permission-action">{fields.map(([key,value])=><div key={key}><dt>{fieldNames[key]??key.replaceAll('_',' ')}</dt><dd><pre>{/api[_-]?key|access[_-]?key|token|password|passwd|secret|authorization/i.test(key)?'[redacted]':bash&&key==='command'&&typeof value==='string'?redactText(value,65536):displayValue(value)}</pre></dd></div>)}</dl>:<pre className="permission-fallback">{displayValue(details)||'Action details unavailable. Inspect the recorded request before responding.'}</pre>;
+}
+
+function ScopeSelect({policy,scope,disabled,onChange,compact=false}:{policy:PermissionPolicy;scope:PermissionOption;disabled:boolean;onChange:(id:string)=>void;compact?:boolean}){
+ return <label className={compact?'dock-scope':undefined}><span className={compact?'sr-only':undefined}>Session scope</span> <select aria-label="Session permission scope" value={scope.id} disabled={disabled} onChange={event=>onChange(event.target.value)}>{policy.options.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}</select></label>;
 }
 
 export function PermissionScopeChoice({policy,scope,disabled,onChange}:{policy:PermissionPolicy;scope:PermissionOption;disabled:boolean;onChange:(id:string)=>void}){
@@ -41,7 +47,7 @@ export function PermissionScopeChoice({policy,scope,disabled,onChange}:{policy:P
   const change=()=>{if(media.matches)settle();};media.addEventListener('change',change);
   return()=>{media.removeEventListener('change',change);gsap.killTweensOf(node);};
  },[scope.id,scope.description]);
- return <div className="permission-scope-choice"><label>Session scope <select aria-label="Session permission scope" value={scope.id} disabled={disabled} onChange={event=>onChange(event.target.value)}>{policy.options.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}</select></label><div ref={detail}><p className="review-scope">For <strong>{scope.actor}</strong> in this session: {scope.description.replace(/ Valid (?:across reconnects and host restart until revoked, assignments change or canonical session authority is replaced|for the matching admitted assignment and revision across reconnects and host restart until revoked or the session authority is replaced)\.$/,'')} Survives restarting the app for work with the same admitted assignment revision. It ends when revoked or the session authority changes. Revoke from session permissions. Other roles need separate permission.</p>{scope.kind==='exact'&&policy.unsupported.map((limit,i)=><p key={i} className="activity-meta">{limit}</p>)}</div></div>;
+ return <div className="permission-scope-choice"><ScopeSelect policy={policy} scope={scope} disabled={disabled} onChange={onChange}/><div ref={detail}><p className="review-scope">For <strong>{scope.actor}</strong> in this session: {scope.description.replace(/ Valid (?:across reconnects and host restart until revoked, assignments change or canonical session authority is replaced|for the matching admitted assignment and revision across reconnects and host restart until revoked or the session authority is replaced)\.$/,'')} Survives restarting the app for work with the same admitted assignment revision. It ends when revoked or the session authority changes. Revoke from session permissions. Other roles need separate permission.</p>{scope.kind==='exact'&&policy.unsupported.map((limit,i)=><p key={i} className="activity-meta">{limit}</p>)}</div></div>;
 }
 
 export async function submitReviewResponse(d:Decision,response:DecisionResponse,storageScope='',scopeOptionId?:string){
@@ -51,6 +57,7 @@ export async function submitReviewResponse(d:Decision,response:DecisionResponse,
    try {
     const result=decision(await request('POST',`/api/decisions/${encodeURIComponent(d.id)}/responses`,body));
     if(result.id!==d.id||result.session!==d.session||result.command!==d.command||result.resolution?.command_id!==body.command_id)throw new Error('Decision acknowledgment identity mismatch; reconnect before continuing.');
+    return result;
    }catch(e){
     if((answersNotAccepted(e,d.id,body)||permissionResponseNotAccepted(e,d.id,body))&&load(key)===JSON.stringify(body))save(key,'');
     throw e;
@@ -77,18 +84,19 @@ export async function submitReviewResponse(d:Decision,response:DecisionResponse,
      save(key,JSON.stringify(body));
     }
    }else save(key,JSON.stringify(body));
-   await send(body);
+   return send(body);
 }
 
-export function Review({d,onError,connected,storageScope='',conversation=false,onResize}:{conversation?:boolean;onResize?:()=>void;storageScope?:string;d:Decision;onError:(s:string)=>void;connected:boolean}){
+export function Review({d,onError,connected,storageScope='',conversation=false,onResize,dockOrigin,dockDisclosure,onDockSubmission}:{dockOrigin?:string;dockDisclosure?:(node:HTMLButtonElement|null)=>void;onDockSubmission?:(state:'sent'|'failed')=>void;conversation?:boolean;onResize?:()=>void;storageScope?:string;d:Decision;onError:(s:string)=>void;connected:boolean}){
+ const disclosureId=useId();
  const [selection,setSelection]=useState<{binding:string;id:string}|null>(null);
- const [busy,setBusy]=useState(false),[view,setView]=useState<'proposed'|'observed'>('proposed'),[answers,setAnswers]=useState<Record<string,string>>({}),[choices,setChoices]=useState<Record<string,string[]>>({});
+ const [submission,setSubmission]=useState<{binding:string;acknowledged:boolean}>(),[view,setView]=useState<'proposed'|'observed'>('proposed'),[answers,setAnswers]=useState<Record<string,string>>({}),[choices,setChoices]=useState<Record<string,string[]>>({});
  const responseFocus=useRef(false),focusedInside=useRef(false),section=useRef<HTMLElement>(null);
  const comparisonUnavailable=!!d.file&&(!!d.file.snapshot_error||d.state==='settled'&&d.file.after===null);
  const visible=!conversation||d.state==='pending'||d.state==='uncertain'||d.state==='invalidated'||comparisonUnavailable;
  const resizeCallback=useRef(onResize);resizeCallback.current=onResize;
  useLayoutEffect(()=>{const node=section.current;if(!conversation||!node)return;const observer=new ResizeObserver(()=>resizeCallback.current?.());observer.observe(node);return()=>observer.disconnect();},[conversation]);
- const sending=useRef(false),content=useRef<HTMLDivElement>(null),actions=useRef<HTMLDivElement>(null),initialView=useRef(true);
+ const sending=useRef<string|undefined>(undefined),content=useRef<HTMLDivElement>(null),actions=useRef<HTMLDivElement>(null),initialView=useRef(true);
  const [expanded,setExpanded]=useState(false),reviewBody=useRef<HTMLDivElement>(null),summary=useRef<HTMLButtonElement>(null);
  const pending=d.state==='pending',show=pending||expanded||d.state==='uncertain'||d.state==='invalidated'||comparisonUnavailable;
  useLayoutEffect(()=>{if(!pending){const active=document.activeElement;if(!visible){if(section.current?.contains(active)||(focusedInside.current||responseFocus.current)&&active===document.body)document.getElementById('prompt')?.focus({preventScroll:true});focusedInside.current=false;}else if(reviewBody.current?.contains(active)||responseFocus.current&&active===document.body)summary.current?.focus({preventScroll:true});responseFocus.current=false;}},[pending,visible]);
@@ -103,11 +111,21 @@ export function Review({d,onError,connected,storageScope='',conversation=false,o
   const change=()=>{if(media.matches)settle();};media.addEventListener('change',change);
   return()=>{media.removeEventListener('change',change);gsap.killTweensOf(node);};
  },[view]);
- async function respond(response:DecisionResponse){if(sending.current||disabled||!allowed(response.type==='deny'&&display?.kind==='question'?'dismiss':response.type))return;
+ const responseBinding=JSON.stringify([d.id,d.revision]);
+ const submissionState=submission?.binding===responseBinding?submission:undefined;
+ async function respond(response:DecisionResponse){if(sending.current===responseBinding||disabled||!allowed(response.type==='deny'&&display?.kind==='question'?'dismiss':response.type))return;
   try{
-   responseFocus.current=!!reviewBody.current?.contains(document.activeElement);sending.current=true;setBusy(true);
+   responseFocus.current=!!section.current?.contains(document.activeElement);
+   sending.current=responseBinding;
+   setSubmission({binding:responseBinding,acknowledged:false});
+   // The dock hides the request at once; a failed submission brings it back.
+   onDockSubmission?.('sent');
    await submitReviewResponse(d,response,storageScope,scope?.id);
-  }catch(e){onError((e as Error).message);}finally{sending.current=false;setBusy(false);}}
+   setSubmission(current=>current?.binding===responseBinding?{binding:responseBinding,acknowledged:true}:current);
+  }catch(e){
+   setSubmission(current=>current?.binding===responseBinding?undefined:current);
+   if(sending.current===responseBinding){sending.current=undefined;onDockSubmission?.('failed');onError((e as Error).message);}
+  }}
 
  const display=d.presentation,available=display?.validated===true,grant=persistentGrant(display?.persistent_grant);
  const roleGrant=sessionGrant(display?.session_grant),hasSessionScope=!!display&&Object.hasOwn(display,'session_grant');
@@ -118,17 +136,44 @@ export function Review({d,onError,connected,storageScope='',conversation=false,o
  const persistentConsent=grant?`Persistent command prefix: ${JSON.stringify(grant.prefix)}. This permits commands matching this prefix in future sessions. Deck cannot revoke this grant; manage it outside Deck in the runner's permission settings.`:undefined;
  const permission=available&&!['question','file_edit'].includes(display.kind);
  const allowed=(response:string)=>available&&(response!=='allow_always'||!!grant)&&(response!=='allow_session'||(!hasSessionScope||!!roleGrant)&&(!hasPolicy||!!scope))&&(display.responses?.includes(response as never)??(display.kind==='file_edit'?['allow_once','deny']:display.kind==='question'?['answers','dismiss']:[]).includes(response));
- const disabled=!pending||busy||!connected||!available;
+ const disabled=!pending||!!submissionState||!connected||!available;
  const title=!available?'Action unavailable':permission?'Permission request':d.file?'Review file change':'Questions from the runner';
  const response=d.resolution?.response.type;
  const outcome=provenance?.kind==='reused_grant'?'Session permission reused':provenance?.kind==='intrinsic'?'Coordination allowed':response?({deny:'Denied',allow_once:'Allowed once',allow_session:'Allowed for this session',allow_always:'Persistent permission allowed',answers:'Answers sent'}[response]):d.state;
  const excerpt=available&&permission?actionExcerpt(display.details):d.file?.path;
 
+ if(dockOrigin){
+  const details=display?.details as {tool?:unknown;server?:unknown;operation?:unknown}|undefined;
+  const tool=available?(typeof details?.tool==='string'?displayValue(details.tool):d.file?'File change':display.kind==='command'?'Command':display.kind==='permissions'?'Capabilities':display.kind==='files'?'File change':'Permission'):'Permission';
+  return <section ref={section} className="docked-permission" aria-label={dockOrigin+' '+tool+' permission'}>
+   <button ref={dockDisclosure} type="button" className="quiet dock-permission-summary" aria-expanded={expanded} aria-controls={disclosureId} onClick={()=>setExpanded(value=>!value)}>
+    <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.25"><path d={expanded?'m4 10 4-4 4 4':'m4 6 4 4 4-4'}/></svg>
+    <strong>{tool} · {dockOrigin}</strong>{excerpt&&excerpt!==tool&&<span>{excerpt}</span>}
+   </button>
+   <div className="dock-permission-details" id={disclosureId} hidden={!expanded}>
+    {!available?<p role="status">Validated action details are unavailable. Reconnect to inspect this request.</p>
+     :d.file?<><p>{d.file.path}</p><pre>{d.file.diff}</pre></>
+     :<ActionDetails details={display.details} bash={display.kind==='bash'}/>}
+    {scope&&<p className="review-scope">{scope.description}</p>}
+    {roleGrant&&!hasPolicy&&<p className="review-scope">{roleGrant.description}</p>}
+    {persistentConsent&&<p className="review-scope">{persistentConsent}</p>}
+   </div>
+   <div className="dock-permission-controls">
+    {policy&&scope&&<ScopeSelect compact policy={policy} scope={scope} disabled={disabled} onChange={id=>setSelection({binding,id})}/>}
+    {/* Hierarchy: one filled primary allow, an outlined secondary, quiet text actions. */}
+    {allowed('deny')&&<button type="button" className="dock-action-tertiary dock-action-deny" disabled={disabled} onClick={()=>void respond({type:'deny'})}>Deny</button>}
+    {allowed('allow_always')&&<button type="button" className="dock-action-tertiary" disabled={disabled} aria-label="Always allow this permission" onClick={()=>{if(persistentConsent&&confirm(persistentConsent+'\n\nAllow this persistent grant?'))void respond({type:'allow_always'});}}>Always</button>}
+    {allowed('allow_once')&&<button type="button" className={allowed('allow_session')?'dock-action-secondary':'dock-action-primary'} disabled={disabled} onClick={()=>void respond({type:'allow_once'})}>Allow once</button>}
+    {allowed('allow_session')&&<button type="button" className="dock-action-primary" disabled={disabled} aria-label="Allow for this session" onClick={()=>void respond({type:'allow_session'})}>Allow session</button>}
+   </div>
+  </section>;
+ }
+
  return <section ref={section} hidden={!visible} inert={!visible} aria-hidden={!visible} onFocusCapture={()=>{focusedInside.current=true;}} onBlurCapture={event=>{if(event.relatedTarget&&event.relatedTarget!==document.body&&!event.currentTarget.contains(event.relatedTarget as Node))focusedInside.current=false;}} className={'review task'+(pending?' review--pending':' review--settled')} aria-label={!available?'Action unavailable':permission?'Permission request':d.file?'Review file change':'Answer questions'}>
- <header>{pending?<><strong>{title}</strong><span className="review-state">Needs {display?.kind==='question'?'an answer':'approval'}</span></>:<button ref={summary} type="button" className="quiet review-summary" aria-expanded={show} onClick={()=>setExpanded(v=>!v)}><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.25"><path d={show?'m4 10 4-4 4 4':'m4 6 4 4 4-4'}/></svg><span><strong>{outcome}</strong>{excerpt&&<span className="review-excerpt">{excerpt}</span>}</span><span className="review-state">{d.state}</span></button>}</header>
+ <header>{pending?<><strong>{title}</strong><span className="review-state" role="status">{submissionState?(submissionState.acknowledged?'Response recorded':'Sending response…'):(display?.kind==='question'?'Needs an answer':'Needs approval')}</span></>:<button ref={summary} type="button" className="quiet review-summary" aria-expanded={show} onClick={()=>setExpanded(v=>!v)}><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.25"><path d={show?'m4 10 4-4 4 4':'m4 6 4 4 4-4'}/></svg><span><strong>{outcome}</strong>{excerpt&&<span className="review-excerpt">{excerpt}</span>}</span><span className="review-state">{d.state}</span></button>}</header>
  <div ref={reviewBody} className="review-body" hidden={!show}>
 
- {!available?<p role="status">Validated action presentation unavailable. Reconnect to inspect the current decision.</p>:permission?<><ActionDetails details={display.details}/>{pending&&!roleGrant&&!hasPolicy&&<p className="review-scope">Review the action and choose a permission duration.</p>}{roleGrant&&!hasPolicy&&<p className="review-scope">Allow new tasks for <strong>{roleGrant.role}</strong> in this session. Permission survives restarting the app; it ends if the team or session permissions change. Revoke it from session permissions. Other roles and tools need separate permission.</p>}{pending&&allowed('allow_session')&&!hasSessionScope&&!hasPolicy&&<p className="review-scope">Session permission covers this exact action only.</p>}{hasPolicy&&pending&&(policy&&scope?<PermissionScopeChoice policy={policy} scope={scope} disabled={disabled} onChange={id=>setSelection({binding,id})}/>:<p className="activity-meta" role="status">Session scope unavailable or unsupported. Reconnect to inspect the current offer; allow once or deny remain available.</p>)}{hasSessionScope&&!roleGrant&&<p className="activity-meta" role="status">Session scope unavailable or unsupported. Session consent is withheld; inspect the recorded request or reconnect.</p>}{grant&&(!pending||allowed('allow_always'))&&<p className="activity-meta">{persistentConsent}</p>}<div ref={actions} hidden={!pending} className="review-actions">{allowed('deny')&&<button type="button" disabled={disabled||!(allowed('deny')||allowed('dismiss'))} onClick={()=>void respond({type:'deny'})}>Deny</button>}{allowed('allow_once')&&<button type="button" disabled={disabled||!allowed('allow_once')} onClick={()=>void respond({type:'allow_once'})}>Allow once</button>}{allowed('allow_session')&&<button type="button" disabled={disabled} onClick={()=>void respond({type:'allow_session'})}>{roleGrant&&!hasPolicy?'Allow this role for this session':'Allow for this session'}</button>}{allowed('allow_always')&&<button type="button" disabled={disabled} onClick={()=>{if(persistentConsent&&confirm(persistentConsent+'\n\nAllow this persistent grant?'))void respond({type:'allow_always'});}}>Always allow this permission</button>}</div></>:d.file?<><p className="review-path">{d.file.path}</p>{comparisonUnavailable&&<p className="activity-meta" role="status">Comparison unavailable. {d.file.snapshot_error||'No file result was retained. Inspect the target before requesting a fresh proposal.'}</p>}<div className="review-views" role="group" aria-label="File change view"><button type="button" className="quiet" aria-pressed={view==='proposed'} onClick={()=>setView('proposed')}>Proposed change</button><button type="button" className="quiet" aria-pressed={view==='observed'} onClick={()=>setView('observed')}>Observed change</button></div><div ref={content} className="review-diff" tabIndex={0} aria-label={view==='proposed'?'Proposed diff':'Observed diff'}><pre>{view==='proposed'?d.file.diff:d.file.after===null?(d.file.snapshot_error||d.state==='settled'?'Comparison unavailable. '+(d.file.snapshot_error||'No snapshot was retained.')+' Inspect the target and its accessibility manually before requesting a fresh proposal. No change is reapplied or rolled back.':'No file result observed yet. Approval alone does not prove a change.'):observedDiff(d.file.before,d.file.after)}</pre></div>{d.file.native_status&&<p className="activity-meta">Native result: {d.file.native_status}. Observed content may include concurrent changes.</p>}
+ {!available?<p role="status">Validated action presentation unavailable. Reconnect to inspect the current decision.</p>:permission?<><ActionDetails details={display.details} bash={display.kind==='bash'}/>{pending&&!roleGrant&&!hasPolicy&&<p className="review-scope">Review the action and choose a permission duration.</p>}{roleGrant&&!hasPolicy&&<p className="review-scope">Allow new tasks for <strong>{roleGrant.role}</strong> in this session. Permission survives restarting the app; it ends if the team or session permissions change. Revoke it from session permissions. Other roles and tools need separate permission.</p>}{pending&&allowed('allow_session')&&!hasSessionScope&&!hasPolicy&&<p className="review-scope">Session permission covers this exact action only.</p>}{hasPolicy&&pending&&(policy&&scope?<PermissionScopeChoice policy={policy} scope={scope} disabled={disabled} onChange={id=>setSelection({binding,id})}/>:<p className="activity-meta" role="status">Session scope unavailable or unsupported. Reconnect to inspect the current offer; allow once or deny remain available.</p>)}{hasSessionScope&&!roleGrant&&<p className="activity-meta" role="status">Session scope unavailable or unsupported. Session consent is withheld; inspect the recorded request or reconnect.</p>}{grant&&(!pending||allowed('allow_always'))&&<p className="activity-meta">{persistentConsent}</p>}<div ref={actions} hidden={!pending} className="review-actions">{allowed('deny')&&<button type="button" disabled={disabled||!(allowed('deny')||allowed('dismiss'))} onClick={()=>void respond({type:'deny'})}>Deny</button>}{allowed('allow_once')&&<button type="button" disabled={disabled||!allowed('allow_once')} onClick={()=>void respond({type:'allow_once'})}>Allow once</button>}{allowed('allow_session')&&<button type="button" disabled={disabled} onClick={()=>void respond({type:'allow_session'})}>{roleGrant&&!hasPolicy?'Allow this role for this session':'Allow for this session'}</button>}{allowed('allow_always')&&<button type="button" disabled={disabled} onClick={()=>{if(persistentConsent&&confirm(persistentConsent+'\n\nAllow this persistent grant?'))void respond({type:'allow_always'});}}>Always allow this permission</button>}</div></>:d.file?<><p className="review-path">{d.file.path}</p>{comparisonUnavailable&&<p className="activity-meta" role="status">Comparison unavailable. {d.file.snapshot_error||'No file result was retained. Inspect the target before requesting a fresh proposal.'}</p>}<div className="review-views" role="group" aria-label="File change view"><button type="button" className="quiet" aria-pressed={view==='proposed'} onClick={()=>setView('proposed')}>Proposed change</button><button type="button" className="quiet" aria-pressed={view==='observed'} onClick={()=>setView('observed')}>Observed change</button></div><div ref={content} className="review-diff" tabIndex={0} aria-label={view==='proposed'?'Proposed diff':'Observed diff'}><pre>{view==='proposed'?d.file.diff:d.file.after===null?(d.file.snapshot_error||d.state==='settled'?'Comparison unavailable. '+(d.file.snapshot_error||'No snapshot was retained.')+' Inspect the target and its accessibility manually before requesting a fresh proposal. No change is reapplied or rolled back.':'No file result observed yet. Approval alone does not prove a change.'):observedDiff(d.file.before,d.file.after)}</pre></div>{d.file.native_status&&<p className="activity-meta">Native result: {d.file.native_status}. Observed content may include concurrent changes.</p>}
  <div ref={actions} hidden={!pending} className="review-actions"><button type="button" disabled={disabled||!(allowed('deny')||allowed('dismiss'))} onClick={()=>void respond({type:'deny'})}>Deny</button><button type="button" disabled={disabled||!allowed('allow_once')} onClick={()=>void respond({type:'allow_once'})}>Allow once</button></div></>
  :<form onSubmit={e=>{e.preventDefault();void respond({type:'answers',answers:Object.fromEntries(d.questions.map(q=>[q.id,q.multiple?[...(choices[q.id]??[]),...(answers[q.id]?.trim()?[answers[q.id]]:[])]:[answers[q.id]||'']]))});}}>{d.questions.map(q=><fieldset key={q.id} className="review-question"><legend>{q.question}</legend>{q.multiple&&q.options.map(o=><label key={o.label}><input type="checkbox" checked={(choices[q.id]??[]).includes(o.label)} disabled={disabled} onChange={e=>setChoices(v=>({...v,[q.id]:e.target.checked?[...(v[q.id]??[]),o.label]:(v[q.id]??[]).filter(s=>s!==o.label)}))}/>{o.label} — {o.description}</label>)}{!q.multiple&&q.options.length>0&&<select aria-label={q.header+' options'} value={q.options.some(o=>o.label===answers[q.id])?answers[q.id]:''} onChange={e=>setAnswers(v=>({...v,[q.id]:e.target.value}))} disabled={disabled}><option value="">Choose an answer or enter your own</option>{q.options.map(o=><option key={o.label} value={o.label}>{o.label} — {o.description}</option>)}</select>}<input maxLength={4096} value={answers[q.id]||''} onChange={e=>setAnswers(v=>({...v,[q.id]:e.target.value}))} disabled={disabled} aria-label={q.header+' answer'}/></fieldset>)}<div ref={actions} hidden={!pending} className="review-actions"><button type="button" disabled={disabled||!(allowed('deny')||allowed('dismiss'))} onClick={()=>void respond({type:'deny'})}>Dismiss</button><button disabled={disabled||!allowed('answers')||d.questions.some(q=>!answers[q.id]?.trim()&&!(q.multiple&&choices[q.id]?.length))}>Send answers</button></div><p className="activity-meta">Answers provide information and grant no file permission.</p></form>}
  <ReceiptDetails>{hasPolicy&&<pre aria-label="Recorded permission scopes">{redactText(JSON.stringify(policy??{unavailable:true},null,2),65536)}</pre>}{provenance&&<p className="activity-meta">{provenance.kind==='reused_grant'?`Reused session permission from decision ${provenance.source_decision}. No new user consent.`:provenance.kind==='intrinsic'?'Allowed by authenticated coordination policy; no user consent requested.':'User response recorded.'}</p>}{roleGrant&&<pre aria-label="Recorded session permission scope">{redactText(JSON.stringify(roleGrant,null,2),65536)}</pre>}{permission&&available&&<pre>{nativeActionDetails(display.details)}</pre>}<p className="activity-meta">Decision {d.id}<br/>Attempt {d.attempt}<br/>Revision {d.revision}<br/>State {d.state}<br/>Request {d.request}<br/>Dispatch {d.dispatch_ms??'not observed'}<br/>Delivered {d.delivered_ms??'not observed'}<br/>Grant consumed {String(d.grant_consumed)}</p>{d.resolution&&<pre aria-label="Recorded response">{redactText(JSON.stringify(d.resolution,null,2),65536)}</pre>}<p className="activity-meta" role="status">{d.detail}</p></ReceiptDetails></div></section>;

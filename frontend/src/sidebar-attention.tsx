@@ -16,7 +16,7 @@ function PermissionReview({decision,connected,storageScope}:{decision:Decision;c
  </div>;
 }
 
-export function SidebarAttention({rows,connected,viewedSession,onNavigate}:{rows:AttentionRow[];connected:boolean;viewedSession:string;onNavigate:(row:AttentionRow)=>void}){
+export function SidebarAttention({rows,connected,onNavigate}:{rows:AttentionRow[];connected:boolean;onNavigate:(row:AttentionRow)=>void}){
  const id=useId();
  const [reviewing,setReviewing]=useState<string>();
  const review=rows.find(row=>row.id===reviewing&&row.permissions.length);
@@ -54,7 +54,7 @@ export function SidebarAttention({rows,connected,viewedSession,onNavigate}:{rows
   <ul className="attention-bubble-list">{rows.map(row=>{
    const open=review?.id===row.id;
    return <li className="attention-bubble" key={row.id}>
-    <button type="button" className="quiet attention-bubble-title" aria-current={viewedSession===row.id?'page':undefined} title={row.title+' · '+row.projectName} onClick={()=>{close(false);onNavigate(row);}}>
+    <button type="button" className="quiet attention-bubble-title" title={row.title+' · '+row.projectName} onClick={()=>{close(false);onNavigate(row);}}>
      <span className="sidebar-attention-session"><strong>{row.title}</strong><small>{row.projectName}</small></span>
      <span className="sidebar-attention-count"><span className="sr-only">Actions pending: </span>{row.count}</span>
     </button>

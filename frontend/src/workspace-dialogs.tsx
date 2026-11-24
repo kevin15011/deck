@@ -5,6 +5,7 @@ import React,{useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {gsap} from 'gsap';
 import {API,request,load,save as persist,HttpError,sessionContract,workspace,type Session,type SessionContract,type MemberAssignment as Assignment} from './api';
 import {transitionPreview,transitionCommand,transitionedSession,type TransitionCommand} from './session-transition';
+import {lastAssignmentsKey,mergeAssignments,restoreAssignments} from './last-assignments';
 interface RunnerOption {runnerId:string;label:string;available:boolean;reasonCode?:string;models:{modelId:string;label:string;thinkingLevels:string[]}[]}
 export function AssignmentFields({ runners, value, onChange, role, disabled = false }: { runners: RunnerOption[]; value: Assignment; onChange: (assignment: Assignment) => void; role?: string; disabled?: boolean }) {
     const runner = runners.find(item => item.runnerId === value.runnerId), model = runner?.models.find(item => item.modelId === value.modelId);
@@ -64,6 +65,12 @@ function AssignmentRows({ session, runners, onAssigned, onPending, onClose, pend
         if (failure?.member === member) setFailure(undefined);
     }
 
+    function rememberAssignment(contract: SessionContract, member: string) {
+        const assignment = contract.members[member];
+        if (!assignment) return;
+        try { persist(lastAssignmentsKey, mergeAssignments(load(lastAssignmentsKey), member, assignment)); } catch { /* best effort */ }
+    }
+
     async function save() {
         if (saving.current || !canSave) return;
         saving.current = true;
@@ -84,6 +91,7 @@ function AssignmentRows({ session, runners, onAssigned, onPending, onClose, pend
                     reconcile(confirmed);
                     expectedRevision = confirmed.revision;
                     committed = true;
+                    rememberAssignment(confirmed, member);
                 } catch (cause) {
                     const message = String(cause instanceof Error ? cause.message : cause);
                     const stale = message.includes('assignment-revision-stale');
@@ -95,7 +103,9 @@ function AssignmentRows({ session, runners, onAssigned, onPending, onClose, pend
                             if (!latest || latest.revision < expectedRevision) throw Error('Assignment revision unavailable.');
                             reconcile(latest);
                             committed ||= latest.revision > expectedRevision;
-                            if (!sameAssignment(edits[member].value, latest.members[member] ?? unassigned)) {
+                            if (sameAssignment(edits[member].value, latest.members[member] ?? unassigned)) {
+                                if (latest.revision > expectedRevision) rememberAssignment(latest, member);
+                            } else {
                                 setFailure({member, message: stale ? 'Assignments changed elsewhere. Review the latest assignments before saving again.' : message});
                             }
                         } catch {
@@ -169,7 +179,8 @@ export function WorkspaceDialog({open,session,transitionSource,projectId,onClose
    else if(transitionSource)preview=transitionPreview(await request('GET',`/api/sessions/${encodeURIComponent(transitionSource.id)}/transition`,undefined,controller.signal),transitionSource.id);
    if(controller.signal.aborted)return;
    setRunners(data.runners);setDigest(preview);
-   if(!session){const r=data.runners.find(r=>r.available&&r.models.length);if(r)setDrafts({lead:{runnerId:r.runnerId,modelId:r.models[0].modelId}});}
+   // New sessions start from the most recent assignments still offered.
+   if(!session){const last=restoreAssignments(load(lastAssignmentsKey),data.runners);const r=data.runners.find(r=>r.available&&r.models.length);if(last)setDrafts(last);else if(r)setDrafts({lead:{runnerId:r.runnerId,modelId:r.models[0].modelId}});}
    if(command.current){const c=command.current;setTitle(c.session.title);setDrafts(c.session.members);setRetained(true);}
   }
   void discover().catch(e=>{if(!controller.signal.aborted)setError(String(e));}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});return()=>controller.abort();
@@ -185,7 +196,7 @@ export function WorkspaceDialog({open,session,transitionSource,projectId,onClose
    try {const created=transitionedSession(await request('POST',`/api/sessions/${encodeURIComponent(transitionSource.id)}/transition`,c),c);persist(transitionKey,'');command.current=undefined;setRetained(false);onSaved(created.id);onClose();}
    catch(e){if(!retrying&&e instanceof HttpError&&e.status>=400&&e.status<500){persist(transitionKey,'');command.current=undefined;setRetained(false);setDigest('');}throw e;}
   }
-  else {const id=creationId.current;await request('POST','/api/sessions',{api:API,id,project_id:projectId,title:title.trim(),members:drafts,approvals:yolo?'yolo':'relay'});onSaved(id);onClose();}
+  else {const id=creationId.current;await request('POST','/api/sessions',{api:API,id,project_id:projectId,title:title.trim(),members:drafts,approvals:yolo?'yolo':'relay'});try{persist(lastAssignmentsKey,JSON.stringify(drafts));}catch{/* best effort */}onSaved(id);onClose();}
  }catch(e){setError(String(e));}finally{sending.current=false;setPending(false);}}
  return <dialog ref={ref} className="workspace-dialog assignments-dialog" aria-labelledby="session-dialog-title" onCancel={e=>{e.preventDefault();if(!pending)onClose();}}><form onSubmit={e=>{e.preventDefault();if(!session)void save();}}><div className="dialog-heading"><h2 id="session-dialog-title">{session?'Session assignments':transitionSource?'Start canonical session':'New session'}</h2><button type="button" className="quiet" aria-label="Close dialog" disabled={pending} onClick={onClose}>✕</button></div>
  {session?<><p className="muted">Changes apply to future work. Existing delegated tasks keep their recorded assignments.</p><p className="muted">Changing the Lead starts a new native context. Your conversation stays here.</p></>:<label>Session name<input required autoFocus disabled={pending||retained} value={title} maxLength={160} onChange={e=>setTitle(e.target.value)}/></label>}

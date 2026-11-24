@@ -1,3 +1,4 @@
+import {otherSessionAttention} from './sidebar-state';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {SessionIndicators} from './session-indicators';
@@ -120,6 +121,9 @@ test('sidebar attention counts distinct pending requests for existing sessions',
   {...r,session:'working-only'},
  ]};
  expect([...sidebarAttention(value,{'session-b':2,removed:3})]).toEqual([['session-a',2],['session-b',2]]);
+ const rows=[...sidebarAttention(value,{'session-b':2,removed:3})].map(([id,count])=>({id,count}));
+ expect(otherSessionAttention(rows,'session-a')).toEqual([{id:'session-b',count:2}]);
+ expect(otherSessionAttention(rows,'session-b')).toEqual([{id:'session-a',count:2}]);
  value.receipts[0]!.decisions=[{...approval,state:'delivered'},{...question,state:'responded'}];
  value.receipts[1]!.decisions=[];
  expect([...sidebarAttention(value,{'session-b':2})]).toEqual([['session-b',2]]);

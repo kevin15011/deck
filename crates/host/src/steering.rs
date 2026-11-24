@@ -1,4 +1,4 @@
-use crate::Store;
+use crate::{AdmissionError, Store, storage_error};
 use crate::server::{App, problem};
 use axum::{
     Json,
@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use deck2_shared::{
-    Mode, Phase, QueuedSteeringSource, Receipt, SteeringCommand, SteeringReceipt, SteeringState,
+    API, Mode, Phase, QueuedSteeringSource, Receipt, SteeringCommand, SteeringReceipt, SteeringState, Submit,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -119,16 +119,19 @@ fn eligible_queue(root: &Receipt, source: &Receipt) -> bool {
         && (source.attachments.is_empty() || lead_accepts_images(root))
         && source.continuation.is_none()
         && (!source.prompt.trim().is_empty() || !source.attachments.is_empty())
-        && source
-            .configuration
-            .as_ref()
-            .and_then(|c| c.session_contract.as_ref())
-            .zip(
-                root.configuration
-                    .as_ref()
-                    .and_then(|c| c.session_contract.as_ref()),
-            )
-            .is_some_and(|(source, root)| source.generation == root.generation)
+        && compatible_queue_admission(root, source)
+}
+
+fn compatible_queue_admission(root: &Receipt, source: &Receipt) -> bool {
+    let Some((root, source)) = root.configuration.as_ref().zip(source.configuration.as_ref()) else {
+        return false;
+    };
+    let contracts = root.session_contract.as_ref().zip(source.session_contract.as_ref());
+    contracts.is_some_and(|(running, queued)| {
+        running.generation == queued.generation
+            && (running.members.get("lead").is_none_or(|lead| lead.runner_id != crate::claude::RUNNER)
+                || crate::claude::compatible_live_input(root, source))
+    })
 }
 
 fn accepts_steering(root: &Receipt) -> bool {
@@ -171,6 +174,47 @@ fn decision_reply(store: &Store, id: &str) -> Result<bool, String> {
             |row| row.get(0),
         )
         .map_err(|_| "Cannot verify queued decision reply ownership".into())
+}
+
+fn direct_source_id(input: &SteeringCommand) -> String {
+    format!("live-{}", input.id)
+}
+
+fn queue_direct(store: &mut Store, command: &SteeringCommand) -> Result<Receipt, AdmissionError> {
+    let id = direct_source_id(command);
+    if store.get(&id).map_err(storage_error)?.is_some() {
+        return Err("This live message ID already belongs to a queued command".into());
+    }
+    store.accept_in(
+        &Submit { api: API, id, prompt: command.text.clone(), mode: Mode::SessionV1, attachments: Vec::new() },
+        &command.session,
+        true,
+        false,
+    )
+}
+
+fn save_direct(
+    store: &mut Store,
+    root: &mut Receipt,
+    input: &mut SteeringReceipt,
+) -> Result<(), AdmissionError> {
+    store.conn.execute_batch("SAVEPOINT direct_steering")
+        .map_err(|_| storage_error("Cannot begin live input reservation".into()))?;
+    let result = (|| {
+        let queued = queue_direct(store, &input.command)?;
+        if !eligible_queue(root, &queued) {
+            return Err("The selected Lead turn can no longer receive this message".into());
+        }
+        input.queued_source = Some(QueuedSteeringSource { id: queued.id, attempt: queued.attempt });
+        root.steering.push(input.clone());
+        store.save(root).map_err(storage_error)?;
+        store.conn.execute_batch("RELEASE direct_steering")
+            .map_err(|_| storage_error("Cannot commit live input reservation".into()))
+    })();
+    if result.is_err() {
+        let _ = store.conn.execute_batch("ROLLBACK TO direct_steering; RELEASE direct_steering");
+    }
+    result
 }
 
 fn admit(
@@ -219,7 +263,11 @@ fn admit(
         if queued_source.is_some() {
             command.text = existing.command.text.clone();
         }
-        return if existing.command == command && existing.queued_source == queued_source {
+        let same_source = existing.queued_source == queued_source
+            || (queued_source.is_none() && existing.queued_source.as_ref().is_some_and(|source| {
+                source.id == direct_source_id(&command)
+            }));
+        return if existing.command == command && same_source {
             Json(existing).into_response()
         } else {
             problem(
@@ -308,42 +356,127 @@ fn admit(
     if let Some(r) = crate::web_identity::effect_denied() {
         return r;
     }
-    let input = SteeringReceipt {
+    let mut input = SteeringReceipt {
         command,
         state: SteeringState::Pending,
         admitted_ms: crate::now(),
         queued_source,
+        resend_requested: false,
     };
-    receipt.steering.push(input.clone());
-    if let Err(e) = store.save(&mut receipt) {
+    let result = if input.queued_source.is_none() {
+        save_direct(&mut store, &mut receipt, &mut input)
+    } else {
+        receipt.steering.push(input.clone());
+        store.save(&mut receipt).map_err(storage_error)
+    };
+    if let Err(e) = result {
+        if !e.storage {
+            return problem(StatusCode::CONFLICT, "steering_context", e.message);
+        }
         drop(store);
         drop(history);
         drop(active);
         app.storage_failed();
-        return problem(StatusCode::SERVICE_UNAVAILABLE, "storage", e);
+        return problem(StatusCode::SERVICE_UNAVAILABLE, "storage", e.message);
     }
     (StatusCode::ACCEPTED, Json(input)).into_response()
 }
 
+/// Explicitly release a settled, uncertain live reservation while retaining its audit state.
+pub(crate) async fn resend_queued(
+    State(app): State<App>,
+    Path((root, id)): Path<(String, String)>,
+) -> Response {
+    if let Some(response) = crate::web_identity::effect_denied() {
+        return response;
+    }
+    let result = (|| -> Result<bool, String> {
+        let active = app.active.lock().map_err(|_| "Live owner unavailable")?;
+        let history = app.history.lock().map_err(|_| "Session history unavailable")?;
+        let mut store = app.store.lock().map_err(|_| "Receipt store unavailable")?;
+        let mut r = store.get(&root)?.ok_or("Live receipt unavailable")?;
+        history.check_context(&store.session_by_id(&r.session)?)?;
+        let input = r.steering.iter_mut().find(|input| {
+            input.command.id == id && input.state == SteeringState::Uncertain
+        }).ok_or("Message has no unconfirmed live reservation")?;
+        if input.resend_requested {
+            return Ok(false);
+        }
+        if r.phase.active() || r.phase == Phase::Uncertain || active.contains_key(&root)
+            || !app.persistence_available()
+        {
+            return Err("Wait for the original Lead turn to settle before resending.".into());
+        }
+        input.resend_requested = true;
+        store.save(&mut r)?;
+        Ok(true)
+    })();
+    match result {
+        Ok(changed) => {
+            if changed {
+                app.pump_queue();
+            }
+            Json(json!({"id": id, "resendRequested": true})).into_response()
+        }
+        Err(message) => problem(StatusCode::CONFLICT, "steering_resend_unavailable", message),
+    }
+}
+
 /// Hold the source slot in the same SQLite savepoint as its live receipt.
-/// Definite failure returns the original row to FIFO; an uncertain write consumes it.
+/// Return the original row to FIFO on proven non-delivery or an explicit resend.
 pub(crate) fn sync_queued_sources(
     store: &mut Store,
     root: &Receipt,
     prior: Option<&Receipt>,
 ) -> Result<(), String> {
     for input in &root.steering {
-        let Some(source) = &input.queued_source else {
-            continue;
-        };
         let previous = prior.and_then(|root| {
             root.steering
                 .iter()
                 .find(|old| old.command.id == input.command.id)
         });
-        if previous.is_some_and(|old| old.state == input.state) {
+        if previous.is_some_and(|old| old.state == input.state && old.resend_requested == input.resend_requested) {
             continue;
         }
+        let Some(source) = &input.queued_source else {
+            // Older direct receipts were persisted without a queue reservation.
+            if input.state == SteeringState::Rejected
+                && previous.is_some_and(|old| old.state == SteeringState::Pending)
+            {
+                // The write fence was never crossed. Commit the recovered input
+                // with this transition, using the original turn's admission.
+                let submit = Submit {
+                    api: API,
+                    id: format!("live-{}", uuid::Uuid::new_v4()),
+                    prompt: input.command.text.clone(),
+                    mode: Mode::SessionV1,
+                    attachments: Vec::new(),
+                };
+                let snapshot = root.configuration.clone().ok_or("Legacy steering admission missing")?;
+                let mut queued = Store::admitted_receipt(
+                    &submit, &root.session, true, false, snapshot, Vec::new(), root.requested_model.clone(),
+                );
+                queued.accepted_ms = input.admitted_ms;
+                store.save(&mut queued)?;
+                // Legacy steering has an admission timestamp but no queue
+                // rowid. Place it before the first existing input admitted at
+                // or after that time, keeping other receipts in rowid order.
+                store.conn.execute(
+                    "INSERT INTO recovered_steering_queue(id, before_id)
+                     SELECT ?1, id FROM receipts
+                     WHERE rowid > (SELECT rowid FROM receipts WHERE id=?2)
+                       AND rowid < (SELECT rowid FROM receipts WHERE id=?1)
+                       AND json_extract(body, '$.session')=?3
+                       AND json_extract(body, '$.continuation') IS NULL
+                       AND json_extract(body, '$.accepted_ms') >= ?4
+                     ORDER BY rowid LIMIT 1",
+                    rusqlite::params![queued.id, root.id, root.session, queued.accepted_ms],
+                ).map_err(|_| "Cannot preserve recovered steering queue position")?;
+            } else if previous.is_some_and(|old| !old.resend_requested) && input.resend_requested {
+                queue_direct(store, &input.command).map_err(|e| e.message)?;
+            }
+            continue;
+        };
         let mut queued = store.get(&source.id)?.ok_or("Missing queued live source")?;
         if queued.attempt != source.attempt
             || queued.session != root.session
@@ -366,11 +499,16 @@ pub(crate) fn sync_queued_sources(
             SteeringState::Pending => "Queued message reserved for live delivery",
             SteeringState::Dispatching => continue,
             SteeringState::Accepted => "Queued message delivered to the current turn",
+            SteeringState::Uncertain if input.resend_requested => {
+                queued.steered_to = None;
+                queued.phase = Phase::Queued;
+                "Message queued at your request after unconfirmed live delivery."
+            }
             SteeringState::Uncertain => "Live delivery could not be confirmed. This message will not be sent again automatically.",
             SteeringState::Rejected => {
                 queued.steered_to = None;
                 queued.phase = Phase::Queued;
-                "Live delivery was rejected. Message is back in the queue."
+                "Live message was not delivered. Message is back in the queue."
             }
         }.into();
         store.save(&mut queued)?;
@@ -405,16 +543,26 @@ pub(crate) fn claim_input(
         if !receipt.can_steer || closing(&receipt) {
             return Ok(None);
         }
-        let Some(input) = receipt
+        let Some(index) = receipt
             .steering
-            .iter_mut()
-            .find(|input| input.state == SteeringState::Pending)
+            .iter()
+            .position(|input| input.state == SteeringState::Pending)
         else {
             return Ok(None);
         };
+        let input = &receipt.steering[index];
         if input.command.thread_id != thread || input.command.expected_turn_id != turn {
             return Err("Live input does not belong to this native turn".into());
         }
+        if let Some(source) = &input.queued_source {
+            let queued = store.get(&source.id)?.ok_or("Queued live source missing")?;
+            if !compatible_queue_admission(&receipt, &queued) {
+                receipt.steering[index].state = SteeringState::Rejected;
+                store.save(&mut receipt)?;
+                return Ok(None);
+            }
+        }
+        let input = &mut receipt.steering[index];
         input.state = SteeringState::Dispatching;
         let claimed = input.clone();
         store.save(&mut receipt)?;
@@ -466,7 +614,8 @@ pub(crate) fn settle(
         if let Some(input) = receipt.steering.iter_mut().find(|input| {
             input.command.id == id
                 && (input.state == SteeringState::Dispatching
-                    || (state == SteeringState::Accepted && input.state == SteeringState::Uncertain))
+                    || (matches!(state, SteeringState::Accepted | SteeringState::Rejected)
+                        && input.state == SteeringState::Uncertain && !input.resend_requested))
         }) {
             input.state = state;
         }
@@ -526,6 +675,86 @@ mod tests {
     use super::*;
 
     #[test]
+    fn restart_restores_only_pending_legacy_direct_steering_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().to_str().unwrap();
+        let path = dir.path().join("state.db");
+        let mut store = Store::open(&path, project).unwrap();
+        store.register_codex("a".repeat(64)).unwrap();
+        let session = "legacy-steering-session";
+        store.create_session(&serde_json::from_value(json!({
+            "api": API, "id": session, "title": "Fixture",
+            "members": {"lead": {"runnerId": "codex", "modelId": "gpt-6.1-sol"}}
+        })).unwrap()).unwrap();
+        let mut root = store.admit(&serde_json::from_value(json!({
+            "api": API, "id": "old-live-root", "session": session, "mode": "session_v1",
+            "prompt": "An interrupted turn"
+        })).unwrap()).unwrap();
+        root.phase = Phase::Running;
+        root.dispatch_ms = Some(crate::now());
+        root.thread = Some("thread".into());
+        root.turn = Some("turn".into());
+        root.can_steer = true;
+        let mut earlier = store.admit(&serde_json::from_value(json!({
+            "api": API, "id": "earlier-user-input", "session": session, "mode": "session_v1",
+            "prompt": "Queued before legacy steering", "queue": true
+        })).unwrap()).unwrap();
+        earlier.accepted_ms = root.accepted_ms;
+        store.save(&mut earlier).unwrap();
+        for (state, text) in [
+            (SteeringState::Dispatching, "Possibly delivered"),
+            (SteeringState::Pending, "Never yielded"),
+            (SteeringState::Rejected, "Already rejected before restart"),
+        ] {
+            root.steering.push(SteeringReceipt {
+                command: SteeringCommand {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    session: session.into(),
+                    thread_id: "thread".into(),
+                    expected_turn_id: "turn".into(),
+                    text: text.into(),
+                },
+                state,
+                admitted_ms: earlier.accepted_ms + 1,
+                resend_requested: false,
+                queued_source: None,
+            });
+        }
+        store.save(&mut root).unwrap();
+        let mut later = store.admit(&serde_json::from_value(json!({
+            "api": API, "id": "later-user-input", "session": session, "mode": "session_v1",
+            "prompt": "Queued after legacy steering", "queue": true
+        })).unwrap()).unwrap();
+        later.accepted_ms = root.steering[1].admitted_ms + 1;
+        store.save(&mut later).unwrap();
+        drop(store);
+
+        let mut store = Store::open(&path, project).unwrap();
+        let interrupted = store.get(&root.id).unwrap().unwrap();
+        assert_eq!(interrupted.phase, Phase::Uncertain);
+        assert_eq!(interrupted.steering[0].state, SteeringState::Uncertain);
+        assert_eq!(interrupted.steering[1].state, SteeringState::Rejected);
+        let queued: Vec<_> = store.all().unwrap().into_iter().filter(|r| r.phase == Phase::Queued).collect();
+        assert_eq!(queued.len(), 3, "only the pending input should be added to the queue");
+        let recovered = queued.iter().find(|r| r.prompt == "Never yielded").unwrap();
+        assert_eq!(recovered.session, root.session);
+        assert_eq!(recovered.configuration, root.configuration);
+        assert!(recovered.dispatch_ms.is_none());
+        assert!(store.claim_next().unwrap().is_none());
+        drop(store);
+
+        let mut store = Store::open(&path, project).unwrap();
+        store.recover().unwrap();
+        for expected in [&earlier.id, &recovered.id, &later.id] {
+            let mut claimed = store.claim_next().unwrap().unwrap();
+            assert_eq!(&claimed.id, expected);
+            claimed.phase = Phase::Completed;
+            store.save(&mut claimed).unwrap();
+        }
+        assert!(store.claim_next().unwrap().is_none());
+    }
+
+    #[test]
     fn queued_steering_reservation_rolls_back_and_recovers_without_replay() {
         for dispatched in [false, true] {
             let dir = tempfile::tempdir().unwrap();
@@ -569,6 +798,7 @@ mod tests {
                 },
                 state: SteeringState::Pending,
                 admitted_ms: crate::now(),
+                resend_requested: false,
                 queued_source: Some(QueuedSteeringSource {
                     id: selected.id.clone(),
                     attempt: selected.attempt.clone(),

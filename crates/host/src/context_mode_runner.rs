@@ -22,12 +22,16 @@ pub(crate) const PLUGIN: &str = "context-mode@context-mode";
 const MARKET: &str = "context-mode";
 const SOURCE: &str = "mksglu/context-mode";
 
+#[path = "context_mode_claude.rs"]
+mod claude;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum State {
     NotInstalled,
     Installed,
     Incomplete,
+    Stale,
     Standalone,
     MigrationAvailable,
     Conflict,
@@ -197,20 +201,62 @@ fn bundle_hook(command: &str, bundle: &FsPath) -> bool {
     })
 }
 
-fn has_unrecognized_hooks(hooks: &Value, bundle: Option<&Bundle>) -> bool {
+// The previous bundle may already have been pruned. Validate the exact
+// cache layout and semver without resolving the missing target on disk.
+fn cache_script_version(script: &FsPath, cache: &FsPath, name: &str) -> Option<semver::Version> {
+    if script.file_name()? != name {
+        return None;
+    }
+    semver::Version::parse(script.parent()?.strip_prefix(cache).ok()?.to_str()?).ok()
+}
+
+fn configured_hooks(hooks: &Value) -> impl Iterator<Item = &str> {
     hooks
         .as_object()
         .into_iter()
         .flatten()
         .filter_map(|(_, groups)| groups.as_array())
         .flatten()
-        .filter_map(|group| group["hooks"].as_array())
-        .flatten()
-        .any(|hook| {
-            hook["command"].as_str().is_some_and(|cmd| {
-                context_name(cmd) && !bundle.is_some_and(|b| bundle_hook(cmd, &b.path))
-            })
+        .flat_map(|group| {
+            std::iter::once(group).chain(group["hooks"].as_array().into_iter().flatten())
         })
+        .filter_map(|hook| hook["command"].as_str())
+        .filter(|cmd| {
+            context_name(cmd)
+                || cmd.ends_with("hook.mjs\" --agent codex")
+                || cmd.ends_with("hook.mjs --agent codex")
+        })
+}
+
+fn stale_hooks(
+    hooks: &Value,
+    bundle: Option<&Bundle>,
+    cache: &FsPath,
+) -> Result<bool, &'static str> {
+    let mut stale = false;
+    for cmd in configured_hooks(hooks) {
+        let matched = bundle.and_then(|bundle| {
+            // Match the whole command after taking the version from the
+            // configured or canonical cache root, even if its bundle is gone.
+            [Some(cache), bundle.path.parent()]
+                .into_iter()
+                .flatten()
+                .find_map(|cache| {
+                    let (_, suffix) = cmd.rsplit_once(cache.to_str()?)?;
+                    let (version, _) = suffix.strip_prefix('/')?.split_once('/')?;
+                    let version = semver::Version::parse(version).ok()?;
+                    bundle_hook(cmd, &cache.join(version.to_string()))
+                        .then(|| version != bundle.version)
+                })
+        });
+        let Some(older) = matched else {
+            return Err(
+                "Deck could not identify the source of a configured Context Mode hook. Review its command in Codex.",
+            );
+        };
+        stale |= older;
+    }
+    Ok(stale)
 }
 
 fn verify_hook_inventory(hooks: &[Value], bundle: &FsPath) -> Result<(), String> {
@@ -282,8 +328,12 @@ struct Bundle {
     hooks: Vec<String>,
 }
 
+fn bundle_cache(root: &FsPath) -> PathBuf {
+    root.join("plugins/cache").join(MARKET).join(MARKET)
+}
+
 async fn installed_bundle(root: &FsPath) -> Result<Option<Bundle>, String> {
-    let cache = root.join("plugins/cache").join(MARKET).join(MARKET);
+    let cache = bundle_cache(root);
     let mut versions = match tokio::fs::read_dir(&cache).await {
         Ok(versions) => versions,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -466,20 +516,59 @@ impl Runner {
         } else {
             None
         };
-        let same_server = match (servers.as_slice(), local.as_ref()) {
-            ([(name, spec)], Some(bundle)) if name.as_str() == MARKET => {
-                spec["enabled"] != false && bundle_server(spec, &bundle.path).await
+        let cache = bundle_cache(&self.root);
+        let (same_server, stale_server) = match (servers.as_slice(), local.as_ref()) {
+            ([(name, spec)], Some(bundle))
+                if name.as_str() == MARKET && spec["enabled"] != false =>
+            {
+                let current = bundle_server(spec, &bundle.path).await;
+                let stale = !current
+                    && server_script(spec).is_some_and(|script| {
+                        [Some(cache.as_path()), bundle.path.parent()]
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|cache| cache_script_version(&script, cache, "server.mjs"))
+                            .any(|version| version != bundle.version)
+                    });
+                (current, stale)
             }
-            _ => false,
+            _ => (false, false),
         };
-        let standalone = !servers.is_empty() && !same_server;
+        let standalone = !servers.is_empty() && !same_server && !stale_server;
         let user_hooks = read_json(&self.root.join("hooks.json")).await?;
-        if has_unrecognized_hooks(&config["hooks"], local.as_ref())
-            || has_unrecognized_hooks(&user_hooks["hooks"], local.as_ref())
+        let stale = stale_hooks(&config["hooks"], local.as_ref(), &cache).and_then(|inline| {
+            stale_hooks(&user_hooks["hooks"], local.as_ref(), &cache)
+                .map(|file| inline || file || stale_server)
+        });
+        let stale = match stale {
+            Ok(stale) => stale,
+            Err(detail) => {
+                observed.status = Status::new(State::CheckFailed, detail);
+                return Ok(observed);
+            }
+        };
+
+        if stale
+            && (same_server || stale_server)
+            && servers.iter().any(|(_, spec)| {
+                spec.as_object().is_some_and(|spec| {
+                    spec.keys().any(|key| {
+                        !matches!(
+                            key.as_str(),
+                            "command"
+                                | "args"
+                                | "cwd"
+                                | "enabled"
+                                | "omit_tools_from"
+                                | "default_tools_approval_mode"
+                        )
+                    })
+                })
+            })
         {
             observed.status = Status::new(
-                State::CheckFailed,
-                "Deck could not identify the source of a configured Context Mode hook. Review its command in Codex.",
+                State::Conflict,
+                "Review the customized Context Mode MCP settings before refreshing the Codex registration.",
             );
             return Ok(observed);
         }
@@ -537,7 +626,12 @@ impl Runner {
         }
         if let Some(bundle) = local {
             if !standalone {
-                observed.status = if hooks_approved(&config["hooks"]["state"], &bundle.hooks) {
+                observed.status = if stale {
+                    Status::new(
+                        State::Stale,
+                        "Context Mode references an older plugin bundle. Update to refresh the Codex hooks and MCP registration.",
+                    )
+                } else if hooks_approved(&config["hooks"]["state"], &bundle.hooks) {
                     Status::new(
                         State::Installed,
                         "The native plugin and its hook approvals are present in Codex.",
@@ -572,8 +666,13 @@ impl Runner {
         if matches!(action, Action::Migrate) != (state == State::MigrationAvailable) {
             return Err("Refresh Context Mode in Settings and use the action shown there.".into());
         }
-        if matches!(action, Action::Install) && state == State::Installed {
-            return Ok((before.status, Outcome::Current));
+        if matches!(action, Action::Install) {
+            if state == State::Installed {
+                return Ok((before.status, Outcome::Current));
+            }
+            if state == State::Stale {
+                return Err(before.status.detail.into());
+            }
         }
         match action {
             Action::Install => {
@@ -609,7 +708,7 @@ impl Runner {
                 self.migrate(legacy, bundle_current).await?;
             }
             Action::Update => {
-                if state != State::Installed {
+                if !matches!(state, State::Installed | State::Stale) {
                     return Err("Complete the native plugin setup before updating.".into());
                 }
                 self.codex(
@@ -621,14 +720,33 @@ impl Runner {
             }
         }
 
-        let current = self.observe().await?;
+        let mut current = self.observe().await?;
+        if matches!(action, Action::Update)
+            && matches!(
+                current.status.state,
+                State::Installed | State::Incomplete | State::Stale
+            )
+            && current.catalog_version.is_some()
+            && current.status.version != current.catalog_version
+        {
+            self.codex(
+                &["plugin", "add", PLUGIN],
+                90,
+                "Could not refresh the installed Context Mode plugin.",
+            )
+            .await?;
+            current = self.observe().await?;
+        }
         if current.status.state == State::NotInstalled {
             return Err(
                 "Codex finished the command but did not expose the native plugin registration."
                     .into(),
             );
         }
-        if !matches!(current.status.state, State::Installed | State::Incomplete) {
+        if !matches!(
+            current.status.state,
+            State::Installed | State::Incomplete | State::Stale
+        ) {
             return Err(current.status.detail.into());
         }
         let bundle = current
@@ -647,13 +765,19 @@ impl Runner {
                 "The requested Context Mode version could not be verified in Codex.".into(),
             );
         }
-        let hooks = self.verify_registration(&bundle.path).await?;
-        let needs_hook_setup = !hooks_ready(&hooks);
+        let updating = matches!(action, Action::Update);
+        let repaired = current.status.state == State::Stale;
+        if repaired {
+            // The bundled CLI's cache mode removes version-pinned duplicates.
+            // With Codex on PATH its native mode only verifies/trusts plugin hooks.
+            self.setup(&bundle.path, true).await?;
+        }
+        let needs_hook_setup =
+            updating || !hooks_ready(&self.verify_registration(&bundle.path).await?);
+        if needs_hook_setup {
+            self.setup(&bundle.path, false).await?;
+        }
         let after = if needs_hook_setup {
-            self.setup(&bundle.path).await?;
-            if !hooks_ready(&self.verify_registration(&bundle.path).await?) {
-                return Err("Context Mode hook setup could not be verified in Codex.".into());
-            }
             let after = self.observe().await?;
             if after.status.state != State::Installed
                 || after.bundle.as_ref().map(|bundle| &bundle.path) != Some(&bundle.path)
@@ -662,6 +786,9 @@ impl Runner {
                     "Context Mode setup could not be verified. {}",
                     after.status.detail
                 ));
+            }
+            if !hooks_ready(&self.verify_registration(&bundle.path).await?) {
+                return Err("Context Mode hook setup could not be verified in Codex.".into());
             }
             after
         } else {
@@ -675,7 +802,9 @@ impl Runner {
         let outcome = match action {
             Action::Install | Action::Migrate => Outcome::Installed,
             Action::Update
-                if !needs_hook_setup && before.status.version == after.status.version =>
+                if !repaired
+                    && state != State::Stale
+                    && before.status.version == after.status.version =>
             {
                 Outcome::Current
             }
@@ -758,30 +887,41 @@ impl Runner {
         Ok(hooks)
     }
 
-    async fn setup(&self, bundle: &FsPath) -> Result<(), String> {
+    async fn setup(&self, bundle: &FsPath, cache_only: bool) -> Result<(), String> {
         // The official bundle includes the vendor CLI. Use the same Codex
         // executable for its discovery/checks as Deck used for installation.
         let bin_dir = tempfile::tempdir().map_err(|_| "Setup scratch directory unavailable")?;
-        let binary = tokio::fs::canonicalize(&self.binary)
-            .await
-            .map_err(|_| "Selected Codex is unavailable")?;
-        std::os::unix::fs::symlink(binary, bin_dir.path().join("codex"))
-            .map_err(|_| "Cannot bind Context Mode setup to the selected Codex")?;
-        let inherited_path = std::env::var_os("PATH").unwrap_or_default();
-        let path = std::env::join_paths(
-            std::iter::once(bin_dir.path().to_owned())
-                .chain(std::env::split_paths(&inherited_path)),
-        )
-        .map_err(|_| "Context Mode setup PATH is invalid")?;
-        let mut cmd = self.command(FsPath::new("node"));
-        cmd.env("PATH", path).arg(bundle.join("cli.mjs")).args([
-            "setup",
-            "--agents",
-            "codex",
-            "--yes",
-            "--no-input",
-            "--json",
-        ]);
+        let setup_path = if cache_only {
+            bin_dir.path().as_os_str().to_owned()
+        } else {
+            let binary = tokio::fs::canonicalize(&self.binary)
+                .await
+                .map_err(|_| "Selected Codex is unavailable")?;
+            std::os::unix::fs::symlink(binary, bin_dir.path().join("codex"))
+                .map_err(|_| "Cannot bind Context Mode setup to the selected Codex")?;
+            let inherited_path = std::env::var_os("PATH").unwrap_or_default();
+            std::env::join_paths(
+                std::iter::once(bin_dir.path().to_owned())
+                    .chain(std::env::split_paths(&inherited_path)),
+            )
+            .map_err(|_| "Context Mode setup PATH is invalid")?
+        };
+        // The plugin ships its own official CLI. A global npm installation
+        // can belong to an older, incompatible Context Mode release.
+        let node = crate::runner_management::path_tool("node").map_err(
+            |_| "Install Node.js 24.15 or later and make it available on the Deck host PATH.",
+        )?;
+        let mut cmd = self.command(&node);
+        cmd.env("PATH", setup_path)
+            .arg(bundle.join("cli.mjs"))
+            .args([
+                "setup",
+                "--agents",
+                "codex",
+                "--yes",
+                "--no-input",
+                "--json",
+            ]);
         let output = run(cmd, Duration::from_secs(120)).await
             .map_err(|error| format!("Context Mode hook setup failed. Check that the Deck host can run the Node version required by Context Mode. {error}"))?;
         let result: Value = serde_json::from_slice(&output)
@@ -818,28 +958,24 @@ enum Registration {
     Unrecognized,
 }
 
-async fn bundle_server(spec: &Value, bundle: &FsPath) -> bool {
+fn server_script(spec: &Value) -> Option<PathBuf> {
     if !spec["url"].is_null() || !spec["command"].as_str().is_some_and(node_command) {
-        return false;
+        return None;
     }
-    let Some(args) = spec["args"].as_array() else {
-        return false;
-    };
+    let args = spec["args"].as_array()?;
     if args.len() != 3 || args[1] != "--agent" || args[2] != "codex" {
-        return false;
+        return None;
     }
-    let Some(script) = args[0].as_str().map(FsPath::new) else {
-        return false;
-    };
-    let path = if script.is_absolute() {
-        script.to_owned()
-    } else if let Some(cwd) = spec["cwd"]
-        .as_str()
-        .map(FsPath::new)
-        .filter(|p| p.is_absolute())
-    {
-        cwd.join(script)
-    } else {
+    let script = FsPath::new(args[0].as_str()?);
+    if script.is_absolute() {
+        return Some(script.to_owned());
+    }
+    let cwd = FsPath::new(spec["cwd"].as_str()?);
+    cwd.is_absolute().then(|| cwd.join(script))
+}
+
+async fn bundle_server(spec: &Value, bundle: &FsPath) -> bool {
+    let Some(path) = server_script(spec) else {
         return false;
     };
     tokio::fs::canonicalize(path)
@@ -899,14 +1035,32 @@ fn success(status: Status, outcome: Option<Outcome>) -> Response {
         "detail":status.detail, "outcome":outcome})).into_response()
 }
 
-pub async fn inspect(ProjectState(app): ProjectState<crate::server::App>) -> Response {
-    let result = async { Runner::for_app(&app)?.observe().await }.await;
+async fn inspect_runner(app: &crate::server::App, runner: &str) -> Response {
+    let result = async {
+        match runner {
+            "codex" => Ok(Runner::for_app(app)?.observe().await?.status),
+            "claude" => claude::Runner::for_host()?.status().await,
+            _ => Err("Context Mode settings support Codex and Claude Code.".into()),
+        }
+    }
+    .await;
     match result {
-        Ok(observed) => success(observed.status, None),
+        Ok(status) => success(status, None),
         Err(error) => Json(json!({"api":deck2_shared::API, "state":State::CheckFailed,
             "version":null, "detail":error, "outcome":null}))
         .into_response(),
     }
+}
+
+pub async fn inspect(ProjectState(app): ProjectState<crate::server::App>) -> Response {
+    inspect_runner(&app, "codex").await
+}
+
+pub async fn inspect_selected(
+    ProjectState(app): ProjectState<crate::server::App>,
+    Path(runner): Path<String>,
+) -> Response {
+    inspect_runner(&app, &runner).await
 }
 
 pub async fn change(
@@ -920,11 +1074,11 @@ pub async fn change(
     if request.api != deck2_shared::API {
         return problem(StatusCode::BAD_REQUEST, "api", "Unsupported API");
     }
-    if runner != "codex" {
+    if !matches!(runner.as_str(), "codex" | "claude") {
         return problem(
             StatusCode::BAD_REQUEST,
             "context_mode_runner",
-            "Context Mode settings support Codex.",
+            "Context Mode settings support Codex and Claude Code.",
         );
     }
     if !app.persistence_available() {
@@ -941,7 +1095,15 @@ pub async fn change(
             "Another tool change is running",
         );
     };
-    match async { Runner::for_app(&app)?.apply(request.action).await }.await {
+    let result = async {
+        if runner == "codex" {
+            Runner::for_app(&app)?.apply(request.action).await
+        } else {
+            claude::Runner::for_host()?.apply(request.action).await
+        }
+    }
+    .await;
+    match result {
         Ok((status, outcome)) => success(status, Some(outcome)),
         Err(error) => problem(StatusCode::CONFLICT, "tool_change_failed", error),
     }
@@ -958,6 +1120,189 @@ mod tests {
             root: home.join("custom-codex"),
             binary,
         }
+    }
+
+    // A plugin refresh can leave setup-owned paths pointing at a deleted bundle.
+    #[tokio::test]
+    async fn context_mode_stale_codex_setup_can_be_updated() {
+        use std::fs;
+        let home = tempfile::tempdir().unwrap();
+        let runner = runner(home.path(), home.path().join("codex"));
+        let cache = runner.root.join("plugins/cache/context-mode/context-mode");
+        let active = cache.join("2.2.2");
+        let old = cache.join("2.2.1");
+        fs::create_dir_all(active.join(".codex-plugin")).unwrap();
+        fs::write(active.join("cli.mjs"), "").unwrap();
+        fs::write(active.join("server.mjs"), "").unwrap();
+        fs::write(
+            active.join(".codex-plugin/plugin.json"),
+            r#"{"name":"context-mode","version":"2.2.2"}"#,
+        )
+        .unwrap();
+        fs::write(active.join(".codex-plugin/mcp.json"), r#"{"mcpServers":{"context-mode":{"command":"node","args":["./server.mjs","--agent","codex"],"cwd":"."}}}"#).unwrap();
+        fs::write(
+            active.join(".codex-plugin/hooks.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"verified-command"}]}]}}"#,
+        )
+        .unwrap();
+        fs::write(
+            runner.root.join("config.toml"),
+            format!(
+                r#"
+[marketplaces.context-mode]
+source_type = "git"
+source = "mksglu/context-mode"
+[plugins."context-mode@context-mode"]
+enabled = true
+[mcp_servers.personal]
+command = "unrelated"
+[mcp_servers.context-mode]
+command = "node"
+args = [{:?}, "--agent", "codex"]
+omit_tools_from = ["deferred"]
+default_tools_approval_mode = "approve"
+[hooks.state."context-mode@context-mode:.codex-plugin/hooks.json:stop:0:0"]
+trusted_hash = "sha256:fixture"
+"#,
+                old.join("server.mjs")
+            ),
+        )
+        .unwrap();
+        let groups = json!([{"hooks":[{"type":"command","command":format!("node \"{}\" --agent codex", old.join("hook.mjs").display())}]}]);
+        fs::write(
+            runner.root.join("hooks.json"),
+            json!({"hooks":{
+                "PreToolUse":groups,"PostToolUse":groups,"SessionStart":groups,"SessionEnd":groups,
+                "Stop":[{"hooks":[{"type":"command","command":"echo unrelated"}]}]
+            }})
+            .to_string(),
+        )
+        .unwrap();
+
+        let observed = runner.observe().await.unwrap();
+        assert_eq!(
+            serde_json::to_value(observed.status.state).unwrap(),
+            "stale",
+            "{}",
+            observed.status.detail
+        );
+        let config_path = runner.root.join("config.toml");
+        let hooks_path = runner.root.join("hooks.json");
+        let pinned_hooks = fs::read_to_string(&hooks_path).unwrap();
+        let pinned_config = fs::read_to_string(&config_path).unwrap();
+        fs::write(&hooks_path, pinned_hooks.replace("2.2.1", "local")).unwrap();
+        assert_eq!(
+            runner.observe().await.unwrap().status.state,
+            State::CheckFailed
+        );
+        fs::write(&hooks_path, &pinned_hooks).unwrap();
+        fs::write(
+            &config_path,
+            pinned_config.replace("server.mjs", "foreign.mjs"),
+        )
+        .unwrap();
+        assert_eq!(
+            runner.observe().await.unwrap().status.state,
+            State::CheckFailed
+        );
+        fs::write(&config_path, &pinned_config).unwrap();
+
+        let catalog = marketplace_root(&runner.root);
+        fs::create_dir_all(catalog.join(".agents/plugins")).unwrap();
+        fs::create_dir_all(catalog.join("plugin/.codex-plugin")).unwrap();
+        fs::write(catalog.join(".agents/plugins/marketplace.json"),
+            r#"{"name":"context-mode","plugins":[{"name":"context-mode","source":{"source":"local","path":"./plugin"}}]}"#).unwrap();
+        fs::copy(
+            active.join(".codex-plugin/plugin.json"),
+            catalog.join("plugin/.codex-plugin/plugin.json"),
+        )
+        .unwrap();
+        fs::write(
+            &runner.binary,
+            r#"#!/usr/bin/python3
+import json, os, sys
+from pathlib import Path
+home = Path(__file__).parent
+root = home / 'custom-codex'
+args = sys.argv[1:]
+with (home / 'commands').open('a') as log:
+    log.write(' '.join(args[:4]) + '\n')
+if args == ['plugin', 'marketplace', 'upgrade', 'context-mode']:
+    assert os.environ['CODEX_HOME'] == str(root)
+    sys.exit()
+if args == ['mcp', 'list', '--json']:
+    assert '2.2.1' not in (root / 'config.toml').read_text()
+    print(json.dumps([{'name':'context-mode','enabled':True,'transport':{
+        'type':'stdio','command':'node','args':['./server.mjs','--agent','codex'],
+        'cwd':str(root / 'plugins/cache/context-mode/context-mode/2.2.2')}}]))
+    sys.exit()
+assert args[0] == 'app-server'
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request['method']
+    if method == 'initialized':
+        continue
+    if method == 'initialize':
+        result = {'userAgent':'deck2/0.170.0'}
+    elif method == 'hooks/list':
+        assert '2.2.1' not in (root / 'hooks.json').read_text()
+        result = {'data':[{'cwd':str(home),'errors':[],'hooks':[{
+            'source':'plugin','pluginId':'context-mode@context-mode',
+            'enabled':True,'trustStatus':'trusted'}]}]}
+    else:
+        raise AssertionError(method)
+    print(json.dumps({'id':request['id'],'result':result}), flush=True)
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&runner.binary, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(active.join("cli.mjs"), r#"
+import assert from 'node:assert/strict';
+import {appendFileSync, existsSync, readFileSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+assert.deepEqual(process.argv.slice(2), ['setup', '--agents', 'codex', '--yes', '--no-input', '--json']);
+const {HOME: home, CODEX_HOME: root, PATH: path} = process.env;
+assert.equal(root, join(home, 'custom-codex'));
+const commands = join(home, 'commands');
+assert.match(readFileSync(commands, 'utf8'), /plugin marketplace upgrade context-mode/);
+const cacheOnly = !existsSync(join(path.split(':')[0], 'codex'));
+appendFileSync(commands, cacheOnly ? 'setup cache\n' : 'setup native\n');
+if (cacheOnly && !existsSync(join(home, 'no-effect'))) {
+  const config = join(root, 'config.toml');
+  writeFileSync(config, readFileSync(config, 'utf8').replace(/\[mcp_servers.context-mode\][\s\S]*?(?=\[hooks.state)/, ''));
+  const hooks = join(root, 'hooks.json');
+  const data = JSON.parse(readFileSync(hooks, 'utf8'));
+  for (const name of ['PreToolUse','PostToolUse','SessionStart','SessionEnd']) delete data.hooks[name];
+  writeFileSync(hooks, JSON.stringify(data));
+}
+console.log(JSON.stringify({exitCode:0,agents:[{id:'codex',status:'PASS'}]}));
+"#).unwrap();
+        fs::write(home.path().join("no-effect"), "").unwrap();
+        assert!(runner.apply(Action::Update).await.is_err());
+        assert_eq!(runner.observe().await.unwrap().status.state, State::Stale);
+        fs::remove_file(home.path().join("no-effect")).unwrap();
+        let result = runner.apply(Action::Update).await.unwrap();
+        assert_eq!(result.0.state, State::Installed);
+        assert_eq!(serde_json::to_value(result.1).unwrap(), "updated");
+        let commands = fs::read_to_string(home.path().join("commands")).unwrap();
+        assert!(
+            commands.starts_with(concat!(
+                "plugin marketplace upgrade context-mode\nsetup cache\nsetup native\n",
+                "plugin marketplace upgrade context-mode\nsetup cache\nsetup native\n",
+                "mcp list --json\napp-server",
+            )),
+            "{commands}"
+        );
+        assert!(
+            fs::read_to_string(hooks_path)
+                .unwrap()
+                .contains("echo unrelated")
+        );
+        assert!(
+            fs::read_to_string(config_path)
+                .unwrap()
+                .contains("[mcp_servers.personal]")
+        );
     }
 
     // Protects the Settings entry point for the old Deck-owned MCP registration.
@@ -1175,7 +1520,11 @@ for line in sys.stdin:
     #[tokio::test]
     async fn context_mode_distinguishes_resolved_plugin_paths_from_duplicates() {
         let temp = tempfile::tempdir().unwrap();
-        let bundle = temp.path().canonicalize().unwrap().join("context-mode/2.2.1");
+        let bundle = temp
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("context-mode/2.2.1");
         std::fs::create_dir_all(&bundle).unwrap();
         let script = bundle.join("server.mjs");
         std::fs::write(&script, "").unwrap();

@@ -19,8 +19,10 @@ pub(crate) fn bind(
     let launch =
         Launch::new(trusted.then(|| Path::new(&snapshot.project.root))).map_err(|s| s.message())?;
     let storage = launch.storage().map_err(|s| s.message())?;
+    // Keep the existing trust discriminator so stored native continuations survive.
+    let trust_key = if trusted { "project" } else { "" };
     let context = digest(
-        &serde_json::to_vec(&(storage, launch.sources(), &snapshot.project))
+        &serde_json::to_vec(&(storage, trust_key, &snapshot.project))
             .map_err(|_| "Invalid Claude member storage")?,
     );
     let role = role_key(role)?;
@@ -184,13 +186,13 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
     if status != Status::SubscriptionSignedIn {
         return Err(status.message().into());
     }
-    launch.verify_policy().map_err(|s| s.message())?;
     let bridge = crate::session_mcp::Bridge::start_member(app, task, attempt).await?;
     let can_write = trusted && !matches!(t.owner.as_str(), "investigate" | "quality");
     let allow_bash = can_write && matches!(t.owner.as_str(), "apply-fast" | "apply-deep");
     let script = bridge_script()?;
     let mut child = super::spawn_sdk(
         &launch,
+        &super::node_runtime()?,
         script.path(),
         binary,
         &thread,
@@ -205,7 +207,7 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
     let result = async {
         update(app, task, attempt, |a| a.native_pid = Some(pid))?;
         app.history.lock().map_err(|_| "Original ownership unavailable")?.track_process(pid)?;
-        let mut config = bootstrap(&bridge, instructions, trusted, can_write, allow_bash, &contract.approvals);
+        let mut config = bootstrap(&bridge, instructions, trusted, can_write, allow_bash);
         if resume {
             let storage = launch.storage().map_err(|s| s.message())?;
             config["transcriptStorage"] = json!(storage.to_str().ok_or("Claude transcript storage path is invalid")?);
@@ -245,7 +247,6 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
         let current_task = app.store.lock().unwrap().task(task)?;
         let current_attempt = current_task.attempts.iter().find(|a| a.id == attempt).ok_or("Member attempt missing")?;
         let prompt = handoff(&current_task, current_attempt, !use_native)?;
-        launch.verify_policy().map_err(|s| s.message())?;
         if file_digest(binary).map_err(|_| "Claude member executable unavailable")? != bound.executable.executable {
             return Err("Claude member executable changed before dispatch".into());
         }
@@ -271,8 +272,8 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
 
         let mut text = String::new();
         let mut initialized = false;
-        let mut bash_decisions = bash::Decisions::default();
-        let bash_scope = allow_bash.then_some((&bridge, &project));
+        let mut relay_decisions = bash::Decisions::default();
+        let bash_project = allow_bash.then_some(&project);
         let mut controls = tokio::time::interval(Duration::from_millis(100));
         controls.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // At most one live Lead input is outstanding; its id is the SDK message uuid.
@@ -308,8 +309,8 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
                     }
                     continue;
                 }
-                (request, allowed) = bash_decisions.next() => {
-                    send(&mut stdin, json!({"type":"permission_reply","request":request,"allowed":allowed,"permit":allowed.then(|| json!({}))})).await?;
+                (request, result) = relay_decisions.next() => {
+                    send(&mut stdin, bash::reply(request, result)).await?;
                     continue;
                 }
                 event = frame(&mut stdout, &mut partial) => event.map_err(|error|
@@ -368,9 +369,7 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
                     })?;
                 }
                 Some("activity") if initialized => {
-                    if let Some(item) = activity_item(&event) {
-                        let method = if event["phase"] == "completed" { "item/completed" } else { "item/started" };
-                        let value = json!({"method":method,"params":{"threadId":thread,"turnId":attempt,"item":item}});
+                    if let Some(value) = super::activity_event(&event, &thread, attempt) {
                         let root = {
                             let store = app.store.lock().unwrap();
                             let t = store.task(task)?;
@@ -392,7 +391,7 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
                         if !trusted {
                             None
                         } else if event["type"] == "permission" {
-                            approval::member_read_permit(&event, &project)
+                            approval::workspace_read_permit(&event, &project)
                         } else {
                             (can_write && approval::workspace_write_target(&event, &project)).then(|| json!({}))
                         }
@@ -400,8 +399,10 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
                     send(&mut stdin, json!({"type":"permission_reply","request":request,"allowed":permit.is_some(),"permit":permit})).await?;
                 }
                 Some("permission_closed") if initialized => {}
-                Some("workspace_bash") if initialized => bash_decisions.request(&event, app, bash_scope)?,
-                Some("workspace_bash_closed") if initialized => bash_decisions.withdraw(&event),
+                Some("workspace_bash" | "mcp_permission") if initialized => {
+                    relay_decisions.request(&event, app, &bridge, bash_project)?;
+                }
+                Some("workspace_bash_closed" | "mcp_permission_closed") if initialized => relay_decisions.withdraw(&event),
                 Some("result") if event["outcome"] == "completed" && initialized => {
                     let report = event["text"].as_str().filter(|s| s.len() <= MAX_TEXT)
                         .ok_or("Invalid Claude member final report")?;
@@ -443,24 +444,6 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
 
 /// Map one bridge lifecycle signal onto the shared, already-bounded step shape.
 /// Only an id, a coarse kind, a short summary and a status are accepted.
-fn activity_item(event: &Value) -> Option<Value> {
-    let id = event["id"].as_str().filter(|s| !s.is_empty() && s.len() <= 200)?;
-    let cap = |key: &str, n: usize| -> String { event[key].as_str().unwrap_or("").chars().take(n).collect() };
-    let status = match event["status"].as_str() {
-        Some("cancelled") => "cancelled",
-        Some("failed") => "failed",
-        _ => "completed",
-    };
-    let mut item = match event["kind"].as_str()? {
-        "reasoning" => json!({"id":id,"type":"reasoning"}),
-        "command" => json!({"id":id,"type":"commandExecution","command":cap("command", 240)}),
-        "file" => json!({"id":id,"type":"fileChange","changes":[{"path":cap("path", 240)}]}),
-        "tool" => json!({"id":id,"type":"dynamicToolCall","tool":cap("tool", 64),"arguments":cap("summary", 160)}),
-        _ => return None,
-    };
-    item["status"] = json!(if event["phase"] == "completed" { status } else { "running" });
-    Some(item)
-}
 
 fn settle(
     app: &App,

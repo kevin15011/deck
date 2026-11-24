@@ -35,7 +35,7 @@ export function useLiveSteering(owner:string,receipts:Receipt[]){
   refresh();
   setNotice(result.state==='accepted'?undefined:{owner,text:result.state==='rejected'
    ?'The current turn declined the message. Deck returned it to the queue.'
-   :'Live delivery could not be confirmed. Deck will keep this message out of the queue.'});
+   :'Live delivery could not be confirmed. You can resend the message from the conversation.'});
  }
 
  useEffect(()=>{
@@ -86,4 +86,10 @@ export function useLiveSteering(owner:string,receipts:Receipt[]){
    }});
   },
  };
+}
+
+/** Retry the same explicit request if its HTTP response was lost. */
+export async function resendQueuedSteer(root:string,id:string){
+ const response=await request('POST',`/api/commands/${encodeURIComponent(root)}/steering/${encodeURIComponent(id)}/resend`,{});
+ if(!response||typeof response!=='object'||!('id' in response)||response.id!==id||!('resendRequested' in response)||response.resendRequested!==true)throw Error('Resend could not be confirmed. Check the message before retrying.');
 }

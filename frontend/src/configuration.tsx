@@ -39,8 +39,10 @@ export function ConfigurationView({w,connected,project,onChanged}:{w:Workspace;c
 }
 type ToolId='codebase-memory'|'rtk'|'context7';
 type RunnerState='installed'|'not_installed'|'incomplete'|'check_failed';
-interface ToolRunner {id:'codex';state:RunnerState}
-const validRunner=(v:unknown):v is ToolRunner=>typeof v==='object'&&v!==null&&(v as ToolRunner).id==='codex'&&['installed','not_installed','incomplete','check_failed'].includes((v as ToolRunner).state);
+type RunnerId='codex'|'claude';
+const runnerNames:Record<RunnerId,string>={codex:'Codex',claude:'Claude Code'};
+interface ToolRunner {id:RunnerId;state:RunnerState}
+const validRunner=(v:unknown):v is ToolRunner=>typeof v==='object'&&v!==null&&['codex','claude'].includes((v as ToolRunner).id)&&['installed','not_installed','incomplete','check_failed'].includes((v as ToolRunner).state);
 interface Tool {id:ToolId;enabled:boolean;installed:boolean;version:string|null;update:ToolUpdate;runners?:ToolRunner[]}
 function tools(v:unknown):Tool[]{
  const data=v as {api:number;tools:Tool[]};
@@ -67,12 +69,12 @@ export function RtkSettings({w,connected,projectId}:{w:Workspace;connected:boole
   catch(e){if(generation.current===turn)setError(settingsError(e));}
   finally{if(generation.current===turn)setBusy(undefined);}
  }
- async function changeRunner(t:Tool,runner:ToolRunner,action:'install'|'remove'){
-  if(busy)return;const turn=generation.current;setBusy(`rtk:runner:${action}`);setError('');setChanges([]);
+ async function changeRunner(t:Tool,runner:ToolRunner,action:'install'|'update'|'remove'){
+  if(busy)return;const turn=generation.current;setBusy(`rtk:runner:${runner.id}:${action}`);setError('');setChanges([]);
   try{
    const result=await request('POST',`/api/tools/rtk/runners/${runner.id}`,{api:API,action}) as {api:number;runner:ToolRunner;changes:{path:string;change:string}[]};
-   if(result.api!==API||!validRunner(result.runner)||!Array.isArray(result.changes)||result.changes.some(c=>typeof c.path!=='string'||!['created','modified','removed'].includes(c.change)))throw Error('Invalid runner result');
-   if(generation.current===turn){setData(rows=>rows?.map(row=>row.id===t.id?{...row,runners:[result.runner]}:row));setChanges(result.changes);}
+   if(result.api!==API||!validRunner(result.runner)||result.runner.id!==runner.id||!Array.isArray(result.changes)||result.changes.some(c=>typeof c.path!=='string'||!['created','modified','removed'].includes(c.change)))throw Error('Invalid runner result');
+   if(generation.current===turn){setData(rows=>rows?.map(row=>row.id===t.id?{...row,runners:row.runners?.map(r=>r.id===runner.id?result.runner:r)}:row));setChanges(result.changes);}
   }catch(e){if(generation.current===turn)setError(settingsError(e));}
   finally{if(generation.current===turn)setBusy(undefined);}
  }
@@ -84,7 +86,19 @@ export function RtkSettings({w,connected,projectId}:{w:Workspace;connected:boole
 
   return <section className="rtk-settings" aria-labelledby="rtk-settings-heading" key={t.id}>
    {toolRow}
-   <section className="rtk-runners" aria-label="RTK runners"><h4>Runners</h4><p>RTK changes this runner’s configuration. Restart the runner after installing or removing. Removal may leave formatting changes and RTK backups.</p>{(t.runners??[{id:'codex',state:'check_failed'} as ToolRunner]).map(r=><div className="settings-row" key={r.id}><div><h5>Codex</h5><p role="status">{busy?.startsWith('rtk:runner:')?(busy.endsWith(':remove')?'Removing integration…':'Installing integration…'):!connected?'Waiting for connection':!data?'Checking…':r.state==='installed'?'Integration installed':r.state==='not_installed'?'Not installed':r.state==='incomplete'?'Integration incomplete':"Couldn’t check integration"}</p></div><div className="settings-row-actions"><button type="button" className="quiet" aria-label="Install RTK for Codex" disabled={!connected||!data||!t.installed||!!busy||r.state==='installed'} onClick={()=>void changeRunner(t,r,'install')}>Install</button><button type="button" className="quiet" aria-label="Remove RTK from Codex" disabled={!connected||!data||!t.installed||!!busy||r.state==='not_installed'} onClick={()=>void changeRunner(t,r,'remove')}>Remove</button></div></div>)}
+   <section className="rtk-runners" aria-label="RTK runners">
+    <h4>Runners</h4><p>RTK changes the selected runner’s configuration. Restart it after a change.</p>
+    {(t.runners??[{id:'codex',state:'check_failed'},{id:'claude',state:'check_failed'}] as ToolRunner[]).map(r=>{
+     const name=runnerNames[r.id];
+     const action=r.state==='installed'?'update':'install';
+     const changing=busy?.startsWith(`rtk:runner:${r.id}:`);
+     return <div className="settings-row" key={r.id}><div><h5>{name}</h5>
+      <p role="status">{changing?(busy?.endsWith(':remove')?'Removing integration…':action==='update'?'Updating integration…':'Installing integration…'):!connected?'Waiting for connection':!data?'Checking…':r.state==='installed'?'Integration installed':r.state==='not_installed'?'Not installed':r.state==='incomplete'?'Integration incomplete':"Couldn’t check integration"}</p>
+     </div><div className="settings-row-actions">
+      <button type="button" className="quiet" aria-label={`${action==='update'?'Update':'Install'} RTK for ${name}`} disabled={!connected||!data||!t.installed||!!busy||r.state==='check_failed'} onClick={()=>void changeRunner(t,r,action)}>{action==='update'?'Update':'Install'}</button>
+      <button type="button" className="quiet" aria-label={`Remove RTK from ${name}`} disabled={!connected||!data||!t.installed||!!busy||r.state==='not_installed'||r.state==='check_failed'} onClick={()=>void changeRunner(t,r,'remove')}>Remove</button>
+     </div></div>;
+    })}
     <div ref={notice} hidden={!changes.length} inert={!changes.length}>
      {changes.length>0&&<div className="rtk-changes" role="status">
       <h5>RTK changed these files:</h5>
@@ -96,14 +110,19 @@ export function RtkSettings({w,connected,projectId}:{w:Workspace;connected:boole
    </section>
   </section>;
  })}
- <ContextModeSettings key={w.host_id+':'+projectId} projectId={projectId} connected={connected} blocked={!!busy} onBusy={setBusy}/>
+ <section className="rtk-settings" aria-labelledby="context-mode-heading">
+  <div className="settings-row"><div><h3 id="context-mode-heading">Context Mode</h3><p>Keeps large tool output out of the conversation.</p></div></div>
+  <section className="rtk-runners" aria-label="Context Mode runners"><h4>Runners</h4>
+   {(['codex','claude'] as const).map(runner=><ContextModeSettings key={w.host_id+':'+projectId+':'+runner} runner={runner} projectId={projectId} connected={connected} blocked={!!busy} onBusy={setBusy}/>)}
+  </section>
+ </section>
  </div><div ref={alert} hidden={!error} inert={!error}>{error&&<p className="error" role="alert">{error}</p>}</div></div>;
 }
 
 const contextModePath='/api/tools/context-mode';
 type ContextModeAction='install'|'update'|'migrate';
 type ContextModeOutcome='installed'|'updated'|'current';
-const contextModeStates=['not_installed','installed','incomplete','standalone','migration_available','conflict','disabled','check_failed'] as const;
+const contextModeStates=['not_installed','installed','incomplete','stale','standalone','migration_available','conflict','disabled','check_failed'] as const;
 type ContextModeStatus={
  state:typeof contextModeStates[number];
  version:string|null;
@@ -123,8 +142,8 @@ function contextModeStatus(value:unknown):ContextModeStatus {
  return status;
 }
 
-function ContextModeSettings({projectId,connected,blocked,onBusy}:{
- projectId?:string;connected:boolean;blocked:boolean;onBusy:(busy:string|undefined)=>void;
+function ContextModeSettings({runner,projectId,connected,blocked,onBusy}:{
+ runner:RunnerId;projectId?:string;connected:boolean;blocked:boolean;onBusy:(busy:string|undefined)=>void;
 }) {
  const [status,setStatus]=useState<ContextModeStatus>();
  const [action,setAction]=useState<ContextModeAction>();
@@ -135,11 +154,15 @@ function ContextModeSettings({projectId,connected,blocked,onBusy}:{
  const requestId=useRef(0);
  const projectQuery=projectId?`?projectId=${encodeURIComponent(projectId)}`:'';
 
+ const name=runnerNames[runner];
+ const runnerPath=`${contextModePath}/runners/${runner}`;
+ const heading=React.useId();
+
  async function refresh(signal?:AbortSignal) {
   const requestTurn=++requestId.current;
   setChecking(true);
   try {
-   const result=contextModeStatus(await request('GET',contextModePath+projectQuery,undefined,signal));
+   const result=contextModeStatus(await request('GET',(runner==='codex'?contextModePath:runnerPath)+projectQuery,undefined,signal));
    if(requestTurn===requestId.current)setStatus(result);
   } catch(e) {
    if(requestTurn===requestId.current)setError(settingsError(e));
@@ -170,7 +193,7 @@ function ContextModeSettings({projectId,connected,blocked,onBusy}:{
   onBusy('context-mode:'+next);
   setError('');
   try {
-   const result=contextModeStatus(await request('POST',contextModePath+'/runners/codex'+projectQuery,{api:API,action:next}));
+   const result=contextModeStatus(await request('POST',runnerPath+projectQuery,{api:API,action:next}));
    if(turn===lifetime.current){
     setStatus(result);
     if(result.outcome==='installed'||result.outcome==='updated')setRestart('recommended');
@@ -191,28 +214,29 @@ function ContextModeSettings({projectId,connected,blocked,onBusy}:{
  const installed=status?.state==='installed';
  const canMigrate=status?.state==='migration_available';
  const disabled=!connected||blocked||checking;
- return <section className="settings-row" aria-labelledby="context-mode-heading">
+ return <section className="settings-row" aria-labelledby={heading}>
   <div>
-   <h3 id="context-mode-heading">Context Mode</h3>
-   <p>Native Codex plugin for keeping large tool output out of the conversation.</p>
-   <p role="status">{action==='install'?'Setting up for Codex…':action==='update'?'Refreshing the Codex plugin…':action==='migrate'?'Migrating Context Mode for Codex…':
-    !connected?'Waiting for connection':checking?'Checking Codex…':
-    installed?`Installed for Codex · ${status.version}`:
+   <h5 id={heading}>{name}</h5>
+   <p role="status">{action==='install'?`Setting up for ${name}…`:action==='update'?`Updating for ${name}…`:action==='migrate'?'Migrating Context Mode for Codex…':
+    !connected?'Waiting for connection':checking?`Checking ${name}…`:
+    installed?`Installed · ${status.version}`:
     (canMigrate||status?.state==='standalone')?'Standalone MCP configured':
-    status?.state==='conflict'?'Conflicting Codex configuration':
-    status?.state==='incomplete'?'Plugin setup incomplete':status?.state==='disabled'?'Disabled in Codex':
-    status?.state==='not_installed'?'Not installed for Codex':"Couldn’t check Codex"}</p>
+    status?.state==='conflict'?'Conflicting configuration':
+    status?.state==='stale'?'Integration needs an update':
+    status?.state==='incomplete'?'Plugin setup incomplete':status?.state==='disabled'?`Disabled in ${name}`:
+    status?.state==='not_installed'?'Not installed':`Couldn’t check ${name}`}</p>
    {status&&!installed&&<p>{status.detail}</p>}
-   {restart==='recommended'&&<CodexRestartPrompt connected={connected} projectId={projectId}
+   {restart==='recommended'&&runner==='claude'&&<p role="status">Restart Claude Code to load the plugin changes.</p>}
+   {restart==='recommended'&&runner==='codex'&&<CodexRestartPrompt connected={connected} projectId={projectId}
     onLater={()=>setRestart('later')} onRestart={()=>setRestart('complete')}/>}
    {restart==='later'&&<p role="status">Restart Codex when you’re ready from Settings → Agents &amp; tools → Codex.</p>}
    {restart==='complete'&&<p role="status">Codex server restarted.</p>}
-   {status?.outcome==='current'&&<p role="status">Codex already has the current plugin version.</p>}
+   {status?.outcome==='current'&&<p role="status">{name} already has the current plugin version.</p>}
    {error&&<p className="error" role="alert">{error}</p>}
   </div>
   <div className="settings-row-actions">
    {installing&&<button type="button" className="quiet" disabled={disabled}
-    aria-label={status.state==='incomplete'?'Finish Context Mode setup for Codex':'Install Context Mode for Codex'}
+    aria-label={status.state==='incomplete'?`Finish Context Mode setup for ${name}`:`Install Context Mode for ${name}`}
     onClick={()=>void change('install')}>{status.state==='incomplete'?'Finish setup':'Install'}</button>}
    {canMigrate&&<button type="button" className="quiet" disabled={disabled}
     aria-label="Install Context Mode for Codex"
@@ -221,9 +245,9 @@ function ContextModeSettings({projectId,connected,blocked,onBusy}:{
       void change('migrate');
      }
     }}>Install</button>}
-   {installed&&<button type="button" className="quiet" disabled={disabled}
-    aria-label="Update Context Mode for Codex" onClick={()=>void change('update')}>Update</button>}
-   <button type="button" className="quiet" disabled={disabled} aria-label="Refresh Context Mode status"
+   {(installed||status?.state==='stale')&&<button type="button" className="quiet" disabled={disabled}
+    aria-label={`Update Context Mode for ${name}`} onClick={()=>void change('update')}>Update</button>}
+   <button type="button" className="quiet" disabled={disabled} aria-label={`Refresh Context Mode status for ${name}`}
     onClick={()=>{setError('');void refresh();}}>Refresh</button>
   </div>
  </section>;

@@ -41,6 +41,15 @@ pub fn validate(c: &SessionContract) -> Result<(), String> {
 
 use crate::Store;
 use deck2_shared::{MemberAssignment, Phase};
+pub(crate) fn advance_grant_revocation(contract: &mut SessionContract) -> Result<(), String> {
+    // Wall time can repeat or move backwards while an admission is live.
+    contract.grants_revoked_at = crate::now().max(
+        contract.grants_revoked_at.checked_add(1)
+            .ok_or("Session revocation fence exhausted")?,
+    );
+    Ok(())
+}
+
 impl Store {
     pub fn set_approvals(
         &mut self,
@@ -332,12 +341,7 @@ impl Store {
             .contract
             .as_mut()
             .ok_or("Historical session has no connected grants")?;
-        // This persisted timestamp also fences admitted authority. Wall time can
-        // repeat or move backwards; every revocation must still advance it.
-        contract.grants_revoked_at = crate::now().max(
-            contract.grants_revoked_at.checked_add(1)
-                .ok_or("Session revocation fence exhausted")?
-        );
+        advance_grant_revocation(contract)?;
         let mut tasks=self.tasks()?;
         let mut affected_members=std::collections::HashSet::new();
         let tx = self

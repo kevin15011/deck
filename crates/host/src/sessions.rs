@@ -183,9 +183,10 @@ impl Store {
         self.accept_in(&submit, &c.session, c.queue, c.fresh)
     }
     pub fn claim_next(&mut self) -> Result<Option<Receipt>, String> {
-        self.claim_next_with_limit(&std::collections::HashSet::new(), self.configuration()?.execution_budget.lead)
+        self.claim_next_with_limit(&std::collections::HashSet::new(), self.configuration()?.execution_budget.lead, &mut None)
     }
-    pub(crate) fn claim_next_with_limit(&mut self, live: &std::collections::HashSet<String>, cap: usize) -> Result<Option<Receipt>, String> {
+    pub(crate) fn claim_next_with_limit(&mut self, live: &std::collections::HashSet<String>, cap: usize, retry_at: &mut Option<u64>) -> Result<Option<Receipt>, String> {
+        let now = crate::now();
         let paused = self.queue_paused()?;
         let cursor: String = self.conn.query_row("SELECT value FROM meta WHERE key='lead_cursor'", [], |row| row.get(0)).optional().map_err(|_| "Cannot read Lead cursor")?.unwrap_or_default();
         let pending = self.pending_receipts()?;
@@ -198,8 +199,8 @@ impl Store {
                 eligible.push(r);
             }
         }
-        // Round robin across sessions, with durable receipt rowid order
-        // within each session even when wall-clock timestamps go backward.
+        // Round robin across sessions. The stable sort preserves the durable
+        // order returned by pending_receipts within each session.
         eligible.sort_by(|a, b| {
             (a.session <= cursor)
                 .cmp(&(b.session <= cursor))
@@ -228,6 +229,13 @@ impl Store {
                 }
             }
             selected = selected.or(first_outcome);
+            // A retry keeps its original row and position within this session.
+            if let Some(retry) = selected.and_then(|r| r.claude_startup_retry.as_ref())
+                && retry.after_ms > now
+            {
+                *retry_at = Some(retry_at.map_or(retry.after_ms, |at| at.min(retry.after_ms)));
+                selected = None;
+            }
             if selected.is_some() {
                 break;
             }
@@ -254,6 +262,7 @@ impl Store {
                 .ok_or("Session contract missing")?
                 .approvals;
         }
+        crate::claude::refresh_queued_bridge(&mut r);
         r.phase = Phase::Accepted;
         r.detail =
             "Queued input claimed; rechecking native context and capabilities before dispatch"
@@ -412,6 +421,8 @@ impl Store {
             "DELETE FROM task_calls WHERE root IN
                 (SELECT id FROM receipts WHERE json_extract(body,'$.session')=?1)",
             "DELETE FROM tasks WHERE json_extract(body,'$.session')=?1",
+            "DELETE FROM recovered_steering_queue WHERE id IN
+                (SELECT id FROM receipts WHERE json_extract(body,'$.session')=?1)",
             "DELETE FROM receipts WHERE json_extract(body,'$.session')=?1",
         ] {
             tx.execute(sql, [id]).map_err(|_| "Cannot remove local execution history")?;

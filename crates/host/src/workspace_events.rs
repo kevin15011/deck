@@ -14,6 +14,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     convert::Infallible,
     ffi::{CStr, c_char, c_int, c_void},
+    io::Write,
     sync::{
         Arc, Mutex, Weak,
         atomic::{AtomicBool, Ordering},
@@ -63,6 +64,17 @@ struct Runtime {
     started: AtomicBool,
     closed: AtomicBool,
     transaction: Mutex<Scope>,
+    claude_timing: Option<Mutex<VecDeque<ClaudeAppend>>>,
+}
+
+struct ClaudeAppend {
+    receipt: String,
+    revision: u64,
+    sdk_received_ms: u64,
+    durable_append_ms: u64,
+    start: usize,
+    end: usize,
+    text_digest: String,
 }
 
 #[derive(Default)]
@@ -84,6 +96,9 @@ impl Default for Updates {
             started: AtomicBool::new(false),
             closed: AtomicBool::new(false),
             transaction: Mutex::default(),
+            claude_timing: std::env::var_os("DECK2_CLAUDE_STREAM_TIMING")
+                .is_some_and(|value| value == "1")
+                .then(Mutex::default),
         }))
     }
 }
@@ -96,6 +111,35 @@ impl Updates {
     pub(crate) fn close(&self) {
         self.0.closed.store(true, Ordering::Release);
         self.0.changed.send_modify(|_| {});
+    }
+
+    pub(crate) fn record_claude_append(
+        &self,
+        receipt: &str,
+        revision: u64,
+        sdk_received_ms: u64,
+        start: usize,
+        text: &str,
+    ) {
+        let Some(samples) = &self.0.claude_timing else {
+            return;
+        };
+        if text.is_empty() || self.0.changed.receiver_count() == 0 {
+            return;
+        }
+        let mut samples = samples.lock().unwrap();
+        if samples.len() >= 256 {
+            samples.pop_front();
+        }
+        samples.push_back(ClaudeAppend {
+            receipt: receipt.into(),
+            revision,
+            sdk_received_ms,
+            durable_append_ms: crate::now(),
+            start,
+            end: start + text.len(),
+            text_digest: crate::tasks::digest(text.as_bytes()),
+        });
     }
 
     // Store retains this Updates instance until after the connection closes.
@@ -174,8 +218,12 @@ impl Updates {
             }
         };
         let payload = snapshot.as_ref().and_then(|previous| diff(previous, &next));
+        let published = payload.is_some();
         *snapshot = Some(next.clone());
         let revision = runtime.publish(payload);
+        if published {
+            runtime.trace_claude_publication(&next, revision);
+        }
         Ok(bootstrap.then(|| (next, runtime.cursor(revision))))
     }
 
@@ -312,6 +360,46 @@ impl Runtime {
             true
         });
         state.revision
+    }
+
+    fn trace_claude_publication(&self, snapshot: &Value, workspace_revision: u64) {
+        let Some(samples) = &self.claude_timing else {
+            return;
+        };
+        let sse_published_ms = crate::now();
+        let published = snapshot["receipts"].as_array().unwrap();
+        let mut samples = samples.lock().unwrap();
+        if samples.is_empty() {
+            return;
+        }
+        let by_id = by_id(published);
+        let mut ready = Vec::new();
+        samples.retain(|sample| {
+            let Some(receipt) = by_id.get(sample.receipt.as_str()).filter(|receipt| {
+                receipt["revision"].as_u64().is_some_and(|revision| revision >= sample.revision)
+            }) else {
+                return true;
+            };
+            // A terminal result can supersede text before the coalescer publishes
+            // it. Only measure deltas that are part of the published snapshot.
+            if receipt["text"].as_str().and_then(|text| text.get(sample.start..sample.end))
+                .is_some_and(|text| crate::tasks::digest(text.as_bytes()) == sample.text_digest)
+            {
+                ready.push(json!({
+                    "receipt": sample.receipt,
+                    "receipt_revision": sample.revision,
+                    "workspace_revision": workspace_revision,
+                    "sdk_received_ms": sample.sdk_received_ms,
+                    "durable_append_ms": sample.durable_append_ms,
+                    "sse_published_ms": sse_published_ms,
+                }));
+            }
+            false
+        });
+        drop(samples);
+        for sample in ready {
+            let _ = writeln!(std::io::stderr(), "Claude Lead stream {sample}");
+        }
     }
 
     fn cursor(&self, revision: u64) -> String {

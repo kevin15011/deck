@@ -19,7 +19,7 @@ async function next() {
   return done ? {type: 'stop'} : JSON.parse(value);
 }
 
-type Permit = {input?: Record<string, unknown>};
+type Permit = {input?: Record<string, unknown>; denial?: string};
 
 const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const base64 = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -55,15 +55,16 @@ const options: Options = {
   env: process.env,
   abortController,
   systemPrompt: {type: 'preset', preset: 'claude_code'},
-  settingSources: sources === 'project' ? ['project'] : [],
+  settingSources: sources === 'user,project,local' ? ['user', 'project', 'local'] : ['user'],
   settings,
-  mcpServers: {},
-  strictMcpConfig: true,
-  extraArgs: {'disable-slash-commands': null, ...(sources === 'project' ? {} : {'safe-mode': null})},
 };
 
 const deckServer = 'deck-session';
-type Bootstrap = {type: 'bootstrap'; transcriptStorage?: string; instructions: string; server: McpHttpServerConfig; toolNames: string[]; workspaceTools: string[]; autoAllowBash: boolean};
+const deckToolPrefix = `mcp__${deckServer}__`;
+const isUserMcpTool = (tool: string) => tool.startsWith('mcp__') && !tool.startsWith(deckToolPrefix);
+const sameTools = (actual: string[], expected: string[]) =>
+  actual.length === expected.length && expected.every(name => actual.includes(name));
+type Bootstrap = {type: 'bootstrap'; transcriptStorage?: string; instructions: string; server: McpHttpServerConfig; toolNames: string[]; workspaceTools: string[]};
 
 async function subscription(native: ReturnType<typeof query>) {
   const {account, claude_code_version} = await native.initializationResult();
@@ -172,10 +173,25 @@ async function run() {
       resume = false;
     }
   }
-  const deckTools = bootstrap.toolNames.map(name => `mcp__${deckServer}__${name}`);
+  const deckTools = bootstrap.toolNames.map(name => deckToolPrefix + name);
   let stopped = false;
   let sent = false;
-  const tools = bootstrap.workspaceTools;
+  let inputClosed = false;
+  let steerEvidence = false;
+  function closeSteering() {
+    inputClosed = true;
+    if (member || !sent || steerEvidence) return;
+    steerEvidence = true;
+    emit({type: 'steer_terminal', session_id: thread, yielded: [...steers.keys()]});
+  }
+  function readiness(stage: string) {
+    const started = performance.now();
+    if (!member) emit({type: 'readiness', stage});
+    return () => {
+      if (!member) emit({type: 'readiness', stage, elapsed_ms: Math.round(performance.now() - started)});
+    };
+  }
+  const tools = [...bootstrap.workspaceTools, 'Skill'];
   const pending = new Map<string, (permit: Permit | null) => void>();
   // Live messages by uuid. The CLI de-duplicates a repeated uuid, so a repeated
   // id is acknowledged from this state and never written to the CLI twice.
@@ -197,16 +213,18 @@ async function run() {
     }
     if (member && request.images !== undefined) throw Error('Members do not accept images');
     const content = userContent(request.text, request.images);
+    const initialId = member ? request.message_id : randomUUID();
     sent = true;
     yield {
       type: 'user',
       message: {role: 'user', content},
       parent_tool_use_id: null,
       session_id: thread,
-      ...(member ? {uuid: request.message_id} : {}),
+      uuid: initialId as SDKUserMessage['uuid'],
     };
-    while (true) {
+    while (!inputClosed) {
       const message = await next();
+      if (inputClosed) return;
       if (message.type === 'stop') {
         stopped = true;
         void native.interrupt().catch(() => abortController.abort());
@@ -247,39 +265,41 @@ async function run() {
       if (message.type !== 'permission_reply' || typeof message.allowed !== 'boolean') {
         throw Error('Unexpected Deck reply');
       }
-      pending.get(message.request)?.(message.allowed ? message.permit ?? null : null);
+      pending.get(message.request)?.(message.allowed ? message.permit ?? null : typeof message.reason === 'string' ? {denial: message.reason} : null);
     }
   }
 
+  const initialized = readiness("sdk");
   const native = query({
     prompt: prompt(),
     options: {
       ...options,
-      ...(member ? {
-        settingSources: [],
-        // The replay echo is the CLI's acknowledgment of live Lead guidance.
-        extraArgs: {...options.extraArgs, 'safe-mode': null, 'replay-user-messages': null},
-      } : {extraArgs: {...options.extraArgs, 'replay-user-messages': null}}),
+      // The replay echo is the CLI's acknowledgment of live guidance.
+      extraArgs: {'replay-user-messages': null},
       ...(resume ? {resume: thread} : {sessionId: thread}),
       ...(model && model !== 'default' ? {model} : {}),
       ...(isEffort(effort) ? {effort} : {}),
       systemPrompt: {type: 'preset', preset: 'claude_code', append: bootstrap.instructions},
       includePartialMessages: true,
       persistSession: true,
-      permissionMode: tools.length ? 'default' : 'dontAsk',
+      permissionMode: 'default',
       tools,
-      allowedTools: bootstrap.autoAllowBash && tools.includes('Bash') ? [...deckTools, 'Bash'] : deckTools,
-      // Let Claude evaluate Bash permissions; relay requests that need a decision.
-      settings: {...settings, permissions: {ask: tools.filter(tool => tool !== 'Bash')}},
+      allowedTools: [...deckTools, 'Skill', 'mcp__plugin_context-mode_context-mode'],
+      // Deck validates each workspace tool request in the host.
+      settings: {...settings, permissions: {ask: bootstrap.workspaceTools}},
       canUseTool: async (tool, input, {signal, toolUseID}) => {
         const deny = {behavior: 'deny', message: 'Deck did not authorize this tool call.'} as const;
-        if (!sent || stopped || signal.aborted || !tools.includes(tool) ||
+        const userMcp = isUserMcpTool(tool);
+        if (!sent || stopped || signal.aborted || (!bootstrap.workspaceTools.includes(tool) && !userMcp) ||
             typeof toolUseID !== 'string' || !toolUseID || toolUseID.length > 128) return deny;
         const edit = tool === 'Edit' || tool === 'Write';
         const bash = tool === 'Bash';
-        if (bash && (
-            (input.dangerouslyDisableSandbox !== undefined && input.dangerouslyDisableSandbox !== false) ||
-            (input.run_in_background !== undefined && input.run_in_background !== false))) return deny;
+        if (bash && input.dangerouslyDisableSandbox !== undefined && input.dangerouslyDisableSandbox !== false) {
+          return {...deny, message: 'Deck does not authorize Bash sandbox overrides.'};
+        }
+        if (bash && input.run_in_background !== undefined && input.run_in_background !== false) {
+          return {...deny, message: 'Deck requires Bash to run in the foreground.'};
+        }
         if (edit && (typeof input.file_path !== 'string' || input.file_path.length > 4096)) return deny;
         const request = randomUUID();
         const abort = new AbortController();
@@ -289,27 +309,31 @@ async function run() {
           if (edit) {
             emit({type: 'workspace_write', session_id: thread, request, tool, file_path: input.file_path});
           } else {
-            emit({type: bash ? 'workspace_bash' : 'permission', session_id: thread, request, tool, tool_use_id: toolUseID, input});
+            emit({type: bash ? 'workspace_bash' : userMcp ? 'mcp_permission' : 'permission', session_id: thread, request, tool, tool_use_id: toolUseID, input});
           }
         });
         abort.abort();
         pending.delete(request);
         if (signal.aborted && !stopped && !edit) {
-          emit({type: bash ? 'workspace_bash_closed' : 'permission_closed', session_id: thread, request});
+          emit({type: bash ? 'workspace_bash_closed' : userMcp ? 'mcp_permission_closed' : 'permission_closed', session_id: thread, request});
         }
         if (!permit || stopped || signal.aborted) return deny;
-        return {behavior: 'allow', updatedInput: edit || bash ? input : permit.input};
+        if (permit.denial) return {...deny, message: permit.denial};
+        return {behavior: 'allow', updatedInput: edit || bash || userMcp ? input : permit.input};
       },
     },
   });
   try {
     const plan = await subscription(native);
+    initialized();
     if (!plan) {
       emit({type: 'unqualified'});
       return;
     }
     if (model !== 'default' || effort) {
+      const checked = readiness("selection");
       const selected = (await models(native)).find(row => row.modelId === model);
+      checked();
       if (!selected || (effort && !selected.thinkingLevels.some(level => level === effort))) {
         emit({type: 'selection_unavailable'});
         return;
@@ -317,7 +341,9 @@ async function run() {
     }
     // Read the native plan on this exact SDK process. Credits can otherwise
     // take over after the included cap. Skip transcript-derived usage stats.
+    const checkedUsage = readiness("usage");
     const usage = await readUsage(native);
+    checkedUsage();
     const quota = quotaMetadata(plan, usage);
     const credits = usage.rate_limits?.extra_usage;
     if (usage.rate_limits_available !== true || usage.subscription_type !== plan ||
@@ -331,15 +357,20 @@ async function run() {
       return;
     }
     // Register over the SDK control pipe so the per-attempt token stays out of argv.
+    const registered = readiness("deck_registration");
     const registration = await native.setMcpServers({[deckServer]: bootstrap.server});
+    registered();
+    const verified = readiness("deck_inventory");
+    // One native snapshot verifies the Deck server. Other servers can still be pending.
     const servers = await native.mcpServerStatus();
-    const server = servers[0];
+    verified();
+    const deckServers = servers.filter(candidate => candidate.name === deckServer);
+    const [server] = deckServers;
     const advertised = server?.tools?.map(tool => tool.name);
-    if (!registration.added.includes(deckServer) || Object.keys(registration.errors).length ||
-        servers.length !== 1 || server?.name !== deckServer || server.status !== 'connected' ||
+    if (!registration.added.includes(deckServer) || deckServer in registration.errors ||
+        deckServers.length !== 1 || server?.status !== 'connected' ||
         server.source !== 'dynamic' || !advertised ||
-        advertised.length !== bootstrap.toolNames.length ||
-        !bootstrap.toolNames.every(name => advertised.includes(name))) {
+        !sameTools(advertised, bootstrap.toolNames)) {
       emit({type: 'coordination_unavailable', quota});
       return;
     }
@@ -381,7 +412,7 @@ async function run() {
         } while (again);
       })().finally(() => { reading = undefined; });
     }
-    // Member activity: lifecycle only. Raw thinking, tool payloads and tool output
+    // Activity is lifecycle only. Raw thinking, tool payloads and tool output
     // never leave this process; only a bounded one-line summary does.
     const open = new Map<string, {kind: string; extra: Record<string, unknown>}>();
     const blocks = new Map<number, string>();
@@ -410,6 +441,11 @@ async function run() {
       const id = typeof block.id === 'string' ? block.id : '';
       const name = clip(block.name, 64);
       if (!name || name.startsWith('mcp__deck-')) return;
+      if (!member) {
+        const tool = /^[a-zA-Z0-9_.:-]+$/.test(name) ? name : 'Tool';
+        step('started', id, name === 'Bash' ? 'command' : 'tool', {tool});
+        return;
+      }
       const input = (block.input && typeof block.input === 'object' ? block.input : {}) as Record<string, unknown>;
       if (name === 'Bash') {
         step('started', id, 'command', {tool: name, command: summarizeCommand(input.command)});
@@ -453,6 +489,7 @@ async function run() {
       }
     }
     for await (const event of native) {
+      const sdkReceivedMs = Date.now();
       if (!sent || !('session_id' in event)) continue;
       if (event.session_id !== thread) {
         if (member && (event.type === 'result' || (event.type === 'system' && event.subtype === 'init'))) {
@@ -462,22 +499,30 @@ async function run() {
         continue;
       }
       // The CLI names every user message a turn has consumed on its replies.
-      const consumed = (event as {user_message_uuids?: unknown}).user_message_uuids;
-      if (Array.isArray(consumed)) for (const id of consumed) if (typeof id === 'string') settleSteer(id);
-      if (member) observeActivity(event);
-      if (event.type === 'user' && 'isReplay' in event && event.isReplay && typeof event.uuid === 'string') {
+      const {user_message_uuids: consumed, user_message_uuid: primary} = event as
+        {user_message_uuids?: unknown; user_message_uuid?: unknown};
+      const mainThread = !('parent_tool_use_id' in event) || !event.parent_tool_use_id;
+      if (mainThread && Array.isArray(consumed)) {
+        for (const id of consumed) if (typeof id === 'string') settleSteer(id);
+      }
+      if (mainThread && typeof primary === 'string') settleSteer(primary);
+      observeActivity(event);
+      if (mainThread && event.type === 'user' && 'isReplay' in event && event.isReplay && typeof event.uuid === 'string') {
         settleSteer(event.uuid);
       } else if (event.type === 'system' && event.subtype === 'init') {
-        if (event.tools.some(tool => !tools.includes(tool) && !deckTools.includes(tool)) ||
-            event.mcp_servers.length !== 1 || event.mcp_servers[0].name !== deckServer ||
-            event.mcp_servers[0].status !== 'connected') {
+        const deckServers = event.mcp_servers.filter(candidate => candidate.name === deckServer);
+        if (!sameTools(event.tools.filter(tool => tool.startsWith(deckToolPrefix)), deckTools) ||
+            // The SDK can advertise its discovery helper alongside dynamic MCP tools.
+            // This init check does not add it to the executable tool configuration.
+            event.tools.some(tool => !tool.startsWith('mcp__') && tool !== 'ToolSearch' && !tools.includes(tool)) ||
+            deckServers.length !== 1 || deckServers[0]?.status !== 'connected') {
           throw Error('Unexpected runtime capabilities');
         }
         emit({type: 'init', session_id: thread, model: event.model});
         refreshContext();
       } else if (event.type === 'stream_event' && !event.parent_tool_use_id &&
           event.event.type === 'content_block_delta' && event.event.delta.type === 'text_delta') {
-        emit({type: 'delta', session_id: thread, text: event.event.delta.text});
+        emit({type: 'delta', session_id: thread, text: event.event.delta.text, sdk_received_ms: sdkReceivedMs});
       } else if (event.type === 'assistant' && event.error === 'rate_limit') {
         limited = true;
       } else if (event.type === 'assistant' && !event.parent_tool_use_id) {
@@ -487,9 +532,13 @@ async function run() {
         again = false;
         emit({type: 'context_reset', session_id: thread});
       } else if (event.type === 'result') {
-        if (member) closeSteps(stopped ? 'cancelled' : event.subtype === 'success' && !event.is_error ? 'completed' : 'failed');
-        // A message the turn never took in is neither delivered nor provably lost.
-        for (const [id, state] of steers) if (state === 'sent') emit({type: 'steer_unconsumed', session_id: thread, id});
+        // The result inventories only its own turn. An already yielded input
+        // can be consumed in a subsequent native turn.
+        closeSteering();
+        closeSteps(stopped ? 'cancelled' : event.subtype === 'success' && !event.is_error ? 'completed' : 'failed');
+        if (member) for (const [id, state] of steers) if (state === 'sent') {
+          emit({type: 'steer_unconsumed', session_id: thread, id});
+        }
         if (!limited && event.subtype === 'success' && !event.is_error) {
           emit({type: 'result', session_id: thread, outcome: 'completed', text: event.result});
         } else {
@@ -499,6 +548,7 @@ async function run() {
       }
     }
   } finally {
+    closeSteering();
     for (const resolve of pending.values()) resolve(null);
     input.close();
     process.stdin.pause();

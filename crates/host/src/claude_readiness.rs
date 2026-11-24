@@ -1,7 +1,6 @@
 use std::{
     ffi::OsString,
-    fs::File,
-    io::{ErrorKind, Read},
+    io::ErrorKind,
     path::{Path, PathBuf},
 };
 use tokio::process::Command;
@@ -19,9 +18,9 @@ pub(crate) enum Status {
     OtherProviderOrBilling,
     EnvironmentOverride,
     ConfigurationOverride,
-    ProjectConfigurationOverride,
     RuntimeUnavailable,
     SubscriptionSignedIn,
+    ProbeTimedOut,
     Unknown,
 }
 
@@ -67,7 +66,7 @@ fn classify(success: bool, output: &[u8], has_override: bool) -> Status {
 }
 
 // These apply to the CLI probe and the SDK's native subprocess.
-pub(crate) const SETTINGS: &str = r#"{"disableClaudeAiConnectors":true,"disableAllHooks":true,"autoMemoryEnabled":false,"forceLoginMethod":"claudeai","attribution":{"commit":""}}"#;
+pub(crate) const SETTINGS: &str = r#"{"forceLoginMethod":"claudeai","attribution":{"commit":""}}"#;
 
 pub(crate) struct Launch {
     home: PathBuf,
@@ -118,7 +117,7 @@ impl Launch {
             cwd: project.unwrap_or(Path::new("/")).into(),
             trusted: project.is_some(),
         };
-        launch.verify_policy()?;
+        launch.storage()?;
         Ok(launch)
     }
 
@@ -139,34 +138,6 @@ impl Launch {
         }
     }
 
-    pub(crate) fn verify_policy(&self) -> Result<(), Status> {
-        // Managed settings still apply in safe mode. A managed extension,
-        // helper or environment setting cannot inherit Deck launch authority.
-        for path in [
-            "/etc/claude-code/managed-settings.json",
-            "/etc/claude-code/managed-settings.d",
-            "/etc/claude-code/managed-mcp.json",
-        ] {
-            match std::fs::symlink_metadata(path) {
-                Err(e) if e.kind() == ErrorKind::NotFound => {}
-                _ => return Err(Status::ConfigurationOverride),
-            }
-        }
-        self.verify_launch_settings()
-    }
-
-    fn verify_launch_settings(&self) -> Result<(), Status> {
-        empty_settings(&self.storage()?.join("remote-settings.json"))?;
-        if self.trusted {
-            // The CLI and SDK select only the project source, resolved from
-            // the launch directory. Ancestors may supply CLAUDE.md, but they
-            // do not supply the shared settings file for this session.
-            empty_settings(&self.cwd.join(".claude/settings.json"))
-                .map_err(|_| Status::ProjectConfigurationOverride)?;
-        }
-        Ok(())
-    }
-
     pub(crate) fn command(&self, binary: &Path) -> Command {
         let mut cmd = Command::new(binary);
         cmd.env_clear()
@@ -178,7 +149,7 @@ impl Launch {
     }
 
     pub(crate) fn sources(&self) -> &str {
-        if self.trusted { "project" } else { "" }
+        if self.trusted { "user,project,local" } else { "user" }
     }
 
     pub(crate) async fn status(&self, binary: &Path) -> Status {
@@ -186,45 +157,15 @@ impl Launch {
         cmd.args([
             "--setting-sources",
             self.sources(),
-            "--strict-mcp-config",
-            "--mcp-config",
-            r#"{"mcpServers":{}}"#,
             "--settings",
             SETTINGS,
-            "--disable-slash-commands",
         ]);
-        if !self.trusted {
-            cmd.arg("--safe-mode");
-        }
         cmd.args(["auth", "status", "--json"]);
         match crate::native::claude_auth_probe(cmd).await {
             Ok((success, output)) => classify(success, &output, false),
+            Err(reason) if reason == crate::native::PROBE_TIMED_OUT => Status::ProbeTimedOut,
             Err(_) => Status::Unknown,
         }
-    }
-}
-
-fn empty_settings(path: &Path) -> Result<(), Status> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let file = match File::options()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-    {
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
-        Ok(file) if file.metadata().is_ok_and(|metadata| metadata.is_file()) => file,
-        _ => return Err(Status::ConfigurationOverride),
-    };
-    let mut bytes = Vec::new();
-    file.take(64 * 1024)
-        .read_to_end(&mut bytes)
-        .map_err(|_| Status::ConfigurationOverride)?;
-    let settings: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_slice(&bytes).map_err(|_| Status::ConfigurationOverride)?;
-    if settings.is_empty() {
-        Ok(())
-    } else {
-        Err(Status::ConfigurationOverride)
     }
 }
 
@@ -240,15 +181,13 @@ impl Status {
                 "Remove Claude authentication or provider overrides from the Deck host environment."
             }
             Self::ConfigurationOverride => {
-                "Check the host's Claude config directory and managed settings with your administrator."
-            }
-            Self::ProjectConfigurationOverride => {
-                "Choose a project without shared Claude settings, or review its .claude/settings.json."
+                "Check the host's Claude config directory."
             }
             Self::RuntimeUnavailable => {
                 "The Claude Agent SDK bridge requires Node.js 22 or later on the host PATH."
             }
             Self::SubscriptionSignedIn => "Claude Code subscription sign-in is verified.",
+            Self::ProbeTimedOut => "Claude Code sign-in verification timed out",
             Self::Unknown => "Deck could not verify the Claude Code subscription sign-in.",
         }
     }
@@ -269,7 +208,7 @@ pub(crate) async fn readiness(State(app): State<App>) -> Json<Readiness> {
     Json(Readiness {
         execution_available: status == Status::SubscriptionSignedIn
             && crate::claude::node_runtime().is_ok(),
-        status,
+        status: if status == Status::ProbeTimedOut { Status::Unknown } else { status },
     })
 }
 
@@ -279,42 +218,18 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
-    fn trusted_project_settings_are_scoped_to_the_launch_directory() {
+    fn launch_selects_native_settings_sources_by_trust() {
         let home = tempfile::tempdir().unwrap();
-        let ancestor = home.path().join("projects");
-        let cwd = ancestor.join("repo");
-        let user = home.path().join(".claude");
-        let shared = cwd.join(".claude/settings.json");
-        let remote = user.join("remote-settings.json");
-        for settings in [
-            user.join("settings.json"),
-            ancestor.join(".claude/settings.json"),
-            cwd.join(".claude/settings.local.json"),
-        ] {
-            std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
-            std::fs::write(settings, r#"{"disableAllHooks":true}"#).unwrap();
+        let cwd = home.path().join("repo");
+        for (trusted, sources) in [(true, "user,project,local"), (false, "user")] {
+            let launch = Launch {
+                home: home.path().into(),
+                env: vec![],
+                cwd: if trusted { cwd.clone() } else { "/".into() },
+                trusted,
+            };
+            assert_eq!(launch.sources(), sources);
         }
-        let launch = Launch {
-            home: home.path().into(),
-            env: vec![],
-            cwd,
-            trusted: true,
-        };
-
-        assert_eq!(launch.verify_launch_settings(), Ok(()));
-        std::fs::write(&shared, "{}").unwrap();
-        assert_eq!(launch.verify_launch_settings(), Ok(()));
-        std::fs::write(&shared, r#"{"disableAllHooks":true}"#).unwrap();
-        assert_eq!(
-            launch.verify_launch_settings(),
-            Err(Status::ProjectConfigurationOverride),
-        );
-        std::fs::remove_file(shared).unwrap();
-        std::fs::write(remote, r#"{"disableAllHooks":true}"#).unwrap();
-        assert_eq!(
-            launch.verify_launch_settings(),
-            Err(Status::ConfigurationOverride),
-        );
     }
 
     #[tokio::test]

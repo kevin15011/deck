@@ -3,6 +3,7 @@
 .app-body.session-opening .history-content,
 .app-body.session-opening .conversation-feedback,
 .app-body.session-opening .composer-dock,
+.app-body.session-opening .permission-dock,
 .app-body.session-opening .workspace-panel,
 .app-body.session-opening .session-header-controls,
 .app-body.session-opening .lead-identity { visibility: hidden; }

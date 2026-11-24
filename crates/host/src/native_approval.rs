@@ -1,6 +1,24 @@
 //! Tagged approval-envelope dispatch. No missing/unknown transport defaults to a decoder.
-use deck2_shared::{Decision, NativeTransport};
+use deck2_shared::{Decision, DecisionState, NativeTransport, Receipt};
 use serde_json::Value;
+
+pub(crate) const CAPACITY_DENIAL: &str = "Deck already has 64 in-flight permission requests for this receipt";
+
+pub(crate) fn at_capacity(receipt: &Receipt) -> bool {
+    const LIMIT: usize = 64;
+    receipt
+        .decisions
+        .iter()
+        .filter(|decision| {
+            matches!(
+                decision.state,
+                DecisionState::Pending | DecisionState::Responded | DecisionState::Dispatching
+            )
+        })
+        .take(LIMIT)
+        .count()
+        == LIMIT
+}
 
 pub fn validate_native(d: &Decision) -> Result<(), String> {
     let n = d.native.as_ref().ok_or("Native action missing")?;

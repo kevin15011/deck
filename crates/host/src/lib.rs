@@ -605,7 +605,9 @@ impl Store {
             "CREATE INDEX IF NOT EXISTS receipts_pending ON receipts(id)
                  WHERE (json_extract(body, '$.phase') IN ('completed', 'cancelled', 'failed')) IS NOT TRUE;
              CREATE INDEX IF NOT EXISTS receipts_thread ON receipts(
-                 json_extract(body, '$.session'), json_extract(body, '$.thread'));",
+                 json_extract(body, '$.session'), json_extract(body, '$.thread'));
+             CREATE TABLE IF NOT EXISTS recovered_steering_queue(
+                 id TEXT PRIMARY KEY, before_id TEXT NOT NULL);",
         ).map_err(|_| "Cannot prepare receipt lookup indexes")?;
         store
             .conn
@@ -618,8 +620,16 @@ impl Store {
         store.recover_lifecycle()?;
         for mut r in store.all()? {
             if r.phase.active() {
+                let claude_undispatched = crate::claude::is_receipt(&r)
+                    && r.dispatch_ms.is_none() && !r.cancel_requested;
                 r.phase = Phase::Uncertain;
-                r.cancel_requested = true;
+                if claude_undispatched {
+                    r.claude_startup_retry.get_or_insert(deck2_shared::StartupRetry {
+                        retries: 0, after_ms: 0,
+                    });
+                } else {
+                    r.cancel_requested = true;
+                }
                 for d in &mut r.decisions {
                     // Delivered consent survives restart; its old RPC is never
                     // replayed because the owning receipt is cancelled/uncertain.
@@ -631,7 +641,11 @@ impl Store {
                     };
                     d.detail = "Host restarted; old native request will never replay".into();
                 }
-                r.detail="Host restarted. Native ownership/outcome is unproven. Inspect the previous process before deck2 recover; this command will never replay.".into();
+                r.detail = if claude_undispatched {
+                    "Host restarted during Claude startup. Waiting for process teardown before retrying the undispatched input."
+                } else {
+                    "Host restarted. Native ownership/outcome is unproven. Inspect the previous process before deck2 recover; this command will never replay."
+                }.into();
                 store.save(&mut r)?;
             }
         }
@@ -667,9 +681,11 @@ impl Store {
     // uncertain work. Keep the durable arrival order without decoding settled transcripts.
     pub(crate) fn pending_receipts(&self) -> Result<Vec<Receipt>, String> {
         self.read_receipts(
-            "SELECT body FROM receipts INDEXED BY receipts_pending
-             WHERE (json_extract(body, '$.phase') IN ('completed', 'cancelled', 'failed')) IS NOT TRUE
-             ORDER BY rowid",
+            "SELECT receipts.body FROM receipts INDEXED BY receipts_pending
+             LEFT JOIN recovered_steering_queue recovered ON recovered.id=receipts.id
+             LEFT JOIN receipts anchor ON anchor.id=recovered.before_id
+             WHERE (json_extract(receipts.body, '$.phase') IN ('completed', 'cancelled', 'failed')) IS NOT TRUE
+             ORDER BY COALESCE(anchor.rowid, receipts.rowid), anchor.rowid IS NULL, receipts.rowid",
         )
     }
 
@@ -974,8 +990,23 @@ impl Store {
                 ));
             }
         }
+        let mut r = Self::admitted_receipt(c, session, queued, fresh, snapshot, attachments, requested_model);
+        self.save(&mut r).map_err(storage_error)?;
+        if !queued { self.record_root_overlaps(&r).map_err(storage_error)?; }
+        Ok(r)
+    }
+
+    fn admitted_receipt(
+        c: &Submit,
+        session: &str,
+        queued: bool,
+        fresh: bool,
+        snapshot: deck2_shared::AdmissionSnapshot,
+        attachments: Vec<deck2_shared::ImageAttachment>,
+        requested_model: Option<String>,
+    ) -> Receipt {
         let runner = snapshot.native.as_ref().map(|n| format!("{} {} / {}", match n.runner { deck2_shared::NativeRunner::Codex => "codex", deck2_shared::NativeRunner::Opencode => "opencode", deck2_shared::NativeRunner::Claude => "claude" }, n.version, n.protocol)).unwrap_or_else(|| "codex / app-server stdio".into());
-        let mut r = Receipt {
+        Receipt {
             context: Default::default(),
             can_steer: false,
             steering: Vec::new(),
@@ -1015,6 +1046,7 @@ impl Store {
             accepted_ms: now(),
             handshake_ms: None,
             startup_timing: None,
+            claude_startup_retry: None,
             dispatch_ms: None,
             acknowledgment_ms: None,
             first_output_ms: None,
@@ -1034,10 +1066,7 @@ impl Store {
             .into(),
             runner,
             delivery: "Selected deck2-readonly-v1; native delivery not yet observed".into(),
-        };
-        self.save(&mut r).map_err(storage_error)?;
-        if !queued { self.record_root_overlaps(&r).map_err(storage_error)?; }
-        Ok(r)
+        }
     }
     // Best-effort bounded diagnostics never replace durable execution receipts.
     pub fn diagnostic(&self, id: &str, code: &str, status: u16) {

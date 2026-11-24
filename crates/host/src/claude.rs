@@ -117,7 +117,6 @@ async fn account_read(launch: Launch, operation: &str) -> Result<Value, String> 
     if status != Status::SubscriptionSignedIn {
         return Err(status.message().into());
     }
-    launch.verify_policy().map_err(|s| s.message())?;
     let script = bridge_script()?;
     let mut command = launch.command(&node);
     command
@@ -134,7 +133,6 @@ async fn account_read(launch: Launch, operation: &str) -> Result<Value, String> 
                 "Claude Code could not load its model catalog. Reopen the dialog to retry."
             }
         })?;
-    launch.verify_policy().map_err(|s| s.message())?;
     let frame: Value =
         serde_json::from_slice(&bytes).map_err(|_| "Invalid Claude Code account metadata")?;
     if frame["type"] == "unqualified" {
@@ -250,8 +248,39 @@ pub(crate) fn admitted(snapshot: &AdmissionSnapshot) -> bool {
         .is_some_and(|assignment| matches_binding(snapshot, assignment, QUALIFICATION))
 }
 
-fn is_receipt(receipt: &Receipt) -> bool {
+pub(crate) fn is_receipt(receipt: &Receipt) -> bool {
     receipt.mode == Mode::SessionV1 && receipt.configuration.as_ref().is_some_and(admitted)
+}
+
+pub(crate) fn compatible_live_input(root: &AdmissionSnapshot, source: &AdmissionSnapshot) -> bool {
+    if !admitted(root) || !admitted(source) {
+        return false;
+    }
+    let root = root.native.as_ref().unwrap();
+    let source = source.native.as_ref().unwrap();
+    // Launch already checked the running bridge and executable. Use that
+    // identity here, even if the CLI on disk changed after the turn started.
+    // As with queued launch, an older Deck-owned bridge digest can be refreshed.
+    source.version == SDK_VERSION
+        && source.version == root.version
+        && source.executable == root.executable
+        && source.storage == root.storage
+        && source.protocol == root.protocol
+        && source.role == root.role
+}
+
+pub(crate) fn refresh_queued_bridge(receipt: &mut Receipt) {
+    // The embedded bridge is Deck-owned. A queued turn can cross a Deck
+    // update without replacing its admitted CLI, assignment or profile.
+    if receipt.phase != Phase::Queued || receipt.dispatch_ms.is_some()
+        || receipt.native_pid.is_some() || BRIDGE.is_empty() || !is_receipt(receipt)
+    {
+        return;
+    }
+    let binding = receipt.configuration.as_mut().unwrap().native.as_mut().unwrap();
+    if binding.version == SDK_VERSION {
+        binding.configuration = digest(BRIDGE);
+    }
 }
 
 fn absent(pid: i32) -> bool {
@@ -317,6 +346,11 @@ pub(crate) fn settle_recovered(store: &mut Store, live: &HashSet<String>) -> Res
         } else if r.dispatch_ms.is_some() {
             continue;
         }
+        if r.dispatch_ms.is_none() && !r.cancel_requested && r.claude_startup_retry.is_some() {
+            retry_startup(&mut r, "The Claude startup process stopped before dispatch");
+            store.save(&mut r)?;
+            continue;
+        }
         r.phase = Phase::Failed;
         approval::settle(&mut r);
         r.detail = "The previous Claude Code process stopped without a confirmed result. Context is retained and the input will not replay.".into();
@@ -325,16 +359,66 @@ pub(crate) fn settle_recovered(store: &mut Store, live: &HashSet<String>) -> Res
     Ok(retry)
 }
 
+fn startup_detail(r: &Receipt, detail: &str) -> String {
+    let stages = r.startup_timing.as_ref().map(|timing| &timing.claude_stages_ms);
+    let Some(stages) = stages.filter(|stages| !stages.is_empty()) else {
+        return detail.into();
+    };
+    let timings = [
+        ("sdk", "SDK"),
+        ("selection", "model selection"),
+        ("usage", "plan usage"),
+        ("deck_registration", "Deck registration"),
+        ("deck_inventory", "Deck inventory"),
+    ].iter().filter_map(|(stage, label)| stages.get(*stage).map(|ms| format!("{label} {ms} ms")))
+        .collect::<Vec<_>>().join(", ");
+    format!("{detail} Claude readiness: {timings}.")
+}
+
+fn retry_startup(r: &mut Receipt, cause: &str) {
+    debug_assert!(r.dispatch_ms.is_none() && !r.cancel_requested);
+    r.native_pid = None;
+    let retries = r.claude_startup_retry.as_ref().map_or(0, |retry| retry.retries);
+    if retries >= 2 {
+        r.phase = Phase::Failed;
+        r.detail = startup_detail(r, &format!("{cause}. Claude startup failed after two retries. Check Claude Code sign-in and Deck session tool availability, then send the message again. No input was sent."));
+        return;
+    }
+    let delay_ms = 1_000 << retries;
+    r.claude_startup_retry = Some(deck2_shared::StartupRetry {
+        retries: retries + 1,
+        after_ms: now().saturating_add(delay_ms),
+    });
+    r.phase = Phase::Queued;
+    r.detail = startup_detail(r, &format!("{cause}. No input was sent. Queued for retry {} of 2 in {} s.", retries + 1, delay_ms / 1_000));
+}
+
+fn readiness_progress(timing: &mut deck2_shared::StartupTiming, event: &Value) -> Result<String, String> {
+    let stage = event["stage"].as_str().ok_or("Claude startup stage missing")?;
+    let label = match stage {
+        "sdk" => "Initializing Claude SDK and checking subscription identity",
+        "selection" => "Validating Claude model and effort",
+        "usage" => "Checking Claude plan usage",
+        "deck_registration" => "Registering Deck session tools",
+        "deck_inventory" => "Verifying Deck session tools",
+        _ => return Err("Unknown Claude startup stage".into()),
+    };
+    if let Some(ms) = event["elapsed_ms"].as_u64().filter(|ms| *ms <= 60_000) {
+        timing.claude_stages_ms.insert(stage.into(), ms);
+    }
+    Ok(format!("{label}…"))
+}
+
 fn spawn_sdk(
     launch: &Launch,
+    node: &Path,
     script: &Path,
     binary: &Path,
     thread: &str,
     operation: &str,
     assignment: &MemberAssignment,
 ) -> Result<Child, String> {
-    let node = node_runtime()?;
-    let mut command = launch.command(&node);
+    let mut command = launch.command(node);
     command
         .arg(script)
         .arg(binary)
@@ -352,7 +436,7 @@ fn spawn_sdk(
     command.spawn().map_err(|_| "Could not start the Claude Agent SDK bridge".into())
 }
 
-fn bootstrap(bridge: &crate::session_mcp::Bridge, mut instructions: String, trusted: bool, can_write: bool, allow_bash: bool, approvals: &str) -> Value {
+fn bootstrap(bridge: &crate::session_mcp::Bridge, mut instructions: String, trusted: bool, can_write: bool, allow_bash: bool) -> Value {
     let inventory = bridge.inventory();
     let tool_names: Vec<_> = inventory.as_array().unwrap().iter().map(|tool| &tool["name"]).collect();
     let mut workspace_tools = if !trusted { vec![] } else if can_write {
@@ -370,7 +454,6 @@ fn bootstrap(bridge: &crate::session_mcp::Bridge, mut instructions: String, trus
         "server": {"type": "http", "url": bridge.config["url"], "headers": bridge.config["http_headers"], "alwaysLoad": true},
         "toolNames": tool_names,
         "workspaceTools": workspace_tools,
-        "autoAllowBash": allow_bash && approvals == "yolo",
     })
 }
 
@@ -487,18 +570,27 @@ pub(crate) async fn lead(
         .map(|context| context.thread.clone())
         .unwrap_or_else(|| Uuid::new_v4().to_string());
 
+    app.change(id, |r| r.detail = "Checking Claude Code sign-in…".into())?;
     let status_started = Instant::now();
-    let status = tokio::select! {
-        biased;
-        _ = cancel.wait_for(|active| *active) => return cancelled(app, id, false),
-        status = launch.status(binary) => status,
-    };
+    // The auth probe owns a bounded child process. Let it settle before moving
+    // an undispatched receipt even if Stop or shutdown arrived during the probe.
+    let status = launch.status(binary).await;
+    if *cancel.borrow() {
+        return if app.shutdown_requested.load(std::sync::atomic::Ordering::Acquire) {
+            requeue_startup(app, id, "Deck restarted during Claude sign-in verification")
+        } else {
+            cancelled(app, id, false)
+        };
+    }
     let status_ms = status_started.elapsed().as_millis() as u64;
+    if status == Status::ProbeTimedOut {
+        return requeue_startup(app, id, status.message());
+    }
     if status != Status::SubscriptionSignedIn {
         return Err(status.message().into());
     }
-    launch.verify_policy().map_err(|s| s.message())?;
     let script = bridge_script()?;
+    let node = node_runtime()?;
     let contract = snapshot.session_contract.as_ref().unwrap();
     let members: Vec<_> = crate::session_contract::configured_member_ids(contract).collect();
     let instructions = format!(
@@ -512,10 +604,13 @@ pub(crate) async fn lead(
     let bridge_start_ms = bridge_started.elapsed().as_millis() as u64;
     let assignment = &contract.members["lead"];
     let spawn_started = Instant::now();
-    let mut child = spawn_sdk(
-        &launch, script.path(), binary, &thread,
+    let mut child = match spawn_sdk(
+        &launch, &node, script.path(), binary, &thread,
         if resume.is_some() { "resume" } else { "new" }, assignment,
-    )?;
+    ) {
+        Ok(child) => child,
+        Err(message) => return requeue_startup(app, id, &message),
+    };
     let spawn_ms = spawn_started.elapsed().as_millis() as u64;
     let pid = child
         .id()
@@ -527,19 +622,46 @@ pub(crate) async fn lead(
             .take()
             .expect("configured Claude bridge stdout"),
     );
+    let mut retryable = true;
+    let mut timing = deck2_shared::StartupTiming {
+        admission_ms,
+        version_ms: status_ms,
+        bridge_start_ms,
+        process_spawn_ms: spawn_ms,
+        ..Default::default()
+    };
     let run = async {
-        app.change(id, |r| r.native_pid = Some(pid))?;
+        app.change(id, |r| {
+            r.native_pid = Some(pid);
+            r.startup_timing = Some(timing.clone());
+            r.detail = "Starting Claude SDK…".into();
+        })?;
         let ready_started = Instant::now();
-        send(&mut stdin, bootstrap(&bridge, instructions, trusted, trusted, trusted, &contract.approvals)).await?;
-        let mut ready_frame = Vec::new();
+        let deadline = ready_started + Duration::from_secs(60);
+        let mut partial = Vec::new();
         let ready = tokio::select! {
             biased;
             _ = cancel.wait_for(|active| *active) => return Ok(None),
-            ready = timeout(Duration::from_secs(20), frame(&mut stdout, &mut ready_frame)) =>
-                ready.map_err(|_| "Claude SDK subscription initialization timed out")??,
+            ready = tokio::time::timeout_at(deadline, async {
+                send(&mut stdin, bootstrap(&bridge, instructions, trusted, trusted, trusted)).await?;
+                loop {
+                    let event = frame(&mut stdout, &mut partial).await?;
+                    if event["type"] != "readiness" {
+                        break Ok::<_, String>(event);
+                    }
+                    let detail = readiness_progress(&mut timing, &event)?;
+                    app.change(id, |r| {
+                        r.detail = detail;
+                        r.startup_timing = Some(timing.clone());
+                    })?;
+                }
+            }) => ready.map_err(|_| "Claude SDK readiness timed out after 60 s")??,
         };
+        retryable = matches!(ready["type"].as_str(), Some("transport_error" | "usage_unverified"));
+        if ready["type"] == "transport_error" {
+            return Err("Claude SDK stopped during readiness".into());
+        }
         check_ready(app, &ready, "Lead")?;
-        launch.verify_policy().map_err(|s| s.message())?;
         let ready_ms = ready_started.elapsed().as_millis() as u64;
         let prompt = {
             let mut store = crate::latency::locked(&app.store);
@@ -549,33 +671,25 @@ pub(crate) async fn lead(
                 return Err("Project trust or ownership changed. Submit a new message.".into());
             }
             store.validate_snapshot(snapshot)?;
-            if r.cancel_requested || *cancel.borrow() {
+            if r.cancel_requested || *cancel.borrow() || app.shutdown_requested.load(std::sync::atomic::Ordering::Acquire) {
                 return Ok(None);
             }
             let prompt = store.outcome_prompt(&r)?.unwrap_or_else(|| r.prompt.clone());
             r.phase = Phase::Dispatching;
             let handshake_ms = started.elapsed().as_millis() as u64;
-            // Claude has no thread/MCP inventory: `version_ms` is the CLI
-            // subscription status probe, `initialization_ms` is SDK readiness.
-            let mut timing = deck2_shared::StartupTiming {
-                admission_ms,
-                version_ms: status_ms,
-                bridge_start_ms,
-                process_spawn_ms: spawn_ms,
-                initialization_ms: ready_ms,
-                ..Default::default()
-            };
+            timing.initialization_ms = ready_ms;
             (timing.run_lock_wait_us, timing.run_lock_acquisitions) = crate::latency::run_waits();
             if let Some(waits) = crate::latency::take_submit(id) {
                 waits.apply(&mut timing);
             }
             timing.other_ms = handshake_ms.saturating_sub(status_ms + bridge_start_ms + spawn_ms + ready_ms);
-            r.startup_timing = Some(timing);
+            r.startup_timing = Some(timing.clone());
+            r.claude_startup_retry = None;
             r.handshake_ms = Some(handshake_ms);
             r.dispatch_ms = Some(now());
             r.thread = Some(thread.clone());
             r.generation = Uuid::new_v4().to_string();
-            r.detail = "Claude SDK subscription verified. Delivering the input once.".into();
+            r.detail = startup_detail(&r, "Claude SDK subscription verified. Delivering the input once.");
             store.save(&mut r)?;
             prompt
         };
@@ -593,7 +707,7 @@ pub(crate) async fn lead(
             &mut stdin,
             cancel,
             trusted.then_some(&project),
-            trusted.then_some((&bridge, &project)),
+            &bridge,
         )
         .await
     }
@@ -601,9 +715,24 @@ pub(crate) async fn lead(
 
     drop(bridge);
     drop(stdin);
-    let clean = drain_sdk(&mut child, pid).await?;
-
+    let settlement = drain_sdk(&mut child, pid).await;
     let dispatched = app.receipt(id)?.dispatch_ms.is_some();
+    let clean = match settlement {
+        Ok(clean) => clean,
+        Err(message) => return app.change(id, |r| {
+            approval::settle(r);
+            r.phase = Phase::Uncertain;
+            if !dispatched && !r.cancel_requested && (retryable || run.is_ok()) {
+                r.claude_startup_retry.get_or_insert(deck2_shared::StartupRetry {
+                    retries: 0, after_ms: 0,
+                });
+            } else if !dispatched {
+                r.claude_startup_retry = None;
+            }
+            r.detail = message;
+        }),
+    };
+
     match run {
         Ok(Some((phase, text, detail))) if clean => app.change(id, |r| {
             approval::settle(r);
@@ -611,11 +740,18 @@ pub(crate) async fn lead(
                 r.first_output_ms.get_or_insert_with(now);
                 r.text = text;
             }
-            r.detail = detail.into();
+            r.detail = startup_detail(r, detail);
             r.phase = phase;
         }),
+        Ok(None) if !dispatched && app.shutdown_requested.load(std::sync::atomic::Ordering::Acquire) =>
+            requeue_startup(app, id, "Deck restarted during Claude startup"),
         _ if *cancel.borrow() => cancelled(app, id, dispatched),
-        Err(message) if !dispatched => Err(message),
+        Err(message) if !dispatched && retryable => requeue_startup(app, id, &message),
+        Err(message) if !dispatched => app.change(id, |r| {
+            r.native_pid = None;
+            r.phase = Phase::Failed;
+            r.detail = startup_detail(r, &message);
+        }),
         _ => app.change(id, |r| {
             approval::settle(r);
             r.phase = Phase::Failed;
@@ -625,10 +761,25 @@ pub(crate) async fn lead(
     }
 }
 
+fn requeue_startup(app: &App, id: &str, cause: &str) -> Result<(), String> {
+    app.change(id, |r| {
+        if r.cancel_requested {
+            r.phase = Phase::Cancelled;
+            r.native_pid = None;
+            r.detail = "Stopped before sending input to Claude Code.".into();
+        } else {
+            retry_startup(r, cause);
+        }
+    })
+}
+
 fn cancelled(app: &App, id: &str, dispatched: bool) -> Result<(), String> {
     app.change(id, |r| {
         approval::settle(r);
         r.phase = Phase::Cancelled;
+        if !dispatched {
+            r.native_pid = None;
+        }
         r.detail = if dispatched {
             "Claude Code stopped without confirming the turn outcome. The input will not replay."
         } else {
@@ -685,14 +836,15 @@ async fn stream(
     stdin: &mut ChildStdin,
     cancel: &mut watch::Receiver<bool>,
     project: Option<&ProjectBinding>,
-    bash_scope: Option<(&crate::session_mcp::Bridge, &ProjectBinding)>,
+    bridge: &crate::session_mcp::Bridge,
 ) -> Result<Option<(Phase, Option<String>, &'static str)>, String> {
     let mut initialized = false;
     let mut stop = None;
+    let mut write_failure_deadline = None;
     let mut partial = Vec::new();
     let mut total = 0;
     let mut pending = HashMap::<String, (String, Instant)>::new();
-    let mut bash_decisions = bash::Decisions::default();
+    let mut relay_decisions = bash::Decisions::default();
     // At most one live message is in flight; the bridge acknowledges it only
     // from the CLI's own echo. An unconfirmed one stays upgradeable while the
     // attempt runs, and is never written again.
@@ -704,15 +856,17 @@ async fn stream(
             biased;
             _ = async { let _ = cancel.wait_for(|requested| *requested).await; }, if stop.is_none() => {
                 send(stdin, json!({"type":"stop"})).await?;
-                bash_decisions = bash::Decisions::default();
+                relay_decisions = bash::Decisions::default();
                 stop = Some(Instant::now() + Duration::from_secs(3));
                 continue;
             }
             _ = async { tokio::time::sleep_until(stop.unwrap()).await; }, if stop.is_some() => return Ok(None),
-            _ = approvals.tick(), if stop.is_none() => {
+            _ = async { tokio::time::sleep_until(write_failure_deadline.unwrap()).await; }, if write_failure_deadline.is_some() =>
+                return Err("Claude bridge could not accept live input or confirm its outcome.".into()),
+            _ = approvals.tick(), if stop.is_none() && write_failure_deadline.is_none() => {
                 if app.receipt(id)?.cancel_requested {
                     send(stdin, json!({"type":"stop"})).await?;
-                    bash_decisions = bash::Decisions::default();
+                    relay_decisions = bash::Decisions::default();
                     stop = Some(Instant::now() + Duration::from_secs(3));
                     continue;
                 }
@@ -735,8 +889,13 @@ async fn stream(
                                     if !images.is_empty() {
                                         request["images"] = json!(image_parts(&images));
                                     }
-                                    send(stdin, request).await?;
-                                    live = Some((command.id.clone(), Instant::now() + Duration::from_secs(60)));
+                                    if send(stdin, request).await.is_ok() {
+                                        live = Some((command.id.clone(), Instant::now() + Duration::from_secs(60)));
+                                    } else {
+                                        // A close can race the write. Read the bridge's
+                                        // terminal evidence before classifying delivery.
+                                        write_failure_deadline = Some(Instant::now() + Duration::from_secs(3));
+                                    }
                                 }
                                 // Nothing was written, so this is a definite non-delivery.
                                 Err(_) => steering::settle(app, id, &command.id, SteeringState::Rejected)?,
@@ -744,7 +903,7 @@ async fn stream(
                         }
                     }
                 }
-                if pending.is_empty() {
+                if pending.is_empty() || write_failure_deadline.is_some() {
                     continue;
                 }
                 let project = project.ok_or("Claude permission project missing")?;
@@ -795,9 +954,9 @@ async fn stream(
                 }
                 continue;
             }
-            (request, allowed) = bash_decisions.next(), if stop.is_none() => {
-                let allowed = allowed && !*cancel.borrow();
-                send(stdin, json!({"type":"permission_reply","request":request,"allowed":allowed,"permit":allowed.then(|| json!({}))})).await?;
+            (request, result) = relay_decisions.next(), if stop.is_none() && write_failure_deadline.is_none() => {
+                let result = if *cancel.borrow() { Err("Permission request was cancelled".into()) } else { result };
+                send(stdin, bash::reply(request, result)).await?;
                 continue;
             }
             event = frame(stdout, &mut partial) => event?,
@@ -819,17 +978,39 @@ async fn stream(
                     crate::observations::observe_claude(&mut r.context, &event, thread, &turn, &r.attempt, r.model.as_deref());
                 })?;
             }
-            Some(kind @ ("steer_ack" | "steer_rejected" | "steer_unconsumed")) if initialized => {
+            Some("steer_terminal") => {
+                let yielded = event["yielded"].as_array().filter(|ids| ids.len() <= 32)
+                    .ok_or("Invalid Claude terminal live input inventory")?
+                    .iter().map(|id| id.as_str().and_then(|id| Uuid::parse_str(id).ok())
+                        .ok_or_else(|| "Invalid Claude live message ID".to_string()))
+                    .collect::<Result<HashSet<_>, _>>()?;
+                app.change(id, |r| {
+                    r.can_steer = false;
+                    for input in &mut r.steering {
+                        if matches!(input.state, SteeringState::Pending | SteeringState::Dispatching | SteeringState::Uncertain)
+                            && Uuid::parse_str(&input.command.id).is_ok_and(|id| !yielded.contains(&id))
+                        {
+                            input.state = SteeringState::Rejected;
+                        }
+                    }
+                })?;
+                live = None;
+            }
+            Some(kind @ ("steer_ack" | "steer_rejected")) if initialized => {
                 let steer = event["id"].as_str().filter(|id| Uuid::parse_str(id).is_ok())
                     .ok_or("Invalid Claude live message ID")?;
-                let state = match kind {
-                    "steer_ack" => SteeringState::Accepted,
-                    "steer_rejected" => SteeringState::Rejected,
-                    _ => SteeringState::Uncertain,
-                };
+                let state = if kind == "steer_ack" { SteeringState::Accepted } else { SteeringState::Rejected };
                 steering::settle(app, id, steer, state)?;
                 if live.as_ref().is_some_and(|(open, _)| open == steer) {
                     live = None;
+                }
+            }
+            Some("activity") if initialized => {
+                let receipt = app.receipt(id)?;
+                if let Some(turn) = receipt.turn.as_deref()
+                    && let Some(value) = activity_event(&event, thread, turn)
+                {
+                    app.record_activity(id, "", &receipt.attempt, thread, turn, &value);
                 }
             }
             Some("delta") if initialized => {
@@ -838,10 +1019,7 @@ async fn stream(
                 if total > MAX_TEXT {
                     return Err("Claude output exceeded the text limit".into());
                 }
-                app.change(id, |r| {
-                    r.first_output_ms.get_or_insert_with(now);
-                    r.text.push_str(text);
-                })?;
+                app.append_claude_delta(id, text, event["sdk_received_ms"].as_u64())?;
             }
             Some("permission") if initialized => {
                 let request = event["request"]
@@ -851,32 +1029,39 @@ async fn stream(
                 if stop.is_some() || *cancel.borrow() {
                     continue;
                 }
-                let decision = if let Some(project) = project {
+                let permission = if let Some(project) = project
+                    && app.persistence_available()
+                    && !app.shutdown_requested.load(std::sync::atomic::Ordering::SeqCst)
+                {
                     let mut store = app.store.lock().map_err(|_| "State lock failed")?;
                     let mut r = store.get(id)?.ok_or("Claude receipt missing")?;
                     approval::record(&mut store, &mut r, project, &event, request)?
                 } else {
-                    None
+                    approval::Permission::Denied
                 };
-                if let Some(decision) = decision {
+                if let approval::Permission::Review(decision) = permission {
                     pending.insert(
                         request.into(),
                         (decision, Instant::now() + Duration::from_secs(15 * 60)),
                     );
                 } else {
+                    let permit = match permission {
+                        approval::Permission::Allowed(permit) if !*cancel.borrow() => Some(permit),
+                        _ => None,
+                    };
                     send(
                         stdin,
-                        json!({"type": "permission_reply", "request": request, "allowed": false}),
+                        json!({"type":"permission_reply","request":request,"allowed":permit.is_some(),"permit":permit}),
                     )
                     .await?;
                 }
             }
-            Some("workspace_bash") if initialized => {
+            Some("workspace_bash" | "mcp_permission") if initialized => {
                 if stop.is_none() && !*cancel.borrow() {
-                    bash_decisions.request(&event, app, bash_scope)?;
+                    relay_decisions.request(&event, app, bridge, project)?;
                 }
             }
-            Some("workspace_bash_closed") if initialized => bash_decisions.withdraw(&event),
+            Some("workspace_bash_closed" | "mcp_permission_closed") if initialized => relay_decisions.withdraw(&event),
             Some("workspace_write") if initialized => {
                 let request = event["request"]
                     .as_str()
@@ -950,6 +1135,31 @@ async fn stream(
             _ => return Err("Unexpected Claude bridge event".into()),
         }
     }
+}
+
+fn activity_event(event: &Value, thread: &str, turn: &str) -> Option<Value> {
+    let item = activity_item(event)?;
+    let method = if event["phase"] == "completed" { "item/completed" } else { "item/started" };
+    Some(json!({"method":method,"params":{"threadId":thread,"turnId":turn,"item":item}}))
+}
+
+fn activity_item(event: &Value) -> Option<Value> {
+    let id = event["id"].as_str().filter(|s| !s.is_empty() && s.len() <= 200)?;
+    let cap = |key: &str, n: usize| -> String { event[key].as_str().unwrap_or("").chars().take(n).collect() };
+    let status = match event["status"].as_str() {
+        Some("cancelled") => "cancelled",
+        Some("failed") => "failed",
+        _ => "completed",
+    };
+    let mut item = match event["kind"].as_str()? {
+        "reasoning" => json!({"id":id,"type":"reasoning"}),
+        "command" => json!({"id":id,"type":"commandExecution","tool":cap("tool", 64),"command":cap("command", 240)}),
+        "file" => json!({"id":id,"type":"fileChange","changes":[{"path":cap("path", 240)}]}),
+        "tool" => json!({"id":id,"type":"dynamicToolCall","tool":cap("tool", 64),"arguments":cap("summary", 160)}),
+        _ => return None,
+    };
+    item["status"] = json!(if event["phase"] == "completed" { status } else { "running" });
+    Some(item)
 }
 
 pub(crate) fn confirm_context(

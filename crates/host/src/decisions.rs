@@ -96,6 +96,7 @@ impl Store {
     }
     pub fn set_trust(&mut self, project: &str, trusted: bool) -> Result<(), String> {
         let binding=self.project_by_id(&crate::projects::id(project))?;
+        let sessions = if trusted { Vec::new() } else { self.sessions()? };
 
         let tx = self
             .conn
@@ -107,6 +108,18 @@ impl Store {
         )
         .map_err(|_| "Cannot persist project trust")?;
         if !trusted {
+            for mut session in sessions.into_iter().filter(|s| s.project == binding) {
+                let Some(contract) = session.contract.as_mut() else { continue };
+                crate::session_contract::advance_grant_revocation(contract)?;
+                tx.execute(
+                    "UPDATE sessions SET body=?1 WHERE id=?2",
+                    rusqlite::params![
+                        serde_json::to_string(&session).map_err(|_| "Cannot encode revocation")?,
+                        session.id
+                    ],
+                )
+                .map_err(|_| "Cannot revoke project session grants")?;
+            }
             let mut stmt = tx
                 .prepare("SELECT body FROM receipts")
                 .map_err(|_| "Cannot read attempts")?;

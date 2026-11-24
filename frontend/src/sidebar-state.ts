@@ -45,6 +45,10 @@ export function workerCounts(w:Workspace,session:string){
  return workers;
 }
 
+export function otherSessionAttention<T extends {id:string}>(rows:T[],viewedSession:string):T[]{
+ return rows.filter(row=>row.id!==viewedSession);
+}
+
 /** The sidebar count includes pending native requests and actionable session decisions.
  * Worker blocks from the same native requests already appear in the receipt. */
 export function sidebarAttention(w:Workspace|undefined,decisions:Record<string,number>|undefined){

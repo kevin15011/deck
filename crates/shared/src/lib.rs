@@ -16,6 +16,8 @@ pub struct StartupTiming {
     pub qualification_cached: bool,
     pub process_spawn_ms: u64,
     pub initialization_ms: u64,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub claude_stages_ms: std::collections::BTreeMap<String, u64>,
     pub configuration_model_ms: u64,
     pub thread_ms: u64,
     pub thread_method: String,
@@ -148,6 +150,8 @@ pub struct Receipt {
     pub handshake_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub startup_timing: Option<StartupTiming>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_startup_retry: Option<StartupRetry>,
     pub dispatch_ms: Option<u64>,
     #[serde(default)]
     pub acknowledgment_ms: Option<u64>,
@@ -158,6 +162,11 @@ pub struct Receipt {
     pub policy: String,
     pub runner: String,
     pub delivery: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StartupRetry {
+    pub retries: u8,
+    pub after_ms: u64,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -195,6 +204,8 @@ pub struct SteeringReceipt {
     pub admitted_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queued_source: Option<QueuedSteeringSource>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resend_requested: bool,
 }
 /// A Deck Lead's scoped instruction, independent of user steering and decisions.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -13,6 +13,7 @@ export function processingState(rows:Receipt[],connected:boolean,sending:boolean
  if(r.context&&typeof r.context==='object'&&'compacting' in r.context&&r.context.compacting)return {phase:'compacting',label:'Compacting context…'};
  if(r.phase==='uncertain')return {phase:'waiting',label:'Waiting for previous Lead turn to settle'};
  if(r.phase==='queued'){
+  if(r.claude_startup_retry)return {phase:'waiting',label:'Claude startup retry queued'};
   if(r.detail.startsWith('Waiting for subagent '))return {phase:'waiting',label:'Waiting for a subagent to settle'};
   return {phase:'waiting',label:r.continuation?'Subagent result queued for Lead':'Message queued'};
  }
@@ -21,7 +22,10 @@ export function processingState(rows:Receipt[],connected:boolean,sending:boolean
   if(queued)return {phase:'waiting',label:'Message queued while Lead reviews a subagent result'};
   if(r.phase==='running')return {phase:'working',label:'Reviewing a subagent result…'};
  }
- if(['accepted','preparing','dispatching'].includes(r.phase))return {phase:'preparing',label:'Starting Lead…'};
+ if(['accepted','preparing','dispatching'].includes(r.phase)){
+  const claude=r.configuration?.session_contract?.members.lead?.runnerId==='claude';
+  return {phase:'preparing',label:claude&&r.detail.endsWith('…')?r.detail:'Starting Lead…'};
+ }
  return {phase:'working',label:'Working…'};
 }
 export function ProcessingProgress({rows,connected,sending,unconfirmed,children}:{rows:Receipt[];connected:boolean;sending:boolean;unconfirmed?:boolean;children:React.ReactNode}){

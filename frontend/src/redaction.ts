@@ -27,5 +27,11 @@ export function redactText(text: string, cap = 12000): string {
       /(["']?\b[\w.-]*(?:api[_-]?key|access[_-]?key|token|password|passwd|secret(?:[_-][\w-]+)?|authorization)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\])*'?|[^\s,;}&#"']+)/gi,
       "$1[redacted]",
     )
+    // Match Bash continuations as zero-width for flag detection, keeping their
+    // original spelling in the captured separator. Projections escape them.
+    .replace(
+      /(^|[\s"'=;|&()]|\\[nrt])(--[\w.-]*(?:api[_-]?key|access[_-]?key|token|password|passwd|secret|authorization)(?:\\?"|')?(?:\\\n|\\\\\\n)*(?:[ \t]|\\t)(?:[ \t]|\\t|\\\n|\\\\\\n)*)(?:\\"(?:\\\\\\"|\\(?!")|[^\\])*(?:\\"|$)|"(?:\\.|[^"\\])*"?|'[^']*'?|(?:\\{1,2}[ \t]|\\(?![nrt])|[^\s\\,;&|()<>"'}])+)/gi,
+      "$1$2[redacted]",
+    )
     .slice(0, cap);
 }

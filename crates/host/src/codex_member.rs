@@ -152,6 +152,12 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
             store.save_task(&current)?;
         }
         let (permissions, approval_policy, _) = native.permission_policy(false);
+        // Workspace writes rely on trust captured at member start; recheck it.
+        if native.member_project_trust() == Some(true)
+            && !app.store.lock().map_err(|_| "State lock failed")?.trusted_project(&app.project)?
+        {
+            return Err("Project trust changed before member turn start".into());
+        }
         let ack=native.request("turn/start",native.turn_assignment(json!({"threadId":thread,"input":[{"type":"text","text":launch_prompt}],"permissions":permissions,"approvalPolicy":approval_policy,"approvalsReviewer":"user"}))).await?;
         let turn = ack["turn"]["id"]
             .as_str()
@@ -257,7 +263,10 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
       d.state=deck2_shared::DecisionState::Responded;
      }
      if d.state==deck2_shared::DecisionState::Pending { app.store.lock().unwrap().reuse_permission(&mut d)?; }
-     app.change(&authority,|r|r.decisions.push(d))?;continue;
+     if let Some(reason) = crate::codex_protocol::record_decision(app, d)? {
+      native.write(json!({"id":value["id"],"error":{"code":-32000,"message":reason}})).await?;
+     }
+     continue;
     }
     native.write(json!({"id":value["id"],"error":{"code":-32601,"message":"Member native approval relay not yet qualified"}})).await?;return Err("Member requested an unqualified approval boundary".into());}
    app.observe_quota(&value)?;

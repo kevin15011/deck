@@ -500,6 +500,40 @@ fn schema17_runner_identity_migrates_atomically_without_inventing_authority() {
 
 }
 
+#[test]
+fn codex_command_projection_withholds_continued_credentials() {
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_str().unwrap();
+    let mut store = Store::open(&dir.path().join("state.db"), root).unwrap();
+    store.register_codex("a".repeat(64)).unwrap();
+    store.create_session(&serde_json::from_value(json!({
+        "api": API, "id": "codex-command-session", "title": "Command fixture",
+        "members": {"lead": {"runnerId": "codex", "modelId": "gpt-6.1-sol"}}
+    })).unwrap()).unwrap();
+    let mut receipt = store.admit(&serde_json::from_value(json!({
+        "api": API, "id": "codex-command-receipt", "session": "codex-command-session",
+        "mode": "session_v1", "prompt": "Command fixture"
+    })).unwrap()).unwrap();
+    receipt.phase = Phase::Running;
+    receipt.thread = Some("thread".into());
+    receipt.turn = Some("turn".into());
+    let decision = crate::codex_protocol::native_decision(
+        &receipt, &receipt.generation, "thread", "turn", &json!({
+            "id": 1, "method": "item/commandExecution/requestApproval",
+            "params": {"threadId": "thread", "turnId": "turn", "cwd": root,
+                "command": "fixture --clientSecret\\\n   \"FIXTURE_QUOTED_SENTINEL two words\""}
+        }),
+    ).unwrap();
+    let view = crate::execution_view::decision(&decision);
+    // Chromium uses this exact host projection as the Codex card's presentation.
+    println!("CODEX_DOCK_PROJECTION={view}");
+    assert_eq!(view["kind"], "command");
+    assert_eq!(view["details"]["cwd"], root);
+    assert!(!view.to_string().contains("FIXTURE_QUOTED_SENTINEL"));
+}
+
 // protects: Q92-01 exact retained persistent scope, projection/reply equality,
 // independent host rejection and revision authority. Oracle: accepted UI20 contract;
 // fails if prose authorizes a grant or a stale/unsupported scope reaches native reply.
@@ -513,8 +547,9 @@ fn persistent_scope_projection_and_reply_share_retained_authority() {
     s.create_session(&serde_json::from_value(json!({"api":API,"id":"persistent-session","title":"Scope","members":{"lead":{"runnerId":"codex","modelId":"gpt-6.1-sol"}}})).unwrap()).unwrap();
     let mut r=s.admit(&serde_json::from_value(json!({"api":API,"id":"persistent-receipt","session":"persistent-session","mode":"session_v1","prompt":"Scope fixture"})).unwrap()).unwrap();
     r.phase=Phase::Running;r.thread=Some("thread".into());r.turn=Some("turn".into());
-    let scope=json!(["git","-C","project path"]);
-    let mut d=crate::codex_protocol::native_decision(&r,&r.generation,"thread","turn",&json!({"id":1,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread","turnId":"turn","command":"git -C 'project path' status","proposedExecpolicyAmendment":scope}})).unwrap();
+    let scope=json!(["git","-C","project path","status","--"]);
+    std::fs::create_dir(f.path().join("project path")).unwrap();
+    let mut d=crate::codex_protocol::native_decision(&r,&r.generation,"thread","turn",&json!({"id":1,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread","turnId":"turn","command":"git -C 'project path' status --","cwd":f.path(),"proposedExecpolicyAmendment":scope}})).unwrap();
     let view=crate::execution_view::decision(&d);
     assert_eq!(view["persistent_grant"]["prefix"],scope);
     assert_eq!(view["persistent_grant"]["persistence"],"across_sessions");
@@ -533,8 +568,20 @@ fn persistent_scope_projection_and_reply_share_retained_authority() {
     params["proposedExecpolicyAmendment"]=json!(["git"]);native.parameters=params.to_string();
     assert!(s.save(&mut changed).is_err(), "same decision cannot silently change scope");
     assert_eq!(s.get(&r.id).unwrap().unwrap().decisions[0].native,d.native);
+    let mut wrapper = crate::codex_protocol::native_decision(&r, &r.generation, "thread", "turn", &json!({
+        "id":2,"method":"item/commandExecution/requestApproval","params":{
+            "threadId":"thread","turnId":"turn","command":"rtk git status","cwd":f.path(),
+            "proposedExecpolicyAmendment":["rtk"]
+        }
+    })).unwrap();
+    let view = crate::execution_view::decision(&wrapper);
+    assert!(view["persistent_grant"].is_null());
+    assert!(!view["responses"].as_array().unwrap().contains(&json!("allow_always")));
+    wrapper.resolution = Some(Resolve { response: DecisionResponse::AllowAlways, ..reply.clone() });
+    assert!(crate::codex_protocol::native_reply(&wrapper).is_err());
+
     // Invalid partitions retain forged historical prose, proving it grants no authority.
-    for bad in [Value::Null,json!([]),json!([""]),json!([42]),json!(["x\n"]),json!(["\u{202e}x"]),json!(["Bearer credential"]),json!(["https://user:pass@host"]),json!(["https://host/?%74oken=credential"]),json!(["token=credential"]),json!(["?key=credential"]),json!(["&sig=credential"]),json!(["Basic credential"]),json!(["accesskey=credential"]),json!(vec!["x"; 129]),json!(["x".repeat(8192)])] {
+    for bad in [Value::Null,json!([]),json!([""]),json!([42]),json!(["x\n"]),json!(["git"]),json!(["git","-C","project path"]),json!(["\u{202e}x"]),json!(["Bearer credential"]),json!(["https://user:pass@host"]),json!(["https://host/?%74oken=credential"]),json!(["token=credential"]),json!(["?key=credential"]),json!(["&sig=credential"]),json!(["Basic credential"]),json!(["accesskey=credential"]),json!(vec!["x"; 129]),json!(["x".repeat(8192)])] {
         let mut invalid=d.clone();
         let n=invalid.native.as_mut().unwrap();
         let mut p:Value=serde_json::from_str(&n.parameters).unwrap();p["proposedExecpolicyAmendment"]=bad;n.parameters=p.to_string();n.always_note=Some("forged authority".into());
