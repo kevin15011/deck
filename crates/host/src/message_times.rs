@@ -10,7 +10,7 @@ pub(super) fn backfill(conn: &Connection) -> Result<()> {
     )? {
         return Ok(());
     }
-    let mut candidates = conn.prepare("SELECT DISTINCT json_extract(body,'$.receiptId'),session,task,attempt FROM session_events WHERE kind LIKE 'notification:message:%' AND json_extract(body,'$.displayStart') > 0 AND json_type(body,'$.receiptId')='text' AND session IS NOT NULL AND task IS NOT NULL AND attempt IS NOT NULL")?;
+    let mut candidates = conn.prepare("SELECT DISTINCT json_extract(body,'$.receiptId'),session,task,attempt FROM session_events WHERE kind>='notification:message:' AND kind<'notification:message;' AND json_extract(body,'$.displayStart') > 0 AND json_type(body,'$.receiptId')='text' AND session IS NOT NULL AND task IS NOT NULL AND attempt IS NOT NULL")?;
     let mut events = conn.prepare("SELECT kind,json_extract(body,'$.delta'),json_extract(body,'$.at_ms'),json_extract(body,'$.displayStart') FROM session_events WHERE session=?1 AND task=?2 AND attempt=?3 ORDER BY seq")?;
     for candidate in candidates.query_map([], |r| {
         Ok((

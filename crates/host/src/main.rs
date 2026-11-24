@@ -514,6 +514,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             app.browser_identity(identity);
             app.adopt_history(p.join("original-history.db")).await;
             deck2::web_push::start(app.clone(),p.clone());
+            deck2::native::start_zombie_reaper(app.clone());
             println!(
                 "Deck host ready on {host}\nRead-only project execution; Codex may refresh its own auth/cache.\n{}\nStop host: deck2 stop (use the same state directory). Browser closure keeps it running.",
                 launcher::guidance(&p)

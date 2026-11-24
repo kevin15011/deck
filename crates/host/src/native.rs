@@ -1486,6 +1486,136 @@ pub(crate) fn own_child(cmd: &mut Command) -> Result<(), String> {
     Ok(())
 }
 
+/// Reap reparented subreaper zombies that outlived their original parent without
+/// touching live processes or any PID still owned by a parked/active Child handle.
+pub fn start_zombie_reaper(app: App) {
+    tokio::spawn(async move {
+        let mut seen = std::collections::HashMap::<i32, u64>::new();
+        let mut tick = tokio::time::interval(Duration::from_secs(10));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            if app.shutdown_requested.load(std::sync::atomic::Ordering::Acquire) {
+                break;
+            }
+            let mut excluded = app.claude_reuse.owned_pids();
+            excluded.extend(app.native_reuse.owned_pids());
+            let next = tokio::task::spawn_blocking(move || {
+                reap_orphaned_zombies(&excluded, &mut seen);
+                seen
+            })
+            .await;
+            match next {
+                Ok(updated) => seen = updated,
+                Err(_) => break,
+            }
+        }
+    });
+}
+
+fn direct_child_pids() -> Vec<i32> {
+    let mut pids = std::collections::HashSet::new();
+    let Ok(tasks) = std::fs::read_dir("/proc/self/task") else {
+        return Vec::new();
+    };
+    for entry in tasks.flatten() {
+        let Ok(raw) = std::fs::read_to_string(entry.path().join("children")) else {
+            continue;
+        };
+        for token in raw.split_whitespace() {
+            if let Ok(pid) = token.parse::<i32>()
+                && pid > 1
+            {
+                pids.insert(pid);
+            }
+        }
+    }
+    pids.into_iter().collect()
+}
+
+fn zombie_starttime(pid: i32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let (_, fields) = stat.rsplit_once(") ")?;
+    let mut parts = fields.split_whitespace();
+    if parts.next()? != "Z" {
+        return None;
+    }
+    // Field 3 is state (index 0); field 22 is starttime (index 19 -> nth(18) after state).
+    parts.nth(18)?.parse::<u64>().ok()
+}
+
+fn reap_orphaned_zombies(
+    excluded: &std::collections::HashSet<i32>,
+    seen: &mut std::collections::HashMap<i32, u64>,
+) -> usize {
+    let mut next_seen = std::collections::HashMap::new();
+    let mut reaped = 0;
+    for pid in direct_child_pids() {
+        if excluded.contains(&pid) {
+            continue;
+        }
+        let Some(start) = zombie_starttime(pid) else {
+            continue;
+        };
+        if seen.get(&pid) == Some(&start) {
+            let mut status = 0;
+            if unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) } == pid {
+                reaped += 1;
+                continue;
+            }
+        }
+        next_seen.insert(pid, start);
+    }
+    *seen = next_seen;
+    reaped
+}
+
+#[cfg(test)]
+mod zombie_reaper_tests {
+    use super::*;
+
+    #[test]
+    fn subreaper_reaps_orphaned_zombies_without_touching_excluded_pids() {
+        assert_eq!(unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1) }, 0);
+        // Spawn a parent that creates a grandchild in its own process group, prints its PID, and exits.
+        let out = std::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "python3 -c 'import os,sys,time; pid=os.fork()\nif pid==0:\n os.setsid()\n time.sleep(0.05)\n os._exit(0)\nprint(pid)'",
+            ])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let grandchild: i32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while zombie_starttime(grandchild).is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            zombie_starttime(grandchild).is_some(),
+            "grandchild {grandchild} did not become a subreaper zombie"
+        );
+
+        let mut seen = std::collections::HashMap::new();
+        let excluded = std::collections::HashSet::from([grandchild]);
+        reap_orphaned_zombies(&excluded, &mut seen);
+        reap_orphaned_zombies(&excluded, &mut seen);
+        assert!(
+            zombie_starttime(grandchild).is_some(),
+            "excluded PID must not be reaped"
+        );
+
+        let empty = std::collections::HashSet::new();
+        // First sweep records the zombie without reaping it immediately.
+        reap_orphaned_zombies(&empty, &mut seen);
+        assert!(seen.contains_key(&grandchild));
+        // Second sweep reaps it cleanly.
+        let reaped = reap_orphaned_zombies(&empty, &mut seen);
+        assert!(reaped >= 1, "expected grandchild {grandchild} to be reaped");
+        assert!(zombie_starttime(grandchild).is_none());
+    }
+}
+
 async fn probe(
     mut cmd: Command,
     catalog: bool,

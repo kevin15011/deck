@@ -176,8 +176,15 @@ async function run() {
   const deckTools = bootstrap.toolNames.map(name => deckToolPrefix + name);
   let stopped = false;
   let sent = false;
+  let turnActive = false;
   let inputClosed = false;
   let steerEvidence = false;
+  let closing = false;
+  let sessionInitialized = false;
+  let turnInitEmitted = false;
+  let lastInitModel: string | undefined;
+  let currentInitialId = '';
+  let limited = false;
   function closeSteering() {
     inputClosed = true;
     if (member || !sent || steerEvidence) return;
@@ -201,77 +208,46 @@ async function run() {
     steers.set(id, 'acked');
     emit({type: 'steer_ack', session_id: thread, id});
   }
-  async function* prompt(): AsyncGenerator<SDKUserMessage> {
-    const request = await next();
-    if (request.type !== 'send' || typeof request.text !== 'string') {
-      stopped = true;
-      abortController.abort();
-      return;
+  const queuedUsers: SDKUserMessage[] = [];
+  let waitingUser: ((result: IteratorResult<SDKUserMessage>) => void) | undefined;
+  let userStreamClosed = false;
+  function pushUser(message: SDKUserMessage) {
+    if (userStreamClosed) return;
+    if (waitingUser) {
+      const resolve = waitingUser;
+      waitingUser = undefined;
+      resolve({value: message, done: false});
+    } else {
+      queuedUsers.push(message);
     }
-    if (member && (typeof request.message_id !== 'string' || !uuid.test(request.message_id))) {
-      throw Error('Missing member message identity');
+  }
+  function closeUsers() {
+    if (userStreamClosed) return;
+    userStreamClosed = true;
+    if (waitingUser) {
+      const resolve = waitingUser;
+      waitingUser = undefined;
+      resolve({value: undefined, done: true});
     }
-    if (member && request.images !== undefined) throw Error('Members do not accept images');
-    const content = userContent(request.text, request.images);
-    const initialId = member ? request.message_id : randomUUID();
-    sent = true;
-    yield {
-      type: 'user',
-      message: {role: 'user', content},
-      parent_tool_use_id: null,
-      session_id: thread,
-      uuid: initialId as SDKUserMessage['uuid'],
-    };
-    while (!inputClosed) {
-      const message = await next();
-      if (inputClosed) return;
-      if (message.type === 'stop') {
-        stopped = true;
-        void native.interrupt().catch(() => abortController.abort());
-        return;
-      }
-      if (message.type === 'steer') {
-        // Members take Lead guidance as text only: never images.
-        if ((member && message.images !== undefined) || typeof message.id !== 'string' ||
-            !uuid.test(message.id) || typeof message.text !== 'string') {
-          emit({type: 'steer_rejected', session_id: thread, id: message.id});
-          continue;
-        }
-        if (steers.has(message.id)) {
-          if (steers.get(message.id) === 'acked') emit({type: 'steer_ack', session_id: thread, id: message.id});
-          continue;
-        }
-        let live: string | UserContent;
-        try {
-          live = userContent(message.text, message.images);
-          if (typeof live === 'string' && !live.trim()) throw Error('Empty live message');
-        } catch {
-          emit({type: 'steer_rejected', session_id: thread, id: message.id});
-          continue;
-        }
-        steers.set(message.id, 'sent');
-        // 'next' folds the message into the running turn between tool rounds. It
-        // neither aborts that turn nor waits for the next one.
-        yield {
-          type: 'user',
-          message: {role: 'user', content: live},
-          parent_tool_use_id: null,
-          session_id: thread,
-          uuid: message.id as `${string}-${string}-${string}-${string}-${string}`,
-          priority: 'next',
-        };
+  }
+  async function* userStream(): AsyncGenerator<SDKUserMessage> {
+    while (true) {
+      if (queuedUsers.length) {
+        yield queuedUsers.shift()!;
         continue;
       }
-      if (message.type !== 'permission_reply' || typeof message.allowed !== 'boolean') {
-        throw Error('Unexpected Deck reply');
-      }
-      pending.get(message.request)?.(message.allowed ? message.permit ?? null : typeof message.reason === 'string' ? {denial: message.reason} : null);
+      if (userStreamClosed) return;
+      const item = await new Promise<IteratorResult<SDKUserMessage>>(resolve => {
+        waitingUser = resolve;
+      });
+      if (item.done) return;
+      yield item.value;
     }
   }
 
   const initialized = readiness("sdk");
   const native = query({
-    prompt: prompt(),
+    prompt: userStream(),
     options: {
       ...options,
       // The replay echo is the CLI's acknowledgment of live guidance.
@@ -290,7 +266,7 @@ async function run() {
       canUseTool: async (tool, input, {signal, toolUseID}) => {
         const deny = {behavior: 'deny', message: 'Deck did not authorize this tool call.'} as const;
         const userMcp = isUserMcpTool(tool);
-        if (!sent || stopped || signal.aborted || (!bootstrap.workspaceTools.includes(tool) && !userMcp) ||
+        if (!turnActive || !sent || stopped || signal.aborted || (!bootstrap.workspaceTools.includes(tool) && !userMcp) ||
             typeof toolUseID !== 'string' || !toolUseID || toolUseID.length > 128) return deny;
         const edit = tool === 'Edit' || tool === 'Write';
         const bash = tool === 'Bash';
@@ -323,6 +299,8 @@ async function run() {
       },
     },
   });
+  let stdinLoop: Promise<void> | undefined;
+  let stdinError: unknown;
   try {
     const plan = await subscription(native);
     initialized();
@@ -341,41 +319,52 @@ async function run() {
     }
     // Read the native plan on this exact SDK process. Credits can otherwise
     // take over after the included cap. Skip transcript-derived usage stats.
-    const checkedUsage = readiness("usage");
-    const usage = await readUsage(native);
-    checkedUsage();
-    const quota = quotaMetadata(plan, usage);
-    const credits = usage.rate_limits?.extra_usage;
-    if (usage.rate_limits_available !== true || usage.subscription_type !== plan ||
-        !credits || credits.is_enabled !== false) {
-      emit({type: credits?.is_enabled === true ? 'credits_enabled' : 'usage_unverified', quota});
-      return;
+    async function verifyUsage() {
+      const checkedUsage = readiness("usage");
+      const usage = await readUsage(native);
+      checkedUsage();
+      const quota = quotaMetadata(plan!, usage);
+      const credits = usage.rate_limits?.extra_usage;
+      if (usage.rate_limits_available !== true || usage.subscription_type !== plan ||
+          !credits || credits.is_enabled !== false) {
+        emit({type: credits?.is_enabled === true ? 'credits_enabled' : 'usage_unverified', quota});
+        return undefined;
+      }
+      if ([usage.rate_limits?.five_hour, usage.rate_limits?.seven_day, usage.rate_limits?.seven_day_oauth_apps]
+          .some(window => (window?.utilization ?? 0) >= 100)) {
+        emit({type: 'plan_limit', quota});
+        return undefined;
+      }
+      return {quota};
     }
-    if ([usage.rate_limits?.five_hour, usage.rate_limits?.seven_day, usage.rate_limits?.seven_day_oauth_apps]
-        .some(window => (window?.utilization ?? 0) >= 100)) {
-      emit({type: 'plan_limit', quota});
-      return;
+    async function verifyDeckInventory(quota: ReturnType<typeof quotaMetadata>) {
+      const verified = readiness("deck_inventory");
+      // One native snapshot verifies the Deck server. Other servers can still be pending.
+      const servers = await native.mcpServerStatus();
+      verified();
+      const deckServers = servers.filter(candidate => candidate.name === deckServer);
+      const [server] = deckServers;
+      const advertised = server?.tools?.map(tool => tool.name);
+      if (deckServers.length !== 1 || server?.status !== 'connected' ||
+          server.source !== 'dynamic' || !advertised ||
+          !sameTools(advertised, bootstrap.toolNames)) {
+        emit({type: 'coordination_unavailable', quota});
+        return false;
+      }
+      return true;
     }
+    const usageCheck = await verifyUsage();
+    if (!usageCheck) return;
     // Register over the SDK control pipe so the per-attempt token stays out of argv.
     const registered = readiness("deck_registration");
     const registration = await native.setMcpServers({[deckServer]: bootstrap.server});
     registered();
-    const verified = readiness("deck_inventory");
-    // One native snapshot verifies the Deck server. Other servers can still be pending.
-    const servers = await native.mcpServerStatus();
-    verified();
-    const deckServers = servers.filter(candidate => candidate.name === deckServer);
-    const [server] = deckServers;
-    const advertised = server?.tools?.map(tool => tool.name);
-    if (!registration.added.includes(deckServer) || deckServer in registration.errors ||
-        deckServers.length !== 1 || server?.status !== 'connected' ||
-        server.source !== 'dynamic' || !advertised ||
-        !sameTools(advertised, bootstrap.toolNames)) {
-      emit({type: 'coordination_unavailable', quota});
+    if (!registration.added.includes(deckServer) || deckServer in registration.errors) {
+      emit({type: 'coordination_unavailable', quota: usageCheck.quota});
       return;
     }
-    emit({type: 'ready', quota});
-    let limited = false;
+    if (!(await verifyDeckInventory(usageCheck.quota))) return;
+    emit({type: 'ready', quota: usageCheck.quota});
     // Current-request occupancy comes from the CLI itself: 'summary' answers from
     // the last response's usage (input + cache read/creation) and local estimates,
     // with no token-count API calls. Reads are serialized and coalesced, never block
@@ -383,10 +372,11 @@ async function run() {
     const safe = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
     let reading: Promise<void> | undefined;
     let again = false;
-    // A compaction boundary invalidates every earlier measurement: replies already
-    // in flight are dropped by epoch, and nothing is shown until the next response.
+    // A compaction boundary or turn end invalidates every earlier measurement:
+    // replies already in flight are dropped by epoch.
     let epoch = 0;
     function refreshContext(): void {
+      if (!turnActive) return;
       if (reading) {
         again = true;
         return;
@@ -399,7 +389,7 @@ async function run() {
             const usage = await native.getContextUsage({detail: 'summary'});
             // Before the first response apiUsage is null and the total is a bare 0:
             // that is absence of data, not an empty window.
-            if (started === epoch && usage.apiUsage && safe(usage.totalTokens)) {
+            if (started === epoch && turnActive && usage.apiUsage && safe(usage.totalTokens)) {
               // A missing window is reported as absent, never guessed.
               const capacity = safe(usage.rawMaxTokens) && usage.rawMaxTokens > 0 ? usage.rawMaxTokens : undefined;
               emit({type: 'context', session_id: thread, tokens: usage.totalTokens,
@@ -409,7 +399,7 @@ async function run() {
           } catch {
             // Unsupported or interrupted: the host keeps showing the last reading.
           }
-        } while (again);
+        } while (again && turnActive);
       })().finally(() => { reading = undefined; });
     }
     // Activity is lifecycle only. Raw thinking, tool payloads and tool output
@@ -488,72 +478,241 @@ async function run() {
         }
       }
     }
-    for await (const event of native) {
-      const sdkReceivedMs = Date.now();
-      if (!sent || !('session_id' in event)) continue;
-      if (event.session_id !== thread) {
-        if (member && (event.type === 'result' || (event.type === 'system' && event.subtype === 'init'))) {
-          emit({type: 'session_mismatch'});
-          return;
+    stdinLoop = (async () => {
+      try {
+        while (!closing) {
+          const {value, done} = await inbox.next();
+          if (done) {
+            if (turnActive) {
+              stopped = true;
+              abortController.abort();
+            } else {
+              closing = true;
+              closeUsers();
+              native.close();
+            }
+            return;
+          }
+          const message = JSON.parse(value);
+          if (message.type === 'close') {
+            closing = true;
+            closeUsers();
+            native.close();
+            return;
+          }
+          if (message.type === 'prepare_turn') {
+            if (member || turnActive || !sessionInitialized) {
+              emit({type: 'transport_error'});
+              closing = true;
+              closeUsers();
+              native.close();
+              return;
+            }
+            const nextUsage = await verifyUsage();
+            if (!nextUsage || !(await verifyDeckInventory(nextUsage.quota))) {
+              closing = true;
+              closeUsers();
+              native.close();
+              return;
+            }
+            emit({type: 'ready', quota: nextUsage.quota});
+            continue;
+          }
+          if (message.type === 'send') {
+            if (turnActive || typeof message.text !== 'string') {
+              stopped = true;
+              abortController.abort();
+              return;
+            }
+            if (member && (typeof message.message_id !== 'string' || !uuid.test(message.message_id))) {
+              throw Error('Missing member message identity');
+            }
+            if (member && message.images !== undefined) throw Error('Members do not accept images');
+            const content = userContent(message.text, message.images);
+            const initialId = member ? message.message_id : randomUUID();
+            stopped = false;
+            sent = true;
+            turnActive = true;
+            turnInitEmitted = false;
+            inputClosed = false;
+            steerEvidence = false;
+            limited = false;
+            currentInitialId = initialId;
+            steers.clear();
+            open.clear();
+            blocks.clear();
+            messageId = '';
+            pushUser({
+              type: 'user',
+              message: {role: 'user', content},
+              parent_tool_use_id: null,
+              session_id: thread,
+              uuid: initialId as SDKUserMessage['uuid'],
+            });
+            continue;
+          }
+          if (message.type === 'stop') {
+            stopped = true;
+            if (turnActive) {
+              void native.interrupt().catch(() => abortController.abort());
+            } else {
+              closing = true;
+              closeUsers();
+              native.close();
+            }
+            return;
+          }
+          if (message.type === 'steer') {
+            // Members take Lead guidance as text only: never images.
+            if (!turnActive || inputClosed || (member && message.images !== undefined) ||
+                typeof message.id !== 'string' || !uuid.test(message.id) || typeof message.text !== 'string') {
+              emit({type: 'steer_rejected', session_id: thread, id: message.id});
+              continue;
+            }
+            if (steers.has(message.id)) {
+              if (steers.get(message.id) === 'acked') emit({type: 'steer_ack', session_id: thread, id: message.id});
+              continue;
+            }
+            let live: string | UserContent;
+            try {
+              live = userContent(message.text, message.images);
+              if (typeof live === 'string' && !live.trim()) throw Error('Empty live message');
+            } catch {
+              emit({type: 'steer_rejected', session_id: thread, id: message.id});
+              continue;
+            }
+            steers.set(message.id, 'sent');
+            // 'next' folds the message into the running turn between tool rounds. It
+            // neither aborts that turn nor waits for the next one.
+            pushUser({
+              type: 'user',
+              message: {role: 'user', content: live},
+              parent_tool_use_id: null,
+              session_id: thread,
+              uuid: message.id as `${string}-${string}-${string}-${string}-${string}`,
+              priority: 'next',
+            });
+            continue;
+          }
+          if (message.type !== 'permission_reply' || typeof message.allowed !== 'boolean') {
+            throw Error('Unexpected Deck reply');
+          }
+          pending.get(message.request)?.(
+            message.allowed ? message.permit ?? null : typeof message.reason === 'string' ? {denial: message.reason} : null,
+          );
         }
-        continue;
+      } catch (error) {
+        if (!closing) {
+          stdinError = error;
+          closing = true;
+          closeUsers();
+          abortController.abort();
+          native.close();
+        }
       }
-      // The CLI names every user message a turn has consumed on its replies.
-      const {user_message_uuids: consumed, user_message_uuid: primary} = event as
-        {user_message_uuids?: unknown; user_message_uuid?: unknown};
-      const mainThread = !('parent_tool_use_id' in event) || !event.parent_tool_use_id;
-      if (mainThread && Array.isArray(consumed)) {
-        for (const id of consumed) if (typeof id === 'string') settleSteer(id);
-      }
-      if (mainThread && typeof primary === 'string') settleSteer(primary);
-      observeActivity(event);
-      if (mainThread && event.type === 'user' && 'isReplay' in event && event.isReplay && typeof event.uuid === 'string') {
-        settleSteer(event.uuid);
-      } else if (event.type === 'system' && event.subtype === 'init') {
-        const deckServers = event.mcp_servers.filter(candidate => candidate.name === deckServer);
-        if (!sameTools(event.tools.filter(tool => tool.startsWith(deckToolPrefix)), deckTools) ||
-            // The SDK can advertise its discovery helper alongside dynamic MCP tools.
-            // This init check does not add it to the executable tool configuration.
-            event.tools.some(tool => !tool.startsWith('mcp__') && tool !== 'ToolSearch' && !tools.includes(tool)) ||
-            deckServers.length !== 1 || deckServers[0]?.status !== 'connected') {
-          throw Error('Unexpected runtime capabilities');
-        }
-        emit({type: 'init', session_id: thread, model: event.model});
+    })();
+    function ensureReusedInit() {
+      if (sessionInitialized && !turnInitEmitted) {
+        turnInitEmitted = true;
+        emit({type: 'init', session_id: thread, model: lastInitModel});
         refreshContext();
-      } else if (event.type === 'stream_event' && !event.parent_tool_use_id &&
-          event.event.type === 'content_block_delta' && event.event.delta.type === 'text_delta') {
-        emit({type: 'delta', session_id: thread, text: event.event.delta.text, sdk_received_ms: sdkReceivedMs});
-      } else if (event.type === 'assistant' && event.error === 'rate_limit') {
-        limited = true;
-      } else if (event.type === 'assistant' && !event.parent_tool_use_id) {
-        refreshContext();
-      } else if (event.type === 'system' && event.subtype === 'compact_boundary') {
-        epoch++;
-        again = false;
-        emit({type: 'context_reset', session_id: thread});
-      } else if (event.type === 'result') {
-        // The result inventories only its own turn. An already yielded input
-        // can be consumed in a subsequent native turn.
-        closeSteering();
-        closeSteps(stopped ? 'cancelled' : event.subtype === 'success' && !event.is_error ? 'completed' : 'failed');
-        if (member) for (const [id, state] of steers) if (state === 'sent') {
-          emit({type: 'steer_unconsumed', session_id: thread, id});
-        }
-        if (!limited && event.subtype === 'success' && !event.is_error) {
-          emit({type: 'result', session_id: thread, outcome: 'completed', text: event.result});
-        } else {
-          emit({type: 'result', session_id: thread, outcome: stopped ? 'cancelled' : limited ? 'limited' : 'failed'});
-        }
-        break;
       }
     }
+    try {
+      for await (const event of native) {
+        const sdkReceivedMs = Date.now();
+        if (!turnActive || !sent || !('session_id' in event)) continue;
+        if (event.session_id !== thread) {
+          if (member && (event.type === 'result' || (event.type === 'system' && event.subtype === 'init'))) {
+            emit({type: 'session_mismatch'});
+            return;
+          }
+          continue;
+        }
+        // The CLI names every user message a turn has consumed on its replies.
+        const {user_message_uuids: consumed, user_message_uuid: primary} = event as
+          {user_message_uuids?: unknown; user_message_uuid?: unknown};
+        const mainThread = !('parent_tool_use_id' in event) || !event.parent_tool_use_id;
+        if (event.type === 'system' && event.subtype === 'init') {
+          const deckServers = event.mcp_servers.filter(candidate => candidate.name === deckServer);
+          if (!sameTools(event.tools.filter(tool => tool.startsWith(deckToolPrefix)), deckTools) ||
+              // The SDK can advertise its discovery helper alongside dynamic MCP tools.
+              // This init check does not add it to the executable tool configuration.
+              event.tools.some(tool => !tool.startsWith('mcp__') && tool !== 'ToolSearch' && !tools.includes(tool)) ||
+              deckServers.length !== 1 || deckServers[0]?.status !== 'connected') {
+            throw Error('Unexpected runtime capabilities');
+          }
+          sessionInitialized = true;
+          lastInitModel = event.model;
+          if (!turnInitEmitted) {
+            turnInitEmitted = true;
+            emit({type: 'init', session_id: thread, model: event.model});
+            refreshContext();
+          }
+          continue;
+        }
+        if (sessionInitialized && !turnInitEmitted && (
+            event.type === 'stream_event' || event.type === 'assistant' || event.type === 'result' ||
+            (mainThread && event.type === 'user' && 'isReplay' in event && event.isReplay &&
+              typeof event.uuid === 'string' && event.uuid === currentInitialId))) {
+          ensureReusedInit();
+        }
+        if (mainThread && Array.isArray(consumed)) {
+          for (const id of consumed) if (typeof id === 'string') settleSteer(id);
+        }
+        if (mainThread && typeof primary === 'string') settleSteer(primary);
+        observeActivity(event);
+        if (mainThread && event.type === 'user' && 'isReplay' in event && event.isReplay && typeof event.uuid === 'string') {
+          settleSteer(event.uuid);
+        } else if (event.type === 'stream_event' && !event.parent_tool_use_id &&
+            event.event.type === 'content_block_delta' && event.event.delta.type === 'text_delta') {
+          emit({type: 'delta', session_id: thread, text: event.event.delta.text, sdk_received_ms: sdkReceivedMs});
+        } else if (event.type === 'assistant' && event.error === 'rate_limit') {
+          limited = true;
+        } else if (event.type === 'assistant' && !event.parent_tool_use_id) {
+          refreshContext();
+        } else if (event.type === 'system' && event.subtype === 'compact_boundary') {
+          epoch++;
+          again = false;
+          emit({type: 'context_reset', session_id: thread});
+        } else if (event.type === 'result') {
+          // The result inventories only its own turn. An already yielded input
+          // can be consumed in a subsequent native turn.
+          epoch++;
+          again = false;
+          closeSteering();
+          closeSteps(stopped ? 'cancelled' : event.subtype === 'success' && !event.is_error ? 'completed' : 'failed');
+          for (const resolve of pending.values()) resolve(null);
+          pending.clear();
+          if (member) for (const [id, state] of steers) if (state === 'sent') {
+            emit({type: 'steer_unconsumed', session_id: thread, id});
+          }
+          const completedCleanly = !limited && !stopped && event.subtype === 'success' && !event.is_error;
+          turnActive = false;
+          sent = false;
+          if (completedCleanly) {
+            emit({type: 'result', session_id: thread, outcome: 'completed', text: event.result});
+          } else {
+            emit({type: 'result', session_id: thread, outcome: stopped ? 'cancelled' : limited ? 'limited' : 'failed'});
+          }
+          if (member || !completedCleanly) break;
+        }
+      }
+    } catch (error) {
+      if (!closing || stdinError !== undefined) throw error;
+    }
   } finally {
+    closing = true;
+    closeUsers();
     closeSteering();
     for (const resolve of pending.values()) resolve(null);
+    pending.clear();
     input.close();
     process.stdin.pause();
     native.close();
+    if (stdinLoop) await stdinLoop.catch(() => {});
   }
+  if (stdinError !== undefined) throw stdinError;
 }
 
 try {

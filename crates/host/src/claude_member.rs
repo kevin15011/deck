@@ -272,6 +272,8 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
 
         let mut text = String::new();
         let mut initialized = false;
+        let mut first_delta = true;
+        let mut deferred: Option<Result<Value, String>> = None;
         let mut relay_decisions = bash::Decisions::default();
         let bash_project = allow_bash.then_some(&project);
         let mut controls = tokio::time::interval(Duration::from_millis(100));
@@ -281,41 +283,47 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
         // Inputs recorded as unconfirmed whose native receipt may still arrive.
         let mut unconfirmed: Vec<deck2_shared::SteeringCommand> = Vec::new();
         loop {
-            let event = tokio::select! {
-                biased;
-                _ = controls.tick() => {
-                    if app.shutdown_requested.load(std::sync::atomic::Ordering::SeqCst)
-                        || !app.persistence_available() {
-                        return Err("Claude member host authority ended".into());
-                    }
-                    let pending = {
-                        let store = app.store.lock().unwrap();
-                        let t = store.task(task)?;
-                        let a = t.attempts.iter().find(|a| a.id == attempt).ok_or("Member attempt missing")?;
-                        current(&store, &t, a, &project, trusted)?;
-                        a.guidance_open && a.guidance.iter().any(|g| g.input.state == deck2_shared::SteeringState::Pending)
-                    };
-                    if steering.as_ref().is_some_and(|(_, deadline)| Instant::now() >= *deadline)
-                        && let Some((command, _)) = steering.take() {
-                        // The bridge wrote it but the SDK has not confirmed consumption yet.
-                        // Record it as unconfirmed; an exact later receipt still reconciles it.
-                        crate::member_guidance::resolve(app, task, attempt, &command, None)?;
-                        unconfirmed.push(command);
-                    }
-                    if pending && initialized && steering.is_none()
-                        && let Some(command) = crate::member_guidance::claim(app, task, attempt, &thread, attempt)? {
-                        send(&mut stdin, json!({"type":"steer","id":command.id,"text":crate::member_guidance::framed(&command)})).await?;
-                        steering = Some((command, Instant::now() + crate::member_guidance::confirm_window()));
-                    }
-                    continue;
-                }
-                (request, result) = relay_decisions.next() => {
-                    send(&mut stdin, bash::reply(request, result)).await?;
-                    continue;
-                }
-                event = frame(&mut stdout, &mut partial) => event.map_err(|error|
+            let event = if let Some(next) = deferred.take() {
+                next.map_err(|error| {
                     format!("{error} Claude did not confirm the member turn. The input will not replay.")
-                )?,
+                })?
+            } else {
+                tokio::select! {
+                    biased;
+                    _ = controls.tick() => {
+                        if app.shutdown_requested.load(std::sync::atomic::Ordering::SeqCst)
+                            || !app.persistence_available() {
+                            return Err("Claude member host authority ended".into());
+                        }
+                        let pending = {
+                            let store = app.store.lock().unwrap();
+                            let t = store.task(task)?;
+                            let a = t.attempts.iter().find(|a| a.id == attempt).ok_or("Member attempt missing")?;
+                            current(&store, &t, a, &project, trusted)?;
+                            a.guidance_open && a.guidance.iter().any(|g| g.input.state == deck2_shared::SteeringState::Pending)
+                        };
+                        if steering.as_ref().is_some_and(|(_, deadline)| Instant::now() >= *deadline)
+                            && let Some((command, _)) = steering.take() {
+                            // The bridge wrote it but the SDK has not confirmed consumption yet.
+                            // Record it as unconfirmed; an exact later receipt still reconciles it.
+                            crate::member_guidance::resolve(app, task, attempt, &command, None)?;
+                            unconfirmed.push(command);
+                        }
+                        if pending && initialized && steering.is_none()
+                            && let Some(command) = crate::member_guidance::claim(app, task, attempt, &thread, attempt)? {
+                            send(&mut stdin, json!({"type":"steer","id":command.id,"text":crate::member_guidance::framed(&command)})).await?;
+                            steering = Some((command, Instant::now() + crate::member_guidance::confirm_window()));
+                        }
+                        continue;
+                    }
+                    (request, result) = relay_decisions.next() => {
+                        send(&mut stdin, bash::reply(request, result)).await?;
+                        continue;
+                    }
+                    event = frame(&mut stdout, &mut partial) => event.map_err(|error|
+                        format!("{error} Claude did not confirm the member turn. The input will not replay.")
+                    )?,
+                }
             };
             if matches!(event["type"].as_str(), Some("session_mismatch" | "transport_error")) {
                 return Err("Claude did not confirm the member turn in the expected session. The input will not replay.".into());
@@ -362,7 +370,33 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
                     if text.len() + delta.len() > MAX_TEXT {
                         return Err("Claude member output exceeded the text limit".into());
                     }
-                    text.push_str(delta);
+                    let mut batch = delta.to_owned();
+                    if !first_delta {
+                        let deadline = Instant::now() + super::DELTA_BATCH_WINDOW;
+                        while batch.len() < super::DELTA_BATCH_BYTES && Instant::now() < deadline {
+                            let Ok(next) = tokio::time::timeout_at(
+                                deadline,
+                                frame(&mut stdout, &mut partial),
+                            )
+                            .await
+                            else {
+                                break;
+                            };
+                            if let Ok(next_event) = &next
+                                && next_event["session_id"].as_str() == Some(thread.as_str())
+                                && next_event["type"].as_str() == Some("delta")
+                                && let Some(more) = next_event["text"].as_str()
+                                && text.len() + batch.len() + more.len() <= MAX_TEXT
+                            {
+                                batch.push_str(more);
+                            } else {
+                                deferred = Some(next);
+                                break;
+                            }
+                        }
+                    }
+                    first_delta = false;
+                    text.push_str(&batch);
                     update(app, task, attempt, |a| {
                         a.first_output_ms.get_or_insert_with(now);
                         a.text.clone_from(&text);

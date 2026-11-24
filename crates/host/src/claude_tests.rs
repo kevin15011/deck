@@ -1041,6 +1041,15 @@ async fn claude_sdk_live_steering_and_explicit_resend() {
 }
 
 #[tokio::test]
+async fn claude_sdk_batches_rapid_deltas_and_reuses_lead_process() {
+    if BRIDGE.is_empty() {
+        return;
+    }
+    let dir = sdk_fixture();
+    run_sdk_case(dir.path(), "batch-reuse").await;
+}
+
+#[tokio::test]
 async fn claude_sdk_lead_coordinates_with_codex() {
     if BRIDGE.is_empty() {
         return;
@@ -1121,6 +1130,10 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     }
     if action == "coordination" {
         verify_coordination(&host, &dir).await;
+        return;
+    }
+    if action == "batch-reuse" {
+        verify_batch_and_reuse(&host, &dir).await;
         return;
     }
     if action == "steering" {
@@ -2774,6 +2787,232 @@ async fn verify_guidance(host: &App, dir: &Path, runner: &str) {
     assert!(host.receipt("drives-lead").unwrap().decisions.is_empty(), "guidance resolves no decision");
     std::fs::write(dir.join("drive-stop"), "").unwrap();
     wait_for(host, "drives-lead", |r| r.phase == Phase::Completed).await;
+}
+
+async fn verify_batch_and_reuse(host: &App, dir: &Path) {
+    host.store
+        .lock()
+        .unwrap()
+        .select_project_folder_with_trust(host.project.as_str(), true)
+        .unwrap();
+    let browser = Browser::open(host).await;
+    browser
+        .request(
+            "POST",
+            "/api/sessions",
+            json!({
+                "api": API, "id": SESSION, "title": "Claude batch and reuse",
+                "members": {"lead": {"runnerId": "claude", "modelId": "default"}}
+            }),
+        )
+        .await;
+
+    // Turn 1: cold start with 121 rapid deltas. Deltas coalesce into far fewer DB saves
+    // and the bridge process is parked for reuse once completed.
+    browser
+        .request("POST", "/api/commands", send_command("batch-turn-1", "persistent-batch:1"))
+        .await;
+    let first = wait_for(host, "batch-turn-1", |r| r.phase == Phase::Completed).await;
+    let expected_first: String = std::iter::once("A".to_string())
+        .chain((0..120).map(|i| format!("x{i} ")))
+        .collect();
+    assert_eq!(first.text, expected_first);
+    let first_timing = first.startup_timing.as_ref().expect("first startup timing");
+    assert!(!first_timing.process_reused);
+    assert!(!first_timing.thread_reused);
+    assert!(
+        first.revision < 40,
+        "121 rapid deltas should coalesce instead of saving per fragment; got revision {}",
+        first.revision
+    );
+    assert!(
+        host.claude_reuse.loaded_session(SESSION),
+        "completed Claude Lead process should be parked for reuse"
+    );
+
+    // Idle MCP proxy must refuse calls with 403 while no attempt is active.
+    let endpoint: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("mcp-proxy-endpoint.json")).unwrap())
+            .unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let idle_reply = client
+        .post(endpoint["url"].as_str().unwrap())
+        .header("Authorization", endpoint["headers"]["Authorization"].as_str().unwrap())
+        .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(idle_reply.status(), reqwest::StatusCode::FORBIDDEN);
+
+    // Seed a large session_events ledger and verify the new index avoids full scans
+    // and keeps workspace projection and send latency within tight budgets.
+    {
+        let store = host.store.lock().unwrap();
+        store.conn.execute_batch("BEGIN").unwrap();
+        {
+            let mut stmt = store
+                .conn
+                .prepare("INSERT INTO session_events(session,task,attempt,kind,body) VALUES (?1,?2,?3,?4,?5)")
+                .unwrap();
+            for i in 0..5_000 {
+                stmt.execute(rusqlite::params![
+                    SESSION,
+                    "historical-task",
+                    format!("hist-attempt-{}", i % 25),
+                    format!("receipt:{i}"),
+                    r#"{"type":"receipt.updated","phase":"completed","at_ms":1}"#,
+                ])
+                .unwrap();
+            }
+        }
+        store.conn.execute_batch("COMMIT").unwrap();
+        let plan: String = store
+            .conn
+            .query_row(
+                "EXPLAIN QUERY PLAN SELECT seq,json_extract(body,'$.at_ms') FROM session_events WHERE session=?1 AND attempt=?2 AND kind=?3",
+                rusqlite::params![SESSION, "hist-attempt-1", "notification:attention:d1:1"],
+                |row| row.get(3),
+            )
+            .unwrap();
+        assert!(
+            plan.contains("session_events_session_attempt_kind"),
+            "decision_occurrence should use index, got: {plan}"
+        );
+    }
+    let workspace_started = Instant::now();
+    crate::server::project_workspace(host).unwrap();
+    let workspace_ms = workspace_started.elapsed().as_millis();
+    assert!(
+        workspace_ms < 250,
+        "project_workspace with 5,000 ledger events exceeded budget: {workspace_ms} ms"
+    );
+
+    // Turn 2: warm reuse on the exact same process and thread (no auth probe, no spawn, no setMcpServers),
+    // with progressive streaming verified over the live workspace SSE stream.
+    let cli_pid = std::fs::read_to_string(dir.join("persistent-cli-pid")).unwrap();
+    let mut sse = browser.open_workspace_events().await;
+    let submit_started = Instant::now();
+    browser
+        .request(
+            "POST",
+            "/api/commands",
+            send_command("batch-turn-2", "persistent-batch:progressive"),
+        )
+        .await;
+    let submit_ms = submit_started.elapsed().as_millis();
+    assert!(
+        submit_ms < 300,
+        "POST /api/commands exceeded 300 ms latency budget: {submit_ms} ms"
+    );
+
+    let mut running_text_updates: Vec<String> = Vec::new();
+    let mut sse_buf = String::new();
+    timeout(Duration::from_secs(8), async {
+        loop {
+            let Some(Ok(frame)) = sse.frame().await else {
+                panic!("SSE stream closed before batch-turn-2 completed");
+            };
+            let Some(data) = frame.data_ref() else { continue };
+            sse_buf.push_str(&String::from_utf8_lossy(data));
+            while let Some(pos) = sse_buf.find("\n\n") {
+                let block = sse_buf[..pos].to_owned();
+                sse_buf.drain(..pos + 2);
+                for line in block.lines() {
+                    let Some(payload) = line.strip_prefix("data: ") else { continue };
+                    let Ok(delta) = serde_json::from_str::<Value>(payload) else { continue };
+                    let Some(changed) = delta["collections"]["receipts"]["changed"].as_array() else {
+                        continue;
+                    };
+                    for row in changed {
+                        if row["id"] != "batch-turn-2" {
+                            continue;
+                        }
+                        if row["phase"] == "running"
+                            && let Some(text) = row["text"].as_str()
+                            && !text.is_empty()
+                            && running_text_updates.last().map(String::as_str) != Some(text)
+                        {
+                            running_text_updates.push(text.to_owned());
+                        }
+                        if row["phase"] == "completed" {
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    })
+    .await
+    .expect("SSE did not observe batch-turn-2 completion");
+    assert!(
+        running_text_updates.len() >= 2,
+        "expected progressive streaming updates before completion, got: {running_text_updates:?}"
+    );
+    assert!(
+        running_text_updates[0].len() < running_text_updates.last().unwrap().len(),
+        "progressive streaming updates should grow monotonically: {running_text_updates:?}"
+    );
+
+    let second = wait_for(host, "batch-turn-2", |r| r.phase == Phase::Completed).await;
+    assert_eq!(second.thread, first.thread);
+    assert_eq!(second.native_pid, first.native_pid);
+    assert!(
+        second.text.starts_with(&format!("Reused turn 2 pid={cli_pid} ")),
+        "unexpected reused reply: {}",
+        second.text
+    );
+    let second_timing = second.startup_timing.as_ref().expect("second startup timing");
+    assert!(second_timing.process_reused, "{second_timing:?}");
+    assert!(second_timing.thread_reused, "{second_timing:?}");
+    assert_eq!(second_timing.version_ms, 0);
+    assert_eq!(second_timing.process_spawn_ms, 0);
+    assert!(
+        second.handshake_ms.unwrap_or(u64::MAX) < 2_000,
+        "warm Claude handshake exceeded 2 s budget: {:?} ms ({second_timing:?})",
+        second.handshake_ms
+    );
+    assert!(
+        second_timing.run_lock_acquisitions <= 6,
+        "warm Claude startup should minimize lock acquisitions, got {}",
+        second_timing.run_lock_acquisitions
+    );
+    assert!(!second_timing.claude_stages_ms.contains_key("deck_registration"));
+    assert!(second_timing.claude_stages_ms.contains_key("usage"));
+    assert!(second_timing.claude_stages_ms.contains_key("deck_inventory"));
+    assert!(
+        second.revision < 25,
+        "40 rapid deltas across 4 waves on reused turn should coalesce; got revision {}",
+        second.revision
+    );
+    assert!(host.claude_reuse.loaded_session(SESSION));
+
+    // Turn 3: if the parked process dies while idle, Deck transparently falls back to cold start.
+    let parked_pid = second.native_pid.expect("parked pid") as i32;
+    unsafe {
+        libc::kill(-parked_pid, libc::SIGKILL);
+    }
+    timeout(Duration::from_secs(5), async {
+        while !process_group_stopped(parked_pid) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("killed parked Claude group did not stop");
+
+    browser
+        .request("POST", "/api/commands", send_command("batch-turn-3", "persistent-batch:3"))
+        .await;
+    let third = wait_for(host, "batch-turn-3", |r| r.phase == Phase::Completed).await;
+    assert_eq!(third.thread, first.thread);
+    assert_ne!(third.native_pid, second.native_pid);
+    assert!(!third.startup_timing.as_ref().unwrap().process_reused);
+    assert!(host.claude_reuse.loaded_session(SESSION));
+
+    // Explicit session retirement stops and reaps the parked process group.
+    let third_pid = third.native_pid.expect("third pid") as i32;
+    host.retire_native_session(SESSION).await.unwrap();
+    assert!(!host.claude_reuse.loaded_session(SESSION));
+    assert!(process_group_stopped(third_pid));
 }
 
 fn member_git(root: &Path, args: &[&str]) {

@@ -71,6 +71,14 @@ impl Slot {
                 && i.native.alive()
         })
     }
+    pub(crate) fn owned_pids(&self) -> std::collections::HashSet<i32> {
+        self.idle
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|i| i.native.group.and_then(|p| i32::try_from(p).ok()))
+            .collect()
+    }
 }
 struct Idle {
     native: Native,
@@ -185,7 +193,7 @@ pub(super) fn process_key(app: &App, common: &str) -> Result<String, String> {
 
 impl App {
     pub(crate) fn native_retiring(&self) -> bool {
-        self.native_reuse.registry.retiring()
+        self.native_reuse.registry.retiring() || self.claude_reuse.is_retiring()
     }
 
     pub(crate) fn shutdown_native(&self) {
@@ -203,6 +211,7 @@ impl App {
                 *state = Some("Native shutdown settlement was not observed".into());
             }
             drop(idle);
+            self.claude_reuse.shutdown_sync();
         }
     }
     pub async fn retire_native(&self) -> Result<(), String> {
@@ -214,7 +223,9 @@ impl App {
             return Err(error.clone());
         }
         let idle = std::mem::take(&mut *self.native_reuse.idle.lock().unwrap());
-        settle(self, idle, state).await
+        let codex = settle(self, idle, state).await;
+        let claude = self.claude_reuse.retire_all().await;
+        codex.and(claude)
     }
     pub(crate) async fn retire_native_session(&self, session: &str) -> Result<(), String> {
         self.retire_native_session_checked(session, || Ok(())).await
@@ -241,6 +252,7 @@ impl App {
         if let Some(idle) = idle {
             settle(self, vec![idle], state).await?;
         }
+        self.claude_reuse.retire_session(session).await?;
         Ok(())
     }
 

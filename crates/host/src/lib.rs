@@ -606,6 +606,13 @@ impl Store {
                  WHERE (json_extract(body, '$.phase') IN ('completed', 'cancelled', 'failed')) IS NOT TRUE;
              CREATE INDEX IF NOT EXISTS receipts_thread ON receipts(
                  json_extract(body, '$.session'), json_extract(body, '$.thread'));
+             CREATE INDEX IF NOT EXISTS session_events_session_attempt_kind ON session_events(
+                 session, attempt, kind, seq);
+             CREATE INDEX IF NOT EXISTS session_events_session_seq ON session_events(
+                 session, seq);
+             CREATE INDEX IF NOT EXISTS session_events_notification_message ON session_events(
+                 session, json_extract(body, '$.receiptId'), seq)
+                 WHERE kind >= 'notification:message:' AND kind < 'notification:message;';
              CREATE TABLE IF NOT EXISTS recovered_steering_queue(
                  id TEXT PRIMARY KEY, before_id TEXT NOT NULL);",
         ).map_err(|_| "Cannot prepare receipt lookup indexes")?;

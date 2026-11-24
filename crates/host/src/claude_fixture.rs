@@ -194,7 +194,7 @@ pub(crate) async fn lead(
         }
         match (frame["type"].as_str(), frame["subtype"].as_str()) {
             (Some("system"), Some("init")) if !initialized => {
-                crate::claude::confirm_context(app, id, &thread, provenance.clone(), None)?;
+                crate::claude::confirm_context(app, id, &thread, provenance.clone(), None, false)?;
                 initialized = true;
             }
             (Some("stream_event"), _) if initialized => {

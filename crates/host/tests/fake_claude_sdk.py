@@ -242,6 +242,7 @@ inventory = []
 stopping = False
 received_user = False
 instructions = ""
+persistent_turns = 0
 
 
 for line in sys.stdin:
@@ -561,6 +562,47 @@ for line in sys.stdin:
         if isinstance(content, list):
             (home / "initial-blocks").write_text(json.dumps(content))
             content = "".join(b.get("text", "") for b in content if b["type"] == "text")
+        if content.startswith("persistent-batch:"):
+            persistent_turns += 1
+            if persistent_turns == 1:
+                emit({"type": "system", "subtype": "init", "session_id": thread,
+                      "model": "fixture-model",
+                      "tools": tools + ["mcp__deck-session__" + tool["name"] for tool in inventory],
+                      "mcp_servers": [{"name": "deck-session", "status": "connected"}] if server else []})
+                (home / "mcp-proxy-endpoint.json").write_text(json.dumps(server))
+                (home / "persistent-cli-pid").write_text(str(os.getpid()))
+                parts = ["A"] + [f"x{i} " for i in range(120)]
+                for chunk in parts:
+                    emit({"type": "stream_event", "session_id": thread, "parent_tool_use_id": None,
+                          "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": chunk}}})
+                full = "".join(parts)
+                emit({"type": "assistant", "session_id": thread, "parent_tool_use_id": None,
+                      "message": {"role": "assistant", "content": [{"type": "text", "text": full}]}})
+                finish(full)
+                continue
+            # Subsequent turns on the same persistent CLI process do not re-emit system/init;
+            # they echo the user message via --replay-user-messages and reuse deck-session MCP.
+            emit({"type": "user", "message": message["message"], "session_id": thread,
+                  "parent_tool_use_id": None, "uuid": initial_uuid, "isReplay": True})
+            call("deck_session_history", {}, 500 + persistent_turns)
+            if content.startswith("persistent-batch:progressive"):
+                parts = []
+                for wave in range(4):
+                    wave_chunks = [f"w{wave}c{i}-" for i in range(10)]
+                    for chunk in wave_chunks:
+                        parts.append(chunk)
+                        emit({"type": "stream_event", "session_id": thread, "parent_tool_use_id": None,
+                              "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": chunk}}})
+                    if wave < 3:
+                        time.sleep(0.24)
+                finish(f"Reused turn {persistent_turns} pid={os.getpid()} " + "".join(parts))
+                continue
+            parts = [f"r{i}-" for i in range(40)]
+            for chunk in parts:
+                emit({"type": "stream_event", "session_id": thread, "parent_tool_use_id": None,
+                      "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": chunk}}})
+            finish(f"Reused turn {persistent_turns} pid={os.getpid()} " + "".join(parts))
+            continue
         if resume_fixture and member and content.endswith("continuity-foreign"):
             assert resume
             emit({"type":"result", "subtype":"success", "is_error":False,

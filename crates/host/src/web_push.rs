@@ -311,6 +311,9 @@ impl Runtime {
         project(app, self.storage.as_mut().unwrap())?;
         let s = self.storage.as_ref().unwrap();
         let records = s.push["subscriptions"].as_array().unwrap().clone();
+        if records.is_empty() {
+            return Ok(());
+        }
         let mut items = attention(app)?;
         // Indexed bounded pages. Already receipted rows do not consume queue space.
         let mut cursor = s
@@ -863,26 +866,66 @@ pub(crate) fn decision_occurrence(
     r: &deck2_shared::Receipt,
     d: &deck2_shared::Decision,
 ) -> Result<Option<(u64, u64)>> {
-    store.conn.query_row("SELECT seq,json_extract(body,'$.at_ms') FROM session_events WHERE session=?1 AND attempt=?2 AND kind=?3",params![r.session,r.attempt,format!("notification:attention:{}:{}",d.id,d.revision)],|row|Ok((row.get(0)?,row.get(1)?))).optional().map_err(failure)
+    let mut stmt = store
+        .conn
+        .prepare_cached(
+            "SELECT seq,json_extract(body,'$.at_ms') FROM session_events WHERE session=?1 AND attempt=?2 AND kind=?3",
+        )
+        .map_err(failure)?;
+    stmt.query_row(
+        params![
+            r.session,
+            r.attempt,
+            format!("notification:attention:{}:{}", d.id, d.revision)
+        ],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(failure)
 }
 fn attention(app: &App) -> Result<Vec<Value>> {
     use deck2_shared::{DecisionState, Phase, Receipt};
-    let history = app.history.lock().unwrap();
-    let store = app.store.lock().unwrap();
+    let mut trace = crate::latency::Trace::new("web_push_attention");
+    let history = trace.lock(&app.history, crate::latency::Lock::History);
+    let store = trace.lock(&app.store, crate::latency::Lock::Store);
     let mut q = store
         .conn
-        .prepare("SELECT body FROM receipts ORDER BY rowid DESC LIMIT 256")
+        .prepare_cached(
+            "SELECT json_extract(body,'$.session'),json_extract(body,'$.phase'),body FROM receipts ORDER BY rowid DESC LIMIT 256",
+        )
         .map_err(failure)?;
     let rows = q
-        .query_map([], |r| r.get::<_, String>(0))
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, Option<String>>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
         .map_err(failure)?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(failure)?;
+    drop(q);
     let mut items = vec![];
     let mut latest = std::collections::BTreeSet::new();
-    for body in rows {
+    let mut failed_stmt = store
+        .conn
+        .prepare_cached(
+            "SELECT seq,json_extract(body,'$.at_ms') FROM session_events WHERE session=?1 AND attempt=?2 AND kind>='receipt:' AND kind<'receipt;' AND json_extract(body,'$.phase')=?3 ORDER BY seq LIMIT 1",
+        )
+        .map_err(failure)?;
+    for (session, phase, body) in rows {
+        let Some(session) = session else { continue };
+        let newest = latest.insert(session);
+        let active = matches!(
+            phase.as_deref(),
+            Some("accepted" | "dispatching" | "running" | "cancelling")
+        );
+        let newest_failed = newest && matches!(phase.as_deref(), Some("failed" | "uncertain"));
+        if !active && !newest_failed {
+            continue;
+        }
         let r: Receipt = serde_json::from_str(&body).map_err(failure)?;
-        let newest = latest.insert(r.session.clone());
         if store.session_by_id(&r.session).is_err() || r.cancel_requested {
             continue;
         }
@@ -896,7 +939,12 @@ fn attention(app: &App) -> Result<Vec<Value>> {
             } else {
                 "uncertain"
             };
-            let occurrence:Option<(u64,u64)>=store.conn.query_row("SELECT seq,json_extract(body,'$.at_ms') FROM session_events WHERE session=?1 AND attempt=?2 AND kind LIKE 'receipt:%' AND json_extract(body,'$.phase')=?3 ORDER BY seq LIMIT 1",params![r.session,r.attempt,phase],|row|Ok((row.get(0)?,row.get(1)?))).optional().map_err(failure)?;
+            let occurrence: Option<(u64, u64)> = failed_stmt
+                .query_row(params![r.session, r.attempt, phase], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })
+                .optional()
+                .map_err(failure)?;
             if let Some((seq, ts)) = occurrence {
                 items.push(json!({"sessionId":r.session,"key":format!("lead-failed:{}",r.attempt),"kind":"failure","revision":1,"seq":seq+offset,"ts":ts}));
             }
@@ -922,12 +970,19 @@ fn attention(app: &App) -> Result<Vec<Value>> {
             items.push(json!({"sessionId":r.session,"key":format!("{kind}:{}",d.id),"kind":kind,"revision":d.revision,"seq":seq,"ts":ts,"approvalId":d.id,"tool":tool,"risk":if normal{"normal"}else{"high"}}));
         }
     }
-    let mut q=store.conn.prepare("SELECT session,body FROM session_decisions WHERE json_extract(body,'$.state')='pending' ORDER BY rowid LIMIT 256").map_err(failure)?;
+    drop(failed_stmt);
+    let mut q = store
+        .conn
+        .prepare_cached(
+            "SELECT session,body FROM session_decisions WHERE json_extract(body,'$.state')='pending' ORDER BY rowid LIMIT 256",
+        )
+        .map_err(failure)?;
     let rows = q
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
         .map_err(failure)?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(failure)?;
+    drop(q);
     for (session, body) in rows {
         let d: Value = serde_json::from_str(&body).map_err(failure)?;
         if store.session_by_id(&session).is_err() {
@@ -954,11 +1009,12 @@ fn attention(app: &App) -> Result<Vec<Value>> {
         };
         items.push(json!({"sessionId":session,"kind":"decision","key":format!("decision:{}",d["decisionId"].as_str().unwrap_or("")),"seq":seq+history.notification_boundary(&session)?,"revision":d["questionRevision"],"ts":ts}));
     }
+    trace.release();
     Ok(items)
 }
 fn project(app: &App, s: &mut Storage) -> Result<()> {
-    let history = app.history.lock().unwrap();
-    let store = app.store.lock().unwrap();
+    // Read local notification cursor and pending sessions before taking host locks,
+    // then release host locks before writing/fsyncing replies.db.
     let after: u64 = s
         .replies
         .query_row("SELECT seq FROM rust_cursor WHERE singleton=1", [], |r| {
@@ -967,27 +1023,72 @@ fn project(app: &App, s: &mut Storage) -> Result<()> {
         .optional()
         .map_err(failure)?
         .unwrap_or(0);
-    let mut q=store.conn.prepare("SELECT seq,session,task,attempt,kind,body FROM session_events WHERE seq>?1 ORDER BY seq LIMIT 4096").map_err(failure)?;
-    let events = q
-        .query_map([after], |r| {
-            Ok((
-                r.get::<_, u64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
-                r.get::<_, String>(5)?,
-            ))
-        })
-        .map_err(failure)?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(failure)?;
+    let pending: Vec<String> = {
+        let mut q = s
+            .replies
+            .prepare_cached("SELECT DISTINCT sessionId FROM pending LIMIT 4096")
+            .map_err(failure)?;
+        q.query_map([], |r| r.get::<_, String>(0))
+            .map_err(failure)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(failure)?
+    };
+    let (events, session_meta, retired_pending) = {
+        let mut trace = crate::latency::Trace::new("web_push_project");
+        let history = trace.lock(&app.history, crate::latency::Lock::History);
+        let store = trace.lock(&app.store, crate::latency::Lock::Store);
+        let mut q = store
+            .conn
+            .prepare_cached(
+                "SELECT seq,session,task,attempt,kind,body FROM session_events WHERE seq>?1 ORDER BY seq LIMIT 4096",
+            )
+            .map_err(failure)?;
+        let events = q
+            .query_map([after], |r| {
+                Ok((
+                    r.get::<_, u64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(failure)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(failure)?;
+        drop(q);
+        let mut session_meta: std::collections::HashMap<String, (u64, bool)> =
+            std::collections::HashMap::new();
+        for (_, session, _, _, _, _) in &events {
+            if !session_meta.contains_key(session) {
+                let offset = history.notification_boundary(session)?;
+                let exists = store.session_by_id(session).is_ok();
+                session_meta.insert(session.clone(), (offset, exists));
+            }
+        }
+        let mut retired_pending = Vec::new();
+        for session in pending {
+            if store.session_by_id(&session).is_err()
+                && !history.notification_session_exists(&session)?
+            {
+                retired_pending.push(session);
+            }
+        }
+        trace.release();
+        (events, session_meta, retired_pending)
+    };
+    if events.is_empty() && retired_pending.is_empty() {
+        return Ok(());
+    }
     s.replies
         .execute_batch("SAVEPOINT rust_projection")
         .map_err(failure)?;
     let result = (|| {
         for (raw_seq, session, task, attempt, kind, body) in events {
-            let offset = history.notification_boundary(&session)?;
+            let &(offset, session_exists) = session_meta
+                .get(&session)
+                .ok_or("reply-session-meta-missing")?;
             let seq = offset
                 .checked_add(raw_seq)
                 .ok_or("reply-sequence-overflow")?;
@@ -1020,7 +1121,7 @@ fn project(app: &App, s: &mut Storage) -> Result<()> {
                     .map_err(failure)?;
                 if body["phase"] == "completed"
                     && let Some(part) = part
-                    && store.session_by_id(&session).is_ok()
+                    && session_exists
                 {
                     let retired: bool = s
                         .replies
@@ -1041,7 +1142,9 @@ fn project(app: &App, s: &mut Storage) -> Result<()> {
                                 params![session, id],
                                 |r| r.get(0),
                             )
-                            .map_err(failure)?;
+                            .optional()
+                            .map_err(failure)?
+                            .ok_or("reply-row-missing")?;
                         s.replies
                             .execute(
                                 "INSERT OR IGNORE INTO reply_messages VALUES (?1,?2,?3)",
@@ -1063,30 +1166,16 @@ fn project(app: &App, s: &mut Storage) -> Result<()> {
             s.replies.execute("INSERT INTO rust_cursor VALUES (1,?1) ON CONFLICT(singleton) DO UPDATE SET seq=excluded.seq",[raw_seq]).map_err(failure)?;
         }
         // Session removal is disposition, never a fabricated display receipt.
-        let mut q = s
-            .replies
-            .prepare("SELECT DISTINCT sessionId FROM pending LIMIT 4096")
-            .map_err(failure)?;
-        let pending = q
-            .query_map([], |r| r.get::<_, String>(0))
-            .map_err(failure)?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(failure)?;
-        drop(q);
-        for session in pending {
-            if store.session_by_id(&session).is_err()
-                && !history.notification_session_exists(&session)?
-            {
-                s.replies
-                    .execute(
-                        "INSERT OR IGNORE INTO retired_sessions VALUES (?1,0)",
-                        [&session],
-                    )
-                    .map_err(failure)?;
-                s.replies
-                    .execute("DELETE FROM pending WHERE sessionId=?1", [&session])
-                    .map_err(failure)?;
-            }
+        for session in retired_pending {
+            s.replies
+                .execute(
+                    "INSERT OR IGNORE INTO retired_sessions VALUES (?1,0)",
+                    [&session],
+                )
+                .map_err(failure)?;
+            s.replies
+                .execute("DELETE FROM pending WHERE sessionId=?1", [&session])
+                .map_err(failure)?;
         }
         Ok(())
     })();
@@ -1424,72 +1513,120 @@ async fn session_replies(
         .iter()
         .any(|(k, _)| k == "messageSeq" || k == "commandId")
     {
-        return response_for(
-            &app,
-            (|| {
-                let (device, _) = context(&app, &headers, peer.map(|p| p.0.0))?;
-                crate::web_identity::admit().map_err(String::from)?;
-                if values.len() > 120
-                    || values.iter().any(|(k, v)| {
-                        !(k == "messageSeq"
-                            && v.parse::<u64>().is_ok_and(|n| n > 0 && n <= MAX_SAFE)
-                            || k == "commandId" && safe(v))
-                    })
-                {
-                    return Err("reply-receipt-invalid".into());
-                }
-                let history = app.history.lock().unwrap();
-                let offset = history.notification_boundary(&session)?;
-                drop(history);
-                let store = app.store.lock().unwrap();
-                let mut requested = vec![];
-                for (k, v) in &values {
+        let precheck = (|| -> Result<(String, Vec<(String, String)>)> {
+            let (device, _) = context(&app, &headers, peer.map(|p| p.0.0))?;
+            crate::web_identity::admit().map_err(String::from)?;
+            if values.len() > 120
+                || values.iter().any(|(k, v)| {
+                    !(k == "messageSeq"
+                        && v.parse::<u64>().is_ok_and(|n| n > 0 && n <= MAX_SAFE)
+                        || k == "commandId" && safe(v))
+                })
+            {
+                return Err("reply-receipt-invalid".into());
+            }
+            Ok((
+                device,
+                values
+                    .into_iter()
+                    .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                    .collect(),
+            ))
+        })();
+        let (device, owned_values) = match precheck {
+            Ok(v) => v,
+            Err(e) => return response_for(&app, Err(e)),
+        };
+        let worker_app = app.clone();
+        let worker_session = session.clone();
+        let outcome = tokio::task::spawn_blocking(move || -> Result<Value> {
+            let mut requested = vec![];
+            {
+                let mut trace = crate::latency::Trace::new("web_push_replies");
+                let history = trace.lock(&worker_app.history, crate::latency::Lock::History);
+                let store = trace.lock(&worker_app.store, crate::latency::Lock::Store);
+                let offset = history.notification_boundary(&worker_session)?;
+                let mut q = store
+                    .conn
+                    .prepare_cached(
+                        "SELECT seq,body FROM session_events e \
+                         WHERE session=?1 \
+                           AND kind>='notification:message:' AND kind<'notification:message;' \
+                           AND json_extract(body,'$.receiptId')=?2 \
+                           AND json_extract(body,'$.final')=1 \
+                           AND seq>COALESCE((SELECT MAX(seq) FROM session_events \
+                             WHERE session=?1 \
+                               AND kind>='notification:message:' AND kind<'notification:message;' \
+                               AND json_extract(body,'$.receiptId')=?2 \
+                               AND json_extract(body,'$.final')=0),0) \
+                         ORDER BY seq LIMIT 1",
+                    )
+                    .map_err(failure)?;
+                for (k, v) in &owned_values {
                     if k == "messageSeq" {
                         requested.push((v.parse::<u64>().unwrap(), None, None));
                     } else {
-                        let mut q=store.conn.prepare("SELECT seq,body FROM session_events e WHERE session=?1 AND kind LIKE 'notification:message:%' AND json_extract(body,'$.receiptId')=?2 AND json_extract(body,'$.final')=1 AND seq>COALESCE((SELECT MAX(seq) FROM session_events WHERE session=?1 AND kind LIKE 'notification:message:%' AND json_extract(body,'$.receiptId')=?2 AND json_extract(body,'$.final')=0),0) ORDER BY seq LIMIT 1").map_err(failure)?;
                         let event: Option<(u64, String)> = q
-                            .query_row(params![session, v.as_ref()], |r| Ok((r.get(0)?, r.get(1)?)))
+                            .query_row(params![worker_session, v.as_str()], |r| {
+                                Ok((r.get(0)?, r.get(1)?))
+                            })
                             .optional()
                             .map_err(failure)?;
                         if let Some((seq, body)) = event {
                             let body: Value = serde_json::from_str(&body).map_err(failure)?;
                             requested.push((
                                 seq + offset,
-                                Some(v.to_string()),
+                                Some(v.clone()),
                                 body["displayStart"].as_u64(),
                             ));
                         }
                     }
                 }
-                drop(store);
-                let mut runtime = app.web_push.lock().unwrap();
-                runtime.ensure(&app)?;
-                crate::web_identity::admit().map_err(String::from)?;
-                let s = runtime.storage.as_ref().unwrap();
-                s.enroll(&device, crate::now())?;
-                let mut replies = vec![];
-                for (seq, command, display_start) in requested {
-                    let mut q=s.replies.prepare("SELECT r.replyId FROM reply_messages m JOIN replies r ON r.id=m.reply JOIN pending p ON p.reply=r.id AND p.deviceId=?1 WHERE m.sessionId=?2 AND m.seq=?3 AND NOT EXISTS(SELECT 1 FROM retired_sessions t WHERE t.sessionId=r.sessionId)").map_err(failure)?;
-                    let ids = q
-                        .query_map(params![device, session, seq], |r| r.get::<_, String>(0))
-                        .map_err(failure)?
-                        .collect::<std::result::Result<Vec<_>, _>>()
-                        .map_err(failure)?;
-                    for id in ids {
-                        if let Some(mut reply) = s.reply(&session, &id)? {
-                            reply["displayMessageSeq"] = json!(seq);
-                            if let Some(command) = &command {
-                                reply["commandId"] = json!(command);
-                                reply["displayStart"] = json!(display_start);
-                            }
-                            replies.push(reply);
+                trace.release();
+            }
+            let mut runtime = worker_app.web_push.lock().unwrap();
+            runtime.ensure(&worker_app)?;
+            let s = runtime.storage.as_ref().unwrap();
+            s.enroll(&device, crate::now())?;
+            let mut replies = vec![];
+            let mut q = s
+                .replies
+                .prepare_cached(
+                    "SELECT r.replyId FROM reply_messages m \
+                     JOIN replies r ON r.id=m.reply \
+                     JOIN pending p ON p.reply=r.id AND p.deviceId=?1 \
+                     WHERE m.sessionId=?2 AND m.seq=?3 \
+                       AND NOT EXISTS(SELECT 1 FROM retired_sessions t WHERE t.sessionId=r.sessionId)",
+                )
+                .map_err(failure)?;
+            for (seq, command, display_start) in requested {
+                let ids = q
+                    .query_map(params![device, worker_session, seq], |r| {
+                        r.get::<_, String>(0)
+                    })
+                    .map_err(failure)?
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(failure)?;
+                for id in ids {
+                    if let Some(mut reply) = s.reply(&worker_session, &id)? {
+                        reply["displayMessageSeq"] = json!(seq);
+                        if let Some(command) = &command {
+                            reply["commandId"] = json!(command);
+                            reply["displayStart"] = json!(display_start);
                         }
+                        replies.push(reply);
                     }
                 }
-                Ok(json!({"ok":true,"replies":replies,"syncing":false}))
-            })(),
-        );
+            }
+            Ok(json!({"ok":true,"replies":replies,"syncing":false}))
+        })
+        .await
+        .map_err(|_| "notification-storage-unavailable".to_string())
+        .and_then(|res| {
+            crate::web_identity::admit().map_err(String::from)?;
+            res
+        });
+        return response_for(&app, outcome);
     }
     if values.len() > 1
         || values
@@ -2366,6 +2503,74 @@ mod tests {
                 .is_none()
         );
         drop(runtime);
+        app.shutdown();
+    }
+    #[tokio::test]
+    async fn session_replies_uses_partial_index_and_stays_fast_with_large_ledger() {
+        let (_t, app, token, _clock) = fixture().await;
+        waiting_reply(&app, &token).await;
+        {
+            let store = app.store.lock().unwrap();
+            store.conn.execute_batch("BEGIN").unwrap();
+            {
+                let mut stmt = store
+                    .conn
+                    .prepare("INSERT INTO session_events(session,task,attempt,kind,body) VALUES (?1,?2,?3,?4,?5)")
+                    .unwrap();
+                for i in 0..5_000 {
+                    stmt.execute(params![
+                        "notification-waiting",
+                        "lead",
+                        format!("hist-{}", i % 50),
+                        format!("receipt:{i}"),
+                        r#"{"type":"receipt.updated","phase":"completed","at_ms":1}"#,
+                    ])
+                    .unwrap();
+                }
+            }
+            store.conn.execute_batch("COMMIT").unwrap();
+            let plan: String = store
+                .conn
+                .query_row(
+                    "EXPLAIN QUERY PLAN SELECT seq,body FROM session_events e \
+                     WHERE session=?1 \
+                       AND kind>='notification:message:' AND kind<'notification:message;' \
+                       AND json_extract(body,'$.receiptId')=?2 \
+                       AND json_extract(body,'$.final')=1 \
+                       AND seq>COALESCE((SELECT MAX(seq) FROM session_events \
+                         WHERE session=?1 \
+                           AND kind>='notification:message:' AND kind<'notification:message;' \
+                           AND json_extract(body,'$.receiptId')=?2 \
+                           AND json_extract(body,'$.final')=0),0) \
+                     ORDER BY seq LIMIT 1",
+                    params!["notification-waiting", "cmd-0"],
+                    |row| row.get(3),
+                )
+                .unwrap();
+            assert!(
+                plan.contains("session_events_notification_message"),
+                "session_replies should use partial index, got: {plan}"
+            );
+        }
+        let query: String = (0..80)
+            .map(|i| format!("commandId=cmd-{i}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        let started = std::time::Instant::now();
+        let (status, body) = call(
+            &app,
+            &token,
+            "GET",
+            &format!("/api/sessions/notification-waiting/replies?{query}"),
+            Value::Null,
+        )
+        .await;
+        let elapsed_ms = started.elapsed().as_millis();
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(
+            elapsed_ms < 250,
+            "80-commandId session_replies exceeded budget: {elapsed_ms} ms"
+        );
         app.shutdown();
     }
 }

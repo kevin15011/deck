@@ -152,6 +152,10 @@ impl Launch {
         if self.trusted { "user,project,local" } else { "user" }
     }
 
+    pub(crate) fn env(&self) -> &[(&'static str, OsString)] {
+        &self.env
+    }
+
     pub(crate) async fn status(&self, binary: &Path) -> Status {
         let mut cmd = self.command(binary);
         cmd.args([

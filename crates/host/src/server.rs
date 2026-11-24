@@ -96,6 +96,7 @@ pub struct Inner {
     session_removals: Mutex<HashSet<String>>,
     pub(crate) delegated_cursor: Mutex<String>,
     pub(crate) native_reuse: crate::native::reuse::Slot,
+    pub(crate) claude_reuse: crate::claude::reuse::Slot,
     #[cfg(test)]
     pub(crate) claude_transport: Mutex<Option<crate::claude_fixture::Transport>>,
     pub(crate) session_credentials: Mutex<HashMap<String, String>>,
@@ -213,6 +214,7 @@ impl App {
             session_removals: Mutex::default(),
             delegated_cursor: Mutex::new(String::new()),
             native_reuse,
+            claude_reuse: crate::claude::reuse::Slot::default(),
             #[cfg(test)]
             claude_transport: Mutex::new(None),
             session_credentials: Mutex::new(HashMap::new()),
