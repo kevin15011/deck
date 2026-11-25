@@ -39,10 +39,10 @@ export function ConfigurationView({w,connected,project,onChanged}:{w:Workspace;c
 }
 type ToolId='codebase-memory'|'rtk'|'context7';
 type RunnerState='installed'|'not_installed'|'incomplete'|'check_failed';
-type RunnerId='codex'|'claude';
-const runnerNames:Record<RunnerId,string>={codex:'Codex',claude:'Claude Code'};
+type RunnerId='codex'|'claude'|'agy';
+const runnerNames:Record<RunnerId,string>={codex:'Codex',claude:'Claude Code',agy:'Antigravity'};
 interface ToolRunner {id:RunnerId;state:RunnerState}
-const validRunner=(v:unknown):v is ToolRunner=>typeof v==='object'&&v!==null&&['codex','claude'].includes((v as ToolRunner).id)&&['installed','not_installed','incomplete','check_failed'].includes((v as ToolRunner).state);
+const validRunner=(v:unknown):v is ToolRunner=>typeof v==='object'&&v!==null&&['codex','claude','agy'].includes((v as ToolRunner).id)&&['installed','not_installed','incomplete','check_failed'].includes((v as ToolRunner).state);
 interface Tool {id:ToolId;enabled:boolean;installed:boolean;version:string|null;update:ToolUpdate;runners?:ToolRunner[]}
 function tools(v:unknown):Tool[]{
  const data=v as {api:number;tools:Tool[]};
@@ -88,7 +88,7 @@ export function RtkSettings({w,connected,projectId}:{w:Workspace;connected:boole
    {toolRow}
    <section className="rtk-runners" aria-label="RTK runners">
     <h4>Runners</h4><p>RTK changes the selected runner’s configuration. Restart it after a change.</p>
-    {(t.runners??[{id:'codex',state:'check_failed'},{id:'claude',state:'check_failed'}] as ToolRunner[]).map(r=>{
+    {(t.runners??[{id:'codex',state:'check_failed'},{id:'claude',state:'check_failed'},{id:'agy',state:'check_failed'}] as ToolRunner[]).map(r=>{
      const name=runnerNames[r.id];
      const action=r.state==='installed'?'update':'install';
      const changing=busy?.startsWith(`rtk:runner:${r.id}:`);
@@ -113,7 +113,7 @@ export function RtkSettings({w,connected,projectId}:{w:Workspace;connected:boole
  <section className="rtk-settings" aria-labelledby="context-mode-heading">
   <div className="settings-row"><div><h3 id="context-mode-heading">Context Mode</h3><p>Keeps large tool output out of the conversation.</p></div></div>
   <section className="rtk-runners" aria-label="Context Mode runners"><h4>Runners</h4>
-   {(['codex','claude'] as const).map(runner=><ContextModeSettings key={w.host_id+':'+projectId+':'+runner} runner={runner} projectId={projectId} connected={connected} blocked={!!busy} onBusy={setBusy}/>)}
+   {(['codex','claude','agy'] as const).map(runner=><ContextModeSettings key={w.host_id+':'+projectId+':'+runner} runner={runner} projectId={projectId} connected={connected} blocked={!!busy} onBusy={setBusy}/>)}
   </section>
  </section>
  </div><div ref={alert} hidden={!error} inert={!error}>{error&&<p className="error" role="alert">{error}</p>}</div></div>;
@@ -134,7 +134,6 @@ function contextModeStatus(value:unknown):ContextModeStatus {
  const status=value as ContextModeStatus & {api:number};
  if(status?.api!==API||!contextModeStates.includes(status.state)
    ||(status.version!==null&&typeof status.version!=='string')
-   ||(status.state==='installed'&&!status.version)
    ||typeof status.detail!=='string'
    ||(status.outcome!==null&&(!['installed','updated','current'].includes(status.outcome)||status.state!=='installed'))) {
   throw Error('Invalid Context Mode status');
@@ -219,7 +218,7 @@ function ContextModeSettings({runner,projectId,connected,blocked,onBusy}:{
    <h5 id={heading}>{name}</h5>
    <p role="status">{action==='install'?`Setting up for ${name}…`:action==='update'?`Updating for ${name}…`:action==='migrate'?'Migrating Context Mode for Codex…':
     !connected?'Waiting for connection':checking?`Checking ${name}…`:
-    installed?`Installed · ${status.version}`:
+    installed?(status.version?`Installed · ${status.version}`:'MCP registered'):
     (canMigrate||status?.state==='standalone')?'Standalone MCP configured':
     status?.state==='conflict'?'Conflicting configuration':
     status?.state==='stale'?'Integration needs an update':
@@ -227,6 +226,7 @@ function ContextModeSettings({runner,projectId,connected,blocked,onBusy}:{
     status?.state==='not_installed'?'Not installed':`Couldn’t check ${name}`}</p>
    {status&&!installed&&<p>{status.detail}</p>}
    {restart==='recommended'&&runner==='claude'&&<p role="status">Restart Claude Code to load the plugin changes.</p>}
+   {restart==='recommended'&&runner==='agy'&&<p role="status">Start a new Antigravity turn to load the MCP changes.</p>}
    {restart==='recommended'&&runner==='codex'&&<CodexRestartPrompt connected={connected} projectId={projectId}
     onLater={()=>setRestart('later')} onRestart={()=>setRestart('complete')}/>}
    {restart==='later'&&<p role="status">Restart Codex when you’re ready from Settings → Agents &amp; tools → Codex.</p>}

@@ -52,10 +52,15 @@ pub(super) fn claude_home(home: &FsPath) -> Result<PathBuf, String> {
     Ok(root)
 }
 
+pub(super) fn agy_plugin_root(home: &FsPath) -> PathBuf {
+    home.join(".gemini/config/plugins/rtk")
+}
+
 #[derive(Clone, Copy)]
 enum Runner {
     Codex,
     Claude,
+    Agy,
 }
 
 impl Runner {
@@ -63,6 +68,7 @@ impl Runner {
         match self {
             Self::Codex => "codex",
             Self::Claude => "claude",
+            Self::Agy => "agy",
         }
     }
 
@@ -70,26 +76,31 @@ impl Runner {
         match self {
             Self::Codex => codex_home(home),
             Self::Claude => claude_home(home),
+            Self::Agy => Ok(agy_plugin_root(home)),
         }
     }
 
     fn command(self, home: &FsPath, root: &FsPath) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(Tool::Rtk.executable(home));
-        let variable = match self {
-            Self::Codex => "CODEX_HOME",
-            Self::Claude => "CLAUDE_CONFIG_DIR",
-        };
-        command
-            .env("HOME", home)
-            .env(variable, root)
-            .env("NO_COLOR", "1")
-            .current_dir(home);
+        command.env("HOME", home).env("NO_COLOR", "1").current_dir(home);
+        match self {
+            Self::Codex => {
+                command.env("CODEX_HOME", root);
+            }
+            Self::Claude => {
+                command.env("CLAUDE_CONFIG_DIR", root);
+            }
+            Self::Agy => {}
+        }
         command
     }
 
     async fn observe(self, home: &FsPath, root: &FsPath) -> Result<Integration, String> {
         if matches!(self, Self::Codex) {
             return detect(root).await;
+        }
+        if matches!(self, Self::Agy) {
+            return detect_agy(root).await;
         }
         if !Tool::Rtk.executable(home).is_file() {
             return Ok(Integration::NotInstalled);
@@ -166,6 +177,8 @@ impl Runner {
         cmd.args(["init", "-g"]);
         if matches!(self, Self::Codex) {
             cmd.arg("--codex");
+        } else if matches!(self, Self::Agy) {
+            cmd.args(["--agent", "antigravity"]);
         }
         if matches!(action, Action::Remove) {
             cmd.arg("--uninstall");
@@ -211,6 +224,7 @@ impl Runner {
                 "settings.json.bak",
                 "hooks/rtk-rewrite.sh",
             ],
+            Self::Agy => &["plugin.json", "hooks.json", "rules/AGENTS.md"],
         };
         let mut result = Vec::new();
         for name in names {
@@ -283,9 +297,51 @@ async fn detect(root: &FsPath) -> Result<Integration, String> {
         _ => Integration::Incomplete,
     })
 }
+async fn detect_agy(root: &FsPath) -> Result<Integration, String> {
+    let plugin = if let Some(text) = read(&root.join("plugin.json")).await? {
+        let value: serde_json::Value =
+            serde_json::from_str(&text).map_err(|_| "Antigravity RTK plugin.json could not be read")?;
+        value["name"] == "rtk"
+    } else {
+        false
+    };
+    let hook = if let Some(text) = read(&root.join("hooks.json")).await? {
+        let value: serde_json::Value =
+            serde_json::from_str(&text).map_err(|_| "Antigravity RTK hooks.json could not be read")?;
+        value["rtk-rewrite"]["enabled"] != false
+            && value
+                .pointer("/rtk-rewrite/PreToolUse")
+                .and_then(|v| v.as_array())
+                .is_some_and(|entries| {
+                    entries.iter().any(|entry| {
+                        entry["matcher"] == "run_command"
+                            && entry["hooks"].as_array().is_some_and(|hooks| {
+                                hooks.iter().any(|h| {
+                                    h["type"] == "command"
+                                        && h["command"] == "rtk hook antigravity"
+                                })
+                            })
+                    })
+                })
+    } else {
+        false
+    };
+    let rules = read(&root.join("rules/AGENTS.md"))
+        .await?
+        .is_some_and(|s| !s.trim().is_empty());
+    Ok(match (plugin, hook, rules) {
+        (true, true, true) => Integration::Installed,
+        (false, false, false) => Integration::NotInstalled,
+        _ => Integration::Incomplete,
+    })
+}
 pub(super) async fn statuses(home: &FsPath) -> Vec<RunnerStatus> {
-    let (codex, claude) = tokio::join!(Runner::Codex.status(home), Runner::Claude.status(home));
-    vec![codex, claude]
+    let (codex, claude, agy) = tokio::join!(
+        Runner::Codex.status(home),
+        Runner::Claude.status(home),
+        Runner::Agy.status(home)
+    );
+    vec![codex, claude, agy]
 }
 
 #[derive(Deserialize)]
@@ -317,6 +373,7 @@ pub async fn change(
     let runner = match runner.as_str() {
         "codex" => Runner::Codex,
         "claude" => Runner::Claude,
+        "agy" => Runner::Agy,
         _ => {
             return problem(
                 StatusCode::BAD_REQUEST,
@@ -410,5 +467,24 @@ mod tests {
         assert_eq!(detect(root).await.unwrap(), Integration::Installed);
         std::fs::write(root.join("hooks.json"), "malformed").unwrap();
         assert!(detect(root).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn external_tools_rtk_agy_detection() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        assert_eq!(detect_agy(root).await.unwrap(), Integration::NotInstalled);
+        std::fs::write(root.join("plugin.json"), r#"{"name":"rtk"}"#).unwrap();
+        assert_eq!(detect_agy(root).await.unwrap(), Integration::Incomplete);
+        std::fs::create_dir_all(root.join("rules")).unwrap();
+        std::fs::write(root.join("rules/AGENTS.md"), "# Command output\n").unwrap();
+        std::fs::write(
+            root.join("hooks.json"),
+            r#"{"rtk-rewrite":{"enabled":true,"PreToolUse":[{"matcher":"run_command","hooks":[{"type":"command","command":"rtk hook antigravity"}]}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(detect_agy(root).await.unwrap(), Integration::Installed);
+        std::fs::write(root.join("hooks.json"), "malformed").unwrap();
+        assert!(detect_agy(root).await.is_err());
     }
 }

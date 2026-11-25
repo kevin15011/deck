@@ -24,6 +24,8 @@ const SOURCE: &str = "mksglu/context-mode";
 
 #[path = "context_mode_claude.rs"]
 mod claude;
+#[path = "context_mode_agy.rs"]
+mod agy;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1040,7 +1042,8 @@ async fn inspect_runner(app: &crate::server::App, runner: &str) -> Response {
         match runner {
             "codex" => Ok(Runner::for_app(app)?.observe().await?.status),
             "claude" => claude::Runner::for_host()?.status().await,
-            _ => Err("Context Mode settings support Codex and Claude Code.".into()),
+            "agy" => agy::Runner::for_host()?.status().await,
+            _ => Err("Context Mode settings support Codex, Claude Code, and Antigravity.".into()),
         }
     }
     .await;
@@ -1074,11 +1077,11 @@ pub async fn change(
     if request.api != deck2_shared::API {
         return problem(StatusCode::BAD_REQUEST, "api", "Unsupported API");
     }
-    if !matches!(runner.as_str(), "codex" | "claude") {
+    if !matches!(runner.as_str(), "codex" | "claude" | "agy") {
         return problem(
             StatusCode::BAD_REQUEST,
             "context_mode_runner",
-            "Context Mode settings support Codex and Claude Code.",
+            "Context Mode settings support Codex, Claude Code, and Antigravity.",
         );
     }
     if !app.persistence_available() {
@@ -1096,10 +1099,11 @@ pub async fn change(
         );
     };
     let result = async {
-        if runner == "codex" {
-            Runner::for_app(&app)?.apply(request.action).await
-        } else {
-            claude::Runner::for_host()?.apply(request.action).await
+        match runner.as_str() {
+            "codex" => Runner::for_app(&app)?.apply(request.action).await,
+            "claude" => claude::Runner::for_host()?.apply(request.action).await,
+            "agy" => agy::Runner::for_host()?.apply(request.action).await,
+            _ => Err("Context Mode settings support Codex, Claude Code, and Antigravity.".into()),
         }
     }
     .await;
