@@ -521,40 +521,7 @@ fn settle(
             a.detail = error;
         }
     }
-    save_settlement(&mut store, &t, attempt)
-}
-
-// The report and the deterministic outcome receipt commit together so a host
-// loss cannot strand a published report between settlement and notification.
-fn save_settlement(store: &mut Store, task: &Task, attempt: &str) -> Result<(), String> {
-    store
-        .conn
-        .execute_batch("SAVEPOINT claude_member_settlement")
-        .map_err(|_| "Cannot begin Claude member settlement")?;
-    let result = (|| {
-        store.save_normal_task(task)?;
-        if let Err(error) = store.enqueue_task_outcome(&task.id, attempt) {
-            let mut task = task.clone();
-            let a = task
-                .attempts
-                .iter_mut()
-                .find(|a| a.id == attempt)
-                .ok_or("Member attempt missing")?;
-            a.detail
-                .push_str(&format!(" Lead continuation unavailable: {error}"));
-            store.save_normal_task(&task)?;
-        }
-        store
-            .conn
-            .execute_batch("RELEASE claude_member_settlement")
-            .map_err(|_| "Cannot commit Claude member settlement".into())
-    })();
-    if result.is_err() {
-        let _ = store.conn.execute_batch(
-            "ROLLBACK TO claude_member_settlement; RELEASE claude_member_settlement",
-        );
-    }
-    result
+    crate::session_tasks::save_member_settlement(&mut store, &t, attempt)
 }
 
 pub(crate) fn settle_recovered(store: &mut Store, live: &HashSet<String>) -> Result<bool, String> {
@@ -584,7 +551,7 @@ pub(crate) fn settle_recovered(store: &mut Store, live: &HashSet<String>) -> Res
             a.settled_ms = Some(now());
             a.detail = "The previous Claude member process stopped without a confirmed result. Its assignment will never replay.".into();
             let attempt = a.id.clone();
-            save_settlement(store, &task, &attempt)?;
+            crate::session_tasks::save_member_settlement(store, &task, &attempt)?;
         }
     }
     Ok(retry)

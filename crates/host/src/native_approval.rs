@@ -28,6 +28,7 @@ pub fn validate_native(d: &Decision) -> Result<(), String> {
             crate::connected_opencode::execution::validate_approval(d)
         }
         Some(NativeTransport::ClaudeSdk) => crate::claude::approval::validate(d),
+        Some(NativeTransport::AgyAcp) => crate::agy_approval::validate(d),
         Some(NativeTransport::DeckMcp) => {
             if n.method != "deck/approve" || n.parameters.len() > 65536 {
                 return Err("Native action invalid".into());

@@ -1455,13 +1455,21 @@ pub(crate) async fn command_probe_at(binary: &Path, args: &[&str], context: Opti
                 .env("OPENCODE_DISABLE_EXTERNAL_SKILLS", "true");
         }
     }
-    probe(cmd, context.is_some(), false, args == ["--version"], PROBE_TIMEOUT)
+    probe(cmd, context.is_some(), ProbeExit::Success, args == ["--version"], PROBE_TIMEOUT)
         .await
         .map(|(_, output)| output)
 }
 
 pub(crate) async fn claude_auth_probe(cmd: Command) -> Result<(bool, Vec<u8>), String> {
-    probe(cmd, false, true, false, PROBE_TIMEOUT).await
+    probe(cmd, false, ProbeExit::ClaudeAuth, false, PROBE_TIMEOUT).await
+}
+
+pub(crate) async fn agy_update_help(binary: &Path) -> Result<Vec<u8>, String> {
+    let mut cmd = Command::new(binary);
+    cmd.args(["update", "--help"]);
+    probe(cmd, false, ProbeExit::AgyUpdateHelp, false, PROBE_TIMEOUT)
+        .await
+        .map(|(_, output)| output)
 }
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -1469,13 +1477,13 @@ const CLAUDE_CATALOG_TIMEOUT: Duration = Duration::from_secs(20);
 pub(crate) const PROBE_TIMED_OUT: &str = "Native command probe timed out";
 
 pub(crate) async fn claude_catalog_probe(cmd: Command) -> Result<Vec<u8>, String> {
-    probe(cmd, true, false, false, CLAUDE_CATALOG_TIMEOUT)
+    probe(cmd, true, ProbeExit::Success, false, CLAUDE_CATALOG_TIMEOUT)
         .await
         .map(|(_, output)| output)
 }
 
 pub(crate) async fn claude_quota_probe(cmd: Command) -> Result<Vec<u8>, String> {
-    probe(cmd, true, false, false, PROBE_TIMEOUT)
+    probe(cmd, true, ProbeExit::Success, false, PROBE_TIMEOUT)
         .await
         .map(|(_, output)| output)
 }
@@ -1629,10 +1637,17 @@ mod zombie_reaper_tests {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ProbeExit {
+    Success,
+    ClaudeAuth,
+    AgyUpdateHelp,
+}
+
 async fn probe(
     mut cmd: Command,
     catalog: bool,
-    claude_auth: bool,
+    exit: ProbeExit,
     _version: bool,
     timeout: Duration,
 ) -> Result<(bool, Vec<u8>), String> {
@@ -1667,7 +1682,7 @@ async fn probe(
         .take()
         .ok_or("Native probe stderr unavailable")?;
     let result = tokio::time::timeout(timeout, async {
-        let (out, _, status) = tokio::try_join!(
+        let (mut out, err, status) = tokio::try_join!(
             async {if catalog {let mut b=Vec::new();stdout.take(8*1024*1024+1).read_to_end(&mut b).await.map_err(|_|"Native catalog pipe failed".to_string())?;if b.len()>8*1024*1024{return Err("Native catalog exceeds bound".into());}Ok(b)}else{bounded_probe_output(stdout).await}},
             bounded_probe_output(stderr),
             async {
@@ -1677,10 +1692,18 @@ async fn probe(
                     .map_err(|_| "Native probe wait failed".to_string())
             }
         )?;
-        if !(status.success() || claude_auth && status.code() == Some(1)) {
+        let expected = match exit {
+            ProbeExit::Success => None,
+            ProbeExit::ClaudeAuth => Some(1),
+            ProbeExit::AgyUpdateHelp => Some(2),
+        };
+        if !status.success() && (expected.is_none() || status.code() != expected) {
             return Err(
                 "Native command probe failed; inspect the selected CLI in a terminal".into(),
             );
+        }
+        if matches!(exit, ProbeExit::AgyUpdateHelp) {
+            out.extend_from_slice(&err);
         }
         Ok((status.success(), out))
     })
@@ -1753,6 +1776,7 @@ async fn run_selected(app: &App, id: &str, cancel: &mut watch::Receiver<bool>) -
         crate::member_integration::Integration::Codex => run_inner(app, id, &path, cancel).await,
         crate::member_integration::Integration::OpenCode => crate::connected_opencode::execution::lead(app, id, cancel).await,
         crate::member_integration::Integration::Claude => crate::claude::lead(app, id, &path, cancel).await,
+        crate::member_integration::Integration::Agy => crate::agy::lead(app, id, &path, cancel).await,
     }
 }
 
@@ -1787,8 +1811,9 @@ pub async fn run(app: App, id: String, _binary: PathBuf, mut cancel: watch::Rece
     }
     // A root terminal event cannot discard descendant ownership. Request stop;
     // task receipts and the active registry retain the slot until settlement.
-    if app
-        .receipt(&id)
+    let settled = app.receipt(&id);
+    if settled
+        .as_ref()
         .is_ok_and(|r| r.mode != Mode::SessionV1 || r.phase != Phase::Completed)
         && let Err(_e) = app.store.lock().unwrap().cancel_tasks(&id)
     {
@@ -1802,7 +1827,15 @@ pub async fn run(app: App, id: String, _binary: PathBuf, mut cancel: watch::Rece
             app.storage_failed();
         }
     }
+    let refresh_agy = settled.is_ok_and(|r| {
+        r.phase == Phase::Completed
+            && crate::member_integration::Integration::for_receipt(&r)
+                .is_ok_and(|runner| runner == crate::member_integration::Integration::Agy)
+    });
     app.clear_active(&id);
+    if refresh_agy {
+        crate::quota::refresh_agy_after_turn(app);
+    }
 }
 tokio::task_local! {
     static PREPARATION_STOP: std::sync::Arc<std::sync::atomic::AtomicBool>;
@@ -3303,7 +3336,7 @@ mod tests {
         let result = probe(
             Command::new(&binary),
             true,
-            false,
+            ProbeExit::Success,
             false,
             Duration::from_secs(1),
         )
@@ -3456,7 +3489,7 @@ for line in sys.stdin:
             .insert(pid, second.clone());
         first.1.notify_one();
         second.0.notified().await;
-        assert!(app.active.lock().unwrap().contains_key("quota-refresh"));
+        assert!(app.active.lock().unwrap().contains_key("quota:codex"));
         assert!(app.scope_lock(true).is_err());
         second.1.notify_one();
         for _ in 0..300 {

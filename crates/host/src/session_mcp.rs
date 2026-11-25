@@ -18,6 +18,7 @@ struct Scope {
     session: String,
     member_task: Option<String>,
     delegate_roles: Option<Vec<String>>,
+    agy: bool,
     git_project: Option<deck2_shared::ProjectBinding>,
     role: std::sync::Mutex<Option<crate::session_roles::Role>>,
     codebase: crate::session_freshness::Slot,
@@ -80,18 +81,23 @@ impl Bridge {
         project: &deck2_shared::ProjectBinding,
         args: &Value,
     ) -> Result<(), String> {
-        let reply = relay_approval(&self.scope, app, args, Some(project)).await
+        let reply = relay_approval(&self.scope, app, args, ClaudeRelay::Bash(project)).await
             .map_err(|_| "Deck could not record or deliver the Bash permission for this project and attempt")?;
         if reply["behavior"] == "allow" {
             return Ok(());
         }
         Err(reply["message"].as_str().unwrap_or("Bash permission was denied").into())
     }
-    pub(crate) async fn approve_claude_mcp(&self, app: &App, args: &Value) -> Result<(), String> {
+    pub(crate) async fn approve_claude_mcp(
+        &self,
+        app: &App,
+        args: &Value,
+        project: Option<&deck2_shared::ProjectBinding>,
+    ) -> Result<(), String> {
         if !args["tool_name"].as_str().is_some_and(crate::permission_bounds::claude_mcp_tool) {
             return Err("Invalid user MCP tool name".into());
         }
-        let reply = relay_approval(&self.scope, app, args, None).await?;
+        let reply = relay_approval(&self.scope, app, args, ClaudeRelay::Mcp(project)).await?;
         if reply["behavior"] == "allow" {
             return Ok(());
         }
@@ -110,13 +116,18 @@ impl Bridge {
             .as_ref()
             .and_then(|snapshot| snapshot.session_contract.as_ref())
             .filter(|contract| {
-                contract.members.get("lead").is_some_and(|lead| lead.runner_id == crate::claude::RUNNER)
+                contract.members.get("lead").is_some_and(|lead| matches!(lead.runner_id.as_str(), crate::claude::RUNNER | crate::agy::RUNNER))
             })
             .map(|contract| {
                 crate::session_contract::configured_member_ids(contract)
                     .map(str::to_owned)
                     .collect()
             });
+        let agy = receipt
+            .configuration
+            .as_ref()
+            .and_then(|snapshot| snapshot.native.as_ref())
+            .is_some_and(|native| native.runner == deck2_shared::NativeRunner::Agy);
         let scope = Arc::new(Scope {
             app: Arc::downgrade(&app.inner),
             token: crate::server::secret(),
@@ -125,6 +136,7 @@ impl Bridge {
             session: receipt.session,
             member_task: None,
             delegate_roles,
+            agy,
             git_project: None,
             role: std::sync::Mutex::new(None),
             codebase: Default::default(),
@@ -132,17 +144,19 @@ impl Bridge {
         Self::bind(scope).await
     }
     pub async fn start_member(app: &App, task: &str, attempt: &str) -> Result<Self, String> {
-        let (t, root, git_project) = {
+        let (t, root, git_project, agy) = {
             let store = app.store.lock().unwrap();
             let t = store.task(task)?;
             let a = t.attempts.iter().find(|a| a.id == attempt).ok_or("Member attempt missing")?;
+            let runner = a.configuration.as_ref().and_then(|s| s.native.as_ref()).map(|n| n.runner);
+            let agy = runner == Some(deck2_shared::NativeRunner::Agy);
             let project = a.configuration.as_ref()
-                .filter(|snapshot| snapshot.native.as_ref().is_some_and(|native| native.runner == deck2_shared::NativeRunner::Claude))
+                .filter(|_| agy || runner == Some(deck2_shared::NativeRunner::Claude))
                 .map(|snapshot| &snapshot.project)
                 .filter(|project| store.trusted_project(&project.root).unwrap_or(false))
                 .cloned();
             let root = t.authority_root(a).to_owned();
-            (t, root, project)
+            (t, root, project, agy)
         };
         let scope = Arc::new(Scope {
             app: Arc::downgrade(&app.inner),
@@ -152,6 +166,7 @@ impl Bridge {
             session: t.session,
             member_task: Some(task.into()),
             delegate_roles: None,
+            agy,
             git_project,
             role: std::sync::Mutex::new(None),
             codebase: Default::default(),
@@ -317,6 +332,9 @@ fn scoped_tools(scope: &Scope) -> Value {
             "annotations":{"readOnlyHint":true,"destructiveHint":false,"openWorldHint":false}
         }));
     }
+    if scope.agy {
+        crate::agy::adapt_mcp_schemas(&mut inventory);
+    }
     inventory
 }
 fn live(s: &Scope, store: &crate::Store) -> bool {
@@ -339,7 +357,7 @@ fn live(s: &Scope, store: &crate::Store) -> bool {
     let Some(r)=store.get(&s.root).ok().flatten() else {return false;};
     let current=store.session_by_id(&s.session).ok().and_then(|s|s.contract);
     let admitted=r.configuration.as_ref().and_then(|s|s.session_contract.as_ref());
-    if r.session!=s.session || r.cancel_requested || current.as_ref().zip(admitted).is_none_or(|(now,then)|now.lead_task!=then.lead_task || now.generation!=then.generation || now.grants_revoked_at>then.grants_revoked_at) {return false;}
+    if r.session!=s.session || r.cancel_requested || current.as_ref().zip(admitted).is_none_or(|(now,then)|(s.agy && now.revision!=then.revision) || now.lead_task!=then.lead_task || now.generation!=then.generation || now.grants_revoked_at>then.grants_revoked_at) {return false;}
     if let Some(task)=&s.member_task {
         store.task(task).is_ok_and(|t|t.session==s.session && t.attempts.iter().any(|a|a.id==s.attempt && a.phase.active() && !a.cancel_requested && t.authority_root(a)==s.root))
     } else {r.attempt==s.attempt && r.phase.active()}
@@ -457,9 +475,14 @@ async fn handle(
         );
     }
     let result: Result<Value, String> = match v["method"].as_str().unwrap_or("") {
-        "initialize" => Ok(
-            json!({"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"deck-session","version":"1"}}),
-        ),
+        "server/discover" => Ok(json!({})),
+        "initialize" => {
+            let protocol = match v["params"]["protocolVersion"].as_str() {
+                Some("2025-11-25") => "2025-11-25",
+                _ => "2025-03-26",
+            };
+            Ok(json!({"protocolVersion":protocol,"capabilities":{"tools":{}},"serverInfo":{"name":"deck-session","version":"1"}}))
+        }
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({"tools":scoped_tools(&s)})),
         "tools/call" => {
@@ -731,16 +754,31 @@ impl Drop for PendingRelay {
     }
 }
 async fn approve(s: &Scope, app: &App, args: &Value) -> Result<Value, String> {
-    relay_approval(s, app, args, None).await
+    relay_approval(s, app, args, ClaudeRelay::General).await
+}
+
+enum ClaudeRelay<'a> {
+    General,
+    Bash(&'a deck2_shared::ProjectBinding),
+    Mcp(Option<&'a deck2_shared::ProjectBinding>),
 }
 
 async fn relay_approval(
     s: &Scope,
     app: &App,
     args: &Value,
-    bash_project: Option<&deck2_shared::ProjectBinding>,
+    adapter: ClaudeRelay<'_>,
 ) -> Result<Value, String> {
     use deck2_shared::{DecisionResponse, DecisionState};
+    let bash_project = match adapter {
+        ClaudeRelay::Bash(project) => Some(project),
+        _ => None,
+    };
+    let trusted_project = match adapter {
+        ClaudeRelay::Bash(project) => Some(project),
+        ClaudeRelay::Mcp(project) if s.member_task.is_none() => project,
+        _ => None,
+    };
     if !crate::session_decisions::keys(args, &["tool_name", "input", "tool_use_id"])
         || !crate::session_decisions::text(&args["tool_name"], 128)
         || !args["input"].is_object()
@@ -754,11 +792,15 @@ async fn relay_approval(
     if args["tool_name"] == "Bash" && bash_project.is_none() {
         return Err("Bash requires the native Claude permission adapter".into());
     }
+    let claude_lead = !matches!(adapter, ClaudeRelay::General) && s.member_task.is_none();
     let live = |store: &crate::Store| {
-        live(s, store) && bash_project.is_none_or(|project| {
-            store.execution_project(&s.session).is_ok_and(|current| current == *project)
-                && store.trusted_project(&project.root).unwrap_or(false)
-        })
+        live(s, store)
+            && trusted_project.is_none_or(|project| {
+                store
+                    .execution_project(&s.session)
+                    .is_ok_and(|current| current == *project)
+                    && store.trusted_project(&project.root).unwrap_or(false)
+            })
     };
     let id = {
         let mut store = app.store.lock().map_err(|_| "State lock failed")?;
@@ -769,6 +811,9 @@ async fn relay_approval(
             return Err("Relay authority revoked".into());
         }
         let mut root = store.get(&s.root)?.ok_or("Origin missing")?;
+        if claude_lead && !crate::claude::approval::lead_permission_current(&store, &root)? {
+            return Err("Claude Lead permission authority revoked".into());
+        }
         let mut caller = root.clone();
         if let Some(task) = &s.member_task {
             let t = store.task(task)?;
@@ -904,6 +949,9 @@ async fn relay_approval(
             }
             store.reconsider_permission(&s.root, &id)?;
             let r = store.get(&s.root)?.ok_or("Origin missing")?;
+            if claude_lead && !crate::claude::approval::lead_permission_current(&store, &r)? {
+                return Ok(json!({"behavior":"deny","message":"Attempt authority revoked"}));
+            }
             let d = r
                 .decisions
                 .iter()
@@ -1618,7 +1666,7 @@ pub(crate) mod tests {
         }
 
         let args = json!({"tool_name":"mcp__foreign__lookup","input":{},"tool_use_id":"next"});
-        let relay = || bridge.approve_claude_mcp(&app, &args);
+        let relay = || bridge.approve_claude_mcp(&app, &args, None);
         let budget = std::time::Duration::from_secs(2);
         let denial = tokio::time::timeout(budget, relay()).await.unwrap().unwrap_err();
         assert!(denial.contains("in-flight permission requests"));
@@ -1705,7 +1753,7 @@ pub(crate) mod tests {
             "tool_name":"mcp__fixture__secret_status", "input":{"clientSecret":"FIXTURE_SENTINEL"},
             "tool_use_id":"public-name",
         });
-        let approval = bridge.approve_claude_mcp(&app, &args);
+        let approval = bridge.approve_claude_mcp(&app, &args, None);
         tokio::pin!(approval);
         let decision = tokio::select! {
             result = &mut approval => panic!("MCP returned before review: {result:?}"),

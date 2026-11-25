@@ -739,6 +739,7 @@ pub enum NativeRunner {
     Codex,
     Opencode,
     Claude,
+    Agy,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -747,6 +748,7 @@ pub enum NativeTransport {
     OpencodeHttp,
     DeckMcp,
     ClaudeSdk,
+    AgyAcp,
 }
 /// Exact launch evidence. Storage is a native namespace identity, never credentials.
 /// Migration cannot reconstruct this authority from a historical model label.

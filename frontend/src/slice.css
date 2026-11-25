@@ -264,6 +264,22 @@
 @keyframes inline-agent-spin {to {transform:rotate(360deg)}}
 .provider-icon {display:inline-flex;flex:none;color:var(--muted)}
 .provider-icon--claude {color:#d97757}
+.provider-icon--agy {color:var(--quota-fill)}
+@container composer-footer (max-width:430px) {
+    .composer-quota-runner:has(.provider-icon--agy) {
+        display:grid;
+        grid-template-columns:auto 1fr auto;
+        row-gap:.125rem;
+    }
+    .composer-quota-runner:has(.provider-icon--agy) .composer-quota-windows {
+        grid-column:2 / -1;
+        grid-row:2;
+    }
+    .composer-quota-runner:has(.provider-icon--agy) .composer-quota-stale {
+        grid-column:3;
+        grid-row:1;
+    }
+}
 .inline-agent-detail {padding:0 0 12px 26px;color:var(--muted);line-height:1.6}
 .inline-agent-detail>p {margin-block:8px}
 .inline-agent-technical {font-size:11px;min-height:32px;padding:4px 0}

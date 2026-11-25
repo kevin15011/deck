@@ -290,6 +290,11 @@ pub(crate) fn compatible_live_input(root: &AdmissionSnapshot, source: &Admission
     if !admitted(root) || !admitted(source) {
         return false;
     }
+    if root.session_contract.as_ref().unwrap().approvals
+        != source.session_contract.as_ref().unwrap().approvals
+    {
+        return false;
+    }
     let root = root.native.as_ref().unwrap();
     let source = source.native.as_ref().unwrap();
     // Launch already checked the running bridge and executable. Use that
@@ -472,17 +477,44 @@ fn spawn_sdk(
 
 fn bootstrap(bridge: &crate::session_mcp::Bridge, instructions: String, trusted: bool, can_write: bool, allow_bash: bool) -> Value {
     let server = json!({"type": "http", "url": bridge.config["url"], "headers": bridge.config["http_headers"], "alwaysLoad": true});
-    bootstrap_with_server(server, &bridge.inventory(), instructions, trusted, can_write, allow_bash)
+    bootstrap_with_server(
+        server,
+        &bridge.inventory(),
+        instructions,
+        trusted,
+        can_write,
+        allow_bash,
+        false,
+    )
 }
 
-fn bootstrap_with_server(server: Value, inventory: &Value, mut instructions: String, trusted: bool, can_write: bool, allow_bash: bool) -> Value {
-    let tool_names: Vec<_> = inventory.as_array().unwrap().iter().map(|tool| &tool["name"]).collect();
-    let mut workspace_tools = if !trusted { vec![] } else if can_write {
+fn bootstrap_with_server(
+    server: Value,
+    inventory: &Value,
+    mut instructions: String,
+    trusted: bool,
+    can_write: bool,
+    allow_bash: bool,
+    lead_yolo: bool,
+) -> Value {
+    let tool_names: Vec<_> = inventory
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| &tool["name"])
+        .collect();
+    let mut workspace_tools = if !trusted {
+        vec![]
+    } else if can_write {
         vec!["Read", "Glob", "Grep", "Edit", "Write"]
     } else { vec!["Read", "Glob", "Grep"] };
     if allow_bash {
         workspace_tools.push("Bash");
-        instructions.push_str("\n\nUse Bash for project builds and tests. Keep the command in the foreground. Protected Git operations still require separate informed confirmation of the exact command before requesting execution.");
+        if lead_yolo {
+            instructions.push_str("\n\nThis turn uses YOLO. Deck allows native tool permission requests without user review while the current project and turn remain authorized.");
+        } else {
+            instructions.push_str("\n\nUse Bash for project builds and tests. Keep the command in the foreground. Protected Git operations still require separate informed confirmation of the exact command before requesting execution.");
+        }
     } else if can_write {
         instructions.push_str("\n\nBash is unavailable for this role.");
     }
@@ -492,6 +524,7 @@ fn bootstrap_with_server(server: Value, inventory: &Value, mut instructions: Str
         "server": server,
         "toolNames": tool_names,
         "workspaceTools": workspace_tools,
+        "leadYolo": lead_yolo,
     })
 }
 
@@ -522,6 +555,18 @@ async fn drain_sdk(child: &mut Child, pid: u32) -> Result<bool, String> {
         return Err("Claude Code process group still owns this attempt.".into());
     }
     Ok(clean)
+}
+
+pub(crate) fn lead_instructions(
+    contract: &deck2_shared::SessionContract,
+) -> Result<String, String> {
+    let members: Vec<_> = crate::session_contract::configured_member_ids(contract).collect();
+    Ok(format!(
+        "{}\n\n{}\n\nUse native Edit and Write for ordinary workspace changes. Deck may ask the user to approve native reads and searches. Use Deck's session tools for task coordination. For a new task, call deck_delegate directly with agent set to a configured role ID below and task set to the instruction. This list is sufficient to choose an ID. Use commandId only with a dependency replan. An empty list means this session has no members assigned for new tasks.\nConfigured member role IDs: {}",
+        crate::session_roles::Role::packaged_instructions("lead")?,
+        crate::session_contract::POLICY,
+        json!(members),
+    ))
 }
 
 pub(crate) async fn lead(
@@ -610,13 +655,7 @@ pub(crate) async fn lead(
 
     let reuse_epoch = app.claude_reuse.epoch();
     let contract = snapshot.session_contract.as_ref().unwrap();
-    let members: Vec<_> = crate::session_contract::configured_member_ids(contract).collect();
-    let instructions = format!(
-        "{}\n\n{}\n\nUse native Edit and Write for ordinary workspace changes. Deck may ask the user to approve native reads and searches. Use Deck's session tools for task coordination. For a new task, call deck_delegate directly with agent set to a configured role ID below and task set to the instruction. This list is sufficient to choose an ID. Use commandId only with a dependency replan. An empty list means this session has no members assigned for new tasks.\nConfigured member role IDs: {}",
-        crate::session_roles::Role::packaged_instructions("lead")?,
-        crate::session_contract::POLICY,
-        json!(members),
-    );
+    let instructions = lead_instructions(contract)?;
     let bridge_started = Instant::now();
     let bridge = crate::session_mcp::Bridge::start(app, id).await?;
     let bridge_start_ms = bridge_started.elapsed().as_millis() as u64;
@@ -753,7 +792,7 @@ pub(crate) async fn lead(
             }
             let script = bridge_script()?;
             let node = node_runtime()?;
-            let mcp_proxy = reuse::ClaudeMcpProxy::start().await?;
+            let mcp_proxy = reuse::SessionMcpProxy::start().await?;
             mcp_proxy.activate(&bridge.config)?;
             let spawn_started = Instant::now();
             let mut child = match spawn_sdk(
@@ -820,6 +859,7 @@ pub(crate) async fn lead(
                             trusted,
                             trusted,
                             trusted,
+                            trusted && contract.approvals == "yolo",
                         ),
                     )
                     .await?;
@@ -1093,6 +1133,9 @@ async fn stream(
     let mut total = 0;
     let mut pending = HashMap::<String, (String, Instant)>::new();
     let mut relay_decisions = bash::Decisions::default();
+    let mut yolo_requests = HashSet::new();
+    let mut native_requests = HashSet::new();
+    let mut tool_uses = HashSet::new();
     // At most one live message is in flight; the bridge acknowledges it only
     // from the CLI's own echo. An unconfirmed one stays upgradeable while the
     // attempt runs, and is never written again.
@@ -1216,7 +1259,45 @@ async fn stream(
         if event["session_id"].as_str() != Some(thread) {
             return Err("Claude bridge did not confirm the requested native session ID.".into());
         }
-        match event["type"].as_str() {
+        let kind = event["type"].as_str();
+        if initialized
+            && matches!(
+                kind,
+                Some(
+                    "yolo_permission"
+                        | "permission"
+                        | "workspace_write"
+                        | "workspace_bash"
+                        | "mcp_permission"
+                )
+            )
+        {
+            let request = event["request"]
+                .as_str()
+                .filter(|id| Uuid::parse_str(id).is_ok())
+                .ok_or("Invalid Claude bridge permission request ID")?;
+            let fresh = if let Some(native) = event["native_request_id"]
+                .as_str()
+                .filter(|id| !id.is_empty() && id.len() <= 128)
+                && let Some(item) = approval::tool_use_id(&event)
+            {
+                // Keep both identities for the turn, including after the SDK callback settles.
+                let new_request = native_requests.insert(native.to_owned());
+                let new_item = tool_uses.insert(item.to_owned());
+                new_request && new_item
+            } else {
+                false
+            };
+            if !fresh {
+                send(
+                    stdin,
+                    json!({"type": "permission_reply", "request": request, "allowed": false}),
+                )
+                .await?;
+                continue;
+            }
+        }
+        match kind {
             Some("init") if !initialized => {
                 // The bridge acknowledges live messages from the CLI's echo of
                 // their uuid, so confirm_context marks can_steer in the same save.
@@ -1314,6 +1395,40 @@ async fn stream(
                 app.append_claude_delta(id, &batch, sdk_received_ms, new_segment)?;
                 if !batch.is_empty() { new_segment = false; }
             }
+            Some("yolo_permission") if initialized => {
+                let request = event["request"]
+                    .as_str()
+                    .ok_or("Missing Claude YOLO request ID")?;
+                let allowed = if let Some(project) = project
+                    && stop.is_none()
+                    && !*cancel.borrow()
+                    && app.persistence_available()
+                    && !app
+                        .shutdown_requested
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                    && let Ok(request_id) = Uuid::parse_str(request)
+                    && approval::is_yolo_tool(&event)
+                {
+                    let store = app.store.lock().map_err(|_| "State lock failed")?;
+                    let receipt = store.get(id)?.ok_or("Claude receipt missing")?;
+                    receipt.attempt == confirmed_attempt
+                        && receipt.thread.as_deref() == Some(thread)
+                        && receipt.turn.as_deref() == confirmed_turn.as_deref()
+                        && approval::lead_yolo_current(&store, &receipt, project)?
+                        && yolo_requests.insert(request_id)
+                } else {
+                    false
+                };
+                let allowed = allowed && !*cancel.borrow();
+                send(
+                    stdin,
+                    json!({
+                        "type": "permission_reply", "request": request, "allowed": allowed,
+                        "permit": allowed.then(|| json!({})),
+                    }),
+                )
+                .await?;
+            }
             Some("permission") if initialized => {
                 let request = event["request"]
                     .as_str()
@@ -1370,8 +1485,7 @@ async fn stream(
                 {
                     let store = app.store.lock().map_err(|_| "State lock failed")?;
                     let receipt = store.get(id)?.ok_or("Claude receipt missing")?;
-                    receipt.phase == Phase::Running
-                        && !receipt.cancel_requested
+                    approval::lead_permission_current(&store, &receipt)?
                         && approval::project_current(&store, &receipt, project)?
                         && approval::workspace_write_target(&event, project)
                 } else {

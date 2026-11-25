@@ -267,7 +267,7 @@ impl Updates {
         let Ok(sessions) = store.sessions() else {
             return Full;
         };
-        let process_active = !active.is_empty();
+        let process_active = active.keys().any(|key| key != crate::quota::AGY_REFRESH_KEY);
         trace.release();
         drop(store);
         drop(active);

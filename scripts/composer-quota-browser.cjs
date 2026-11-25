@@ -26,6 +26,26 @@ const codex = fs.readFileSync(path.join(repo, 'scripts/fixtures/s7-codex.py'), '
  elif m=='account/read':`,
 );
 fs.writeFileSync(file('codex'), codex, {mode:0o700});
+const agy = `#!/usr/bin/env python3
+import json, os, subprocess, sys, time
+if '--settings' in sys.argv:
+    settings_path = sys.argv[sys.argv.index('--settings') + 1]
+    with open(settings_path) as f:
+        cmd = json.load(f)['statusLine']['command']
+    payload = {
+        'email': 'private-agy@example.com',
+        'plan_tier': 'Pro',
+        'quota': {
+            'gemini-5h': {'remaining_fraction': 0.88, 'reset_time': '2030-03-19T12:00:00Z', 'reset_in_seconds': 3600},
+            'gemini-weekly': {'remaining_fraction': 0.765, 'reset_time': '2030-03-25T12:00:00Z', 'reset_in_seconds': 500000},
+            '3p-5h': {'remaining_fraction': 0.01},
+            '3p-weekly': {'remaining_fraction': 0.02},
+        },
+    }
+    subprocess.run(['/bin/sh', '-c', cmd], input=json.dumps(payload).encode(), check=True)
+    time.sleep(30)
+`;
+fs.writeFileSync(file('agy'), agy, {mode:0o700});
 const host = spawn(binary, ['serve','--foreground','--project',project,'--state-dir',state,'--codex',file('codex'),'--no-open','--no-history'], {
     stdio:'ignore',
     env:{...process.env, HOME:root, CLAUDE_CONFIG_DIR:file('claude-config'), CODEX_HOME:file('codex-auth'), PATH:root+':'+process.env.PATH},
@@ -87,6 +107,14 @@ async function main() {
     await trigger.getByText('10.1%',{exact:true}).waitFor();
     assert.equal(await trigger.getByText('4.9%',{exact:true}).filter({visible:true}).count(),0,'the footer omits the Codex 5-hour value');
     await panel.getByRole('progressbar',{name:'Codex 5-hour subscription quota'}).waitFor();
+    const agyPost = post('agy');
+    await panel.getByRole('button',{name:'Refresh Antigravity quota'}).click();
+    const agyResp = await agyPost;
+    assert.equal(agyResp.status(),200,await agyResp.text());
+    await trigger.getByText('88%',{exact:true}).waitFor();
+    await trigger.getByText('76.5%',{exact:true}).waitFor();
+    const agyQuota = panel.getByRole('region',{name:'Antigravity quota'});
+    assert.equal(await agyQuota.getByRole('progressbar').count(),2,'Antigravity shows only 5-hour and 7-day windows');
     await page.keyboard.press('Escape');
     await panel.waitFor({state:'hidden'});
     assert.equal((await page.request.post(refreshUrl('claude'), {headers:{Origin:base}})).status(),409);
@@ -95,7 +123,12 @@ async function main() {
         {id:'five-hour',usedPercent:90,resetsAt:1900000000000},
         {id:'seven-day',usedPercent:95},
     ]);
+    assert.deepEqual(snapshot.runners.agy.snapshot.windows.map(w => ({id:w.id,usedPercent:w.usedPercent})),[
+        {id:'five-hour',usedPercent:12},
+        {id:'seven-day',usedPercent:23.5},
+    ]);
     assert(!JSON.stringify(snapshot).includes('private-codex-account'));
+    assert(!JSON.stringify(snapshot).includes('private-agy@example.com'));
     assert(!JSON.stringify(snapshot).includes('used_credits'));
     assert.deepEqual(nativeWire('wire').map(record => record.message.request?.subtype),['initialize','get_usage']);
     assert.equal(nativeWire('wire')[1].message.request.skip_behaviors,true);
@@ -119,6 +152,8 @@ async function main() {
         await inspect('Claude 7-day subscription quota','5','critical');
         await inspect('Codex 5-hour subscription quota','4.9','critical');
         await inspect('Codex 7-day subscription quota','10.1',undefined);
+        await inspect('Antigravity 5-hour subscription quota','88',undefined);
+        await inspect('Antigravity 7-day subscription quota','76.5',undefined);
         await isolated.getByText('Resets in',{exact:false}).first().waitFor();
         await isolated.getByText('Reset time not reported',{exact:true}).first().waitFor();
     }
@@ -134,6 +169,8 @@ async function main() {
         assert(bounds.actions.right <= bounds.form.right && bounds.textarea.bottom <= bounds.quota.top);
         assert(bounds.form.right <= width);
         await launcher.getByText('10.1%',{exact:true}).waitFor();
+        await launcher.getByText('88%',{exact:true}).waitFor();
+        await launcher.getByText('76.5%',{exact:true}).waitFor();
         assert.equal(await launcher.getByText('4.9%',{exact:true}).filter({visible:true}).count(),0,'the footer always uses the Codex weekly value');
         await launcher[triggerAction]();
         await checkDetails(target);

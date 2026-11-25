@@ -40,6 +40,10 @@ mod quota;
 pub mod rtk;
 pub mod runner_management;
 mod runner_compaction;
+mod agy;
+mod agy_acp;
+mod agy_approval;
+mod agy_readiness;
 mod claude;
 mod claude_readiness;
 #[cfg(test)]
@@ -660,6 +664,26 @@ impl Store {
         for mut t in store.tasks()? {
             let mut repaired = false;
             for a in &mut t.attempts {
+                // Preserve unclaimed Decision-dependent work for the scheduler
+                // to revalidate against the current Lead and exact action.
+                if a.phase == Phase::Accepted
+                    && !a.cancel_requested
+                    && a.dispatch_ms.is_none()
+                    && a.native_pid.is_none()
+                    && a.settled_ms.is_none()
+                    && a.configuration
+                        .as_ref()
+                        .is_some_and(|c| c.session_contract.is_some())
+                    && t.structured.as_deref().is_some_and(|state| {
+                        serde_json::from_str::<serde_json::Value>(state).is_ok_and(|state| {
+                            state["dependsOn"]
+                                .as_array()
+                                .is_some_and(|ids| !ids.is_empty())
+                        })
+                    })
+                {
+                    continue;
+                }
                 // Older Codex workers recorded successful process teardown and
                 // then classified the same attempt as uncertain after dispatch.
                 if a.phase == Phase::Uncertain && a.settled_ms.is_some()
@@ -927,6 +951,7 @@ impl Store {
                 "codex" | "opencode" => crate::connected_opencode::source::bind(&mut snapshot,&assignment,"lead",self.trusted_project(&project.root)?)?,
                 #[cfg(test)]
                 crate::claude_fixture::RUNNER if std::env::var_os("DECK2_CLAUDE_FIXTURE_CHILD").is_some() => crate::claude_fixture::bind(&mut snapshot),
+                crate::agy::RUNNER => crate::agy::bind(&mut snapshot)?,
                 crate::claude::RUNNER => {
                     crate::claude::bind(&mut snapshot)?;
                 }
@@ -1013,7 +1038,7 @@ impl Store {
         attachments: Vec<deck2_shared::ImageAttachment>,
         requested_model: Option<String>,
     ) -> Receipt {
-        let runner = snapshot.native.as_ref().map(|n| format!("{} {} / {}", match n.runner { deck2_shared::NativeRunner::Codex => "codex", deck2_shared::NativeRunner::Opencode => "opencode", deck2_shared::NativeRunner::Claude => "claude" }, n.version, n.protocol)).unwrap_or_else(|| "codex / app-server stdio".into());
+        let runner = snapshot.native.as_ref().map(|n| format!("{} {} / {}", match n.runner { deck2_shared::NativeRunner::Codex => "codex", deck2_shared::NativeRunner::Opencode => "opencode", deck2_shared::NativeRunner::Claude => "claude", deck2_shared::NativeRunner::Agy => "agy" }, n.version, n.protocol)).unwrap_or_else(|| "codex / app-server stdio".into());
         Receipt {
             context: Default::default(),
             can_steer: false,

@@ -46,6 +46,9 @@ async function run() {
                     {modelId: 'default', label: 'Claude Code default', thinkingLevels: []},
                     {modelId: 'sonnet', label: 'Sonnet', thinkingLevels: ['low', 'high']},
                 ]},
+                {runnerId: 'agy', label: 'Antigravity', available: true, models: [
+                    {modelId: 'google-test', label: 'Google test model', thinkingLevels: ['high']},
+                ]},
             ]});
             if (endpoint === '/api/sessions/assign/assignments') {
                 const input = route.request().postDataJSON();
@@ -163,6 +166,16 @@ async function run() {
         assert.equal(await runner.inputValue(), 'claude');
         assert.equal(await model('architect').inputValue(), 'sonnet');
         assert.equal(await reasoning('architect').inputValue(), 'high');
+
+        const leadRunner = modal.getByLabel('Runner for Lead', {exact: true});
+        await runner.selectOption('agy');
+        await reasoning('architect').selectOption('high');
+        await leadRunner.selectOption('agy');
+        await reasoning('Lead').selectOption('high');
+        await save.click();
+        await saved.waitFor();
+        assert.deepEqual(contract.members.lead, {runnerId: 'agy', modelId: 'google-test', thinking: 'high'});
+        assert.deepEqual(contract.members.architect, {runnerId: 'agy', modelId: 'google-test', thinking: 'high'});
 
         await page.setViewportSize({width: 320, height: 780});
         assert(await modal.evaluate(node => node.scrollWidth <= node.clientWidth));

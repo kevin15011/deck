@@ -4,12 +4,13 @@ import type { QuotaRunner, QuotaState, QuotaWindow } from './quota-types';
 import { NavigationIcon } from './navigation-icon';
 import { RunnerMark } from './runner-mark';
 
-const empty: QuotaState = { runners: { claude: { refreshAfter: 0, refreshing: false }, codex: { refreshAfter: 0, refreshing: false } } };
-const names = { claude: 'Claude', codex: 'Codex' };
-const runners = ['claude', 'codex'] as const;
+const empty: QuotaState = { runners: { claude: { refreshAfter: 0, refreshing: false }, codex: { refreshAfter: 0, refreshing: false }, agy: { refreshAfter: 0, refreshing: false } } };
+const names = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity' };
+const runners = ['claude', 'codex', 'agy'] as const;
 const composerWindows = {
     claude: [{id:'five-hour', label:'5h'}, {id:'seven-day', label:'Week'}],
     codex: [{id:'seven-day', label:'Week'}],
+    agy: [{id:'five-hour', label:'5h'}, {id:'seven-day', label:'Week'}],
 } as const;
 // Quota snapshots store percentages to one decimal place.
 const remainingPercent = (usedPercent: number) => (1000 - Math.round(usedPercent * 10)) / 10;
@@ -103,6 +104,7 @@ export function useQuota(api: (path: string, init?: RequestInit) => Promise<any>
                         runners: {
                             claude: pending.current.has('claude') ? previous.runners.claude : data.runners.claude,
                             codex: pending.current.has('codex') ? previous.runners.codex : data.runners.codex,
+                            agy: pending.current.has('agy') ? previous.runners.agy : (data.runners.agy ?? previous.runners.agy),
                         },
                     }));
                 }

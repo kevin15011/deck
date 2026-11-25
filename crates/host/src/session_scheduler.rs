@@ -103,6 +103,7 @@ impl Store {
 impl App {
     // The caller holds admission then Store. Live worker keys extend durable
     // ownership through process drain; unknown/legacy workers remain exclusive.
+    // The Antigravity account probe occupies no Lead slot.
     pub(crate) fn live_roots(&self, active: &std::collections::HashMap<String, tokio::sync::watch::Sender<bool>>, store: &Store, session: &str) -> Result<HashSet<String>, String> {
         let mut roots = HashSet::new();
         for key in active.keys() {
@@ -110,7 +111,9 @@ impl App {
                 if !store.independent_member_worker(attempt)? { return Err("Exclusive member ownership is still active".into()); }
             } else if let Some(target) = key.strip_prefix("session-restart:") {
                 if target == session || session.is_empty() { return Err("Session restart is still settling".into()); }
-            } else { roots.insert(key.clone()); }
+            } else if key != crate::quota::AGY_REFRESH_KEY {
+                roots.insert(key.clone());
+            }
         }
         Ok(roots)
     }
@@ -309,7 +312,7 @@ impl Store {
                     if let Some(state) = &t.structured {
                         let state: Value =
                             serde_json::from_str(state).map_err(|_| "Corrupt task dependencies")?;
-                        crate::session_decisions::dependencies(
+                        crate::session_decisions::stored_dependencies(
                             self,
                             &t.session,
                             state.get("dependsOn").unwrap_or(&json!([])),
@@ -574,6 +577,125 @@ mod tests {
         let mut s = Store::open_memory("/fixture").unwrap();
         s.register_codex("a".repeat(64)).unwrap();
         s
+    }
+
+    #[test]
+    fn legacy_crlf_dependency_is_claimed_once_after_reopen() {
+        // Protects admitted queue work across a restart. Fails if the scheduler
+        // cancels a historically valid action or grants two preparation slots.
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("state.db");
+        let mut s = Store::open(&db, "/fixture").unwrap();
+        s.register_codex("a".repeat(64)).unwrap();
+        session(&mut s, "session-a", "root-alpha");
+        let mut r = s.get("root-alpha").unwrap().unwrap();
+        r.dispatch_ms = Some(crate::now());
+        s.save(&mut r).unwrap();
+        let decision = crate::session_decisions::tool(
+            &mut s, &r.id, "deck_decision_open",
+            &json!({"commandId":"open-legacy-action","key":"scope","question":"Inspect the fixture?","source":{"promptId":r.id}}),
+        ).unwrap();
+        complete_root(&mut s, &r.id);
+        let reply = serde_json::from_value(json!({
+            "api":deck2_shared::API,"id":"root-reply","session":"session-a",
+            "prompt":"Allow the exact fixture action","mode":"session_v1"
+        }))
+        .unwrap();
+        let mut r = s.admit(&reply).unwrap();
+        r.phase = Phase::Running;
+        r.dispatch_ms = Some(crate::now());
+        r.thread = Some("root-reply".into());
+        r.turn = Some("root-reply".into());
+        s.save(&mut r).unwrap();
+        let action = "inspect fixture";
+        crate::session_decisions::tool(
+            &mut s,
+            &r.id,
+            "deck_decision_resolve",
+            &json!({"commandId":"resolve-legacy-action","decisionId":decision["decisionId"],
+                "expectedRevision":1,"promptId":r.id,"note":"User authorized inspection",
+                "disposition":"allow","action":action}),
+        )
+        .unwrap();
+        let queued = crate::session_tasks::tool(
+            &mut s, &r.id, "deck_delegate",
+            &json!({"agent":"apply-deep","task":"Inspect the fixture","dependsOn":[decision["decisionId"]],"action":action}),
+            "delegate-legacy-action",
+        ).unwrap();
+        let id = queued["taskId"].as_str().unwrap();
+        complete_root(&mut s, &r.id);
+        assert_eq!(s.task(id).unwrap().attempts[0].phase, Phase::Accepted);
+
+        // Preserve the Decision and its evidence as written by the legacy validator.
+        for (statement, encoded_action) in [
+            (
+                "UPDATE session_decisions SET body=replace(body,?1,?2)",
+                r"inspect\r\nfixture",
+            ),
+            (
+                "UPDATE session_events SET body=replace(body,?1,?2) WHERE kind LIKE 'decision:%'",
+                r"inspect\r\nfixture",
+            ),
+            (
+                "UPDATE decision_commands SET fingerprint=replace(fingerprint,?1,?2)",
+                r"inspect\r\nfixture",
+            ),
+            (
+                "UPDATE tasks SET body=replace(body,?1,?2)",
+                r"inspect\\r\\nfixture",
+            ),
+            (
+                "UPDATE task_calls SET payload=replace(payload,?1,?2)",
+                r"inspect\\r\\nfixture",
+            ),
+        ] {
+            s.conn.execute(statement, [action, encoded_action]).unwrap();
+        }
+        drop(s);
+
+        let mut s = Store::open(&db, "/fixture").unwrap();
+        let empty = HashSet::new();
+        let task = s.task(id).unwrap();
+        assert_eq!(task.attempts[0].phase, Phase::Accepted);
+        let state: Value = serde_json::from_str(task.structured.as_deref().unwrap()).unwrap();
+        assert_eq!(state["action"], "inspect\r\nfixture");
+        assert!(
+            crate::session_decisions::stored_dependencies(
+                &s,
+                &task.session,
+                &state["dependsOn"],
+                &json!("inspect\nfixture")
+            )
+            .is_err(),
+            "a normalized action is a different authorization"
+        );
+        let inherited =
+            crate::session_decisions::delegation(&s, &r, task.structured.as_deref(), &json!({}))
+                .unwrap();
+        assert_eq!(inherited["action"], state["action"]);
+        assert!(
+            crate::session_decisions::delegation(
+                &s,
+                &r,
+                task.structured.as_deref(),
+                &json!({"action":state["action"]}),
+            )
+            .is_err(),
+            "new delegation arguments still use strict text validation"
+        );
+
+        let mut claimed = s
+            .claim_member("", &empty)
+            .unwrap()
+            .expect("legacy action remains authorized");
+        assert_eq!(claimed.id, id);
+        assert_eq!(claimed.attempts[0].id, task.attempts[0].id);
+        assert_eq!(claimed.attempts[0].phase, Phase::Preparing);
+        assert!(s.claim_member("", &empty).unwrap().is_none());
+        claimed.attempts[0].phase = Phase::Completed;
+        claimed.attempts[0].settled_ms = Some(crate::now());
+        s.save_normal_task(&claimed).unwrap();
+        assert!(s.claim_member("", &empty).unwrap().is_none());
     }
     // Oracle: canonical default two Lead slots, one turn per session, with
     // independent delegated capacity and no implicit replay.

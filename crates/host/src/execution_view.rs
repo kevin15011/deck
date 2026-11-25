@@ -1,6 +1,6 @@
 //! Additive presentation contract. Native envelopes remain exact private evidence;
 //! callers render these bounded projections without decoding native protocols.
-use deck2_shared::{Decision, NativeTransport, Receipt};
+use deck2_shared::{Decision, NativeTransport, ProjectBinding, Receipt};
 use serde_json::{Value, json};
 
 const SENSITIVE_DISPLAY_VALUE: &str = "[Sensitive display value withheld]";
@@ -115,6 +115,10 @@ pub(crate) fn bounded(value: &Value, depth: usize) -> Value {
     }
 }
 pub(crate) fn decision(d: &Decision) -> Value {
+    decision_in_project(d, None)
+}
+
+fn decision_in_project(d: &Decision, project: Option<&ProjectBinding>) -> Value {
     let Some(n) = &d.native else {
         return json!({"version":1,"kind":if d.file.is_some(){"file_edit"}else{"question"},"validated":true,"details":Value::Null});
     };
@@ -133,6 +137,7 @@ pub(crate) fn decision(d: &Decision) -> Value {
         }
         Some(NativeTransport::DeckMcp) => crate::session_mcp::action_view(&n.parameters),
         Some(NativeTransport::ClaudeSdk) => crate::claude::approval::action_view(n),
+        Some(NativeTransport::AgyAcp) => crate::agy_approval::action_view(n, project),
         None => None,
     };
     let Some((kind, mut details)) = projected else {
@@ -149,6 +154,12 @@ pub(crate) fn decision(d: &Decision) -> Value {
         details
     } else {
         let mut display = bounded(&details, 0);
+        if n.transport == Some(NativeTransport::AgyAcp)
+            && let Some(origin) = details["input"]["Url"].as_str()
+        {
+            // The adapter already reduced this to a parsed HTTP(S) origin.
+            display["input"]["Url"] = json!(origin);
+        }
         if n.transport == Some(NativeTransport::DeckMcp)
             && details["tool"].as_str().is_some_and(crate::permission_bounds::claude_mcp_tool)
         {
@@ -195,17 +206,44 @@ pub(crate) fn receipt(r: &Receipt) -> Value {
                     .filter(|v| r.model.as_deref() == Some(&v.model)),
             )
         }
-        Some(crate::member_integration::Integration::OpenCode | crate::member_integration::Integration::Claude) | None => Value::Null,
+        Some(crate::member_integration::Integration::OpenCode | crate::member_integration::Integration::Claude | crate::member_integration::Integration::Agy) | None => Value::Null,
     };
     json!({"version":1,"recorded_runner":recorded,"integration_available":integration.is_some(),"reasoning":reasoning,"retained_runtime_supported":integration.is_some_and(|i|i.supports_retained_lead()) && r.mode==deck2_shared::Mode::SessionV1})
 }
 pub(crate) fn project_receipt(receipt_value: &Receipt, value: &mut Value) {
     value["presentation"] = receipt(receipt_value);
+    let project = receipt_value
+        .configuration
+        .as_ref()
+        .map(|snapshot| &snapshot.project);
     if let Some(decisions) = value["decisions"].as_array_mut() {
         for (value, decision_value) in decisions.iter_mut().zip(&receipt_value.decisions) {
-            value["presentation"] = decision(decision_value);
+            project_decision(decision_value, value, project);
         }
     }
+}
+
+pub(crate) fn agy_approval(d: &Decision) -> bool {
+    d.native
+        .as_ref()
+        .is_some_and(|native| native.transport == Some(NativeTransport::AgyAcp))
+}
+
+fn project_decision(d: &Decision, value: &mut Value, project: Option<&ProjectBinding>) {
+    if agy_approval(d) {
+        value["presentation"] = decision_in_project(d, project);
+        value.as_object_mut().unwrap().remove("native");
+    } else {
+        value["presentation"] = decision(d);
+    }
+}
+
+pub(crate) fn approval_response(d: &Decision, project: Option<&ProjectBinding>) -> Value {
+    let mut value = json!(d);
+    if agy_approval(d) {
+        project_decision(d, &mut value, project);
+    }
+    value
 }
 #[cfg(test)]
 mod tests {

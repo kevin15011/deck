@@ -6,18 +6,18 @@ import {gsap} from 'gsap';
 import {API,request,load,save as persist,HttpError,sessionContract,workspace,type Session,type SessionContract,type MemberAssignment as Assignment} from './api';
 import {transitionPreview,transitionCommand,transitionedSession,type TransitionCommand} from './session-transition';
 import {lastAssignmentsKey,mergeAssignments,restoreAssignments} from './last-assignments';
-interface RunnerOption {runnerId:string;label:string;available:boolean;reasonCode?:string;models:{modelId:string;label:string;thinkingLevels:string[]}[]}
+interface RunnerOption {runnerId:string;label:string;available:boolean;reasonCode?:string;reason?:string;models:{modelId:string;label:string;thinkingLevels:string[]}[]}
 export function AssignmentFields({ runners, value, onChange, role, disabled = false }: { runners: RunnerOption[]; value: Assignment; onChange: (assignment: Assignment) => void; role?: string; disabled?: boolean }) {
     const runner = runners.find(item => item.runnerId === value.runnerId), model = runner?.models.find(item => item.modelId === value.modelId);
     return <div className="assignment-fields"><label>Runner<select aria-label={role ? `Runner for ${role}` : "Runner"} disabled={disabled} required value={value.runnerId} onChange={event => {
         const next = runners.find(item => item.runnerId === event.target.value);
         onChange({ runnerId: event.target.value, modelId: next?.models[0]?.modelId ?? '' });
     }}><option value="" disabled>Choose a runner</option>{runners.map(item => <option key={item.runnerId} value={item.runnerId} disabled={!item.available || !item.models.length}>
-        {item.label}{!item.available ? (item.reasonCode ? ` · ${item.reasonCode}` : ' (unavailable)') : ''}
+        {item.label}{!item.available ? (item.reason || item.reasonCode ? ` · ${item.reason ?? item.reasonCode}` : ' (unavailable)') : ''}
     </option>)}</select></label>
         <label>Model<select aria-label={role ? `Model for ${role}` : "Model"} required value={value.modelId} disabled={disabled || !runner?.available} onChange={event => onChange({ runnerId: value.runnerId, modelId: event.target.value })}><option value="" disabled>Choose a model</option>{value.modelId && !model && <option value={value.modelId} disabled>{value.modelId} (unavailable)</option>}{runner?.models.map(item => <option key={item.modelId} value={item.modelId}>{item.label}</option>)}</select></label>
         {model && (!!model.thinkingLevels.length || !!value.thinking) && <label className="assignment-reasoning">Reasoning level<select aria-label={role ? `Reasoning level for ${role}` : "Reasoning level"} disabled={disabled} value={value.thinking ?? ''} onChange={event => onChange({ ...value, thinking: event.target.value || undefined })}><option value="">Runner default</option>{value.thinking && !model.thinkingLevels.includes(value.thinking) && <option value={value.thinking} disabled>{value.thinking} (unavailable)</option>}{model.thinkingLevels.map(level => <option key={level} value={level}>{level}</option>)}</select></label>}
-        {runner && !runner.available && <p className="muted">{runner.reasonCode ?? 'This runner is currently unavailable.'}</p>}
+        {runner && !runner.available && <p className="muted">{runner.reason ?? runner.reasonCode ?? 'This runner is currently unavailable.'}</p>}
     </div>;
 }
 

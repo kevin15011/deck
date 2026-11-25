@@ -80,6 +80,9 @@ pub struct Inner {
     pub(crate) dictation: tokio::sync::OnceCell<Arc<crate::dictation::Service>>,
     pub(crate) quota_runtime: Mutex<crate::quota::Runtime>,
     pub(crate) claude_quota_runtime: Mutex<crate::quota::Runtime>,
+    pub(crate) agy_quota_runtime: Mutex<crate::quota::Runtime>,
+    #[cfg(test)]
+    pub(crate) agy_binary: Mutex<Option<PathBuf>>,
     pub(crate) git_review: crate::git_review::Runtime,
     pub store: Mutex<Store>,
     pub(crate) workspace_updates: crate::workspace_events::Updates,
@@ -194,6 +197,9 @@ impl App {
             dictation:tokio::sync::OnceCell::new(),
             quota_runtime: Mutex::new(Default::default()),
             claude_quota_runtime: Mutex::new(Default::default()),
+            agy_quota_runtime: Mutex::new(Default::default()),
+            #[cfg(test)]
+            agy_binary: Mutex::new(None),
             git_review: Default::default(),
             artifact_store: Mutex::new(None),
             cookie_name: format!("deck2_{}", host.rsplit(':').next().unwrap_or("local")),
@@ -525,7 +531,9 @@ impl App {
             return;
         }
         let live_members = active.keys().filter_map(|key| key.strip_prefix("child:").map(str::to_owned)).collect();
-        let recovered = crate::claude::settle_recovered(&mut s, &live)
+        let recovered = crate::agy::settle_recovered(&mut s, &live)
+            .and_then(|agy| crate::agy::member::settle_recovered(&mut s, &live_members).map(|member| agy || member))
+            .and_then(|agy| crate::claude::settle_recovered(&mut s, &live).map(|claude| agy || claude))
             .and_then(|claude| crate::claude::member::settle_recovered(&mut s, &live_members).map(|member| claude || member))
             .and_then(|claude| crate::codex_member::settle_recovered(&mut s, &live_members).map(|member| claude || member))
             .and_then(|claude| self.native_reuse.settle_waiting_roots(&mut s, &live).map(|codex| claude || codex));
@@ -892,7 +900,7 @@ pub(crate) fn project_workspace(app: &App) -> Result<serde_json::Value, Response
             })
         })
         .collect();
-    let process_active = !active.is_empty();
+    let process_active = active.keys().any(|key| key != crate::quota::AGY_REFRESH_KEY);
     let default_session = if store.session.is_empty() {
         sessions
             .first()
@@ -941,6 +949,7 @@ pub(crate) fn project_workspace(app: &App) -> Result<serde_json::Value, Response
                 .or_insert_with(|| {
                     unavailable.clone().or_else(|| match runner.as_str() {
                         "opencode" => crate::connected_opencode::source::executable().err(),
+                        crate::agy::RUNNER => crate::agy::executable().err(),
                         crate::claude::RUNNER => crate::claude::executable()
                             .and_then(|_| crate::claude::node_runtime())
                             .err(),
@@ -1297,6 +1306,7 @@ async fn submit(
             .and_then(|c|c.members.get("lead").cloned());
         let unavailable = match selected.as_ref().map(|a| a.runner_id.as_str()) {
             Some("opencode") => crate::connected_opencode::source::executable().err(),
+            Some(crate::agy::RUNNER) => crate::agy::executable().err(),
             Some(crate::claude::RUNNER) => crate::claude::executable().and_then(|_| crate::claude::node_runtime()).err(),
             _ => app.runner_available_for(&store, &app.project),
         };
@@ -1364,7 +1374,17 @@ async fn submit(
     // Let the browser receive the committed receipt independently of the
     // scheduler and optional automatic index maintenance.
     let needs_pump = !existing || receipt.phase == deck2_shared::Phase::Queued;
-    let mut response = Json(receipt).into_response();
+    let mut response = if receipt
+        .decisions
+        .iter()
+        .any(crate::execution_view::agy_approval)
+    {
+        let mut value = json!(&receipt);
+        crate::execution_view::project_receipt(&receipt, &mut value);
+        Json(value).into_response()
+    } else {
+        Json(receipt).into_response()
+    };
     let response_ms = received.elapsed().as_secs_f64() * 1000.0;
     let timing = if existing {
         format!("deck_receipt;dur={response_ms:.2}")
@@ -1534,7 +1554,14 @@ async fn resolve(
     }
     let mut store = app.store.lock().unwrap();
     match store.resolve_submission(&id, &value) {
-        Ok(d) => Json(d).into_response(),
+        Ok(d) => {
+            let project = crate::execution_view::agy_approval(&d)
+                .then(|| store.get(&d.command).ok().flatten())
+                .flatten()
+                .and_then(|receipt| receipt.configuration)
+                .map(|snapshot| snapshot.project);
+            Json(crate::execution_view::approval_response(&d, project.as_ref())).into_response()
+        }
         Err(crate::decisions::ResolveError::InvalidAnswers) => (
             StatusCode::CONFLICT,
             Json(json!({"api":API,"code":"answers_not_accepted","decision_id":id,

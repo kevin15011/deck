@@ -37,35 +37,35 @@ struct ProxyState {
     client: reqwest::Client,
 }
 
-pub(crate) struct ClaudeMcpProxy {
+pub(crate) struct SessionMcpProxy {
     pub(crate) config: Value,
     state: Arc<ProxyState>,
     task: tokio::task::JoinHandle<()>,
 }
 
-impl Drop for ClaudeMcpProxy {
+impl Drop for SessionMcpProxy {
     fn drop(&mut self) {
         self.deactivate();
         self.task.abort();
     }
 }
 
-impl ClaudeMcpProxy {
+impl SessionMcpProxy {
     pub(crate) async fn start() -> Result<Self, String> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
-            .map_err(|_| "Cannot bind Claude session MCP proxy")?;
+            .map_err(|_| "Cannot bind session MCP proxy")?;
         let url = format!(
             "http://{}/mcp",
             listener
                 .local_addr()
-                .map_err(|_| "Claude session MCP proxy address unavailable")?
+                .map_err(|_| "Session MCP proxy address unavailable")?
         );
         let token = crate::server::secret();
         let client = reqwest::Client::builder()
             .no_proxy()
             .build()
-            .map_err(|_| "Cannot initialize Claude session MCP proxy client")?;
+            .map_err(|_| "Cannot initialize session MCP proxy client")?;
         let state = Arc::new(ProxyState {
             token: token.clone(),
             target: Mutex::new(None),
@@ -128,7 +128,7 @@ async fn forward(
         return (
             StatusCode::FORBIDDEN,
             [(header::CONTENT_TYPE, "application/json")],
-            Bytes::from_static(br#"{"error":"No active Claude Lead attempt"}"#),
+            Bytes::from_static(br#"{"error":"No active Lead attempt"}"#),
         );
     };
     let response = state
@@ -152,14 +152,14 @@ async fn forward(
                 Err(_) => (
                     StatusCode::FORBIDDEN,
                     [(header::CONTENT_TYPE, "application/json")],
-                    Bytes::from_static(br#"{"error":"Active Claude Lead attempt closed"}"#),
+                    Bytes::from_static(br#"{"error":"Active Lead attempt closed"}"#),
                 ),
             }
         }
         Err(_) => (
             StatusCode::FORBIDDEN,
             [(header::CONTENT_TYPE, "application/json")],
-            Bytes::from_static(br#"{"error":"Active Claude Lead attempt unavailable"}"#),
+            Bytes::from_static(br#"{"error":"Active Lead attempt unavailable"}"#),
         ),
     }
 }
@@ -176,7 +176,7 @@ pub(crate) struct ParkedParts {
     pub(crate) stdout: BufReader<ChildStdout>,
     pub(crate) partial: Vec<u8>,
     pub(crate) script: tempfile::NamedTempFile,
-    pub(crate) mcp_proxy: ClaudeMcpProxy,
+    pub(crate) mcp_proxy: SessionMcpProxy,
 }
 
 pub(crate) struct Parked(Option<ParkedParts>);
@@ -472,13 +472,20 @@ pub(crate) fn reuse_key(
     tool_names: &[&Value],
 ) -> Result<String, String> {
     use std::os::unix::fs::MetadataExt;
-    let binding = receipt
+    let snapshot = receipt
         .configuration
         .as_ref()
-        .and_then(|s| s.native.as_ref())
         .ok_or("Claude native binding missing")?;
+    let binding = snapshot
+        .native
+        .as_ref()
+        .ok_or("Claude native binding missing")?;
+    let contract = snapshot
+        .session_contract
+        .as_ref()
+        .ok_or("Claude session contract missing")?;
     let mut inputs = format!(
-        "{}|{}|{}|{}|{}|{}|{}|{:?}|{}|{:?}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{:?}|{}|{:?}|{}|{}|{}|{}",
         receipt.session,
         thread,
         binary.display(),
@@ -489,6 +496,7 @@ pub(crate) fn reuse_key(
         project,
         trusted,
         assignment,
+        contract.approvals,
         digest(instructions.as_bytes()),
         serde_json::to_string(tool_names).map_err(|_| "Invalid Claude tool list")?,
         crate::runner_compaction::claude_launch_settings(),

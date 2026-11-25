@@ -51,3 +51,9 @@ test('valid tokens with an absent capacity stay tokens-only, never a guessed per
  const c=contextReading({observation:{...observation,basis:'claude-context-usage',tokens:42000,capacity:null}},'attempt','thread','turn');
  expect(contextEstimate(c)).toEqual({used:42000,max:null,percent:null});
 });
+
+test('Antigravity displays ACP occupancy against the reported window',()=>{
+ const c=contextReading({observation:{...observation,basis:'agy-acp-usage',tokens:42000,capacity:105000}},'attempt','thread','turn');
+ expect(contextEstimate(c)).toEqual({used:42000,max:105000,percent:40});
+ expect(contextReading({observation:null},'attempt','thread','turn')).toBeUndefined();
+});

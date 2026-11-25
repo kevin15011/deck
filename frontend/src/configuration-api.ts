@@ -19,7 +19,7 @@ export function snapshot(v:unknown):Snapshot|null {
  if(object(v)&&v.project!==undefined&&(!object(v.project)||typeof v.project.id!=='string'||typeof v.project.root!=='string'||!(v.project.identity===null||typeof v.project.identity==='string')))throw Error('Invalid admission project');
  if(v===undefined||v===null)return null;
  if(!object(v)||(v.selection!==undefined&&v.selection!==null&&(!object(v.selection)||typeof v.selection.session!=='string'||!integer(v.selection.revision)))||!runner(v.runner)||!helper(v.helper)||!integer(v.revision)||!strings(v.definitions)||!v.definitions.every(d=>/^[a-f0-9]{64}$/.test(d))||!strings(v.exclusions)||!assignment(v.investigator)||!nullable(v.codex_executable)||typeof v.delivery_observed!=='boolean')throw new Error('Invalid admission snapshot');
- if(v.native!==undefined&&(!object(v.native)||!['codex','opencode','claude'].includes(v.native.runner as string)||!['protocol','version','storage','configuration','role'].every(k=>typeof (v.native as Record<string,unknown>)[k]==='string')||!runner(v.native.executable)))throw Error('Invalid native admission');
+ if(v.native!==undefined&&(!object(v.native)||!['codex','opencode','claude','agy'].includes(v.native.runner as string)||!['protocol','version','storage','configuration','role'].every(k=>typeof (v.native as Record<string,unknown>)[k]==='string')||!runner(v.native.executable)))throw Error('Invalid native admission');
  sessionContract(v.session_contract);
  return v as unknown as Snapshot;
 }

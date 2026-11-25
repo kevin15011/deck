@@ -137,7 +137,7 @@ use axum::{
 };
 use serde::Deserialize;
 pub(crate) async fn model_data(app: &App) -> Result<Value, String> {
-    model_data_for(app, &["codex", "opencode", crate::claude::RUNNER]).await
+    model_data_for(app, &["codex", "opencode", crate::claude::RUNNER, crate::agy::RUNNER]).await
 }
 async fn model_data_for(app: &App, runners: &[&str]) -> Result<Value, String> {
     {let store=app.store.lock().unwrap();crate::projects::validate(&store.project_by_id(&crate::projects::id(&app.project))?)?;}
@@ -161,10 +161,14 @@ async fn model_data_for(app: &App, runners: &[&str]) -> Result<Value, String> {
             Err(e) => json!({"runnerId":"claude","label":"Claude Code","available":false,"models":[],"reasonCode":e}),
         })
     };
-    let (codex, opencode, claude) = tokio::join!(codex, opencode, claude);
+    let agy = async {
+        if runners.contains(&crate::agy::RUNNER) { Some(crate::agy_readiness::inventory().await) } else { None }
+    };
+    let (codex, opencode, claude, agy) = tokio::join!(codex, opencode, claude, agy);
     let codex = codex.unwrap_or_else(|e|json!({"runnerId":"codex","label":"Codex","available":false,"models":[],"reason":e}));
     let mut inventory = vec![codex, opencode];
     inventory.extend(claude);
+    inventory.extend(agy);
     Ok(json!({"runners":inventory}))
 }
 async fn models(crate::server::ProjectState(app): crate::server::ProjectState<App>) -> Response {
@@ -202,7 +206,7 @@ fn validate_inventory(data: &Value, members: &std::collections::BTreeMap<String,
 pub(crate) use crate::member_integration::resolve_model;
 
 pub(crate) fn selection_snapshot(app: &App, store: &Store, runners: &[&str]) -> Result<String,String> {
-    if runners.iter().any(|r| !matches!(*r,"codex"|"opencode"|crate::claude::RUNNER)) { return Err("Unsupported assigned runner".into()); }
+    if runners.iter().any(|r| !matches!(*r,"codex"|"opencode"|crate::claude::RUNNER|crate::agy::RUNNER)) { return Err("Unsupported assigned runner".into()); }
     let config=store.configuration_for(&app.project)?;
     let mut evidence=vec![serde_json::to_string(&config).map_err(|_|"Invalid selected configuration")?];
     let native_root=app.native_role_root.lock().unwrap().clone();
@@ -229,6 +233,7 @@ pub(crate) fn selection_snapshot(app: &App, store: &Store, runners: &[&str]) -> 
     if runners.contains(&crate::claude::RUNNER) {
         evidence.push(crate::claude::selection_key()?);
     }
+    if runners.contains(&crate::agy::RUNNER) { evidence.push(crate::agy::selection_key()?); }
     evidence.push(app.web_identity.lock().unwrap().identity.assignment_members()?.to_string());
     Ok(crate::tasks::digest(serde_json::to_string(&evidence).unwrap().as_bytes()))
 }
@@ -313,6 +318,7 @@ pub fn routes() -> Router<App> {
         .route("/api/sessions/{session}/approvals", post(approvals))
         .route("/api/sessions/{session}/grants/revoke", post(revoke))
         .route("/api/models", get(models))
+        .route("/api/sessions/models", get(models))
         .route(
             "/api/sessions/{session}/decisions",
             get(decisions).post(decision_action),
@@ -505,7 +511,7 @@ pub async fn creation_members(
     let runners=selected.values().map(|a|a.runner_id.as_str()).collect::<Vec<_>>();
     let data=model_data_for(app,&runners).await?;
     validate_inventory(&data,&selected)?;
-    if lead.runner_id != crate::claude::RUNNER {
+    if !matches!(lead.runner_id.as_str(), crate::claude::RUNNER | crate::agy::RUNNER) {
         for role in MEMBERS {next.entry((*role).into()).or_insert_with(||lead.clone());}
     }
     validate(&SessionContract {version:1,revision:1,generation:1,members:next.clone(),approvals:"relay".into(),lead_task:"new-admission-validation".into(),grants_revoked_at:0})?;
@@ -690,5 +696,25 @@ mod general_permission_tests {
         let mut changed=request.clone();changed["id"]=json!(7002);changed["params"]["additionalPermissions"]["network"]=json!(true);
         let next=native_decision(&r,&r.generation,r.thread.as_deref().unwrap(),r.turn.as_deref().unwrap(),&changed).unwrap();
         assert!(!s.session_grant(&next).unwrap(),"session consent reused after network escalation");
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn agy_catalog_validates_lead_and_member_assignments() {
+    let data = json!({"runners":[{"runnerId":"agy","available":true,"models":[
+        {"modelId":"flash","thinkingLevels":["low","high"]},
+        {"modelId":"orchestrator","thinkingLevels":[]}
+    ]}]});
+    for (role, model, thinking, allowed) in [
+        ("lead", "flash", Some("low"), true),
+        ("lead", "flash", Some("xhigh"), false),
+        ("lead", "orchestrator", None, true),
+        ("investigate", "flash", Some("low"), true),
+    ] {
+        let assignments = std::collections::BTreeMap::from([(role.to_owned(), MemberAssignment {
+            runner_id: "agy".into(), model_id: model.into(), thinking: thinking.map(str::to_owned),
+        })]);
+        assert_eq!(validate_inventory(&data, &assignments).is_ok(), allowed);
     }
 }

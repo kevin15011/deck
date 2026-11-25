@@ -10,6 +10,7 @@ pub(crate) enum Integration {
     Codex,
     OpenCode,
     Claude,
+    Agy,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ExecutionProfile {
@@ -22,11 +23,12 @@ impl Integration {
             "codex" => Ok(Self::Codex),
             "opencode" => Ok(Self::OpenCode),
             crate::claude::RUNNER => Ok(Self::Claude),
+            crate::agy::RUNNER => Ok(Self::Agy),
             _ => Err("Assigned member integration is unavailable; no fallback".into()),
         }
     }
     pub(crate) fn shares_lead_slots(self) -> bool {
-        matches!(self, Self::Codex | Self::Claude)
+        matches!(self, Self::Codex | Self::Claude | Self::Agy)
     }
     pub(crate) fn supports_retained_lead(self) -> bool {
         self == Self::Codex
@@ -36,7 +38,7 @@ impl Integration {
             // Codex and Claude members each own a dedicated native process, bridge,
             // session UUID and scoped MCP credential; nothing is shared but the
             // read-only credential store, so they may run beside the Lead.
-            Self::Codex | Self::Claude => ExecutionProfile::IndependentDedicated,
+            Self::Codex | Self::Claude | Self::Agy => ExecutionProfile::IndependentDedicated,
             Self::OpenCode => ExecutionProfile::ExclusiveDelegated,
         }
     }
@@ -66,6 +68,7 @@ impl Integration {
                 )
             }
             Self::Claude => return crate::claude::member::bind(s, a, member, trusted),
+            Self::Agy => return crate::agy::member::bind(s, a, member, trusted),
             Self::OpenCode => {
                 crate::connected_opencode::source::bind(s, a, member, trusted)?;
                 let n = s
@@ -117,6 +120,7 @@ impl Integration {
             }
             Self::OpenCode if crate::connected_opencode::admitted(s) => Ok(selected),
             Self::Claude if crate::claude::admitted(s) => Ok(selected),
+            Self::Agy if crate::agy::admitted(s) => Ok(selected),
             _ => Err("Root native evidence does not match its selected integration".into()),
         }
     }
@@ -141,6 +145,7 @@ impl Integration {
                         .is_none_or(|n| n.runner == NativeRunner::Codex)
             }
             Self::Claude => crate::claude::member::matches_attempt(s, &t.owner, &a.provenance),
+            Self::Agy => crate::agy::member::matches_attempt(s, &t.owner, &a.provenance),
             Self::OpenCode => {
                 crate::connected_opencode::admitted(s)
                     && a.provenance.runner == "opencode 1.19.1"
@@ -169,13 +174,19 @@ pub(crate) fn resolve_model(
     match Integration::select(&a.runner_id)? {
         Integration::Codex => crate::codex_protocol::resolve_model(models, a, fallback),
         Integration::OpenCode => crate::connected_opencode::resolve_public_model(models, a),
-        Integration::Claude => {
-            let model = models.as_array().and_then(|rows| rows.iter().find(|row| row["modelId"] == a.model_id))
-                .ok_or("Claude Code does not offer the selected model for this project")?;
+        Integration::Claude | Integration::Agy => {
+            let model = models
+                .as_array()
+                .and_then(|rows| rows.iter().find(|row| row["modelId"] == a.model_id))
+                .ok_or("The selected runner does not offer this model")?;
             if let Some(effort) = &a.thinking
-                && !model["thinkingLevels"].as_array().is_some_and(|levels| levels.iter().any(|level| level == effort))
+                && !model["thinkingLevels"]
+                    .as_array()
+                    .is_some_and(|levels| levels.iter().any(|level| level == effort))
             {
-                return Err("Claude Code does not offer the selected effort for this model".into());
+                return Err(
+                    "The selected runner does not offer this thinking level for the model".into(),
+                );
             }
             Ok((a.model_id.clone(), a.thinking.clone()))
         }
@@ -191,7 +202,14 @@ pub(crate) fn snapshot_runner_matches(
     if crate::claude_fixture::admitted(s) {
         return s.codex_executable == c.codex_executable;
     }
-    (s.runner == c.runner || crate::connected_opencode::admitted(s) || crate::claude::admitted(s)
-        || s.session_contract.as_ref().is_some_and(|contract| contract.members.keys().any(|role| crate::claude::member::admitted(s, role))))
+    (s.runner == c.runner
+        || crate::connected_opencode::admitted(s)
+        || crate::claude::admitted(s)
+        || crate::agy::admitted(s)
+        || s.session_contract.as_ref().is_some_and(|contract| {
+            contract.members.keys().any(|role| {
+                crate::claude::member::admitted(s, role) || crate::agy::member::admitted(s, role)
+            })
+        }))
         && s.codex_executable == c.codex_executable
 }

@@ -668,7 +668,7 @@ impl App {
             .and_then(|s| s.runner.as_ref());
         if let Some(b) = b {
             if !receipt.configuration.as_ref().is_some_and(|s|
-                crate::connected_opencode::admitted(s) || crate::claude::admitted(s)
+                crate::connected_opencode::admitted(s) || crate::claude::admitted(s) || crate::agy::admitted(s)
             ) { validate_binding(b)?; }
             if b.ownership == "deck_owned"
                 && pin_package(&self.artifact_root()?)? != Path::new(&b.path)
@@ -1163,9 +1163,10 @@ async fn maintenance_handoff(app: &App, revision: u64) -> Result<Value, String> 
     }).await;
     MaintenanceReservation::outcome(&reservation, result)
 }
-const MAINTENANCE_TARGETS: [&str; 6] = [
+const MAINTENANCE_TARGETS: [&str; 7] = [
     "codex",
     "claude",
+    "agy",
     "pi",
     "opencode",
     "rtk",
@@ -1201,6 +1202,19 @@ async fn observe_installation(binary: &Path, target: &str) -> Result<Value, Stri
     if version.is_empty() || version.len() > 160 || version.chars().any(char::is_control) {
         return Err("Invalid bounded version response".into());
     }
+    if target == crate::agy::RUNNER {
+        let readiness = crate::agy_readiness::probe(binary).await;
+        let (ready, state, models) = match readiness {
+            Ok(catalog) => (true, "ready", catalog["models"].clone()),
+            Err(reason) => (false, reason, json!([])),
+        };
+        return Ok(json!({
+            "target":target,"executable":binary,"version":version,"at_ms":now(),
+            "authenticated":if ready { Some(true) } else if state == "signed_out" { Some(false) } else { None },
+            "models":models,"qualified":ready,"ready":ready,"state":state,
+            "detail":if ready {"Antigravity ACP and model discovery are ready."} else {"Antigravity version observed. ACP readiness is unavailable."}
+        }));
+    }
     let supported = target == "codex" && crate::native::codex_version(version).is_some();
     Ok(
         json!({"target":target,"executable":binary,"version":version,"at_ms":now(),"authenticated":null,"models":[],"qualified":supported,"ready":false,"state":if supported {"readiness_check_required"} else if target=="codex" {"unsupported_version"} else {"version_observed"},"detail":if supported {"Supported version; inspect native readiness before explicit reselection"} else if target=="codex" {"The executable did not identify itself as Codex CLI."} else {"Version observed; this does not qualify an execution role or prove an update completed."}}),
@@ -1210,13 +1224,18 @@ async fn tool_handoff(binary: &Path, target: &str) -> Result<Value, String> {
     let observed = observe_installation(binary, target).await?;
     let (args, marker, suffix) = match target {
         "claude" => (vec!["update", "--help"], "claude update", "update"),
+        "agy" => (vec!["update", "--help"], "Usage of update:", "update"),
         "pi" => (vec!["update", "--help"], "--self", "update --self"),
         "opencode" => (vec!["upgrade", "--help"], "opencode upgrade", "upgrade"),
         "codebase-memory-mcp" => (vec!["--help"], "codebase-memory-mcp update", "update"),
         "rtk" => (vec!["--help"], "Usage: rtk", ""),
         _ => return Err("Unknown helper maintenance target".into()),
     };
-    let help = crate::native::command_probe(binary, &args).await?;
+    let help = if target == crate::agy::RUNNER {
+        crate::native::agy_update_help(binary).await?
+    } else {
+        crate::native::command_probe(binary, &args).await?
+    };
     if !String::from_utf8_lossy(&help).contains(marker) {
         return Err("Installed tool does not advertise the supported maintenance mechanism".into());
     }
@@ -1649,6 +1668,7 @@ pub fn routes() -> Router<App> {
         .route("/api/runners", get(inspect))
         .route("/api/runners/refresh", post(refresh))
         .route("/api/runners/claude/readiness", get(crate::claude_readiness::readiness))
+        .route("/api/runners/agy/readiness", get(crate::agy_readiness::readiness))
         .route("/api/runners/codex/daemon/restart", post(restart_codex_daemon))
         .route("/api/runners/maintenance", post(maintenance))
         .route(

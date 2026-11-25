@@ -161,7 +161,7 @@ pub(super) fn workspace_read_permit(event: &Value, project: &ProjectBinding) -> 
     Some(json!({"input": input}))
 }
 
-pub(super) fn workspace_write_target(event: &Value, project: &ProjectBinding) -> bool {
+pub(crate) fn workspace_write_target(event: &Value, project: &ProjectBinding) -> bool {
     let tool = event["tool"].as_str();
     if !matches!(tool, Some("Edit" | "Write")) {
         return false;
@@ -297,16 +297,10 @@ pub(super) fn record(
     event: &Value,
     request: &str,
 ) -> Result<Permission, String> {
-    let Some(item) = event["tool_use_id"].as_str().filter(|v| {
-        !v.is_empty()
-            && v.len() <= 128
-            && v.bytes()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
-    }) else {
+    let Some(item) = tool_use_id(event) else {
         return Ok(Permission::Denied);
     };
-    if receipt.phase != Phase::Running
-        || receipt.cancel_requested
+    if !lead_permission_current(store, receipt)?
         || receipt
             .decisions
             .iter()
@@ -315,22 +309,10 @@ pub(super) fn record(
     {
         return Ok(Permission::Denied);
     }
-    let session = store.session_by_id(&receipt.session)?;
     let admitted = receipt
         .configuration
         .as_ref()
         .and_then(|c| c.session_contract.as_ref());
-    if admitted
-        .zip(session.contract.as_ref())
-        .is_none_or(|(then, current)| {
-            then.generation != current.generation
-                || then.revision != current.revision
-                || then.grants_revoked_at != current.grants_revoked_at
-                || then.lead_task != current.lead_task
-        })
-    {
-        return Ok(Permission::Denied);
-    }
     let thread = receipt.thread.as_deref().ok_or("Claude thread missing")?;
     let turn = receipt
         .turn
@@ -458,6 +440,57 @@ pub(super) fn project_current(
     Ok(store.execution_project(&r.session)? == *project && store.trusted_project(&project.root)?)
 }
 
+pub(crate) fn lead_permission_current(store: &Store, receipt: &Receipt) -> Result<bool, String> {
+    if receipt.phase != Phase::Running || receipt.cancel_requested {
+        return Ok(false);
+    }
+    let session = store.session_by_id(&receipt.session)?;
+    let admitted = receipt
+        .configuration
+        .as_ref()
+        .and_then(|c| c.session_contract.as_ref());
+    Ok(admitted
+        .zip(session.contract.as_ref())
+        .is_some_and(|(then, current)| {
+            then.generation == current.generation
+                && then.revision == current.revision
+                && then.grants_revoked_at == current.grants_revoked_at
+                && then.lead_task == current.lead_task
+        }))
+}
+
+pub(super) fn lead_yolo_current(
+    store: &Store,
+    receipt: &Receipt,
+    project: &ProjectBinding,
+) -> Result<bool, String> {
+    Ok(lead_permission_current(store, receipt)?
+        && project_current(store, receipt, project)?
+        && super::is_receipt(receipt)
+        && receipt
+            .configuration
+            .as_ref()
+            .and_then(|snapshot| snapshot.session_contract.as_ref())
+            .is_some_and(|contract| contract.approvals == "yolo"))
+}
+
+pub(super) fn is_yolo_tool(event: &Value) -> bool {
+    event["tool"].as_str().is_some_and(|tool| {
+        matches!(tool, "Read" | "Glob" | "Grep" | "Edit" | "Write" | "Bash")
+            || crate::permission_bounds::claude_mcp_tool(tool)
+    })
+}
+
+pub(super) fn tool_use_id(event: &Value) -> Option<&str> {
+    event["tool_use_id"].as_str().filter(|id| {
+        !id.is_empty()
+            && id.len() <= 128
+            && id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    })
+}
+
 pub(super) fn release(d: &Decision, project: &ProjectBinding) -> Option<Value> {
     if !matches!(
         d.resolution.as_ref()?.response,
@@ -535,6 +568,20 @@ pub(super) fn delivered(r: &mut Receipt, id: &str, allowed: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replacing_a_grep_target_changes_the_persisted_grant_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("search");
+        std::fs::create_dir(&target).unwrap();
+        let request = json!({"tool":"Grep","input":{"path":target,"pattern":"Fixture"}});
+        let original = target_identity(&request, &target).unwrap();
+
+        std::fs::rename(&target, dir.path().join("original-search")).unwrap();
+        std::fs::create_dir(&target).unwrap();
+
+        assert_ne!(target_identity(&request, &target).unwrap(), original);
+    }
 
     #[test]
     fn quality_regression_grep_url_literal_uses_canonical_project_path() {

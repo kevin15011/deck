@@ -79,14 +79,27 @@ def response(request_id, result):
     emit({"type": "control_response", "response": {
         "subtype": "success", "request_id": request_id, "response": result}})
 
-def ask(number, tool="Read", input=None):
+def ask(number, tool="Read", input=None, *, item=None):
     emit({"type": "control_request", "request_id": f"permission-{number}", "request": {
         "subtype": "can_use_tool", "tool_name": tool,
         "input": {"file_path": str(project / "CLAUDE.md")} if input is None else input,
-        "tool_use_id": f"toolu_fixture_{number}", "permission_suggestions": []}})
+        "tool_use_id": f"toolu_fixture_{number if item is None else item}", "permission_suggestions": []}})
 
 def bash(number, **input):
     ask(number, "Bash", input)
+
+# This fixture checks SDK replies without executing any of these tools.
+YOLO_FLOW = [
+    ("Read", {"file_path": str(project / "CLAUDE.md")}),
+    ("Read", {"file_path": str(home / "state.db")}),
+    ("Edit", {"file_path": str(project / "deny.txt"), "old_string": "before", "new_string": "after"}),
+    ("Write", {"file_path": str(home / "outside.txt"), "content": "fixture"}),
+    ("Bash", {"command": "./fixture-task"}),
+    ("Bash", {"command": "git reset --hard"}),
+    ("Bash", {"command": "fixture --client-secret fixture", "run_in_background": True,
+              "dangerouslyDisableSandbox": True}),
+    ("mcp__foreign__secret_status", {"value": "Fixture"}),
+]
 
 FLOW = [
     ("Read", {"file_path": str(project / "CLAUDE.md"), "offset": 1, "limit": 10}),
@@ -184,15 +197,18 @@ def finish(text):
     emit({"type":"result", "subtype":"success", "is_error":False, "session_id":thread, "result":text})
 
 def direct_edit(tool, path, **fields):
-    ask("direct", tool, {"file_path": str(project / path), **fields})
+    ask(f"direct-{tool}", tool, {"file_path": str(project / path), **fields})
 
 
 def edit(number, path="edit.txt"):
     ask(number, "Edit", {"file_path": str(project / path), "old_string": "before", "new_string": "after"})
 
-def grep(number, pattern="Fixture"):
-    ask(number, "Grep", {"pattern": pattern, "path": str(project / "search"),
-                         "output_mode": "content", "-B": 2})
+def reviewed_read(number):
+    # Unknown scalar options are displayable but outside the automatic read policy.
+    ask(number, "Read", {"file_path": str(project / "CLAUDE.md"), "fixture_option": True})
+
+def reviewed_tool(number, value="Fixture", tool="mcp__foreign__secret_status"):
+    ask(number, tool, {"value": value})
 
 def mcp(method, call_id, params=None, *, authorization=None, status=200, timeout=4):
     payload = {"jsonrpc": "2.0", "id": call_id, "method": method, "params": params or {}}
@@ -439,7 +455,7 @@ for line in sys.stdin:
             emit({"type":"result", "subtype":"success", "is_error":False, "session_id":thread,
                   "result":"Claude member report"})
             break
-        elif reply["request_id"] == "permission-direct":
+        elif reply["request_id"] in ("permission-direct-Write", "permission-direct-Edit"):
             result = reply["response"]
             assert result["behavior"] == "allow", result
             update = result["updatedInput"]
@@ -463,14 +479,46 @@ for line in sys.stdin:
             # rm -rf x (15) is covered by the user's Any Bash grant; protected Git is denied.
             assert reply["response"]["behavior"] == ("allow" if index < 10 or index == 15 else "deny")
             flow_step(index + 1)
-        elif reply["request_id"] == "permission-yolo-protected":
-            assert reply["response"]["behavior"] == "deny"
-            finish("Protected Git reviewed")
-            break
+        elif reply["request_id"] == "permission-workspace-read":
+            if content == "Exercise relay replay" and relay_replaying:
+                assert reply["response"]["behavior"] == "deny", reply
+                ask("relay-tool-replay", item="workspace-read")
+            else:
+                assert reply["response"]["behavior"] == "allow", reply
+                if content != "Exercise relay replay":
+                    finish("Read allowed")
+                    continue
+                relay_replaying = True
+                ask("workspace-read", item="relay-new-item")
+        elif reply["request_id"] == "permission-relay-tool-replay":
+            assert reply["response"]["behavior"] == "deny", reply
+            ask("relay-fresh")
+        elif reply["request_id"] == "permission-relay-fresh":
+            assert reply["response"]["behavior"] == "allow", reply
+            finish("Relay replay denied")
+        elif reply["request_id"] == "permission-revoked-yolo":
+            assert reply["response"]["behavior"] == "deny", reply
+            finish("Revoked permission denied")
+        elif reply["request_id"] == "permission-yolo-replay":
+            assert reply["response"]["behavior"] == "deny", reply
+            ask("yolo-0", *YOLO_FLOW[0], item="yolo-new-item")
+        elif reply["request_id"] == "permission-yolo-0" and yolo_replaying:
+            assert reply["response"]["behavior"] == "deny", reply
+            finish("YOLO permissions verified")
+        elif reply["request_id"].startswith("permission-yolo-"):
+            index = int(reply["request_id"].rsplit("-", 1)[1])
+            tool, input = YOLO_FLOW[index]
+            assert reply["response"]["behavior"] == "allow", (tool, reply)
+            assert reply["response"]["updatedInput"] == input, reply
+            if index + 1 == len(YOLO_FLOW):
+                yolo_replaying = True
+                ask("yolo-replay", *YOLO_FLOW[0], item="yolo-0")
+            else:
+                ask(f"yolo-{index + 1}", *YOLO_FLOW[index + 1])
         elif reply["request_id"] == "permission-1":
             assert reply["response"]["behavior"] == "allow"
-            assert reply["response"]["updatedInput"] == {"file_path": str(project / "CLAUDE.md")}
-            ask(2, "Glob", {"pattern": "*.md", "path": str(project)})
+            assert reply["response"]["updatedInput"] == {"file_path": str(project / "CLAUDE.md"), "fixture_option": True}
+            ask(2, "Glob", {"pattern": "*.md", "path": str(project), "fixture_option": True})
         elif reply["request_id"] == "permission-2":
             assert reply["response"]["behavior"] == "deny"
             ask("outside", input={"file_path": str(home / "state.db")})
@@ -479,17 +527,17 @@ for line in sys.stdin:
             ask("shell", "Bash", {"command": "true", "run_in_background": True})
         elif reply["request_id"] == "permission-shell":
             assert reply["response"]["behavior"] == "deny"
-            grep(3)
+            reviewed_tool(3)
         elif reply["request_id"] == "permission-3":
             assert reply["response"]["behavior"] == "allow"
-            assert reply["response"]["updatedInput"]["path"] == str(project / "search")
+            assert reply["response"]["updatedInput"] == {"value": "Fixture"}
             edit("git", ".git/config")
-        elif reply["request_id"] in ("permission-grant-reused", "permission-grant-denied"):
+        elif reply["request_id"] in ("permission-grant-reused", "permission-grant-denied", "permission-outside-grep"):
             expected = "allow" if reply["request_id"] == "permission-grant-reused" else "deny"
             assert reply["response"]["behavior"] == expected, reply
             emit({"type": "result", "subtype": "success", "is_error": False,
                   "session_id": thread,
-                  "result": "Follow-up finished" if expected == "allow" else "Search denied"})
+                  "result": "Follow-up finished" if expected == "allow" else "Tool denied"})
             break
         elif reply["request_id"] == "permission-git":
             assert reply["response"]["behavior"] == "deny"
@@ -505,7 +553,7 @@ for line in sys.stdin:
             edit("missing", "missing.txt")
         elif reply["request_id"] == "permission-missing":
             assert reply["response"]["behavior"] == "deny"
-            ask("hold")
+            reviewed_read("hold")
         elif reply["request_id"] == "permission-hold":
             assert reply["response"]["behavior"] == "deny"
         else:
@@ -562,6 +610,30 @@ for line in sys.stdin:
         if isinstance(content, list):
             (home / "initial-blocks").write_text(json.dumps(content))
             content = "".join(b.get("text", "") for b in content if b["type"] == "text")
+        if content in ("Read workspace", "Exercise YOLO permissions", "Exercise relay replay", "Check revoked YOLO"):
+            persistent_turns += 1
+            if persistent_turns == 1:
+                emit({"type": "system", "subtype": "init", "session_id": thread,
+                      "model": "fixture-model",
+                      "tools": tools + ["mcp__deck-session__" + tool["name"] for tool in inventory]
+                               + ["mcp__foreign__secret_status"],
+                      "mcp_servers": [{"name": "deck-session", "status": "connected"},
+                                      {"name": "foreign", "status": "connected"}]})
+            else:
+                emit({"type": "user", "message": message["message"], "session_id": thread,
+                      "parent_tool_use_id": None, "uuid": initial_uuid, "isReplay": True})
+            if content == "Read workspace":
+                ask("workspace-read")
+            elif content == "Exercise YOLO permissions":
+                yolo_replaying = False
+                ask("yolo-0", *YOLO_FLOW[0])
+            elif content == "Exercise relay replay":
+                relay_replaying = False
+                ask("workspace-read")
+            else:
+                wait_for("release-yolo-permission")
+                ask("revoked-yolo")
+            continue
         if content.startswith("persistent-batch:"):
             persistent_turns += 1
             if persistent_turns == 1:
@@ -618,6 +690,10 @@ for line in sys.stdin:
                              + ([{"name":"deck-session", "status":"failed"}]
                                 if (home / "duplicate-deck-init").exists() else [])
                              + ([{"name":"foreign", "status":"connected"}] if extra_mcp else [])})
+        # The real SDK opens each text block before its deltas; the bridge maps it to text_start.
+        if not member:
+            emit({"type": "stream_event", "session_id": thread, "parent_tool_use_id": None,
+                  "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}})
         emit({"type": "stream_event", "session_id": thread, "parent_tool_use_id": None,
               "event": {"type": "content_block_delta", "delta": {"type": "text_delta",
                                                                  "text": "Partial"}}})
@@ -918,25 +994,24 @@ for line in sys.stdin:
             (project / "search" / "a.txt").write_text("One\nTwo\n")
             flow_step(0)
             continue
-        if content == "Protected Git in yolo":
-            bash("yolo-protected", command="git reset --hard")
-            continue
         if content == "Follow up":
-            grep("grant-reused")
+            reviewed_tool("grant-reused")
             continue
         if content == "Choose Any":
-            grep("grant-reused", "Select a workspace grant")
+            reviewed_tool("grant-reused", "Select a tool grant")
             continue
-        if content == "Search a different workspace file":
-            ask("grant-reused", "Grep", {"pattern": "Different pattern", "path": str(project / "CLAUDE.md"),
-                                       "output_mode": "content", "-B": 2})
+        if content == "Use the same tool with different arguments":
+            reviewed_tool("grant-reused", "Different argument")
             continue
         if content == "Search outside the workspace":
-            ask("grant-denied", "Grep", {"pattern": "Different pattern", "path": str(home / "state.db"),
+            ask("outside-grep", "Grep", {"pattern": "Different pattern", "path": str(home / "state.db"),
                                        "output_mode": "content", "-B": 2})
             continue
-        if content in ("Changed search", "Repeat search"):
-            grep("grant-denied", "Different pattern" if content == "Changed search" else "Fixture")
+        if content in ("Changed arguments", "Repeat tool call"):
+            reviewed_tool("grant-denied", "Different argument" if content == "Changed arguments" else "Fixture")
+            continue
+        if content == "Use a different tool":
+            reviewed_tool("grant-denied", "Fixture", "mcp__foreign__lookup_other")
             continue
         if message["message"]["content"] == "Direct workspace edits":
             assert trusted
@@ -946,7 +1021,7 @@ for line in sys.stdin:
             ask("untrusted-write", "Write", {"file_path": str(project / "untrusted.txt"), "content": "escaped"})
         else:
             assert trusted
-            ask(1)
+            reviewed_read(1)
 
 # Hold the live native group briefly after its broker dies. The restored
 # scheduler must wait through this interval, then ignore unreaped zombies.

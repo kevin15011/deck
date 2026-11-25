@@ -1,4 +1,4 @@
-//! Account observations are host-only reads; only explicit refresh starts a native account query.
+//! Account observations are host-only reads; native account queries run separately from snapshot reads.
 use crate::{
     Store,
     server::{App, problem},
@@ -21,6 +21,8 @@ pub(crate) struct Runtime {
 
 const CODEX: &str = "codex";
 const CLAUDE: &str = "claude";
+const AGY: &str = "agy";
+pub(crate) const AGY_REFRESH_KEY: &str = "quota:agy";
 
 // Original quota allowlist: account identifiers, credits and raw payloads never leave the host.
 pub(crate) fn snapshot(data: &Value, at: u64) -> Value {
@@ -115,6 +117,124 @@ fn claude_snapshot(data: &Value, at: u64) -> Result<Value, String> {
     Ok(snapshot)
 }
 
+fn parse_rfc3339_utc_ms(text: &str) -> Option<u64> {
+    let rest = text
+        .strip_suffix('Z')
+        .or_else(|| text.strip_suffix("+00:00"))?;
+    let (date, time) = rest.split_once('T')?;
+    let mut d = date.split('-');
+    let year: i64 = d.next()?.parse().ok()?;
+    let month: u32 = d.next()?.parse().ok()?;
+    let day: u32 = d.next()?.parse().ok()?;
+    if d.next().is_some()
+        || !(1970..=9999).contains(&year)
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+    {
+        return None;
+    }
+    let (hms, frac) = match time.split_once('.') {
+        Some((hms, frac)) => (hms, Some(frac)),
+        None => (time, None),
+    };
+    let mut t = hms.split(':');
+    let hour: u32 = t.next()?.parse().ok()?;
+    let min: u32 = t.next()?.parse().ok()?;
+    let sec: u32 = t.next()?.parse().ok()?;
+    if t.next().is_some() || hour > 23 || min > 59 || sec > 59 {
+        return None;
+    }
+    let ms: u64 = match frac {
+        None => 0,
+        Some(f) if !f.is_empty() && f.len() <= 9 && f.bytes().all(|b| b.is_ascii_digit()) => {
+            let mut padded = [b'0'; 3];
+            for (slot, b) in padded.iter_mut().zip(f.bytes()) {
+                *slot = b;
+            }
+            std::str::from_utf8(&padded).ok()?.parse().ok()?
+        }
+        Some(_) => return None,
+    };
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        _ => return None,
+    };
+    if day > max_day {
+        return None;
+    }
+    let y = year - i64::from(month <= 2);
+    let era = y.div_euclid(400);
+    let yoe = (y - era * 400) as u64;
+    let m = month as u64;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + u64::from(day) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe as i64 - 719_468;
+    if days < 0 {
+        return None;
+    }
+    let secs = (days as u64)
+        .checked_mul(86_400)?
+        .checked_add(u64::from(hour) * 3600 + u64::from(min) * 60 + u64::from(sec))?;
+    let total = secs.checked_mul(1000)?.checked_add(ms)?;
+    (1..=8_640_000_000_000_000)
+        .contains(&total)
+        .then_some(total)
+}
+
+// Allowlist only Antigravity's Gemini 5-hour and weekly quota windows; account
+// identifiers (email), paths, third-party buckets and raw payloads never leave the host.
+fn agy_snapshot(data: &Value, at: u64) -> Result<Value, String> {
+    let source = data["quota"]
+        .as_object()
+        .ok_or("Antigravity did not report subscription quota.")?;
+    let mut windows = Vec::new();
+    for (key, id) in [("gemini-5h", "five-hour"), ("gemini-weekly", "seven-day")] {
+        let Some(entry) = source.get(key) else {
+            continue;
+        };
+        if entry["disabled"] == true {
+            continue;
+        }
+        let Some(remaining) = entry["remaining_fraction"]
+            .as_f64()
+            .filter(|p| p.is_finite() && (0.0..=1.0).contains(p))
+        else {
+            continue;
+        };
+        let used = (((1.0 - remaining) * 1000.0).round() / 10.0).clamp(0.0, 100.0);
+        let used = if used == 0.0 { 0.0 } else { used };
+        let mut window = json!({"id":id,"usedPercent":used});
+        let reset = entry["reset_time"]
+            .as_str()
+            .and_then(parse_rfc3339_utc_ms)
+            .or_else(|| {
+                entry["reset_in_seconds"]
+                    .as_u64()
+                    .filter(|secs| *secs > 0)
+                    .and_then(|secs| secs.checked_mul(1000))
+                    .and_then(|ms| at.checked_add(ms))
+                    .filter(|ms| (1..=8_640_000_000_000_000).contains(ms))
+            });
+        if let Some(reset) = reset {
+            window["resetsAt"] = json!(reset);
+        }
+        windows.push(window);
+    }
+    if windows.is_empty() {
+        return Err("Antigravity did not report subscription quota.".into());
+    }
+    Ok(json!({"runnerId":AGY,"updatedAt":at,"windows":windows}))
+}
+
 impl Store {
     fn quota(&self, runner: &str) -> Result<Option<Value>, String> {
         let text: Option<String> = self
@@ -136,10 +256,10 @@ impl Store {
 }
 impl App {
     fn quota_runtime(&self, runner: &str) -> &std::sync::Mutex<Runtime> {
-        if runner == CLAUDE {
-            &self.claude_quota_runtime
-        } else {
-            &self.quota_runtime
+        match runner {
+            CLAUDE => &self.claude_quota_runtime,
+            AGY => &self.agy_quota_runtime,
+            _ => &self.quota_runtime,
         }
     }
 
@@ -160,11 +280,17 @@ impl App {
         self.claude_quota_runtime.lock().unwrap().error = None;
         Ok(())
     }
+    pub(crate) fn observe_agy_quota(&self, data: &Value) -> Result<(), String> {
+        let snapshot = agy_snapshot(data, crate::now())?;
+        self.store.lock().unwrap().save_quota(AGY, &snapshot)?;
+        self.agy_quota_runtime.lock().unwrap().error = None;
+        Ok(())
+    }
 
     fn quota_state(&self) -> Value {
         let store = self.store.lock().unwrap();
         let mut runners = json!({});
-        for runner in [CODEX, CLAUDE] {
+        for runner in [CODEX, CLAUDE, AGY] {
             let runtime = self.quota_runtime(runner).lock().unwrap();
             let mut view =
                 json!({"refreshAfter":runtime.after,"refreshing":runtime.busy,"supported":true});
@@ -192,6 +318,7 @@ pub(crate) async fn refresh(State(app): State<App>, Path(runner): Path<String>) 
     let runner = match runner.as_str() {
         CODEX => CODEX,
         CLAUDE => CLAUDE,
+        AGY => AGY,
         _ => {
             return problem(
                 StatusCode::BAD_REQUEST,
@@ -200,12 +327,43 @@ pub(crate) async fn refresh(State(app): State<App>, Path(runner): Path<String>) 
             );
         }
     };
+    // The request can disconnect without dropping native process ownership.
+    match tokio::spawn(run_refresh(app.clone(), runner)).await {
+        Ok(Ok(())) => Json(json!({"ok":true,"state":app.quota_state()})).into_response(),
+        Ok(Err(RefreshError::Unavailable(error))) => {
+            problem(StatusCode::CONFLICT, "quota-unavailable", error)
+        }
+        outcome => problem(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "quota-refresh-failed",
+            match outcome {
+                Ok(Err(RefreshError::Failed(error))) => error,
+                _ => "Could not refresh quota.".into(),
+            },
+        ),
+    }
+}
+
+pub(crate) fn refresh_agy_after_turn(app: App) {
+    // Admission and the probe both run off the Lead settlement path.
+    tokio::spawn(run_refresh(app, AGY));
+}
+
+enum RefreshError {
+    Unavailable(String),
+    Failed(String),
+}
+
+async fn run_refresh(app: App, runner: &'static str) -> Result<(), RefreshError> {
     // Match native admission's active -> Store -> auth lock order. Selection and
     // its digest are bound while exclusive operations cannot enter this host.
-    let admission = (|| -> Result<_, String> {
+    let (binary, reservation, cancel) = (|| -> Result<_, String> {
         let mut active = app.active.lock().unwrap();
         let store = app.store.lock().unwrap();
-        if !app.persistence_available()
+        if app
+            .shutdown_requested
+            .load(std::sync::atomic::Ordering::Acquire)
+            || !app.persistence_available()
             || store.runner_busy()?
             || active
                 .keys()
@@ -239,7 +397,7 @@ pub(crate) async fn refresh(State(app): State<App>, Path(runner): Path<String>) 
         // A separate shared file belongs to this query, so another host's
         // exclusive admission cannot enter until its child group is reaped.
         let scope = app.scope_lock(false)?;
-        let (tx, _rx) = tokio::sync::watch::channel(false);
+        let (tx, cancel) = tokio::sync::watch::channel(false);
         active.insert(active_key(runner).into(), tx);
         runtime.after = crate::now() + 60_000;
         runtime.busy = true;
@@ -252,54 +410,51 @@ pub(crate) async fn refresh(State(app): State<App>, Path(runner): Path<String>) 
                 #[cfg(test)]
                 before_clear: None,
             }),
+            cancel,
         ))
-    })();
-    let (binary, reservation) = match admission {
-        Ok(a) => a,
-        Err(e) => return problem(StatusCode::CONFLICT, "quota-unavailable", e),
-    };
-    // Own the effect independently of HTTP cancellation; always settle the process and busy state.
-    let owned = app.clone();
-    let result = tokio::spawn(async move {
-        let result = if let Some(binary) = binary {
-            native_refresh(&binary, Some(reservation.clone()))
-                .await
-                .and_then(|data| {
-                    owned
-                        .store
-                        .lock()
-                        .unwrap()
-                        .save_quota(CODEX, &snapshot(&data, crate::now()))
+    })()
+    .map_err(RefreshError::Unavailable)?;
+    let result = match runner {
+        CODEX => native_refresh(&binary.expect("codex binary"), Some(reservation.clone()))
+            .await
+            .and_then(|data| {
+                app.store
+                    .lock()
+                    .unwrap()
+                    .save_quota(CODEX, &snapshot(&data, crate::now()))
+            })
+            .map_err(|_| "Could not refresh Codex quota. Previous snapshot kept.".into()),
+        CLAUDE => crate::native::PROBE_RESERVATION
+            .scope(reservation.clone(), crate::claude::read_quota())
+            .await
+            .and_then(|data| app.observe_claude_quota(&data)),
+        AGY => {
+            #[cfg(test)]
+            let override_binary = app.agy_binary.lock().unwrap().clone();
+            #[cfg(not(test))]
+            let override_binary: Option<std::path::PathBuf> = None;
+            let fetched = crate::native::PROBE_RESERVATION
+                .scope(reservation.clone(), async {
+                    if let Some(binary) = override_binary {
+                        crate::agy_readiness::read_quota_from(&binary, cancel).await
+                    } else {
+                        crate::agy_readiness::read_quota(cancel).await
+                    }
                 })
-                .map_err(|_| "Could not refresh Codex quota. Previous snapshot kept.".into())
-        } else {
-            crate::native::PROBE_RESERVATION
-                .scope(reservation.clone(), crate::claude::read_quota())
-                .await
-                .and_then(|data| owned.observe_claude_quota(&data))
-        };
-        owned.quota_runtime(runner).lock().unwrap().error = result.as_ref().err().cloned();
-        drop(reservation);
-        result
-    })
-    .await;
-    match result {
-        Ok(Ok(())) => Json(json!({"ok":true,"state":app.quota_state()})).into_response(),
-        outcome => problem(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "quota-refresh-failed",
-            outcome
-                .ok()
-                .and_then(Result::err)
-                .unwrap_or_else(|| "Could not refresh quota.".into()),
-        ),
-    }
+                .await;
+            fetched.and_then(|data| app.observe_agy_quota(&data))
+        }
+        _ => unreachable!(),
+    };
+    app.quota_runtime(runner).lock().unwrap().error = result.as_ref().err().cloned();
+    drop(reservation);
+    result.map_err(RefreshError::Failed)
 }
 fn active_key(runner: &str) -> &'static str {
-    if runner == CLAUDE {
-        "claude-quota-refresh"
-    } else {
-        "quota-refresh"
+    match runner {
+        CLAUDE => "quota:claude",
+        AGY => AGY_REFRESH_KEY,
+        _ => "quota:codex",
     }
 }
 // The worker and Native's detached reaper share ownership. Only the last
@@ -348,6 +503,23 @@ async fn native_refresh(
 mod tests {
     use super::*;
     #[test]
+    fn quota_worker_keys_are_rejected_by_command_admission() {
+        for runner in [CODEX, CLAUDE, AGY] {
+            let mut store = Store::open_memory("/fixture").unwrap();
+            let mut command = deck2_shared::Submit {
+                api: deck2_shared::API,
+                id: active_key(runner).into(),
+                prompt: "ordinary command".into(),
+                mode: deck2_shared::Mode::ReadOnly,
+                attachments: Vec::new(),
+            };
+            assert!(store.accept(&command).is_err(), "{runner}");
+            command.id = command.id.replace(':', "-");
+            assert!(store.accept(&command).is_ok(), "{runner}");
+        }
+    }
+
+    #[test]
     fn quota_allowlist_and_persistence() {
         let s = Store::open_memory("/fixture").unwrap();
         let value = snapshot(
@@ -361,6 +533,70 @@ mod tests {
         assert!(value.get("credits").is_none());
         s.save_quota(CODEX, &value).unwrap();
         assert_eq!(s.quota(CODEX).unwrap(), Some(value));
+    }
+
+    #[test]
+    fn agy_quota_allowlist_only_five_hour_and_weekly() {
+        let s = Store::open_memory("/fixture").unwrap();
+        let value = agy_snapshot(
+            &json!({
+                "email": "private@example.com",
+                "cwd": "/secret/path",
+                "plan_tier": "PrivateAccountToken123",
+                "quota": {
+                    "gemini-5h": {
+                        "remaining_fraction": 0.9501591,
+                        "reset_time": "2026-11-25T17:59:06Z",
+                        "reset_in_seconds": 133
+                    },
+                    "gemini-weekly": {
+                        "remaining_fraction": 0.83336884,
+                        "reset_in_seconds": 512491
+                    },
+                    "3p-5h": {
+                        "remaining_fraction": 0.25,
+                        "reset_in_seconds": 3600
+                    },
+                    "3p-weekly": {
+                        "remaining_fraction": 0.50,
+                        "reset_in_seconds": 86400
+                    }
+                }
+            }),
+            1_700_000_000_000,
+        )
+        .unwrap();
+        assert_eq!(value["runnerId"], "agy");
+        assert!(value.get("plan").is_none());
+        let windows = value["windows"].as_array().unwrap();
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0]["id"], "five-hour");
+        assert_eq!(windows[0]["usedPercent"], 5.0);
+        assert_eq!(windows[0]["resetsAt"], 1_795_629_546_000u64);
+        assert_eq!(windows[1]["id"], "seven-day");
+        assert_eq!(windows[1]["usedPercent"], 16.7);
+        assert_eq!(windows[1]["resetsAt"], 1_700_512_491_000u64);
+        let serialized = value.to_string();
+        assert!(!serialized.contains("private@example.com"));
+        assert!(!serialized.contains("/secret/path"));
+        assert!(!serialized.contains("3p-"));
+        s.save_quota(AGY, &value).unwrap();
+        assert_eq!(s.quota(AGY).unwrap(), Some(value));
+    }
+
+    #[test]
+    fn agy_quota_rejects_empty_or_only_third_party() {
+        let err = agy_snapshot(
+            &json!({
+                "quota": {
+                    "3p-5h": {"remaining_fraction": 1.0},
+                    "gemini-5h": {"remaining_fraction": 0.5, "disabled": true}
+                }
+            }),
+            1_700_000_000_000,
+        )
+        .unwrap_err();
+        assert!(err.contains("Antigravity"));
     }
 }
 
@@ -403,10 +639,7 @@ for line in sys.stdin:
         );
         *app.scope_root.lock().unwrap() = Some(dir.path().join("scopes"));
         let (tx, _) = tokio::sync::watch::channel(false);
-        app.active
-            .lock()
-            .unwrap()
-            .insert("quota-refresh".into(), tx);
+        app.active.lock().unwrap().insert("quota:codex".into(), tx);
         // Zero is an injected expired cooldown, no wall-clock wait required.
         app.quota_runtime.lock().unwrap().busy = true;
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
@@ -479,7 +712,7 @@ for line in sys.stdin:
             deck2_shared::Phase::Queued,
             "scheduler must respect the new query owner"
         );
-        assert!(app.active.lock().unwrap().contains_key("quota-refresh"));
+        assert!(app.active.lock().unwrap().contains_key("quota:codex"));
         assert!(app.quota_runtime.lock().unwrap().busy);
         assert!(
             app.scope_lock(true).is_err(),
@@ -561,7 +794,7 @@ for line in sys.stdin:
                 },
                 "{failure}"
             );
-            assert!(!app.active.lock().unwrap().contains_key("quota-refresh"));
+            assert!(!app.active.lock().unwrap().contains_key("quota:codex"));
             assert!(!app.quota_runtime.lock().unwrap().busy);
             assert!(app.scope_lock(true).is_ok());
             if failure != "compatible" {
@@ -609,5 +842,157 @@ for line in sys.stdin:
             !std::path::Path::new(&cwd).exists(),
             "isolated query directory must settle"
         );
+    }
+
+    #[tokio::test]
+    async fn agy_quota_admission_skips_busy_and_cooldown_independently() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = App::new(
+            Store::open_memory("/fixture").unwrap(),
+            "127.0.0.1:12346".into(),
+            dir.path().join("codex-unused"),
+            None,
+            "a".into(),
+            "r".into(),
+        );
+        *app.scope_root.lock().unwrap() = Some(dir.path().join("scopes"));
+        *app.agy_binary.lock().unwrap() = Some(dir.path().join("unavailable-agy"));
+        for (busy, after) in [(true, 0), (false, crate::now() + 60_000)] {
+            {
+                let mut runtime = app.agy_quota_runtime.lock().unwrap();
+                runtime.busy = busy;
+                runtime.after = after;
+            }
+            assert!(matches!(
+                run_refresh(app.clone(), AGY).await,
+                Err(RefreshError::Unavailable(_))
+            ));
+            let runtime = app.agy_quota_runtime.lock().unwrap();
+            assert_eq!((runtime.busy, runtime.after), (busy, after));
+            assert!(runtime.error.is_none());
+        }
+        assert!(app.active.lock().unwrap().is_empty());
+    }
+
+    // Protects Antigravity quota refresh: uses documented --settings statusLine
+    // on a PTY, persists only allowlisted 5h/weekly windows, strips PII and 3p
+    // buckets, enforces cooldown and reaps the child group cleanly.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn agy_refresh_persists_five_hour_and_weekly_and_settles_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("agy");
+        std::fs::write(
+            &binary,
+            r#"#!/usr/bin/env python3
+import json, os, subprocess, sys, time
+assert os.isatty(0) and os.isatty(1), "agy statusLine requires a TTY"
+assert "--settings" in sys.argv, sys.argv
+settings_path = sys.argv[sys.argv.index("--settings") + 1]
+with open(settings_path) as f:
+    settings = json.load(f)
+cmd = settings["statusLine"]["command"]
+payload = {
+    "email": "private-agy@example.com",
+    "plan_tier": "Pro",
+    "quota": {
+        "gemini-5h": {
+            "remaining_fraction": 0.92,
+            "reset_time": "2026-11-25T20:00:00Z",
+            "reset_in_seconds": 3600,
+        },
+        "gemini-weekly": {
+            "remaining_fraction": 0.815,
+            "reset_time": "2026-12-01T16:18:24Z",
+            "reset_in_seconds": 512491,
+        },
+        "3p-5h": {"remaining_fraction": 0.5},
+        "3p-weekly": {"remaining_fraction": 0.4},
+    },
+}
+subprocess.run(["/bin/sh", "-c", cmd], input=json.dumps(payload).encode(), check=True)
+# Stay alive like the interactive TUI until Deck terminates the process group.
+time.sleep(30)
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let app = App::new(
+            Store::open_memory("/fixture").unwrap(),
+            "127.0.0.1:12346".into(),
+            dir.path().join("codex-unused"),
+            None,
+            "a".into(),
+            "r".into(),
+        );
+        *app.scope_root.lock().unwrap() = Some(dir.path().join("scopes"));
+        *app.agy_binary.lock().unwrap() = Some(binary);
+
+        let response = refresh(State(app.clone()), Path("agy".into())).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(!app.active.lock().unwrap().contains_key("quota:agy"));
+        assert!(!app.agy_quota_runtime.lock().unwrap().busy);
+        assert!(app.scope_lock(true).is_ok());
+
+        let saved = app.store.lock().unwrap().quota(AGY).unwrap().unwrap();
+        assert_eq!(saved["runnerId"], "agy");
+        assert!(saved.get("plan").is_none());
+        let windows = saved["windows"].as_array().unwrap();
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0]["id"], "five-hour");
+        assert_eq!(windows[0]["usedPercent"], 8.0);
+        assert_eq!(windows[1]["id"], "seven-day");
+        assert_eq!(windows[1]["usedPercent"], 18.5);
+        assert!(!saved.to_string().contains("private-agy@example.com"));
+        assert!(!saved.to_string().contains("3p-"));
+
+        // Independent cooldown rejects an immediate second refresh.
+        let cooldown = refresh(State(app.clone()), Path("agy".into())).await;
+        assert_eq!(cooldown.status(), StatusCode::CONFLICT);
+
+        app.agy_quota_runtime.lock().unwrap().after = 0;
+        let fault = std::sync::Arc::new(crate::native::ProbeCleanupFault {
+            unsettled: true.into(),
+            reached: Default::default(),
+            pause: false,
+            help_only: false,
+        });
+        let worker = tokio::spawn(
+            crate::native::PROBE_CLEANUP_FAULT.scope(fault.clone(), run_refresh(app.clone(), AGY)),
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(3), fault.reached.notified())
+            .await
+            .expect("the quota reaper must report the injected failure");
+        assert!(app.active.lock().unwrap().contains_key(active_key(AGY)));
+        assert!(app.agy_quota_runtime.lock().unwrap().busy);
+        assert!(app.scope_lock(true).is_err());
+        assert_eq!(
+            app.store.lock().unwrap().quota(AGY).unwrap().unwrap(),
+            saved
+        );
+        worker.abort();
+        assert!(matches!(worker.await, Err(error) if error.is_cancelled()));
+        assert!(app.active.lock().unwrap().contains_key(active_key(AGY)));
+        assert!(app.scope_lock(true).is_err());
+        fault
+            .unsettled
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while app.agy_quota_runtime.lock().unwrap().busy {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(app.scope_lock(true).is_ok());
+        assert!(!app.active.lock().unwrap().contains_key(active_key(AGY)));
+
+        app.agy_quota_runtime.lock().unwrap().after = 0;
+        *app.agy_binary.lock().unwrap() = Some(dir.path().join("unavailable-agy"));
+        let unavailable = refresh(State(app.clone()), Path("agy".into())).await;
+        assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let view = app.quota_state();
+        assert!(view["runners"][AGY]["error"].is_string());
+        assert_eq!(view["runners"][AGY]["refreshing"], false);
+        assert_eq!(view["runners"][AGY]["snapshot"], saved);
     }
 }

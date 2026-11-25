@@ -135,6 +135,44 @@ pub(crate) fn observe_claude(
     state.compacting = None;
 }
 
+/// ACP reports window occupancy, independently of the prompt result's billing counters.
+pub(crate) fn observe_agy(
+    state: &mut ContextState,
+    event: &Value,
+    thread: &str,
+    turn: &str,
+    attempt: &str,
+    model: Option<&str>,
+) {
+    let count = |value: &Value| value.as_u64().filter(|n| *n <= 9_007_199_254_740_991);
+    let update = &event["params"]["update"];
+    if event["method"] != "session/update"
+        || event["params"]["sessionId"] != thread
+        || update["sessionUpdate"] != "usage_update"
+    {
+        return;
+    }
+    let (Some(tokens), Some(capacity)) = (
+        count(&update["used"]),
+        count(&update["size"]).filter(|n| *n > 0),
+    ) else {
+        return;
+    };
+    *state = ContextState {
+        observation: Some(deck2_shared::ContextReading {
+            basis: "agy-acp-usage".into(),
+            tokens: Some(tokens),
+            capacity: Some(capacity),
+            native_thread_id: thread.into(),
+            native_turn_id: turn.into(),
+            attempt: attempt.into(),
+            model_id: model.map(str::to_owned),
+            observed_ms: crate::now(),
+        }),
+        ..Default::default()
+    };
+}
+
 /// Progressive transcript reads are exact session/task/attempt reads, never report retrieval/integration.
 pub(crate) async fn transcript(
     axum::extract::State(app): axum::extract::State<crate::server::App>,
@@ -419,14 +457,25 @@ mod tests {
     // getContextUsage contract (integer totalTokens, positive rawMaxTokens, exact session).
     #[test]
     fn claude_reading_requires_complete_exact_data_and_latest_wins() {
-        let frame = |tokens: Value, capacity: Value, session: &str| {
-            json!({"type":"context","session_id":session,"tokens":tokens,"capacity":capacity,"model":"m"})
-        };
+        let frame = |tokens: Value, capacity: Value, session: &str| json!({"type":"context","session_id":session,"tokens":tokens,"capacity":capacity,"model":"m"});
         let mut c = ContextState::default();
-        observe_claude(&mut c, &frame(json!(40000), json!(200000), "thread"), "thread", "turn", "attempt", None);
+        observe_claude(
+            &mut c,
+            &frame(json!(40000), json!(200000), "thread"),
+            "thread",
+            "turn",
+            "attempt",
+            None,
+        );
         let good = c.observation.clone().unwrap();
-        assert_eq!((good.basis.as_str(), good.tokens, good.capacity), ("claude-context-usage", Some(40000), Some(200000)));
-        assert_eq!((good.native_turn_id.as_str(), good.model_id.as_deref()), ("turn", Some("m")));
+        assert_eq!(
+            (good.basis.as_str(), good.tokens, good.capacity),
+            ("claude-context-usage", Some(40000), Some(200000))
+        );
+        assert_eq!(
+            (good.native_turn_id.as_str(), good.model_id.as_deref()),
+            ("turn", Some("m"))
+        );
         for bad in [
             frame(json!(null), json!(200000), "thread"),
             frame(json!(-1), json!(200000), "thread"),
@@ -437,20 +486,63 @@ mod tests {
             assert_eq!(c.observation.as_ref(), Some(&good));
         }
         // A missing or invalid window keeps valid tokens and leaves capacity unknown.
-        for window in [json!(null), json!(0), json!("200000"), json!(9_007_199_254_740_992u64)] {
+        for window in [
+            json!(null),
+            json!(0),
+            json!("200000"),
+            json!(9_007_199_254_740_992u64),
+        ] {
             let mut t = ContextState::default();
-            observe_claude(&mut t, &frame(json!(7), window, "thread"), "thread", "turn", "attempt", None);
+            observe_claude(
+                &mut t,
+                &frame(json!(7), window, "thread"),
+                "thread",
+                "turn",
+                "attempt",
+                None,
+            );
             let r = t.observation.unwrap();
             assert_eq!((r.tokens, r.capacity), (Some(7), None));
         }
-        observe_claude(&mut c, &json!({"type":"context_reset","session_id":"foreign"}), "thread", "turn", "attempt", None);
+        observe_claude(
+            &mut c,
+            &json!({"type":"context_reset","session_id":"foreign"}),
+            "thread",
+            "turn",
+            "attempt",
+            None,
+        );
         assert_eq!(c.observation.as_ref(), Some(&good));
-        observe_claude(&mut c, &frame(json!(1), json!(200000), "thread"), "thread", "", "attempt", None);
+        observe_claude(
+            &mut c,
+            &frame(json!(1), json!(200000), "thread"),
+            "thread",
+            "",
+            "attempt",
+            None,
+        );
         assert_eq!(c.observation.as_ref(), Some(&good));
-        observe_claude(&mut c, &json!({"type":"context_reset","session_id":"thread"}), "thread", "turn", "attempt", None);
+        observe_claude(
+            &mut c,
+            &json!({"type":"context_reset","session_id":"thread"}),
+            "thread",
+            "turn",
+            "attempt",
+            None,
+        );
         assert!(c.observation.is_none());
         c.compacted = true;
-        observe_claude(&mut c, &frame(json!(9000), json!(200000), "thread"), "thread", "turn", "attempt", None);
-        assert_eq!((c.observation.unwrap().tokens, c.compacted), (Some(9000), false));
+        observe_claude(
+            &mut c,
+            &frame(json!(9000), json!(200000), "thread"),
+            "thread",
+            "turn",
+            "attempt",
+            None,
+        );
+        assert_eq!(
+            (c.observation.unwrap().tokens, c.compacted),
+            (Some(9000), false)
+        );
     }
 }

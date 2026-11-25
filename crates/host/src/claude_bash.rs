@@ -115,7 +115,7 @@ impl<'a> Decisions<'a> {
                 async {
                     let args = args?;
                     if mcp {
-                        bridge.approve_claude_mcp(app, &args).await
+                        bridge.approve_claude_mcp(app, &args, bash_project).await
                     } else {
                         let project = bash_project.ok_or("Bash permission requires a trusted project")?;
                         bridge.approve_claude_bash(app, project, &args).await

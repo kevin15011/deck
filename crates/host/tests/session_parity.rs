@@ -611,3 +611,94 @@ async fn reasoning_default_config_and_explicit_precedence() {
         );
     }
 }
+
+#[tokio::test]
+async fn antigravity_retains_native_context_with_a_live_session_bridge() {
+    use deck2_shared::{Phase, ScopedSubmit};
+    use std::{os::unix::fs::PermissionsExt, path::PathBuf};
+
+    const NAME: &str = "antigravity_retains_native_context_with_a_live_session_bridge";
+    let Some(dir) = std::env::var_os("DECK2_AGY_PARITY_FIXTURE").map(PathBuf::from) else {
+        let fixture = tempfile::tempdir().unwrap();
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(25),
+            tokio::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", NAME, "--nocapture"])
+                .env("DECK2_AGY_PARITY_FIXTURE", fixture.path())
+                .env("HOME", fixture.path())
+                .env("PATH", format!("{}:/usr/bin", fixture.path().display()))
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+            std::fs::read_to_string(fixture.path().join("fixture-errors")).unwrap_or_default(),
+        );
+        return;
+    };
+    let project = dir.join("project");
+    std::fs::create_dir(&project).unwrap();
+    let binary = dir.join("agy");
+    std::fs::write(&binary, include_str!("fake_agy_acp.py")).unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut store = Store::open(&dir.join("state.db"), project.to_str().unwrap()).unwrap();
+    store.set_trust(project.to_str().unwrap(), true).unwrap();
+    let command: SessionCommand = serde_json::from_value(json!({
+        "api":API,"id":"agy-parity-session","title":"Antigravity parity",
+        "members":{"lead":{"runnerId":"agy","modelId":"gemini-3.8-flash","thinking":"low"}},
+    }))
+    .unwrap();
+    store.create_session(&command).unwrap();
+    let app = deck2::server::App::new(
+        store,
+        "127.0.0.1:32132".into(),
+        binary.clone(),
+        None,
+        "admin".into(),
+        "recover".into(),
+    );
+    for id in ["agy-parity-first", "agy-parity-second"] {
+        let submit: ScopedSubmit = serde_json::from_value(json!({
+            "api":API,"id":id,"session":command.id,"mode":"session_v1","prompt":"parity-message",
+        }))
+        .unwrap();
+        app.store.lock().unwrap().admit(&submit).unwrap();
+        let (_cancel, receiver) = tokio::sync::watch::channel(false);
+        deck2::native::run(app.clone(), id.into(), binary.clone(), receiver).await;
+        let receipt = app.receipt(id).unwrap();
+        // The fixture calls the real Deck MCP on both turns before responding.
+        assert_eq!(receipt.phase, Phase::Completed, "{}", receipt.detail);
+        assert_eq!(receipt.context.observation.unwrap().tokens, Some(42000));
+        if id == "agy-parity-first" {
+            let config: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(dir.join("previous-parity-credential")).unwrap(),
+            )
+            .unwrap();
+            let result = reqwest::Client::new()
+                .post(config["url"].as_str().unwrap())
+                .header(
+                    "authorization",
+                    config["headers"][0]["value"].as_str().unwrap(),
+                )
+                .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}))
+                .timeout(std::time::Duration::from_secs(2))
+                .send()
+                .await;
+            assert!(!result.is_ok_and(|response| response.status().is_success()));
+        }
+    }
+    let first = app.receipt("agy-parity-first").unwrap();
+    let second = app.receipt("agy-parity-second").unwrap();
+    assert_eq!(first.thread, second.thread);
+    assert_ne!(first.native_pid, second.native_pid);
+    assert_eq!(first.text, "finished");
+    assert_eq!(second.text, "finished");
+    assert_ne!(first.turn, second.turn);
+    app.retire_native().await.unwrap();
+}

@@ -626,7 +626,41 @@ async fn run(app: &App, task: &str, attempt: &str) -> Result<(), String> {
         crate::member_integration::Integration::Codex=>crate::codex_member::run(app,task,attempt).await,
         crate::member_integration::Integration::OpenCode=>crate::connected_opencode::execution::member(app,task,attempt).await,
         crate::member_integration::Integration::Claude=>crate::claude::member::run(app,task,attempt).await,
+        crate::member_integration::Integration::Agy=>crate::agy::member::run(app,task,attempt).await,
     }
+}
+
+// The report and the deterministic outcome receipt commit together so a host
+// loss cannot strand a published report between settlement and notification.
+pub(crate) fn save_member_settlement(store: &mut Store, task: &Task, attempt: &str) -> Result<(), String> {
+    store
+        .conn
+        .execute_batch("SAVEPOINT member_settlement")
+        .map_err(|_| "Cannot begin member settlement")?;
+    let result = (|| {
+        store.save_normal_task(task)?;
+        if let Err(error) = store.enqueue_task_outcome(&task.id, attempt) {
+            let mut task = task.clone();
+            let a = task
+                .attempts
+                .iter_mut()
+                .find(|a| a.id == attempt)
+                .ok_or("Member attempt missing")?;
+            a.detail
+                .push_str(&format!(" Lead continuation unavailable: {error}"));
+            store.save_normal_task(&task)?;
+        }
+        store
+            .conn
+            .execute_batch("RELEASE member_settlement")
+            .map_err(|_| "Cannot commit member settlement".into())
+    })();
+    if result.is_err() {
+        let _ = store.conn.execute_batch(
+            "ROLLBACK TO member_settlement; RELEASE member_settlement",
+        );
+    }
+    result
 }
 
 pub(crate) async fn cancelled(app:&App,task:&str,attempt:&str) {
@@ -1030,7 +1064,7 @@ impl Store {
             return Ok(());
         }
         if crate::member_integration::Integration::for_attempt(&t, a)
-            .is_ok_and(|integration| integration == crate::member_integration::Integration::Claude)
+            .is_ok_and(|integration| matches!(integration, crate::member_integration::Integration::Claude | crate::member_integration::Integration::Agy))
             && validate_authority(self, &t, a).is_err()
         {
             return Ok(());

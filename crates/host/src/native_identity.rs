@@ -67,6 +67,7 @@ pub(crate) fn validate_binding(b: &NativeBinding) -> Result<(), String> {
         NativeRunner::Codex => "app-server",
         NativeRunner::Opencode => "http-sse",
         NativeRunner::Claude => "stream-json",
+        NativeRunner::Agy => "acp",
     };
     if b.protocol != protocol
         || b.version.is_empty()
@@ -124,6 +125,13 @@ pub(crate) fn inspect(conn: &Connection) -> Result<(), String> {
             {
                 return Err("OpenCode storage identity missing or invalid".into());
             }
+            if runner == NativeRunner::Agy
+                && (n.mode != deck2_shared::Mode::SessionV1 || !crate::agy::valid_id(&n.thread, 200)
+                    || n.provenance.as_ref().is_none_or(|p| p.runner != crate::agy::RUNNER
+                        || !digest(&p.executable) || !digest(&p.storage) || !digest(&p.content)))
+            {
+                return Err("Antigravity context identity missing or invalid".into());
+            }
             if s.original.is_some()
                 && s.original_generation == s.contract.as_ref().map(|c| c.generation)
                 && runner != NativeRunner::Codex
@@ -144,12 +152,14 @@ pub(crate) fn inspect(conn: &Connection) -> Result<(), String> {
                     Some(NativeTransport::DeckMcp) if n.method == "deck/approve" => {}
                     Some(NativeTransport::ClaudeSdk)
                         if n.method == crate::claude::approval::METHOD => {}
+                    Some(NativeTransport::AgyAcp) if n.method == crate::agy_approval::METHOD => {}
                     Some(NativeTransport::OpencodeHttp)
                         if matches!(n.method.as_str(), "permission.asked" | "question.asked") => {}
                     // Unknown legacy methods stay unknown, never acquire a transport.
                     None if !crate::codex_protocol::native_method(&n.method)
                         && n.method != "deck/approve"
-                        && n.method != crate::claude::approval::METHOD => {}
+                        && n.method != crate::claude::approval::METHOD
+                        && n.method != crate::agy_approval::METHOD => {}
                     _ => return Err("Native decision transport mismatch".into()),
                 }
             }

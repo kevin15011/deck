@@ -1078,6 +1078,16 @@ async fn claude_sdk_lead_coordinates_with_codex() {
     run_sdk_case(dir.path(), "coordination").await;
 }
 
+#[tokio::test]
+async fn claude_sdk_lead_yolo_permissions_and_process_reuse() {
+    if !BRIDGE.is_empty() {
+        let dir = sdk_entrypoint_fixture();
+        run_sdk_case(dir.path(), "yolo-permissions").await;
+        let untrusted = sdk_entrypoint_fixture();
+        run_sdk_case(untrusted.path(), "untrusted-yolo").await;
+    }
+}
+
 // The real router, SDK bundle and receipt/queue store run with a fake native
 // process. Assert prompt separation across attempts and actual stream identity.
 #[tokio::test]
@@ -1164,7 +1174,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         let followup = wait_for(&host, SECOND, |r| r.phase == Phase::Completed).await;
         assert_eq!(followup.thread, previous.thread);
         assert_eq!(answer_text(&followup), "Follow-up finished");
-        assert_reused_grep(&previous, &followup);
+        assert_reused_tool_grant(&previous, &followup);
         let retained = host.receipt(FIRST).unwrap();
         assert_eq!(retained.phase, Phase::Failed);
         assert!(retained.detail.contains("without a confirmed result"));
@@ -1175,8 +1185,9 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     host.store
         .lock()
         .unwrap()
-        .select_project_folder_with_trust(host.project.as_str(), true)
+        .select_project_folder_with_trust(host.project.as_str(), action != "untrusted-yolo")
         .unwrap();
+    std::fs::write(dir.join("unexpected-mcp"), "").unwrap();
     let browser = Browser::open(&host).await;
     let inventory = browser.request("GET", "/api/models", Value::Null).await;
     assert_eq!(inventory["runners"][2]["available"], true, "{inventory}");
@@ -1201,8 +1212,122 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
             }),
         )
         .await;
-    // Exercise the persisted read-review lifecycle in the mode that still uses it.
-    host.store.lock().unwrap().set_approvals(SESSION, "yolo").unwrap();
+    if action == "untrusted-yolo" {
+        host.store
+            .lock()
+            .unwrap()
+            .set_approvals(SESSION, "yolo")
+            .unwrap();
+        assert_new_tool_review(
+            &host,
+            &browser,
+            SESSION,
+            "untrusted-mcp",
+            "Repeat tool call",
+        )
+        .await;
+        return;
+    }
+    host.store
+        .lock()
+        .unwrap()
+        .set_approvals(SESSION, "relay")
+        .unwrap();
+    if action == "yolo-permissions" {
+        let mut thread = None;
+        for (mode, id, prompt, answer, process_reused) in [
+            (
+                "relay",
+                "relay-read",
+                "Read workspace",
+                "Read allowed",
+                false,
+            ),
+            (
+                "relay",
+                "relay-read-again",
+                "Read workspace",
+                "Read allowed",
+                true,
+            ),
+            (
+                "yolo",
+                "yolo-tools",
+                "Exercise YOLO permissions",
+                "YOLO permissions verified",
+                false,
+            ),
+            (
+                "yolo",
+                "yolo-read-again",
+                "Read workspace",
+                "Read allowed",
+                true,
+            ),
+            (
+                "relay",
+                "relay-after-yolo",
+                "Exercise relay replay",
+                "Relay replay denied",
+                false,
+            ),
+        ] {
+            host.store
+                .lock()
+                .unwrap()
+                .set_approvals(SESSION, mode)
+                .unwrap();
+            browser
+                .request("POST", "/api/commands", send_command(id, prompt))
+                .await;
+            let receipt = wait_for(&host, id, |r| {
+                matches!(r.phase, Phase::Completed | Phase::Failed) || !r.decisions.is_empty()
+            })
+            .await;
+            assert!(receipt.decisions.is_empty(), "{id} created a Decision");
+            assert_eq!(receipt.phase, Phase::Completed, "{id}: {}", receipt.detail);
+            assert_eq!(answer_text(&receipt), answer);
+            assert_eq!(
+                receipt.startup_timing.unwrap().process_reused,
+                process_reused,
+                "{id}"
+            );
+            if let Some(initial_thread) = &thread {
+                assert_eq!(receipt.thread.as_ref(), Some(initial_thread), "{id}");
+            } else {
+                thread = receipt.thread;
+            }
+        }
+        host.store
+            .lock()
+            .unwrap()
+            .set_approvals(SESSION, "yolo")
+            .unwrap();
+        browser
+            .request(
+                "POST",
+                "/api/commands",
+                send_command("revoked-yolo", "Check revoked YOLO"),
+            )
+            .await;
+        wait_for(&host, "revoked-yolo", |r| r.phase == Phase::Running).await;
+        browser
+            .request(
+                "POST",
+                &format!("/api/sessions/{SESSION}/grants/revoke"),
+                Value::Null,
+            )
+            .await;
+        std::fs::write(dir.join("release-yolo-permission"), "").unwrap();
+        let revoked = wait_for(&host, "revoked-yolo", |r| {
+            matches!(r.phase, Phase::Completed | Phase::Failed) || !r.decisions.is_empty()
+        })
+        .await;
+        assert!(revoked.decisions.is_empty());
+        assert_eq!(revoked.phase, Phase::Completed, "{}", revoked.detail);
+        assert_eq!(answer_text(&revoked), "Revoked permission denied");
+        return;
+    }
     browser
         .request("POST", "/api/commands", send_command(FIRST, "First turn"))
         .await;
@@ -1210,7 +1335,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     for (index, (tool, response)) in [
         ("Read", "allow_once"),
         ("Glob", "deny"),
-        ("Grep", "allow_session"),
+        ("mcp__foreign__secret_status", "allow_session"),
     ]
     .into_iter()
     .enumerate()
@@ -1239,7 +1364,11 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         assert_eq!(presentation["validated"], true);
         assert_eq!(
             presentation["responses"],
-            json!(["allow_once", "allow_session", "deny"])
+            if response == "allow_session" {
+                json!(["allow_once", "allow_session", "deny"])
+            } else {
+                json!(["allow_once", "deny"])
+            }
         );
         assert_eq!(presentation["details"]["tool"], tool);
         if tool == "Read" {
@@ -1318,7 +1447,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     assert_eq!(stopped.decisions.last().unwrap().state, DecisionState::Invalidated);
     let second = wait_for(&host, SECOND, |r| r.phase == Phase::Completed).await;
     assert_eq!(answer_text(&second), "Follow-up finished");
-    assert_reused_grep(&first, &second);
+    assert_reused_tool_grant(&first, &second);
     assert_eq!(second.thread, first.thread);
     assert_eq!(second.model.as_deref(), Some("fixture-model"));
     // Protects Lead context: the CLI's current-request reading (window 200000, not the
@@ -1403,22 +1532,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     assert_inputs(&dir, true);
     std::fs::remove_file(dir.join("reject-billing")).unwrap();
     std::fs::remove_file(dir.join("credits-enabled")).unwrap();
-    assert_new_grep_review(&host, &browser, SESSION, "changed-grep", "Changed search").await;
-
-    let search = dir.join("project/search");
-    let original = dir.join("project/original-search");
-    std::fs::rename(&search, &original).unwrap();
-    std::fs::create_dir(&search).unwrap();
-    assert_new_grep_review(
-        &host,
-        &browser,
-        SESSION,
-        "replaced-grep-target",
-        "Repeat search",
-    )
-    .await;
-    std::fs::remove_dir(&search).unwrap();
-    std::fs::rename(&original, &search).unwrap();
+    assert_new_tool_review(&host, &browser, SESSION, "changed-mcp", "Changed arguments").await;
 
     const OTHER_SESSION: &str = "other-claude-session";
     browser
@@ -1431,18 +1545,22 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
             }),
         )
         .await;
-    host.store.lock().unwrap().set_approvals(OTHER_SESSION, "yolo").unwrap();
-    assert_new_grep_review(
+    host.store
+        .lock()
+        .unwrap()
+        .set_approvals(OTHER_SESSION, "relay")
+        .unwrap();
+    assert_new_tool_review(
         &host,
         &browser,
         OTHER_SESSION,
-        "other-session-grep",
-        "Repeat search",
+        "other-session-mcp",
+        "Repeat tool call",
     )
     .await;
 
     // A newly admitted turn can resume after the CLI changes. The exact
-    // previous Grep grant stays bound to the executable that issued it.
+    // previous MCP grant stays bound to the executable that issued it.
     let executable = dir.join(RUNNER);
     let old_digest = file_digest(&executable).unwrap();
     let mut upgraded = std::fs::read(&executable).unwrap();
@@ -1451,7 +1569,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     let new_digest = file_digest(&executable).unwrap();
     assert_ne!(old_digest, new_digest);
     const UPGRADED: &str = "claude-sdk-after-upgrade";
-    assert_new_grep_review(&host, &browser, SESSION, UPGRADED, "Repeat search").await;
+    assert_new_tool_review(&host, &browser, SESSION, UPGRADED, "Repeat tool call").await;
     assert_eq!(host.receipt(UPGRADED).unwrap().thread, first.thread);
     let native = host
         .store
@@ -1463,12 +1581,12 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         .unwrap();
     assert_eq!(native.provenance.unwrap().executable, new_digest);
 
-    const PENDING_REVOKE: &str = "pending-revoke-grep";
+    const PENDING_REVOKE: &str = "pending-revoke-mcp";
     browser
         .request(
             "POST",
             "/api/commands",
-            send_command(PENDING_REVOKE, "Changed search"),
+            send_command(PENDING_REVOKE, "Changed arguments"),
         )
         .await;
     let pending = wait_for(&host, PENDING_REVOKE, |r| !r.decisions.is_empty()).await;
@@ -1481,21 +1599,24 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         )
         .await;
     let revoked = wait_for(&host, PENDING_REVOKE, |r| r.phase == Phase::Completed).await;
-    assert_eq!(answer_text(&revoked), "Search denied");
+    assert_eq!(answer_text(&revoked), "Tool denied");
     assert_eq!(revoked.decisions[0].state, DecisionState::Invalidated);
-    assert_new_grep_review(&host, &browser, SESSION, "revoked-grep", "Repeat search").await;
+    assert_new_tool_review(&host, &browser, SESSION, "revoked-mcp", "Repeat tool call").await;
     browser
         .request("POST", "/api/commands", send_command("choose-any", "Choose Any"))
         .await;
     let pending = wait_for(&host, "choose-any", |r| !r.decisions.is_empty()).await;
     let [decision] = pending.decisions.as_slice() else {
-        panic!("Expected one pending Grep request");
+        panic!("Expected one pending MCP request");
     };
     assert_eq!(decision.state, DecisionState::Pending);
     let presentation = crate::permission_policy::view(decision).unwrap();
     let options = presentation["options"].as_array().unwrap();
     assert_eq!(options[0]["kind"], "exact");
-    let any = options.iter().find(|o| o["kind"] == "workspace_grep").unwrap();
+    let any = options
+        .iter()
+        .find(|o| o["kind"] == "mcp_tool_any")
+        .unwrap();
     browser
         .request(
             "POST",
@@ -1510,10 +1631,13 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         .request(
             "POST",
             "/api/commands",
-            send_command("any-grep-reuse", "Search a different workspace file"),
+            send_command(
+                "any-mcp-reuse",
+                "Use the same tool with different arguments",
+            ),
         )
         .await;
-    let reused = wait_for(&host, "any-grep-reuse", |r| r.phase == Phase::Completed).await;
+    let reused = wait_for(&host, "any-mcp-reuse", |r| r.phase == Phase::Completed).await;
     assert_eq!(answer_text(&reused), "Follow-up finished");
     assert_eq!(
         reused.decisions[0].native.as_ref().unwrap().resolution_provenance,
@@ -1521,16 +1645,31 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
             source_decision: decision.id.clone(),
         })
     );
-    assert_new_grep_review(&host, &browser, OTHER_SESSION, "any-other-session", "Repeat search").await;
+    assert_new_tool_review(
+        &host,
+        &browser,
+        OTHER_SESSION,
+        "any-other-session",
+        "Repeat tool call",
+    )
+    .await;
+    assert_new_tool_review(
+        &host,
+        &browser,
+        SESSION,
+        "any-other-tool",
+        "Use a different tool",
+    )
+    .await;
     browser
         .request(
             "POST",
             "/api/commands",
-            send_command("any-outside-grep", "Search outside the workspace"),
+            send_command("outside-grep", "Search outside the workspace"),
         )
         .await;
-    let outside = wait_for(&host, "any-outside-grep", |r| r.phase == Phase::Completed).await;
-    assert_eq!(answer_text(&outside), "Search denied");
+    let outside = wait_for(&host, "outside-grep", |r| r.phase == Phase::Completed).await;
+    assert_eq!(answer_text(&outside), "Tool denied");
     assert!(outside.decisions.is_empty());
     // The CLI fixture checks permit and denial replies. Only rejected Bash
     // commands should produce permission cards in relay mode.
@@ -1592,44 +1731,27 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         "git checkout -- f", "printf ready; git clean -fd", "(git status && git stash drop)",
         "git reset --hard HEAD", "setsid git reset --hard", "rm -rf x", "git-reset --hard",
     ]));
-    for (mode, id) in [
-        ("relay", "direct-claude-relay"),
-        ("yolo", "direct-claude-yolo"),
-    ] {
-        let target = dir.join("project/nested/direct.txt");
-        if target.exists() {
-            std::fs::remove_file(&target).unwrap();
-        }
-        host.store
-            .lock()
-            .unwrap()
-            .set_approvals(SESSION, mode)
-            .unwrap();
-        browser
-            .request(
-                "POST",
-                "/api/commands",
-                send_command(id, "Direct workspace edits"),
-            )
-            .await;
-        let receipt = wait_for(&host, id, |r| {
-            r.phase == Phase::Completed || !r.decisions.is_empty()
-        })
+    const DIRECT_RELAY: &str = "direct-claude-relay";
+    browser
+        .request(
+            "POST",
+            "/api/commands",
+            send_command(DIRECT_RELAY, "Direct workspace edits"),
+        )
         .await;
-        assert!(
-            receipt.decisions.is_empty(),
-            "Ordinary Claude writes must apply directly"
-        );
-        assert_eq!(
-            std::fs::read_to_string(target).unwrap(),
-            "after\n".repeat(11000)
-        );
-        assert!(!dir.join("escape.txt").exists());
-    }
-    browser.request("POST", "/api/commands", send_command("yolo-protected", "Protected Git in yolo")).await;
-    resolve_bash(&host, &browser, "yolo-protected", Some("git reset --hard"), false).await;
-    let protected = wait_for(&host, "yolo-protected", |r| r.phase == Phase::Completed).await;
-    assert_eq!(answer_text(&protected), "Protected Git reviewed");
+    let receipt = wait_for(&host, DIRECT_RELAY, |r| {
+        r.phase == Phase::Completed || !r.decisions.is_empty()
+    })
+    .await;
+    assert!(
+        receipt.decisions.is_empty(),
+        "Ordinary Claude writes must apply directly"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("project/nested/direct.txt")).unwrap(),
+        "after\n".repeat(11000)
+    );
+    assert!(!dir.join("escape.txt").exists());
     host.store
         .lock()
         .unwrap()
@@ -1658,26 +1780,30 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     assert!(!dir.join("project/untrusted.txt").exists());
 }
 
-fn assert_reused_grep(source_turn: &Receipt, later_turn: &Receipt) {
+fn assert_reused_tool_grant(source_turn: &Receipt, later_turn: &Receipt) {
     let [decision] = later_turn.decisions.as_slice() else {
-        panic!("Expected one recorded Grep invocation");
+        panic!("Expected one recorded MCP invocation");
     };
     assert_eq!(decision.state, DecisionState::Delivered);
     assert!(decision.grant_consumed);
-    let source_grep = source_turn
+    let source_tool = source_turn
         .decisions
         .iter()
-        .find(|d| d.item == "toolu_fixture_3")
+        .find(|d| {
+            d.resolution
+                .as_ref()
+                .is_some_and(|r| r.response == deck2_shared::DecisionResponse::AllowSession)
+        })
         .unwrap();
     assert_eq!(
         decision.native.as_ref().unwrap().resolution_provenance,
         Some(deck2_shared::PermissionProvenance::ReusedGrant {
-            source_decision: source_grep.id.clone(),
+            source_decision: source_tool.id.clone(),
         })
     );
 }
 
-async fn assert_new_grep_review(
+async fn assert_new_tool_review(
     host: &App,
     browser: &Browser,
     session: &str,
@@ -1701,7 +1827,7 @@ async fn assert_new_grep_review(
         )
         .await;
     let completed = wait_for(host, id, |r| r.phase == Phase::Completed).await;
-    assert_eq!(answer_text(&completed), "Search denied");
+    assert_eq!(answer_text(&completed), "Tool denied");
     assert!(!completed.decisions[0].grant_consumed);
 }
 

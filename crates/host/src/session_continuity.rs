@@ -63,9 +63,10 @@ pub(crate) fn select(x: &Value) -> Value {
     let p = &x["predecessor"];
     let b = &x["bound"];
     let i = &p["input"];
-    let completed_claude_member = x["runnerId"] == "claude"
+    let local_member = x["localMemberPredecessor"].as_str().or_else(|| x["claudeMemberPredecessor"].as_str());
+    let completed_local_member = matches!(x["runnerId"].as_str(), Some("claude" | "agy"))
         && p["state"] == "completed"
-        && x["claudeMemberPredecessor"] == "completed-local";
+        && local_member == Some("completed-local");
     if input(i) {
         v["input"] = i.clone();
     }
@@ -91,11 +92,10 @@ pub(crate) fn select(x: &Value) -> Value {
         "native-ownership-unproven"
     } else if p["state"] == "failed" {
         "failed-predecessor"
-    } else if x["claudeMemberPredecessor"] == "incompatible" {
+    } else if local_member == Some("incompatible") {
         "native-binding-mismatch"
-    } else if completed_claude_member && b.is_null() {
-        // The SDK manages transcript context for completed local Claude members.
-        // Adopting the report leaves the same task and transcript eligible for correction.
+    } else if completed_local_member && b.is_null() {
+        // A completed local native transcript remains eligible for a correction.
         if request == "native" {
             if justified {
                 v["continuity"] = json!("native");
@@ -108,7 +108,7 @@ pub(crate) fn select(x: &Value) -> Value {
             reason
         } else {
             v["continuity"] = json!("native");
-            "eligible-completed-claude-member"
+            if x["runnerId"] == "agy" { "eligible-completed-agy-member" } else { "eligible-completed-claude-member" }
         }
     } else if !input(i)
         || i["final"] != true
@@ -143,7 +143,7 @@ pub(crate) fn select(x: &Value) -> Value {
                 "justified-native-override"
             }
         } else if let Some(reason) =
-            automatic_predecessor_issue(p, &x["now"], &v["policy"], completed_claude_member)
+            automatic_predecessor_issue(p, &x["now"], &v["policy"], completed_local_member)
         {
             reason
         } else if i["tokens"].as_u64().unwrap()
@@ -212,9 +212,15 @@ pub(crate) fn launch(app: &crate::server::App, t: &Task, a: &TaskAttempt) -> Res
     let runner=a.configuration.as_ref().and_then(|s|s.session_contract.as_ref()).and_then(|c|c.members.get(&t.owner)).map(|a|a.runner_id.as_str()).unwrap_or("codex");
     let version=a.configuration.as_ref().and_then(|s|s.native.as_ref()).map(|n|n.version.as_str()).unwrap_or("0.166.0");
     let bound = bound.filter(|b| b["version"] == version && b["configKey"] == config_key(a));
-    let claude_member_predecessor = if runner == "claude" {
+    let local_member_predecessor = if matches!(runner, "claude" | "agy") {
         t.attempts.iter().take_while(|p| p.id != a.id).last().map(|p| {
-            if !crate::claude::member::compatible_predecessor(t, p, a) {
+            let compatible = if runner == "agy" {
+                crate::agy::member::compatible_predecessor(t, p, a)
+                    && crate::agy::member::has_native_state(app, t, p)
+            } else {
+                crate::claude::member::compatible_predecessor(t, p, a)
+            };
+            if !compatible {
                 "incompatible"
             } else if p.phase == deck2_shared::Phase::Completed
                 && p.report.as_ref().is_some_and(|report| report.attempt == p.id) {
@@ -227,7 +233,7 @@ pub(crate) fn launch(app: &crate::server::App, t: &Task, a: &TaskAttempt) -> Res
         None
     };
     let selection = select(
-        &json!({"now":crate::now(),"role":role,"request":state["continuity"],"justification":state["continuityJustification"],"runnerId":runner,"modelId":a.requested_model,"bound":bound,"predecessor":predecessor(t,a),"claudeMemberPredecessor":claude_member_predecessor}),
+        &json!({"now":crate::now(),"role":role,"request":state["continuity"],"justification":state["continuityJustification"],"runnerId":runner,"modelId":a.requested_model,"bound":bound,"predecessor":predecessor(t,a),"localMemberPredecessor":local_member_predecessor}),
     );
     Ok(selection)
 }

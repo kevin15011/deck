@@ -64,7 +64,7 @@ const deckToolPrefix = `mcp__${deckServer}__`;
 const isUserMcpTool = (tool: string) => tool.startsWith('mcp__') && !tool.startsWith(deckToolPrefix);
 const sameTools = (actual: string[], expected: string[]) =>
   actual.length === expected.length && expected.every(name => actual.includes(name));
-type Bootstrap = {type: 'bootstrap'; transcriptStorage?: string; instructions: string; server: McpHttpServerConfig; toolNames: string[]; workspaceTools: string[]};
+type Bootstrap = {type: 'bootstrap'; transcriptStorage?: string; instructions: string; server: McpHttpServerConfig; toolNames: string[]; workspaceTools: string[]; leadYolo: boolean};
 
 async function subscription(native: ReturnType<typeof query>) {
   const {account, claude_code_version} = await native.initializationResult();
@@ -263,39 +263,43 @@ async function run() {
       allowedTools: [...deckTools, 'Skill', 'mcp__plugin_context-mode_context-mode'],
       // Deck validates each workspace tool request in the host.
       settings: {...settings, permissions: {ask: bootstrap.workspaceTools}},
-      canUseTool: async (tool, input, {signal, toolUseID}) => {
+      canUseTool: async (tool, input, {signal, toolUseID, requestId}) => {
         const deny = {behavior: 'deny', message: 'Deck did not authorize this tool call.'} as const;
         const userMcp = isUserMcpTool(tool);
         if (!turnActive || !sent || stopped || signal.aborted || (!bootstrap.workspaceTools.includes(tool) && !userMcp) ||
             typeof toolUseID !== 'string' || !toolUseID || toolUseID.length > 128) return deny;
         const edit = tool === 'Edit' || tool === 'Write';
         const bash = tool === 'Bash';
-        if (bash && input.dangerouslyDisableSandbox !== undefined && input.dangerouslyDisableSandbox !== false) {
+        if (bash && !bootstrap.leadYolo && input.dangerouslyDisableSandbox !== undefined && input.dangerouslyDisableSandbox !== false) {
           return {...deny, message: 'Deck does not authorize Bash sandbox overrides.'};
         }
-        if (bash && input.run_in_background !== undefined && input.run_in_background !== false) {
+        if (bash && !bootstrap.leadYolo && input.run_in_background !== undefined && input.run_in_background !== false) {
           return {...deny, message: 'Deck requires Bash to run in the foreground.'};
         }
-        if (edit && (typeof input.file_path !== 'string' || input.file_path.length > 4096)) return deny;
+        if (edit && !bootstrap.leadYolo && (typeof input.file_path !== 'string' || input.file_path.length > 4096)) return deny;
         const request = randomUUID();
+        const identity = {session_id: thread, request, native_request_id: requestId, tool, tool_use_id: toolUseID};
         const abort = new AbortController();
         const permit = await new Promise<Permit | null>(resolve => {
           pending.set(request, resolve);
           signal.addEventListener('abort', () => resolve(null), {once: true, signal: abort.signal});
-          if (edit) {
-            emit({type: 'workspace_write', session_id: thread, request, tool, file_path: input.file_path});
+          if (bootstrap.leadYolo) {
+            // The host checks the live admission. Keep tool arguments in the SDK.
+            emit({type: 'yolo_permission', ...identity});
+          } else if (edit) {
+            emit({type: 'workspace_write', ...identity, file_path: input.file_path});
           } else {
-            emit({type: bash ? 'workspace_bash' : userMcp ? 'mcp_permission' : 'permission', session_id: thread, request, tool, tool_use_id: toolUseID, input});
+            emit({type: bash ? 'workspace_bash' : userMcp ? 'mcp_permission' : 'permission', ...identity, input});
           }
         });
         abort.abort();
         pending.delete(request);
-        if (signal.aborted && !stopped && !edit) {
+        if (signal.aborted && !stopped && !edit && !bootstrap.leadYolo) {
           emit({type: bash ? 'workspace_bash_closed' : userMcp ? 'mcp_permission_closed' : 'permission_closed', session_id: thread, request});
         }
         if (!permit || stopped || signal.aborted) return deny;
         if (permit.denial) return {...deny, message: permit.denial};
-        return {behavior: 'allow', updatedInput: edit || bash || userMcp ? input : permit.input};
+        return {behavior: 'allow', updatedInput: bootstrap.leadYolo || edit || bash || userMcp ? input : permit.input};
       },
     },
   });

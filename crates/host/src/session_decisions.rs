@@ -6,6 +6,16 @@ use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
 
 pub(crate) fn text(v: &Value, max: usize) -> bool {
+    stored_text(v, max)
+        && v.as_str().is_some_and(|s| {
+            !s.contains('\r')
+                && s.chars()
+                    .any(|c| !c.is_whitespace() && !c.is_control() && c != '\u{feff}')
+        })
+}
+
+// Durable Decisions and tasks may contain text written under the original rules.
+fn stored_text(v: &Value, max: usize) -> bool {
     v.as_str().is_some_and(|s| {
         !s.trim().is_empty()
             && s.encode_utf16().count() <= max
@@ -18,10 +28,10 @@ pub(crate) fn keys(v: &Value, allowed: &[&str]) -> bool {
     v.as_object()
         .is_some_and(|o| o.keys().all(|k| allowed.contains(&k.as_str())))
 }
-fn ids(v: &Value) -> bool {
+fn ids(v: &Value, valid_text: fn(&Value, usize) -> bool) -> bool {
     v.as_array().is_some_and(|a| {
         a.len() <= 16
-            && a.iter().all(|v| text(v, 128))
+            && a.iter().all(|v| valid_text(v, 128))
             && a.iter().enumerate().all(|(i, v)| !a[..i].contains(v))
     })
 }
@@ -118,15 +128,15 @@ pub fn evidence(store: &Store, r: &Receipt, prompt: &Value, after: i64) -> bool 
     reply_current(store,r) && r.dispatch_ms.is_some() && prompt.as_str()==Some(r.id.as_str()) && r.continuation.is_none() && r.phase==Phase::Running && !r.cancel_requested &&
     store.conn.query_row("SELECT MIN(seq) FROM session_events WHERE session=?1 AND task=?2 AND attempt=?3 AND kind LIKE 'receipt:%'",params![r.session,r.configuration.as_ref().and_then(|s|s.session_contract.as_ref()).map(|c|&c.lead_task),r.attempt],|row|row.get::<_,i64>(0)).is_ok_and(|seq|seq>after)
 }
-pub fn dependencies(
+pub(crate) fn stored_dependencies(
     store: &Store,
     session: &str,
     links: &Value,
     action: &Value,
 ) -> Result<(), String> {
-    if !ids(links)
-        || (!action.is_null() && !text(action, 160))
-        || (!links.as_array().unwrap().is_empty() && !text(action, 160))
+    let needs_action = links.as_array().is_some_and(|ids| !ids.is_empty());
+    if !ids(links, stored_text)
+        || ((needs_action || !action.is_null()) && !stored_text(action, 160))
     {
         return Err("Invalid decision dependencies/action".into());
     }
@@ -149,6 +159,9 @@ pub fn delegation(
 ) -> Result<Value, String> {
     if args.get("action").is_some_and(|v| !text(v, 160)) {
         return Err("Invalid dependency action".into());
+    }
+    if args.get("dependsOn").is_some_and(|v| !ids(v, text)) {
+        return Err("Invalid decision dependencies/action".into());
     }
     let mut state: Value = prior
         .map(serde_json::from_str)
@@ -186,7 +199,7 @@ pub fn delegation(
     } else if args.get("commandId").is_some() {
         return Err("Omit commandId for ordinary delegation. It is required only with replan.".into());
     }
-    dependencies(store, &r.session, &links, &action)?;
+    stored_dependencies(store, &r.session, &links, &action)?;
     state.as_object_mut().unwrap().remove("originalDependencies");
     state["dependsOn"] = links;
     state["action"] = action;
@@ -301,7 +314,7 @@ pub fn tool(store: &mut Store, root: &str, name: &str, args: &Value) -> Result<V
             )?;
         }
         let links = args.get("relatedTaskIds").cloned().unwrap_or(json!([]));
-        if !ids(&links) {
+        if !ids(&links, text) {
             return Err("Invalid related tasks".into());
         }
         for id in links.as_array().unwrap() {
@@ -506,7 +519,7 @@ pub fn inspect(conn: &rusqlite::Connection) -> Result<(), String> {
         let (session, id, body) = row.map_err(|_| invalid)?;
         let d: Value = serde_json::from_str(&body).map_err(|_| invalid)?;
         if d["decisionId"] != id
-            || !text(&d["question"], 2000)
+            || !stored_text(&d["question"], 2000)
             || d["revision"]
                 .as_u64()
                 .is_none_or(|n| n == 0 || n > 9_007_199_254_740_991)
@@ -516,7 +529,7 @@ pub fn inspect(conn: &rusqlite::Connection) -> Result<(), String> {
             || !["pending", "deferred", "answered", "cancelled", "superseded"]
                 .iter()
                 .any(|s| d["state"] == *s)
-            || !ids(&d["relatedTaskIds"])
+            || !ids(&d["relatedTaskIds"], stored_text)
         {
             return Err(invalid.into());
         }
@@ -539,7 +552,7 @@ pub fn inspect(conn: &rusqlite::Connection) -> Result<(), String> {
             || d["updatedSeq"]
                 .as_i64()
                 .is_none_or(|n| n < d["questionSeq"].as_i64().unwrap_or(0))
-            || !text(&d["key"], 128)
+            || !stored_text(&d["key"], 128)
             || d["origin"]["attempt"] != r.attempt
             || r.configuration
                 .as_ref()
@@ -563,11 +576,12 @@ pub fn inspect(conn: &rusqlite::Connection) -> Result<(), String> {
                 || prompt.continuation.is_some()
                 || prompt.dispatch_ms.is_none()
                 || seq <= d["questionSeq"].as_i64().ok_or(invalid)?
-                || !text(&d["note"], 512)
+                || !stored_text(&d["note"], 512)
                 || !["allow", "deny", "informational"]
                     .iter()
                     .any(|s| resolution["disposition"] == *s)
-                || (resolution["disposition"] == "allow" && !text(&resolution["action"], 160))
+                || (resolution["disposition"] == "allow"
+                    && !stored_text(&resolution["action"], 160))
             {
                 return Err(invalid.into());
             }
@@ -593,7 +607,7 @@ pub fn inspect(conn: &rusqlite::Connection) -> Result<(), String> {
         let (_, id, f, result) = row.map_err(|_| invalid)?;
         let f: Value = serde_json::from_str(&f).map_err(|_| invalid)?;
         let result: Value = serde_json::from_str(&result).map_err(|_| invalid)?;
-        if f[1]["commandId"] != id || !text(&result["decisionId"], 128) {
+        if f[1]["commandId"] != id || !stored_text(&result["decisionId"], 128) {
             return Err(invalid.into());
         }
     }
@@ -853,6 +867,98 @@ mod tests {
         s.save(&mut r).unwrap();
     }
     #[test]
+    fn agy_regression_rejects_unicode_blank_decision_questions_at_dispatch() {
+        // Protects nonblank Decision questions on every runner. Fails if the
+        // shared dispatcher accepts a Unicode-blank question or a forbidden control.
+        let mut s = Store::open_memory("/fixture").unwrap();
+        session(&mut s);
+        input(&mut s, "decision-question");
+        for question in [
+            "\u{0085}",
+            "\u{0080}",
+            "\u{feff}",
+            "\u{00a0}",
+            "\t\u{feff}\u{3000}\n",
+            "Question\r",
+        ] {
+            let open = json!({
+                "commandId": "open-blank-question",
+                "key": "scope",
+                "question": question,
+                "source": {"promptId": "decision-question"}
+            });
+            assert_eq!(
+                tool(&mut s, "decision-question", "deck_decision_open", &open).unwrap_err(),
+                "Invalid question/key"
+            );
+        }
+        let question = "¿Revisión?\n確認してください 🔍";
+        let d = tool(
+            &mut s,
+            "decision-question",
+            "deck_decision_open",
+            &json!({
+                "commandId":"open-unicode-question",
+                "key":"scope",
+                "question":question,
+                "source":{"promptId":"decision-question"}
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            get(&s, "decision-session", d["decisionId"].as_str().unwrap()).unwrap()["question"],
+            question
+        );
+    }
+
+    #[test]
+    fn reopens_historical_decisions_without_rewriting_text() {
+        // Protects existing Decision history. Fails if startup applies the new
+        // dispatch rules to a previously valid Decision or changes its text.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.db");
+        let mut s = Store::open(&path, "/fixture").unwrap();
+        session(&mut s);
+        input(&mut s, "decision-question");
+        let historical = [
+            ("legacy-crlf", "First line\r\n¿Second line?\u{0085}確認"),
+            ("legacy-c1", "\u{0080}"),
+        ];
+        for (key, question) in historical {
+            let placeholder = format!("Question placeholder for {key}");
+            tool(
+                &mut s,
+                "decision-question",
+                "deck_decision_open",
+                &json!({
+                    "commandId":format!("open-{key}"),
+                    "key":key,
+                    "question":placeholder,
+                    "source":{"promptId":"decision-question"}
+                }),
+            )
+            .unwrap();
+            // Seed the legacy payload in the Decision, ledger and command receipt.
+            let old = json!(placeholder).to_string();
+            let new = json!(question).to_string();
+            for statement in [
+                "UPDATE session_decisions SET body=replace(body,?1,?2)",
+                "UPDATE session_events SET body=replace(body,?1,?2) WHERE kind LIKE 'decision:%'",
+                "UPDATE decision_commands SET fingerprint=replace(fingerprint,?1,?2)",
+            ] {
+                s.conn.execute(statement, params![old, new]).unwrap();
+            }
+        }
+        let history = list(&s, "decision-session").unwrap();
+        for (index, (_, question)) in historical.iter().enumerate() {
+            assert_eq!(history["decisions"][index]["question"], *question);
+        }
+        drop(s);
+        let reopened = Store::open(&path, "/fixture").unwrap();
+        assert_eq!(list(&reopened, "decision-session").unwrap(), history);
+    }
+
+    #[test]
     fn decisions_require_new_current_user_evidence_and_inherit_dependencies() {
         let mut s = Store::open_memory("/fixture").unwrap();
         session(&mut s);
@@ -928,7 +1034,7 @@ mod tests {
             .is_err()
         );
         assert!(
-            dependencies(
+            stored_dependencies(
                 &s,
                 &r.session,
                 &delegate["dependsOn"],
