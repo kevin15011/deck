@@ -804,6 +804,7 @@ impl Turn<'_> {
         let mut tool_call_ids = HashSet::new();
         let mut tools = HashMap::new();
         let mut batch = String::new();
+        let mut new_segment = true;
         let mut bytes = 0;
         let result = async {
             loop {
@@ -811,7 +812,7 @@ impl Turn<'_> {
                     biased;
                     _ = async { let _ = cancel.wait_for(|stop| *stop).await; } => return Ok(None),
                     _ = ticker.tick() => {
-                        self.flush(&mut batch)?;
+                        self.flush(&mut batch, &mut new_segment)?;
                         while !pending.is_empty() {
                             if *cancel.borrow() { return Ok(None); }
                             let Some((wire, allow)) = self.permission_reply(&pending)? else { break; };
@@ -846,7 +847,8 @@ impl Turn<'_> {
                         client.reject(id.clone()).await?;
                         continue;
                     }
-                    self.flush(&mut batch)?;
+                    self.flush(&mut batch, &mut new_segment)?;
+                    new_segment = true;
                     let tool = &params["toolCall"];
                     let item = tool["toolCallId"].as_str().filter(|item| valid_id(item, 200));
                     let fresh_item = item.filter(|item| remember_permission_id(&mut tool_call_ids, item));
@@ -899,7 +901,7 @@ impl Turn<'_> {
                             bytes += delta.len();
                             batch.push_str(delta);
                             if batch.len() >= crate::claude::DELTA_BATCH_BYTES {
-                                self.flush(&mut batch)?;
+                                self.flush(&mut batch, &mut new_segment)?;
                             }
                         }
                     }
@@ -909,7 +911,8 @@ impl Turn<'_> {
                         })?;
                     }
                     Some("tool_call" | "tool_call_update") => {
-                        self.flush(&mut batch)?;
+                        self.flush(&mut batch, &mut new_segment)?;
+                        new_segment = true;
                         if let Some(event) = activity(&mut tools, session, &self.generation, update) {
                             self.app.record_activity(&self.root.id, "", &self.root.attempt, session, &self.generation, &event);
                         }
@@ -918,16 +921,27 @@ impl Turn<'_> {
                 }
             }
         }.await;
-        self.flush(&mut batch)?;
+        self.flush(&mut batch, &mut new_segment)?;
+        if matches!(
+            result.as_ref(),
+            Ok(Some(reason)) if matches!(reason.as_str(), "end_turn" | "max_tokens")
+        ) {
+            self.app.change(&self.root.id, |receipt| {
+                if receipt.message_times.iter().all(|m| m.kind.is_some())
+                    && let Some(last) = receipt.message_times.last_mut()
+                {
+                    last.kind = Some(deck2_shared::MessageKind::Answer);
+                }
+            })?;
+        }
         result
     }
 
-    fn flush(&self, batch: &mut String) -> Result<(), String> {
+    fn flush(&self, batch: &mut String, new_segment: &mut bool) -> Result<(), String> {
         if !batch.is_empty() {
-            self.app.change(&self.root.id, |receipt| {
-                receipt.first_output_ms.get_or_insert_with(now);
-                receipt.text.push_str(batch);
-            })?;
+            self.app
+                .append_claude_delta(&self.root.id, batch, None, *new_segment)?;
+            *new_segment = false;
             batch.clear();
         }
         Ok(())

@@ -435,7 +435,18 @@ async fn agy_acp_normal_entrypoint_and_restart() {
         )
         .await;
     let first = receipt(&host, "agy-first", |r| r.phase == Phase::Completed).await;
-    assert_eq!(first.text, "Starting finished");
+    assert_eq!(first.text, "Starting \n\nfinished");
+    assert_eq!(
+        first
+            .message_times
+            .iter()
+            .map(|m| m.kind)
+            .collect::<Vec<_>>(),
+        vec![
+            Some(deck2_shared::MessageKind::Progress),
+            Some(deck2_shared::MessageKind::Answer)
+        ]
+    );
     assert_eq!(first.decisions[0].state, DecisionState::Delivered);
     let activities = browser
         .request(
