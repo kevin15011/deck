@@ -1,13 +1,13 @@
 import {useEffect,useId,useRef,useState} from 'react';
 import {API,hostRequest} from './api';
 
-export type AutoCompactRunner='claude'|'codex';
-export interface AutoCompact {window:number;claude:boolean;codex:boolean}
+export type AutoCompactRunner='claude'|'codex'|'agy';
+export interface AutoCompact {window:number;claude:boolean;codex:boolean;agy:boolean}
 
 export function parseAutoCompact(v:unknown):AutoCompact{
  const d=v as Record<string,unknown>|null;
- if(typeof d!=='object'||d===null||d.api!==API||!Number.isSafeInteger(d.window)||(d.window as number)<=0||typeof d.claude!=='boolean'||typeof d.codex!=='boolean')throw Error('Invalid automatic compaction settings');
- return {window:d.window as number,claude:d.claude,codex:d.codex};
+ if(typeof d!=='object'||d===null||d.api!==API||!Number.isSafeInteger(d.window)||(d.window as number)<=0||typeof d.claude!=='boolean'||typeof d.codex!=='boolean'||typeof d.agy!=='boolean')throw Error('Invalid automatic compaction settings');
+ return {window:d.window as number,claude:d.claude,codex:d.codex,agy:d.agy};
 }
 
 const tokens=(n:number)=>n%1000===0?`${n/1000}K`:n.toLocaleString();

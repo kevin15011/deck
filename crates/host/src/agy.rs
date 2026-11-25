@@ -484,17 +484,18 @@ pub(crate) async fn lead(
     if binding.storage != profile_key()? {
         return Err("Antigravity profile changed after admission.".into());
     }
-    let (session, project, trusted, external) = {
+    let (session, project, trusted, external, prior_tokens) = {
         let store = app.store.lock().map_err(|_| "State lock failed")?;
         let project = store.execution_project(&root.session)?;
         let trusted = store.trusted_project(&project.root)?;
         let external = external_tools(&store, &project, trusted, false)?;
-        (
-            store.session_by_id(&root.session)?,
-            project,
-            trusted,
-            external,
-        )
+        let session = store.session_by_id(&root.session)?;
+        let prior_tokens = session
+            .native
+            .as_ref()
+            .filter(|_| !root.fresh)
+            .and_then(|native| latest_agy_tokens(&store, &root.session, id, &native.thread));
+        (session, project, trusted, external, prior_tokens)
     };
     if snapshot.project != project {
         return Err("Antigravity project binding changed after admission.".into());
@@ -578,6 +579,16 @@ pub(crate) async fn lead(
         let Some(prompt) = turn.confirm_context(session, provenance, trusted)? else {
             return Ok(None);
         };
+        if resume.is_some()
+            && crate::runner_compaction::agy_should_compact(
+                crate::runner_compaction::agy_enabled(),
+                prior_tokens,
+            )
+        {
+            if let Some(stopped) = turn.compact(&mut client, session, cancel).await? {
+                return Ok(Some(stopped));
+            }
+        }
         let mut blocks = vec![json!({"type":"text","text":prompt})];
         blocks.extend(images);
         let request = client
@@ -627,7 +638,86 @@ pub(crate) async fn lead(
     })
 }
 
+fn latest_agy_tokens(store: &Store, session: &str, current_id: &str, thread: &str) -> Option<u64> {
+    let receipts = store.all().ok()?;
+    receipts
+        .into_iter()
+        .filter(|r| r.session == session && r.id != current_id)
+        .filter_map(|r| {
+            let obs = r.context.observation?;
+            (obs.native_thread_id == thread && obs.basis == "agy-acp-usage")
+                .then_some((obs.observed_ms, obs.tokens?))
+        })
+        .max_by_key(|(ms, _)| *ms)
+        .map(|(_, tokens)| tokens)
+}
+
 impl Turn<'_> {
+    async fn compact(
+        &self,
+        client: &mut Client,
+        session: &str,
+        cancel: &mut watch::Receiver<bool>,
+    ) -> Result<Option<String>, String> {
+        self.app.change(&self.root.id, |r| {
+            r.context.compacting = Some("agy-auto-compact".into());
+        })?;
+        let request = client
+            .request(
+                "session/prompt",
+                json!({"sessionId": session, "prompt": [{"type": "text", "text": "/compact"}]}),
+            )
+            .await?;
+        let mut saw_usage = false;
+        let outcome = loop {
+            let message = tokio::select! {
+                biased;
+                _ = cancel.wait_for(|stop| *stop) => {
+                    break Ok(Some("cancelled".to_owned()));
+                }
+                frame = client.read() => match frame {
+                    Ok(message) => message,
+                    Err(error) => break Err(error.into()),
+                },
+            };
+            if message.get("id") == Some(&json!(request)) {
+                if message.get("error").is_some() {
+                    break Ok(None);
+                }
+                let reason = message["result"]["stopReason"]
+                    .as_str()
+                    .unwrap_or("end_turn");
+                if reason == "cancelled" {
+                    break Ok(Some("cancelled".to_owned()));
+                }
+                break Ok(None);
+            }
+            if message["method"] == "session/update"
+                && message["params"]["sessionId"] == session
+                && message["params"]["update"]["sessionUpdate"] == "usage_update"
+            {
+                saw_usage = true;
+                self.app.change(&self.root.id, |r| {
+                    crate::observations::observe_agy(
+                        &mut r.context,
+                        &message,
+                        session,
+                        &self.generation,
+                        &r.attempt,
+                        r.model.as_deref(),
+                    );
+                })?;
+            }
+        };
+        let _ = self.app.change(&self.root.id, |r| {
+            r.context.compacting = None;
+            if !saw_usage {
+                r.context.compacted = true;
+            }
+        });
+        outcome
+    }
+
     fn confirm_context(
         &self,
         thread: &str,

@@ -131,6 +131,9 @@ export function AgentSettings({w,connected,projectId}:{w:Workspace;connected:boo
    <p>Quota refresh is unavailable.</p>
    <AutoCompactToggle runner="claude" name="Claude Code" state={autoCompact} connected={connected}/>
   </div></div>
+  <div className="settings-row"><div><h3>Antigravity</h3>
+   <AutoCompactToggle runner="agy" name="Antigravity" state={autoCompact} connected={connected}/>
+  </div></div>
   {agents.map(a=><div className="settings-row" key={a.name}><h3>{a.name}</h3><span role="status">{!connected?'Not checked yet':loading?'Checking…':a.ready===null?'Not checked yet':a.ready?'Ready':'Unavailable'}</span>{a.name==='Codex'&&<><CodexServerRestart connected={connected} onRestart={()=>setCheck(v=>v+1)}/><AutoCompactToggle runner="codex" name="Codex" state={autoCompact} connected={connected}/></>}</div>)}
  </div><button type="button" className="quiet" disabled={!connected||loading||claude===undefined} onClick={()=>setCheck(v=>v+1)}>Check again</button></>;
 }

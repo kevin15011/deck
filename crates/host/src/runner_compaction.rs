@@ -25,17 +25,28 @@ const KEY: &str = "runner_auto_compact_v1";
 
 static CLAUDE: AtomicBool = AtomicBool::new(true);
 static CODEX: AtomicBool = AtomicBool::new(true);
+static AGY: AtomicBool = AtomicBool::new(true);
+
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Settings {
     pub claude: bool,
     pub codex: bool,
+    #[serde(default = "default_true")]
+    pub agy: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { claude: true, codex: true }
+        Self {
+            claude: true,
+            codex: true,
+            agy: true,
+        }
     }
 }
 
@@ -44,6 +55,7 @@ impl Default for Settings {
 pub(crate) enum Runner {
     Claude,
     Codex,
+    Agy,
 }
 
 impl Store {
@@ -77,6 +89,7 @@ impl Store {
 fn publish(settings: Settings) {
     CLAUDE.store(settings.claude, Ordering::SeqCst);
     CODEX.store(settings.codex, Ordering::SeqCst);
+    AGY.store(settings.agy, Ordering::SeqCst);
 }
 
 pub(crate) fn claude_enabled() -> bool {
@@ -85,6 +98,14 @@ pub(crate) fn claude_enabled() -> bool {
 
 pub(crate) fn codex_enabled() -> bool {
     CODEX.load(Ordering::SeqCst)
+}
+
+pub(crate) fn agy_enabled() -> bool {
+    AGY.load(Ordering::SeqCst)
+}
+
+pub(crate) fn agy_should_compact(enabled: bool, last_tokens: Option<u64>) -> bool {
+    enabled && last_tokens.is_some_and(|tokens| tokens >= WINDOW)
 }
 
 /// Flag settings passed to the Claude Agent SDK bridge.
@@ -108,7 +129,7 @@ pub(crate) fn codex_override(enabled: bool) -> Option<String> {
 }
 
 fn body(settings: Settings) -> Value {
-    json!({"api": deck2_shared::API, "window": WINDOW, "claude": settings.claude, "codex": settings.codex})
+    json!({"api": deck2_shared::API, "window": WINDOW, "claude": settings.claude, "codex": settings.codex, "agy": settings.agy})
 }
 
 pub(crate) async fn inspect(State(app): State<App>) -> Response {
@@ -140,6 +161,7 @@ pub(crate) async fn change(State(app): State<App>, Path(runner): Path<Runner>, J
         match runner {
             Runner::Claude => s.claude = r.enabled,
             Runner::Codex => s.codex = r.enabled,
+            Runner::Agy => s.agy = r.enabled,
         }
         store.set_runner_compaction(&s)?;
         Ok(s)
@@ -177,15 +199,60 @@ mod tests {
     }
 
     #[test]
+    fn agy_compaction_triggers_at_window_only_when_enabled() {
+        assert!(!agy_should_compact(true, None));
+        assert!(!agy_should_compact(true, Some(WINDOW - 1)));
+        assert!(agy_should_compact(true, Some(WINDOW)));
+        assert!(agy_should_compact(true, Some(WINDOW + 10_000)));
+        assert!(!agy_should_compact(false, Some(WINDOW)));
+    }
+
+    #[test]
     fn settings_default_enabled_and_persist_per_runner() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.db");
         let project = dir.path().to_str().unwrap();
         let store = Store::open(&path, project).unwrap();
-        assert_eq!(store.runner_compaction().unwrap(), Settings { claude: true, codex: true });
-        store.set_runner_compaction(&Settings { claude: false, codex: true }).unwrap();
+        assert_eq!(
+            store.runner_compaction().unwrap(),
+            Settings {
+                claude: true,
+                codex: true,
+                agy: true
+            }
+        );
+        // Legacy records without `agy` default `agy` to true.
+        store
+            .conn
+            .execute(
+                "INSERT INTO meta VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [KEY, r#"{"claude":false,"codex":true}"#],
+            )
+            .unwrap();
+        assert_eq!(
+            store.runner_compaction().unwrap(),
+            Settings {
+                claude: false,
+                codex: true,
+                agy: true
+            }
+        );
+        store
+            .set_runner_compaction(&Settings {
+                claude: false,
+                codex: true,
+                agy: false,
+            })
+            .unwrap();
         drop(store);
         let store = Store::open(&path, project).unwrap();
-        assert_eq!(store.runner_compaction().unwrap(), Settings { claude: false, codex: true });
+        assert_eq!(
+            store.runner_compaction().unwrap(),
+            Settings {
+                claude: false,
+                codex: true,
+                agy: false
+            }
+        );
     }
 }
