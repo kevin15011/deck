@@ -665,6 +665,9 @@ async function run() {
         if (mainThread && event.type === 'user' && 'isReplay' in event && event.isReplay && typeof event.uuid === 'string') {
           settleSteer(event.uuid);
         } else if (event.type === 'stream_event' && !event.parent_tool_use_id &&
+            event.event.type === 'content_block_start' && event.event.content_block.type === 'text') {
+          emit({type: 'text_start', session_id: thread});
+        } else if (event.type === 'stream_event' && !event.parent_tool_use_id &&
             event.event.type === 'content_block_delta' && event.event.delta.type === 'text_delta') {
           emit({type: 'delta', session_id: thread, text: event.event.delta.text, sdk_received_ms: sdkReceivedMs});
         } else if (event.type === 'assistant' && event.error === 'rate_limit') {

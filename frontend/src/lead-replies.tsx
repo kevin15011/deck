@@ -1,5 +1,6 @@
 import {MessageCopy,MessageTime} from './message-copy';
 import type {Receipt} from './api';
+import {isLeadUpdateReplacement,partitionLeadSegments} from './lead-segments';
 import {Markdown} from './markdown';
 import {useLiveLeadText} from './chat-motion';
 import {useEffect, useLayoutEffect, useRef, useState} from 'react';
@@ -70,11 +71,43 @@ export function leadMessageText(text:string,start:number,nextStart?:number){
  return nextStart!==undefined&&slice.endsWith('\n\n')?slice.slice(0,-2):slice;
 }
 
-export function LeadReplyText({text:source,times,live,attempt,revealOnMount,onGrowth,...props}:React.ComponentProps<typeof ReplySlice>&{
- times?:Receipt['message_times'];live:boolean;attempt:Receipt['attempt'];revealOnMount:boolean;onGrowth:()=>void;
+type Update={start:number;at_ms:number;text:string};
+function LeadUpdate({update,running}:{update:Update;running:boolean}){
+ const previous=useRef(update),[outgoing,setOutgoing]=useState<Update|null>(null);
+ useLayoutEffect(()=>{
+  const old=previous.current;previous.current=update;
+  if(!isLeadUpdateReplacement(old.start,update.start,running)){if(!running)setOutgoing(null);return;}
+  setOutgoing(old);
+  const timer=setTimeout(()=>setOutgoing(null),220);
+  return()=>clearTimeout(timer);
+ },[update.start,running]);
+ // Keep the snapshot current without treating streamed growth as a replacement.
+ useLayoutEffect(()=>{previous.current=update;},[update]);
+ return <div className="lead-update" data-live={running||undefined}>
+  <div className="lead-update-header"><span className="lead-update-dot" aria-hidden="true"/><span aria-live="polite" aria-atomic="true">{running?'Working':'Last update'}</span><MessageTime timestamp={update.at_ms} label="Update"/></div>
+  <div className="lead-update-body">{outgoing&&running&&<div className="lead-update-exit" aria-hidden="true"><Markdown text={outgoing.text}/></div>}<div key={update.start} className={running?'lead-update-enter':undefined}><Markdown text={update.text}/></div></div>
+ </div>;
+}
+
+export function LeadReplyText({text:source,times,live,running,attempt,revealOnMount,onGrowth,...props}:React.ComponentProps<typeof ReplySlice>&{
+ times?:Receipt['message_times'];live:boolean;running:boolean;attempt:Receipt['attempt'];revealOnMount:boolean;onGrowth:()=>void;
 }){
  const text=useLiveLeadText(source,live,attempt,revealOnMount);
  useLayoutEffect(()=>{if(live)onGrowth();},[text,live,onGrowth]);
+ const parts=partitionLeadSegments(source,times);
+ if(parts){
+  const latest=parts.progress.at(-1);
+  return <>
+   {((running||!parts.answers.length)&&latest)&&<LeadUpdate update={latest} running={running}/>}
+   {parts.answers.map((part,index)=>{
+    const end=times?.find(t=>t.start>part.start)?.start??source.length;
+    const replyStart=props.reply?.displayStart;
+    const reply=props.reply&&typeof replyStart==='number'&&replyStart>=part.start&&replyStart<end?{...props.reply,displayStart:replyStart-part.start}:undefined;
+    return <div className="lead-message-part" key={part.start}>{index>0&&<div className="message-meta"><MessageTime timestamp={part.at_ms} label="Message received"/><MessageCopy text={part.text}/></div>}<ReplySlice {...props} reply={reply} text={text.slice(part.start,Math.min(end,part.start+part.text.length))}/></div>;
+   })}
+   {!running&&parts.progress.length>0&&<details className="lead-updates"><summary>Show {parts.progress.length} {parts.progress.length===1?'update':'updates'}</summary>{parts.progress.map(part=><div className="lead-update" key={part.start}><MessageTime timestamp={part.at_ms} label="Update"/><Markdown text={part.text}/></div>)}</details>}
+  </>;
+ }
  if(!times?.length)return <ReplySlice text={text} {...props}/>;
  return <>{times.map(({start,at_ms},index)=>{
   if(index>0&&start>=text.length&&text.length<source.length)return null;

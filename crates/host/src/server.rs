@@ -388,9 +388,13 @@ impl App {
     pub fn change(&self, id: &str, f: impl FnOnce(&mut Receipt)) -> Result<(), String> {
         self.change_receipt(id, None, f)
     }
-    pub(crate) fn append_claude_delta(&self, id: &str, text: &str, sdk_received_ms: Option<u64>) -> Result<(), String> {
+    pub(crate) fn append_claude_delta(&self, id: &str, text: &str, sdk_received_ms: Option<u64>, new_segment: bool) -> Result<(), String> {
         self.change_receipt(id, sdk_received_ms, |r| {
             r.first_output_ms.get_or_insert_with(crate::now);
+            if new_segment && !text.is_empty() {
+                if !r.text.is_empty() { r.text.push_str("\n\n"); }
+                r.message_times.push(deck2_shared::MessageTime { start: r.text.encode_utf16().count(), at_ms: crate::now(), kind: Some(deck2_shared::MessageKind::Progress) });
+            }
             r.text.push_str(text);
         })
     }
@@ -2405,6 +2409,8 @@ pub fn router(app: App) -> Router {
             get(crate::git_review::diff),
         )
         .route("/api/changes", get(changes).post(create_change))
+        .route("/api/runners/auto-compact", get(crate::runner_compaction::inspect))
+        .route("/api/runners/auto-compact/{runner}", post(crate::runner_compaction::change))
         .route("/api/tools", get(crate::external_tools::inspect))
         .route("/api/tools/{tool}", post(crate::external_tools::change))
         .route("/api/tools/rtk/runners/{runner}", post(crate::external_tools::runners::change))

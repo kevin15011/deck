@@ -491,7 +491,7 @@ pub(crate) fn reuse_key(
         assignment,
         digest(instructions.as_bytes()),
         serde_json::to_string(tool_names).map_err(|_| "Invalid Claude tool list")?,
-        super::SETTINGS,
+        crate::runner_compaction::claude_launch_settings(),
     );
     let mut paths = vec![
         binary.to_path_buf(),

@@ -110,11 +110,12 @@ pub(super) fn key(
         paths.push(parent.join(".deck/config.json"));
     }
     let mut inputs = format!(
-        "{:?}|{}|{}|{:?}",
+        "{:?}|{}|{}|{:?}|{:?}",
         executable_identity(binary)?,
         app.project,
         receipt.session,
-        receipt.configuration
+        receipt.configuration,
+        crate::runner_compaction::codex_override(crate::runner_compaction::codex_enabled())
     );
     for path in paths {
         inputs.push_str(&format!("{path:?}"));
@@ -146,6 +147,7 @@ pub(super) fn common_key(app: &App, binary: &Path) -> Result<String, String> {
     let home = app.native_role_root.lock().unwrap().clone();
     let mut inputs = format!("{:?}|{:?}|{:?}", executable_identity(binary)?, home, std::env::current_dir().map_err(|_| "Native spawn cwd unavailable")?);
     inputs.push_str(&crate::session_roles::codex_policy_key(&home.join("config.toml"))?);
+    inputs.push_str(&format!("{:?}", crate::runner_compaction::codex_override(crate::runner_compaction::codex_enabled())));
     for path in [home.join("auth.json"), home.join("managed_config.toml"), home.join("requirements.toml"), PathBuf::from("/etc/codex/managed_config.toml"), PathBuf::from("/etc/codex/requirements.toml")] {
         inputs.push_str(&format!("{path:?}"));
         match std::fs::metadata(path) {

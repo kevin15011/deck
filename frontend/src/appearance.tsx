@@ -1,5 +1,6 @@
 import {focusSidebarOpener} from './drawer-motion';
 import {CodexServerRestart} from './codex-server-restart';
+import {AutoCompactToggle,useAutoCompact} from './auto-compact';
 import {useActiveIndicator,useDisclosureMotion} from './view-motion';
 import {hostRequest,request} from './api';
 import {ApplicationSettings} from './application-settings';
@@ -99,6 +100,7 @@ const claudeStatus = new Map<string, string>([
 export function AgentSettings({w,connected,projectId}:{w:Workspace;connected:boolean;projectId?:string}){
  const [agents,setAgents]=useState<{name:string;ready:boolean|null}[]>([{name:'Codex',ready:null}]),[loading,setLoading]=useState(false),[check,setCheck]=useState(0);
  const [claude,setClaude]=useState<{status:string;available:boolean}>();
+ const autoCompact=useAutoCompact(connected,w.host_id);
  useEffect(()=>{
   if(!connected)return;
   const controller=new AbortController();
@@ -127,8 +129,9 @@ export function AgentSettings({w,connected,projectId}:{w:Workspace;connected:boo
    {connected&&claude?.available&&<p>Choose Claude Code as Lead when creating a session. Deck verifies subscription limits before each turn. In trusted projects with supported settings, Claude loads project instructions, can edit and create workspace files directly, and can request one-time approval for Read, Glob, and Grep.</p>}
    {connected&&claude?.status==='subscription_signed_in'&&!claude.available&&<p>Execution requires the Deck Claude Agent SDK bridge and Node.js 22 or later on the host PATH.</p>}
    <p>Quota refresh is unavailable.</p>
+   <AutoCompactToggle runner="claude" name="Claude Code" state={autoCompact} connected={connected}/>
   </div></div>
-  {agents.map(a=><div className="settings-row" key={a.name}><h3>{a.name}</h3><span role="status">{!connected?'Not checked yet':loading?'Checking…':a.ready===null?'Not checked yet':a.ready?'Ready':'Unavailable'}</span>{a.name==='Codex'&&<CodexServerRestart connected={connected} onRestart={()=>setCheck(v=>v+1)}/>}</div>)}
+  {agents.map(a=><div className="settings-row" key={a.name}><h3>{a.name}</h3><span role="status">{!connected?'Not checked yet':loading?'Checking…':a.ready===null?'Not checked yet':a.ready?'Ready':'Unavailable'}</span>{a.name==='Codex'&&<><CodexServerRestart connected={connected} onRestart={()=>setCheck(v=>v+1)}/><AutoCompactToggle runner="codex" name="Codex" state={autoCompact} connected={connected}/></>}</div>)}
  </div><button type="button" className="quiet" disabled={!connected||loading||claude===undefined} onClick={()=>setCheck(v=>v+1)}>Check again</button></>;
 }
 

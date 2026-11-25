@@ -47,6 +47,33 @@ const MAX_TEXT: usize = 2 * MAX_FRAME;
 pub(crate) const DELTA_BATCH_WINDOW: Duration = Duration::from_millis(50);
 pub(crate) const DELTA_BATCH_BYTES: usize = 16 * 1024;
 
+fn finalize_claude_text(r: &mut Receipt, text: &str) {
+    finalize_segments(&mut r.text, &mut r.message_times, text);
+}
+fn finalize_segments(output: &mut String, times: &mut Vec<deck2_shared::MessageTime>, text: &str) {
+    use deck2_shared::{MessageKind, MessageTime};
+    if times.is_empty() || times.iter().any(|m| m.kind.is_none()) {
+        *output = text.to_owned();
+        return;
+    }
+    if text.is_empty() { return; }
+    let normalized = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let target = normalized(text);
+    for i in (0..times.len()).rev() {
+        let start = times[i].start;
+        let byte = output.char_indices().scan(0usize, |units, (byte, ch)| {
+            let before = *units; *units += ch.len_utf16(); Some((before, byte))
+        }).find(|(units, _)| *units == start).map(|(_, byte)| byte);
+        if let Some(byte) = byte && normalized(&output[byte..]) == target {
+            for m in &mut times[i..] { m.kind = Some(MessageKind::Answer); }
+            return;
+        }
+    }
+    if !output.is_empty() { output.push_str("\n\n"); }
+    times.push(MessageTime { start: output.encode_utf16().count(), at_ms: now(), kind: Some(MessageKind::Answer) });
+    output.push_str(text);
+}
+
 pub(crate) fn executable() -> Result<PathBuf, String> {
     crate::runner_management::path_tool(RUNNER).map_err(|_| Status::NotInstalled.message().into())
 }
@@ -126,17 +153,20 @@ async fn account_read(launch: Launch, operation: &str) -> Result<Value, String> 
     command
         .args([script.path(), &binary])
         .args(["", operation, launch.sources(), SETTINGS]);
-    let bytes = crate::native::claude_catalog_probe(command)
-        .await
-        .map_err(|reason| {
-            if operation == "quota" {
-                "Claude Code could not read subscription quota."
-            } else if reason == "Native command probe timed out" {
-                "Claude Code model discovery timed out. Reopen the dialog to retry."
-            } else {
-                "Claude Code could not load its model catalog. Reopen the dialog to retry."
-            }
-        })?;
+    let bytes = if operation == "quota" {
+        crate::native::claude_quota_probe(command).await
+    } else {
+        crate::native::claude_catalog_probe(command).await
+    }
+    .map_err(|reason| {
+        if operation == "quota" {
+            "Claude Code could not read subscription quota."
+        } else if reason == crate::native::PROBE_TIMED_OUT {
+            "Claude Code model discovery timed out. Reopen the dialog to retry."
+        } else {
+            "Claude Code could not load its model catalog. Reopen the dialog to retry."
+        }
+    })?;
     let frame: Value =
         serde_json::from_slice(&bytes).map_err(|_| "Invalid Claude Code account metadata")?;
     if frame["type"] == "unqualified" {
@@ -429,7 +459,7 @@ fn spawn_sdk(
         .arg(thread)
         .arg(operation)
         .arg(launch.sources())
-        .arg(SETTINGS)
+        .arg(crate::runner_compaction::claude_launch_settings())
         .arg(&assignment.model_id)
         .arg(assignment.thinking.as_deref().unwrap_or(""))
         .stdin(Stdio::piped())
@@ -900,7 +930,7 @@ pub(crate) async fn lead(
             approval::settle(r);
             if let Some(text) = text {
                 r.first_output_ms.get_or_insert_with(now);
-                r.text = text;
+                finalize_claude_text(r, &text);
             }
             r.detail = startup_detail(r, detail);
             r.phase = phase;
@@ -951,7 +981,7 @@ pub(crate) async fn lead(
             approval::settle(r);
             if let Some(text) = text {
                 r.first_output_ms.get_or_insert_with(now);
-                r.text = text;
+                finalize_claude_text(r, &text);
             }
             r.detail = startup_detail(r, detail);
             r.phase = phase;
@@ -1056,6 +1086,7 @@ async fn stream(
     let mut confirmed_attempt = String::new();
     let mut confirmed_turn: Option<String> = None;
     let mut first_delta = true;
+    let mut new_segment = true;
     let mut deferred: Option<Result<Value, String>> = None;
     let mut stop = None;
     let mut write_failure_deadline = None;
@@ -1241,6 +1272,7 @@ async fn stream(
                     app.record_activity(id, "", &confirmed_attempt, thread, turn, &value);
                 }
             }
+            Some("text_start") if initialized => { new_segment = true; }
             Some("delta") if initialized => {
                 let text = event["text"].as_str().ok_or("Missing Claude text delta")?;
                 if total + text.len() > MAX_TEXT {
@@ -1279,7 +1311,8 @@ async fn stream(
                 }
                 first_delta = false;
                 total += batch.len();
-                app.append_claude_delta(id, &batch, sdk_received_ms)?;
+                app.append_claude_delta(id, &batch, sdk_received_ms, new_segment)?;
+                if !batch.is_empty() { new_segment = false; }
             }
             Some("permission") if initialized => {
                 let request = event["request"]

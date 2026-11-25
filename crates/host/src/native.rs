@@ -300,6 +300,9 @@ impl Native {
         // Model-declared multi-agent v2 ignores the legacy feature flags.
         // The typed agent switch also suppresses that native tool namespace.
         cmd.args(["-c", "agents.enabled=false"]);
+        if let Some(limit) = crate::runner_compaction::codex_override(crate::runner_compaction::codex_enabled()) {
+            cmd.args(["-c", &limit]);
+        }
         if tools.is_some() {
             cmd.args([
                 "--disable",
@@ -1452,19 +1455,29 @@ pub(crate) async fn command_probe_at(binary: &Path, args: &[&str], context: Opti
                 .env("OPENCODE_DISABLE_EXTERNAL_SKILLS", "true");
         }
     }
-    probe(cmd, context.is_some(), false, args == ["--version"])
+    probe(cmd, context.is_some(), false, args == ["--version"], PROBE_TIMEOUT)
         .await
         .map(|(_, output)| output)
 }
 
 pub(crate) async fn claude_auth_probe(cmd: Command) -> Result<(bool, Vec<u8>), String> {
-    probe(cmd, false, true, false).await
+    probe(cmd, false, true, false, PROBE_TIMEOUT).await
 }
 
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const CLAUDE_CATALOG_TIMEOUT: Duration = Duration::from_secs(20);
 pub(crate) const PROBE_TIMED_OUT: &str = "Native command probe timed out";
 
 pub(crate) async fn claude_catalog_probe(cmd: Command) -> Result<Vec<u8>, String> {
-    probe(cmd, true, false, false).await.map(|(_, output)| output)
+    probe(cmd, true, false, false, CLAUDE_CATALOG_TIMEOUT)
+        .await
+        .map(|(_, output)| output)
+}
+
+pub(crate) async fn claude_quota_probe(cmd: Command) -> Result<Vec<u8>, String> {
+    probe(cmd, true, false, false, PROBE_TIMEOUT)
+        .await
+        .map(|(_, output)| output)
 }
 
 pub(crate) fn own_child(cmd: &mut Command) -> Result<(), String> {
@@ -1621,6 +1634,7 @@ async fn probe(
     catalog: bool,
     claude_auth: bool,
     _version: bool,
+    timeout: Duration,
 ) -> Result<(bool, Vec<u8>), String> {
     own_child(&mut cmd)?;
     cmd.stdin(Stdio::null())
@@ -1652,7 +1666,7 @@ async fn probe(
         .stderr
         .take()
         .ok_or("Native probe stderr unavailable")?;
-    let result = tokio::time::timeout(Duration::from_secs(5), async {
+    let result = tokio::time::timeout(timeout, async {
         let (out, _, status) = tokio::try_join!(
             async {if catalog {let mut b=Vec::new();stdout.take(8*1024*1024+1).read_to_end(&mut b).await.map_err(|_|"Native catalog pipe failed".to_string())?;if b.len()>8*1024*1024{return Err("Native catalog exceeds bound".into());}Ok(b)}else{bounded_probe_output(stdout).await}},
             bounded_probe_output(stderr),
@@ -2594,6 +2608,8 @@ async fn run_once(
     let mut written = current.text.len();
     let mut first_delta = true;
     let mut new_message = true;
+    let mut message_kind = deck2_shared::MessageKind::Progress;
+    let mut last_unphased = false;
     let mut steering: Option<(String, deck2_shared::SteeringCommand, tokio::time::Instant)> = None;
     loop {
         let mut value = tokio::select! {
@@ -3136,6 +3152,8 @@ async fn run_once(
         }
         if method == "item/started" && p["item"]["type"] == "agentMessage" {
             new_message = true;
+            last_unphased = p["item"]["phase"].as_str().is_none();
+            message_kind = codex_message_kind(p["item"]["phase"].as_str());
             app.change(id, |r| {
                 if !r.text.is_empty() {
                     r.text.push_str("\n\n");
@@ -3174,6 +3192,10 @@ async fn run_once(
             s.notification_message(&r,&barrier)?;
         }
         if method == "item/completed" && p["item"]["type"] == "agentMessage" {
+            if let Some(phase) = p["item"]["phase"].as_str() && !new_message {
+                last_unphased = false;
+                app.change(id, |r| { if let Some(m) = r.message_times.last_mut() { m.kind = Some(codex_message_kind(Some(phase))); } })?;
+            }
             let s=app.store.lock().unwrap();
             let r=s.get(id)?.ok_or("Reply receipt missing")?;
             s.notification_message(&r,&p["item"])?;
@@ -3187,7 +3209,7 @@ async fn run_once(
                 crate::observations::observe(&mut r.context, &value, &thread, &turn_id, &r.attempt, r.model.as_deref());
                 let at_ms = crate::now();
                 if new_message && !delta.is_empty() {
-                    r.message_times.push(deck2_shared::MessageTime { start: r.text.encode_utf16().count(), at_ms });
+                    r.message_times.push(deck2_shared::MessageTime { start: r.text.encode_utf16().count(), at_ms, kind: Some(message_kind) });
                     new_message = false;
                 }
                 r.text.push_str(delta);
@@ -3208,6 +3230,11 @@ async fn run_once(
                 Some("failed") => Phase::Failed,
                 _ => return Err("Native returned an unknown terminal status".into()),
             };
+            if phase == Phase::Completed && last_unphased && !new_message {
+                app.change(id, |r| {
+                    promote_unphased_answer(&mut r.message_times);
+                })?;
+            }
             let reusable = phase == Phase::Completed && !cancelling && reuse_key.is_some()
                 && native.retired_paths.len() < 32;
             // Close attempt authority before parking the loaded thread. The
@@ -3255,6 +3282,45 @@ mod tests {
     }
 
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn claude_catalog_probe_has_a_longer_deadline() {
+        assert_eq!(PROBE_TIMEOUT, Duration::from_secs(5));
+        assert_eq!(CLAUDE_CATALOG_TIMEOUT, Duration::from_secs(20));
+    }
+
+    #[tokio::test]
+    async fn stalled_claude_catalog_probe_times_out_and_reaps_its_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("probe");
+        std::fs::write(
+            &binary,
+            "#!/bin/sh\nsleep 300 &\nprintf '%s %s\\n' \"$$\" \"$!\" > \"$0.pids\"\nwait\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // Use the real clock for cleanup because the kernel schedules process exits.
+        let result = probe(
+            Command::new(&binary),
+            true,
+            false,
+            false,
+            Duration::from_secs(1),
+        )
+        .await;
+        assert_eq!(result.unwrap_err(), PROBE_TIMED_OUT);
+
+        let pids = std::fs::read_to_string(binary.with_extension("pids")).unwrap();
+        let pids: Vec<u32> = pids
+            .split_whitespace()
+            .map(|pid| pid.parse().unwrap())
+            .collect();
+        assert_eq!(pids.len(), 2);
+        for pid in pids {
+            assert!(!Path::new("/proc").join(pid.to_string()).exists(), "probe left PID {pid}");
+        }
+    }
+
     #[tokio::test]
     async fn explicit_yolo_preserves_readonly_and_narrower_native_roles() {
         let d = tempfile::tempdir().unwrap();
@@ -5417,4 +5483,33 @@ fn connected_mcp_tool(entry: &Value, tool: &str) -> bool {
     entry["runtimeStatus"] == "connected"
         && entry["toolsError"].is_null()
         && entry["tools"].as_object().is_some_and(|tools| tools.contains_key(tool))
+}
+
+fn codex_message_kind(phase: Option<&str>) -> deck2_shared::MessageKind {
+    match phase { Some("partial_answer" | "final_answer") => deck2_shared::MessageKind::Answer, _ => deck2_shared::MessageKind::Progress }
+}
+
+fn promote_unphased_answer(times: &mut [deck2_shared::MessageTime]) {
+    if !times.iter().any(|m| m.kind == Some(deck2_shared::MessageKind::Answer)) {
+        if let Some(m) = times.last_mut() { m.kind = Some(deck2_shared::MessageKind::Answer); }
+    }
+}
+
+#[cfg(test)]
+mod message_kind_tests {
+    use super::{codex_message_kind, promote_unphased_answer};
+    use deck2_shared::MessageKind::{Answer, Progress};
+    #[test]
+    fn phases_classify_lead_segments() {
+        assert_eq!(codex_message_kind(None), Progress);
+        assert_eq!(codex_message_kind(Some("commentary")), Progress);
+        assert_eq!(codex_message_kind(Some("partial_answer")), Answer);
+        assert_eq!(codex_message_kind(Some("final_answer")), Answer);
+        let mut times = vec![deck2_shared::MessageTime { start: 0, at_ms: 1, kind: Some(Progress) }];
+        promote_unphased_answer(&mut times);
+        assert_eq!(times[0].kind, Some(Answer));
+        times.push(deck2_shared::MessageTime { start: 5, at_ms: 2, kind: Some(Progress) });
+        promote_unphased_answer(&mut times);
+        assert_eq!(times[1].kind, Some(Progress));
+    }
 }

@@ -46,7 +46,7 @@ pub(super) fn backfill(conn: &Connection) -> Result<()> {
             .into_iter()
             .filter_map(|start| {
                 ends.get(ends.partition_point(|(end, _)| *end <= start))
-                    .and_then(|&(_, at_ms)| at_ms.map(|at_ms| MessageTime { start, at_ms }))
+                    .and_then(|&(_, at_ms)| at_ms.map(|at_ms| MessageTime { start, at_ms, kind: None }))
             })
             .collect();
         if times.first().is_some_and(|t| t.start == 0) {

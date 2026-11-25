@@ -1826,3 +1826,25 @@ select:focus-visible, .question-panel textarea:focus-visible {
 .jump-latest-icon:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 @media (pointer: coarse) { .jump-latest-icon { width: 44px; height: 44px; } }
 @media (prefers-reduced-motion: no-preference) { .jump-latest-icon { animation: jump-latest-in .12s ease-out; } @keyframes jump-latest-in { from { opacity: 0; } } }
+.runner-auto-compact{margin-top:10px;display:grid;gap:4px}.settings-row>.runner-auto-compact{flex-basis:100%}.settings-row:has(>.runner-auto-compact){flex-wrap:wrap}
+
+.lead-update { background: var(--surface-2, rgba(127,127,127,.08)); color: var(--muted, inherit); font-size: .9em; padding: .65rem .8rem; border-radius: .5rem; margin: .5rem 0; }
+.lead-update[data-live] { position:relative; overflow:hidden; padding-left:1rem; }
+.lead-update[data-live]::before { content:""; position:absolute; inset:0 auto 0 0; width:3px; background:var(--action); opacity:.6; }
+.lead-update-header { display:flex; align-items:center; gap:.5rem; margin-bottom:.35rem; font-size:.82em; }
+.lead-update-header time { margin-left:auto; font-variant-numeric:tabular-nums; }
+.lead-update-dot { width:6px; height:6px; flex:0 0 6px; background:var(--action); }
+.lead-update-body { position:relative; }
+.lead-update-exit { position:absolute; inset:0; pointer-events:none; }
+@media (prefers-reduced-motion: no-preference) {
+ .lead-update[data-live]::before { animation:lead-update-breathe 2.6s ease-in-out infinite alternate; }
+ .lead-update[data-live] .lead-update-dot { animation:lead-update-breathe 1.6s ease-in-out infinite alternate; }
+ .lead-update-enter { animation:lead-update-in .22s ease-out both; }
+ .lead-update-exit { animation:lead-update-out .22s ease-out both; }
+ @keyframes lead-update-breathe { from { opacity:.35; } to { opacity:.85; } }
+ @keyframes lead-update-in { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+ @keyframes lead-update-out { from { opacity:1; transform:translateY(0); } to { opacity:0; transform:translateY(-5px); } }
+}
+@media (prefers-reduced-motion: reduce) { .lead-update-exit { display:none; } }
+.lead-updates { margin-top: .75rem; font-size: .9em; }
+.lead-updates summary { cursor: pointer; }

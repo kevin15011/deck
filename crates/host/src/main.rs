@@ -421,6 +421,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             }).transpose()?;
             let _lock = lock(&p)?;
             let mut store = Store::open(&p.join("state.db"), project.as_deref().unwrap_or(""))?;
+            store.init_runner_compaction()?;
             if let Some(root) = &project && std::path::Path::new(root).is_dir() {
                 store.select_project_folder(root)?;
             }

@@ -13,7 +13,7 @@ export interface Receipt {
  can_steer?:boolean;
  steering?:SteeringReceipt[];
  presentation?:ReceiptPresentation;
- message_times?:{start:number;at_ms:number}[];
+ message_times?:{start:number;at_ms:number;kind?:'progress'|'answer'}[];
  context?:unknown;
  recalled_ms?:number;
  claude_startup_retry?:{retries:number;after_ms:number};
@@ -55,7 +55,7 @@ export function receipt(v:unknown):Receipt {
  || !['model','thread','turn'].every(k=>v[k]===null || typeof v[k]==='string')
  || !['native_pid','handshake_ms','dispatch_ms','first_output_ms'].every(k=>v[k]===null || integer(v[k]))
  || !['accepted_ms','revision','local_tool_calls'].every(k=>integer(v[k]))) throw new Error('Incompatible host receipt. Reload a compatible Deck client; draft retained.');
- if(v.message_times!==undefined&&(!Array.isArray(v.message_times)||v.message_times.some((m,i,list)=>!object(m)||!integer(m.start)||!integer(m.at_ms)||(m.start as number)>=(v.text as string).length||(i===0?m.start!==0:(m.start as number)<=list[i-1].start))))throw Error('Invalid message delivery times');
+ if(v.message_times!==undefined&&(!Array.isArray(v.message_times)||v.message_times.some((m,i,list)=>!object(m)||!integer(m.start)||!integer(m.at_ms)||(m.kind!==undefined&&m.kind!=='progress'&&m.kind!=='answer')||(m.start as number)>=(v.text as string).length||(i===0?m.start!==0:(m.start as number)<=list[i-1].start))))throw Error('Invalid message delivery times');
  if(v.cancel_requested!==undefined&&typeof v.cancel_requested!=='boolean')throw Error('Invalid cancellation state');
  if(v.can_steer!==undefined&&typeof v.can_steer!=='boolean')throw Error('Invalid live steering capability');
  if(v.steering!==undefined&&(!Array.isArray(v.steering)||v.steering.map(steeringReceipt).some(s=>s.session!==v.session||s.threadId!==v.thread||s.expectedTurnId!==v.turn)))throw Error('Live message belongs to a different turn');

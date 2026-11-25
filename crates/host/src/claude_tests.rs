@@ -13,6 +13,18 @@ use tower::ServiceExt;
 const HOST: &str = "127.0.0.1:32126";
 const SESSION: &str = "claude-sdk-test-session";
 
+fn answer_text(receipt: &Receipt) -> String {
+    if receipt.message_times.is_empty() || receipt.message_times.iter().any(|m| m.kind.is_none()) {
+        return receipt.text.clone();
+    }
+    let utf16: Vec<u16> = receipt.text.encode_utf16().collect();
+    receipt.message_times.iter().enumerate().filter(|(_, m)| m.kind == Some(deck2_shared::MessageKind::Answer)).map(|(i, m)| {
+        let end = receipt.message_times.get(i + 1).map_or(utf16.len(), |next| next.start);
+        let part = String::from_utf16_lossy(&utf16[m.start..end]);
+        if i + 1 < receipt.message_times.len() { part.strip_suffix("\n\n").unwrap_or(&part).to_owned() } else { part }
+    }).collect::<Vec<_>>().join("\n\n")
+}
+
 struct Browser {
     router: Router,
     cookie: String,
@@ -250,7 +262,7 @@ async fn verify_coordination(host: &App, dir: &Path) {
         host.receipt("held-codex-lead").unwrap().phase,
         Phase::Running
     );
-    assert_eq!(overlap.text, "Configured roles received");
+    assert_eq!(answer_text(&overlap), "Configured roles received");
     assert!(overlap.handshake_ms.is_some());
     marker("release-codex-lead");
     wait_for(host, "held-codex-lead", |r| r.phase == Phase::Completed).await;
@@ -259,7 +271,7 @@ async fn verify_coordination(host: &App, dir: &Path) {
     browser.request("POST", "/api/commands", send_command(mcp, mcp)).await;
     verify_user_mcp_permission(host, &browser, mcp, false).await;
     let completed = wait_for(host, mcp, |r| r.phase == Phase::Completed).await;
-    assert_eq!(completed.text, "User MCP review completed");
+    assert_eq!(answer_text(&completed), "User MCP review completed");
     std::fs::remove_file(dir.join("unexpected-mcp")).unwrap();
 
     for (id, key) in [
@@ -349,7 +361,7 @@ async fn verify_coordination(host: &App, dir: &Path) {
         marker("continuation-running");
         let resumed = wait_for(host, &outcome.id, |r| r.phase == Phase::Completed).await;
         assert_eq!(resumed.thread, lead.thread);
-        assert_eq!(resumed.text, "Integrated member report");
+        assert_eq!(answer_text(&resumed), "Integrated member report");
         assert_eq!(
             host.store
                 .lock()
@@ -642,7 +654,7 @@ async fn verify_steering(host: &App, dir: &Path) {
     let admitted = browser.request("POST", "/api/commands/steer-root-1/steering", direct.clone()).await;
     assert_eq!(admitted["state"], "pending");
     let done = wait_for(host, "steer-root-1", |r| r.phase == Phase::Completed).await;
-    assert_eq!(done.text, "Steered: finish with the direct note");
+    assert_eq!(answer_text(&done), "Steered: finish with the direct note");
     assert_eq!(done.steering.len(), 1);
     assert_eq!(done.steering[0].state, SteeringState::Accepted);
     let retry = browser.request("POST", "/api/commands/steer-root-1/steering", direct).await;
@@ -740,7 +752,7 @@ async fn verify_steering(host: &App, dir: &Path) {
     let body = queued_body(&root2, &queued_steer, &queued);
     browser.request("POST", "/api/commands/steer-root-2/steering/queued", body.clone()).await;
     let done = wait_for(host, "steer-root-2", |r| r.phase == Phase::Completed).await;
-    assert_eq!(done.text, "Steered: finish using this picture");
+    assert_eq!(answer_text(&done), "Steered: finish using this picture");
     assert_eq!(done.steering[1].state, SteeringState::Accepted);
     let blocks = fixture_blocks(dir, &format!("steer-{queued_steer}"));
     assert_eq!(blocks.len(), 2);
@@ -897,7 +909,7 @@ async fn verify_steering(host: &App, dir: &Path) {
             let running = wait_for(host, &id, |r| r.phase == Phase::Running || r.phase == Phase::Completed).await;
             let started = Instant::now();
             let done = wait_for(host, &id, |r| r.phase == Phase::Completed).await;
-            assert_eq!(done.text, format!("Context {name}"));
+            assert_eq!(answer_text(&done), format!("Context {name}"));
             (running.phase, started.elapsed(), done.context)
         }
     };
@@ -1151,7 +1163,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         std::fs::remove_file(dir.join("hold-group")).unwrap();
         let followup = wait_for(&host, SECOND, |r| r.phase == Phase::Completed).await;
         assert_eq!(followup.thread, previous.thread);
-        assert_eq!(followup.text, "Follow-up finished");
+        assert_eq!(answer_text(&followup), "Follow-up finished");
         assert_reused_grep(&previous, &followup);
         let retained = host.receipt(FIRST).unwrap();
         assert_eq!(retained.phase, Phase::Failed);
@@ -1305,7 +1317,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     assert_eq!(stopped.text, "Partial");
     assert_eq!(stopped.decisions.last().unwrap().state, DecisionState::Invalidated);
     let second = wait_for(&host, SECOND, |r| r.phase == Phase::Completed).await;
-    assert_eq!(second.text, "Follow-up finished");
+    assert_eq!(answer_text(&second), "Follow-up finished");
     assert_reused_grep(&first, &second);
     assert_eq!(second.thread, first.thread);
     assert_eq!(second.model.as_deref(), Some("fixture-model"));
@@ -1469,7 +1481,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         )
         .await;
     let revoked = wait_for(&host, PENDING_REVOKE, |r| r.phase == Phase::Completed).await;
-    assert_eq!(revoked.text, "Search denied");
+    assert_eq!(answer_text(&revoked), "Search denied");
     assert_eq!(revoked.decisions[0].state, DecisionState::Invalidated);
     assert_new_grep_review(&host, &browser, SESSION, "revoked-grep", "Repeat search").await;
     browser
@@ -1502,7 +1514,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         )
         .await;
     let reused = wait_for(&host, "any-grep-reuse", |r| r.phase == Phase::Completed).await;
-    assert_eq!(reused.text, "Follow-up finished");
+    assert_eq!(answer_text(&reused), "Follow-up finished");
     assert_eq!(
         reused.decisions[0].native.as_ref().unwrap().resolution_provenance,
         Some(deck2_shared::PermissionProvenance::ReusedGrant {
@@ -1518,7 +1530,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         )
         .await;
     let outside = wait_for(&host, "any-outside-grep", |r| r.phase == Phase::Completed).await;
-    assert_eq!(outside.text, "Search denied");
+    assert_eq!(answer_text(&outside), "Search denied");
     assert!(outside.decisions.is_empty());
     // The CLI fixture checks permit and denial replies. Only rejected Bash
     // commands should produce permission cards in relay mode.
@@ -1570,7 +1582,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         ["Bash:exact-only", "Bash:exact-only", "Bash:exact-only", "Bash:exact-only",
          "Bash:exact-only", "Bash:bash_any", "Bash:exact-only"],
     );
-    assert_eq!(flow.text, "Flow finished");
+    assert_eq!(answer_text(&flow), "Flow finished");
     assert_eq!(flow.decisions.len(), prompted.len());
     let commands: Vec<Value> = flow.decisions.iter().map(|d| {
         let parameters: Value = serde_json::from_str(&d.native.as_ref().unwrap().parameters).unwrap();
@@ -1617,7 +1629,7 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
     browser.request("POST", "/api/commands", send_command("yolo-protected", "Protected Git in yolo")).await;
     resolve_bash(&host, &browser, "yolo-protected", Some("git reset --hard"), false).await;
     let protected = wait_for(&host, "yolo-protected", |r| r.phase == Phase::Completed).await;
-    assert_eq!(protected.text, "Protected Git reviewed");
+    assert_eq!(answer_text(&protected), "Protected Git reviewed");
     host.store
         .lock()
         .unwrap()
@@ -1689,7 +1701,7 @@ async fn assert_new_grep_review(
         )
         .await;
     let completed = wait_for(host, id, |r| r.phase == Phase::Completed).await;
-    assert_eq!(completed.text, "Search denied");
+    assert_eq!(answer_text(&completed), "Search denied");
     assert!(!completed.decisions[0].grant_consumed);
 }
 
@@ -1934,7 +1946,7 @@ async fn claude_sdk_member_assignments_and_outcomes() {
         std::fs::write(dir.join("release-member-after-restart"), "").unwrap();
         let outcome = member_outcome(&host, &json!({"id":task})).await;
         assert_eq!(outcome.phase, Phase::Completed, "{}", outcome.detail);
-        assert_eq!(outcome.text, "Observed interrupted Claude member");
+        assert_eq!(answer_text(&outcome), "Observed interrupted Claude member");
         let mut store = host.store.lock().unwrap();
         let settled = &store.task(&task).unwrap().attempts[0].clone();
         assert_eq!(settled.phase, Phase::Failed);
@@ -2145,7 +2157,7 @@ async fn claude_sdk_member_assignments_and_outcomes() {
         ));
         let stop_outcome = member_outcome(&host, &cancelled).await;
         assert_eq!(stop_outcome.phase, Phase::Completed);
-        assert_eq!(stop_outcome.text, "Observed stopped Claude member");
+        assert_eq!(answer_text(&stop_outcome), "Observed stopped Claude member");
     }
 
     // Confirm durable provenance and that duplicate notification does not create
@@ -2552,7 +2564,7 @@ async fn verify_bash(host: &App, dir: &Path, runner: &str) {
     }
     browser.request("POST", "/api/commands", send_command("direct-claude-bash", "lead-make")).await;
     let built = wait_for(host, "direct-claude-bash", |r| r.phase == Phase::Completed).await;
-    assert_eq!(built.text, "make test exited 0: test-passed");
+    assert_eq!(answer_text(&built), "make test exited 0: test-passed");
     assert!(built.decisions.is_empty());
 
     let other = "bash-independent";
@@ -2816,7 +2828,7 @@ async fn verify_batch_and_reuse(host: &App, dir: &Path) {
     let expected_first: String = std::iter::once("A".to_string())
         .chain((0..120).map(|i| format!("x{i} ")))
         .collect();
-    assert_eq!(first.text, expected_first);
+    assert_eq!(answer_text(&first), expected_first);
     let first_timing = first.startup_timing.as_ref().expect("first startup timing");
     assert!(!first_timing.process_reused);
     assert!(!first_timing.thread_reused);
@@ -2957,7 +2969,7 @@ async fn verify_batch_and_reuse(host: &App, dir: &Path) {
     assert_eq!(second.thread, first.thread);
     assert_eq!(second.native_pid, first.native_pid);
     assert!(
-        second.text.starts_with(&format!("Reused turn 2 pid={cli_pid} ")),
+        answer_text(&second).starts_with(&format!("Reused turn 2 pid={cli_pid} ")),
         "unexpected reused reply: {}",
         second.text
     );
@@ -3074,4 +3086,30 @@ async fn codex_command_family_consent_is_reused_over_native_wire() {
     assert_eq!((prompts, receipt.decisions.len(), reused), (1, 2, 1));
     assert_eq!(wire.lines().count(), 2);
     assert!(wire.lines().all(|l| l.contains("accept")), "{wire}");
+}
+
+#[test]
+fn finalize_segments_preserves_progress_and_matches_utf16_suffixes() {
+    use deck2_shared::{MessageKind::{Progress, Answer}, MessageTime};
+    let segment = |start| MessageTime { start, at_ms: 1, kind: Some(Progress) };
+    let mut text = "😀 update\n\nfirst\n\nsecond".to_string();
+    let mut times = vec![segment(0), segment(11), segment(18)];
+    finalize_segments(&mut text, &mut times, "first second");
+    assert_eq!(times.iter().map(|m| m.kind).collect::<Vec<_>>(), vec![Some(Progress), Some(Answer), Some(Answer)]);
+    assert_eq!(text, "😀 update\n\nfirst\n\nsecond");
+    let mut text = "update\n\nanswer".to_string();
+    let mut times = vec![segment(0), segment(8)];
+    finalize_segments(&mut text, &mut times, "answer");
+    assert_eq!(times[1].kind, Some(Answer));
+    let mut text = "update".to_string();
+    let mut times = vec![segment(0)];
+    finalize_segments(&mut text, &mut times, "");
+    assert_eq!(text, "update");
+    finalize_segments(&mut text, &mut times, "final");
+    assert_eq!(text, "update\n\nfinal");
+    assert_eq!(times[1].start, 8);
+    assert_eq!(times[1].kind, Some(Answer));
+    times[0].kind = None;
+    finalize_segments(&mut text, &mut times, "legacy");
+    assert_eq!(text, "legacy");
 }

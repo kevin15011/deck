@@ -39,6 +39,7 @@ pub mod ordinary;
 mod quota;
 pub mod rtk;
 pub mod runner_management;
+mod runner_compaction;
 mod claude;
 mod claude_readiness;
 #[cfg(test)]

@@ -219,7 +219,12 @@ pub struct MemberGuidance {
 pub struct MessageTime {
     pub start: usize,
     pub at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<MessageKind>,
 }
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageKind { Progress, Answer }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Workspace {
     pub host_id: String,
