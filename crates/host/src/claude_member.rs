@@ -365,6 +365,7 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
                         crate::observations::observe_claude(&mut a.context, &event, &thread, attempt, attempt, a.observed_model.as_deref());
                     })?;
                 }
+                Some("text_start") if initialized => {}
                 Some("delta") if initialized => {
                     let delta = event["text"].as_str().ok_or("Missing Claude member text delta")?;
                     if text.len() + delta.len() > MAX_TEXT {
@@ -445,7 +446,19 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
                 Some("result") if event["outcome"] == "limited" =>
                     return Err("Claude declined the member turn at its included usage limit".into()),
                 Some("result") => return Err("Claude stopped without a confirmed member report".into()),
-                _ => return Err("Unexpected Claude member bridge event".into()),
+                kind => {
+                    let detail = "Unexpected Claude member bridge event";
+                    let safe_kind = kind.filter(|kind| {
+                        (1..=48).contains(&kind.len())
+                            && kind.bytes().all(|byte| {
+                                byte.is_ascii_lowercase()
+                                    || byte.is_ascii_digit()
+                                    || matches!(byte, b'_' | b'-')
+                            })
+                    });
+                    return Err(safe_kind
+                        .map_or_else(|| detail.into(), |kind| format!("{detail} ({kind})")));
+                }
             }
         }
     }.await;

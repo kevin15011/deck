@@ -2139,6 +2139,28 @@ async fn claude_sdk_member_assignments_and_outcomes() {
         std::fs::write(dir.join("claude-member-lead-complete"), "").unwrap();
     }
     let origin = wait_for(&host, id, |r| r.phase == Phase::Completed).await;
+    if let Some(scenario) = stage.strip_prefix("protocol-") {
+        let task = member_state(&browser, SESSION, |t| {
+            matches!(t["attempts"][0]["phase"].as_str(), Some("completed" | "failed"))
+        }).await;
+        let settled = &host.store.lock().unwrap()
+            .task(task["id"].as_str().unwrap()).unwrap().attempts[0];
+        if scenario == "text-start" {
+            assert_eq!(settled.phase, Phase::Completed, "{}", settled.detail);
+            assert_eq!(settled.text, "Before tools. After tools.");
+            assert_eq!(settled.report.as_ref().unwrap().text, "Fixture final report");
+        } else {
+            assert_eq!(settled.phase, Phase::Failed, "{}", settled.detail);
+            assert!(settled.report.is_none());
+            let expected = if scenario == "unknown" {
+                "Unexpected Claude member bridge event (future_event-2)"
+            } else {
+                "Unexpected Claude member bridge event"
+            };
+            assert_eq!(settled.detail, expected);
+        }
+        return;
+    }
     if stage == "browser" {
         // Serve the real router to an external Chromium driver and hold the member open.
         let listener = tokio::net::TcpListener::bind(HOST).await.unwrap();
@@ -2300,6 +2322,18 @@ async fn claude_sdk_member_assignments_and_outcomes() {
         Some(native_session.as_str())
     );
     assert_eq!(member_dispatches(&dir, &native_session), 1);
+}
+
+#[tokio::test]
+async fn claude_member_protocol_text_starts() {
+    run_member_fixture("codex", "protocol-text-start").await;
+}
+
+#[tokio::test]
+async fn claude_member_protocol_unknown_events() {
+    for stage in ["protocol-unknown", "protocol-unsafe", "protocol-oversized"] {
+        run_member_fixture("codex", stage).await;
+    }
 }
 
 #[tokio::test]
@@ -2522,7 +2556,41 @@ async fn resume_fixture_step(
 async fn run_member_fixture(runner: &str, stage: &str) {
     let dir = tempfile::tempdir().unwrap();
     let node = node_runtime().unwrap().canonicalize().unwrap();
-    symlink(node, dir.path().join("node")).unwrap();
+    let fixture_node = dir.path().join("node");
+    if let Some(scenario) = stage.strip_prefix("protocol-") {
+        std::fs::write(&fixture_node, format!(r#"#!/usr/bin/python3
+import json, os, sys
+
+if len(sys.argv) < 5 or sys.argv[4] != "member":
+    os.execv({node}, [{node}, *sys.argv[1:]])
+
+scenario = "{scenario}"
+thread = sys.argv[3]
+
+def emit(event_type, **fields):
+    print(json.dumps(dict(type=event_type, session_id=thread, **fields)), flush=True)
+
+json.loads(sys.stdin.readline())
+emit("ready")
+assert json.loads(sys.stdin.readline())["type"] == "send"
+emit("init", model="fixture-model")
+if scenario == "text-start":
+    emit("text_start")
+    emit("delta", text="Before tools. ")
+    emit("activity", id="tool", phase="started", kind="tool", tool="Read")
+    emit("activity", id="tool", phase="completed", kind="tool", tool="Read")
+    emit("text_start")
+    emit("delta", text="After tools.")
+    emit("result", outcome="completed", text="Fixture final report")
+else:
+    kind = {{"unknown": "future_event-2", "unsafe": "private\nvalue", "oversized": "x" * 49}}[scenario]
+    emit(kind, payload="private fixture payload")
+    assert json.loads(sys.stdin.readline())["type"] == "stop"
+"#, node = json!(node))).unwrap();
+        std::fs::set_permissions(&fixture_node, std::fs::Permissions::from_mode(0o700)).unwrap();
+    } else {
+        symlink(node, fixture_node).unwrap();
+    }
     let cli = dir.path().join(RUNNER);
     std::fs::write(&cli, include_str!("../tests/fake_claude_sdk.py")).unwrap();
     std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();

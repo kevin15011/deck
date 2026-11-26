@@ -690,10 +690,9 @@ for line in sys.stdin:
                              + ([{"name":"deck-session", "status":"failed"}]
                                 if (home / "duplicate-deck-init").exists() else [])
                              + ([{"name":"foreign", "status":"connected"}] if extra_mcp else [])})
-        # The real SDK opens each text block before its deltas; the bridge maps it to text_start.
-        if not member:
-            emit({"type": "stream_event", "session_id": thread, "parent_tool_use_id": None,
-                  "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}})
+        # The real SDK opens each text block before its deltas for both roles.
+        emit({"type": "stream_event", "session_id": thread, "parent_tool_use_id": None,
+              "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}})
         emit({"type": "stream_event", "session_id": thread, "parent_tool_use_id": None,
               "event": {"type": "content_block_delta", "delta": {"type": "text_delta",
                                                                  "text": "Partial"}}})
