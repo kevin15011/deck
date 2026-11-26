@@ -2,6 +2,7 @@ import {expect, spyOn, test} from 'bun:test';
 import {parseFile, parseTree, reviewApi, type Entry, type ReviewApi, type Tree, type ReviewDocument} from './api';
 import {ReviewCache, ReviewStore} from './store';
 import {buildTree, visibleRows} from './tree';
+import {isMarkdownPath, resolveReviewPresentation} from './presentation';
 
 const entry = (path: string, kind: Entry['kind'] = 'file'): Entry =>
  ({id:path, path, kind, status:kind === 'file' ? 'M' : null, detail:null, oldPath:null});
@@ -11,6 +12,43 @@ const catalog: Tree = {view:'changes', generation:'g', head:null, base:{kind:'em
 const doc = (file: Entry, version = 'v'): ReviewDocument => ({
  kind:'document', id:file.id, entry:file, generation:'g', version, before:{kind:'absent'},
  after:{kind:'text', text:file.path, bytes:file.path.length, mode:'100644'},
+});
+
+test('Markdown detection checks the final extension case-insensitively', () => {
+ for (const path of ['README.md', 'docs/README.MARKDOWN', 'spec.MkD', 'guide.mdx']) {
+  expect(isMarkdownPath(path)).toBe(true);
+ }
+ for (const path of ['README', 'README.md.txt', 'docs.md/index', 'guide.mdown']) {
+  expect(isMarkdownPath(path)).toBe(false);
+ }
+});
+
+test('Review resolves Code, Diff and Preview from the current document and preference', () => {
+ const markdown = doc(entry('docs/guide.md'));
+ const all = {...markdown, before:null};
+ expect(resolveReviewPresentation(all, '').mode).toBe('code');
+ expect(resolveReviewPresentation(markdown, '').mode).toBe('diff');
+ expect(resolveReviewPresentation(all, 'preview')).toEqual({
+  mode:'preview', preview:{text:markdown.entry.path, deleted:false},
+ });
+ expect(resolveReviewPresentation(markdown, 'preview').mode).toBe('preview');
+ expect(resolveReviewPresentation(doc(a), 'preview')).toEqual({mode:'diff'});
+ expect(resolveReviewPresentation({...doc(a), before:null}, 'preview')).toEqual({mode:'code'});
+});
+
+test('Review previews empty current Markdown and falls back only for an absent current side', () => {
+ const markdown = doc(entry('docs/guide.md'));
+ const before = {kind:'text' as const, text:'Original', mode:'100644', bytes:8};
+ const deleted = {...markdown, before, after:{kind:'absent' as const}};
+ expect(resolveReviewPresentation(deleted, 'preview')).toEqual({
+  mode:'preview', preview:{text:'Original', deleted:true},
+ });
+ expect(resolveReviewPresentation({...markdown, before, after:{...before, text:'', bytes:0}}, 'preview')).toEqual({
+  mode:'preview', preview:{text:'', deleted:false},
+ });
+ expect(resolveReviewPresentation({...deleted, before:{kind:'absent'}}, 'preview')).toEqual({mode:'diff'});
+ expect(resolveReviewPresentation({...deleted, after:{kind:'binary', bytes:8, mode:'100644'}}, 'preview'))
+  .toEqual({mode:'diff'});
 });
 
 test('compaction uses complete branches, and filtering leaves expansion intact', () => {

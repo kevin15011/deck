@@ -54,6 +54,13 @@
 .review-side-labels { font-size: .72rem; color: var(--muted); }
 .review-side-labels span { flex: 1; }
 .review-code { flex: 1; min-height: 0; overflow: hidden; }
+.review-markdown-preview {
+ flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 1rem 1.25rem;
+ font-size: .9rem; line-height: 1.65; overflow-wrap: anywhere;
+}
+.review-markdown-preview:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.review-markdown-preview > .markdown, .review-markdown-notice { max-width: 72ch; margin-inline: auto; }
+.review-markdown-notice { margin-block: 0 .85rem; color: var(--muted); font-size: .76rem; }
 .review-code > .cm-editor, .review-code .cm-mergeView { height: 100%; }
 .review-code .cm-mergeView { overflow: auto; }
 .review-code .cm-mergeViewEditor + .cm-mergeViewEditor { border-inline-start: 1px solid var(--border); }
