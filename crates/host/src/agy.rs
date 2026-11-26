@@ -41,6 +41,45 @@ pub(super) const CANCEL_GRACE: Duration = Duration::from_millis(500);
 /// lookahead. Keep the advertised text constraints in a portable form.
 /// Deck still validates the actual arguments when dispatching a tool.
 pub(crate) fn adapt_mcp_schemas(schema: &mut Value) {
+    // Antigravity silently evicts the largest MCP tool when combined schemas
+    // across Deck + external MCP servers exceed its toolbox budget. Keep
+    // `deck_delegate` compact for ACP while Deck's host dispatcher continues to
+    // enforce the full strict schema server-side.
+    if let Some(tools) = schema.as_array_mut()
+        && let Some(delegate) = tools.iter_mut().find(|tool| tool["name"] == "deck_delegate")
+    {
+        let agent_desc = delegate["inputSchema"]["properties"]["agent"]["description"]
+            .as_str()
+            .unwrap_or("Configured role ID for new tasks or recorded owner for continuations.")
+            .to_owned();
+        let action_pattern = delegate["inputSchema"]["properties"]["action"]["pattern"].clone();
+        let mut action_prop = json!({"type": "string"});
+        if action_pattern.is_string() {
+            action_prop["pattern"] = action_pattern;
+        }
+        delegate["inputSchema"] = json!({
+            "type": "object",
+            "required": ["agent", "task"],
+            "properties": {
+                "agent": {"type": "string", "description": agent_desc},
+                "task": {"type": "string"},
+                "continueTaskId": {"type": "string"},
+                "continuity": {"enum": ["auto", "fresh", "native"]},
+                "continuityJustification": {"type": "string"},
+                "acceptance": {"type": "object"},
+                "findings": {"type": "object"},
+                "sourceTasks": {"type": "array", "items": {"type": "object"}},
+                "dependsOn": {"type": "array", "items": {"type": "string"}},
+                "action": action_prop,
+                "commandId": {"type": "string"},
+                "replan": {"type": "object"}
+            }
+        });
+    }
+    adapt_mcp_patterns(schema);
+}
+
+fn adapt_mcp_patterns(schema: &mut Value) {
     const LOOKAHEAD: &str = r"^(?![\s\S]*[\u0000-\u0008\u000b-\u001f\u007f])[\s\S]*\S[\s\S]*$";
     // Go's \s is ASCII-only. Spell out whitespace and C1 controls so
     // neither can satisfy the requirement for a substantive character.
@@ -56,9 +95,9 @@ pub(crate) fn adapt_mcp_schemas(schema: &mut Value) {
             {
                 *pattern = json!(NONBLANK);
             }
-            fields.values_mut().for_each(adapt_mcp_schemas);
+            fields.values_mut().for_each(adapt_mcp_patterns);
         }
-        Value::Array(values) => values.iter_mut().for_each(adapt_mcp_schemas),
+        Value::Array(values) => values.iter_mut().for_each(adapt_mcp_patterns),
         _ => {}
     }
 }
