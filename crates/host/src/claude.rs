@@ -569,6 +569,37 @@ pub(crate) fn lead_instructions(
     ))
 }
 
+/// Why a saved Lead transcript cannot resume under the current provenance.
+///
+/// Admission pins the executable for this turn. Across turns, Claude's
+/// transcript is scoped to the profile, cwd and qualified integration. A CLI
+/// update can resume that transcript without carrying old grants forward,
+/// since grants remain bound to the full admission identity.
+fn reset_reason(context: &NativeContext, current: &NativeProvenance) -> Option<&'static str> {
+    if context.mode != Mode::SessionV1 || context.runner != Some(NativeRunner::Claude) {
+        return Some("it belongs to another runner or execution mode");
+    }
+    let Some(saved) = context.provenance.as_ref() else {
+        return Some("its saved identity is missing");
+    };
+    if Uuid::parse_str(&context.thread).is_err()
+        || saved.executable.len() != 64
+        || !saved.executable.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Some("its saved identity is invalid");
+    }
+    if saved.runner != current.runner || saved.integration != current.integration {
+        return Some("Deck's Claude Code integration changed");
+    }
+    if saved.storage != current.storage {
+        return Some("the project's trust setting or the Claude Code profile changed");
+    }
+    if saved.content != current.content {
+        return Some("Deck's role instructions changed");
+    }
+    None
+}
+
 pub(crate) async fn lead(
     app: &App,
     id: &str,
@@ -625,29 +656,14 @@ pub(crate) async fn lead(
         storage: digest(format!("{}:{namespace}", binding.storage).as_bytes()),
         content: binding.role.clone(),
     };
-    let resume = session.native.filter(|_| !receipt.fresh);
-    if receipt.continuation.is_some() && resume.is_none() {
+    let saved = session.native.filter(|_| !receipt.fresh);
+    if receipt.continuation.is_some() && saved.is_none() {
         return Err("The Claude Code context for this task outcome is unavailable.".into());
     }
-    // Admission pins the executable for this turn. Across turns, Claude's
-    // transcript is scoped to the profile, cwd and qualified integration.
-    // A CLI update can resume that transcript without carrying old grants
-    // forward, since grants remain bound to the full admission identity.
-    if resume.as_ref().is_some_and(|c| {
-        c.mode != Mode::SessionV1
-            || c.runner != Some(NativeRunner::Claude)
-            || c.provenance.as_ref().is_none_or(|saved| {
-                saved.runner != provenance.runner
-                    || saved.integration != provenance.integration
-                    || saved.storage != provenance.storage
-                    || saved.content != provenance.content
-                    || saved.executable.len() != 64
-                    || !saved.executable.bytes().all(|byte| byte.is_ascii_hexdigit())
-            })
-            || Uuid::parse_str(&c.thread).is_err()
-    }) {
-        return Err("Claude Code continuation belongs to a different native profile. Choose Start new execution.".into());
-    }
+    // A saved transcript that cannot be resumed never blocks the user: Deck
+    // starts a new Claude session and hands it the recorded conversation.
+    let reset = saved.as_ref().and_then(|c| reset_reason(c, &provenance));
+    let resume = saved.filter(|_| reset.is_none());
     let thread = resume
         .as_ref()
         .map(|context| context.thread.clone())
@@ -898,7 +914,11 @@ pub(crate) async fn lead(
             if r.cancel_requested || *cancel.borrow() || app.shutdown_requested.load(std::sync::atomic::Ordering::Acquire) {
                 return Ok(None);
             }
-            let prompt = store.outcome_prompt(&r)?.unwrap_or_else(|| r.prompt.clone());
+            let mut prompt = store.outcome_prompt(&r)?.unwrap_or_else(|| r.prompt.clone());
+            if let Some(reason) = reset {
+                prompt = crate::native_recap::prompt(&store, &r, "Claude Code", reason, prompt)?;
+                r.native_reset = Some(crate::native_recap::notice("Claude Code", reason));
+            }
             r.native_pid = Some(pid);
             r.phase = Phase::Dispatching;
             let handshake_ms = started.elapsed().as_millis() as u64;

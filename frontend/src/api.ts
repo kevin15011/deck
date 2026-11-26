@@ -17,6 +17,7 @@ export interface Receipt {
  context?:unknown;
  recalled_ms?:number;
  claude_startup_retry?:{retries:number;after_ms:number};
+ native_reset?:string;
  steered_to?:string;
  cancel_requested?:boolean;
  reasoning?:{model:string;effort:string;source:string};
@@ -61,6 +62,7 @@ export function receipt(v:unknown):Receipt {
  if(v.steering!==undefined&&(!Array.isArray(v.steering)||v.steering.map(steeringReceipt).some(s=>s.session!==v.session||s.threadId!==v.thread||s.expectedTurnId!==v.turn)))throw Error('Live message belongs to a different turn');
  const startupRetry=v.claude_startup_retry;
  if(startupRetry!==undefined&&(!object(startupRetry)||!integer(startupRetry.retries)||!integer(startupRetry.after_ms)))throw Error('Invalid Claude startup retry');
+ if(v.native_reset!==undefined&&typeof v.native_reset!=='string')throw Error('Invalid native session reset notice');
  if(v.steered_to!==undefined&&(typeof v.steered_to!=='string'||v.phase!=='cancelled'||v.dispatch_ms!==null))throw Error('Invalid queued live reservation');
  if(v.recalled_ms!==undefined&&(!integer(v.recalled_ms)||v.dispatch_ms!==null||v.cancel_requested!==true))throw Error('Invalid recalled input timestamp');
 

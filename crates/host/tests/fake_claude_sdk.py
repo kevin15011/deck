@@ -1018,6 +1018,11 @@ for line in sys.stdin:
         elif message["message"]["content"] == "Untrusted workspace edit":
             assert not trusted
             ask("untrusted-write", "Write", {"file_path": str(project / "untrusted.txt"), "content": "escaped"})
+        elif content.endswith("Current message:\nContinue across namespaces"):
+            # A new transcript after the trust boundary changed carries Deck's history.
+            assert not trusted and not resume
+            assert "<deck-session-history>" in content and "Direct workspace edits" in content
+            finish("Continued in a new transcript")
         else:
             assert trusted
             reviewed_read(1)

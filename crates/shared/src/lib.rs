@@ -152,6 +152,10 @@ pub struct Receipt {
     pub startup_timing: Option<StartupTiming>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_startup_retry: Option<StartupRetry>,
+    /// Set when this turn started a replacement native session because the
+    /// saved one could not be resumed; explains why for the user.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_reset: Option<String>,
     pub dispatch_ms: Option<u64>,
     #[serde(default)]
     pub acknowledgment_ms: Option<u64>,

@@ -1757,16 +1757,41 @@ async fn claude_sdk_normal_entrypoint_streams_stops_and_resumes_once() {
         .unwrap()
         .set_trust(&host.project, false)
         .unwrap();
+    // A changed trust boundary must not resume the old transcript, and it must
+    // not block the user either: Deck starts a new transcript with its history.
+    let previous_thread = host
+        .store
+        .lock()
+        .unwrap()
+        .session_by_id(SESSION)
+        .unwrap()
+        .native
+        .unwrap()
+        .thread;
     const INCOMPATIBLE: &str = "claude-sdk-changed-namespace";
     browser
         .request(
             "POST",
             "/api/commands",
-            send_command(INCOMPATIBLE, "Do not deliver across namespaces"),
+            send_command(INCOMPATIBLE, "Continue across namespaces"),
         )
         .await;
-    let rejected = wait_for(&host, INCOMPATIBLE, |r| r.phase == Phase::Failed).await;
-    assert_eq!(rejected.dispatch_ms, None);
+    let replaced = wait_for(&host, INCOMPATIBLE, |r| !r.phase.active() && r.phase != Phase::Queued).await;
+    assert_eq!(
+        replaced.phase,
+        Phase::Completed,
+        "{}\n{}",
+        replaced.detail,
+        std::fs::read_to_string(dir.join("fixture-error")).unwrap_or_default()
+    );
+    assert!(
+        replaced
+            .native_reset
+            .as_deref()
+            .is_some_and(|notice| notice.contains("trust setting")),
+        "{replaced:?}"
+    );
+    assert_ne!(replaced.thread.as_deref(), Some(previous_thread.as_str()));
 
     const UNTRUSTED: &str = "direct-claude-untrusted";
     let mut command = send_command(UNTRUSTED, "Untrusted workspace edit");

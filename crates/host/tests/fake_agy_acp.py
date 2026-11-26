@@ -166,6 +166,11 @@ for line in sys.stdin:
             assert re.fullmatch(r"deck[0-9a-f]{32}", servers[0]["name"])
             log("deck-server", servers[0]["name"])
             resumed = method == "session/resume"
+            if resumed and (root / "forget-session").exists():
+                log("resume-rejected", params["sessionId"])
+                resumed = False
+                send(id=request_id, error={"code": -32602, "message": "session not found"})
+                continue
             if resumed:
                 assert params["sessionId"] == session and "_meta" not in params
             else:

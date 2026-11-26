@@ -430,17 +430,33 @@ async fn open_session(
     instructions: &str,
     assignment: &MemberAssignment,
     thread: &mut Option<String>,
+    // When set, a resume that Antigravity rejects (for example, a session it
+    // no longer knows) opens a new session instead and records that here.
+    mut replaced: Option<&mut bool>,
 ) -> Result<bool, Error> {
     let capabilities = client.initialize().await?;
-    let mut params = json!({"cwd":cwd,"mcpServers":mcp.servers});
-    let method = if let Some(thread) = resume {
-        params["sessionId"] = json!(thread);
-        "session/resume"
-    } else {
+    let params = json!({"cwd":cwd,"mcpServers":mcp.servers});
+    let new_session = |mut params: Value| {
         params["_meta"] = json!({"antigravity":{"systemPrompt":{"append":instructions}}});
-        "session/new"
+        params
     };
-    let session = client.call(method, params).await?;
+    let mut resume = resume;
+    let session = if let Some(saved) = resume {
+        let mut resume_params = params.clone();
+        resume_params["sessionId"] = json!(saved);
+        match client.call("session/resume", resume_params).await {
+            Err(Error::Rejected) if replaced.is_some() => {
+                if let Some(flag) = replaced.as_deref_mut() {
+                    *flag = true;
+                }
+                resume = None;
+                client.call("session/new", new_session(params)).await?
+            }
+            result => result?,
+        }
+    } else {
+        client.call("session/new", new_session(params)).await?
+    };
     let id = session_id(&session)
         .filter(|id| resume.is_none_or(|saved| *id == saved))
         .ok_or(Error::Protocol)?;
@@ -480,6 +496,41 @@ async fn cancel_session(client: &mut Client, thread: &str) {
         }
     })
     .await;
+}
+
+/// Why a saved Lead context cannot resume under the current provenance, if so.
+///
+/// Admission pins the executable for one turn. Across turns, the native
+/// session is scoped to the profile, cwd, qualified integration and role
+/// content. The executable digest is deliberately excluded: Antigravity
+/// updates itself in place while its session storage stays the same, and
+/// grants remain bound to the full admission identity.
+fn reset_reason(
+    context: &NativeContext,
+    current: &NativeProvenance,
+) -> Option<&'static str> {
+    if context.runner != Some(NativeRunner::Agy) || context.mode != Mode::SessionV1 {
+        return Some("it belongs to another runner or execution mode");
+    }
+    let Some(saved) = context.provenance.as_ref() else {
+        return Some("its saved identity is missing");
+    };
+    if !valid_id(&context.thread, 200)
+        || saved.executable.len() != 64
+        || !saved.executable.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Some("its saved identity is invalid");
+    }
+    if saved.runner != current.runner || saved.integration != current.integration {
+        return Some("Deck's Antigravity integration changed");
+    }
+    if saved.storage != current.storage {
+        return Some("the project's trust setting or the Antigravity profile changed");
+    }
+    if saved.content != current.content {
+        return Some("Deck's role instructions changed");
+    }
+    None
 }
 
 fn prompt_images(app: &App, root: &Receipt) -> Result<Vec<Value>, String> {
@@ -552,18 +603,17 @@ pub(crate) async fn lead(
         storage: digest(format!("{}:{cwd:?}", binding.storage).as_bytes()),
         content: binding.role.clone(),
     };
-    let resume = session.native.filter(|_| !root.fresh);
-    if root.continuation.is_some() && resume.is_none() {
+    let saved = session.native.filter(|_| !root.fresh);
+    if root.continuation.is_some() && saved.is_none() {
         return Err("Antigravity context for this task outcome is unavailable.".into());
     }
-    if resume.as_ref().is_some_and(|context| {
-        context.runner != Some(NativeRunner::Agy)
-            || context.mode != Mode::SessionV1
-            || context.provenance.as_ref() != Some(&provenance)
-            || !valid_id(&context.thread, 200)
-    }) {
-        return Err("Antigravity context belongs to a different native profile. Choose Start new execution.".into());
-    }
+    // A saved session that cannot be resumed never blocks the user: Deck opens
+    // a new native session and hands it the recorded conversation instead.
+    let mut reset = saved
+        .as_ref()
+        .and_then(|context| reset_reason(context, &provenance));
+    let resume = saved.filter(|_| reset.is_none());
+    let mut replaced = false;
 
     let contract = snapshot.session_contract.as_ref().unwrap();
     let instructions = format!(
@@ -597,12 +647,16 @@ pub(crate) async fn lead(
             &instructions,
             &contract.members["lead"],
             &mut thread,
+            Some(&mut replaced),
         );
         let supports_images = tokio::select! {
             biased;
             _ = cancel.wait_for(|stop| *stop) => return Ok(None),
             result = timeout(STARTUP_TIMEOUT, startup) => result.map_err(|_| Error::Timeout)??,
         };
+        if replaced {
+            reset = Some("Antigravity no longer recognized the saved session");
+        }
         if !images.is_empty() && !supports_images {
             return Err("This Antigravity instance does not advertise image input.".into());
         }
@@ -615,10 +669,11 @@ pub(crate) async fn lead(
             tools,
         };
         let session = thread.as_deref().ok_or(Error::Protocol)?;
-        let Some(prompt) = turn.confirm_context(session, provenance, trusted)? else {
+        let Some(prompt) = turn.confirm_context(session, provenance, trusted, reset)? else {
             return Ok(None);
         };
-        if resume.is_some()
+        if reset.is_none()
+            && resume.is_some()
             && crate::runner_compaction::agy_should_compact(
                 crate::runner_compaction::agy_enabled(),
                 prior_tokens,
@@ -762,6 +817,7 @@ impl Turn<'_> {
         thread: &str,
         provenance: NativeProvenance,
         trusted: bool,
+        reset: Option<&str>,
     ) -> Result<Option<String>, String> {
         let mut store = self.app.store.lock().map_err(|_| "State lock failed")?;
         let mut receipt = store
@@ -789,9 +845,13 @@ impl Turn<'_> {
             .runner
             .as_ref()
             .and_then(|runner| runner.model.clone());
-        let prompt = store
+        let mut prompt = store
             .outcome_prompt(&receipt)?
             .unwrap_or_else(|| receipt.prompt.clone());
+        if let Some(reason) = reset {
+            prompt = crate::native_recap::prompt(&store, &receipt, "Antigravity", reason, prompt)?;
+            receipt.native_reset = Some(crate::native_recap::notice("Antigravity", reason));
+        }
         let mut session = store.session_by_id(&receipt.session)?;
         session.native = Some(NativeContext {
             runner: Some(NativeRunner::Agy),

@@ -477,7 +477,7 @@ pub(crate) async fn run(app: &App, task: &str, attempt: &str) -> Result<(), Stri
         tokio::select! {
             biased;
             _ = crate::session_tasks::cancelled(app, &task.id, &attempt.id) => return Err("Antigravity member stopped during initialization.".into()),
-            result = timeout(STARTUP_TIMEOUT, open_session(&mut client, cwd, &mcp, resume, &instructions, assignment, &mut thread)) => result.map_err(|_| Error::Timeout)??,
+            result = timeout(STARTUP_TIMEOUT, open_session(&mut client, cwd, &mcp, resume, &instructions, assignment, &mut thread, None)) => result.map_err(|_| Error::Timeout)??,
         };
         let thread = thread.as_deref().ok_or(Error::Protocol)?;
         if file_digest(binary).map_err(|_| "Antigravity executable unavailable")? != binding.executable.executable {

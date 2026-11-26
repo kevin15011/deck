@@ -188,6 +188,54 @@ async fn receipt(host: &App, id: &str, predicate: impl Fn(&Receipt) -> bool) -> 
     .await
 }
 
+// Protects session continuity. Fails if a saved native session that cannot be
+// resumed blocks the Lead instead of starting a new one with Deck's history.
+async fn exercise_reset(dir: &Path, host: &App, browser: &Browser) {
+    let prompt = |index: usize| wire(dir, "prompt")[index].as_str().unwrap().to_owned();
+    browser.send("reset-first", "remember the fixture plan", false).await;
+    let first = receipt(host, "reset-first", |r| r.phase == Phase::Completed).await;
+    assert!(first.native_reset.is_none());
+
+    // Deck's role instructions changed after the native session was created.
+    {
+        let mut store = host.store.lock().unwrap();
+        let mut session = store.session_by_id(SESSION).unwrap();
+        session.native.as_mut().unwrap().provenance.as_mut().unwrap().content = "0".repeat(64);
+        store.save_session(&session).unwrap();
+    }
+    browser.send("reset-profile", "after profile change", false).await;
+    let changed = receipt(host, "reset-profile", |r| r.phase == Phase::Completed).await;
+    assert!(
+        changed.native_reset.as_deref().unwrap().contains("role instructions changed"),
+        "{changed:?}"
+    );
+    assert_eq!(wire(dir, "session/new").len(), 2);
+    assert!(wire(dir, "session/resume").is_empty());
+    let recap = prompt(1);
+    assert!(recap.contains("<deck-session-history>"), "{recap}");
+    assert!(recap.contains("### User\nremember the fixture plan\n### Lead\nfinished"), "{recap}");
+    assert!(recap.ends_with("Current message:\nafter profile change"), "{recap}");
+
+    // Antigravity no longer recognizes the saved session.
+    std::fs::write(dir.join("forget-session"), "").unwrap();
+    browser.send("reset-forgotten", "after forgotten session", false).await;
+    let forgotten = receipt(host, "reset-forgotten", |r| r.phase == Phase::Completed).await;
+    assert!(forgotten.native_reset.as_deref().unwrap().contains("no longer recognized"));
+    assert_eq!(wire(dir, "resume-rejected").len(), 1);
+    assert_eq!(wire(dir, "session/new").len(), 3);
+    let recap = prompt(2);
+    assert!(recap.contains("remember the fixture plan") && recap.contains("after profile change"));
+    assert!(!recap.contains("<deck-session-history>\nDeck could not"), "recaps must not nest");
+
+    // The replacement session is resumed normally afterwards.
+    std::fs::remove_file(dir.join("forget-session")).unwrap();
+    browser.send("reset-resumed", "resumed", false).await;
+    let resumed = receipt(host, "reset-resumed", |r| r.phase == Phase::Completed).await;
+    assert!(resumed.native_reset.is_none());
+    assert_eq!(wire(dir, "session/resume").len(), 1);
+    assert_eq!(prompt(3), "resumed");
+}
+
 fn wire(dir: &Path, kind: &str) -> Vec<Value> {
     std::fs::read_to_string(dir.join("agy-wire"))
         .unwrap()
@@ -209,6 +257,8 @@ async fn agy_acp_normal_entrypoint_and_restart() {
         run_case(quota.path(), "quota").await;
         let phase2 = fixture();
         run_case(phase2.path(), "phase2").await;
+        let reset = fixture();
+        run_case(reset.path(), "reset").await;
         let restart = fixture();
         let mut crashed = subprocess(restart.path(), "crash")
             .stdout(std::process::Stdio::piped())
@@ -324,6 +374,10 @@ async fn agy_acp_normal_entrypoint_and_restart() {
     assert_eq!(saved["contract"]["members"]["lead"], thinking);
     if action == "phase2" {
         exercise_phase2(&dir, &host, &browser, &assignments, &thinking).await;
+        return;
+    }
+    if action == "reset" {
+        exercise_reset(&dir, &host, &browser).await;
         return;
     }
     if action == "quota" {
@@ -472,8 +526,28 @@ async fn agy_acp_normal_entrypoint_and_restart() {
         .unwrap();
     assert_eq!(context.runner, Some(NativeRunner::Agy));
 
+    // Antigravity updates its binary in place between turns. The Lead must
+    // keep resuming the same native session instead of demanding a new one.
+    let agy = dir.join("agy");
+    let mut updated = std::fs::read(&agy).unwrap();
+    updated.extend_from_slice(b"\n# self-update\n");
+    std::fs::write(dir.join("agy.next"), updated).unwrap();
+    std::fs::set_permissions(dir.join("agy.next"), std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::rename(dir.join("agy.next"), &agy).unwrap();
+    let before_update = context.provenance.unwrap().executable;
+
     browser.send("agy-second", "resumed", false).await;
     let second = receipt(&host, "agy-second", |r| r.phase == Phase::Completed).await;
+    let resumed = host
+        .store
+        .lock()
+        .unwrap()
+        .session_by_id(SESSION)
+        .unwrap()
+        .native
+        .unwrap();
+    assert_eq!(resumed.thread, context.thread);
+    assert_ne!(resumed.provenance.unwrap().executable, before_update);
     assert_eq!(first.thread, second.thread);
     assert_ne!(first.native_pid, second.native_pid);
     assert_eq!(wire(&dir, "session/new").len(), 1);

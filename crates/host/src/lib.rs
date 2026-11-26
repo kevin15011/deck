@@ -22,6 +22,7 @@ pub mod lifecycle;
 pub mod managed_tools;
 mod directories;
 pub mod native;
+mod native_recap;
 mod observations;
 mod activity;
 pub mod application;
@@ -1081,6 +1082,7 @@ impl Store {
             handshake_ms: None,
             startup_timing: None,
             claude_startup_retry: None,
+            native_reset: None,
             dispatch_ms: None,
             acknowledgment_ms: None,
             first_output_ms: None,
