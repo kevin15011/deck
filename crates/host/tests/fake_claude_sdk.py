@@ -258,6 +258,7 @@ inventory = []
 stopping = False
 received_user = False
 instructions = ""
+roster_row = re.compile(r'^- ([a-z-]+) \((".*")\) — \S', re.MULTILINE)
 persistent_turns = 0
 
 
@@ -729,7 +730,7 @@ for line in sys.stdin:
         if member:
             assert (resume_fixture or not resume) and model == "sonnet" and effort == "high"
             assert "ACTIVE TASK ASSIGNMENT" in content
-            assert "Configured member role IDs:" not in instructions
+            assert not roster_row.search(instructions)
             names = {tool["name"] for tool in inventory}
             assert {"deck_session_history", "deck_task_result", "deck_skill_load"} <= names
             for name in ("deck_delegate", "deck_task_list", "deck_task_cancel", "deck_task_integrate", "deck_task_guide"):
@@ -895,10 +896,10 @@ for line in sys.stdin:
             emit({"type":"result", "subtype":"success", "is_error":False, "session_id":thread, "result":final})
             break
         if content in ("Check configured roles", "delegate-and-yield", "delegate-and-stop") or content.startswith("Host task outcome"):
-            role_line = next(line for line in instructions.splitlines()
-                             if line.startswith("Configured member role IDs: "))
-            role_ids = json.loads(role_line.split(": ", 1)[1])
-            assert role_ids == ["investigate"], role_ids
+            assignments = [(role, json.loads(assignment))
+                           for role, assignment in roster_row.findall(instructions)]
+            assert assignments == [("investigate", "codex/gpt-6.1-sol")], assignments
+            role_ids = [role for role, _ in assignments]
             delegate = next(tool for tool in inventory if tool["name"] == "deck_delegate")
             schema = delegate["inputSchema"]
             assert schema["properties"]["agent"]["examples"] == role_ids, schema

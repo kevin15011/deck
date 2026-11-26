@@ -11,6 +11,36 @@ use std::{
 };
 pub(crate) const CONFIG_CHANGED: &str = "Native execution configuration changed during the turn";
 
+pub(crate) fn lead_instructions(body: &str, contract: &deck2_shared::SessionContract) -> String {
+    use std::fmt::Write as _;
+
+    let mut instructions = format!("{body}\n\n{}\n\n", crate::session_contract::POLICY);
+    let mut members = crate::session_contract::configured_member_ids(contract).peekable();
+    if members.peek().is_none() {
+        instructions.push_str("No members are assigned for new tasks.");
+        return instructions;
+    }
+    instructions.push_str("## Configured members for new tasks\n");
+    for id in members {
+        let assignment = &contract.members[id];
+        let purpose = match id {
+            "investigate" => "Find causes and trace unfamiliar behavior",
+            "architect" => "Resolve contracts, design choices, and sequencing",
+            "apply-fast" => "Implement work with a known project pattern",
+            "apply-deep" => "Implement complex systems or algorithms",
+            "quality" => "Review an existing candidate independently",
+            "setup" => "Repair identified readiness issues",
+            _ => unreachable!("configured member IDs are canonical specialist roles"),
+        };
+        let runner_model = serde_json::json!(format!(
+            "{}/{}",
+            assignment.runner_id, assignment.model_id
+        ));
+        writeln!(instructions, "- {id} ({runner_model}) — {purpose}").unwrap();
+    }
+    instructions
+}
+
 #[derive(Clone)]
 pub struct Role {
     pub instructions: String,
@@ -136,16 +166,20 @@ impl Role {
             })
             .as_ref()
             .map_err(Clone::clone)?;
-        Ok(format!(
-            "{}\n\n{}\n\n{}",
-            roles[member]["agentBody"]
+        let mut instructions = roles[member]["agentBody"]
+            .as_str()
+            .ok_or("Canonical role missing")?
+            .to_owned();
+        if member != "lead" {
+            let skill = roles[member]["skillBody"]
                 .as_str()
-                .ok_or("Canonical role missing")?,
-            roles[member]["skillBody"]
-                .as_str()
-                .ok_or("Canonical skill missing")?,
-            crate::session_skills::GUIDANCE
-        ))
+                .ok_or("Canonical skill missing")?;
+            instructions.push_str("\n\n");
+            instructions.push_str(skill);
+        }
+        instructions.push_str("\n\n");
+        instructions.push_str(crate::session_skills::GUIDANCE);
+        Ok(instructions)
     }
 
     pub fn at(root: &Path, member: &str) -> Result<Self, String> {
@@ -214,6 +248,17 @@ impl Role {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lead_assembles_one_routing_and_intake_section() {
+        let instructions = super::Role::packaged_instructions("lead").unwrap();
+        for heading in ["## Route selection", "## Communication"] {
+            assert_eq!(
+                instructions.lines().filter(|line| *line == heading).count(),
+                1
+            );
+        }
+    }
+
     // Plug-and-play: arbitrary legacy materialization must neither become
     // executable authority nor block packaged Deck content in a clean profile.
     #[test]

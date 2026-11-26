@@ -560,13 +560,10 @@ async fn drain_sdk(child: &mut Child, pid: u32) -> Result<bool, String> {
 pub(crate) fn lead_instructions(
     contract: &deck2_shared::SessionContract,
 ) -> Result<String, String> {
-    let members: Vec<_> = crate::session_contract::configured_member_ids(contract).collect();
-    Ok(format!(
-        "{}\n\n{}\n\nUse native Edit and Write for ordinary workspace changes. Deck may ask the user to approve native reads and searches. Use Deck's session tools for task coordination. For a new task, call deck_delegate directly with agent set to a configured role ID below and task set to the instruction. This list is sufficient to choose an ID. Use commandId only with a dependency replan. An empty list means this session has no members assigned for new tasks.\nConfigured member role IDs: {}",
-        crate::session_roles::Role::packaged_instructions("lead")?,
-        crate::session_contract::POLICY,
-        json!(members),
-    ))
+    let body = crate::session_roles::Role::packaged_instructions("lead")?;
+    let mut instructions = crate::session_roles::lead_instructions(&body, contract);
+    instructions.push_str("\n\nOn the Direct route, use native Edit and Write for workspace edits. Deck may ask the user to approve native reads and searches.");
+    Ok(instructions)
 }
 
 /// Why a saved Lead transcript cannot resume under the current provenance.

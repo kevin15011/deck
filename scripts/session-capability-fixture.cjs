@@ -15,9 +15,9 @@ function fixture(root,cbm,rtk){
  const config='# deck-codex-mcp:codebase-memory\n[mcp_servers.codebase-memory]\ncommand = '+JSON.stringify(cbm)+'\n[mcp_servers.codebase-memory.env]\nCBM_CACHE_DIR = '+JSON.stringify(cache)+'\n\n'+block+'\n';
  fs.writeFileSync(path.join(native,'config.toml'),config);
  const bodies=JSON.parse(fs.readFileSync(path.join(repo,'crates/host/assets/session-roles.json'))),files={'.codex/deck/hooks/deck-rtk-hook.cjs':hash(generated.stdout)},contributions=[];
- const lead=bodies.lead.agentBody+'\n\n'+bodies.lead.skillBody;fs.writeFileSync(path.join(native,'deck/role-selection.txt'),lead);files['.codex/deck/role-selection.txt']=hash(lead);
- for(const member of ['lead','investigate','apply-deep'])fs.writeFileSync(path.join(native,'agents/deck-'+member+'.toml'),'name='+JSON.stringify('deck-'+member)+'\ndeveloper_instructions='+JSON.stringify(bodies[member].agentBody+'\n\n'+bodies[member].skillBody)+'\nsandbox_mode="read-only"\n');
- const skill=path.join(root,'.agents/skills/deck-lead/SKILL.md');fs.writeFileSync(skill,bodies.lead.skillBody);contributions.push({path:skill,selector:{kind:'file'}});
+ const lead=bodies.lead.agentBody;fs.writeFileSync(path.join(native,'deck/role-selection.txt'),lead);files['.codex/deck/role-selection.txt']=hash(lead);
+ for(const member of ['lead','investigate','apply-deep'])fs.writeFileSync(path.join(native,'agents/deck-'+member+'.toml'),'name='+JSON.stringify('deck-'+member)+'\ndeveloper_instructions='+JSON.stringify([bodies[member].agentBody,bodies[member].skillBody].filter(Boolean).join('\n\n'))+'\nsandbox_mode="read-only"\n');
+ const skill=path.join(root,'.agents/skills/deck-lead/SKILL.md');fs.writeFileSync(skill,lead);contributions.push({path:skill,selector:{kind:'file'}});
  const selector={end:'# deck-codex-hook:rtk:end',kind:'text',start:'# deck-codex-hook:rtk:start'};
  contributions.push({path:path.join(native,'config.toml'),selector,id:hash(path.join(native,'config.toml')+'\0'+JSON.stringify(selector)),hash:hash(block)});
  fs.writeFileSync(path.join(native,'deck/manifest.json'),JSON.stringify({version:1,files,contributions}));

@@ -558,6 +558,15 @@ struct Turn<'a> {
     tools: TrustedTools,
 }
 
+pub(crate) fn lead_instructions(
+    contract: &deck2_shared::SessionContract,
+) -> Result<String, String> {
+    let body = crate::session_roles::Role::packaged_instructions("lead")?;
+    let mut instructions = crate::session_roles::lead_instructions(&body, contract);
+    instructions.push_str("\n\nUse the current Deck MCP tool's advertised role IDs for new tasks on every turn. The roster above reflects the assignments when this native session was created.");
+    Ok(instructions)
+}
+
 pub(crate) async fn lead(
     app: &App,
     id: &str,
@@ -616,10 +625,7 @@ pub(crate) async fn lead(
     let mut replaced = false;
 
     let contract = snapshot.session_contract.as_ref().unwrap();
-    let instructions = format!(
-        "{}\n\nFor all turns, use the role IDs advertised by the current Deck MCP tool definition. The role list above reflects the assignments when this native session was created.",
-        crate::claude::lead_instructions(contract)?,
-    );
+    let instructions = lead_instructions(contract)?;
     let images = prompt_images(app, &root)?;
     let bridge = Bridge::start(app, id).await?;
     let sandbox = !(trusted && lead_yolo(&root));

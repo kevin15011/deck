@@ -2158,10 +2158,14 @@ async fn run_once(
         if native.effort.is_none() {
             native.effort = role.effort.clone();
         }
-        native.instructions = Some(format!(
-            "{}\n\n{}",
-            role.instructions,
-            crate::session_contract::POLICY
+        let contract = receipt
+            .configuration
+            .as_ref()
+            .and_then(|snapshot| snapshot.session_contract.as_ref())
+            .ok_or("Connected Lead assignment missing")?;
+        native.instructions = Some(crate::session_roles::lead_instructions(
+            &role.instructions,
+            contract,
         ));
         native.role = Some(role);
     }

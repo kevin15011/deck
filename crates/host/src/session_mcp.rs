@@ -116,7 +116,12 @@ impl Bridge {
             .as_ref()
             .and_then(|snapshot| snapshot.session_contract.as_ref())
             .filter(|contract| {
-                contract.members.get("lead").is_some_and(|lead| matches!(lead.runner_id.as_str(), crate::claude::RUNNER | crate::agy::RUNNER))
+                contract.members.get("lead").is_some_and(|lead| {
+                    matches!(
+                        lead.runner_id.as_str(),
+                        "codex" | crate::claude::RUNNER | crate::agy::RUNNER
+                    )
+                })
             })
             .map(|contract| {
                 crate::session_contract::configured_member_ids(contract)
@@ -221,7 +226,7 @@ pub(crate) fn tools(member: bool) -> Value {
     ]);
     if !member {
         tools.as_array_mut().unwrap().extend([
-  json!({"name":"deck_delegate","description":"Start an ordinary delegation with agent and task. For continuation, supply continueTaskId and the recorded owner. Omit commandId unless submitting a dependency replan.","inputSchema":{"type":"object","properties":{"agent":{"type":"string"},"task":{"type":"string"},"continueTaskId":{"type":"string"},"continuity":{"enum":["auto","fresh","native"],"description":"Defaults to automatic continuity. Use fresh to start a new transcript."},"continuityJustification":{"type":"string","maxLength":512,"description":"Required for an explicit native override, which is subject to launch-time policy."},"acceptance":{"type":"object"}},"required":["agent","task"],"dependentRequired":{"replan":["commandId","continueTaskId"],"commandId":["replan"]}}}),
+  json!({"name":"deck_delegate","description":"Assign substantive investigation, design, implementation, or independent review to a configured Deck specialist. For new tasks, supply agent and task. Continue with continueTaskId and recorded owner. Use commandId only for dependency replans.","inputSchema":{"type":"object","properties":{"agent":{"type":"string"},"task":{"type":"string"},"continueTaskId":{"type":"string"},"continuity":{"enum":["auto","fresh","native"],"description":"Defaults to automatic continuity. Use fresh to start a new transcript."},"continuityJustification":{"type":"string","maxLength":512,"description":"Required for an explicit native override, which is subject to launch-time policy."},"acceptance":{"type":"object"}},"required":["agent","task"],"dependentRequired":{"replan":["commandId","continueTaskId"],"commandId":["replan"]}}}),
   json!({"name":"deck_task_guide","description":"Send in-scope Lead guidance to the exact live Codex or Claude member turn. Use deck_task_list for its identities; the attempt must show guidance_open. Accepted means the member's native session acknowledged that input; guidance never changes the member's authority. Retry an interrupted call only with the same commandId and arguments. An unknown delivery never authorizes replay.","inputSchema":{"type":"object","additionalProperties":false,"required":["taskId","attemptId","threadId","expectedTurnId","commandId","text"],"properties":{"taskId":{"type":"string"},"attemptId":{"type":"string"},"threadId":{"type":"string"},"expectedTurnId":{"type":"string"},"commandId":{"type":"string","format":"uuid"},"text":{"type":"string","minLength":1,"maxLength":16384}}}}),
   json!({"name":"deck_task_cancel","description":"Cancel a delegated task.","inputSchema":{"type":"object","properties":{"taskId":{"type":"string"}},"required":["taskId"]}}),
   json!({"name":"deck_task_integrate","description":"Record Lead review of an exact retrieved terminal report. Adoption is not independent verification.","inputSchema":{"type":"object","properties":{"taskId":{"type":"string"},"attempt":{"type":"integer","minimum":1},"commandId":{"type":"string"},"state":{"enum":["integrated","blocked","discarded"]},"note":{"type":"string"},"evidenceSeqs":{"type":"array","items":{"type":"integer"}}},"required":["taskId","attempt","commandId","state","note","evidenceSeqs"]}})
@@ -309,9 +314,9 @@ fn scoped_tools(scope: &Scope) -> Value {
     {
         let schema = &mut delegate["inputSchema"];
         schema["properties"]["agent"]["description"] = json!(if roles.is_empty() {
-            "No members are assigned for new tasks. For continuation, use the recorded owner.".into()
+            "No members assigned for new tasks.".into()
         } else {
-            format!("Choose directly from the configured role IDs for new tasks ({}) and use the recorded owner for continuations.", roles.join(", "))
+            format!("New task role IDs: {}.", roles.join(", "))
         });
         schema["properties"]["agent"]["examples"] = json!(roles);
         let new_owner = if roles.is_empty() {
@@ -1049,6 +1054,136 @@ pub async fn close_codebase() {
 pub(crate) mod tests {
     use super::*;
     use crate::Store;
+
+    fn delegate_tool(inventory: &Value) -> &Value {
+        inventory
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "deck_delegate")
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn codex_advertises_admitted_new_task_roles() {
+        let (_dir, _app, bridge) = fixture().await;
+        let inventory = bridge.inventory();
+        let schema = &delegate_tool(&inventory)["inputSchema"];
+        assert_eq!(schema["properties"]["agent"]["examples"], json!(["apply-deep"]));
+    }
+
+    // The startup prompt and authenticated bridge both use the admitted assignments.
+    // Fresh tasks use configured roles; the schema leaves continuation ownership to the host.
+    #[tokio::test]
+    async fn lead_roster_and_delegate_inventory_follow_admitted_assignments() {
+        use deck2_shared::{MemberAssignment, NativeBinding, NativeRunner, RunnerBinding};
+
+        let (_dir, app, bridge) = fixture().await;
+        drop(bridge);
+        let id = "coordination-root";
+        let mut receipt = app.receipt(id).unwrap();
+        let specialists = &crate::session_contract::MEMBERS[1..];
+        let role_body = crate::session_roles::Role::packaged_instructions("lead").unwrap();
+        let runners = [
+            ("codex", NativeRunner::Codex),
+            (crate::claude::RUNNER, NativeRunner::Claude),
+            (crate::agy::RUNNER, NativeRunner::Agy),
+        ];
+        for (runner, native_runner) in runners {
+            for assigned in [specialists, &["investigate", "apply-deep"][..], &[]] {
+                let snapshot = receipt.configuration.as_mut().unwrap();
+                let contract = snapshot.session_contract.as_mut().unwrap();
+                contract.members.retain(|id, _| id == "lead");
+                contract.members.get_mut("lead").unwrap().runner_id = runner.into();
+                for (idx, &role) in assigned.iter().enumerate() {
+                    contract.members.insert(
+                        role.into(),
+                        MemberAssignment {
+                            runner_id: runners[idx % runners.len()].0.into(),
+                            model_id: format!("fixture/{role}"),
+                            thinking: None,
+                        },
+                    );
+                }
+                let instructions = match native_runner {
+                    NativeRunner::Codex => {
+                        crate::session_roles::lead_instructions(&role_body, contract)
+                    }
+                    NativeRunner::Claude => crate::claude::lead_instructions(contract).unwrap(),
+                    NativeRunner::Agy => crate::agy::lead_instructions(contract).unwrap(),
+                    _ => unreachable!(),
+                };
+                for &role in specialists {
+                    let prefix = format!("- {role} (");
+                    let row = instructions.lines().find(|line| line.starts_with(&prefix));
+                    if let Some(index) = assigned.iter().position(|&id| id == role) {
+                        let assigned_runner = runners[index % runners.len()].0;
+                        let prefix = format!(
+                            r#"- {role} ("{assigned_runner}/fixture/{role}") — "#
+                        );
+                        let purpose = row.unwrap().strip_prefix(&prefix).unwrap();
+                        assert!(!purpose.trim().is_empty());
+                    } else {
+                        assert!(row.is_none(), "{runner}: unassigned {role}");
+                    }
+                }
+                assert!(!instructions.lines().any(|line| line.starts_with("- lead (")));
+                assert_eq!(
+                    instructions.contains("## Configured members for new tasks"),
+                    !assigned.is_empty()
+                );
+
+                // Bridge advertisement only needs the recorded native transport.
+                snapshot.native = Some(NativeBinding {
+                    runner: native_runner,
+                    protocol: "fixture".into(),
+                    version: "fixture".into(),
+                    executable: RunnerBinding {
+                        path: "/fixture".into(),
+                        executable: "fixture".into(),
+                        ownership: "fixture".into(),
+                        model: None,
+                        qualification: "fixture".into(),
+                        catalog: None,
+                    },
+                    storage: "fixture".into(),
+                    configuration: "fixture".into(),
+                    role: "fixture".into(),
+                });
+                app.store.lock().unwrap().save(&mut receipt).unwrap();
+                let bridge = Bridge::start(&app, id).await.unwrap();
+                let inventory = bridge.inventory();
+                let delegate = delegate_tool(&inventory);
+                let schema = &delegate["inputSchema"];
+                let agent = &schema["properties"]["agent"];
+                let description = agent["description"].as_str().unwrap();
+                for &role in specialists {
+                    let advertised = description
+                        .split(|c: char| !c.is_ascii_alphabetic() && c != '-')
+                        .any(|word| word == role);
+                    assert_eq!(advertised, assigned.contains(&role));
+                }
+                if native_runner == NativeRunner::Agy {
+                    // Full-roster serialized tool size from the compact schema in 95c02a8c.
+                    assert!(delegate.to_string().len() <= 1035);
+                    assert!(schema.get("allOf").is_none());
+                    assert_eq!(agent["type"], "string");
+                } else {
+                    assert_eq!(agent["examples"], json!(assigned));
+                    assert_eq!(
+                        schema["allOf"][0]["if"],
+                        json!({"not": {"required": ["continueTaskId"]}})
+                    );
+                    let new_owner = &schema["allOf"][0]["then"]["properties"]["agent"];
+                    if assigned.is_empty() {
+                        assert_eq!(*new_owner, json!(false));
+                    } else {
+                        assert_eq!(new_owner["enum"], json!(assigned));
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn original_coordination_and_request_relay_are_callable_by_their_roles() {
         let lead = tools(false);
