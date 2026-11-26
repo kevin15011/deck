@@ -7,9 +7,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
+#[cfg(test)]
+use {serde::Serialize, std::collections::BTreeSet};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     fs::{self, File},
     io::{Read, Write},
     os::{
@@ -22,11 +23,15 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+#[cfg(test)]
 const FILES: usize = 256;
+#[cfg(test)]
 const SCANNED: usize = 4096;
 const WORK_SCANNED: usize = 16384;
 const CONTENT: usize = 256 * 1024;
+#[cfg(test)]
 const TOTAL: usize = 8 * 1024 * 1024;
+#[cfg(test)]
 const METADATA: usize = 256 * 1024 * 1024;
 pub struct Runtime {
     pub auto_gate: Arc<Semaphore>,
@@ -36,7 +41,6 @@ pub struct Runtime {
     pub gate: Arc<Semaphore>,
     #[cfg(test)]
     pub scan_pause: Mutex<Option<(tokio::sync::oneshot::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
-    snapshot: Mutex<std::collections::HashMap<String, Snapshot>>,
 }
 struct Work {
     temp: tempfile::TempDir,
@@ -77,35 +81,30 @@ impl Default for Runtime {
             auto_gate: Arc::new(Semaphore::new(if cfg!(test) {0} else {1})),
             #[cfg(test)]
             scan_pause: Mutex::new(None),
-            snapshot: Mutex::new(Default::default()),
         }
     }
 }
+#[cfg(test)]
 #[derive(Clone, Serialize)]
-pub struct Entry {
+struct Entry {
     id: String,
     section: String,
     path: String,
     status: String,
     message: String,
 }
+#[cfg(test)]
 struct Data {
     entry: Entry,
     old: Vec<u8>,
     new: Vec<u8>,
 }
+#[cfg(test)]
 struct Snapshot {
     revision: String,
     files: Vec<Data>,
-    captured_ms: u64,
 }
-#[derive(Serialize)]
-struct Catalog {
-    revision: String,
-    captured_ms: u64,
-    files: Vec<Entry>,
-    note: &'static str,
-}
+#[cfg(test)]
 #[derive(Serialize)]
 struct Document {
     revision: String,
@@ -126,7 +125,7 @@ fn check(deadline: Instant) -> Result<(), String> {
 }
 // Open every component relative to an already-owned descriptor, with no symlink
 // following. Directory replacement cannot redirect a read outside the selected root.
-fn open(root: &File, path: &FsPath, directory: bool) -> Result<File, String> {
+pub(crate) fn open(root: &File, path: &FsPath, directory: bool) -> Result<File, String> {
     let mut parent = root
         .try_clone()
         .map_err(|_| error("Cannot duplicate review directory"))?;
@@ -177,7 +176,7 @@ fn read(root: &File, path: &FsPath, max: usize) -> Result<Vec<u8>, String> {
     }
     Ok(bytes)
 }
-fn directory(root: &FsPath) -> Result<File, String> {
+pub(crate) fn directory(root: &FsPath) -> Result<File, String> {
     use std::os::unix::fs::OpenOptionsExt;
     fs::OpenOptions::new()
         .read(true)
@@ -186,7 +185,7 @@ fn directory(root: &FsPath) -> Result<File, String> {
         .map_err(|_| error("Selected project directory is unavailable"))
 }
 // Missing is distinct from permission failures, links and special files.
-fn is_missing(root: &File, path: &FsPath) -> bool {
+pub(crate) fn is_missing(root: &File, path: &FsPath) -> bool {
     let Ok(mut parent) = root.try_clone() else {
         return false;
     };
@@ -357,6 +356,7 @@ fn mirror_names(
     }
     Ok(())
 }
+#[cfg(test)]
 fn namespace(dir: &FsPath) -> Result<Vec<(std::path::PathBuf, Vec<u8>)>, String> {
     fn visit(
         root: &FsPath,
@@ -380,7 +380,7 @@ fn namespace(dir: &FsPath) -> Result<Vec<(std::path::PathBuf, Vec<u8>)>, String>
     result.sort();
     Ok(result)
 }
-fn names(dir: &File) -> Result<fs::ReadDir, String> {
+pub(crate) fn names(dir: &File) -> Result<fs::ReadDir, String> {
     // /proc references an owned descriptor. Iterate lazily so a wide directory
     // cannot allocate names beyond the caller's entry and deadline bounds.
     fs::read_dir(format!("/proc/self/fd/{}", dir.as_raw_fd()))
@@ -701,88 +701,300 @@ fn restrict_member_git(
     Ok(())
 }
 
-pub(crate) fn member_inspection(
-    project: &deck2_shared::ProjectBinding,
-    permit: Arc<OwnedSemaphorePermit>,
-    authority: &dyn Fn() -> Result<(), String>,
-) -> Result<serde_json::Value, String> {
-    use std::os::unix::{fs::MetadataExt, process::CommandExt};
-    let deadline = Instant::now() + Duration::from_secs(3);
-    authority()?;
-    let path = FsPath::new(&project.root);
-    let root = directory(path)?;
-    let stat = root
+const REVIEW_METADATA: [(bool, &str); 5] = [
+    (false, "HEAD"),
+    (false, "index"),
+    (true, "packed-refs"),
+    (true, "shallow"),
+    (true, "info/exclude"),
+];
+
+#[derive(PartialEq, Eq)]
+struct FileStamp {
+    identity: (u64, u64),
+    file: Option<FileChange>,
+}
+
+#[derive(PartialEq, Eq)]
+struct FileChange {
+    size: u64,
+    modified: std::time::SystemTime,
+    ctime: (i64, i64),
+}
+
+fn metadata_stamp(root: &File, path: &FsPath) -> Result<Option<FileStamp>, String> {
+    use std::os::unix::fs::MetadataExt;
+    if is_missing(root, path) {
+        return Ok(None);
+    }
+    let file = open(root, path, false)?;
+    let stat = file
         .metadata()
-        .map_err(|_| error("Project identity unavailable"))?;
-    if project.identity.as_deref() != Some(&format!("{}:{}", stat.dev(), stat.ino())) {
-        return Err(error("Assigned project directory was replaced"));
+        .map_err(|_| error("Cannot inspect Git metadata identity"))?;
+    if !stat.is_file() && !stat.is_dir() {
+        return Err(error("Unsupported Git metadata type"));
     }
-    let (gitdir, common) = member_metadata(path, &root)?;
-    let objects = open(&common, FsPath::new("objects"), true)?;
-    let object_path = fs::read_link(format!("/proc/self/fd/{}", objects.as_raw_fd()))
-        .map_err(|_| error("Git object directory unavailable"))?;
-    let work = Work::new(Some(permit))?;
-    let private = work.path().join("empty.git");
-    for (source, name) in [
-        (&gitdir, "HEAD"),
-        (&gitdir, "index"),
-        (&common, "packed-refs"),
-        (&common, "shallow"),
-        (&common, "info/exclude"),
-    ] {
-        if let Some(bytes) = optional_read(source, FsPath::new(name), 16 * 1024 * 1024)? {
-            if name == "info/exclude" {
-                fs::create_dir(private.join("info"))
-                    .map_err(|_| error("Cannot prepare Git excludes"))?;
+    let file = if stat.is_file() {
+        Some(FileChange {
+            size: stat.len(),
+            modified: stat
+                .modified()
+                .map_err(|_| error("Git metadata timestamp unavailable"))?,
+            ctime: (stat.ctime(), stat.ctime_nsec()),
+        })
+    } else {
+        None
+    };
+    Ok(Some(FileStamp {
+        identity: (stat.dev(), stat.ino()),
+        file,
+    }))
+}
+
+struct GitSource {
+    gitdir: File,
+    common: File,
+    marker: FileStamp,
+    metadata: [Option<FileStamp>; REVIEW_METADATA.len()],
+}
+
+/// Private Git metadata with descriptor-confined reads from the live worktree
+/// and object database. An observation shares the same prepared index and refs.
+pub(crate) struct ConfinedGit {
+    work: Arc<Work>,
+    private: std::path::PathBuf,
+    object_path: std::path::PathBuf,
+    directories: Arc<[File; 4]>,
+    executables: Arc<[File; 2]>,
+    null: Arc<File>,
+    source: Option<GitSource>,
+}
+
+impl ConfinedGit {
+    pub(crate) fn prepare(
+        project: &FsPath,
+        root: File,
+        permit: Arc<OwnedSemaphorePermit>,
+        deadline: Instant,
+    ) -> Result<Self, String> {
+        let work = Work::new(Some(permit))?;
+        let private = work.path().join("empty.git");
+        let marker_path = FsPath::new(".git");
+        let (objects, source) = if let Some(marker) = metadata_stamp(&root, marker_path)? {
+            let (gitdir, common) = member_metadata(project, &root)?;
+            if !is_missing(&common, FsPath::new("reftable")) {
+                return Err(error("Unsupported Git ref storage"));
             }
-            fs::write(private.join(name), bytes)
-                .map_err(|_| error("Cannot prepare Git inspection"))?;
-        } else if name == "HEAD" {
-            return Err(error("Git HEAD unavailable"));
-        }
-    }
-    if !is_missing(&common, FsPath::new("refs")) {
-        let mut budget = 16 * 1024 * 1024;
-        let mut entries = 0;
-        copy_tree(
-            &open(&common, FsPath::new("refs"), true)?,
-            &private.join("refs"),
-            &mut budget,
-            &mut entries,
-            deadline,
-            0,
-        )?;
+            let objects = open(&common, FsPath::new("objects"), true)?;
+            Self::check_alternates(&objects)?;
+            let mut metadata = std::array::from_fn(|_| None);
+            for (stamp, (shared, name)) in metadata.iter_mut().zip(REVIEW_METADATA) {
+                let source = if shared { &common } else { &gitdir };
+                let path = FsPath::new(name);
+                *stamp = metadata_stamp(source, path)?;
+                if let Some(bytes) = optional_read(source, path, 16 * 1024 * 1024)? {
+                    if name == "info/exclude" {
+                        fs::create_dir(private.join("info"))
+                            .map_err(|_| error("Cannot prepare Git excludes"))?;
+                    }
+                    let mut local = File::create(private.join(name))
+                        .map_err(|_| error("Cannot prepare Git inspection"))?;
+                    local
+                        .write_all(&bytes)
+                        .map_err(|_| error("Cannot prepare Git inspection"))?;
+                    if name == "index" {
+                        // Git compares cached worktree stat times with the
+                        // index's own timestamp to recognize racy entries.
+                        let modified = stamp
+                            .as_ref()
+                            .and_then(|stat| stat.file.as_ref())
+                            .map(|stat| stat.modified)
+                            .ok_or("Git index timestamp unavailable")?;
+                        local
+                            .set_modified(modified)
+                            .map_err(|_| error("Cannot preserve the Git index timestamp"))?;
+                    }
+                } else if name == "HEAD" {
+                    return Err(error("Git HEAD unavailable"));
+                }
+                if stamp.as_ref() != metadata_stamp(source, path)?.as_ref() {
+                    return Err(error("Git metadata changed while preparing inspection"));
+                }
+            }
+            if !is_missing(&common, FsPath::new("refs")) {
+                let mut budget = 16 * 1024 * 1024;
+                let mut entries = 0;
+                copy_tree(
+                    &open(&common, FsPath::new("refs"), true)?,
+                    &private.join("refs"),
+                    &mut budget,
+                    &mut entries,
+                    deadline,
+                    0,
+                )?;
+            }
+            (
+                objects,
+                Some(GitSource {
+                    gitdir,
+                    common,
+                    marker,
+                    metadata,
+                }),
+            )
+        } else {
+            (directory(&private.join("objects"))?, None)
+        };
+        let object_path = fs::read_link(format!("/proc/self/fd/{}", objects.as_raw_fd()))
+            .map_err(|_| error("Git object directory unavailable"))?;
+        let directories = Arc::new([
+            root,
+            objects,
+            directory(work.path())?,
+            directory(FsPath::new("/usr/lib"))?,
+        ]);
+        let loader = match std::env::consts::ARCH {
+            "x86_64" => "/lib64/ld-linux-x86-64.so.2",
+            "aarch64" => "/lib/ld-linux-aarch64.so.1",
+            _ => return Err(error("Git inspection is unavailable on this architecture")),
+        };
+        let executables = Arc::new([
+            File::open("/usr/bin/git").map_err(|_| error("Git unavailable"))?,
+            File::open(loader).map_err(|_| error("Git dynamic loader unavailable"))?,
+        ]);
+        let null = Arc::new(File::open("/dev/null").map_err(|_| error("Null device unavailable"))?);
+        Ok(Self {
+            work,
+            private,
+            object_path,
+            directories,
+            executables,
+            null,
+            source,
+        })
     }
 
-    let directories = Arc::new([
-        root,
-        objects,
-        directory(work.path())?,
-        directory(FsPath::new("/usr/lib"))?,
-    ]);
-    let loader = match std::env::consts::ARCH {
-        "x86_64" => "/lib64/ld-linux-x86-64.so.2",
-        "aarch64" => "/lib/ld-linux-aarch64.so.1",
-        _ => return Err(error("Git inspection is unavailable on this architecture")),
-    };
-    let executables = Arc::new([
-        File::open("/usr/bin/git").map_err(|_| error("Git unavailable"))?,
-        File::open(loader).map_err(|_| error("Git dynamic loader unavailable"))?,
-    ]);
-    // Git opens the null device while sanitizing its standard descriptors.
-    let null = Arc::new(File::open("/dev/null").map_err(|_| error("Null device unavailable"))?);
-    let parent = std::process::id() as libc::pid_t;
-    let run = |args: &[&str]| -> Result<String, String> {
-        let mut cmd = git_command(work.path());
-        cmd.env("GIT_OBJECT_DIRECTORY", &object_path)
-            .env("GIT_CONFIG_GLOBAL", work.path().join("no-global-config"))
+    fn check_alternates(objects: &File) -> Result<(), String> {
+        for path in ["info/alternates", "info/http-alternates"] {
+            if !is_missing(objects, FsPath::new(path)) {
+                return Err(error("Alternate Git object stores are unsupported"));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn verify_review_metadata(&self, origin: Option<&str>) -> Result<(), String> {
+        let current = metadata_stamp(&self.directories[0], FsPath::new(".git"))?;
+        let changed = || error("Git metadata changed during Review");
+        let Some(source) = &self.source else {
+            return current.is_none().then_some(()).ok_or_else(changed);
+        };
+        if current.as_ref() != Some(&source.marker) {
+            return Err(changed());
+        }
+        Self::check_alternates(&self.directories[1])?;
+        for (stamp, (shared, name)) in source.metadata.iter().zip(REVIEW_METADATA) {
+            let directory = if shared {
+                &source.common
+            } else {
+                &source.gitdir
+            };
+            if stamp.as_ref() != metadata_stamp(directory, FsPath::new(name))?.as_ref() {
+                return Err(changed());
+            }
+        }
+        self.verify_reference(source, b"HEAD")?;
+        if let Some(origin) = origin {
+            for reference in [
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+                "refs/remotes/origin/master",
+                origin,
+            ] {
+                self.verify_reference(source, reference.as_bytes())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_reference(&self, source: &GitSource, reference: &[u8]) -> Result<(), String> {
+        let mut reference = reference.to_vec();
+        for _ in 0..16 {
+            let directory = if reference.as_slice() == b"HEAD" {
+                &source.gitdir
+            } else if reference.starts_with(b"refs/")
+                && reference
+                    .split(|byte| *byte == b'/')
+                    .all(|part| !matches!(part, b"" | b"." | b"..") && !part.contains(&0))
+            {
+                &source.common
+            } else {
+                return Err(error("Unsupported Git reference"));
+            };
+            let path = FsPath::new(std::ffi::OsStr::from_bytes(&reference));
+            let private = match fs::read(self.private.join(path)) {
+                Ok(bytes) if bytes.len() <= 4096 => Some(bytes),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                _ => return Err(error("Unsupported Git reference metadata")),
+            };
+            if optional_read(directory, path, 4096)? != private {
+                return Err(error("Git reference changed during Review"));
+            }
+            let Some(target) = private
+                .as_deref()
+                .and_then(|bytes| bytes.strip_prefix(b"ref: "))
+            else {
+                return Ok(());
+            };
+            reference = target.trim_ascii_end().to_vec();
+        }
+        Err(error("Unsupported Git reference chain"))
+    }
+
+    pub(crate) fn is_shallow(&self) -> bool {
+        self.private.join("shallow").is_file()
+    }
+
+    pub(crate) fn run(
+        &self,
+        args: &[&std::ffi::OsStr],
+        input: Option<&[u8]>,
+        deadline: Instant,
+        limit: usize,
+        authority: &dyn Fn() -> Result<(), String>,
+    ) -> Result<(Vec<u8>, std::process::ExitStatus), String> {
+        use std::os::unix::process::CommandExt;
+        let parent = std::process::id() as libc::pid_t;
+        let mut cmd = git_command(self.work.path());
+        if args.first().is_none_or(|arg| *arg != "check-ignore") {
+            cmd.arg("--literal-pathspecs");
+        }
+        cmd.env("GIT_OBJECT_DIRECTORY", &self.object_path)
+            .env(
+                "GIT_CONFIG_GLOBAL",
+                self.work.path().join("no-global-config"),
+            )
+            .env("GIT_ALLOW_PROTOCOL", "")
+            .env("GIT_ATTR_NOSYSTEM", "1")
+            // Git's preload workers can exhaust the per-child address-space
+            // limit on wide indexes. Admission already bounds parallel reads.
+            .args(["-c", "core.preloadIndex=false", "-c", "index.threads=1"])
             .arg("--git-dir")
-            .arg(&private)
+            .arg(&self.private)
             .arg("--work-tree=.")
             .args(args);
-        let directories = directories.clone();
-        let executables = executables.clone();
-        let null = null.clone();
+        if let Some(bytes) = input {
+            use std::io::{Seek, SeekFrom};
+            let mut file = tempfile::tempfile_in(self.work.path())
+                .map_err(|_| error("Cannot prepare Git input"))?;
+            file.write_all(bytes)
+                .and_then(|()| file.seek(SeekFrom::Start(0)))
+                .map_err(|_| error("Cannot prepare Git input"))?;
+            cmd.stdin(file);
+        }
+        let directories = self.directories.clone();
+        let executables = self.executables.clone();
+        let null = self.null.clone();
         unsafe {
             cmd.pre_exec(move || {
                 if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) < 0
@@ -796,7 +1008,33 @@ pub(crate) fn member_inspection(
                 restrict_member_git(directories.as_ref(), executables.as_ref(), &null)
             });
         }
-        let (bytes, status) = run_git(&work, cmd, deadline, 48 * 1024, authority)?;
+        run_git(&self.work, cmd, deadline, limit, authority)
+    }
+}
+
+pub(crate) fn member_inspection(
+    project: &deck2_shared::ProjectBinding,
+    permit: Arc<OwnedSemaphorePermit>,
+    authority: &dyn Fn() -> Result<(), String>,
+) -> Result<serde_json::Value, String> {
+    use std::os::unix::fs::MetadataExt;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    authority()?;
+    let path = FsPath::new(&project.root);
+    let root = directory(path)?;
+    let stat = root
+        .metadata()
+        .map_err(|_| error("Project identity unavailable"))?;
+    if project.identity.as_deref() != Some(&format!("{}:{}", stat.dev(), stat.ino())) {
+        return Err(error("Assigned project directory was replaced"));
+    }
+    if is_missing(&root, FsPath::new(".git")) {
+        return Err(error("Git directory unavailable"));
+    }
+    let git = ConfinedGit::prepare(path, root, permit, deadline)?;
+    let run = |args: &[&str]| -> Result<String, String> {
+        let args: Vec<_> = args.iter().map(std::ffi::OsStr::new).collect();
+        let (bytes, status) = git.run(&args, None, deadline, 48 * 1024, authority)?;
         if !status.success() {
             return Err(error("Git could not inspect the assigned worktree"));
         }
@@ -854,9 +1092,12 @@ fn settled(child: &mut std::process::Child, pid: u32, _work: &Work) -> bool {
 }
 #[derive(Clone)]
 struct Tracked {
+    #[cfg(test)]
     mode: String,
+    #[cfg(test)]
     oid: String,
 }
+#[cfg(test)]
 fn tracked(bytes: &[u8], tree: bool) -> Result<BTreeMap<String, Tracked>, String> {
     let mut out = BTreeMap::new();
     for row in bytes.split(|b| *b == 0).filter(|v| !v.is_empty()) {
@@ -903,9 +1144,11 @@ fn tracked(bytes: &[u8], tree: bool) -> Result<BTreeMap<String, Tracked>, String
     }
     Ok(out)
 }
+#[cfg(test)]
 type Blobs = BTreeMap<String, Result<Vec<u8>, String>>;
 // Two bounded Git batches avoid one subprocess for every unchanged tracked file.
 // Size inspection precedes content delivery; oversized objects stay unavailable.
+#[cfg(test)]
 fn load_blobs(
     work: &Arc<Work>,
     gitdir: &FsPath,
@@ -1013,6 +1256,7 @@ fn load_blobs(
     }
     Ok(out)
 }
+#[cfg(test)]
 fn blob(blobs: &Blobs, file: Option<&Tracked>) -> Result<Vec<u8>, String> {
     match file {
         None => Ok(Vec::new()),
@@ -1025,6 +1269,7 @@ fn blob(blobs: &Blobs, file: Option<&Tracked>) -> Result<Vec<u8>, String> {
             .unwrap_or_else(|| Err(error("Git object unavailable"))),
     }
 }
+#[cfg(test)]
 fn capture(project: &str, permit: Option<Arc<OwnedSemaphorePermit>>) -> Result<Snapshot, String> {
     let deadline = Instant::now() + Duration::from_secs(30);
     let root = directory(FsPath::new(project))?;
@@ -1322,15 +1567,14 @@ fn capture(project: &str, permit: Option<Arc<OwnedSemaphorePermit>>) -> Result<S
             return Err(error("Worktree changed while reading; refresh to retry"));
         }
     }
-    let captured_ms = crate::now();
     let revision = uuid::Uuid::new_v4().to_string();
     Ok(Snapshot {
         revision,
         files,
-        captured_ms,
     })
 }
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn add(
     files: &mut Vec<Data>,
     used: &mut usize,
@@ -1360,6 +1604,7 @@ fn add(
     });
     Ok(())
 }
+#[cfg(test)]
 fn document(
     revision: String,
     data: &Data,
@@ -1488,69 +1733,6 @@ pub async fn identity(State(app): State<App>, Path(id): Path<String>) -> Respons
         _ => Json(serde_json::json!({"currentBranch":null})).into_response(),
     }
 }
-pub async fn catalog(State(app): State<App>, Path(id): Path<String>) -> Response {
-    if !session(&app, &id) {
-        return problem(StatusCode::NOT_FOUND, "session", "Conversation unavailable");
-    }
-    // The blocking worker retains the permit even if HTTP delivery is cancelled.
-    let app=match app.for_session(&id){Ok(a)=>a,Err(e)=>return problem(StatusCode::CONFLICT,"project",e)};
-    let Ok(permit) = app.git_review.gate.clone().try_acquire_owned() else {
-        return problem(
-            StatusCode::TOO_MANY_REQUESTS,
-            "git_busy",
-            "Git review busy; retry after the current read settles",
-        );
-    };
-    let app2 = app.clone();
-    match tokio::task::spawn_blocking(move || {
-        let permit=Arc::new(permit);
-        let snapshot=capture(&app2.project,Some(permit.clone()))?;
-        let result=Catalog{revision:snapshot.revision.clone(),captured_ms:snapshot.captured_ms,files:snapshot.files.iter().map(|f|f.entry.clone()).collect(),note:"Live working-tree snapshot · Refresh to observe later edits. Raw index bytes versus raw working-tree bytes (filters and line-ending conversion are not applied). Renames appear as add/delete; conflicts, links, submodules, linked worktrees and non-SHA-1 metadata are unsupported. Capture deadline 30 seconds; comparisons 3 seconds. Tracked baseline text limit 64 MiB. Metadata limit 256 MiB / 20,000 entries; worktree scan 16,384 entries / tracked scan 4,096 files, 64 directory levels, 256 changed entries / 8 MiB combined text, 256 KiB per file, 2,000 rendered lines. Only local .gitignore rules (1 MiB combined) are applied; global/info excludes are not imported. Recorded edit evidence is separate."};
-        let mut cache=app2.git_review.snapshot.lock().unwrap();
-        if !cache.contains_key(&id)&&cache.len()>=8 && let Some(old)=cache.iter().min_by_key(|(_,s)|s.captured_ms).map(|(k,_)|k.clone()){cache.remove(&old);}
-        cache.insert(id,snapshot);Ok::<_,String>(result)
-    }).await {Ok(Ok(result))=>Json(result).into_response(),Ok(Err(message))=>problem(StatusCode::UNPROCESSABLE_ENTITY,"git_unavailable",message),Err(_)=>problem(StatusCode::INTERNAL_SERVER_ERROR,"git_failed","Git review failed; refresh to retry")}
-}
-pub async fn diff(
-    State(app): State<App>,
-    Path((id, revision, file)): Path<(String, String, String)>,
-) -> Response {
-    if !session(&app, &id) {
-        return problem(StatusCode::NOT_FOUND, "session", "Conversation unavailable");
-    }
-    let app=match app.for_session(&id){Ok(a)=>a,Err(e)=>return problem(StatusCode::CONFLICT,"project",e)};
-    let Ok(permit) = app.git_review.gate.clone().try_acquire_owned() else {
-        return problem(
-            StatusCode::TOO_MANY_REQUESTS,
-            "git_busy",
-            "Git review busy; retry after the current read settles",
-        );
-    };
-    match tokio::task::spawn_blocking(move || {
-        let lock = app.git_review.snapshot.lock().unwrap();
-        let snapshot = lock
-            .get(&id)
-            .filter(|s| s.revision == revision)
-            .ok_or("Stale Git snapshot; refresh to retry")?;
-        let data = snapshot
-            .files
-            .iter()
-            .find(|f| f.entry.id == file)
-            .ok_or("File selection is unavailable; refresh to retry")?;
-        document(revision, data, Some(Arc::new(permit)))
-    })
-    .await
-    {
-        Ok(Ok(result)) => Json(result).into_response(),
-        Ok(Err(message)) => problem(StatusCode::CONFLICT, "git_stale", message),
-        Err(_) => problem(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "git_failed",
-            "Git comparison failed; refresh to retry",
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1671,137 +1853,6 @@ mod tests {
         }
         assert!(!path.exists());
         assert!(gate.try_acquire_owned().is_ok());
-    }
-    #[tokio::test]
-    async fn git_routes_auth_scope_stale_and_busy() {
-        use axum::{body::Body, http::Request};
-        use http_body_util::BodyExt;
-        use tower::ServiceExt;
-        let d = fixture();
-        fs::write(d.path().join("new"), "new\n").unwrap();
-        let store = crate::Store::open_memory(d.path().to_str().unwrap()).unwrap();
-        let session = store.session.clone();
-        let app = App::new(
-            store,
-            "127.0.0.1:12345".into(),
-            "/missing".into(),
-            None,
-            "admin".into(),
-            "recovery".into(),
-        );
-        let call = |url: String, cookie: Option<String>, origin: &str| {
-            let mut req = Request::builder()
-                .uri(url)
-                .header("host", &app.host)
-                .header("origin", origin);
-            if let Some(cookie) = cookie {
-                req = req.header("cookie", cookie);
-            }
-            crate::server::router(app.clone()).oneshot(req.body(Body::empty()).unwrap())
-        };
-        let url = format!("/api/sessions/{session}/git");
-        assert_eq!(
-            call(url.clone(), None, "http://127.0.0.1:12345")
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::FORBIDDEN
-        );
-        let auth = crate::server::router(app.clone())
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/auth")
-                    .header("host", &app.host)
-                    .header("origin", "http://127.0.0.1:12345")
-                    .body(Body::from(app.issue_launch()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let cookie = auth.headers()["set-cookie"]
-            .to_str()
-            .unwrap()
-            .split(';')
-            .next()
-            .unwrap()
-            .to_string();
-        assert_eq!(
-            call(url.clone(), Some(cookie.clone()), "http://evil.invalid")
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::FORBIDDEN
-        );
-        assert!(app.git_review.snapshot.lock().unwrap().is_empty());
-        assert_eq!(
-            call(
-                "/api/sessions/missing/git".into(),
-                Some(cookie.clone()),
-                "http://127.0.0.1:12345"
-            )
-            .await
-            .unwrap()
-            .status(),
-            StatusCode::NOT_FOUND
-        );
-        let permit = app.git_review.gate.clone().try_acquire_owned().unwrap();
-        assert_eq!(
-            call(url.clone(), Some(cookie.clone()), "http://127.0.0.1:12345")
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::TOO_MANY_REQUESTS
-        );
-        drop(permit);
-        let res = call(url.clone(), Some(cookie.clone()), "http://127.0.0.1:12345")
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        let first: serde_json::Value =
-            serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
-        let file = first["files"][0]["id"].as_str().unwrap();
-        let rev = first["revision"].as_str().unwrap();
-        assert_eq!(
-            call(
-                format!("{url}/{rev}/{file}"),
-                Some(cookie.clone()),
-                "http://127.0.0.1:12345"
-            )
-            .await
-            .unwrap()
-            .status(),
-            StatusCode::OK
-        );
-        assert_eq!(
-            call(url.clone(), Some(cookie.clone()), "http://127.0.0.1:12345")
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::OK
-        );
-        assert_eq!(
-            call(
-                format!("{url}/{rev}/{file}"),
-                Some(cookie.clone()),
-                "http://127.0.0.1:12345"
-            )
-            .await
-            .unwrap()
-            .status(),
-            StatusCode::CONFLICT
-        );
-        assert_eq!(
-            call(
-                format!("{url}/bad/%2E%2E%2Fsecret"),
-                Some(cookie),
-                "http://127.0.0.1:12345"
-            )
-            .await
-            .unwrap()
-            .status(),
-            StatusCode::CONFLICT
-        );
     }
     // Protects explicit HEAD/index/worktree bases, inert unusual paths and no index writes.
     // Oracle: staged text differs from both HEAD and the current working copy.

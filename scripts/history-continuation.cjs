@@ -46,7 +46,11 @@ const result={passed:false,interrupted:process.env.DECK2_HISTORY_INTERRUPTED==='
  const fakeSource=fs.readFileSync(fake,'utf8');assert(fakeSource.includes(" elif m=='turn/start':\n"));fs.writeFileSync(fake,fakeSource.replace(" elif m=='turn/start':\n"," elif m=='turn/start':\n  (root/'turn-input.json').write_text(json.dumps(p))\n"));
  const env={...process.env,HOME:path.join(root,'home'),CODEX_HOME:native};dir(env.HOME);
  async function start(){host=spawn(binary,['serve','--foreground','--project',process.env.DECK2_HISTORY_OTHER_PROJECT==='1'?path.join(root,'initial-project'):project,'--state-dir',state,'--history-root',source,'--artifact-store',path.join(root,'tools'),'--no-open','--codex',fake],{stdio:['ignore','pipe','pipe'],env});let log='';host.stdout.on('data',b=>log+=b);host.stderr.on('data',b=>log+=b);for(let i=0;i<400;i++){if(fs.existsSync(path.join(state,'launcher.json'))){const l=JSON.parse(fs.readFileSync(path.join(state,'launcher.json')));try{const r=await fetch('http://'+l.host+'/launch',{method:'POST',body:l.admin});if(r.ok){fs.writeFileSync(path.join(out,'host.log'),log);return {base:'http://'+l.host,link:await r.json()};}}catch{}}if(host.exitCode!==null)throw Error(log);await wait(25);}throw Error('Host startup deadline: '+log);}
- let launch=await start();browser=await chromium.launch({executablePath:process.env.DECK2_CHROMIUM||chromium.executablePath(),headless:true,args:['--no-sandbox']});page=await browser.newPage({viewport:{width:1365,height:900}});page.on('response',async response=>{if(response.url().endsWith('/activate')){try{result.activation={status:response.status(),body:await response.json()};}catch{}}});await page.goto(launch.link.url);await page.getByRole('button',{name:'Original Codex conversation',exact:false}).first().click();await page.locator('#prompt:visible').waitFor({timeout:10000});await page.getByText('Original question preserved',{exact:true}).waitFor();await page.getByText('Original native answer preserved',{exact:true}).waitFor();
+ let launch=await start();browser=await chromium.launch({executablePath:process.env.DECK2_CHROMIUM||chromium.executablePath(),headless:true,args:['--no-sandbox']});page=await browser.newPage({viewport:{width:1365,height:900}});page.on('response',async response=>{if(response.url().endsWith('/activate')){try{result.activation={status:response.status(),body:await response.json()};}catch{}}});await page.goto(launch.link.url);
+ const originalProject=page.locator('.project-toggle').filter({hasText:'Original project'}).first();
+ await originalProject.waitFor();
+ if(await originalProject.getAttribute('aria-expanded')==='false')await originalProject.click();
+ await page.getByRole('button',{name:'Original Codex conversation',exact:false}).first().click();await page.locator('#prompt:visible').waitFor({timeout:10000});await page.getByText('Original question preserved',{exact:true}).waitFor();await page.getByText('Original native answer preserved',{exact:true}).waitFor();
  let w=await(await page.request.get(launch.base+'/api/workspace')).json();const adopted=w.sessions.find(s=>s.id===sid);assert.equal(adopted.native.thread,thread);assert.equal(adopted.original.task,'lead');assert.equal(adopted.original.attempt,1);assert.equal(w.receipts.length,0,'historical queue must not create a receipt');
  if(process.env.DECK2_HISTORY_INTERRUPTED==='1'){
   const h=await(await page.request.get(launch.base+'/api/history/sessions/'+sid)).json();assert.equal(h.recovery.tasks.lead.state,'interrupted');assert.equal(h.recovery.tasks.lead.reason,'process-containment-settled');result.checks.push('interrupted original work activates only after positive previous-boot containment');
@@ -64,7 +68,7 @@ const result={passed:false,interrupted:process.env.DECK2_HISTORY_INTERRUPTED==='
 
  if(multi){
   const post=async(url,body)=>{const r=await page.request.post(launch.base+url,{headers:{Origin:launch.base},data:body});const v=await r.json();assert.equal(r.status(),200,JSON.stringify(v));return v;};
-  const get=async url=>{const r=await page.request.get(launch.base+url);assert.equal(r.status(),200);return r.json();};
+  const get=async url=>{const r=await page.request.get(launch.base+url);const v=await r.json();assert.equal(r.status(),200,url+' '+JSON.stringify(v));return v;};
   if(process.env.DECK2_PROJECT_AVAILABILITY==='1'){
    // UI boundary fault injection only: B remains healthy while the startup A
    // projection reports loss. The host owner-selection boundary is tested in Rust.
@@ -95,15 +99,32 @@ const result={passed:false,interrupted:process.env.DECK2_HISTORY_INTERRUPTED==='
    // full A/B journey separately, without extra navigation racing its Git reads.
    result.passed=true;return;
   }
+  await post('/api/project/trust',{api:7,project:projectA,trusted:true});
+  assert.equal((await get('/api/workspace')).project_trust[pid],false);
+  await post('/api/project/trust',{api:7,project,trusted:true});
   const ca=(await get('/api/configuration?projectId='+pidA)).selected,cb=(await get('/api/configuration?projectId='+pid)).selected;assert.equal(ca.project,projectA);assert.equal(cb.project,project);assert.notEqual(ca.revision,cb.revision);
-  await post('/api/project/trust',{api:7,project:projectA,trusted:true});assert.equal((await get('/api/workspace')).project_trust[pid],false);
-  await page.locator('.project-row button').filter({hasText:'Other original project'}).first().click();await page.getByRole('button',{name:'Other original conversation',exact:false}).first().click();await page.locator('#prompt:visible').waitFor();
+  await post('/api/history/sessions/'+sidA+'/activate',{});
+  const reviewBase=id=>'/api/sessions/'+id+'/review/';
+  const ga=await get(reviewBase(sidA)+'tree?view=changes'),gb=await get(reviewBase(sid)+'tree?view=changes');
+  const fa=ga.entries.find(f=>f.path==='same.txt'),fb=gb.entries.find(f=>f.path==='same.txt');assert(fa&&fb);
+  const file=(generation,id)=>'file?'+new URLSearchParams({view:'changes',generation,id});
+  const da=await get(reviewBase(sidA)+file(ga.generation,fa.id)),db=await get(reviewBase(sid)+file(gb.generation,fb.id));
+  assert.equal(da.after.text,'A changed\n');assert.equal(db.after.text,'B changed\n');
+  const cross=await page.request.get(launch.base+reviewBase(sid)+file(ga.generation,fa.id));
+  assert.equal(cross.status(),409);assert.equal((await cross.json()).code,'review_stale');
+  result.checks.push('A/B same-name Review files and generations are scoped to their adopted sessions');
+  if(process.env.DECK2_HISTORY_REVIEW_ONLY==='1'){result.passed=true;return;}
+  const secondProject=page.locator('.project-toggle').filter({hasText:'Other original project'}).first();
+  if(await secondProject.getAttribute('aria-expanded')==='false')await secondProject.click();
+  const selectA=page.getByRole('button',{name:'Other original conversation',exact:true});
+  await selectA.focus();await selectA.press('Enter');
+  await page.getByRole('heading',{name:'Other original conversation',exact:true}).waitFor();
+  await page.locator('#prompt:visible').waitFor();
   await page.locator('#prompt').fill('Project73 delegate A');await page.getByRole('button',{name:'Send question',exact:true}).click();
   for(let i=0;i<600&&!fs.existsSync(path.join(root,'ready-childproject'));i++)await wait(25);assert(fs.existsSync(path.join(root,'ready-childproject')),'Quality child must reach owned native preparation');
   const before=await get('/api/workspace'),child=before.tasks.find(t=>t.id===fs.readFileSync(path.join(root,'project-child'),'utf8'));assert.equal(child.session,sidA);assert.equal(child.owner,'quality');assert.equal(child.attempts[0].configuration.project.root,projectA);
   await page.getByRole('button',{name:'Original Codex conversation',exact:false}).first().click();await page.locator('#prompt:visible').waitFor();await page.locator('#prompt').fill('B draft survives reversal');
   await page.getByRole('button',{name:'Other original conversation',exact:false}).first().click();await page.getByRole('button',{name:'Original Codex conversation',exact:false}).first().click();await page.waitForFunction(()=>document.querySelector('#prompt')?.value==='B draft survives reversal');
-  const ga=await get('/api/sessions/'+sidA+'/git'),gb=await get('/api/sessions/'+sid+'/git');const fa=ga.files.find(f=>f.path==='same.txt'),fb=gb.files.find(f=>f.path==='same.txt');assert(fa&&fb);const da=await get('/api/sessions/'+sidA+'/git/'+ga.revision+'/'+fa.id),db=await get('/api/sessions/'+sid+'/git/'+gb.revision+'/'+fb.id);assert(JSON.stringify(da).includes('A changed'));assert(JSON.stringify(db).includes('B changed'));assert.equal((await page.request.get(launch.base+'/api/sessions/'+sid+'/git/'+ga.revision+'/'+fa.id)).status(),409);
   await post('/api/commands',{api:7,id:'project-b-waiting',session:sid,prompt:'Project73 queued B',mode:'session_v1',queue:true,fresh:false});await post('/api/sessions/'+sid+'/approvals',{api:7,mode:'yolo'});
   await post('/api/project/trust',{api:7,project:project,trusted:false});assert.equal((await get('/api/workspace')).project_trust[pidA],true);
   assert.equal((await get('/api/workspace')).receipts.find(r=>r.id==='project-b-waiting').phase,'queued');write(path.join(root,'release-childproject'),'release');
@@ -111,9 +132,9 @@ const result={passed:false,interrupted:process.env.DECK2_HISTORY_INTERRUPTED==='
   const queued=w.receipts.find(r=>r.id==='project-b-waiting');assert.equal(queued.phase,'completed',JSON.stringify(w.receipts));assert.equal(queued.configuration.project.root,project);assert.equal(queued.configuration.session_contract.approvals,'yolo');assert.equal(w.tasks.find(t=>t.id===child.id).attempts[0].configuration.project.root,projectA);
   const nativeLog=fs.readFileSync(path.join(root,'native-protocol'),'utf8').trim().split('\n').map(JSON.parse);assert(nativeLog.some(v=>v.cwd===projectA));assert(nativeLog.some(v=>v.cwd===project&&v.permissions===':danger-full-access'));
   await page.emulateMedia({reducedMotion:'reduce'});const aButton=page.getByRole('button',{name:'Other original conversation',exact:false}).first();await aButton.focus();await page.keyboard.press('Enter');await page.getByRole('button',{name:'Original Codex conversation',exact:false}).first().click();
-  result.checks.push('A Quality attempt remains in A while B is selected and queued; B captures its own updated permission at launch','A/B same-name Git files and revisions cannot cross sessions; B revocation leaves A trust intact','rapid reversal and keyboard/reduced-motion navigation preserve B composer draft');
+  result.checks.push('A Quality attempt remains in A while B is selected and queued; B captures its own updated permission at launch','B revocation leaves A trust intact','rapid reversal and keyboard/reduced-motion navigation preserve B composer draft');
   const reads=fs.readFileSync(path.join(root,'project-config-reads'),'utf8').trim().split('\n').map(JSON.parse);assert(reads.some(v=>v.cwd===projectA&&v.value==='A changed\n'));assert(reads.some(v=>v.cwd===project&&v.value==='B changed\n'));
-  await page.locator('.sidebar .project-group').filter({hasText:'Original project'}).first().getByRole('button',{name:'+ New conversation',exact:true}).click();await page.getByRole('textbox',{name:'Session name'}).fill('Project B fresh session');await page.getByRole('button',{name:'Create session',exact:true}).click();await page.getByRole('heading',{name:'Project B fresh session',exact:true}).waitFor();
+  await page.locator('.sidebar .project-group').filter({hasText:'Original project'}).first().getByRole('button',{name:'New session in Original project',exact:true}).click();await page.getByRole('textbox',{name:'Session name'}).fill('Project B fresh session');await page.getByRole('button',{name:'Create session',exact:true}).click();await page.getByRole('heading',{name:'Project B fresh session',exact:true}).waitFor();
   const fresh=(await get('/api/workspace')).sessions.find(s=>s.title==='Project B fresh session');assert.equal(fresh.project.id,pid);assert.equal(fresh.project.root,project);await page.getByRole('button',{name:'Original Codex conversation',exact:false}).first().click();
   result.checks.push('new session uses selected B project and grouping; native configuration probes see distinct owning roots and contents');
   result.multiReceiptCount=w.receipts.length;result.multiDispatch=fs.readFileSync(path.join(root,'dispatch-count'),'utf8');

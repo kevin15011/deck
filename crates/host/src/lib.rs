@@ -14,6 +14,7 @@ pub mod configuration;
 pub mod decisions;
 pub mod dictation;
 pub mod git_review;
+mod review_panel;
 pub mod history;
 pub mod images;
 pub mod launcher;

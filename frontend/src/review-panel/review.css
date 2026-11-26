@@ -1,0 +1,91 @@
+.workspace-stack > .review-pane { overflow: hidden; scrollbar-gutter: auto; }
+.review-panel { height: 100%; min-width: 0; display: flex; flex-direction: column; container-type: inline-size; color: var(--ink); }
+.review-toolbar, .review-file-heading, .review-comparison {
+ display: flex; align-items: center; flex-wrap: wrap; gap: .3rem .65rem; padding: .4rem .55rem; border-bottom: 1px solid var(--border);
+}
+.review-toolbar { justify-content: space-between; background: var(--surface); }
+.review-views, .review-layouts { display: flex; flex-wrap: wrap; gap: .18rem; }
+.review-toolbar button, .review-layouts button { min-height: 30px; padding: .23rem .45rem; font-size: .76rem; white-space: nowrap; }
+.review-views small { color: var(--muted); margin-inline-start: .15rem; font-variant-numeric: tabular-nums; }
+.review-panel button[aria-pressed=true] {
+ background: color-mix(in srgb, var(--focus) 12%, var(--surface)); box-shadow: inset 0 -2px var(--focus); color: var(--ink);
+}
+.review-browser { flex: 1; min-height: 0; display: grid; grid-template-columns: clamp(165px, 29%, 265px) minmax(0,1fr); }
+.review-navigation, .review-viewer { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.review-navigation { border-inline-end: 1px solid var(--border); background: var(--surface); }
+.review-search { padding: .45rem; }
+.review-search input {
+ width: 100%; min-width: 0; min-height: 32px; padding: .3rem .5rem; border: 1px solid var(--border);
+ border-radius: 5px; font: inherit; font-size: .78rem; color: var(--ink); background: var(--input);
+}
+.review-tree { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; overscroll-behavior: contain; }
+.review-tree:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.review-tree-space { position: relative; }
+.review-tree-row {
+ position: absolute; inset-inline: 0; padding-inline-end: .3rem; display: flex; align-items: center;
+ gap: .25rem; font-size: .76rem; cursor: pointer; overflow: hidden;
+}
+.review-tree-row:hover { background: var(--tint); }
+.review-tree-row[aria-selected=true] {
+ background: color-mix(in srgb, var(--focus) 14%, var(--surface)); box-shadow: inset 2px 0 var(--focus);
+}
+.review-tree:focus-visible .review-tree-row[data-active=true] { outline: 1px solid var(--focus); outline-offset: -1px; }
+.review-tree-row svg { color: var(--muted); flex: none; }
+.review-tree-chevron { width: .65rem; flex: none; text-align: center; color: var(--muted); }
+.review-row-label { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.review-status-badge, .review-folder-changes, .review-line-stats {
+ flex: none; font-family: var(--review-mono, ui-monospace, monospace); font-size: .68rem; font-variant-numeric: tabular-nums;
+}
+.review-status-badge { color: var(--warning); }
+.review-status-badge[data-status=A], .review-status-badge[data-status=untracked], .review-line-stats span:first-child { color: var(--success); }
+.review-status-badge[data-status=D], .review-status-badge[data-status=conflict], .review-line-stats span:last-child { color: var(--error); }
+.review-folder-changes { color: var(--muted); }
+.review-line-stats { display: flex; gap: .2rem; }
+.review-viewer { background: var(--console); min-height: 0; }
+.review-file-heading { justify-content: space-between; background: var(--surface); }
+.review-comparison, .review-side-notice, .review-message { color: var(--muted); font-size: .76rem; overflow-wrap: anywhere; }
+.review-message { margin: 0; padding: .55rem .65rem; }
+.review-comparison, .review-file-path, .review-code .cm-scroller { font-family: var(--review-mono, ui-monospace, monospace); }
+:root:is([data-font=jetbrains-mono],[data-font=fira-code],[data-font=ibm-plex-mono]) .review-panel { --review-mono: var(--chosen-font); }
+.review-file-path { font-size: .76rem; overflow-wrap: anywhere; }
+.review-old-path { color: var(--muted); }
+.review-side-notice, .review-side-labels { display: flex; gap: .5rem; padding: .35rem .65rem; border-bottom: 1px solid var(--border); }
+.review-side-notice { flex-wrap: wrap; }
+.review-side-labels { font-size: .72rem; color: var(--muted); }
+.review-side-labels span { flex: 1; }
+.review-code { flex: 1; min-height: 0; overflow: hidden; }
+.review-code > .cm-editor, .review-code .cm-mergeView { height: 100%; }
+.review-code .cm-mergeView { overflow: auto; }
+.review-code .cm-mergeViewEditor + .cm-mergeViewEditor { border-inline-start: 1px solid var(--border); }
+.review-code .cm-editor { color: var(--ink); background: var(--console); }
+.review-code .cm-editor.cm-focused { outline: 1px solid var(--focus); outline-offset: -1px; }
+.review-code .cm-scroller { font-size: .78rem; line-height: 1.55; overscroll-behavior: contain; }
+.review-code .cm-gutters { background: var(--console); color: var(--muted); border-color: var(--border); }
+.review-code .cm-cursor { border-color: var(--focus); }
+.review-code .cm-editor .cm-selectionBackground,
+.review-code .cm-editor.cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--focus) 32%, transparent); }
+.review-code .cm-content ::selection, .review-code .cm-content::selection { background: color-mix(in srgb, var(--focus) 35%, transparent); }
+.review-code .cm-editor .cm-deletedChunk, .review-code .cm-editor.cm-merge-a .cm-changedLine {
+ background: color-mix(in srgb, var(--error) 12%, var(--console));
+}
+.review-code .cm-editor .cm-inlineChangedLine, .review-code .cm-editor.cm-merge-b .cm-changedLine {
+ background: color-mix(in srgb, var(--success) 12%, var(--console));
+}
+.review-code .cm-editor .cm-deletedChunk .cm-deletedText,
+.review-code .cm-editor.cm-merge-b .cm-deletedText, .review-code .cm-editor.cm-merge-a .cm-changedText {
+ background: color-mix(in srgb, var(--error) 30%, var(--console)); text-decoration: line-through;
+}
+.review-code .cm-editor .cm-insertedLine, .review-code .cm-editor.cm-merge-b .cm-changedText {
+ background: color-mix(in srgb, var(--success) 30%, var(--console)); text-decoration: underline;
+}
+.review-code .cm-editor.cm-merge-a .cm-changedLineGutter, .review-code .cm-editor .cm-deletedLineGutter { background: var(--error); }
+.review-code .cm-editor.cm-merge-b .cm-changedLineGutter { background: var(--success); }
+.review-code .cm-editor .cm-changeGutter .cm-inlineChangedLineGutter { background: var(--focus); }
+.review-code .cm-editor .cm-collapsedLines {
+ background: var(--surface); color: var(--muted); border-color: var(--border);
+}
+.review-code .cm-collapsedLines:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+@container (max-width: 500px) {
+ .review-browser { grid-template-columns: minmax(0,1fr); grid-template-rows: clamp(100px,33%,200px) minmax(0,1fr); }
+ .review-navigation { border-inline-end: 0; border-bottom: 1px solid var(--border); }
+}

@@ -84,6 +84,7 @@ pub struct Inner {
     #[cfg(test)]
     pub(crate) agy_binary: Mutex<Option<PathBuf>>,
     pub(crate) git_review: crate::git_review::Runtime,
+    pub(crate) review_panel: crate::review_panel::Runtime,
     pub store: Mutex<Store>,
     pub(crate) workspace_updates: crate::workspace_events::Updates,
     pub artifact_store: Mutex<Option<PathBuf>>,
@@ -201,6 +202,7 @@ impl App {
             #[cfg(test)]
             agy_binary: Mutex::new(None),
             git_review: Default::default(),
+            review_panel: Default::default(),
             artifact_store: Mutex::new(None),
             cookie_name: format!("deck2_{}", host.rsplit(':').next().unwrap_or("local")),
             host,
@@ -702,6 +704,7 @@ pub(crate) async fn boundary(State(app): State<App>, req: Request, next: Next) -
                 .any(|v| v.trim() == format!("{}={}", app.cookie_name, app.cookie))
         });
     let public = !path.starts_with("/api/");
+    let path_is_immutable_asset = path.starts_with("/chunks/");
     let origin = h.get(header::ORIGIN).and_then(|v| v.to_str().ok());
     let host = h.get(header::HOST).and_then(|v| v.to_str().ok());
     let launch = path == "/launch";
@@ -783,11 +786,15 @@ pub(crate) async fn boundary(State(app): State<App>, req: Request, next: Next) -
     }
     record_problem(&app, &response);
     let h = response.headers_mut();
-    h.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    if !public || !path_is_immutable_asset {
+        h.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    } else {
+        h.entry(header::CACHE_CONTROL).or_insert("no-store".parse().unwrap());
+    }
     h.insert("x-content-type-options", "nosniff".parse().unwrap());
     h.insert("referrer-policy", "no-referrer".parse().unwrap());
     h.insert("x-frame-options", "DENY".parse().unwrap());
-    h.insert("content-security-policy","default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'".parse().unwrap());
+    h.entry("content-security-policy").or_insert(content_security_policy(None));
     response
 }
 async fn launch(State(app): State<App>, body: String) -> Response {
@@ -2354,6 +2361,21 @@ async fn snapshot(State(app): State<App>, Path(id): Path<String>) -> Response {
     }
 }
 
+fn content_security_policy(style_nonce: Option<&str>) -> header::HeaderValue {
+    let nonce = style_nonce.map(|value| format!(" 'nonce-{value}'")).unwrap_or_default();
+    format!("default-src 'self'; script-src 'self'; style-src 'self'{nonce}; style-src-attr 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        .parse()
+        .unwrap()
+}
+
+async fn review_replaced() -> Response {
+    problem(
+        StatusCode::GONE,
+        "review_replaced",
+        "Git snapshots were replaced by Review. Reload Deck to open Review.",
+    )
+}
+
 static ASSETS: include_dir::Dir =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../dist/assets");
 async fn asset(req: Request) -> Response {
@@ -2364,7 +2386,20 @@ async fn asset(req: Request) -> Response {
     };
     match ASSETS.get_file(path) {
         Some(file) => {
-            let mut res = Response::new(Body::from(file.contents()));
+            let mut res = if path == "index.html" {
+                let nonce = secret();
+                let html = std::str::from_utf8(file.contents())
+                    .expect("embedded shell is UTF-8")
+                    .replace("__DECK_STYLE_NONCE__", &nonce);
+                let mut response = Response::new(Body::from(html));
+                response.headers_mut().insert("content-security-policy", content_security_policy(Some(&nonce)));
+                response
+            } else {
+                Response::new(Body::from(file.contents()))
+            };
+            if path.starts_with("chunks/") {
+                res.headers_mut().insert(header::CACHE_CONTROL, "public, max-age=31536000, immutable".parse().unwrap());
+            }
             res.headers_mut().insert(
                 header::CONTENT_TYPE,
                 mime_guess::from_path(path)
@@ -2429,12 +2464,15 @@ pub fn router(app: App) -> Router {
         .route("/api/quota/{runner}/refresh", post(crate::quota::refresh))
         .route(
             "/api/sessions/{session}/git",
-            get(crate::git_review::catalog),
+            get(review_replaced),
         )
         .route(
             "/api/sessions/{session}/git/{revision}/{file}",
-            get(crate::git_review::diff),
+            get(review_replaced),
         )
+        .route("/api/sessions/{session}/review/tree", get(crate::review_panel::tree))
+        .route("/api/sessions/{session}/review/file", get(crate::review_panel::file))
+        .route("/api/sessions/{session}/review/stats", get(crate::review_panel::stats))
         .route("/api/changes", get(changes).post(create_change))
         .route("/api/runners/auto-compact", get(crate::runner_compaction::inspect))
         .route("/api/runners/auto-compact/{runner}", post(crate::runner_compaction::change))
@@ -2522,6 +2560,10 @@ pub fn router(app: App) -> Router {
 }
 
 #[cfg(test)]
+#[path = "review_panel_tests.rs"]
+mod review_panel_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use tower::ServiceExt;
@@ -2537,6 +2579,76 @@ mod tests {
         );
         *app.scope_root.lock().unwrap() = Some(d.path().join("scopes"));
         (d, app)
+    }
+
+    #[tokio::test]
+    async fn review_shell_nonces_and_chunks_are_served_by_the_router() {
+        use http_body_util::BodyExt;
+        let (_dir, app) = scope_fixture();
+        let host = app.host.to_owned();
+        let routes = router(app);
+        let get = |path: &str| {
+            let request = axum::http::Request::builder()
+                .uri(path)
+                .header("host", &host)
+                .body(Body::empty())
+                .unwrap();
+            routes.clone().oneshot(request)
+        };
+        let mut nonces = std::collections::HashSet::new();
+        for path in ["/", "/index.html", "/"] {
+            let res = get(path).await.unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+            assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
+            let csp = res.headers()["content-security-policy"].to_str().unwrap();
+            assert!(csp.split("; ").any(|rule| rule == "script-src 'self'"));
+            let style = csp.split("; ").find(|rule| rule.starts_with("style-src ")).unwrap();
+            let nonce = style.split("'nonce-").nth(1).unwrap().trim_end_matches('\'').to_owned();
+            assert!(nonce.len() >= 22 && nonces.insert(nonce.clone()));
+            let html = res.into_body().collect().await.unwrap().to_bytes();
+            assert!(String::from_utf8_lossy(&html).contains(&format!("nonce=\"{nonce}\"")));
+        }
+
+        let chunk = ASSETS.get_dir("chunks").unwrap().files()
+            .find(|file| file.path().extension().is_some_and(|ext| ext == "js")).unwrap();
+        let res = get(&format!("/{}", chunk.path().display())).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(res.headers()[header::CONTENT_TYPE].to_str().unwrap().contains("javascript"));
+        assert_eq!(res.headers()[header::CACHE_CONTROL], "public, max-age=31536000, immutable");
+        assert_eq!(res.headers()["x-content-type-options"], "nosniff");
+        let missing = get("/chunks/missing.js").await.unwrap();
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+        assert_eq!(missing.headers()[header::CACHE_CONTROL], "no-store");
+    }
+
+    #[tokio::test]
+    async fn legacy_review_routes_require_authentication_and_return_gone() {
+        use http_body_util::BodyExt;
+        let (_dir, app) = scope_fixture();
+        let host = app.host.to_owned();
+        let session = app.store.lock().unwrap().session.clone();
+        let cookie = format!("{}={}", app.cookie_name, app.cookie);
+        let routes = router(app);
+        let catalog = format!("/api/sessions/{session}/git");
+        let file = format!("{catalog}/revision/file");
+        for path in [catalog, file] {
+            for origin in [None, Some("http://evil.invalid"), Some("http://127.0.0.1:1234")] {
+                let mut get = axum::http::Request::builder().uri(&path).header("host", &host);
+                if let Some(origin) = origin {
+                    get = get.header("origin", origin).header("cookie", &cookie);
+                }
+                let res = routes.clone().oneshot(get.body(Body::empty()).unwrap()).await.unwrap();
+                if origin != Some("http://127.0.0.1:1234") {
+                    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+                    continue;
+                }
+                assert_eq!(res.status(), StatusCode::GONE);
+                let body = res.into_body().collect().await.unwrap().to_bytes();
+                let problem: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(problem["code"], "review_replaced");
+                assert!(problem["message"].as_str().unwrap().to_lowercase().contains("reload"));
+            }
+        }
     }
 
     #[tokio::test]
